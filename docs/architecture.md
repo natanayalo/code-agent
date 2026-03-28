@@ -127,7 +127,13 @@ Memory buckets:
 Responsibilities:
 
 - wrap integrations behind stable interfaces
-- prepare for MCP compatibility
+125:### 6. Tool layer
+126:
+127:Responsibilities:
+128:
+129:- wrap integrations behind stable interfaces
+130:- prepare for MCP (Model Context Protocol) compatibility
+131:- isolate external side effects
 - isolate external side effects
 
 ## State model
