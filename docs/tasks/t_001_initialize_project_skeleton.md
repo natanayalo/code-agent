@@ -1,12 +1,15 @@
 # T-001 Initialize Project Skeleton
 
+This document is the canonical source for T-001 scope, acceptance criteria, and implementation boundaries.
+Supporting docs may add context, but they must not override this task definition.
+
 ## Goal
 
 Turn the repo from planning-only into a minimal executable service skeleton for Milestone 0.
 
 After this task:
 - the repository has a real Python project layout
-- the API app can be imported and started locally
+- the API app can be imported and started locally via `uvicorn apps.api.main:app`
 - formatter, linter, and test entry points are configured
 - later milestones have clear package boundaries to build into
 
@@ -15,7 +18,7 @@ After this task:
 Included:
 - project tooling in `pyproject.toml`
 - top-level package layout aligned with `AGENTS.md`
-- minimal FastAPI app entry point
+- minimal FastAPI app entry point with a valid `uvicorn apps.api.main:app` startup target
 - a basic test harness and one startup smoke test
 - `README.md` updated with bootstrap run/test instructions
 
@@ -47,15 +50,15 @@ Explicitly excluded:
 
 1. Add `pyproject.toml` with the minimum runtime and dev tooling needed for a bootable service skeleton.
 2. Create the top-level package directories defined in `AGENTS.md` so later work lands in stable locations.
-3. Add a minimal FastAPI app in `apps/api/main.py` with no business logic and no orchestration coupling.
-4. Add one integration-style smoke test that proves the app object imports cleanly.
+3. Add a minimal FastAPI app in `apps/api/main.py` with no business logic, no orchestration coupling, and a valid `uvicorn apps.api.main:app` startup target.
+4. Add one integration-style smoke test that proves the app object imports cleanly. T-001 does not require a process-level startup test.
 5. Replace the placeholder `README.md` with a short project overview and the approved local bootstrap commands.
 
 ## Acceptance Criteria
 
 - [ ] `pyproject.toml` exists and defines formatter/linter/test commands used by the repo
 - [ ] the package layout matches the folder ownership described in `AGENTS.md`
-- [ ] `apps/api/main.py` exposes an importable FastAPI app
+- [ ] `apps/api/main.py` exposes an importable FastAPI app and a valid `uvicorn apps.api.main:app` startup target
 - [ ] one smoke test covers app bootstrap
 - [ ] `README.md` explains project purpose, current status, and basic local commands
 - [ ] no DB, worker, sandbox, or webhook behavior is implemented yet

@@ -1,8 +1,9 @@
 # Bootstrap File List
 
-Use this file as the source of truth for the first executable scaffold.
+Use this file as a supporting reference for T-001.
 
-The goal is to make Milestone 0 concrete without pulling Milestone 1+ work forward.
+The canonical scope and acceptance criteria live in `docs/tasks/t_001_initialize_project_skeleton.md`.
+This file helps map that task into concrete files without pulling Milestone 1+ work forward.
 
 ## Create In T-001
 
@@ -23,7 +24,7 @@ The goal is to make Milestone 0 concrete without pulling Milestone 1+ work forwa
   Purpose: mark the API entry-point package.
 
 - `apps/api/main.py`
-  Purpose: expose the minimal FastAPI app object and local startup target.
+  Purpose: expose the minimal FastAPI app object and the `uvicorn apps.api.main:app` startup target.
 
 ### Stable package boundaries
 
@@ -48,7 +49,7 @@ The goal is to make Milestone 0 concrete without pulling Milestone 1+ work forwa
 ### Test harness
 
 - `tests/integration/test_app_bootstrap.py`
-  Purpose: prove the app imports cleanly and the bootstrap slice is executable.
+  Purpose: prove the app imports cleanly and the bootstrap slice is executable. T-001 does not require a process-level startup test.
 
 ## Create In T-002
 
@@ -97,3 +98,4 @@ The goal is to make Milestone 0 concrete without pulling Milestone 1+ work forwa
 - Do not add placeholder code that implies DB, worker, or sandbox behavior already exists.
 - Do not create files for later milestones just to make the tree look complete.
 - Prefer the smallest scaffold that makes the repo executable and testable.
+- If this file and the T-001 task spec diverge, follow the task spec.
