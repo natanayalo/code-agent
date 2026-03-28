@@ -5,6 +5,10 @@
 ### T-001 Initialize project skeleton
 Create Python project structure, tooling, and base package layout.
 
+Detailed task spec:
+- `docs/tasks/t_001_initialize_project_skeleton.md`
+- `docs/bootstrap_file_list.md`
+
 Acceptance:
 - repo structure exists
 - formatter/linter/test tooling configured
