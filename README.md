@@ -52,7 +52,6 @@ Run the bootstrap test and linter:
 
 ```bash
 pytest
-ruff check .
 pre-commit run --all-files
 ```
 
