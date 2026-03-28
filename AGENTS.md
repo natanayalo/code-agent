@@ -1,4 +1,4 @@
-# AGENTS.md
+# Coding Agent Contributor Guide
 
 This repository builds a personal coding-agent service with:
 - message/webhook ingress
