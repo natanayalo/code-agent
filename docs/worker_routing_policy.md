@@ -21,7 +21,7 @@ Use ClaudeWorker if one or more are true:
 
 ## Route to CodexWorker when
 
-Use CodexWorker if most are true:
+Use CodexWorker when the task is straightforward and the following indicators apply:
 - task is straightforward
 - task is lower-risk
 - task is repetitive or mechanical
