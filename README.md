@@ -12,6 +12,7 @@ The repo currently contains:
 - project guidance in `AGENTS.md`
 - architecture and planning docs in `docs/`
 - a minimal FastAPI bootstrap app for Milestone 0
+- local `/health` and `/ready` endpoints for service verification
 
 This slice intentionally does not include:
 - database models or migrations
@@ -48,6 +49,13 @@ Start the bootstrap API locally:
 python -m uvicorn apps.api.main:app --reload
 ```
 
+Verify the local service:
+
+```bash
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/ready
+```
+
 Run the bootstrap test and linter:
 
 ```bash
@@ -57,6 +65,6 @@ pre-commit run --all-files
 
 ## Next Steps
 
-The next implementation target is `T-001 Initialize Project Skeleton`, defined in:
-- `docs/tasks/t_001_initialize_project_skeleton.md`
-- `docs/bootstrap_file_list.md`
+The next implementation targets after the bootstrap and health slices are:
+- `T-002 Add local infrastructure`
+- Milestone 1 persistence and state work
