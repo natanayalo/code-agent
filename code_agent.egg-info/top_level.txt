@@ -1,7 +1,0 @@
-apps
-db
-memory
-orchestrator
-sandbox
-tools
-workers
