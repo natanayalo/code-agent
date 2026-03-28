@@ -1,0 +1,22 @@
+# Python bytecode and interpreter caches
+__pycache__/
+*.py[cod]
+
+# Local virtual environments
+.venv/
+venv/
+
+# Packaging artifacts
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Test and lint caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local editor and OS files
+.DS_Store
