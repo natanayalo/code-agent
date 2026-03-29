@@ -18,12 +18,13 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 ## In Progress
 
 - T-012 Define orchestrator state schema
+- T-020 Build LangGraph workflow skeleton
 
 ## Next
 
-- T-020 Build LangGraph workflow skeleton
 - T-013 Normalize persistence enums and constrained value fields
 - T-021 Add checkpoint persistence
+- T-022 Add approval interrupt node
 
 ## Blocked
 
@@ -31,5 +32,5 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Milestone 1 is in progress with the orchestrator state schema slice.
+- Milestone 1 close-out and Milestone 2 skeleton work are both active.
 - T-013 tracks deferred schema-enum work from the T-010 review so the follow-up is explicit.
