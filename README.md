@@ -55,6 +55,7 @@ Run the local container stack:
 
 ```bash
 cp .env.example .env
+# edit .env and replace the example password before first run
 docker compose up --build
 ```
 

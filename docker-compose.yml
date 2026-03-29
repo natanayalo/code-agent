@@ -2,15 +2,15 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-code_agent}
-      POSTGRES_USER: ${POSTGRES_USER:-code_agent}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-code_agent}
+      POSTGRES_DB: ${POSTGRES_DB?Please set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER?Please set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-code_agent} -d ${POSTGRES_DB:-code_agent}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER?Please set POSTGRES_USER in .env} -d ${POSTGRES_DB?Please set POSTGRES_DB in .env}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,9 +21,9 @@ services:
     environment:
       DATABASE_HOST: ${DATABASE_HOST:-postgres}
       DATABASE_PORT: ${DATABASE_PORT:-5432}
-      DATABASE_NAME: ${POSTGRES_DB:-code_agent}
-      DATABASE_USER: ${POSTGRES_USER:-code_agent}
-      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-code_agent}
+      DATABASE_NAME: ${POSTGRES_DB?Please set POSTGRES_DB in .env}
+      DATABASE_USER: ${POSTGRES_USER?Please set POSTGRES_USER in .env}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}
     ports:
       - "8000:8000"
     depends_on:

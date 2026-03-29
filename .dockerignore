@@ -1,12 +1,17 @@
 .git
 .github
 .venv
+.gitignore
+.pre-commit-config.yaml
+AGENTS.md
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 code_agent.egg-info/
+docker-compose.yml
+.env.example
 docs/
 tests/
 .env
