@@ -31,6 +31,7 @@ Every non-trivial task must follow this sequence:
 - Keep file ownership boundaries intact:
   - `apps/` entrypoints only
   - `db/` schema and migrations only
+  - `repositories/` persistence access patterns only
   - `workers/` provider-specific execution only
   - `orchestrator/` workflow and state only
 

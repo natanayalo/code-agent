@@ -28,7 +28,16 @@ dev = [
 include-package-data = false
 
 [tool.setuptools.packages.find]
-include = ["apps*", "db*", "memory*", "orchestrator*", "sandbox*", "tools*", "workers*"]
+include = [
+    "apps*",
+    "db*",
+    "memory*",
+    "orchestrator*",
+    "repositories*",
+    "sandbox*",
+    "tools*",
+    "workers*",
+]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

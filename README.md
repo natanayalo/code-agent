@@ -17,10 +17,11 @@ The repo currently contains:
 - local `/health` and `/ready` endpoints for service verification
 - a local Docker Compose stack for `api` + `postgres`
 - initial SQLAlchemy models and Alembic migration scaffolding for Milestone 1
+- an initial repository layer for users, sessions, tasks, runs, and memory
 
 This slice intentionally does not include:
 - LangGraph workflow code
-- repository layer or DB access wiring
+- app DB wiring
 - worker implementations
 - sandbox execution logic
 - Telegram or webhook task handling
@@ -30,6 +31,7 @@ This slice intentionally does not include:
 - `.agents/`: development rules, workflows, and repo-specific skills for coding agents
 - `apps/`: application entrypoints only
 - `orchestrator/`: workflow state and orchestration logic
+- `repositories/`: persistence access patterns and CRUD boundaries
 - `workers/`: provider-specific coding worker adapters
 - `sandbox/`: isolated workspace and command execution
 - `memory/`: structured memory persistence and retrieval
@@ -115,6 +117,6 @@ The repo includes:
 ## Next Steps
 
 The next implementation targets after the local-infra slice are:
-- `T-011 Add repository layer`
 - `T-012 Define orchestrator state schema`
 - `T-020 Build LangGraph workflow skeleton`
+- `T-013 Normalize persistence enums and constrained value fields`

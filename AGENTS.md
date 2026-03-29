@@ -120,6 +120,10 @@ Owns integration wrappers and tool abstractions.
 ### db/
 Owns schema/migrations only.
 
+### repositories/
+Owns persistence access patterns and CRUD boundaries.
+No business policy here.
+
 ## Worker contract
 
 All coding workers must implement the same interface.
