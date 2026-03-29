@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
+from db.models import PersonalMemory, ProjectMemory
 from repositories import (
     ArtifactRepository,
     PersonalMemoryRepository,
@@ -139,6 +140,48 @@ def test_worker_run_and_artifact_repositories_support_crud(session_factory) -> N
         assert artifacts[0].artifact_type == "log"
 
 
+def test_worker_run_complete_preserves_existing_optional_fields(session_factory) -> None:
+    """Completing a run without optional fields keeps existing persisted values."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_run_repo = WorkerRunRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:preserve", display_name="Preserve")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-preserve",
+        )
+        task = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="Preserve run fields",
+        )
+        worker_run = worker_run_repo.create(
+            task_id=task.id,
+            worker_type="codex",
+            started_at=datetime.now(UTC),
+            status="running",
+            summary="Keep this summary",
+            commands_run=[{"command": "pytest", "exit_code": 0}],
+            artifact_index=[{"name": "stdout.log"}],
+        )
+
+        worker_run_repo.complete(
+            run_id=worker_run.id,
+            status="success",
+            finished_at=datetime.now(UTC),
+            files_changed_count=1,
+        )
+
+        stored_run = worker_run_repo.get(worker_run.id)
+        assert stored_run is not None
+        assert stored_run.summary == "Keep this summary"
+        assert stored_run.commands_run == [{"command": "pytest", "exit_code": 0}]
+        assert stored_run.artifact_index == [{"name": "stdout.log"}]
+
+
 def test_memory_repositories_support_upsert_and_delete(session_factory) -> None:
     """Personal and project memory entries support CRUD operations."""
     with session_scope(session_factory) as session:
@@ -188,3 +231,92 @@ def test_memory_repositories_support_upsert_and_delete(session_factory) -> None:
             repo_url="https://github.com/natanayalo/code-agent",
             memory_key="known_pitfalls",
         )
+
+
+def test_personal_memory_upsert_recovers_from_duplicate_insert_race(
+    session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A duplicate insert race updates the existing personal memory entry."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        personal_memory_repo = PersonalMemoryRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:race", display_name="Race User")
+        existing_entry = PersonalMemory(
+            user_id=user.id,
+            memory_key="communication_preferences",
+            value={"style": "concise"},
+        )
+        session.add(existing_entry)
+        session.flush()
+
+        original_get = personal_memory_repo.get
+        get_calls = 0
+
+        def stale_get(*, user_id: str, memory_key: str) -> PersonalMemory | None:
+            nonlocal get_calls
+            get_calls += 1
+            if get_calls == 1:
+                return None
+            return original_get(user_id=user_id, memory_key=memory_key)
+
+        monkeypatch.setattr(personal_memory_repo, "get", stale_get)
+
+        updated_entry = personal_memory_repo.upsert(
+            user_id=user.id,
+            memory_key="communication_preferences",
+            value={"style": "direct"},
+        )
+
+        stored_entry = original_get(
+            user_id=user.id,
+            memory_key="communication_preferences",
+        )
+        assert updated_entry.id == existing_entry.id
+        assert stored_entry is not None
+        assert stored_entry.value == {"style": "direct"}
+
+
+def test_project_memory_upsert_recovers_from_duplicate_insert_race(
+    session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A duplicate insert race updates the existing project memory entry."""
+    with session_scope(session_factory) as session:
+        project_memory_repo = ProjectMemoryRepository(session)
+        repo_url = "https://github.com/natanayalo/code-agent"
+
+        existing_entry = ProjectMemory(
+            repo_url=repo_url,
+            memory_key="known_pitfalls",
+            value={"docker": "use cert.pem when needed"},
+        )
+        session.add(existing_entry)
+        session.flush()
+
+        original_get = project_memory_repo.get
+        get_calls = 0
+
+        def stale_get(*, repo_url: str, memory_key: str) -> ProjectMemory | None:
+            nonlocal get_calls
+            get_calls += 1
+            if get_calls == 1:
+                return None
+            return original_get(repo_url=repo_url, memory_key=memory_key)
+
+        monkeypatch.setattr(project_memory_repo, "get", stale_get)
+
+        updated_entry = project_memory_repo.upsert(
+            repo_url=repo_url,
+            memory_key="known_pitfalls",
+            value={"docker": "updated after retry"},
+        )
+
+        stored_entry = original_get(
+            repo_url=repo_url,
+            memory_key="known_pitfalls",
+        )
+        assert updated_entry.id == existing_entry.id
+        assert stored_entry is not None
+        assert stored_entry.value == {"docker": "updated after retry"}

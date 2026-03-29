@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from db.models import (
@@ -333,11 +334,20 @@ class PersonalMemoryRepository:
                 memory_key=memory_key,
                 value=value,
             )
-            self.session.add(memory_entry)
+            try:
+                with self.session.begin_nested():
+                    self.session.add(memory_entry)
+                    self.session.flush()
+            except IntegrityError:
+                memory_entry = self.get(user_id=user_id, memory_key=memory_key)
+                if memory_entry is None:
+                    raise
+
+                memory_entry.value = value
+                self.session.flush()
         else:
             memory_entry.value = value
-
-        self.session.flush()
+            self.session.flush()
         return memory_entry
 
     def delete(self, *, user_id: str, memory_key: str) -> bool:
@@ -381,11 +391,20 @@ class ProjectMemoryRepository:
                 memory_key=memory_key,
                 value=value,
             )
-            self.session.add(memory_entry)
+            try:
+                with self.session.begin_nested():
+                    self.session.add(memory_entry)
+                    self.session.flush()
+            except IntegrityError:
+                memory_entry = self.get(repo_url=repo_url, memory_key=memory_key)
+                if memory_entry is None:
+                    raise
+
+                memory_entry.value = value
+                self.session.flush()
         else:
             memory_entry.value = value
-
-        self.session.flush()
+            self.session.flush()
         return memory_entry
 
     def delete(self, *, repo_url: str, memory_key: str) -> bool:
