@@ -126,9 +126,11 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
     """Create a fake dispatch record for the worker run."""
     state = _ensure_state(state_input)
     task_identifier = state.task.task_id or "pending"
+    worker_type = state.route.chosen_worker
+    assert worker_type is not None, "choose_worker must set route.chosen_worker before dispatch."
     dispatch = WorkerDispatch(
         run_id=f"run-{task_identifier}",
-        worker_type=state.route.chosen_worker or "codex",
+        worker_type=worker_type,
         workspace_id=f"workspace-{task_identifier}",
     )
     return {
@@ -169,7 +171,8 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
             artifacts=[],
         )
     elif state.result.summary is None:
-        worker_name = state.dispatch.worker_type or state.route.chosen_worker or "worker"
+        worker_name = state.dispatch.worker_type
+        assert worker_name is not None, "dispatch_job must set dispatch.worker_type before summary."
         result = state.result.model_copy(
             update={"summary": f"{worker_name} finished with status {state.result.status}"},
         )
