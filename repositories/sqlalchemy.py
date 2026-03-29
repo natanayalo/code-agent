@@ -257,11 +257,14 @@ class WorkerRunRepository:
 
         worker_run.status = status
         worker_run.finished_at = finished_at
-        worker_run.summary = summary
-        worker_run.commands_run = commands_run
+        if summary is not None:
+            worker_run.summary = summary
+        if commands_run is not None:
+            worker_run.commands_run = commands_run
         if files_changed_count is not None:
             worker_run.files_changed_count = files_changed_count
-        worker_run.artifact_index = artifact_index
+        if artifact_index is not None:
+            worker_run.artifact_index = artifact_index
         self.session.flush()
         return worker_run
 
