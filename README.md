@@ -10,6 +10,7 @@ return progress plus final results. This repository is currently in the bootstra
 
 The repo currently contains:
 - project guidance in `AGENTS.md`
+- agent development rules, workflows, and skills in `.agents/`
 - architecture and planning docs in `docs/`
 - live progress tracking in `docs/status.md`
 - a minimal FastAPI bootstrap app for Milestone 0
@@ -26,6 +27,7 @@ This slice intentionally does not include:
 
 ## Project Layout
 
+- `.agents/`: development rules, workflows, and repo-specific skills for coding agents
 - `apps/`: application entrypoints only
 - `orchestrator/`: workflow state and orchestration logic
 - `workers/`: provider-specific coding worker adapters

@@ -89,6 +89,12 @@ A task is done only if:
 - rollback path is obvious
 - no unrelated files were modified
 
+## Agent assets
+
+The `.agents/` directory contains supporting development workflows, rules, and repo-specific skills.
+
+Use those assets to execute common tasks consistently, but treat this `AGENTS.md` file as the canonical source of repo policy. If any `.agents/` file conflicts with this document, follow `AGENTS.md`.
+
 ## Folder ownership
 
 ### apps/
