@@ -18,6 +18,7 @@ The repo currently contains:
 - a local Docker Compose stack for `api` + `postgres`
 - initial SQLAlchemy models and Alembic migration scaffolding for Milestone 1
 - an initial repository layer for users, sessions, tasks, runs, and memory
+- a typed orchestrator state schema for future workflow execution
 
 This slice intentionally does not include:
 - LangGraph workflow code
@@ -117,6 +118,6 @@ The repo includes:
 ## Next Steps
 
 The next implementation targets after the local-infra slice are:
-- `T-012 Define orchestrator state schema`
 - `T-020 Build LangGraph workflow skeleton`
 - `T-013 Normalize persistence enums and constrained value fields`
+- `T-021 Add checkpoint persistence`
