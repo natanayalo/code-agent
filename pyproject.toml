@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "code-agent"
 version = "0.1.0"
 description = "Bootstrap scaffold for a personal coding-agent service."
-readme = {text = "Bootstrap scaffold for a personal coding-agent service.", content-type = "text/markdown"}
+readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.116,<1.0",
