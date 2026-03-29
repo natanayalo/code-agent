@@ -40,7 +40,7 @@ Create and activate a virtual environment, then install the project with dev dep
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-pre-commit install
+pre-commit install --hook-type pre-commit --hook-type commit-msg
 ```
 
 Start the bootstrap API locally:
@@ -62,6 +62,19 @@ Run the bootstrap test and linter:
 pytest
 pre-commit run --all-files
 ```
+
+Commit messages are validated with Commitizen, so use Conventional Commits such as:
+
+```text
+feat: add docker compose stack
+chore: add pre-commit workflow
+```
+
+## CI
+
+GitHub Actions run:
+- `pre-commit` on pushes
+- `pytest` on pushes
 
 ## Next Steps
 

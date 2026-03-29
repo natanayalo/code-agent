@@ -30,9 +30,24 @@ include = ["apps*", "db*", "memory*", "orchestrator*", "sandbox*", "tools*", "wo
 addopts = "-ra"
 testpaths = ["tests"]
 
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+pretty = true
+show_error_codes = true
+disallow_untyped_defs = true
+exclude = ["^tests/"]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "pep621"
+version_scheme = "semver"
+tag_format = "$version"
+update_changelog_on_bump = false

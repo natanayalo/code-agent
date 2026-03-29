@@ -7,11 +7,14 @@ repos:
       - id: check-merge-conflict
       - id: check-yaml
       - id: check-json
+      - id: check-toml
       - id: check-ast
+      - id: debug-statements
+      - id: check-added-large-files
       - id: detect-private-key
       - id: no-commit-to-branch
         args: [--branch, main, --branch, master]
-        stages: [pre-commit, pre-push]
+        stages: [pre-commit]
   - repo: https://github.com/google/yamlfmt
     rev: v0.17.2
     hooks:
@@ -20,6 +23,10 @@ repos:
   - repo: https://github.com/sirosen/check-jsonschema
     rev: 0.28.0
     hooks:
+      - id: check-jsonschema
+        name: Validate GitHub Workflows
+        files: ^\.github/workflows/.*\.ya?ml$
+        args: [--schemafile, "https://json.schemastore.org/github-workflow.json"]
       - id: check-jsonschema
         name: Validate Pre-commit Config
         files: ^\.pre-commit-config\.yaml$
@@ -35,9 +42,28 @@ repos:
     hooks:
       - id: gitleaks
         args: [--redact]
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+        types: [shell]
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.4.4
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        args: [--config-file=pyproject.toml]
+        additional_dependencies:
+          - fastapi>=0.116,<1.0
+          - uvicorn>=0.35,<1.0
+        files: ^(apps|db|memory|orchestrator|sandbox|tools|workers)/.*\.py$
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.13.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
