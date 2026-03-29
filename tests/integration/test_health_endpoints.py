@@ -15,17 +15,18 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def test_health_endpoint_returns_success(client: TestClient) -> None:
-    """The API exposes a basic health endpoint for local verification."""
-    response = client.get("/health")
+@pytest.mark.parametrize(
+    ("endpoint", "expected_json"),
+    [
+        ("/health", {"status": "ok"}),
+        ("/ready", {"status": "ready"}),
+    ],
+)
+def test_status_endpoints_return_success(
+    client: TestClient, endpoint: str, expected_json: dict[str, str]
+) -> None:
+    """The API exposes basic status endpoints for local verification."""
+    response = client.get(endpoint)
 
     assert response.status_code == status.HTTP_200_OK
-    assert response.json() == {"status": "ok"}
-
-
-def test_ready_endpoint_returns_success(client: TestClient) -> None:
-    """The API exposes a basic readiness endpoint for local verification."""
-    response = client.get("/ready")
-
-    assert response.status_code == status.HTTP_200_OK
-    assert response.json() == {"status": "ready"}
+    assert response.json() == expected_json
