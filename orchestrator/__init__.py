@@ -14,6 +14,7 @@ from orchestrator.state import (
     WorkerCommand,
     WorkerDispatch,
     WorkerResult,
+    WorkflowStep,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "WorkerCommand",
     "WorkerDispatch",
     "WorkerResult",
+    "WorkflowStep",
 ]

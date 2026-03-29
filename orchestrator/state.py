@@ -8,6 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 WorkerType = Literal["claude", "codex"]
 MemoryCategory = Literal["personal", "project"]
+WorkflowStep = Literal[
+    "ingest_task",
+    "classify_task",
+    "load_memory",
+    "choose_worker",
+    "dispatch_job",
+    "await_result",
+    "summarize_result",
+    "persist_memory",
+]
 
 
 class OrchestratorModel(BaseModel):
@@ -128,7 +138,7 @@ class PersistMemoryEntry(OrchestratorModel):
 class OrchestratorState(OrchestratorModel):
     """Top-level state handed between orchestrator workflow nodes."""
 
-    current_step: str = "ingest_task"
+    current_step: WorkflowStep = "ingest_task"
     session: SessionRef | None = None
     task: TaskRequest
     normalized_task_text: str | None = None

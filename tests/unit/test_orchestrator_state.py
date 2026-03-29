@@ -105,6 +105,7 @@ def test_orchestrator_state_supports_nested_workflow_data() -> None:
     [
         ({"task": {"task_text": "Bad priority", "priority": -1}}, "greater than or equal to 0"),
         ({"task": {"task_text": "Bad worker", "worker_override": "unknown"}}, "Input should be"),
+        ({"task": {"task_text": "Bad step"}, "current_step": "unknown"}, "Input should be"),
         (
             {"task": {"task_text": "Extra data"}, "unexpected": "field"},
             "Extra inputs are not permitted",
