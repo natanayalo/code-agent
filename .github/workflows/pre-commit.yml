@@ -1,12 +1,9 @@
 name: pre-commit
 on:
-  pull_request:
   push:
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
-    env:
-      SKIP: no-commit-to-branch
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

@@ -40,7 +40,7 @@ Create and activate a virtual environment, then install the project with dev dep
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type commit-msg
+pre-commit install --hook-type pre-commit --hook-type commit-msg
 ```
 
 Start the bootstrap API locally:
@@ -73,8 +73,8 @@ chore: add pre-commit workflow
 ## CI
 
 GitHub Actions run:
-- `pre-commit` on pull requests and pushes
-- `pytest` on pull requests and pushes
+- `pre-commit` on pushes
+- `pytest` on pushes
 
 ## Next Steps
 
