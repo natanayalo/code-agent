@@ -11,16 +11,17 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - Planning doc refinements and task scaffolding. PR: [#2](https://github.com/natanayalo/code-agent/pull/2)
 - T-003 Add health endpoints. PR: [#3](https://github.com/natanayalo/code-agent/pull/3)
 - Repo quality hooks and CI. PR: [#4](https://github.com/natanayalo/code-agent/pull/4)
+- T-002 Add local infrastructure. PR: [#5](https://github.com/natanayalo/code-agent/pull/5)
 
 ## In Progress
 
-- T-002 Add local infrastructure. PR: [#5](https://github.com/natanayalo/code-agent/pull/5)
+- T-010 Add DB models. PR: [#6](https://github.com/natanayalo/code-agent/pull/6)
 
 ## Next
 
-- T-010 Add DB models
 - T-011 Add repository layer
 - T-012 Define orchestrator state schema
+- T-013 Normalize persistence enums and constrained value fields
 
 ## Blocked
 
@@ -28,5 +29,5 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Milestone 0 is almost complete. The remaining open task is T-002.
-- Step 2 work should not start until T-002 is merged and verified.
+- Milestone 0 is complete.
+- T-013 tracks deferred schema-enum work from the T-010 review so the follow-up is explicit.
