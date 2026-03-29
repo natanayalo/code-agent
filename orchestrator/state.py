@@ -117,7 +117,7 @@ class ArtifactReference(OrchestratorModel):
 class WorkerResult(OrchestratorModel):
     """Structured result returned from a coding worker."""
 
-    status: str
+    status: Literal["success", "failure", "error"]
     summary: str | None = None
     commands_run: list[WorkerCommand] = Field(default_factory=list)
     files_changed: list[str] = Field(default_factory=list)
