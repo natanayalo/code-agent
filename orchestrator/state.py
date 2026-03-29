@@ -102,7 +102,7 @@ class TestResult(OrchestratorModel):
     """A summarized test result emitted by a worker."""
 
     name: str
-    status: str
+    status: Literal["passed", "failed", "skipped", "error"]
     details: str | None = None
 
 
