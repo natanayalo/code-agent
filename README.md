@@ -11,6 +11,7 @@ return progress plus final results. This repository is currently in the bootstra
 The repo currently contains:
 - project guidance in `AGENTS.md`
 - architecture and planning docs in `docs/`
+- live progress tracking in `docs/status.md`
 - a minimal FastAPI bootstrap app for Milestone 0
 - local `/health` and `/ready` endpoints for service verification
 - a local Docker Compose stack for `api` + `postgres`
