@@ -28,11 +28,11 @@ Use `.agents/` to make repeated development work more consistent:
 
 ## Current assets
 
-- `rules/development.md`
-- `workflows/start-task.md`
-- `workflows/address-review.md`
-- `workflows/schema-change.md`
-- `skills/db-schema/SKILL.md`
+- `.agents/rules/development.md`
+- `.agents/workflows/start-task.md`
+- `.agents/workflows/address-review.md`
+- `.agents/workflows/schema-change.md`
+- `.agents/skills/db-schema/SKILL.md`
 
 ## Scope
 
