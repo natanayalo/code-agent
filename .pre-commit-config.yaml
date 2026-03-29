@@ -59,7 +59,9 @@ repos:
       - id: mypy
         args: [--config-file=pyproject.toml]
         additional_dependencies:
+          - alembic>=1.16,<2.0
           - fastapi>=0.116,<1.0
+          - SQLAlchemy>=2.0,<3.0
           - uvicorn>=0.35,<1.0
         files: ^(apps|db|memory|orchestrator|sandbox|tools|workers)/.*\.py$
   - repo: https://github.com/commitizen-tools/commitizen

@@ -52,6 +52,14 @@ Create typed state model for the workflow.
 Acceptance:
 - state model validated in tests
 
+### T-013 Normalize persistence enums and constrained value fields
+Define canonical enums for persisted statuses and artifact types, then align the ORM schema and migrations.
+
+Acceptance:
+- status and artifact vocabularies are explicitly defined
+- ORM models use typed enums or equivalent constrained values
+- migrations preserve compatibility with existing persisted rows
+
 ---
 
 ## Milestone 2 - Orchestrator skeleton

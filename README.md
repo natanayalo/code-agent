@@ -15,10 +15,11 @@ The repo currently contains:
 - a minimal FastAPI bootstrap app for Milestone 0
 - local `/health` and `/ready` endpoints for service verification
 - a local Docker Compose stack for `api` + `postgres`
+- initial SQLAlchemy models and Alembic migration scaffolding for Milestone 1
 
 This slice intentionally does not include:
-- database models or migrations
 - LangGraph workflow code
+- repository layer or DB access wiring
 - worker implementations
 - sandbox execution logic
 - Telegram or webhook task handling
@@ -69,6 +70,12 @@ Verify Postgres reachability from the API container:
 docker compose exec api python -c "import socket; socket.create_connection(('postgres', 5432), 5).close(); print('postgres reachable')"
 ```
 
+Apply the initial schema locally:
+
+```bash
+DATABASE_URL="postgresql+psycopg://code_agent:<your-password>@localhost:5432/code_agent" alembic upgrade head
+```
+
 Verify the local service:
 
 ```bash
@@ -95,10 +102,17 @@ chore: add pre-commit workflow
 GitHub Actions run:
 - `pre-commit` on pushes
 - `pytest` on pushes
+- `pip-audit` weekly and on manual dispatch
+
+## Dependency Security
+
+The repo includes:
+- Dependabot updates for Python dependencies and GitHub Actions
+- a scheduled `pip-audit` workflow for Python vulnerability checks
 
 ## Next Steps
 
 The next implementation targets after the local-infra slice are:
-- `T-010 Add DB models`
 - `T-011 Add repository layer`
 - `T-012 Define orchestrator state schema`
+- `T-020 Build LangGraph workflow skeleton`
