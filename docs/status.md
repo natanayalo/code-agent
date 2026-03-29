@@ -12,14 +12,14 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-003 Add health endpoints. PR: [#3](https://github.com/natanayalo/code-agent/pull/3)
 - Repo quality hooks and CI. PR: [#4](https://github.com/natanayalo/code-agent/pull/4)
 - T-002 Add local infrastructure. PR: [#5](https://github.com/natanayalo/code-agent/pull/5)
+- T-010 Add DB models. PR: [#6](https://github.com/natanayalo/code-agent/pull/6)
 
 ## In Progress
 
-- T-010 Add DB models. PR: [#6](https://github.com/natanayalo/code-agent/pull/6)
+- T-011 Add repository layer
 
 ## Next
 
-- T-011 Add repository layer
 - T-012 Define orchestrator state schema
 - T-013 Normalize persistence enums and constrained value fields
 
@@ -29,5 +29,5 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Milestone 0 is complete.
+- Milestone 1 is in progress with the repository layer slice.
 - T-013 tracks deferred schema-enum work from the T-010 review so the follow-up is explicit.
