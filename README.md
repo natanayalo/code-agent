@@ -13,6 +13,7 @@ The repo currently contains:
 - architecture and planning docs in `docs/`
 - a minimal FastAPI bootstrap app for Milestone 0
 - local `/health` and `/ready` endpoints for service verification
+- a local Docker Compose stack for `api` + `postgres`
 
 This slice intentionally does not include:
 - database models or migrations
@@ -49,6 +50,23 @@ Start the bootstrap API locally:
 python -m uvicorn apps.api.main:app --reload
 ```
 
+Run the local container stack:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+If your environment uses a private or intercepting CA and Docker builds fail with SSL
+verification errors, place the CA certificate at `cert.pem` in the repository root before
+building. The Docker image will trust that certificate during package installation.
+
+Verify Postgres reachability from the API container:
+
+```bash
+docker compose exec api python -c "import socket; socket.create_connection(('postgres', 5432), 5).close(); print('postgres reachable')"
+```
+
 Verify the local service:
 
 ```bash
@@ -78,6 +96,7 @@ GitHub Actions run:
 
 ## Next Steps
 
-The next implementation targets after the bootstrap and health slices are:
-- `T-002 Add local infrastructure`
-- Milestone 1 persistence and state work
+The next implementation targets after the local-infra slice are:
+- `T-010 Add DB models`
+- `T-011 Add repository layer`
+- `T-012 Define orchestrator state schema`
