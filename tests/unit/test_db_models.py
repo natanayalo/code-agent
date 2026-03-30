@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from sqlalchemy import Enum as SQLAlchemyEnum
+
 import db.models  # noqa: F401
 from db.base import Base
+from db.enums import ArtifactType, SessionStatus, TaskStatus, WorkerRunStatus, WorkerType
 
 EXPECTED_TABLES = {
     "artifacts",
@@ -19,3 +22,24 @@ EXPECTED_TABLES = {
 def test_model_metadata_defines_expected_tables() -> None:
     """The ORM metadata contains the initial persistence tables."""
     assert EXPECTED_TABLES == set(Base.metadata.tables)
+
+
+def test_model_metadata_uses_canonical_enums_for_constrained_columns() -> None:
+    """Persisted enum-like columns are backed by explicit SQLAlchemy enum types."""
+
+    expected_columns = {
+        ("sessions", "status"): SessionStatus,
+        ("tasks", "status"): TaskStatus,
+        ("tasks", "chosen_worker"): WorkerType,
+        ("worker_runs", "worker_type"): WorkerType,
+        ("worker_runs", "status"): WorkerRunStatus,
+        ("artifacts", "artifact_type"): ArtifactType,
+    }
+
+    for (table_name, column_name), enum_class in expected_columns.items():
+        column_type = Base.metadata.tables[table_name].c[column_name].type
+        assert isinstance(column_type, SQLAlchemyEnum)
+        assert column_type.enum_class is enum_class
+        assert list(column_type.enums) == [member.value for member in enum_class]
+        assert not column_type.native_enum
+        assert column_type.create_constraint

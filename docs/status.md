@@ -19,10 +19,10 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 - T-012 Define orchestrator state schema
 - T-020 Build LangGraph workflow skeleton
+- T-013 Normalize persistence enums and constrained value fields
 
 ## Next
 
-- T-013 Normalize persistence enums and constrained value fields
 - T-021 Add checkpoint persistence
 - T-022 Add approval interrupt node
 
