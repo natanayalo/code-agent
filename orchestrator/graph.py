@@ -199,7 +199,7 @@ def persist_memory(state_input: OrchestratorState) -> dict[str, Any]:
 def build_orchestrator_graph(
     *,
     worker_result_provider: WorkerResultProvider | None = None,
-    checkpointer: Any | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
     interrupt_before: Literal["*"] | list[str] | None = None,
     interrupt_after: Literal["*"] | list[str] | None = None,
 ) -> Any:
