@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, START, StateGraph
@@ -199,6 +199,9 @@ def persist_memory(state_input: OrchestratorState) -> dict[str, Any]:
 def build_orchestrator_graph(
     *,
     worker_result_provider: WorkerResultProvider | None = None,
+    checkpointer: Any | None = None,
+    interrupt_before: Literal["*"] | list[str] | None = None,
+    interrupt_after: Literal["*"] | list[str] | None = None,
 ) -> Any:
     """Build and compile the linear LangGraph happy-path skeleton."""
     builder = StateGraph(OrchestratorState)
@@ -222,4 +225,8 @@ def build_orchestrator_graph(
     builder.add_edge("await_result", "summarize_result")
     builder.add_edge("summarize_result", "persist_memory")
     builder.add_edge("persist_memory", END)
-    return builder.compile()
+    return builder.compile(
+        checkpointer=checkpointer,
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+    )

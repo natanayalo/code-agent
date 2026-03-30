@@ -20,12 +20,12 @@ The repo currently contains:
 - an initial repository layer for users, sessions, tasks, runs, and memory
 - a typed orchestrator state schema for future workflow execution
 - a LangGraph workflow skeleton that runs the happy path with a fake worker result
+- SQLite-backed checkpoint persistence helpers for durable LangGraph workflow resume
 
 This slice intentionally does not include:
 - app DB wiring
 - worker implementations
 - real worker dispatch
-- checkpoint persistence
 - sandbox execution logic
 - Telegram or webhook task handling
 
@@ -120,6 +120,6 @@ The repo includes:
 ## Next Steps
 
 The next implementation targets after the local-infra slice are:
-- `T-013 Normalize persistence enums and constrained value fields`
-- `T-021 Add checkpoint persistence`
 - `T-022 Add approval interrupt node`
+- `T-030 Create workspace manager`
+- `T-031 Add Docker sandbox runner`
