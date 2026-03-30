@@ -6,9 +6,23 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db.enums import (
+    ArtifactType,
+    SessionStatus,
+    TaskStatus,
+    WorkerRunStatus,
+    WorkerType,
+    build_sql_enum,
+)
+
+SESSION_STATUS_ENUM = build_sql_enum(SessionStatus, name="session_status")
+TASK_STATUS_ENUM = build_sql_enum(TaskStatus, name="task_status")
+WORKER_TYPE_ENUM = build_sql_enum(WorkerType, name="worker_type")
+WORKER_RUN_STATUS_ENUM = build_sql_enum(WorkerRunStatus, name="worker_run_status")
+ARTIFACT_TYPE_ENUM = build_sql_enum(ArtifactType, name="artifact_type")
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -43,11 +57,21 @@ class Session(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     channel: Mapped[str] = mapped_column(String(50), nullable=False)
     external_thread_id: Mapped[str] = mapped_column(String(255), nullable=False)
     active_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
+    status: Mapped[SessionStatus] = mapped_column(
+        SESSION_STATUS_ENUM,
+        nullable=False,
+        default=SessionStatus.ACTIVE,
+    )
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="sessions")
     tasks: Mapped[list[Task]] = relationship(back_populates="session")
+
+    @validates("status")
+    def _coerce_status(self, _key: str, value: SessionStatus | str) -> SessionStatus:
+        """Normalize assigned session statuses to the canonical enum."""
+
+        return SessionStatus(value)
 
 
 class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -63,13 +87,35 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     repo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     task_text: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
+    status: Mapped[TaskStatus] = mapped_column(
+        TASK_STATUS_ENUM,
+        nullable=False,
+        default=TaskStatus.PENDING,
+    )
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    chosen_worker: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    chosen_worker: Mapped[WorkerType | None] = mapped_column(WORKER_TYPE_ENUM, nullable=True)
     route_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     session: Mapped[Session] = relationship(back_populates="tasks")
     worker_runs: Mapped[list[WorkerRun]] = relationship(back_populates="task")
+
+    @validates("status")
+    def _coerce_status(self, _key: str, value: TaskStatus | str) -> TaskStatus:
+        """Normalize assigned task statuses to the canonical enum."""
+
+        return TaskStatus(value)
+
+    @validates("chosen_worker")
+    def _coerce_chosen_worker(
+        self,
+        _key: str,
+        value: WorkerType | str | None,
+    ) -> WorkerType | None:
+        """Normalize assigned chosen workers to the canonical enum."""
+
+        if value is None:
+            return None
+        return WorkerType(value)
 
 
 class WorkerRun(UUIDPrimaryKeyMixin, Base):
@@ -82,11 +128,11 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
         nullable=False,
         index=True,
     )
-    worker_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    worker_type: Mapped[WorkerType] = mapped_column(WORKER_TYPE_ENUM, nullable=False)
     workspace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    status: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[WorkerRunStatus] = mapped_column(WORKER_RUN_STATUS_ENUM, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     commands_run: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     files_changed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -94,6 +140,22 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
 
     task: Mapped[Task] = relationship(back_populates="worker_runs")
     artifacts: Mapped[list[Artifact]] = relationship(back_populates="worker_run")
+
+    @validates("worker_type")
+    def _coerce_worker_type(self, _key: str, value: WorkerType | str) -> WorkerType:
+        """Normalize assigned worker types to the canonical enum."""
+
+        return WorkerType(value)
+
+    @validates("status")
+    def _coerce_status(
+        self,
+        _key: str,
+        value: WorkerRunStatus | str,
+    ) -> WorkerRunStatus:
+        """Normalize assigned worker-run statuses to the canonical enum."""
+
+        return WorkerRunStatus(value)
 
 
 class Artifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -106,12 +168,22 @@ class Artifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
-    artifact_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    artifact_type: Mapped[ArtifactType] = mapped_column(ARTIFACT_TYPE_ENUM, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     uri: Mapped[str] = mapped_column(String(1024), nullable=False)
     artifact_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     worker_run: Mapped[WorkerRun] = relationship(back_populates="artifacts")
+
+    @validates("artifact_type")
+    def _coerce_artifact_type(
+        self,
+        _key: str,
+        value: ArtifactType | str,
+    ) -> ArtifactType:
+        """Normalize assigned artifact types to the canonical enum."""
+
+        return ArtifactType(value)
 
 
 class PersonalMemory(UUIDPrimaryKeyMixin, TimestampMixin, Base):

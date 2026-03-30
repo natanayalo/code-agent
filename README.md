@@ -10,7 +10,7 @@ return progress plus final results. This repository is currently in the bootstra
 
 The repo currently contains:
 - project guidance in `AGENTS.md`
-- agent development rules, workflows, and skills in `.agents/`
+- agent development rules plus triggerable repo skills in `.agents/`
 - architecture and planning docs in `docs/`
 - live progress tracking in `docs/status.md`
 - a minimal FastAPI bootstrap app for Milestone 0

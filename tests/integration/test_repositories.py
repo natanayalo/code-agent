@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
+from db.enums import ArtifactType, SessionStatus, TaskStatus, WorkerRunStatus, WorkerType
 from db.models import PersonalMemory, ProjectMemory
 from repositories import (
     ArtifactRepository,
@@ -80,11 +81,12 @@ def test_session_and_task_repositories_support_crud(session_factory) -> None:
         )
         stored_task = task_repo.get(task.id)
         assert stored_task is not None
-        assert stored_task.status == "in_progress"
-        assert stored_task.chosen_worker == "codex"
+        assert stored_task.status is TaskStatus.IN_PROGRESS
+        assert stored_task.chosen_worker is WorkerType.CODEX
         assert stored_task.route_reason == "cheap_mechanical_change"
         stored_session = session_repo.get(conversation_session.id)
         assert stored_session is not None
+        assert stored_session.status is SessionStatus.ACTIVE
         assert stored_session.active_task_id == task.id
         assert len(task_repo.list_by_session(conversation_session.id)) == 1
 
@@ -131,13 +133,13 @@ def test_worker_run_and_artifact_repositories_support_crud(session_factory) -> N
 
         stored_run = worker_run_repo.get(worker_run.id)
         assert stored_run is not None
-        assert stored_run.status == "success"
+        assert stored_run.status is WorkerRunStatus.SUCCESS
         assert stored_run.summary == "Task completed"
         assert stored_run.files_changed_count == 2
         assert len(worker_run_repo.list_by_task(task.id)) == 1
         artifacts = artifact_repo.list_by_run(worker_run.id)
         assert len(artifacts) == 1
-        assert artifacts[0].artifact_type == "log"
+        assert artifacts[0].artifact_type is ArtifactType.LOG
 
 
 def test_worker_run_complete_preserves_existing_optional_fields(session_factory) -> None:
@@ -177,6 +179,7 @@ def test_worker_run_complete_preserves_existing_optional_fields(session_factory)
 
         stored_run = worker_run_repo.get(worker_run.id)
         assert stored_run is not None
+        assert stored_run.status is WorkerRunStatus.SUCCESS
         assert stored_run.summary == "Keep this summary"
         assert stored_run.commands_run == [{"command": "pytest", "exit_code": 0}]
         assert stored_run.artifact_index == [{"name": "stdout.log"}]

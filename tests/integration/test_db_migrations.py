@@ -19,6 +19,41 @@ EXPECTED_TABLES = {
     "worker_runs",
 }
 
+EXPECTED_CHECK_CONSTRAINTS = {
+    "sessions": {
+        "ck_sessions_session_status": {"active", "closed"},
+    },
+    "tasks": {
+        "ck_tasks_task_status": {
+            "pending",
+            "in_progress",
+            "completed",
+            "failed",
+            "cancelled",
+        },
+        "ck_tasks_worker_type": {"claude", "codex"},
+    },
+    "worker_runs": {
+        "ck_worker_runs_worker_type": {"claude", "codex"},
+        "ck_worker_runs_worker_run_status": {
+            "queued",
+            "running",
+            "success",
+            "failure",
+            "error",
+            "cancelled",
+        },
+    },
+    "artifacts": {
+        "ck_artifacts_artifact_type": {
+            "log",
+            "diff",
+            "test_report",
+            "result_summary",
+        },
+    },
+}
+
 
 def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     """Upgrading to head creates the initial persistence schema."""
@@ -42,3 +77,13 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     assert {"commands_run", "artifact_index", "files_changed_count"} <= {
         column["name"] for column in inspector.get_columns("worker_runs")
     }
+
+    for table_name, expected_constraints in EXPECTED_CHECK_CONSTRAINTS.items():
+        actual_constraints = {
+            constraint["name"]: constraint["sqltext"]
+            for constraint in inspector.get_check_constraints(table_name)
+        }
+        for constraint_name, expected_values in expected_constraints.items():
+            assert constraint_name in actual_constraints
+            for expected_value in expected_values:
+                assert expected_value in actual_constraints[constraint_name]

@@ -23,18 +23,23 @@ Use `.agents/` to make repeated development work more consistent:
 ## Layout
 
 - `rules/`: thin operating rules that point back to the canonical docs
-- `workflows/`: step-by-step execution checklists for common development loops
-- `skills/`: focused repo-specific guidance for specialized areas
+- `workflows/`: thin reference checklists and pointers
+- `skills/`: triggerable repo-specific guidance for repeated tasks and specialized areas
 
 ## Current assets
 
 - `.agents/rules/development.md`
+- `.agents/skills/start-task/SKILL.md`
+- `.agents/skills/address-review/SKILL.md`
+- `.agents/skills/db-schema/SKILL.md`
 - `.agents/workflows/start-task.md`
 - `.agents/workflows/address-review.md`
 - `.agents/workflows/schema-change.md`
-- `.agents/skills/db-schema/SKILL.md`
 
 ## Scope
 
 Keep these files thin.
 Do not duplicate broad project policy that already exists in `AGENTS.md`.
+
+Prefer `skills/` for procedures that should trigger from matching user requests.
+Keep `workflows/` as human-readable pointers or supplemental checklists only.

@@ -95,6 +95,13 @@ The `.agents/` directory contains supporting development workflows, rules, and r
 
 Use those assets to execute common tasks consistently, but treat this `AGENTS.md` file as the canonical source of repo policy. If any `.agents/` file conflicts with this document, follow `AGENTS.md`.
 
+Prefer triggerable skills over workflow docs when the user request clearly matches one.
+
+Current routing hints:
+- use the `start-task` skill when the user asks to start a new task, pick the next backlog item, or begin the next implementation slice
+- use the `address-review` skill, together with the GitHub review-comment skill when needed, when the user asks to inspect or address PR review feedback
+- use the `db-schema` skill for model or migration changes under `db/`
+
 ## Folder ownership
 
 ### apps/
