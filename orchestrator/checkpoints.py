@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
 
@@ -17,7 +18,7 @@ def create_in_memory_checkpointer() -> InMemorySaver:
 
 
 @contextmanager
-def create_sqlite_checkpointer(checkpoint_path: str | Path) -> Iterator[Any]:
+def create_sqlite_checkpointer(checkpoint_path: str | Path) -> Iterator[BaseCheckpointSaver]:
     """Create a SQLite-backed checkpointer for durable graph execution."""
 
     try:
