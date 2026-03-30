@@ -1,6 +1,6 @@
 # Workflow: Start Task
 
-The triggerable task-start procedure now lives in [`.agents/skills/start-task/SKILL.md`](/Users/e137124/Private/code-agent/.agents/skills/start-task/SKILL.md).
+The triggerable task-start procedure now lives in [`.agents/skills/start-task/SKILL.md`](../skills/start-task/SKILL.md).
 
 Keep this workflow as a thin reference only.
 
