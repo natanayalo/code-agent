@@ -28,17 +28,27 @@ def test_model_metadata_uses_canonical_enums_for_constrained_columns() -> None:
     """Persisted enum-like columns are backed by explicit SQLAlchemy enum types."""
 
     expected_columns = {
-        ("sessions", "status"): SessionStatus,
-        ("tasks", "status"): TaskStatus,
-        ("tasks", "chosen_worker"): WorkerType,
-        ("worker_runs", "worker_type"): WorkerType,
-        ("worker_runs", "status"): WorkerRunStatus,
-        ("artifacts", "artifact_type"): ArtifactType,
+        ("sessions", "status"): (SessionStatus, ["active", "closed"]),
+        (
+            "tasks",
+            "status",
+        ): (TaskStatus, ["pending", "in_progress", "completed", "failed", "cancelled"]),
+        ("tasks", "chosen_worker"): (WorkerType, ["claude", "codex"]),
+        ("worker_runs", "worker_type"): (WorkerType, ["claude", "codex"]),
+        (
+            "worker_runs",
+            "status",
+        ): (WorkerRunStatus, ["queued", "running", "success", "failure", "error", "cancelled"]),
+        (
+            "artifacts",
+            "artifact_type",
+        ): (ArtifactType, ["log", "diff", "test_report", "result_summary"]),
     }
 
-    for (table_name, column_name), enum_class in expected_columns.items():
+    for (table_name, column_name), (enum_class, expected_values) in expected_columns.items():
         column_type = Base.metadata.tables[table_name].c[column_name].type
         assert isinstance(column_type, SQLAlchemyEnum)
         assert column_type.enum_class is enum_class
+        assert list(column_type.enums) == expected_values
         assert not column_type.native_enum
         assert column_type.create_constraint

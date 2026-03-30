@@ -51,12 +51,6 @@ class ArtifactType(StrEnum):
     RESULT_SUMMARY = "result_summary"
 
 
-def enum_values(enum_class: type[StrEnum]) -> tuple[str, ...]:
-    """Return the persisted string values for a StrEnum class."""
-
-    return tuple(member.value for member in enum_class)
-
-
 def build_sql_enum(enum_class: type[StrEnum], *, name: str) -> SQLAlchemyEnum:
     """Create a non-native SQLAlchemy enum backed by a check constraint."""
 
@@ -68,10 +62,3 @@ def build_sql_enum(enum_class: type[StrEnum], *, name: str) -> SQLAlchemyEnum:
         validate_strings=True,
         values_callable=lambda values: [member.value for member in values],
     )
-
-
-SESSION_STATUS_VALUES = enum_values(SessionStatus)
-TASK_STATUS_VALUES = enum_values(TaskStatus)
-WORKER_TYPE_VALUES = enum_values(WorkerType)
-WORKER_RUN_STATUS_VALUES = enum_values(WorkerRunStatus)
-ARTIFACT_TYPE_VALUES = enum_values(ArtifactType)
