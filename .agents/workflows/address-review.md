@@ -1,6 +1,6 @@
 # Workflow: Address Review
 
-The triggerable review-triage procedure now lives in [`.agents/skills/address-review/SKILL.md`](/Users/e137124/Private/code-agent/.agents/skills/address-review/SKILL.md).
+The triggerable review-triage procedure now lives in [`.agents/skills/address-review/SKILL.md`](../skills/address-review/SKILL.md).
 
 Keep this workflow as a thin reference only.
 
