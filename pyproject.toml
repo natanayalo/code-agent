@@ -12,6 +12,7 @@ dependencies = [
     "SQLAlchemy>=2.0,<3.0",
     "fastapi>=0.116,<1.0",
     "langgraph>=1.0,<2.0",
+    "langgraph-checkpoint-sqlite>=3.0,<4.0",
     "uvicorn>=0.35,<1.0"
 ]
 
