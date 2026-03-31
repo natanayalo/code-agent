@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any, Literal
 
@@ -74,7 +75,10 @@ def _is_destructive_task(task_text: str, constraints: dict[str, Any]) -> bool:
     if constraints.get("destructive_action") is True:
         return True
     normalized_text = task_text.lower()
-    return any(marker in normalized_text for marker in DESTRUCTIVE_TASK_MARKERS)
+    return any(
+        re.search(rf"\b{re.escape(marker)}\b", normalized_text)
+        for marker in DESTRUCTIVE_TASK_MARKERS
+    )
 
 
 def _task_requires_approval(task_text: str, constraints: dict[str, Any]) -> bool:
@@ -121,7 +125,12 @@ def _coerce_approval_decision(resume_value: Any) -> bool:
         return resume_value
 
     if isinstance(resume_value, dict):
-        return _coerce_approval_decision(resume_value.get("approved"))
+        val = resume_value.get("approved")
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            return val.lower() in ("true", "yes", "y", "1", "approve", "approved")
+        return False
 
     if isinstance(resume_value, str):
         return resume_value.lower() in ("true", "yes", "y", "1", "approve", "approved")
