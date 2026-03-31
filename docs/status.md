@@ -21,10 +21,10 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-012 Define orchestrator state schema
 - T-020 Build LangGraph workflow skeleton
 - T-021 Add checkpoint persistence
+- T-022 Add approval interrupt node
 
 ## Next
 
-- T-022 Add approval interrupt node
 - T-030 Create workspace manager
 
 ## Blocked
@@ -35,3 +35,4 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 - Milestone 1 close-out and Milestone 2 skeleton work are both active.
 - T-021 adds durable LangGraph checkpointing without yet wiring orchestrator state to the app layer.
+- T-022 adds a destructive-action approval pause/resume path before worker dispatch.

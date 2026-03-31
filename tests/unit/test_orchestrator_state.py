@@ -18,6 +18,7 @@ def test_orchestrator_state_supports_minimal_task_input() -> None:
     assert state.memory.personal == []
     assert state.route.chosen_worker is None
     assert state.approval.required is False
+    assert state.approval.status == "not_required"
     assert state.progress_updates == []
     assert state.errors == []
 
@@ -59,6 +60,13 @@ def test_orchestrator_state_supports_nested_workflow_data() -> None:
             "route_reason": "manual_override",
             "override_applied": True,
         },
+        approval={
+            "required": True,
+            "status": "approved",
+            "approval_type": "destructive_action",
+            "reason": "Deletes files from the workspace",
+            "resume_token": "approval-task-1",
+        },
         dispatch={
             "run_id": "run-1",
             "worker_type": "codex",
@@ -94,6 +102,7 @@ def test_orchestrator_state_supports_nested_workflow_data() -> None:
     assert state.session is not None
     assert state.session.channel == "telegram"
     assert state.route.chosen_worker == "codex"
+    assert state.approval.status == "approved"
     assert state.result is not None
     assert state.result.commands_run[0].command == "pytest"
     assert state.memory.project[0].memory_key == "known_pitfalls"

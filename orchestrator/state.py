@@ -13,6 +13,8 @@ WorkflowStep = Literal[
     "classify_task",
     "load_memory",
     "choose_worker",
+    "check_approval",
+    "await_approval",
     "dispatch_job",
     "await_result",
     "summarize_result",
@@ -77,6 +79,7 @@ class ApprovalCheckpoint(OrchestratorModel):
     """Approval state for an interruptible workflow step."""
 
     required: bool = False
+    status: Literal["not_required", "pending", "approved", "rejected"] = "not_required"
     approval_type: str | None = None
     reason: str | None = None
     resume_token: str | None = None

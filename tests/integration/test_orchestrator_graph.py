@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from langgraph.types import Command
+
 from orchestrator import OrchestratorState, WorkerResult, build_orchestrator_graph
 from orchestrator.checkpoints import create_sqlite_checkpointer
 
@@ -38,6 +40,8 @@ def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
     assert state.normalized_task_text == "Add generic webhook endpoint"
     assert state.task_kind == "implementation"
     assert state.route.chosen_worker == "codex"
+    assert state.approval.required is False
+    assert state.approval.status == "not_required"
     assert state.dispatch.worker_type == "codex"
     assert state.result is not None
     assert state.result.status == "success"
@@ -48,6 +52,7 @@ def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
         "task classified as implementation",
         "memory context loaded",
         "worker selected: codex",
+        "approval not required",
         "worker dispatched",
         "worker result received",
         "result summarized",
@@ -85,6 +90,7 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
 
     assert snapshot.next == ("await_result",)
     assert snapshot.values["current_step"] == "dispatch_job"
+    assert snapshot.values["approval"]["status"] == "not_required"
     assert snapshot.values["dispatch"]["worker_type"] == "codex"
     assert snapshot.values.get("result") is None
     assert snapshot.values["progress_updates"] == [
@@ -92,6 +98,7 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
         "task classified as implementation",
         "memory context loaded",
         "worker selected: codex",
+        "approval not required",
         "worker dispatched",
     ]
 
@@ -120,6 +127,7 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
     assert state.normalized_task_text == "Add checkpoint persistence"
     assert state.task_kind == "implementation"
     assert state.route.chosen_worker == "codex"
+    assert state.approval.status == "not_required"
     assert state.dispatch.worker_type == "codex"
     assert state.result is not None
     assert state.result.status == "success"
@@ -130,8 +138,140 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
         "task classified as implementation",
         "memory context loaded",
         "worker selected: codex",
+        "approval not required",
         "worker dispatched",
         "worker result received",
+        "result summarized",
+        "memory persistence queued",
+    ]
+
+
+def test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly(
+    tmp_path: Path,
+) -> None:
+    """A destructive task should pause for approval and resume on confirmation."""
+
+    checkpoint_path = tmp_path / "approval-checkpoints.sqlite"
+    config = {"configurable": {"thread_id": "task-022-approved"}}
+    initial_input = {
+        "task": {
+            "task_id": "task-022",
+            "task_text": "Delete files from the repo workspace",
+            "repo_url": "https://github.com/natanayalo/code-agent",
+            "branch": "master",
+            "constraints": {
+                "requires_approval": True,
+                "approval_reason": "Task deletes files from the task workspace.",
+            },
+        }
+    }
+
+    with create_sqlite_checkpointer(checkpoint_path) as checkpointer:
+        graph = build_orchestrator_graph(
+            worker_result_provider=lambda _state: WorkerResult(
+                status="success",
+                commands_run=[],
+                files_changed=["sandbox/workspace.py"],
+                test_results=[{"name": "approval-resume", "status": "passed"}],
+                artifacts=[],
+                next_action_hint="persist_memory",
+                summary=None,
+            ),
+            checkpointer=checkpointer,
+        )
+
+        interrupted_output = graph.invoke(initial_input, config=config)
+        snapshot = graph.get_state(config)
+
+        interrupts = interrupted_output["__interrupt__"]
+        assert len(interrupts) == 1
+        interrupt_payload = getattr(interrupts[0], "value")
+        assert interrupt_payload["approval_type"] == "destructive_action"
+        assert interrupt_payload["reason"] == "Task deletes files from the task workspace."
+        assert interrupt_payload["resume_token"] == "approval-task-022"
+        assert interrupt_payload["task_text"] == "Delete files from the repo workspace"
+        assert snapshot.next == ("await_approval",)
+        assert snapshot.values["current_step"] == "check_approval"
+        assert snapshot.values["approval"]["status"] == "pending"
+        assert snapshot.values["progress_updates"] == [
+            "task ingested",
+            "task classified as implementation",
+            "memory context loaded",
+            "worker selected: codex",
+            "approval requested",
+        ]
+
+        raw_output = graph.invoke(Command(resume=True), config=config)
+
+    state = OrchestratorState.model_validate(raw_output)
+
+    assert state.current_step == "persist_memory"
+    assert state.approval.required is True
+    assert state.approval.status == "approved"
+    assert state.dispatch.worker_type == "codex"
+    assert state.result is not None
+    assert state.result.status == "success"
+    assert state.result.test_results[0].name == "approval-resume"
+    assert state.progress_updates == [
+        "task ingested",
+        "task classified as implementation",
+        "memory context loaded",
+        "worker selected: codex",
+        "approval requested",
+        "approval granted",
+        "worker dispatched",
+        "worker result received",
+        "result summarized",
+        "memory persistence queued",
+    ]
+
+
+def test_orchestrator_graph_stops_when_approval_is_rejected(tmp_path: Path) -> None:
+    """A rejected destructive task should not dispatch the worker."""
+
+    checkpoint_path = tmp_path / "approval-rejected.sqlite"
+    config = {"configurable": {"thread_id": "task-022-rejected"}}
+    initial_input = {
+        "task": {
+            "task_id": "task-022-rejected",
+            "task_text": "Delete files from the repo workspace",
+            "repo_url": "https://github.com/natanayalo/code-agent",
+            "branch": "master",
+            "constraints": {"requires_approval": True},
+        }
+    }
+
+    def unexpected_worker_result(_state: OrchestratorState) -> WorkerResult:
+        raise AssertionError("dispatch should not run after approval is rejected.")
+
+    with create_sqlite_checkpointer(checkpoint_path) as checkpointer:
+        graph = build_orchestrator_graph(
+            worker_result_provider=unexpected_worker_result,
+            checkpointer=checkpointer,
+        )
+
+        graph.invoke(initial_input, config=config)
+        raw_output = graph.invoke(Command(resume=False), config=config)
+
+    state = OrchestratorState.model_validate(raw_output)
+
+    assert state.current_step == "persist_memory"
+    assert state.approval.required is True
+    assert state.approval.status == "rejected"
+    assert state.dispatch.run_id is None
+    assert state.result is not None
+    assert state.result.status == "failure"
+    assert (
+        state.result.summary
+        == "Task halted because the requested destructive action was not approved."
+    )
+    assert state.progress_updates == [
+        "task ingested",
+        "task classified as implementation",
+        "memory context loaded",
+        "worker selected: codex",
+        "approval requested",
+        "approval rejected",
         "result summarized",
         "memory persistence queued",
     ]
