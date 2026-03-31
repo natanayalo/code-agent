@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from langchain_core.runnables import RunnableLambda
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
 from orchestrator.state import OrchestratorState, RouteDecision, WorkerDispatch, WorkerResult
