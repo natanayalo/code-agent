@@ -69,15 +69,19 @@ def _classify_task_kind(task_text: str) -> str:
     return "implementation"
 
 
+def _is_destructive_task(task_text: str, constraints: dict[str, Any]) -> bool:
+    """Return whether the task involves potentially destructive changes."""
+    if constraints.get("destructive_action") is True:
+        return True
+    normalized_text = task_text.lower()
+    return any(marker in normalized_text for marker in DESTRUCTIVE_TASK_MARKERS)
+
+
 def _task_requires_approval(task_text: str, constraints: dict[str, Any]) -> bool:
     """Return whether the task should pause for manual approval."""
     if constraints.get("requires_approval") is True:
         return True
-    if constraints.get("destructive_action") is True:
-        return True
-
-    normalized_text = task_text.lower()
-    return any(marker in normalized_text for marker in DESTRUCTIVE_TASK_MARKERS)
+    return _is_destructive_task(task_text, constraints)
 
 
 def _build_approval_checkpoint(state: OrchestratorState) -> ApprovalCheckpoint:
@@ -88,10 +92,7 @@ def _build_approval_checkpoint(state: OrchestratorState) -> ApprovalCheckpoint:
 
     reason = state.task.constraints.get("approval_reason")
     if not isinstance(reason, str) or not reason.strip():
-        normalized_text = task_text.lower()
-        is_destructive = state.task.constraints.get("destructive_action") is True or any(
-            marker in normalized_text for marker in DESTRUCTIVE_TASK_MARKERS
-        )
+        is_destructive = _is_destructive_task(task_text, state.task.constraints)
         reason = (
             "Task includes a potentially destructive action."
             if is_destructive
@@ -120,10 +121,7 @@ def _coerce_approval_decision(resume_value: Any) -> bool:
         return resume_value
 
     if isinstance(resume_value, dict):
-        approved = resume_value.get("approved")
-        if isinstance(approved, bool):
-            return approved
-        return False
+        return _coerce_approval_decision(resume_value.get("approved"))
 
     if isinstance(resume_value, str):
         return resume_value.lower() in ("true", "yes", "1", "approve")
