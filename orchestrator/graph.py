@@ -8,8 +8,15 @@ from typing import Any, Literal
 from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
 
-from orchestrator.state import OrchestratorState, RouteDecision, WorkerDispatch, WorkerResult
+from orchestrator.state import (
+    ApprovalCheckpoint,
+    OrchestratorState,
+    RouteDecision,
+    WorkerDispatch,
+    WorkerResult,
+)
 
 WorkerResultProvider = Callable[[OrchestratorState], WorkerResult]
 
@@ -18,10 +25,25 @@ ORCHESTRATOR_NODE_SEQUENCE = (
     "classify_task",
     "load_memory",
     "choose_worker",
+    "check_approval",
+    "await_approval",
     "dispatch_job",
     "await_result",
     "summarize_result",
     "persist_memory",
+)
+
+DESTRUCTIVE_TASK_MARKERS = (
+    "delete file",
+    "delete files",
+    "destroy workspace",
+    "drop database",
+    "drop table",
+    "git clean",
+    "git reset",
+    "purge data",
+    "rm -rf",
+    "wipe data",
 )
 
 
@@ -45,6 +67,62 @@ def _classify_task_kind(task_text: str) -> str:
     if any(keyword in normalized_text for keyword in ("investigate", "debug", "analyze")):
         return "ambiguous"
     return "implementation"
+
+
+def _task_requires_approval(task_text: str, constraints: dict[str, Any]) -> bool:
+    """Return whether the task should pause for manual approval."""
+    if constraints.get("requires_approval") is True:
+        return True
+    if constraints.get("destructive_action") is True:
+        return True
+
+    normalized_text = task_text.lower()
+    return any(marker in normalized_text for marker in DESTRUCTIVE_TASK_MARKERS)
+
+
+def _build_approval_checkpoint(state: OrchestratorState) -> ApprovalCheckpoint:
+    """Build approval metadata for the current task, if required."""
+    task_text = state.normalized_task_text or state.task.task_text
+    if not _task_requires_approval(task_text, state.task.constraints):
+        return ApprovalCheckpoint()
+
+    reason = state.task.constraints.get("approval_reason")
+    if not isinstance(reason, str) or not reason.strip():
+        reason = "Task includes a potentially destructive action."
+
+    task_identifier = state.task.task_id or "pending"
+    return ApprovalCheckpoint(
+        required=True,
+        status="pending",
+        approval_type="destructive_action",
+        reason=reason,
+        resume_token=f"approval-{task_identifier}",
+    )
+
+
+def _route_after_check_approval(state_input: OrchestratorState) -> str:
+    """Route either to the approval interrupt or straight to dispatch."""
+    state = _ensure_state(state_input)
+    return "await_approval" if state.approval.required else "dispatch_job"
+
+
+def _coerce_approval_decision(resume_value: Any) -> bool:
+    """Normalize LangGraph resume payloads into a boolean approval decision."""
+    if isinstance(resume_value, bool):
+        return resume_value
+
+    if isinstance(resume_value, dict):
+        approved = resume_value.get("approved")
+        if isinstance(approved, bool):
+            return approved
+
+    return bool(resume_value)
+
+
+def _route_after_await_approval(state_input: OrchestratorState) -> str:
+    """Continue to dispatch only when the destructive action was approved."""
+    state = _ensure_state(state_input)
+    return "dispatch_job" if state.approval.status == "approved" else "summarize_result"
 
 
 def _default_worker_result_provider(state: OrchestratorState) -> WorkerResult:
@@ -121,6 +199,63 @@ def choose_worker(state_input: OrchestratorState) -> dict[str, Any]:
         "route": route.model_dump(),
         "progress_updates": _progress_update(state, f"worker selected: {route.chosen_worker}"),
     }
+
+
+def check_approval(state_input: OrchestratorState) -> dict[str, Any]:
+    """Persist approval metadata before any destructive action is dispatched."""
+    state = _ensure_state(state_input)
+    approval = _build_approval_checkpoint(state)
+    progress_message = "approval requested" if approval.required else "approval not required"
+    return {
+        "current_step": "check_approval",
+        "approval": approval.model_dump(),
+        "progress_updates": _progress_update(state, progress_message),
+    }
+
+
+def await_approval(state_input: OrchestratorState) -> dict[str, Any]:
+    """Pause the graph until a destructive action is approved or rejected."""
+    state = _ensure_state(state_input)
+    approval = state.approval
+    if not approval.required:
+        return {
+            "current_step": "await_approval",
+            "approval": approval.model_dump(),
+        }
+
+    task_text = state.normalized_task_text or state.task.task_text
+    approved = _coerce_approval_decision(
+        interrupt(
+            {
+                "approval_type": approval.approval_type,
+                "reason": approval.reason,
+                "resume_token": approval.resume_token,
+                "task_text": task_text,
+                "chosen_worker": state.route.chosen_worker,
+            }
+        )
+    )
+
+    updated_approval = approval.model_copy(
+        update={"status": "approved" if approved else "rejected"},
+    )
+    progress_message = "approval granted" if approved else "approval rejected"
+    response: dict[str, Any] = {
+        "current_step": "await_approval",
+        "approval": updated_approval.model_dump(),
+        "progress_updates": _progress_update(state, progress_message),
+    }
+    if not approved:
+        response["result"] = WorkerResult(
+            status="failure",
+            summary="Task halted because the requested destructive action was not approved.",
+            commands_run=[],
+            files_changed=[],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="await_manual_follow_up",
+        ).model_dump()
+    return response
 
 
 def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
@@ -210,6 +345,8 @@ def build_orchestrator_graph(
     builder.add_node("classify_task", RunnableLambda(classify_task))
     builder.add_node("load_memory", RunnableLambda(load_memory))
     builder.add_node("choose_worker", RunnableLambda(choose_worker))
+    builder.add_node("check_approval", RunnableLambda(check_approval))
+    builder.add_node("await_approval", RunnableLambda(await_approval))
     builder.add_node("dispatch_job", RunnableLambda(dispatch_job))
     builder.add_node(
         "await_result",
@@ -221,7 +358,23 @@ def build_orchestrator_graph(
     builder.add_edge("ingest_task", "classify_task")
     builder.add_edge("classify_task", "load_memory")
     builder.add_edge("load_memory", "choose_worker")
-    builder.add_edge("choose_worker", "dispatch_job")
+    builder.add_edge("choose_worker", "check_approval")
+    builder.add_conditional_edges(
+        "check_approval",
+        RunnableLambda(_route_after_check_approval),
+        {
+            "await_approval": "await_approval",
+            "dispatch_job": "dispatch_job",
+        },
+    )
+    builder.add_conditional_edges(
+        "await_approval",
+        RunnableLambda(_route_after_await_approval),
+        {
+            "dispatch_job": "dispatch_job",
+            "summarize_result": "summarize_result",
+        },
+    )
     builder.add_edge("dispatch_job", "await_result")
     builder.add_edge("await_result", "summarize_result")
     builder.add_edge("summarize_result", "persist_memory")
