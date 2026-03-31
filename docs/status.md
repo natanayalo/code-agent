@@ -22,10 +22,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-020 Build LangGraph workflow skeleton
 - T-021 Add checkpoint persistence
 - T-022 Add approval interrupt node
+- T-030 Create workspace manager
 
 ## Next
 
-- T-030 Create workspace manager
+- T-031 Add Docker sandbox runner
 
 ## Blocked
 
@@ -36,3 +37,4 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - Milestone 1 close-out and Milestone 2 skeleton work are both active.
 - T-021 adds durable LangGraph checkpointing without yet wiring orchestrator state to the app layer.
 - T-022 adds a destructive-action approval pause/resume path before worker dispatch.
+- T-030 adds per-task workspace provisioning, repo clone, and cleanup-policy scaffolding.
