@@ -29,8 +29,10 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 3. Call out the main risk and the smallest safe scope.
 4. Implement the narrowest working slice.
 5. Add or update tests in the same slice.
-6. Propose the minimal verification commands, but do not run them without approval.
-7. Summarize what changed, what was verified, and what was deferred.
+6. Run the minimal checks and tests that cover the changed behavior. If a command needs approval or is blocked, request approval or report the blocker clearly.
+7. Create or switch to a focused task branch before publishing work. Use the repo's default `codex/` prefix unless the user asked for something else.
+8. Stage only the task files, create a specific commit, and push the branch when the user wants the slice published.
+9. Summarize what changed, what was verified, and what was deferred.
 
 ## Scope guardrails
 
@@ -38,6 +40,8 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 - Do not absorb adjacent cleanup unless it is required for correctness.
 - If review or design feedback expands scope, track a follow-up instead of silently widening the task.
 - Update `docs/status.md` when task progress materially changes.
+- Keep commits focused and do not stage unrelated changes.
+- Do not push until the requested checks pass or the blocker is explicitly called out.
 
 ## Response shape
 
