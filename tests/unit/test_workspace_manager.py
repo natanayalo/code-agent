@@ -29,6 +29,7 @@ def test_build_clone_command_adds_branch_when_requested() -> None:
         "--branch",
         "main",
         "--single-branch",
+        "--",
         "https://example.com/repo.git",
         "/tmp/repo",
     ]
@@ -67,6 +68,7 @@ def test_workspace_manager_uses_injected_command_runner(tmp_path: Path) -> None:
             "--branch",
             "main",
             "--single-branch",
+            "--",
             "/tmp/source-repo",
             str(workspace.repo_path),
         ]

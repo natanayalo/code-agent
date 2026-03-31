@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -60,7 +61,7 @@ class WorkspaceManagerError(RuntimeError):
 
 def _slugify_task_id(task_id: str) -> str:
     """Normalize a task id for filesystem-safe workspace naming."""
-    slug = re.sub(r"[^a-z0-9]+", "-", task_id.lower()).strip("-")
+    slug = re.sub(r"[^a-z0-9]+", "-", task_id.lower()).strip("-")[:64]
     return slug or "task"
 
 
@@ -74,7 +75,7 @@ def _build_clone_command(repo_url: str, destination: Path, branch: str | None) -
     command = ["git", "clone"]
     if branch is not None:
         command.extend(["--branch", branch, "--single-branch"])
-    command.extend([repo_url, str(destination)])
+    command.extend(["--", repo_url, str(destination)])
     return command
 
 
@@ -87,13 +88,20 @@ def _should_delete_workspace(policy: WorkspaceCleanupPolicy, *, succeeded: bool)
 
 def _run_command(command: list[str], *, cwd: Path | None = None) -> None:
     """Run a command and raise a workspace-specific error on failure."""
-    completed = subprocess.run(
-        command,
-        cwd=cwd,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise WorkspaceManagerError(f"{' '.join(command)} timed out after 300s") from exc
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         stdout = completed.stdout.strip()
@@ -171,7 +179,10 @@ class WorkspaceManager:
             return False
 
         try:
-            shutil.rmtree(workspace.workspace_path)
+            target = workspace.workspace_path.resolve()
+            if not target.is_relative_to(self.root_dir) or target == self.root_dir:
+                raise WorkspaceManagerError(f"Refusing to delete path outside root: {target}")
+            shutil.rmtree(target)
         except FileNotFoundError:
             return True
         except OSError as exc:
