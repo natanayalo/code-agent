@@ -91,8 +91,8 @@ def _build_approval_checkpoint(state: OrchestratorState) -> ApprovalCheckpoint:
         return ApprovalCheckpoint()
 
     reason = state.task.constraints.get("approval_reason")
+    is_destructive = _is_destructive_task(task_text, state.task.constraints)
     if not isinstance(reason, str) or not reason.strip():
-        is_destructive = _is_destructive_task(task_text, state.task.constraints)
         reason = (
             "Task includes a potentially destructive action."
             if is_destructive
@@ -103,7 +103,7 @@ def _build_approval_checkpoint(state: OrchestratorState) -> ApprovalCheckpoint:
     return ApprovalCheckpoint(
         required=True,
         status="pending",
-        approval_type="destructive_action",
+        approval_type="destructive_action" if is_destructive else "manual_approval",
         reason=reason,
         resume_token=f"approval-{task_identifier}",
     )
@@ -124,7 +124,7 @@ def _coerce_approval_decision(resume_value: Any) -> bool:
         return _coerce_approval_decision(resume_value.get("approved"))
 
     if isinstance(resume_value, str):
-        return resume_value.lower() in ("true", "yes", "1", "approve")
+        return resume_value.lower() in ("true", "yes", "y", "1", "approve", "approved")
 
     return False
 
