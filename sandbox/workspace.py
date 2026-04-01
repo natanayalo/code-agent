@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -108,7 +109,7 @@ def _run_command(command: list[str], *, cwd: Path | None = None) -> None:
         stderr = completed.stderr.strip()
         stdout = completed.stdout.strip()
         message = stderr or stdout or "command failed without output"
-        cmd_str = re.sub(r"://[^@]+@", "://****@", " ".join(command))
+        cmd_str = re.sub(r"://[^/ ]+@", "://****@", shlex.join(command))
         raise WorkspaceManagerError(f"Command failed ({cmd_str}): {message}")
 
 
@@ -139,7 +140,7 @@ class WorkspaceManager:
             extra={
                 "workspace_id": workspace_id,
                 "task_id": request.task_id,
-                "repo_url": re.sub(r"://[^@]+@", "://****@", request.repo_url),
+                "repo_url": re.sub(r"://[^/ ]+@", "://****@", request.repo_url),
                 "branch": request.branch,
             },
         )
