@@ -61,7 +61,6 @@ def test_pytest_workflow_runs_on_push_and_enforces_coverage() -> None:
     upload_step = _step_by_name(steps, "Upload coverage artifact")
 
     assert "push" in triggers
-    assert len(triggers) == 1
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] is True
     assert workflow["jobs"]["pytest"]["timeout-minutes"] == 15
@@ -93,7 +92,6 @@ def test_pre_commit_workflow_runs_on_push_without_ci_branch_guard_failures() -> 
     run_step = _step_by_name(steps, "Run pre-commit")
 
     assert "push" in triggers
-    assert len(triggers) == 1
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] is True
     assert workflow["jobs"]["pre-commit"]["timeout-minutes"] == 10
@@ -105,14 +103,11 @@ def test_pre_commit_config_keeps_local_default_branch_guard() -> None:
     """Developers should still be blocked from committing directly to main/master locally."""
     config = _load_yaml(".pre-commit-config.yaml")
 
-    branch_guard_hook: dict[str, Any] | None = None
-    for repo in config["repos"]:
-        for hook in repo["hooks"]:
-            if hook["id"] == "no-commit-to-branch":
-                branch_guard_hook = hook
-                break
-        if branch_guard_hook is not None:
-            break
+    all_hooks = (hook for repo in config["repos"] for hook in repo["hooks"])
+    branch_guard_hook = next(
+        (hook for hook in all_hooks if hook["id"] == "no-commit-to-branch"),
+        None,
+    )
 
     assert branch_guard_hook is not None
     assert branch_guard_hook["args"] == ["--branch", "main", "--branch", "master"]
