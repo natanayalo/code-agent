@@ -66,7 +66,7 @@ def _read_stream_bounded(stream: typing.IO[bytes], limit: int) -> bytearray:
     """
     buf = bytearray()
     for chunk in iter(lambda: stream.read(65536), b""):
-        remaining = limit - len(buf)
+        remaining = (limit + 1) - len(buf)
         if remaining > 0:
             buf.extend(chunk[:remaining])
         # Keep draining even after limit is reached so the pipe never blocks.
@@ -76,7 +76,7 @@ def _read_stream_bounded(stream: typing.IO[bytes], limit: int) -> bytearray:
 def _decode_bounded(buf: bytearray, limit: int) -> str:
     """Decode *buf* to a string, appending a truncation marker when needed."""
     text = buf[:limit].decode("utf-8", errors="replace")
-    if len(buf) >= limit:
+    if len(buf) > limit:
         text += "\n... (truncated)"
     return text
 
@@ -136,6 +136,7 @@ def _run_docker_command(
     try:
         proc = subprocess.Popen(
             command,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -170,6 +171,7 @@ def _run_docker_command(
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         proc.kill()
+        proc.wait()
         stdout_thread.join()
         stderr_thread.join()
 
@@ -182,7 +184,11 @@ def _run_docker_command(
 
         stdout_tail = _tail(stdout_buf)
         stderr_tail = _tail(stderr_buf)
-        output = stderr_tail or stdout_tail or "command timed out without output"
+        output = (
+            f"stderr: {stderr_tail}\nstdout: {stdout_tail}".strip()
+            if stderr_tail or stdout_tail
+            else "command timed out without output"
+        )
 
         raise DockerSandboxRunnerError(
             f"Docker sandbox command timed out after {timeout}s ({cmd_str}): {output}"

@@ -49,7 +49,14 @@ def _make_popen_mock(
     mock.returncode = returncode
 
     if wait_side_effect is not None:
-        mock.wait.side_effect = wait_side_effect
+        # First call (proc.wait(timeout=N)) should raise; second call (proc.wait() after
+        # proc.kill()) must return normally so threads can join without propagating the exc.
+        def _wait_side_effect(*args: object, **kwargs: object) -> int:
+            if "timeout" in kwargs:
+                raise wait_side_effect  # type: ignore[misc]
+            return returncode
+
+        mock.wait.side_effect = _wait_side_effect
     else:
         mock.wait.return_value = returncode
 
@@ -216,7 +223,7 @@ def test_timeout_raises_with_output() -> None:
     with patch("subprocess.Popen", return_value=mock_proc):
         with pytest.raises(
             DockerSandboxRunnerError,
-            match=r"Docker sandbox command timed out after 30s \(docker run image\): timeout out",
+            match=r"(?s)timed out after 30s.*stdout: timeout out",
         ):
             _run_docker_command(["docker", "run", "image"], timeout=30)
 
@@ -229,7 +236,7 @@ def test_timeout_decorates_bytes_output() -> None:
     )
 
     with patch("subprocess.Popen", return_value=mock_proc):
-        with pytest.raises(DockerSandboxRunnerError, match=r": byte out"):
+        with pytest.raises(DockerSandboxRunnerError, match=r"stdout: byte out"):
             _run_docker_command(["docker", "run", "image"], timeout=30)
 
 
@@ -304,21 +311,23 @@ def test_read_stream_bounded_under_limit() -> None:
 
 
 def test_read_stream_bounded_at_limit() -> None:
-    """Streams equal to the limit are captured fully without truncation marker."""
+    """Streams equal to the limit fit within limit+1 capacity – no truncation marker."""
     data = b"a" * 100
     stream = io.BytesIO(data)
     buf = _read_stream_bounded(stream, limit=100)
+    # Exactly 100 bytes → buf holds 100 bytes, len(buf) == limit, not > limit.
     assert buf == bytearray(data)
+    assert len(buf) == 100
 
 
 def test_read_stream_bounded_over_limit() -> None:
-    """Streams exceeding the limit are capped at *limit* bytes; the rest is drained."""
+    """Streams exceeding the limit store limit+1 bytes so _decode_bounded detects overflow."""
     limit = 50
     stream = io.BytesIO(b"x" * 200)
     buf = _read_stream_bounded(stream, limit=limit)
-    # Buffer must not exceed limit
-    assert len(buf) == limit
-    assert buf == bytearray(b"x" * limit)
+    # Buffer holds limit+1 bytes so the caller can detect truncation via len(buf) > limit.
+    assert len(buf) == limit + 1
+    assert buf == bytearray(b"x" * (limit + 1))
 
 
 def test_read_stream_bounded_pipe_fully_drained() -> None:
