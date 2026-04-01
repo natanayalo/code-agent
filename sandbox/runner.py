@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import shlex
 import subprocess
-import tempfile
+import threading
 import typing
 from time import perf_counter
 from typing import Protocol
@@ -15,6 +16,10 @@ from pydantic import Field
 from sandbox.workspace import SandboxModel, WorkspaceHandle, _mask_url_credentials
 
 logger = logging.getLogger(__name__)
+
+# Maximum bytes captured from stdout/stderr. Output beyond this is discarded
+# to prevent disk or memory exhaustion from runaway sandbox processes.
+MAX_OUTPUT_SIZE_BYTES = 2 * 1024 * 1024  # 2 MB
 
 
 class DockerCommandRunner(Protocol):
@@ -53,6 +58,29 @@ class DockerSandboxRunnerError(RuntimeError):
     """Raised when the Docker sandbox cannot start or complete."""
 
 
+def _read_stream_bounded(stream: typing.IO[bytes], limit: int) -> bytearray:
+    """Read from *stream* into a bytearray, discarding bytes beyond *limit*.
+
+    The stream is drained to its end so the subprocess pipe never blocks,
+    regardless of how much data the container produces.
+    """
+    buf = bytearray()
+    for chunk in iter(lambda: stream.read(65536), b""):
+        remaining = limit - len(buf)
+        if remaining > 0:
+            buf.extend(chunk[:remaining])
+        # Keep draining even after limit is reached so the pipe never blocks.
+    return buf
+
+
+def _decode_bounded(buf: bytearray, limit: int) -> str:
+    """Decode *buf* to a string, appending a truncation marker when needed."""
+    text = buf[:limit].decode("utf-8", errors="replace")
+    if len(buf) >= limit:
+        text += "\n... (truncated)"
+    return text
+
+
 def _build_docker_run_command(
     request: DockerSandboxCommand,
     *,
@@ -74,13 +102,11 @@ def _build_docker_run_command(
             "--workdir",
             request.working_dir,
             "--mount",
-            f"type=bind,source='{request.workspace.workspace_path.resolve()}',target=/workspace",
+            f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
         ]
     )
 
     try:
-        import os
-
         uid = os.getuid()
         gid = os.getgid()
         command.extend(["--user", f"{uid}:{gid}"])
@@ -101,73 +127,79 @@ def _run_docker_command(
     *,
     timeout: int,
 ) -> subprocess.CompletedProcess[str]:
-    """Run docker and safely capture stdout/stderr up to a limit."""
-    limit = 2 * 1024 * 1024  # 2MB
+    """Run docker and safely capture stdout/stderr up to MAX_OUTPUT_SIZE_BYTES.
 
-    # We use temporary files to capture unbounded output safely without host OOM.
-    with (
-        tempfile.TemporaryFile(mode="w+b") as out,
-        tempfile.TemporaryFile(mode="w+b") as err,
-    ):
-        try:
-            proc = subprocess.run(
-                command,
-                check=False,
-                stdout=out,
-                stderr=err,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired as exc:
-            cmd_str = _mask_url_credentials(shlex.join(command))
-
-            def _read_tail(f: typing.IO[bytes]) -> str:
-                f.seek(0, 2)
-                size = f.tell()
-                f.seek(max(0, size - 1024))
-                tail = f.read().decode("utf-8", errors="replace").strip()
-                if size > 1024:
-                    return f"... (truncated)\n{tail}"
-                return tail
-
-            stdout = _read_tail(out)
-            stderr = _read_tail(err)
-
-            output = stderr or stdout or "command timed out without output"
-
-            raise DockerSandboxRunnerError(
-                f"Docker sandbox command timed out after {timeout}s ({cmd_str}): {output}"
-            ) from exc
-        except OSError as exc:
-            cmd_str = _mask_url_credentials(shlex.join(command))
-            raise DockerSandboxRunnerError(
-                f"Failed to start Docker sandbox command ({cmd_str}): {exc}"
-            ) from exc
-
-        out.seek(0)
-        err.seek(0)
-
-        stdout_bytes = out.read(limit + 1)
-        if len(stdout_bytes) > limit:
-            stdout_str = (
-                stdout_bytes[:limit].decode("utf-8", errors="replace") + "\n... (truncated)"
-            )
-        else:
-            stdout_str = stdout_bytes.decode("utf-8", errors="replace")
-
-        stderr_bytes = err.read(limit + 1)
-        if len(stderr_bytes) > limit:
-            stderr_str = (
-                stderr_bytes[:limit].decode("utf-8", errors="replace") + "\n... (truncated)"
-            )
-        else:
-            stderr_str = stderr_bytes.decode("utf-8", errors="replace")
-
-        return subprocess.CompletedProcess(
-            args=command,
-            returncode=proc.returncode,
-            stdout=stdout_str,
-            stderr=stderr_str,
+    Uses Popen with background reader threads so that output is bounded *during*
+    execution—preventing both memory exhaustion (RAM) and disk exhaustion that
+    would occur if we redirected pipes directly to temporary files on disk.
+    """
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
+    except OSError as exc:
+        cmd_str = _mask_url_credentials(shlex.join(command))
+        raise DockerSandboxRunnerError(
+            f"Failed to start Docker sandbox command ({cmd_str}): {exc}"
+        ) from exc
+
+    stdout_buf: bytearray = bytearray()
+    stderr_buf: bytearray = bytearray()
+
+    assert proc.stdout is not None  # noqa: S101 – guaranteed by PIPE
+    assert proc.stderr is not None  # noqa: S101 – guaranteed by PIPE
+
+    stdout_thread = threading.Thread(
+        target=lambda: stdout_buf.extend(
+            _read_stream_bounded(proc.stdout, MAX_OUTPUT_SIZE_BYTES)  # type: ignore[arg-type]
+        ),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=lambda: stderr_buf.extend(
+            _read_stream_bounded(proc.stderr, MAX_OUTPUT_SIZE_BYTES)  # type: ignore[arg-type]
+        ),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        proc.kill()
+        stdout_thread.join()
+        stderr_thread.join()
+
+        cmd_str = _mask_url_credentials(shlex.join(command))
+
+        def _tail(buf: bytearray) -> str:
+            tail_bytes = buf[-1024:] if len(buf) > 1024 else buf
+            tail = tail_bytes.decode("utf-8", errors="replace").strip()
+            return f"... (truncated)\n{tail}" if len(buf) > 1024 else tail
+
+        stdout_tail = _tail(stdout_buf)
+        stderr_tail = _tail(stderr_buf)
+        output = stderr_tail or stdout_tail or "command timed out without output"
+
+        raise DockerSandboxRunnerError(
+            f"Docker sandbox command timed out after {timeout}s ({cmd_str}): {output}"
+        ) from exc
+
+    stdout_thread.join()
+    stderr_thread.join()
+
+    stdout_str = _decode_bounded(stdout_buf, MAX_OUTPUT_SIZE_BYTES)
+    stderr_str = _decode_bounded(stderr_buf, MAX_OUTPUT_SIZE_BYTES)
+
+    return subprocess.CompletedProcess(
+        args=command,
+        returncode=proc.returncode,
+        stdout=stdout_str,
+        stderr=stderr_str,
+    )
 
 
 class DockerSandboxRunner:

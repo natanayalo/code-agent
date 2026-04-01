@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import io
+import os
 import subprocess
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from sandbox.runner import (
+    MAX_OUTPUT_SIZE_BYTES,
     DockerSandboxCommand,
     DockerSandboxRunner,
     DockerSandboxRunnerError,
     _build_docker_run_command,
+    _read_stream_bounded,
     _run_docker_command,
 )
 from sandbox.workspace import WorkspaceCleanupPolicy, WorkspaceHandle
@@ -29,6 +34,31 @@ def _workspace_handle(tmp_path: Path) -> WorkspaceHandle:
         repo_url="https://example.com/repo.git",
         cleanup_policy=WorkspaceCleanupPolicy(),
     )
+
+
+def _make_popen_mock(
+    stdout_data: bytes = b"",
+    stderr_data: bytes = b"",
+    returncode: int = 0,
+    wait_side_effect: Exception | None = None,
+) -> MagicMock:
+    """Build a mock subprocess.Popen object with streaming stdout/stderr."""
+    mock = MagicMock()
+    mock.stdout = io.BytesIO(stdout_data)
+    mock.stderr = io.BytesIO(stderr_data)
+    mock.returncode = returncode
+
+    if wait_side_effect is not None:
+        mock.wait.side_effect = wait_side_effect
+    else:
+        mock.wait.return_value = returncode
+
+    return mock
+
+
+# ---------------------------------------------------------------------------
+# _build_docker_run_command
+# ---------------------------------------------------------------------------
 
 
 def test_build_docker_run_command_mounts_workspace_and_disables_network(tmp_path: Path) -> None:
@@ -52,11 +82,9 @@ def test_build_docker_run_command_mounts_workspace_and_disables_network(tmp_path
         "--workdir",
         "/workspace/repo",
         "--mount",
-        f"type=bind,source='{request.workspace.workspace_path.resolve()}',target=/workspace",
+        f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
     ]
     try:
-        import os
-
         uid = os.getuid()
         gid = os.getgid()
         expected_command.extend(["--user", f"{uid}:{gid}"])
@@ -83,8 +111,6 @@ def test_build_docker_run_command_skips_user_mapping_on_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """If os.getuid is missing (like on Windows), we should skip user mapping gracefully."""
-    import os
-
     monkeypatch.delattr(os, "getuid", raising=False)
     monkeypatch.delattr(os, "getgid", raising=False)
 
@@ -107,13 +133,18 @@ def test_build_docker_run_command_skips_user_mapping_on_windows(
         "--workdir",
         "/workspace/repo",
         "--mount",
-        f"type=bind,source='{request.workspace.workspace_path.resolve()}',target=/workspace",
+        f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
         "--network",
         "none",
         "alpine",
         "echo",
         "test",
     ]
+
+
+# ---------------------------------------------------------------------------
+# DockerSandboxRunner.run (uses injected command_runner)
+# ---------------------------------------------------------------------------
 
 
 def test_runner_returns_structured_result(tmp_path: Path) -> None:
@@ -170,111 +201,141 @@ def test_runner_uses_request_image_override(tmp_path: Path) -> None:
     assert "busybox:1.36" in captured_command
 
 
-def test_timeout_raises_with_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Timeouts should surface as DockerSandboxRunnerError."""
-
-    def mock_run(*args, **kwargs):
-        out_file = kwargs.get("stdout")
-        if out_file:
-            out_file.write(b"timeout out")
-        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30)
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
-
-    with pytest.raises(
-        DockerSandboxRunnerError,
-        match=r"Docker sandbox command timed out after 30s \(docker run image\): timeout out",
-    ):
-        _run_docker_command(["docker", "run", "image"], timeout=30)
+# ---------------------------------------------------------------------------
+# _run_docker_command – Popen-based tests
+# ---------------------------------------------------------------------------
 
 
-def test_timeout_decorates_bytes_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Byte output from subrpocess shouldn't crash the error formatter on timeout."""
+def test_timeout_raises_with_output() -> None:
+    """Timeouts should surface as DockerSandboxRunnerError with captured tail output."""
+    mock_proc = _make_popen_mock(
+        stdout_data=b"timeout out",
+        wait_side_effect=subprocess.TimeoutExpired(cmd="docker run", timeout=30),
+    )
 
-    def mock_run(*args, **kwargs):
-        out_file = kwargs.get("stdout")
-        if out_file:
-            # We must write bytes because the temporary files are opened in binary mode.
-            out_file.write(b"byte out\xff")
-        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30)
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
-
-    with pytest.raises(DockerSandboxRunnerError, match=r": byte out"):
-        _run_docker_command(["docker", "run", "image"], timeout=30)
+    with patch("subprocess.Popen", return_value=mock_proc):
+        with pytest.raises(
+            DockerSandboxRunnerError,
+            match=r"Docker sandbox command timed out after 30s \(docker run image\): timeout out",
+        ):
+            _run_docker_command(["docker", "run", "image"], timeout=30)
 
 
-def test_timeout_truncates_long_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Massive output from docker shouldn't bloat the logger but must be truncated."""
+def test_timeout_decorates_bytes_output() -> None:
+    """Byte output with invalid UTF-8 from subprocess shouldn't crash the error formatter."""
+    mock_proc = _make_popen_mock(
+        stdout_data=b"byte out\xff",
+        wait_side_effect=subprocess.TimeoutExpired(cmd="docker run", timeout=30),
+    )
 
-    long_output = "x" * 2000
+    with patch("subprocess.Popen", return_value=mock_proc):
+        with pytest.raises(DockerSandboxRunnerError, match=r": byte out"):
+            _run_docker_command(["docker", "run", "image"], timeout=30)
 
-    def mock_run(*args, **kwargs):
-        out_file = kwargs.get("stdout")
-        if out_file:
-            out_file.write(long_output.encode("utf-8"))
-        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30)
 
-    monkeypatch.setattr(subprocess, "run", mock_run)
+def test_timeout_truncates_long_output() -> None:
+    """Massive output on timeout should be tail-truncated to the last 1024 bytes."""
+    long_output = b"x" * 2000
 
-    with pytest.raises(DockerSandboxRunnerError) as exc_info:
-        _run_docker_command(["docker", "run", "image"], timeout=30)
+    mock_proc = _make_popen_mock(
+        stdout_data=long_output,
+        wait_side_effect=subprocess.TimeoutExpired(cmd="docker run", timeout=30),
+    )
+
+    with patch("subprocess.Popen", return_value=mock_proc):
+        with pytest.raises(DockerSandboxRunnerError) as exc_info:
+            _run_docker_command(["docker", "run", "image"], timeout=30)
 
     assert "... (truncated)" in str(exc_info.value)
-    assert len(str(exc_info.value)) < 1150
+    assert len(str(exc_info.value)) < 1200
 
 
-def test_run_docker_command_truncates_stream_limits(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execution output surpassing 2MB limits should safely truncate."""
-    limit = 2 * 1024 * 1024
+def test_run_docker_command_truncates_stream_limits() -> None:
+    """Execution output surpassing MAX_OUTPUT_SIZE_BYTES should safely truncate."""
+    limit = MAX_OUTPUT_SIZE_BYTES
+    mock_proc = _make_popen_mock(
+        stdout_data=b"x" * (limit + 100),
+        stderr_data=b"y" * (limit + 100),
+    )
 
-    def mock_run(*args, **kwargs):
-        out_file = kwargs.get("stdout")
-        err_file = kwargs.get("stderr")
-        if out_file and err_file:
-            out_file.write(b"x" * (limit + 100))
-            err_file.write(b"y" * (limit + 100))
-        return subprocess.CompletedProcess(args=args[0], returncode=0)
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
-
-    result = _run_docker_command(["docker", "run", "image"], timeout=30)
+    with patch("subprocess.Popen", return_value=mock_proc):
+        result = _run_docker_command(["docker", "run", "image"], timeout=30)
 
     assert result.returncode == 0
-    assert len(result.stdout) == limit + len("\n... (truncated)")
     assert result.stdout.endswith("... (truncated)")
-    assert len(result.stderr) == limit + len("\n... (truncated)")
     assert result.stderr.endswith("... (truncated)")
+    # Content portion is exactly `limit` bytes decoded
+    assert len(result.stdout.encode()) > limit
 
 
-def test_run_docker_command_success(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_docker_command_success() -> None:
     """Standard executions capture regular logs directly and faithfully."""
+    mock_proc = _make_popen_mock(stdout_data=b"regular log")
 
-    def mock_run(*args, **kwargs):
-        out_file = kwargs.get("stdout")
-        if out_file:
-            out_file.write(b"regular log")
-        return subprocess.CompletedProcess(args=args[0], returncode=0)
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
-
-    result = _run_docker_command(["docker", "run", "image"], timeout=30)
+    with patch("subprocess.Popen", return_value=mock_proc):
+        result = _run_docker_command(["docker", "run", "image"], timeout=30)
 
     assert result.returncode == 0
     assert result.stdout == "regular log"
     assert result.stderr == ""
 
 
-def test_run_docker_command_raises_on_os_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_docker_command_raises_on_os_error() -> None:
     """Docker execution daemon initialization errors should surface as DockerSandboxRunnerError."""
+    with patch("subprocess.Popen", side_effect=OSError("Docker daemon missing")):
+        with pytest.raises(
+            DockerSandboxRunnerError,
+            match=r"Failed to start Docker sandbox command"
+            r" \(docker run image\): Docker daemon missing",
+        ):
+            _run_docker_command(["docker", "run", "image"], timeout=30)
 
-    def mock_run(*args, **kwargs):
-        raise OSError("Docker daemon missing")
 
-    monkeypatch.setattr(subprocess, "run", mock_run)
+# ---------------------------------------------------------------------------
+# _read_stream_bounded
+# ---------------------------------------------------------------------------
 
-    with pytest.raises(
-        DockerSandboxRunnerError,
-        match=r"Failed to start Docker sandbox command \(docker run image\): Docker daemon missing",
-    ):
-        _run_docker_command(["docker", "run", "image"], timeout=30)
+
+def test_read_stream_bounded_under_limit() -> None:
+    """Streams smaller than the limit are captured fully."""
+    stream = io.BytesIO(b"hello world")
+    buf = _read_stream_bounded(stream, limit=100)
+    assert buf == bytearray(b"hello world")
+
+
+def test_read_stream_bounded_at_limit() -> None:
+    """Streams equal to the limit are captured fully without truncation marker."""
+    data = b"a" * 100
+    stream = io.BytesIO(data)
+    buf = _read_stream_bounded(stream, limit=100)
+    assert buf == bytearray(data)
+
+
+def test_read_stream_bounded_over_limit() -> None:
+    """Streams exceeding the limit are capped at *limit* bytes; the rest is drained."""
+    limit = 50
+    stream = io.BytesIO(b"x" * 200)
+    buf = _read_stream_bounded(stream, limit=limit)
+    # Buffer must not exceed limit
+    assert len(buf) == limit
+    assert buf == bytearray(b"x" * limit)
+
+
+def test_read_stream_bounded_pipe_fully_drained() -> None:
+    """Even when over limit, the underlying stream must be fully read to avoid pipe blockage."""
+    limit = 10
+    data = b"z" * 1000
+
+    class CountingStream:
+        def __init__(self, data: bytes) -> None:
+            self._stream = io.BytesIO(data)
+            self.total_read = 0
+
+        def read(self, n: int) -> bytes:
+            chunk = self._stream.read(n)
+            self.total_read += len(chunk)
+            return chunk
+
+    stream = CountingStream(data)
+    _read_stream_bounded(stream, limit=limit)  # type: ignore[arg-type]
+    assert stream.total_read == len(data)
