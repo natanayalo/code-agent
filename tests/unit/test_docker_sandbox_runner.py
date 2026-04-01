@@ -51,8 +51,8 @@ def test_build_docker_run_command_mounts_workspace_and_disables_network(tmp_path
         "1.0",
         "--workdir",
         "/workspace/repo",
-        "--volume",
-        f"{request.workspace.workspace_path.resolve()}:/workspace",
+        "--mount",
+        f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
     ]
     try:
         import os
@@ -106,8 +106,8 @@ def test_build_docker_run_command_skips_user_mapping_on_windows(
         "1.0",
         "--workdir",
         "/workspace/repo",
-        "--volume",
-        f"{request.workspace.workspace_path.resolve()}:/workspace",
+        "--mount",
+        f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
         "--network",
         "none",
         "alpine",
@@ -170,11 +170,14 @@ def test_runner_uses_request_image_override(tmp_path: Path) -> None:
     assert "busybox:1.36" in captured_command
 
 
-def test_run_docker_command_raises_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_timeout_raises_with_output(monkeypatch: pytest.MonkeyPatch) -> None:
     """Timeouts should surface as DockerSandboxRunnerError."""
 
     def mock_run(*args, **kwargs):
-        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30, output="timeout out")
+        out_file = kwargs.get("stdout")
+        if out_file:
+            out_file.write("timeout out")
+        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
 
@@ -189,7 +192,11 @@ def test_timeout_decorates_bytes_output(monkeypatch: pytest.MonkeyPatch) -> None
     """Byte output from subrpocess shouldn't crash the error formatter on timeout."""
 
     def mock_run(*args, **kwargs):
-        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30, output=b"byte out")
+        out_file = kwargs.get("stdout")
+        if out_file:
+            # We must write str because the temporary files are opened in text mode.
+            out_file.write("byte out")
+        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
 
@@ -203,7 +210,10 @@ def test_timeout_truncates_long_output(monkeypatch: pytest.MonkeyPatch) -> None:
     long_output = "x" * 2000
 
     def mock_run(*args, **kwargs):
-        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30, output=long_output)
+        out_file = kwargs.get("stdout")
+        if out_file:
+            out_file.write(long_output)
+        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
 
@@ -212,6 +222,47 @@ def test_timeout_truncates_long_output(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert "... (truncated)" in str(exc_info.value)
     assert len(str(exc_info.value)) < 1150
+
+
+def test_run_docker_command_truncates_stream_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execution output surpassing 2MB limits should safely truncate."""
+    limit = 2 * 1024 * 1024
+
+    def mock_run(*args, **kwargs):
+        out_file = kwargs.get("stdout")
+        err_file = kwargs.get("stderr")
+        if out_file and err_file:
+            out_file.write("x" * (limit + 100))
+            err_file.write("y" * (limit + 100))
+        return subprocess.CompletedProcess(args=args[0], returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    result = _run_docker_command(["docker", "run", "image"], timeout=30)
+
+    assert result.returncode == 0
+    assert len(result.stdout) == limit + len("\n... (truncated)")
+    assert result.stdout.endswith("... (truncated)")
+    assert len(result.stderr) == limit + len("\n... (truncated)")
+    assert result.stderr.endswith("... (truncated)")
+
+
+def test_run_docker_command_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Standard executions capture regular logs directly and faithfully."""
+
+    def mock_run(*args, **kwargs):
+        out_file = kwargs.get("stdout")
+        if out_file:
+            out_file.write("regular log")
+        return subprocess.CompletedProcess(args=args[0], returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    result = _run_docker_command(["docker", "run", "image"], timeout=30)
+
+    assert result.returncode == 0
+    assert result.stdout == "regular log"
+    assert result.stderr == ""
 
 
 def test_run_docker_command_raises_on_os_error(monkeypatch: pytest.MonkeyPatch) -> None:

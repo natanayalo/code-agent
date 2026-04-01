@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import shlex
 import subprocess
+import tempfile
 from time import perf_counter
 from typing import Protocol
 
@@ -58,7 +59,6 @@ def _build_docker_run_command(
     docker_binary: str = "docker",
 ) -> list[str]:
     """Build a deterministic docker run command for the sandbox request."""
-    workspace_mount = f"{request.workspace.workspace_path.resolve()}:/workspace"
     command = [
         docker_binary,
         "run",
@@ -72,8 +72,8 @@ def _build_docker_run_command(
         [
             "--workdir",
             request.working_dir,
-            "--volume",
-            workspace_mount,
+            "--mount",
+            f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
         ]
     )
 
@@ -100,38 +100,60 @@ def _run_docker_command(
     *,
     timeout: int,
 ) -> subprocess.CompletedProcess[str]:
-    """Run docker and capture stdout/stderr for the sandbox result."""
-    try:
-        return subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=timeout,
+    """Run docker and safely capture stdout/stderr up to a limit."""
+    limit = 2 * 1024 * 1024  # 2MB
+
+    # We use temporary files to capture unbounded output safely without host OOM.
+    with (
+        tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as out,
+        tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as err,
+    ):
+        try:
+            proc = subprocess.run(
+                command,
+                check=False,
+                stdout=out,
+                stderr=err,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            cmd_str = _mask_url_credentials(shlex.join(command))
+
+            out.seek(0)
+            err.seek(0)
+            stdout = out.read(1025).strip()
+            stderr = err.read(1025).strip()
+
+            output = stderr or stdout or "command timed out without output"
+            if len(output) > 1024:
+                output = output[:1024] + "... (truncated)"
+
+            raise DockerSandboxRunnerError(
+                f"Docker sandbox command timed out after {timeout}s ({cmd_str}): {output}"
+            ) from exc
+        except OSError as exc:
+            cmd_str = _mask_url_credentials(shlex.join(command))
+            raise DockerSandboxRunnerError(
+                f"Failed to start Docker sandbox command: {cmd_str}"
+            ) from exc
+
+        out.seek(0)
+        err.seek(0)
+
+        stdout_str = out.read(limit)
+        if len(stdout_str) == limit:
+            stdout_str += "\n... (truncated)"
+
+        stderr_str = err.read(limit)
+        if len(stderr_str) == limit:
+            stderr_str += "\n... (truncated)"
+
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=proc.returncode,
+            stdout=stdout_str,
+            stderr=stderr_str,
         )
-    except subprocess.TimeoutExpired as exc:
-        cmd_str = _mask_url_credentials(shlex.join(command))
-
-        def _to_str(val: bytes | str | None) -> str:
-            if isinstance(val, bytes):
-                return val.decode("utf-8", errors="replace")
-            return val or ""
-
-        stdout = _to_str(exc.stdout).strip()
-        stderr = _to_str(exc.stderr).strip()
-        output = stderr or stdout or "command timed out without output"
-        if len(output) > 1024:
-            output = output[:1024] + "... (truncated)"
-
-        raise DockerSandboxRunnerError(
-            f"Docker sandbox command timed out after {timeout}s ({cmd_str}): {output}"
-        ) from exc
-    except OSError as exc:
-        cmd_str = _mask_url_credentials(shlex.join(command))
-        raise DockerSandboxRunnerError(
-            f"Failed to start Docker sandbox command: {cmd_str}"
-        ) from exc
 
 
 class DockerSandboxRunner:
@@ -163,7 +185,7 @@ class DockerSandboxRunner:
                 "workspace_id": request.workspace.workspace_id,
                 "task_id": request.workspace.task_id,
                 "image": image,
-                "command": request.command,
+                "command": [_mask_url_credentials(arg) for arg in request.command],
             },
         )
 
