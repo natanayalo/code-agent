@@ -104,6 +104,24 @@ def test_run_command_raises_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
         _run_command(["fail"])
 
 
+def test_run_command_truncates_long_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    long_output = "x" * 2000
+
+    def mock_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=["fail"], returncode=1, stdout=long_output, stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    with pytest.raises(WorkspaceManagerError) as exc_info:
+        _run_command(["fail"])
+
+    # Output should be truncated to 1024 chars + "... (truncated)"
+    assert len(exc_info.value.args[0]) < 1100
+    assert "... (truncated)" in exc_info.value.args[0]
+
+
 def test_create_workspace_cleans_up_on_failure(tmp_path: Path) -> None:
     def failing_runner(command: list[str], *, cwd: Path | None = None, timeout: int = 300) -> None:
         raise RuntimeError("simulated clone failure")
@@ -199,3 +217,28 @@ def test_cleanup_workspace_handles_os_error(
 
     with pytest.raises(WorkspaceManagerError, match="Failed to remove workspace"):
         manager.cleanup_workspace(workspace, succeeded=True)
+
+
+def test_cleanup_workspace_succeeds(tmp_path: Path) -> None:
+    manager = WorkspaceManager(tmp_path)
+    manager._command_runner = lambda cmd, **kwargs: None
+
+    workspace = manager.create_workspace(WorkspaceRequest(task_id="test", repo_url="http://fake"))
+    assert workspace.workspace_path.exists()
+
+    result = manager.cleanup_workspace(workspace, succeeded=True)
+    assert result is True
+    assert not workspace.workspace_path.exists()
+
+
+def test_cleanup_workspace_succeeds_when_already_deleted(tmp_path: Path) -> None:
+    manager = WorkspaceManager(tmp_path)
+    manager._command_runner = lambda cmd, **kwargs: None
+
+    workspace = manager.create_workspace(WorkspaceRequest(task_id="test", repo_url="http://fake"))
+    import shutil
+
+    shutil.rmtree(workspace.workspace_path)
+
+    result = manager.cleanup_workspace(workspace, succeeded=True)
+    assert result is True

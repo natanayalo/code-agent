@@ -69,6 +69,11 @@ def _slugify_task_id(task_id: str) -> str:
     return slug or "task"
 
 
+def _mask_url_credentials(text: str) -> str:
+    """Mask credentials in repository URLs to prevent leaking secrets."""
+    return re.sub(r"://[^/ ]+@", "://****@", text)
+
+
 def _build_workspace_id(task_id: str) -> str:
     """Generate a readable unique workspace identifier."""
     return f"workspace-{_slugify_task_id(task_id)}-{uuid4().hex[:8]}"
@@ -111,7 +116,9 @@ def _run_command(command: list[str], *, cwd: Path | None = None, timeout: int = 
         stderr = completed.stderr.strip()
         stdout = completed.stdout.strip()
         message = stderr or stdout or "command failed without output"
-        cmd_str = re.sub(r"://[^/ ]+@", "://****@", shlex.join(command))
+        if len(message) > 1024:
+            message = message[:1024] + "... (truncated)"
+        cmd_str = _mask_url_credentials(shlex.join(command))
         raise WorkspaceManagerError(f"Command failed ({cmd_str}): {message}")
 
 
@@ -144,7 +151,7 @@ class WorkspaceManager:
             extra={
                 "workspace_id": workspace_id,
                 "task_id": request.task_id,
-                "repo_url": re.sub(r"://[^/ ]+@", "://****@", request.repo_url),
+                "repo_url": _mask_url_credentials(request.repo_url),
                 "branch": request.branch,
             },
         )
