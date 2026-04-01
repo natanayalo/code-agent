@@ -134,19 +134,19 @@ def _run_docker_command(
         except OSError as exc:
             cmd_str = _mask_url_credentials(shlex.join(command))
             raise DockerSandboxRunnerError(
-                f"Failed to start Docker sandbox command: {cmd_str}"
+                f"Failed to start Docker sandbox command ({cmd_str}): {exc}"
             ) from exc
 
         out.seek(0)
         err.seek(0)
 
-        stdout_str = out.read(limit)
-        if len(stdout_str) == limit:
-            stdout_str += "\n... (truncated)"
+        stdout_str = out.read(limit + 1)
+        if len(stdout_str) > limit:
+            stdout_str = stdout_str[:limit] + "\n... (truncated)"
 
-        stderr_str = err.read(limit)
-        if len(stderr_str) == limit:
-            stderr_str += "\n... (truncated)"
+        stderr_str = err.read(limit + 1)
+        if len(stderr_str) > limit:
+            stderr_str = stderr_str[:limit] + "\n... (truncated)"
 
         return subprocess.CompletedProcess(
             args=command,

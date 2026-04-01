@@ -269,9 +269,12 @@ def test_run_docker_command_raises_on_os_error(monkeypatch: pytest.MonkeyPatch) 
     """Docker execution daemon initialization errors should surface as DockerSandboxRunnerError."""
 
     def mock_run(*args, **kwargs):
-        raise OSError("Executable not found")
+        raise OSError("Docker daemon missing")
 
     monkeypatch.setattr(subprocess, "run", mock_run)
 
-    with pytest.raises(DockerSandboxRunnerError, match=r"Failed to start Docker sandbox command:"):
+    with pytest.raises(
+        DockerSandboxRunnerError,
+        match=r"Failed to start Docker sandbox command \(docker run image\): Docker daemon missing",
+    ):
         _run_docker_command(["docker", "run", "image"], timeout=30)
