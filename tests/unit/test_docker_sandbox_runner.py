@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import os
 import subprocess
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -13,6 +14,7 @@ import pytest
 from sandbox.runner import (
     MAX_OUTPUT_SIZE_BYTES,
     DockerSandboxCommand,
+    DockerSandboxOutputLimitError,
     DockerSandboxRunner,
     DockerSandboxRunnerError,
     _build_docker_run_command,
@@ -278,7 +280,7 @@ def test_timeout_truncates_long_output() -> None:
 
 
 def test_run_docker_command_truncates_stream_limits() -> None:
-    """Execution output surpassing MAX_OUTPUT_SIZE_BYTES should safely truncate."""
+    """Execution output surpassing MAX_OUTPUT_SIZE_BYTES should trigger kill and error."""
     limit = MAX_OUTPUT_SIZE_BYTES
     mock_proc = _make_popen_mock(
         stdout_data=b"x" * (limit + 100),
@@ -286,13 +288,10 @@ def test_run_docker_command_truncates_stream_limits() -> None:
     )
 
     with patch("subprocess.Popen", return_value=mock_proc):
-        result = _run_docker_command(["docker", "run", "image"], timeout=30)
+        with pytest.raises(DockerSandboxOutputLimitError, match="output limit exceeded"):
+            _run_docker_command(["docker", "run", "image"], timeout=30)
 
-    assert result.returncode == 0
-    assert result.stdout.endswith("... (truncated)")
-    assert result.stderr.endswith("... (truncated)")
-    # Content portion is exactly `limit` bytes decoded
-    assert len(result.stdout.encode()) > limit
+    assert mock_proc.kill.called
 
 
 def test_run_docker_command_success() -> None:
@@ -343,11 +342,28 @@ def test_read_stream_bounded_at_limit() -> None:
 def test_read_stream_bounded_over_limit() -> None:
     """Streams exceeding the limit store limit+1 bytes so _decode_bounded detects overflow."""
     limit = 50
-    stream = io.BytesIO(b"x" * 200)
+    # BytesIO returns all data in one read() if chunk size > len(data).
+    data = b"x" * (limit + 10)
+    stream = io.BytesIO(data)
     buf = _read_stream_bounded(stream, limit=limit)
-    # Buffer holds limit+1 bytes so the caller can detect truncation via len(buf) > limit.
-    assert len(buf) == limit + 1
-    assert buf == bytearray(b"x" * (limit + 1))
+    assert len(buf) == len(data)
+    assert buf == bytearray(data)
+
+
+def test_read_stream_bounded_on_limit_is_triggered() -> None:
+    """The on_limit callback is invoked and reading stops early when limit exceeded."""
+    limit = 50
+    data = b"x" * 100
+    stream = io.BytesIO(data)
+    on_limit_called = False
+
+    def on_limit():
+        nonlocal on_limit_called
+        on_limit_called = True
+
+    buf = _read_stream_bounded(stream, limit=limit, on_limit=on_limit)
+    assert on_limit_called
+    assert len(buf) == 100  # Captures the full chunk that went over
 
 
 def test_read_stream_bounded_pipe_fully_drained() -> None:
@@ -368,3 +384,82 @@ def test_read_stream_bounded_pipe_fully_drained() -> None:
     stream = CountingStream(data)
     _read_stream_bounded(stream, limit=limit)  # type: ignore[arg-type]
     assert stream.total_read == len(data)
+
+
+def test_read_stream_bounded_preserves_partial_data_on_os_error() -> None:
+    """Partial data captured before an OSError is returned rather than lost."""
+
+    class BrokenStream:
+        def __init__(self) -> None:
+            self._calls = 0
+
+        def read(self, n: int) -> bytes:
+            self._calls += 1
+            if self._calls == 1:
+                return b"first chunk"
+            raise OSError("pipe closed")
+
+    buf = _read_stream_bounded(BrokenStream(), limit=1000)  # type: ignore[arg-type]
+    assert buf == bytearray(b"first chunk")
+
+
+def test_run_docker_command_cleans_up_threads_on_unexpected_exception() -> None:
+    """Threads must be joined even when an unexpected exception occurs (e.g. KeyboardInterrupt)."""
+    mock_proc = _make_popen_mock(stdout_data=b"output")
+
+    # Make proc.wait raise KeyboardInterrupt on the first (non-timeout) call.
+    interrupt_raised = False
+
+    def _wait(**kwargs: object) -> int:
+        nonlocal interrupt_raised
+        if not interrupt_raised:
+            interrupt_raised = True
+            raise KeyboardInterrupt
+        return 0
+
+    mock_proc.wait.side_effect = _wait
+
+    with patch("subprocess.Popen", return_value=mock_proc):
+        with pytest.raises(KeyboardInterrupt):
+            _run_docker_command(["docker", "run", "image"], timeout=30)
+
+    # Verify that wait was called at least once (cleanup path executed).
+    assert mock_proc.wait.call_count >= 1
+
+
+def test_run_docker_command_closes_pipe_when_thread_hangs() -> None:
+    """When a reader thread outlives _THREAD_JOIN_TIMEOUT the pipe is force-closed to unblock it."""
+    import sandbox.runner as runner_module
+
+    class HangingStream:
+        def __init__(self) -> None:
+            self.closed = False
+            self.blocker = threading.Event()
+
+        def read(self, n: int) -> bytes:
+            if self.closed:
+                raise ValueError("I/O operation on closed file")
+            self.blocker.wait()
+            return b""
+
+        def close(self) -> None:
+            self.closed = True
+            self.blocker.set()
+
+    stdout_pipe = HangingStream()
+    stderr_pipe = io.BytesIO(b"")
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = stdout_pipe
+    mock_proc.stderr = stderr_pipe
+    mock_proc.returncode = 0
+    mock_proc.wait.return_value = 0
+
+    with (
+        patch("subprocess.Popen", return_value=mock_proc),
+        patch.object(runner_module, "_THREAD_JOIN_TIMEOUT", 0.05),
+    ):
+        result = _run_docker_command(["docker", "run", "image"], timeout=30)
+
+    assert result.returncode == 0
+    assert stdout_pipe.closed

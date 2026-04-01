@@ -58,18 +58,41 @@ class DockerSandboxRunnerError(RuntimeError):
     """Raised when the Docker sandbox cannot start or complete."""
 
 
-def _read_stream_bounded(stream: typing.IO[bytes], limit: int) -> bytearray:
+class DockerSandboxOutputLimitError(DockerSandboxRunnerError):
+    """Raised when the sandbox exceeds capture limits."""
+
+
+def _read_stream_bounded(
+    stream: typing.IO[bytes],
+    limit: int,
+    on_limit: typing.Callable[[], None] | None = None,
+) -> bytearray:
     """Read from *stream* into a bytearray, discarding bytes beyond *limit*.
 
-    The stream is drained to its end so the subprocess pipe never blocks,
-    regardless of how much data the container produces.
+    If *on_limit* is provided, it is invoked if the captured data exceeds *limit*,
+    and the stream reading terminates early.
+
+    The stream is drained to its end unless *on_limit* is called, so the subprocess
+    pipe never blocks regardless of how much data the container produces.
+
+    Partial data already read is preserved if the stream is closed or an I/O
+    error occurs mid-read (e.g. during cleanup to unblock a hanging reader).
     """
     buf = bytearray()
-    for chunk in iter(lambda: stream.read(65536), b""):
-        remaining = (limit + 1) - len(buf)
-        if remaining > 0:
-            buf.extend(chunk[:remaining])
-        # Keep draining even after limit is reached so the pipe never blocks.
+    try:
+        for chunk in iter(lambda: stream.read(65536), b""):
+            buf.extend(chunk)
+            if len(buf) > limit:
+                if on_limit:
+                    on_limit()
+                # Stop reading early if the limit was reached—usually because
+                # the process is being killed to prevent further exhaustion.
+                return buf
+            # Keep draining as long as we are under the limit.
+    except (OSError, ValueError):
+        # Stream closed or became unavailable (e.g. pipe forcibly closed during
+        # cleanup).  Return whatever was captured so far.
+        pass
     return buf
 
 
@@ -132,6 +155,12 @@ def _build_docker_run_command(
     return command
 
 
+# Seconds to wait for reader threads to finish after the process exits.
+# If a child process inside the container keeps pipes open, we close them
+# explicitly after this window to unblock the threads.
+_THREAD_JOIN_TIMEOUT: float = 5.0
+
+
 def _run_docker_command(
     command: list[str],
     *,
@@ -162,28 +191,49 @@ def _run_docker_command(
     assert proc.stdout is not None  # noqa: S101 – guaranteed by PIPE
     assert proc.stderr is not None  # noqa: S101 – guaranteed by PIPE
 
+    limit_exceeded = threading.Event()
+
+    def kill_on_limit() -> None:
+        limit_exceeded.set()
+        proc.kill()
+
     stdout_thread = threading.Thread(
         target=lambda: stdout_buf.extend(
-            _read_stream_bounded(proc.stdout, MAX_OUTPUT_SIZE_BYTES)  # type: ignore[arg-type]
+            _read_stream_bounded(proc.stdout, MAX_OUTPUT_SIZE_BYTES, on_limit=kill_on_limit)  # type: ignore[arg-type]
         ),
         daemon=True,
     )
     stderr_thread = threading.Thread(
         target=lambda: stderr_buf.extend(
-            _read_stream_bounded(proc.stderr, MAX_OUTPUT_SIZE_BYTES)  # type: ignore[arg-type]
+            _read_stream_bounded(proc.stderr, MAX_OUTPUT_SIZE_BYTES, on_limit=kill_on_limit)  # type: ignore[arg-type]
         ),
         daemon=True,
     )
     stdout_thread.start()
     stderr_thread.start()
 
+    def _join_threads() -> None:
+        """Join reader threads, closing pipes if they hang past the timeout."""
+        for thread, pipe in [
+            (stdout_thread, proc.stdout),
+            (stderr_thread, proc.stderr),
+        ]:
+            thread.join(timeout=_THREAD_JOIN_TIMEOUT)
+            if thread.is_alive():
+                # Force-close the pipe so the blocked read() unblocks.
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except OSError:
+                        pass
+                thread.join()  # Should return promptly after pipe close.
+
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         proc.kill()
         proc.wait()
-        stdout_thread.join()
-        stderr_thread.join()
+        _join_threads()
 
         cmd_str = _mask_url_credentials(shlex.join(command))
 
@@ -206,9 +256,21 @@ def _run_docker_command(
         raise DockerSandboxRunnerError(
             f"Docker sandbox command timed out after {timeout}s ({cmd_str}): {output}"
         ) from exc
+    finally:
+        # Always join threads and clean up pipes, even on unexpected exceptions
+        # such as KeyboardInterrupt or SystemExit.
+        _join_threads()
 
-    stdout_thread.join()
-    stderr_thread.join()
+    if limit_exceeded.is_set():
+        cmd_str = _mask_url_credentials(shlex.join(command))
+        stdout_str = _decode_bounded(stdout_buf, MAX_OUTPUT_SIZE_BYTES)
+        stderr_str = _decode_bounded(stderr_buf, MAX_OUTPUT_SIZE_BYTES)
+        msg = (
+            f"Docker sandbox output limit exceeded ({MAX_OUTPUT_SIZE_BYTES} bytes) "
+            f"for command ({cmd_str}). Partial output:\n"
+            f"stderr: {stderr_str}\nstdout: {stdout_str}"
+        )
+        raise DockerSandboxOutputLimitError(msg)
 
     stdout_str = _decode_bounded(stdout_buf, MAX_OUTPUT_SIZE_BYTES)
     stderr_str = _decode_bounded(stderr_buf, MAX_OUTPUT_SIZE_BYTES)
