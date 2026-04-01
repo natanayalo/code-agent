@@ -10,7 +10,7 @@ from typing import Protocol
 
 from pydantic import Field
 
-from sandbox.workspace import SandboxModel, WorkspaceHandle
+from sandbox.workspace import SandboxModel, WorkspaceHandle, _mask_url_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,8 @@ class DockerSandboxCommand(SandboxModel):
     working_dir: str = "/workspace/repo"
     timeout_seconds: int = Field(default=300, ge=1)
     network_enabled: bool = False
+    memory_limit: str | None = "1g"
+    cpu_limit: float | None = 1.0
 
 
 class DockerSandboxResult(SandboxModel):
@@ -61,11 +63,19 @@ def _build_docker_run_command(
         docker_binary,
         "run",
         "--rm",
-        "--workdir",
-        request.working_dir,
-        "--volume",
-        workspace_mount,
     ]
+    if request.memory_limit:
+        command.extend(["--memory", request.memory_limit])
+    if request.cpu_limit:
+        command.extend(["--cpus", str(request.cpu_limit)])
+    command.extend(
+        [
+            "--workdir",
+            request.working_dir,
+            "--volume",
+            workspace_mount,
+        ]
+    )
 
     try:
         import os
@@ -101,12 +111,24 @@ def _run_docker_command(
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        cmd_str = shlex.join(command)
+        cmd_str = _mask_url_credentials(shlex.join(command))
+
+        def _to_str(val: bytes | str | None) -> str:
+            if isinstance(val, bytes):
+                return val.decode("utf-8", errors="replace")
+            return val or ""
+
+        stdout = _to_str(exc.stdout).strip()
+        stderr = _to_str(exc.stderr).strip()
+        output = stderr or stdout or "command timed out without output"
+        if len(output) > 1024:
+            output = output[:1024] + "... (truncated)"
+
         raise DockerSandboxRunnerError(
-            f"Docker sandbox command timed out after {timeout}s: {cmd_str}"
+            f"Docker sandbox command timed out after {timeout}s ({cmd_str}): {output}"
         ) from exc
     except OSError as exc:
-        cmd_str = shlex.join(command)
+        cmd_str = _mask_url_credentials(shlex.join(command))
         raise DockerSandboxRunnerError(
             f"Failed to start Docker sandbox command: {cmd_str}"
         ) from exc

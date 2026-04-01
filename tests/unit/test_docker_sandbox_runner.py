@@ -45,6 +45,10 @@ def test_build_docker_run_command_mounts_workspace_and_disables_network(tmp_path
         "docker",
         "run",
         "--rm",
+        "--memory",
+        "1g",
+        "--cpus",
+        "1.0",
         "--workdir",
         "/workspace/repo",
         "--volume",
@@ -96,6 +100,10 @@ def test_build_docker_run_command_skips_user_mapping_on_windows(
         "docker",
         "run",
         "--rm",
+        "--memory",
+        "1g",
+        "--cpus",
+        "1.0",
         "--workdir",
         "/workspace/repo",
         "--volume",
@@ -166,11 +174,14 @@ def test_run_docker_command_raises_on_timeout(monkeypatch: pytest.MonkeyPatch) -
     """Timeouts should surface as DockerSandboxRunnerError."""
 
     def mock_run(*args, **kwargs):
-        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30)
+        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30, output="timeout out")
 
     monkeypatch.setattr(subprocess, "run", mock_run)
 
-    with pytest.raises(DockerSandboxRunnerError, match=r"Docker sandbox command timed out"):
+    with pytest.raises(
+        DockerSandboxRunnerError,
+        match=r"Docker sandbox command timed out after 30s \(docker run image\): timeout out",
+    ):
         _run_docker_command(["docker", "run", "image"], timeout=30)
 
 
