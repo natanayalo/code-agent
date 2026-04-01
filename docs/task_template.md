@@ -35,6 +35,9 @@ What is explicitly excluded?
 -
 -
 
+## External config or manual follow-up
+- note any required GitHub, deployment, or platform setting that is not enforced from repo code
+
 ## Rollback
 How can this change be safely undone?
 
@@ -42,3 +45,4 @@ How can this change be safely undone?
 - keep changes small
 - do not touch auth/billing/sandbox policy unless task explicitly requires it
 - update docs if behavior changes
+- call out manual external steps explicitly instead of implying they are repo-enforced

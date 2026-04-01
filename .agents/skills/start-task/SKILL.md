@@ -32,7 +32,8 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 6. Run the minimal checks and tests that cover the changed behavior. If a command needs approval or is blocked, request approval or report the blocker clearly.
 7. Create or switch to a focused task branch before publishing work. Use the repo's default `codex/` prefix unless the user asked for something else.
 8. Stage only the task files, create a specific commit, and push the branch when the user wants the slice published.
-9. Summarize what changed, what was verified, and what was deferred.
+9. Update `README.md` or other nearby instructions when local workflow, verification, or CI/CD behavior changes.
+10. Call out any manual external follow-up that cannot be enforced from repo code, then summarize what changed, what was verified, and what was deferred.
 
 ## Scope guardrails
 
@@ -40,6 +41,8 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 - Do not absorb adjacent cleanup unless it is required for correctness.
 - If review or design feedback expands scope, track a follow-up instead of silently widening the task.
 - Update `docs/status.md` when task progress materially changes.
+- Do not describe branch protection or similar external controls as enforced unless the required
+  GitHub or platform settings are also called out.
 - Keep commits focused and do not stage unrelated changes.
 - Do not push until the requested checks pass or the blocker is explicitly called out.
 

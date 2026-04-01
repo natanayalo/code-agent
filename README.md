@@ -107,9 +107,19 @@ chore: add pre-commit workflow
 ## CI
 
 GitHub Actions run:
-- `pre-commit` on pushes
-- `pytest` on pushes
+- `pre-commit` on every push, including merges to `master`
+- `pytest` on every push, including merges to `master`, enforcing 90% branch coverage and uploading `coverage.xml`
 - `pip-audit` weekly and on manual dispatch
+
+Protect `master` in GitHub settings to make those checks authoritative:
+- require a pull request before merging
+- require the `pre-commit` and `pytest` checks to pass
+- require branches to be up to date before merging
+- block force pushes and branch deletion
+
+The local `no-commit-to-branch` pre-commit hook still blocks direct commits to `main` and
+`master`, but branch protection is the server-side control that actually prevents protected
+branch bypasses.
 
 ## Dependency Security
 

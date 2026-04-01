@@ -1,12 +1,22 @@
 name: pre-commit
 on:
   push:
+permissions:
+  contents: read
+concurrency:
+  group: pre-commit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SKIP: no-commit-to-branch
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -17,4 +27,4 @@ jobs:
           python -m pip install --upgrade pip
           pip install pre-commit
       - name: Run pre-commit
-        run: pre-commit run --all-files --show-diff-on-failure
+        run: pre-commit run --all-files --hook-stage manual --show-diff-on-failure

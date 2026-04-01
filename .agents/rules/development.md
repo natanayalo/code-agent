@@ -46,5 +46,8 @@ Every non-trivial task must follow this sequence:
 ## Documentation checks
 
 - Update docs if behavior or repo workflow changes.
+- Update `README.md` when local setup, verification, CI/CD, or developer workflow changes.
 - Update `docs/status.md` when task state or sequencing changes.
+- If a change depends on external settings that are not stored in the repo, document the manual
+  follow-up clearly and do not describe it as repo-enforced.
 - Add follow-up backlog items when you intentionally defer a real design decision.
