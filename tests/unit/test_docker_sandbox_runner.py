@@ -185,6 +185,35 @@ def test_run_docker_command_raises_on_timeout(monkeypatch: pytest.MonkeyPatch) -
         _run_docker_command(["docker", "run", "image"], timeout=30)
 
 
+def test_timeout_decorates_bytes_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Byte output from subrpocess shouldn't crash the error formatter on timeout."""
+
+    def mock_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30, output=b"byte out")
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    with pytest.raises(DockerSandboxRunnerError, match=r": byte out"):
+        _run_docker_command(["docker", "run", "image"], timeout=30)
+
+
+def test_timeout_truncates_long_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Massive output from docker shouldn't bloat the logger but must be truncated."""
+
+    long_output = "x" * 2000
+
+    def mock_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="docker run", timeout=30, output=long_output)
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    with pytest.raises(DockerSandboxRunnerError) as exc_info:
+        _run_docker_command(["docker", "run", "image"], timeout=30)
+
+    assert "... (truncated)" in str(exc_info.value)
+    assert len(str(exc_info.value)) < 1150
+
+
 def test_run_docker_command_raises_on_os_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Docker execution daemon initialization errors should surface as DockerSandboxRunnerError."""
 
