@@ -90,6 +90,7 @@ def _run_command(command: list[str], *, cwd: Path | None = None) -> None:
     """Run a command and raise a workspace-specific error on failure."""
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
+    timeout = 300
     try:
         completed = subprocess.run(
             command,
@@ -98,15 +99,17 @@ def _run_command(command: list[str], *, cwd: Path | None = None) -> None:
             check=False,
             capture_output=True,
             text=True,
-            timeout=300,
+            errors="replace",
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
-        raise WorkspaceManagerError(f"{' '.join(command)} timed out after 300s") from exc
+        raise WorkspaceManagerError(f"Command timed out after {timeout}s") from exc
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
         stdout = completed.stdout.strip()
         message = stderr or stdout or "command failed without output"
-        raise WorkspaceManagerError(f"{' '.join(command)} failed: {message}")
+        cmd_str = re.sub(r"://[^@]+@", "://****@", " ".join(command))
+        raise WorkspaceManagerError(f"Command failed ({cmd_str}): {message}")
 
 
 class WorkspaceManager:
@@ -136,12 +139,16 @@ class WorkspaceManager:
             extra={
                 "workspace_id": workspace_id,
                 "task_id": request.task_id,
-                "repo_url": request.repo_url,
+                "repo_url": re.sub(r"://[^@]+@", "://****@", request.repo_url),
                 "branch": request.branch,
             },
         )
 
-        workspace_path.mkdir(parents=False, exist_ok=False)
+        try:
+            workspace_path.mkdir(parents=False, exist_ok=False)
+        except FileExistsError:
+            raise WorkspaceManagerError(f"Workspace directory already exists: {workspace_id}")
+
         try:
             self._command_runner(
                 _build_clone_command(request.repo_url, repo_path, request.branch),

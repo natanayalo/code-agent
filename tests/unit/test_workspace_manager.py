@@ -87,7 +87,7 @@ def test_run_command_raises_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(subprocess, "run", mock_run)
 
-    with pytest.raises(WorkspaceManagerError, match="timed out"):
+    with pytest.raises(WorkspaceManagerError, match=r"Command timed out after 300s"):
         _run_command(["sleep", "400"])
 
 
@@ -99,7 +99,7 @@ def test_run_command_raises_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(subprocess, "run", mock_run)
 
-    with pytest.raises(WorkspaceManagerError, match="failed: mock error"):
+    with pytest.raises(WorkspaceManagerError, match=r"Command failed \(fail\): mock error"):
         _run_command(["fail"])
 
 
@@ -114,6 +114,26 @@ def test_create_workspace_cleans_up_on_failure(tmp_path: Path) -> None:
         manager.create_workspace(request)
 
     assert not list(tmp_path.iterdir())
+
+
+def test_create_workspace_raises_on_existing_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = WorkspaceManager(tmp_path)
+
+    import sandbox.workspace
+
+    def mock_build_workspace_id(task_id: str) -> str:
+        return "workspace-collision"
+
+    manager._command_runner = lambda cmd, **kwargs: None
+    monkeypatch.setattr(sandbox.workspace, "_build_workspace_id", mock_build_workspace_id)
+
+    (tmp_path / "workspace-collision").mkdir()
+
+    request = WorkspaceRequest(task_id="test", repo_url="http://fake")
+    with pytest.raises(WorkspaceManagerError, match="Workspace directory already exists"):
+        manager.create_workspace(request)
 
 
 def test_cleanup_workspace_refuses_outside_root(tmp_path: Path) -> None:
