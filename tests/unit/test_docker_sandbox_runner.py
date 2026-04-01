@@ -52,7 +52,7 @@ def test_build_docker_run_command_mounts_workspace_and_disables_network(tmp_path
         "--workdir",
         "/workspace/repo",
         "--mount",
-        f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
+        f"type=bind,source='{request.workspace.workspace_path.resolve()}',target=/workspace",
     ]
     try:
         import os
@@ -107,7 +107,7 @@ def test_build_docker_run_command_skips_user_mapping_on_windows(
         "--workdir",
         "/workspace/repo",
         "--mount",
-        f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
+        f"type=bind,source='{request.workspace.workspace_path.resolve()}',target=/workspace",
         "--network",
         "none",
         "alpine",
@@ -176,7 +176,7 @@ def test_timeout_raises_with_output(monkeypatch: pytest.MonkeyPatch) -> None:
     def mock_run(*args, **kwargs):
         out_file = kwargs.get("stdout")
         if out_file:
-            out_file.write("timeout out")
+            out_file.write(b"timeout out")
         raise subprocess.TimeoutExpired(cmd="docker run", timeout=30)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
@@ -194,8 +194,8 @@ def test_timeout_decorates_bytes_output(monkeypatch: pytest.MonkeyPatch) -> None
     def mock_run(*args, **kwargs):
         out_file = kwargs.get("stdout")
         if out_file:
-            # We must write str because the temporary files are opened in text mode.
-            out_file.write("byte out")
+            # We must write bytes because the temporary files are opened in binary mode.
+            out_file.write(b"byte out\xff")
         raise subprocess.TimeoutExpired(cmd="docker run", timeout=30)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
@@ -212,7 +212,7 @@ def test_timeout_truncates_long_output(monkeypatch: pytest.MonkeyPatch) -> None:
     def mock_run(*args, **kwargs):
         out_file = kwargs.get("stdout")
         if out_file:
-            out_file.write(long_output)
+            out_file.write(long_output.encode("utf-8"))
         raise subprocess.TimeoutExpired(cmd="docker run", timeout=30)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
@@ -232,8 +232,8 @@ def test_run_docker_command_truncates_stream_limits(monkeypatch: pytest.MonkeyPa
         out_file = kwargs.get("stdout")
         err_file = kwargs.get("stderr")
         if out_file and err_file:
-            out_file.write("x" * (limit + 100))
-            err_file.write("y" * (limit + 100))
+            out_file.write(b"x" * (limit + 100))
+            err_file.write(b"y" * (limit + 100))
         return subprocess.CompletedProcess(args=args[0], returncode=0)
 
     monkeypatch.setattr(subprocess, "run", mock_run)
@@ -253,7 +253,7 @@ def test_run_docker_command_success(monkeypatch: pytest.MonkeyPatch) -> None:
     def mock_run(*args, **kwargs):
         out_file = kwargs.get("stdout")
         if out_file:
-            out_file.write("regular log")
+            out_file.write(b"regular log")
         return subprocess.CompletedProcess(args=args[0], returncode=0)
 
     monkeypatch.setattr(subprocess, "run", mock_run)

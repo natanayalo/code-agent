@@ -6,6 +6,7 @@ import logging
 import shlex
 import subprocess
 import tempfile
+import typing
 from time import perf_counter
 from typing import Protocol
 
@@ -73,7 +74,7 @@ def _build_docker_run_command(
             "--workdir",
             request.working_dir,
             "--mount",
-            f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
+            f"type=bind,source='{request.workspace.workspace_path.resolve()}',target=/workspace",
         ]
     )
 
@@ -105,8 +106,8 @@ def _run_docker_command(
 
     # We use temporary files to capture unbounded output safely without host OOM.
     with (
-        tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as out,
-        tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as err,
+        tempfile.TemporaryFile(mode="w+b") as out,
+        tempfile.TemporaryFile(mode="w+b") as err,
     ):
         try:
             proc = subprocess.run(
@@ -119,14 +120,19 @@ def _run_docker_command(
         except subprocess.TimeoutExpired as exc:
             cmd_str = _mask_url_credentials(shlex.join(command))
 
-            out.seek(0)
-            err.seek(0)
-            stdout = out.read(1025).strip()
-            stderr = err.read(1025).strip()
+            def _read_tail(f: typing.IO[bytes]) -> str:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - 1024))
+                tail = f.read().decode("utf-8", errors="replace").strip()
+                if size > 1024:
+                    return f"... (truncated)\n{tail}"
+                return tail
+
+            stdout = _read_tail(out)
+            stderr = _read_tail(err)
 
             output = stderr or stdout or "command timed out without output"
-            if len(output) > 1024:
-                output = output[:1024] + "... (truncated)"
 
             raise DockerSandboxRunnerError(
                 f"Docker sandbox command timed out after {timeout}s ({cmd_str}): {output}"
@@ -140,13 +146,21 @@ def _run_docker_command(
         out.seek(0)
         err.seek(0)
 
-        stdout_str = out.read(limit + 1)
-        if len(stdout_str) > limit:
-            stdout_str = stdout_str[:limit] + "\n... (truncated)"
+        stdout_bytes = out.read(limit + 1)
+        if len(stdout_bytes) > limit:
+            stdout_str = (
+                stdout_bytes[:limit].decode("utf-8", errors="replace") + "\n... (truncated)"
+            )
+        else:
+            stdout_str = stdout_bytes.decode("utf-8", errors="replace")
 
-        stderr_str = err.read(limit + 1)
-        if len(stderr_str) > limit:
-            stderr_str = stderr_str[:limit] + "\n... (truncated)"
+        stderr_bytes = err.read(limit + 1)
+        if len(stderr_bytes) > limit:
+            stderr_str = (
+                stderr_bytes[:limit].decode("utf-8", errors="replace") + "\n... (truncated)"
+            )
+        else:
+            stderr_str = stderr_bytes.decode("utf-8", errors="replace")
 
         return subprocess.CompletedProcess(
             args=command,
