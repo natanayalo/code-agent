@@ -114,6 +114,26 @@ def test_build_docker_run_command_mounts_workspace_and_disables_network(tmp_path
     assert command == expected_command
 
 
+def test_build_docker_run_command_raises_on_comma_in_path(tmp_path: Path) -> None:
+    """Workspace paths containing commas are incompatible with --mount and must fail fast."""
+    # Manually construct a handle whose path would contain a comma.
+    workspace_path = tmp_path / "work,space"
+    repo_path = workspace_path / "repo"
+    repo_path.mkdir(parents=True)
+    handle = WorkspaceHandle(
+        workspace_id="workspace-task-31",
+        task_id="task-31",
+        workspace_path=workspace_path,
+        repo_path=repo_path,
+        repo_url="https://example.com/repo.git",
+        cleanup_policy=WorkspaceCleanupPolicy(),
+    )
+    request = DockerSandboxCommand(workspace=handle, command=["echo", "hi"])
+
+    with pytest.raises(DockerSandboxRunnerError, match="Workspace path contains a comma"):
+        _build_docker_run_command(request, image="alpine")
+
+
 def test_build_docker_run_command_skips_user_mapping_on_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -253,7 +273,7 @@ def test_timeout_truncates_long_output() -> None:
         with pytest.raises(DockerSandboxRunnerError) as exc_info:
             _run_docker_command(["docker", "run", "image"], timeout=30)
 
-    assert "... (truncated)" in str(exc_info.value)
+    assert "tail of captured prefix" in str(exc_info.value)
     assert len(str(exc_info.value)) < 1200
 
 

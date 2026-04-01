@@ -74,10 +74,14 @@ def _read_stream_bounded(stream: typing.IO[bytes], limit: int) -> bytearray:
 
 
 def _decode_bounded(buf: bytearray, limit: int) -> str:
-    """Decode *buf* to a string, appending a truncation marker when needed."""
-    text = buf[:limit].decode("utf-8", errors="replace")
+    """Decode *buf* to a string, appending a truncation marker when needed.
+
+    Decoding the whole buffer (at most limit+1 bytes) before truncating avoids
+    splitting a multi-byte UTF-8 sequence at the boundary.
+    """
+    text = buf.decode("utf-8", errors="replace")
     if len(buf) > limit:
-        text += "\n... (truncated)"
+        text = text[:limit] + "\n... (truncated)"
     return text
 
 
@@ -97,12 +101,18 @@ def _build_docker_run_command(
         command.extend(["--memory", request.memory_limit])
     if request.cpu_limit:
         command.extend(["--cpus", str(request.cpu_limit)])
+    workspace_path = request.workspace.workspace_path.resolve()
+    if "," in str(workspace_path):
+        raise DockerSandboxRunnerError(
+            f"Workspace path contains a comma which is incompatible with "
+            f"the --mount syntax: {workspace_path}"
+        )
     command.extend(
         [
             "--workdir",
             request.working_dir,
             "--mount",
-            f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
+            f"type=bind,source={workspace_path},target=/workspace",
         ]
     )
 
@@ -178,9 +188,12 @@ def _run_docker_command(
         cmd_str = _mask_url_credentials(shlex.join(command))
 
         def _tail(buf: bytearray) -> str:
+            # Note: because _read_stream_bounded caps capture at MAX_OUTPUT_SIZE_BYTES+1,
+            # this tail reflects the end of the *captured prefix*, not necessarily the
+            # true end of the process output if it produced more than the limit.
             tail_bytes = buf[-1024:] if len(buf) > 1024 else buf
             tail = tail_bytes.decode("utf-8", errors="replace").strip()
-            return f"... (truncated)\n{tail}" if len(buf) > 1024 else tail
+            return f"... (tail of captured prefix)\n{tail}" if len(buf) > 1024 else tail
 
         stdout_tail = _tail(stdout_buf)
         stderr_tail = _tail(stderr_buf)
