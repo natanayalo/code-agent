@@ -19,6 +19,7 @@ dist/
 .ruff_cache/
 .mypy_cache/
 .coverage
+coverage.xml
 htmlcov/
 
 # Local editor and OS files

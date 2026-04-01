@@ -1,12 +1,21 @@
 name: pytest
 on:
+  pull_request:
   push:
+permissions:
+  contents: read
+concurrency:
+  group: pytest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -16,5 +25,24 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      - name: Run pytest
-        run: pytest
+      - name: Run pytest with coverage gate
+        run: |
+          pytest \
+            --cov=apps \
+            --cov=db \
+            --cov=memory \
+            --cov=orchestrator \
+            --cov=repositories \
+            --cov=sandbox \
+            --cov=tools \
+            --cov=workers \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=90
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: error
