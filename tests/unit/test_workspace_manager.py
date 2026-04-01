@@ -55,8 +55,9 @@ def test_workspace_manager_uses_injected_command_runner(tmp_path: Path) -> None:
     """Workspace creation should delegate clone execution through the runner boundary."""
     captured_commands: list[list[str]] = []
 
-    def fake_runner(command: list[str], *, cwd: Path | None = None) -> None:
+    def fake_runner(command: list[str], *, cwd: Path | None = None, timeout: int = 300) -> None:
         del cwd
+        del timeout
         captured_commands.append(command)
         Path(command[-1]).mkdir(parents=True, exist_ok=False)
 
@@ -104,7 +105,7 @@ def test_run_command_raises_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_create_workspace_cleans_up_on_failure(tmp_path: Path) -> None:
-    def failing_runner(command: list[str], *, cwd: Path | None = None) -> None:
+    def failing_runner(command: list[str], *, cwd: Path | None = None, timeout: int = 300) -> None:
         raise RuntimeError("simulated clone failure")
 
     manager = WorkspaceManager(tmp_path, command_runner=failing_runner)
@@ -136,6 +137,32 @@ def test_create_workspace_raises_on_existing_directory(
         manager.create_workspace(request)
 
 
+def test_create_workspace_uses_request_cleanup_policy(tmp_path: Path) -> None:
+    manager = WorkspaceManager(tmp_path)
+    manager._command_runner = lambda cmd, **kwargs: None
+    custom_policy = WorkspaceCleanupPolicy(delete_on_success=False, retain_on_failure=False)
+    request = WorkspaceRequest(task_id="test", repo_url="foo", cleanup_policy=custom_policy)
+    handle = manager.create_workspace(request)
+    assert handle.cleanup_policy is custom_policy
+
+    request2 = WorkspaceRequest(task_id="test2", repo_url="foo")
+    handle2 = manager.create_workspace(request2)
+    assert handle2.cleanup_policy is manager.cleanup_policy
+
+
+def test_create_workspace_uses_configurable_timeout(tmp_path: Path) -> None:
+    captured_kwargs = {}
+
+    def tracking_runner(command: list[str], **kwargs) -> None:
+        captured_kwargs.update(kwargs)
+
+    manager = WorkspaceManager(tmp_path, command_timeout=450, command_runner=tracking_runner)
+    request = WorkspaceRequest(task_id="test", repo_url="foo")
+    manager.create_workspace(request)
+
+    assert captured_kwargs.get("timeout") == 450
+
+
 def test_cleanup_workspace_refuses_outside_root(tmp_path: Path) -> None:
     manager = WorkspaceManager(tmp_path)
     handle = WorkspaceHandle(
@@ -156,7 +183,7 @@ def test_cleanup_workspace_handles_os_error(
 ) -> None:
     manager = WorkspaceManager(tmp_path)
 
-    def fake_runner(command: list[str], *, cwd: Path | None = None) -> None:
+    def fake_runner(command: list[str], *, cwd: Path | None = None, timeout: int = 300) -> None:
         pass
 
     manager._command_runner = fake_runner

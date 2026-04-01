@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 class CommandRunner(Protocol):
     """Protocol for running external commands."""
 
-    def __call__(self, command: list[str], *, cwd: Path | None = None) -> None: ...
+    def __call__(
+        self, command: list[str], *, cwd: Path | None = None, timeout: int = 300
+    ) -> None: ...
 
 
 class SandboxModel(BaseModel):
@@ -42,6 +44,7 @@ class WorkspaceRequest(SandboxModel):
     task_id: str = Field(min_length=1)
     repo_url: str = Field(min_length=1)
     branch: str | None = None
+    cleanup_policy: WorkspaceCleanupPolicy | None = None
 
 
 class WorkspaceHandle(SandboxModel):
@@ -87,11 +90,10 @@ def _should_delete_workspace(policy: WorkspaceCleanupPolicy, *, succeeded: bool)
     return not policy.retain_on_failure
 
 
-def _run_command(command: list[str], *, cwd: Path | None = None) -> None:
+def _run_command(command: list[str], *, cwd: Path | None = None, timeout: int = 300) -> None:
     """Run a command and raise a workspace-specific error on failure."""
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
-    timeout = 300
     try:
         completed = subprocess.run(
             command,
@@ -121,10 +123,12 @@ class WorkspaceManager:
         root_dir: str | Path,
         *,
         cleanup_policy: WorkspaceCleanupPolicy | None = None,
+        command_timeout: int = 300,
         command_runner: CommandRunner | None = None,
     ) -> None:
         self.root_dir = Path(root_dir).expanduser().resolve()
         self.cleanup_policy = cleanup_policy or WorkspaceCleanupPolicy()
+        self.command_timeout = command_timeout
         self._command_runner = command_runner or _run_command
 
     def create_workspace(self, request: WorkspaceRequest) -> WorkspaceHandle:
@@ -153,6 +157,7 @@ class WorkspaceManager:
         try:
             self._command_runner(
                 _build_clone_command(request.repo_url, repo_path, request.branch),
+                timeout=self.command_timeout,
             )
         except Exception:
             shutil.rmtree(workspace_path, ignore_errors=True)
@@ -169,7 +174,7 @@ class WorkspaceManager:
             repo_path=repo_path,
             repo_url=request.repo_url,
             branch=request.branch,
-            cleanup_policy=self.cleanup_policy,
+            cleanup_policy=request.cleanup_policy or self.cleanup_policy,
         )
 
     def cleanup_workspace(self, workspace: WorkspaceHandle, *, succeeded: bool) -> bool:
