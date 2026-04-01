@@ -23,10 +23,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-021 Add checkpoint persistence
 - T-022 Add approval interrupt node
 - T-030 Create workspace manager
+- T-031 Add Docker sandbox runner
 
 ## Next
 
-- T-031 Add Docker sandbox runner
+- T-032 Add artifact capture
 
 ## Blocked
 
@@ -38,3 +39,4 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-021 adds durable LangGraph checkpointing without yet wiring orchestrator state to the app layer.
 - T-022 adds a destructive-action approval pause/resume path before worker dispatch.
 - T-030 adds per-task workspace provisioning, repo clone, and cleanup-policy scaffolding.
+- T-031 adds Docker-based command execution with mounted workspaces and captured stdout/stderr.

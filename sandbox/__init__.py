@@ -1,5 +1,11 @@
 """Sandbox package boundary."""
 
+from sandbox.runner import (
+    DockerSandboxCommand,
+    DockerSandboxResult,
+    DockerSandboxRunner,
+    DockerSandboxRunnerError,
+)
 from sandbox.workspace import (
     WorkspaceCleanupPolicy,
     WorkspaceHandle,
@@ -9,6 +15,10 @@ from sandbox.workspace import (
 )
 
 __all__ = [
+    "DockerSandboxCommand",
+    "DockerSandboxResult",
+    "DockerSandboxRunner",
+    "DockerSandboxRunnerError",
     "WorkspaceCleanupPolicy",
     "WorkspaceHandle",
     "WorkspaceManager",
