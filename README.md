@@ -107,8 +107,8 @@ chore: add pre-commit workflow
 ## CI
 
 GitHub Actions run:
-- `pre-commit` on pull requests and pushes
-- `pytest` on pull requests and pushes, enforcing 90% branch coverage and uploading `coverage.xml`
+- `pre-commit` on every push, including merges to `master`
+- `pytest` on every push, including merges to `master`, enforcing 90% branch coverage and uploading `coverage.xml`
 - `pip-audit` weekly and on manual dispatch
 
 Protect `master` in GitHub settings to make those checks authoritative:

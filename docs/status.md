@@ -36,7 +36,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 ## Notes
 
 - Milestone 1 close-out and Milestone 2 skeleton work are both active.
-- CI now validates pull requests as well as pushes and enforces a 90% branch-coverage floor in `pytest`.
+- CI now validates every push, including merges to `master`, avoiding duplicate pull request branch runs while enforcing a 90% branch-coverage floor in `pytest`.
 - Protected-branch enforcement for `master` still depends on GitHub branch protection settings and required status checks.
 - T-021 adds durable LangGraph checkpointing without yet wiring orchestrator state to the app layer.
 - T-022 adds a destructive-action approval pause/resume path before worker dispatch.

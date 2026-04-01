@@ -52,16 +52,16 @@ def test_pyproject_dev_dependencies_include_pytest_cov() -> None:
     assert any(dependency.startswith("pytest-cov>=") for dependency in dev_dependencies)
 
 
-def test_pytest_workflow_runs_on_prs_and_enforces_coverage() -> None:
-    """The pytest workflow should validate PRs and fail below the coverage floor."""
+def test_pytest_workflow_runs_on_push_and_enforces_coverage() -> None:
+    """The pytest workflow should validate each push with a coverage gate."""
     workflow = _load_yaml(".github/workflows/pytest.yml")
     triggers = _workflow_triggers(workflow)
     steps = _job_steps(workflow, "pytest")
     run_step = _step_by_name(steps, "Run pytest with coverage gate")
     upload_step = _step_by_name(steps, "Upload coverage artifact")
 
-    assert "pull_request" in triggers
     assert "push" in triggers
+    assert len(triggers) == 1
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] is True
     assert workflow["jobs"]["pytest"]["timeout-minutes"] == 15
@@ -85,15 +85,15 @@ def test_pytest_workflow_runs_on_prs_and_enforces_coverage() -> None:
     assert upload_step["with"]["path"] == "coverage.xml"
 
 
-def test_pre_commit_workflow_runs_on_prs_without_ci_branch_guard_failures() -> None:
-    """CI should lint PRs while skipping the local branch-guard hook in Actions."""
+def test_pre_commit_workflow_runs_on_push_without_ci_branch_guard_failures() -> None:
+    """CI should lint each push while skipping the local branch-guard hook in Actions."""
     workflow = _load_yaml(".github/workflows/pre-commit.yml")
     triggers = _workflow_triggers(workflow)
     steps = _job_steps(workflow, "pre-commit")
     run_step = _step_by_name(steps, "Run pre-commit")
 
-    assert "pull_request" in triggers
     assert "push" in triggers
+    assert len(triggers) == 1
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] is True
     assert workflow["jobs"]["pre-commit"]["timeout-minutes"] == 10
