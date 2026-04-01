@@ -17,6 +17,7 @@ from sandbox.runner import (
     DockerSandboxOutputLimitError,
     DockerSandboxRunner,
     DockerSandboxRunnerError,
+    _build_container_name,
     _build_docker_run_command,
     _read_stream_bounded,
     _run_docker_command,
@@ -84,6 +85,8 @@ def test_build_docker_run_command_mounts_workspace_and_disables_network(tmp_path
         "docker",
         "run",
         "--rm",
+        "--name",
+        _build_container_name(request.workspace),
         "--memory",
         "1g",
         "--cpus",
@@ -155,6 +158,8 @@ def test_build_docker_run_command_skips_user_mapping_on_windows(
         "docker",
         "run",
         "--rm",
+        "--name",
+        _build_container_name(request.workspace),
         "--memory",
         "1g",
         "--cpus",
@@ -287,11 +292,24 @@ def test_run_docker_command_truncates_stream_limits() -> None:
         stderr_data=b"y" * (limit + 100),
     )
 
-    with patch("subprocess.Popen", return_value=mock_proc):
+    with (
+        patch("subprocess.Popen", return_value=mock_proc),
+        patch("subprocess.run") as mock_run,
+    ):
         with pytest.raises(DockerSandboxOutputLimitError, match="output limit exceeded"):
-            _run_docker_command(["docker", "run", "image"], timeout=30)
+            _run_docker_command(
+                ["docker", "run", "--name", "sandbox-workspace-task-31", "image"],
+                timeout=30,
+            )
 
     assert mock_proc.kill.called
+    mock_run.assert_called_once_with(
+        ["docker", "kill", "sandbox-workspace-task-31"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
 
 
 def test_run_docker_command_success() -> None:
@@ -346,8 +364,8 @@ def test_read_stream_bounded_over_limit() -> None:
     data = b"x" * (limit + 10)
     stream = io.BytesIO(data)
     buf = _read_stream_bounded(stream, limit=limit)
-    assert len(buf) == len(data)
-    assert buf == bytearray(data)
+    assert len(buf) == limit + 1
+    assert buf == bytearray(data[: limit + 1])
 
 
 def test_read_stream_bounded_on_limit_is_triggered() -> None:
@@ -363,13 +381,13 @@ def test_read_stream_bounded_on_limit_is_triggered() -> None:
 
     buf = _read_stream_bounded(stream, limit=limit, on_limit=on_limit)
     assert on_limit_called
-    assert len(buf) == 100  # Captures the full chunk that went over
+    assert len(buf) == limit + 1
 
 
 def test_read_stream_bounded_pipe_fully_drained() -> None:
     """Even when over limit, the underlying stream must be fully read to avoid pipe blockage."""
     limit = 10
-    data = b"z" * 1000
+    data = b"z" * 100000
 
     class CountingStream:
         def __init__(self, data: bytes) -> None:
@@ -384,6 +402,32 @@ def test_read_stream_bounded_pipe_fully_drained() -> None:
     stream = CountingStream(data)
     _read_stream_bounded(stream, limit=limit)  # type: ignore[arg-type]
     assert stream.total_read == len(data)
+
+
+def test_run_docker_command_kills_named_container_on_timeout() -> None:
+    """Timeout cleanup should attempt to stop the named docker container."""
+    mock_proc = _make_popen_mock(
+        stdout_data=b"timeout out",
+        wait_side_effect=subprocess.TimeoutExpired(cmd="docker run", timeout=30),
+    )
+
+    with (
+        patch("subprocess.Popen", return_value=mock_proc),
+        patch("subprocess.run") as mock_run,
+    ):
+        with pytest.raises(DockerSandboxRunnerError, match=r"timed out after 30s"):
+            _run_docker_command(
+                ["docker", "run", "--name", "sandbox-workspace-task-31", "image"],
+                timeout=30,
+            )
+
+    mock_run.assert_called_once_with(
+        ["docker", "kill", "sandbox-workspace-task-31"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
 
 
 def test_read_stream_bounded_preserves_partial_data_on_os_error() -> None:

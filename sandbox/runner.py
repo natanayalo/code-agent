@@ -62,6 +62,40 @@ class DockerSandboxOutputLimitError(DockerSandboxRunnerError):
     """Raised when the sandbox exceeds capture limits."""
 
 
+def _build_container_name(workspace: WorkspaceHandle) -> str:
+    """Build a deterministic docker container name for a workspace run."""
+    return f"sandbox-{workspace.workspace_id}"
+
+
+def _extract_container_name(command: list[str]) -> str | None:
+    """Return the docker container name embedded in a run command, if present."""
+    for index, token in enumerate(command[:-1]):
+        if token == "--name":
+            return command[index + 1]
+    return None
+
+
+def _kill_docker_container(command: list[str]) -> None:
+    """Best-effort docker kill for the named container in *command*."""
+    container_name = _extract_container_name(command)
+    if container_name is None:
+        return
+
+    try:
+        subprocess.run(
+            [command[0], "kill", container_name],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        logger.warning(
+            "Failed to stop docker container after sandbox error",
+            extra={"container_name": container_name},
+        )
+
+
 def _read_stream_bounded(
     stream: typing.IO[bytes],
     limit: int,
@@ -81,14 +115,17 @@ def _read_stream_bounded(
     buf = bytearray()
     try:
         for chunk in iter(lambda: stream.read(65536), b""):
-            buf.extend(chunk)
+            remaining = (limit + 1) - len(buf)
+            if remaining > 0:
+                buf.extend(chunk[:remaining])
             if len(buf) > limit:
                 if on_limit:
                     on_limit()
-                # Stop reading early if the limit was reached—usually because
-                # the process is being killed to prevent further exhaustion.
-                return buf
-            # Keep draining as long as we are under the limit.
+                    # Stop reading early if the limit was reached—usually because
+                    # the process is being killed to prevent further exhaustion.
+                    return buf
+                # Continue draining the stream to prevent the subprocess from
+                # blocking on a full pipe, but discard additional bytes.
     except (OSError, ValueError):
         # Stream closed or became unavailable (e.g. pipe forcibly closed during
         # cleanup).  Return whatever was captured so far.
@@ -115,10 +152,13 @@ def _build_docker_run_command(
     docker_binary: str = "docker",
 ) -> list[str]:
     """Build a deterministic docker run command for the sandbox request."""
+    container_name = _build_container_name(request.workspace)
     command = [
         docker_binary,
         "run",
         "--rm",
+        "--name",
+        container_name,
     ]
     if request.memory_limit:
         command.extend(["--memory", request.memory_limit])
@@ -234,6 +274,7 @@ def _run_docker_command(
         proc.kill()
         proc.wait()
         _join_threads()
+        _kill_docker_container(command)
 
         cmd_str = _mask_url_credentials(shlex.join(command))
 
@@ -262,6 +303,7 @@ def _run_docker_command(
         _join_threads()
 
     if limit_exceeded.is_set():
+        _kill_docker_container(command)
         cmd_str = _mask_url_credentials(shlex.join(command))
         stdout_str = _decode_bounded(stdout_buf, MAX_OUTPUT_SIZE_BYTES)
         stderr_str = _decode_bounded(stderr_buf, MAX_OUTPUT_SIZE_BYTES)
