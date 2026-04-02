@@ -70,6 +70,15 @@ cp .env.example .env
 docker compose up --build
 ```
 
+Optional for local worker runs:
+
+```bash
+export CODE_AGENT_WORKSPACE_ROOT="$HOME/.code-agent/workspaces"
+```
+
+Set `CODE_AGENT_WORKSPACE_ROOT` if you want the Codex worker to keep sandbox workspaces
+outside the system temporary directory.
+
 If your environment uses a private or intercepting CA and Docker builds fail with SSL
 verification errors, place the CA certificate at `cert.pem` in the repository root before
 building. The Docker image will trust that certificate during package installation.

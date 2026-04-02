@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shlex
+import tempfile
 from pathlib import Path
 from typing import Literal
 
@@ -30,8 +32,10 @@ from workers.base import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_WORKSPACE_ROOT = Path("/tmp/code-agent-workspaces")
+DEFAULT_WORKSPACE_ROOT_ENV_VAR = "CODE_AGENT_WORKSPACE_ROOT"
 DEFAULT_SANDBOX_TIMEOUT_SECONDS = 300
+_TOY_TASK_SCRIPT_CONTAINER_PATH = "/workspace/.code-agent/codex_worker_task.py"
+_TOY_TASK_SCRIPT_RELATIVE_PATH = Path(".code-agent") / "codex_worker_task.py"
 
 _TOY_TASK_SCRIPT = """
 from pathlib import Path
@@ -81,6 +85,14 @@ def _slugify(value: str) -> str:
     return slug[:48] or "task"
 
 
+def _default_workspace_root() -> Path:
+    """Return the default workspace root, honoring an environment override."""
+    configured_root = os.environ.get(DEFAULT_WORKSPACE_ROOT_ENV_VAR)
+    if configured_root:
+        return Path(configured_root).expanduser()
+    return Path(tempfile.gettempdir()) / "code-agent-workspaces"
+
+
 def _workspace_task_id(request: WorkerRequest) -> str:
     """Build a readable workspace task identifier from the worker request."""
     source = request.session_id or request.task_text
@@ -97,7 +109,7 @@ def _workspace_artifacts(
     *,
     sandbox_artifacts: list[ArtifactReference] | None = None,
 ) -> list[ArtifactReference]:
-    """Build absolute artifact references for a retained workspace."""
+    """Build artifact references for a retained workspace."""
     artifacts = [
         ArtifactReference(
             name="workspace",
@@ -110,6 +122,14 @@ def _workspace_artifacts(
     return artifacts
 
 
+def _write_toy_task_script(workspace: WorkspaceHandle) -> Path:
+    """Persist the toy task script under the mounted workspace root."""
+    script_path = workspace.workspace_path / _TOY_TASK_SCRIPT_RELATIVE_PATH
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.write_text(_TOY_TASK_SCRIPT, encoding="utf-8")
+    return script_path
+
+
 class CodexWorker(Worker):
     """Execute a deterministic toy repo task through the sandbox stack."""
 
@@ -118,7 +138,7 @@ class CodexWorker(Worker):
         *,
         workspace_manager: WorkspaceManager | None = None,
         sandbox_runner: DockerSandboxRunner | None = None,
-        workspace_root: str | Path = DEFAULT_WORKSPACE_ROOT,
+        workspace_root: str | Path | None = None,
         cleanup_policy: WorkspaceCleanupPolicy | None = None,
         timeout_seconds: int = DEFAULT_SANDBOX_TIMEOUT_SECONDS,
     ) -> None:
@@ -127,7 +147,7 @@ class CodexWorker(Worker):
             retain_on_failure=True,
         )
         self.workspace_manager = workspace_manager or WorkspaceManager(
-            workspace_root,
+            workspace_root or _default_workspace_root(),
             cleanup_policy=self.cleanup_policy,
         )
         self.sandbox_runner = sandbox_runner or DockerSandboxRunner()
@@ -174,10 +194,28 @@ class CodexWorker(Worker):
             )
 
         try:
+            _write_toy_task_script(workspace)
+        except OSError as exc:
+            logger.exception(
+                "Codex worker failed to prepare toy task script",
+                extra={
+                    "session_id": request.session_id,
+                    "workspace_id": workspace.workspace_id,
+                    "workspace_task_id": workspace_task_id,
+                },
+            )
+            return WorkerResult(
+                status="error",
+                summary=f"CodexWorker failed to prepare the sandbox task script: {exc}",
+                artifacts=_workspace_artifacts(workspace),
+                next_action_hint="inspect_workspace_artifacts",
+            )
+
+        try:
             sandbox_result = self.sandbox_runner.run(
                 DockerSandboxCommand(
                     workspace=workspace,
-                    command=["python3", "-c", _TOY_TASK_SCRIPT],
+                    command=["python3", _TOY_TASK_SCRIPT_CONTAINER_PATH],
                     environment={
                         "TASK_TEXT": request.task_text,
                         "SESSION_ID": request.session_id or "unknown",
@@ -210,7 +248,7 @@ class CodexWorker(Worker):
         sandbox_artifacts = [
             ArtifactReference(
                 name=artifact.name,
-                uri=str((workspace.workspace_path / artifact.uri).resolve()),
+                uri=artifact.uri,
                 artifact_type=artifact.artifact_type,
             )
             for artifact in sandbox_result.artifacts

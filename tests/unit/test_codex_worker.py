@@ -11,6 +11,10 @@ from sandbox import (
     WorkspaceHandle,
 )
 from workers import CodexWorker, WorkerRequest
+from workers.codex_worker import (
+    DEFAULT_WORKSPACE_ROOT_ENV_VAR,
+    _default_workspace_root,
+)
 
 
 class FakeWorkspaceManager:
@@ -77,6 +81,15 @@ def test_codex_worker_requires_repo_url(tmp_path: Path) -> None:
     assert sandbox_runner.requests == []
 
 
+def test_default_workspace_root_supports_environment_override(
+    monkeypatch,
+) -> None:
+    """The default workspace root should be configurable per environment."""
+    monkeypatch.setenv(DEFAULT_WORKSPACE_ROOT_ENV_VAR, "~/custom-codex-root")
+
+    assert _default_workspace_root() == Path("~/custom-codex-root").expanduser()
+
+
 def test_codex_worker_maps_sandbox_result_into_worker_contract(tmp_path: Path) -> None:
     """A successful sandbox run should be exposed through the shared worker contract."""
     workspace = _workspace_handle(tmp_path)
@@ -84,7 +97,7 @@ def test_codex_worker_maps_sandbox_result_into_worker_contract(tmp_path: Path) -
     sandbox_runner = FakeSandboxRunner(
         result=DockerSandboxResult(
             image="python:3.12-slim",
-            command=["python3", "-c", "print('toy task')"],
+            command=["python3", "/workspace/.code-agent/codex_worker_task.py"],
             docker_command=["docker", "run", "python:3.12-slim"],
             exit_code=0,
             stdout="Wrote .code-agent/codex-worker-report.md\n",
@@ -123,14 +136,21 @@ def test_codex_worker_maps_sandbox_result_into_worker_contract(tmp_path: Path) -
     assert result.test_results[0].status == "passed"
     assert result.artifacts[0].artifact_type == "workspace"
     assert result.artifacts[0].uri == str(workspace.workspace_path)
-    assert result.artifacts[1].uri == str(
-        (workspace.workspace_path / "artifacts/command-123/stdout.log").resolve()
-    )
+    assert result.artifacts[1].uri == "artifacts/command-123/stdout.log"
 
     workspace_request = workspace_manager.requests[0]
     assert getattr(workspace_request, "cleanup_policy").delete_on_success is False
     assert getattr(workspace_request, "cleanup_policy").retain_on_failure is True
 
     sandbox_request = sandbox_runner.requests[0]
+    assert getattr(sandbox_request, "command") == [
+        "python3",
+        "/workspace/.code-agent/codex_worker_task.py",
+    ]
     assert getattr(sandbox_request, "working_dir") == "/workspace/repo"
     assert getattr(sandbox_request, "environment")["TASK_TEXT"] == "Summarize the repo"
+
+    script_path = workspace.workspace_path / ".code-agent" / "codex_worker_task.py"
+    assert script_path.exists()
+    assert script_path.parent == (workspace.workspace_path / ".code-agent")
+    assert not (workspace.repo_path / ".code-agent" / "codex_worker_task.py").exists()

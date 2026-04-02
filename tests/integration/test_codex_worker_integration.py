@@ -55,11 +55,13 @@ def _workspace_path_from_docker_command(command: list[str]) -> Path:
 def test_codex_worker_runs_real_workspace_and_graph_path(tmp_path: Path) -> None:
     """The orchestrator can invoke the real Codex worker through the shared contract."""
     source_repo = _create_local_repo(tmp_path)
+    captured_command: list[str] = []
 
     def fake_docker_command_runner(
         command: list[str], *, timeout: int
     ) -> subprocess.CompletedProcess[str]:
         assert timeout == 300
+        captured_command[:] = command
         workspace_path = _workspace_path_from_docker_command(command)
         report_path = workspace_path / "repo" / ".code-agent" / "codex-worker-report.md"
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -97,17 +99,26 @@ def test_codex_worker_runs_real_workspace_and_graph_path(tmp_path: Path) -> None
     assert state.result.summary == (
         "CodexWorker completed a sandboxed toy repo task and retained the workspace."
     )
+    assert captured_command[-2:] == ["python3", "/workspace/.code-agent/codex_worker_task.py"]
 
     artifact_names = {artifact.name for artifact in state.result.artifacts}
     assert "workspace" in artifact_names
     assert "stdout.log" in artifact_names
     assert "changed-files.txt" in artifact_names
+    stdout_artifact = next(
+        artifact for artifact in state.result.artifacts if artifact.name == "stdout.log"
+    )
+    assert (
+        stdout_artifact.uri == "artifacts/command-123/stdout.log"
+        or stdout_artifact.uri.startswith("artifacts/command-")
+    )
 
     workspace_artifact = next(
         artifact for artifact in state.result.artifacts if artifact.name == "workspace"
     )
     workspace_path = Path(workspace_artifact.uri)
     assert (workspace_path / "repo" / ".code-agent" / "codex-worker-report.md").exists()
+    assert (workspace_path / ".code-agent" / "codex_worker_task.py").exists()
     assert state.progress_updates == [
         "task ingested",
         "task classified as implementation",
