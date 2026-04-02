@@ -9,8 +9,13 @@ import os
 import re
 import shlex
 import tempfile
+from collections.abc import Mapping, Sequence
+from datetime import date, datetime, time
+from enum import Enum
 from pathlib import Path
 from typing import Literal
+
+from pydantic import BaseModel
 
 from sandbox import (
     DockerSandboxCommand,
@@ -92,7 +97,6 @@ def _default_workspace_root() -> Path:
     configured_root = os.environ.get(DEFAULT_WORKSPACE_ROOT_ENV_VAR)
     if configured_root:
         return Path(configured_root).expanduser()
-    workspace_owner = "shared"
     getuid = getattr(os, "getuid", None)
     if callable(getuid):
         workspace_owner = f"uid-{getuid()}"
@@ -100,6 +104,8 @@ def _default_workspace_root() -> Path:
         username = os.environ.get("USER") or os.environ.get("USERNAME")
         if username:
             workspace_owner = f"user-{_slugify(username)}"
+        else:
+            workspace_owner = f"pid-{os.getpid()}"
     return Path(tempfile.gettempdir()) / f"code-agent-workspaces-{workspace_owner}"
 
 
@@ -120,6 +126,35 @@ def _build_execution_context(request: WorkerRequest) -> dict[str, object]:
         "constraints": request.constraints,
         "budget": request.budget,
     }
+
+
+def _jsonify_execution_context_value(value: object, *, field_path: str) -> object:
+    """Normalize context values into JSON-safe structures without hiding bad types."""
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, Path | date | datetime | time):
+        return str(value)
+    if isinstance(value, Enum):
+        return _jsonify_execution_context_value(value.value, field_path=field_path)
+    if isinstance(value, BaseModel):
+        return _jsonify_execution_context_value(
+            value.model_dump(mode="json"),
+            field_path=field_path,
+        )
+    if isinstance(value, Mapping):
+        return {
+            str(key): _jsonify_execution_context_value(
+                item,
+                field_path=f"{field_path}.{key}",
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return [
+            _jsonify_execution_context_value(item, field_path=f"{field_path}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    raise TypeError(f"{field_path} contains unsupported value of type {type(value).__name__}.")
 
 
 def _build_test_result_details(
@@ -175,12 +210,16 @@ def _write_execution_context_file(
     """Persist the worker execution context under the mounted workspace root."""
     context_path = workspace.workspace_path / _TOY_TASK_CONTEXT_RELATIVE_PATH
     context_path.parent.mkdir(parents=True, exist_ok=True)
+    execution_context = _build_execution_context(request)
+    serialized_context = {
+        key: _jsonify_execution_context_value(value, field_path=key)
+        for key, value in execution_context.items()
+    }
     context_path.write_text(
         json.dumps(
-            _build_execution_context(request),
+            serialized_context,
             indent=2,
             sort_keys=True,
-            default=str,
         )
         + "\n",
         encoding="utf-8",
@@ -246,7 +285,7 @@ class CodexWorker(Worker):
                     cleanup_policy=self.cleanup_policy,
                 )
             )
-        except WorkspaceManagerError as exc:
+        except (WorkspaceManagerError, OSError) as exc:
             logger.exception(
                 "Codex worker failed to provision workspace",
                 extra={"session_id": request.session_id, "workspace_task_id": workspace_task_id},
@@ -260,6 +299,21 @@ class CodexWorker(Worker):
         try:
             _write_toy_task_script(workspace)
             _write_execution_context_file(workspace, request)
+        except TypeError as exc:
+            logger.exception(
+                "Codex worker failed to serialize sandbox execution context",
+                extra={
+                    "session_id": request.session_id,
+                    "workspace_id": workspace.workspace_id,
+                    "workspace_task_id": workspace_task_id,
+                },
+            )
+            return WorkerResult(
+                status="error",
+                summary=f"CodexWorker failed to serialize the sandbox execution context: {exc}",
+                artifacts=_workspace_artifacts(workspace),
+                next_action_hint="inspect_worker_configuration",
+            )
         except OSError as exc:
             logger.exception(
                 "Codex worker failed to prepare sandbox task files",

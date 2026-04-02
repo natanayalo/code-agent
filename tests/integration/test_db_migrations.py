@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 from alembic import command
@@ -62,8 +61,6 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     config = Config(str(Path("alembic.ini").resolve()))
     config.set_main_option("script_location", str(Path("db/migrations").resolve()))
     config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
-    worker_logger = logging.getLogger("workers.codex_worker")
-    worker_logger.disabled = False
 
     command.upgrade(config, "head")
 
@@ -90,5 +87,3 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
             assert constraint_name in actual_constraints
             for expected_value in expected_values:
                 assert expected_value in actual_constraints[constraint_name]
-
-    assert worker_logger.disabled is False

@@ -35,6 +35,16 @@ class FakeWorkspaceManager:
         return self.workspace
 
 
+class RaisingWorkspaceManager:
+    """Raise a predefined workspace creation error."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def create_workspace(self, request: object) -> WorkspaceHandle:
+        raise self.error
+
+
 class FakeSandboxRunner:
     """Return a predefined sandbox result or raise an injected error."""
 
@@ -128,6 +138,21 @@ def test_default_workspace_root_uses_uid_scoped_temp_dir(
     )
 
 
+def test_default_workspace_root_falls_back_to_pid_scoped_temp_dir(
+    monkeypatch,
+) -> None:
+    """The last-resort fallback should avoid a shared temp directory name."""
+    monkeypatch.delenv(DEFAULT_WORKSPACE_ROOT_ENV_VAR, raising=False)
+    monkeypatch.delenv("USER", raising=False)
+    monkeypatch.delenv("USERNAME", raising=False)
+    monkeypatch.setattr(codex_worker_module.os, "getuid", None, raising=False)
+    monkeypatch.setattr(codex_worker_module.os, "getpid", lambda: 31337)
+
+    assert _default_workspace_root() == (
+        Path(tempfile.gettempdir()) / "code-agent-workspaces-pid-31337"
+    )
+
+
 def test_build_test_result_details_prefers_stderr_on_failure() -> None:
     """Failure summaries should surface stderr before stdout."""
     details = _build_test_result_details(
@@ -188,6 +213,29 @@ def test_codex_worker_masks_repo_url_in_logs_and_context(
     context_path = workspace.workspace_path / ".code-agent" / "codex_worker_context.json"
     context = json.loads(context_path.read_text(encoding="utf-8"))
     assert context["repo_url"] == "https://****@github.com/example/repo.git"
+
+
+def test_codex_worker_handles_workspace_permission_error() -> None:
+    """Workspace-permission failures should become structured worker errors."""
+    worker = CodexWorker(
+        workspace_manager=RaisingWorkspaceManager(PermissionError("permission denied")),
+        sandbox_runner=FakeSandboxRunner(),
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-41",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Summarize the repo",
+            )
+        )
+    )
+
+    assert result.status == "error"
+    assert result.summary == ("CodexWorker failed to provision a workspace: permission denied")
+    assert result.next_action_hint == "inspect_worker_configuration"
 
 
 def test_codex_worker_maps_sandbox_result_into_worker_contract(tmp_path: Path) -> None:
@@ -315,3 +363,36 @@ def test_codex_worker_failure_result_includes_stderr_details(tmp_path: Path) -> 
     assert result.test_results[0].details == (
         "STDERR:\nTraceback: boom\n\nSTDOUT:\npartial progress"
     )
+
+
+def test_codex_worker_rejects_unserializable_execution_context(tmp_path: Path) -> None:
+    """Unsupported context values should fail explicitly instead of being stringified."""
+    workspace = _workspace_handle(tmp_path)
+    worker = CodexWorker(
+        workspace_manager=FakeWorkspaceManager(workspace),
+        sandbox_runner=FakeSandboxRunner(),
+    )
+
+    class Unserializable:
+        pass
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-41",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Summarize the repo",
+                memory_context={"project": [Unserializable()]},
+            )
+        )
+    )
+
+    assert result.status == "error"
+    assert result.summary == (
+        "CodexWorker failed to serialize the sandbox execution context: "
+        "memory_context.project[0] contains unsupported value of type Unserializable."
+    )
+    assert result.next_action_hint == "inspect_worker_configuration"
+    assert result.artifacts[0].artifact_type == "workspace"
+    assert result.artifacts[0].uri == str(workspace.workspace_path)
