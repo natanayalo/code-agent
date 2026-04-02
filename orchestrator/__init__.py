@@ -3,7 +3,6 @@
 from orchestrator.graph import ORCHESTRATOR_NODE_SEQUENCE, build_orchestrator_graph
 from orchestrator.state import (
     ApprovalCheckpoint,
-    ArtifactReference,
     MemoryContext,
     MemoryEntry,
     OrchestratorState,
@@ -11,12 +10,10 @@ from orchestrator.state import (
     RouteDecision,
     SessionRef,
     TaskRequest,
-    TestResult,
-    WorkerCommand,
     WorkerDispatch,
-    WorkerResult,
     WorkflowStep,
 )
+from workers import ArtifactReference, TestResult, WorkerCommand, WorkerResult
 
 __all__ = [
     "ApprovalCheckpoint",

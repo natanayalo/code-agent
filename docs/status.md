@@ -25,10 +25,10 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-030 Create workspace manager
 - T-031 Add Docker sandbox runner
 - T-032 Add artifact capture
+- T-040 Define worker interface
 
 ## Next
 
-- T-040 Define worker interface
 - T-041 Implement CodexWorker or ClaudeWorker
 - Architecture review checkpoint (after T-041): validate worker interface output and orchestrator state schema under real execution
 - T-042 Add baseline worker timeout/cancel handling
