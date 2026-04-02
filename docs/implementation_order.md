@@ -15,22 +15,34 @@ LangGraph workflow skeleton with fake worker
 Checkpoint persistence and approval interrupts
 
 ## Step 5
-Sandbox workspace and artifact capture
+Sandbox workspace and artifact capture baseline (through T-032)
 
 ## Step 6
-First real coding worker
+First real worker interface and implementation (T-040/T-041)
 
 ## Step 7
-Webhook + Telegram ingress
+Architecture review checkpoint after T-041
+- Verify real worker output matches the Worker interface contract.
+- Verify orchestrator state schema holds under real execution paths.
+- Document mismatches before expanding scope.
 
 ## Step 8
-Memory v1
+Baseline worker timeout handling + Vertical Slice E2E (T-042, T-044): minimal HTTP submit path + real curl -> HTTP submit -> orchestrator -> real worker -> real workspace -> DB -> task_id/status
 
 ## Step 9
-Second worker and routing
+Telegram ingress and generic webhook adapters (T-050 to T-053) on top of the existing HTTP path
 
 ## Step 10
-Tools, observability, hardening
+Sandbox hardening (T-054) with enforced destructive-action approval gate
+
+## Step 11
+Memory integration loop (T-060 to T-064): load_memory -> execute -> persist_learnings
+
+## Step 12
+Structured run observability and second worker routing (T-043, T-070+)
+
+## Step 13
+Tools, observability, and remaining hardening
 
 ## Rule
 

@@ -128,30 +128,53 @@ Acceptance:
 Pick one first and integrate with real task execution.
 
 Acceptance:
-- toy repo task succeeds end-to-end
+- real worker executes one toy repo task through the shared worker interface
+- worker returns a contract-compliant result to the orchestrator
 
-### T-042 Add worker timeout/cancel handling
-Support max runtime and cancellation.
-
-Acceptance:
-- timed-out task fails safely
-- workspace/logs preserved
-
-### T-043 Add structured run logs
-Store worker run metadata and output summary.
-
-Acceptance:
-- run details visible in DB/logs
+Architecture review checkpoint (non-milestone, after T-041):
+- verify real worker outputs conform to the worker interface contract
+- verify orchestrator state schema survives real execution paths
+- document any interface/state mismatches before continuing
 
 ---
 
-## Milestone 5 - Message ingress
+## Milestone 5 - Vertical Slice E2E
 
-### T-050 Add generic webhook endpoint
-Accept JSON task payload and create task/session.
+### T-042 Add baseline worker timeout/cancel handling
+Add the minimum timeout and cancellation behavior required so the first real worker execution path cannot hang indefinitely.
 
 Acceptance:
-- posting webhook creates a task
+- hung worker or sandbox execution fails safely within a configured timeout
+- timeout/cancel failure is surfaced back to the orchestrator without blocking the run forever
+- workspace/logs are preserved for debugging after timeout
+
+### T-044 Run one real orchestrator-to-worker vertical slice
+Execute one real task submitted via curl, routed through orchestrator, run by the real worker in a real workspace, with results persisted and returned.
+
+Scope notes:
+- includes the minimal HTTP task submission endpoint needed for curl-based validation
+- includes persistence wiring for final result, worker run, and captured artifacts
+- builds on the baseline timeout/cancel handling from T-042
+- Telegram is explicitly out of scope for this milestone
+- hardcoded repo URL and task text are acceptable
+- no mocks or fake worker results
+
+Acceptance:
+- `curl` submission reaches the minimal HTTP task endpoint and starts a real run
+- orchestrator routes to the implemented real worker
+- worker executes in a real workspace and returns real output
+- final result and run artifacts are persisted to DB
+- API returns a task identifier and initial status for the asynchronous run
+
+---
+
+## Milestone 6 - Telegram ingress (minimal real flow)
+
+### T-050 Add generic webhook adapter
+Accept JSON webhook payloads and translate them onto the existing HTTP task submission path.
+
+Acceptance:
+- posting a webhook payload creates a task through the existing HTTP path
 
 ### T-051 Add Telegram webhook adapter
 Receive Telegram messages and map them to sessions.
@@ -171,9 +194,28 @@ Prevent duplicate webhook deliveries from creating duplicate tasks.
 Acceptance:
 - repeated delivery is idempotent
 
+Acceptance for milestone completion:
+- one `/task` command from Telegram is accepted by the bot
+- Telegram task is submitted to the existing HTTP task path
+- chat receives at least one progress update and one final result from the real flow
+
 ---
 
-## Milestone 6 - Memory v1
+## Milestone 7 - Sandbox hardening
+
+### T-054 Enforce sandbox execution boundary and destructive-action approval gate
+Harden execution so one real command runs only inside the sandbox with complete artifact capture and approval interrupts for destructive actions.
+
+Acceptance:
+- one real command is executed in sandbox (not host process execution)
+- stdout/stderr, changed files, and diff-summary artifacts are captured and persisted
+- destructive command attempts hit the approval gate before execution
+- approval pause/resume path is verified end-to-end
+- milestone is only done when all checks pass without bypass flags
+
+---
+
+## Milestone 8 - Memory integration
 
 ### T-060 Add personal memory store
 Store user preferences and approval/routing defaults.
@@ -199,9 +241,26 @@ Inspect and edit memory entries manually.
 Acceptance:
 - memory can be listed and modified
 
+### T-064 Wire load_memory → execute → persist_learnings in orchestrator
+Run the full memory loop on a real task execution path with structured records.
+
+Acceptance:
+- orchestrator loads structured memory before dispatch on a real task
+- execution persists structured learnings back to memory stores
+- stored memory is inspectable and retrievable via repositories/endpoints
+- no opaque blob-only memory payloads are introduced
+
 ---
 
-## Milestone 7 - Second worker + routing
+## Milestone 9 - Structured run observability + second worker routing
+
+### T-043 Add structured run logs
+Expand worker run metadata and output summaries beyond the baseline persistence required by T-044.
+
+Acceptance:
+- task run records include session_id, task_id, chosen worker, route reason, workspace id, start/end timestamps, final status, changed files count, and artifact list
+- sandbox command records include command, exit code, duration, and stdout/stderr artifact locations
+- structured run summaries are queryable in DB/logs without relying only on free-form text blobs
 
 ### T-070 Implement second worker adapter
 Add remaining worker so both Claude and Codex are supported.
@@ -223,7 +282,7 @@ Acceptance:
 
 ---
 
-## Milestone 8 - Tools
+## Milestone 10 - Tools
 
 ### T-080 Add git utility wrapper
 Expose git status, diff, branch, commit helpers.
@@ -251,7 +310,7 @@ Acceptance:
 
 ---
 
-## Milestone 9 - Observability + replay
+## Milestone 11 - Observability + replay
 
 ### T-090 Add task timeline
 Track state transitions and important events.
@@ -273,7 +332,7 @@ Acceptance:
 
 ---
 
-## Milestone 10 - Hardening
+## Milestone 12 - Hardening
 
 ### T-100 Secret scoping
 Inject only minimum required secrets per run.
