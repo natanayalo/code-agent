@@ -31,16 +31,20 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 5. Add or update tests in the same slice.
 6. Run the minimal checks and tests that cover the changed behavior, including `pre-commit` and the relevant `pytest` checks. If a command needs approval or is blocked, request approval or report the blocker clearly.
 7. Create or switch to a focused task branch before publishing work. Prefer `task/<task-id>-<short-slug>` when a task ID exists; otherwise use `task/<short-slug>`.
-8. Stage only the task files, create a specific commit, and push the branch when the user wants the slice published.
-9. Update `README.md` or other nearby instructions when local workflow, verification, or CI/CD behavior changes.
-10. Call out any manual external follow-up that cannot be enforced from repo code, then summarize what changed, what was verified, and what was deferred.
+8. Update `docs/status.md` before wrapping up:
+   - move a finished task slice out of `Next` or `In Progress`
+   - add it to `Done` with the PR number once the work is published
+   - leave the task in `In Progress` only when the slice is still actively unfinished or unpublished
+9. Stage only the task files, create a specific commit, and push the branch when the user wants the slice published.
+10. Update `README.md` or other nearby instructions when local workflow, verification, or CI/CD behavior changes.
+11. Call out any manual external follow-up that cannot be enforced from repo code, then summarize what changed, what was verified, and what was deferred.
 
 ## Scope guardrails
 
 - Prefer small, reviewable diffs.
 - Do not absorb adjacent cleanup unless it is required for correctness.
 - If review or design feedback expands scope, track a follow-up instead of silently widening the task.
-- Update `docs/status.md` when task progress materially changes.
+- Update `docs/status.md` when task progress materially changes, and explicitly move finished published tasks into `Done`.
 - Do not describe branch protection or similar external controls as enforced unless the required
   GitHub or platform settings are also called out.
 - Keep commits focused and do not stage unrelated changes.
