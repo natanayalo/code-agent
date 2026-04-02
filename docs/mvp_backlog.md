@@ -125,10 +125,11 @@ Acceptance:
 - orchestrator can call fake worker through interface
 
 ### T-041 Implement CodexWorker or ClaudeWorker
-Pick one first and integrate with real task execution.
+Pick one first and integrate with real task execution through the shared async worker contract.
 
 Acceptance:
-- real worker executes one toy repo task through the shared worker interface
+- real worker executes one toy repo task through the shared async worker interface
+- orchestrator awaits worker execution through the shared worker contract
 - worker returns a contract-compliant result to the orchestrator
 
 Architecture review checkpoint (non-milestone, after T-041):

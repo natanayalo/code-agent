@@ -29,7 +29,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Next
 
-- T-041 Implement CodexWorker or ClaudeWorker
+- T-041 Implement CodexWorker or ClaudeWorker through the shared async worker contract
 - Architecture review checkpoint (after T-041): validate worker interface output and orchestrator state schema under real execution
 - T-042 Add baseline worker timeout/cancel handling
 - T-044 Run one real orchestrator-to-worker vertical slice, including the minimal HTTP submit path and DB persistence wiring
