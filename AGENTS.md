@@ -245,7 +245,7 @@ Before merging:
 Priority order:
 1. T-032 artifact capture baseline
 2. T-040/T-041 first worker interface + implementation
-3. T-042 + Vertical Slice E2E milestone (timeout-safe real curl → orchestrator → worker → workspace → DB → response)
+3. T-042 + Vertical Slice E2E milestone (timeout-safe real curl → HTTP submit → orchestrator → worker → workspace → DB → task_id/status)
 4. Telegram ingress milestone (single `/task` command through real flow)
 5. Sandbox hardening milestone (isolated execution + artifact capture + enforced destructive-action approval gate)
 6. Memory integration milestone (load_memory → execute → persist_learnings with structured, inspectable records)

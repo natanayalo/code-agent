@@ -164,7 +164,7 @@ Acceptance:
 - orchestrator routes to the implemented real worker
 - worker executes in a real workspace and returns real output
 - final result and run artifacts are persisted to DB
-- API returns the real final result payload
+- API returns a task identifier and initial status for the asynchronous run
 
 ---
 

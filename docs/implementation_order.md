@@ -27,7 +27,7 @@ Architecture review checkpoint after T-041
 - Document mismatches before expanding scope.
 
 ## Step 8
-Baseline worker timeout handling + Vertical Slice E2E (T-042, T-044): minimal HTTP submit path + real curl -> orchestrator -> real worker -> real workspace -> DB -> response
+Baseline worker timeout handling + Vertical Slice E2E (T-042, T-044): minimal HTTP submit path + real curl -> HTTP submit -> orchestrator -> real worker -> real workspace -> DB -> task_id/status
 
 ## Step 9
 Telegram ingress and generic webhook adapters (T-050 to T-053) on top of the existing HTTP path
