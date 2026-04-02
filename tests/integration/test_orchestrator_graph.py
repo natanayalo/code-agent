@@ -8,12 +8,35 @@ from langgraph.types import Command
 
 from orchestrator import OrchestratorState, WorkerResult, build_orchestrator_graph
 from orchestrator.checkpoints import create_sqlite_checkpointer
+from workers import Worker, WorkerRequest
+
+
+class StaticWorker(Worker):
+    """Test worker that returns a predefined result and records requests."""
+
+    def __init__(self, result: WorkerResult) -> None:
+        self.result = result
+        self.requests: list[WorkerRequest] = []
+
+    def run(self, request: WorkerRequest) -> WorkerResult:
+        self.requests.append(request)
+        return self.result
+
+
+class UnexpectedWorker(Worker):
+    """Test worker that should never be invoked."""
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+    def run(self, request: WorkerRequest) -> WorkerResult:
+        raise AssertionError(self.message)
 
 
 def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
     """The compiled graph should complete the documented happy-path node sequence."""
-    graph = build_orchestrator_graph(
-        worker_result_provider=lambda state: WorkerResult(
+    worker = StaticWorker(
+        WorkerResult(
             status="success",
             commands_run=[],
             files_changed=["orchestrator/graph.py"],
@@ -23,6 +46,7 @@ def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
             summary=None,
         )
     )
+    graph = build_orchestrator_graph(worker=worker)
 
     raw_output = graph.invoke(
         {
@@ -43,6 +67,10 @@ def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
     assert state.approval.required is False
     assert state.approval.status == "not_required"
     assert state.dispatch.worker_type == "codex"
+    assert len(worker.requests) == 1
+    assert worker.requests[0].task_text == "Add generic webhook endpoint"
+    assert worker.requests[0].repo_url == "https://github.com/natanayalo/code-agent"
+    assert worker.requests[0].branch == "master"
     assert state.result is not None
     assert state.result.status == "success"
     assert state.result.summary == "codex finished with status success"
@@ -75,12 +103,11 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
         }
     }
 
-    def unexpected_worker_result(_state: OrchestratorState) -> WorkerResult:
-        raise AssertionError("await_result should not execute before resume.")
+    unexpected_worker = UnexpectedWorker("await_result should not execute before resume.")
 
     with create_sqlite_checkpointer(checkpoint_path) as checkpointer:
         interrupted_graph = build_orchestrator_graph(
-            worker_result_provider=unexpected_worker_result,
+            worker=unexpected_worker,
             checkpointer=checkpointer,
             interrupt_before=["await_result"],
         )
@@ -102,17 +129,20 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
         "worker dispatched",
     ]
 
+    resumed_worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=["orchestrator/graph.py"],
+            test_results=[{"name": "checkpoint-resume", "status": "passed"}],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary=None,
+        )
+    )
     with create_sqlite_checkpointer(checkpoint_path) as checkpointer:
         resumed_graph = build_orchestrator_graph(
-            worker_result_provider=lambda _state: WorkerResult(
-                status="success",
-                commands_run=[],
-                files_changed=["orchestrator/graph.py"],
-                test_results=[{"name": "checkpoint-resume", "status": "passed"}],
-                artifacts=[],
-                next_action_hint="persist_memory",
-                summary=None,
-            ),
+            worker=resumed_worker,
             checkpointer=checkpointer,
         )
 
@@ -129,6 +159,8 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
     assert state.route.chosen_worker == "codex"
     assert state.approval.status == "not_required"
     assert state.dispatch.worker_type == "codex"
+    assert len(resumed_worker.requests) == 1
+    assert resumed_worker.requests[0].task_text == "Add checkpoint persistence"
     assert state.result is not None
     assert state.result.status == "success"
     assert state.result.summary == "codex finished with status success"
@@ -166,17 +198,20 @@ def test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly(
         }
     }
 
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=["sandbox/workspace.py"],
+            test_results=[{"name": "approval-resume", "status": "passed"}],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary=None,
+        )
+    )
     with create_sqlite_checkpointer(checkpoint_path) as checkpointer:
         graph = build_orchestrator_graph(
-            worker_result_provider=lambda _state: WorkerResult(
-                status="success",
-                commands_run=[],
-                files_changed=["sandbox/workspace.py"],
-                test_results=[{"name": "approval-resume", "status": "passed"}],
-                artifacts=[],
-                next_action_hint="persist_memory",
-                summary=None,
-            ),
+            worker=worker,
             checkpointer=checkpointer,
         )
 
@@ -209,6 +244,8 @@ def test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly(
     assert state.approval.required is True
     assert state.approval.status == "approved"
     assert state.dispatch.worker_type == "codex"
+    assert len(worker.requests) == 1
+    assert worker.requests[0].task_text == "Delete files from the repo workspace"
     assert state.result is not None
     assert state.result.status == "success"
     assert state.result.test_results[0].name == "approval-resume"
@@ -241,12 +278,11 @@ def test_orchestrator_graph_stops_when_approval_is_rejected(tmp_path: Path) -> N
         }
     }
 
-    def unexpected_worker_result(_state: OrchestratorState) -> WorkerResult:
-        raise AssertionError("dispatch should not run after approval is rejected.")
+    unexpected_worker = UnexpectedWorker("dispatch should not run after approval is rejected.")
 
     with create_sqlite_checkpointer(checkpoint_path) as checkpointer:
         graph = build_orchestrator_graph(
-            worker_result_provider=unexpected_worker_result,
+            worker=unexpected_worker,
             checkpointer=checkpointer,
         )
 

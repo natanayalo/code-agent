@@ -14,22 +14,25 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-002 Add local infrastructure. PR: [#5](https://github.com/natanayalo/code-agent/pull/5)
 - T-010 Add DB models. PR: [#6](https://github.com/natanayalo/code-agent/pull/6)
 - T-011 Add repository layer. PR: [#11](https://github.com/natanayalo/code-agent/pull/11)
+- T-012 Define orchestrator state schema. PR: [#12](https://github.com/natanayalo/code-agent/pull/12)
+- T-020 Build LangGraph workflow skeleton. PR: [#13](https://github.com/natanayalo/code-agent/pull/13)
 - T-013 Normalize persistence enums and constrained value fields. PR: [#14](https://github.com/natanayalo/code-agent/pull/14)
+- T-021 Add checkpoint persistence. PR: [#15](https://github.com/natanayalo/code-agent/pull/15)
+- T-022 Add approval interrupt node. PR: [#16](https://github.com/natanayalo/code-agent/pull/16)
+- T-030 Create workspace manager. PR: [#17](https://github.com/natanayalo/code-agent/pull/17)
+- T-031 Add Docker sandbox runner. PR: [#18](https://github.com/natanayalo/code-agent/pull/18)
+- CI validation hardening. PR: [#19](https://github.com/natanayalo/code-agent/pull/19)
+- T-032 Add artifact capture. PR: [#20](https://github.com/natanayalo/code-agent/pull/20)
+- Implementation plan critical-path refinement. PR: [#21](https://github.com/natanayalo/code-agent/pull/21)
+- T-040 Define worker interface. PR: [#22](https://github.com/natanayalo/code-agent/pull/22)
 
 ## In Progress
 
-- T-012 Define orchestrator state schema
-- T-020 Build LangGraph workflow skeleton
-- T-021 Add checkpoint persistence
-- T-022 Add approval interrupt node
-- T-030 Create workspace manager
-- T-031 Add Docker sandbox runner
-- T-032 Add artifact capture
+- None
 
 ## Next
 
-- T-040 Define worker interface
-- T-041 Implement CodexWorker or ClaudeWorker
+- T-041 Implement CodexWorker or ClaudeWorker through the shared async worker contract
 - Architecture review checkpoint (after T-041): validate worker interface output and orchestrator state schema under real execution
 - T-042 Add baseline worker timeout/cancel handling
 - T-044 Run one real orchestrator-to-worker vertical slice, including the minimal HTTP submit path and DB persistence wiring
@@ -44,7 +47,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order: T-032 → T-040/T-041 → architecture checkpoint → T-042 timeout/cancel baseline → T-044 vertical slice with minimal HTTP submit path and DB persistence → Telegram ingress/adapters → T-054 sandbox hardening → T-060..T-064 memory integration → T-043 structured run observability → T-070+ second worker.
+- Current target order: T-041 → architecture checkpoint → T-042 timeout/cancel baseline → T-044 vertical slice with minimal HTTP submit path and DB persistence → Telegram ingress/adapters → T-054 sandbox hardening → T-060..T-064 memory integration → T-043 structured run observability → T-070+ second worker.
 - CI now validates every push, including merges to `master`, avoiding duplicate pull request branch runs while enforcing a 90% branch-coverage floor in `pytest`.
 - Protected-branch enforcement for `master` still depends on GitHub branch protection settings and required status checks.
 - T-021 adds durable LangGraph checkpointing without yet wiring orchestrator state to the app layer.

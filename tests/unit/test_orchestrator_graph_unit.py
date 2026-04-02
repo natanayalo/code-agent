@@ -2,6 +2,7 @@
 
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.graph import (
+    _build_worker_request,
     _classify_task_kind,
     _coerce_approval_decision,
     _default_worker_result_provider,
@@ -12,6 +13,7 @@ from orchestrator.graph import (
     summarize_result,
 )
 from orchestrator.state import OrchestratorState
+from workers import WorkerRequest
 
 
 def test_ensure_state_from_dict():
@@ -50,9 +52,36 @@ def test_coerce_approval_decision():
 
 
 def test_default_worker_result_provider():
-    state = OrchestratorState.model_validate({"task": {"task_text": "demo"}})
-    res = _default_worker_result_provider(state)
+    request = WorkerRequest(task_text="demo")
+    res = _default_worker_result_provider(request)
     assert res.status == "success"
+
+
+def test_build_worker_request_from_state():
+    state = OrchestratorState.model_validate(
+        {
+            "session": {
+                "session_id": "session-1",
+                "user_id": "user-1",
+                "channel": "telegram",
+                "external_thread_id": "thread-1",
+            },
+            "task": {
+                "task_text": "Add worker interface",
+                "repo_url": "https://github.com/natanayalo/code-agent",
+                "branch": "task/t-040-worker-interface",
+                "constraints": {"requires_approval": False},
+                "budget": {"max_minutes": 15},
+            },
+        }
+    )
+    request = _build_worker_request(state)
+    assert request.session_id == "session-1"
+    assert request.repo_url == "https://github.com/natanayalo/code-agent"
+    assert request.branch == "task/t-040-worker-interface"
+    assert request.task_text == "Add worker interface"
+    assert request.constraints == {"requires_approval": False}
+    assert request.budget == {"max_minutes": 15}
 
 
 def test_choose_worker_override():

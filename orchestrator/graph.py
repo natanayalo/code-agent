@@ -16,10 +16,8 @@ from orchestrator.state import (
     OrchestratorState,
     RouteDecision,
     WorkerDispatch,
-    WorkerResult,
 )
-
-WorkerResultProvider = Callable[[OrchestratorState], WorkerResult]
+from workers import Worker, WorkerRequest, WorkerResult
 
 ORCHESTRATOR_NODE_SEQUENCE = (
     "ingest_task",
@@ -144,7 +142,20 @@ def _route_after_await_approval(state_input: OrchestratorState) -> str:
     return "dispatch_job" if state.approval.status == "approved" else "summarize_result"
 
 
-def _default_worker_result_provider(state: OrchestratorState) -> WorkerResult:
+def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
+    """Build the typed worker request from orchestrator state."""
+    return WorkerRequest(
+        session_id=state.session.session_id if state.session is not None else None,
+        repo_url=state.task.repo_url,
+        branch=state.task.branch,
+        task_text=state.normalized_task_text or state.task.task_text,
+        memory_context=state.memory.model_dump(),
+        constraints=dict(state.task.constraints),
+        budget=dict(state.task.budget),
+    )
+
+
+def _default_worker_result_provider(request: WorkerRequest) -> WorkerResult:
     """Return a fake successful worker result for the skeleton happy path."""
     return WorkerResult(
         status="success",
@@ -153,8 +164,15 @@ def _default_worker_result_provider(state: OrchestratorState) -> WorkerResult:
         test_results=[],
         artifacts=[],
         next_action_hint="persist_memory",
-        summary=f"Fake worker completed: {state.task.task_text}",
+        summary=f"Fake worker completed: {request.task_text}",
     )
+
+
+class _DefaultFakeWorker(Worker):
+    """Fallback worker used until a real provider-specific adapter exists."""
+
+    def run(self, request: WorkerRequest) -> WorkerResult:
+        return _default_worker_result_provider(request)
 
 
 def ingest_task(state_input: OrchestratorState) -> dict[str, Any]:
@@ -296,14 +314,15 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
 
 
 def build_await_result_node(
-    worker_result_provider: WorkerResultProvider | None = None,
+    worker: Worker | None = None,
 ) -> Callable[[OrchestratorState], dict[str, Any]]:
-    """Create the await-result node around a fake or injected worker provider."""
-    result_provider = worker_result_provider or _default_worker_result_provider
+    """Create the await-result node around a fake or injected worker."""
+    bound_worker = worker or _DefaultFakeWorker()
 
     def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
-        result = result_provider(state)
+        request = _build_worker_request(state)
+        result = bound_worker.run(request)
         return {
             "current_step": "await_result",
             "result": result.model_dump(),
@@ -353,7 +372,7 @@ def persist_memory(state_input: OrchestratorState) -> dict[str, Any]:
 
 def build_orchestrator_graph(
     *,
-    worker_result_provider: WorkerResultProvider | None = None,
+    worker: Worker | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
     interrupt_before: Literal["*"] | list[str] | None = None,
     interrupt_after: Literal["*"] | list[str] | None = None,
@@ -369,7 +388,7 @@ def build_orchestrator_graph(
     builder.add_node("dispatch_job", RunnableLambda(dispatch_job))
     builder.add_node(
         "await_result",
-        RunnableLambda(build_await_result_node(worker_result_provider)),
+        RunnableLambda(build_await_result_node(worker)),
     )
     builder.add_node("summarize_result", RunnableLambda(summarize_result))
     builder.add_node("persist_memory", RunnableLambda(persist_memory))

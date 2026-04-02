@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from workers import WorkerResult
+
 WorkerType = Literal["claude", "codex"]
 MemoryCategory = Literal["personal", "project"]
 WorkflowStep = Literal[
@@ -91,42 +93,6 @@ class WorkerDispatch(OrchestratorModel):
     run_id: str | None = None
     worker_type: WorkerType | None = None
     workspace_id: str | None = None
-
-
-class WorkerCommand(OrchestratorModel):
-    """A command reported by a worker result."""
-
-    command: str
-    exit_code: int | None = None
-    duration_seconds: float | None = Field(default=None, ge=0)
-
-
-class TestResult(OrchestratorModel):
-    """A summarized test result emitted by a worker."""
-
-    name: str
-    status: Literal["passed", "failed", "skipped", "error"]
-    details: str | None = None
-
-
-class ArtifactReference(OrchestratorModel):
-    """A summarized artifact emitted by a worker run."""
-
-    name: str
-    uri: str
-    artifact_type: str | None = None
-
-
-class WorkerResult(OrchestratorModel):
-    """Structured result returned from a coding worker."""
-
-    status: Literal["success", "failure", "error"]
-    summary: str | None = None
-    commands_run: list[WorkerCommand] = Field(default_factory=list)
-    files_changed: list[str] = Field(default_factory=list)
-    test_results: list[TestResult] = Field(default_factory=list)
-    artifacts: list[ArtifactReference] = Field(default_factory=list)
-    next_action_hint: str | None = None
 
 
 class PersistMemoryEntry(OrchestratorModel):
