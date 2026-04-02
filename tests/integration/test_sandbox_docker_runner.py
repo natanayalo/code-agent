@@ -94,6 +94,22 @@ def test_docker_sandbox_runner_executes_command_in_container(tmp_path: Path) -> 
     assert result.exit_code == 0
     assert result.stderr == ""
     assert result.stdout.strip() == "sandbox runner"
+    assert result.files_changed == ["docker-output.txt"]
+    artifact_paths = {
+        artifact.name: workspace.workspace_path / artifact.uri for artifact in result.artifacts
+    }
+    assert set(artifact_paths) == {
+        "stdout.log",
+        "stderr.log",
+        "changed-files.txt",
+        "diff-summary.txt",
+    }
+    assert artifact_paths["stdout.log"].read_text(encoding="utf-8").strip() == "sandbox runner"
+    assert artifact_paths["stderr.log"].read_text(encoding="utf-8") == ""
+    assert artifact_paths["changed-files.txt"].read_text(encoding="utf-8") == "docker-output.txt\n"
+    diff_summary = artifact_paths["diff-summary.txt"].read_text(encoding="utf-8")
+    assert "Untracked files:" in diff_summary
+    assert "- docker-output.txt" in diff_summary
     assert (workspace.repo_path / "docker-output.txt").read_text(encoding="utf-8") == (
         "sandbox runner\n"
     )
