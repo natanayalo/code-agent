@@ -24,10 +24,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-022 Add approval interrupt node
 - T-030 Create workspace manager
 - T-031 Add Docker sandbox runner
+- T-032 Add artifact capture
 
 ## Next
 
-- T-032 Add artifact capture
+- T-040 Define worker interface
 
 ## Blocked
 
@@ -42,3 +43,5 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-022 adds a destructive-action approval pause/resume path before worker dispatch.
 - T-030 adds per-task workspace provisioning, repo clone, and cleanup-policy scaffolding.
 - T-031 adds Docker-based command execution with mounted workspaces and captured stdout/stderr.
+- T-032 writes per-command stdout/stderr logs plus changed-file and diff-summary artifacts into
+  each sandbox workspace for later worker-run persistence.

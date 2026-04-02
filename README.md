@@ -21,6 +21,8 @@ The repo currently contains:
 - a typed orchestrator state schema for future workflow execution
 - a LangGraph workflow skeleton that runs the happy path with a fake worker result
 - SQLite-backed checkpoint persistence helpers for durable LangGraph workflow resume
+- sandbox command artifact capture for stdout/stderr logs, changed-file snapshots, and
+  diff summaries
 
 This slice intentionally does not include:
 - app DB wiring
@@ -129,7 +131,7 @@ The repo includes:
 
 ## Next Steps
 
-The next implementation targets after the local-infra slice are:
-- `T-022 Add approval interrupt node`
-- `T-030 Create workspace manager`
-- `T-031 Add Docker sandbox runner`
+The current implementation targets are:
+- `T-032 Add artifact capture`
+- `T-040 Define worker interface`
+- `T-041 Implement CodexWorker or ClaudeWorker`

@@ -5,6 +5,7 @@ from sandbox.runner import (
     DockerSandboxResult,
     DockerSandboxRunner,
     DockerSandboxRunnerError,
+    SandboxArtifact,
 )
 from sandbox.workspace import (
     WorkspaceCleanupPolicy,
@@ -19,6 +20,7 @@ __all__ = [
     "DockerSandboxResult",
     "DockerSandboxRunner",
     "DockerSandboxRunnerError",
+    "SandboxArtifact",
     "WorkspaceCleanupPolicy",
     "WorkspaceHandle",
     "WorkspaceManager",

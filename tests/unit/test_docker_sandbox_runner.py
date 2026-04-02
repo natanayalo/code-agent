@@ -19,16 +19,49 @@ from sandbox.runner import (
     DockerSandboxRunnerError,
     _build_container_name,
     _build_docker_run_command,
+    _parse_git_status_entries,
     _read_stream_bounded,
     _run_docker_command,
 )
 from sandbox.workspace import WorkspaceCleanupPolicy, WorkspaceHandle
 
 
-def _workspace_handle(tmp_path: Path) -> WorkspaceHandle:
+def _run_git(command: list[str], *, cwd: Path) -> str:
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip()
+
+
+def _initialize_repo(repo_path: Path) -> None:
+    _run_git(["git", "init", "--initial-branch", "main"], cwd=repo_path)
+    (repo_path / "README.md").write_text("sandbox runner\n", encoding="utf-8")
+    _run_git(["git", "add", "README.md"], cwd=repo_path)
+    _run_git(
+        [
+            "git",
+            "-c",
+            "user.name=Codex",
+            "-c",
+            "user.email=codex@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+        cwd=repo_path,
+    )
+
+
+def _workspace_handle(tmp_path: Path, *, initialize_git: bool = False) -> WorkspaceHandle:
     workspace_path = tmp_path / "workspace-task-31"
     repo_path = workspace_path / "repo"
     repo_path.mkdir(parents=True)
+    if initialize_git:
+        _initialize_repo(repo_path)
     return WorkspaceHandle(
         workspace_id="workspace-task-31",
         task_id="task-31",
@@ -184,7 +217,7 @@ def test_build_docker_run_command_skips_user_mapping_on_windows(
 def test_runner_returns_structured_result(tmp_path: Path) -> None:
     """A successful docker invocation should return captured stdout/stderr."""
     request = DockerSandboxCommand(
-        workspace=_workspace_handle(tmp_path),
+        workspace=_workspace_handle(tmp_path, initialize_git=True),
         command=["python3", "-c", "print('sandbox')"],
     )
 
@@ -206,12 +239,24 @@ def test_runner_returns_structured_result(tmp_path: Path) -> None:
     assert result.stdout == "sandbox\n"
     assert result.stderr == ""
     assert result.duration_seconds >= 0
+    assert result.files_changed == []
+
+    artifact_paths = {
+        artifact.name: request.workspace.workspace_path / artifact.uri
+        for artifact in result.artifacts
+    }
+    assert set(artifact_paths) == {"stdout.log", "stderr.log", "changed-files.txt"}
+    assert artifact_paths["stdout.log"].read_text(encoding="utf-8") == "sandbox\n"
+    assert artifact_paths["stderr.log"].read_text(encoding="utf-8") == ""
+    assert artifact_paths["changed-files.txt"].read_text(encoding="utf-8") == (
+        "No changed files detected.\n"
+    )
 
 
 def test_runner_uses_request_image_override(tmp_path: Path) -> None:
     """Per-command image overrides should win over the runner default."""
     request = DockerSandboxCommand(
-        workspace=_workspace_handle(tmp_path),
+        workspace=_workspace_handle(tmp_path, initialize_git=True),
         command=["sh", "-c", "echo ok"],
         image="busybox:1.36",
     )
@@ -233,6 +278,72 @@ def test_runner_uses_request_image_override(tmp_path: Path) -> None:
 
     assert result.image == "busybox:1.36"
     assert "busybox:1.36" in captured_command
+
+
+def test_runner_captures_changed_files_and_diff_summary(tmp_path: Path) -> None:
+    """Artifact capture should snapshot changed files and a diff summary after the run."""
+    workspace = _workspace_handle(tmp_path, initialize_git=True)
+    request = DockerSandboxCommand(
+        workspace=workspace,
+        command=["python3", "-c", "print('changed')"],
+    )
+
+    def fake_runner(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+        del command, timeout
+        (workspace.repo_path / "README.md").write_text("sandbox runner updated\n", encoding="utf-8")
+        (workspace.repo_path / "generated.txt").write_text("generated\n", encoding="utf-8")
+        return subprocess.CompletedProcess(
+            args=request.command,
+            returncode=0,
+            stdout="changed\n",
+            stderr="warning\n",
+        )
+
+    result = DockerSandboxRunner(command_runner=fake_runner).run(request)
+
+    assert set(result.files_changed) == {"README.md", "generated.txt"}
+
+    artifact_paths = {
+        artifact.name: workspace.workspace_path / artifact.uri for artifact in result.artifacts
+    }
+    assert set(artifact_paths) == {
+        "stdout.log",
+        "stderr.log",
+        "changed-files.txt",
+        "diff-summary.txt",
+    }
+    assert artifact_paths["stdout.log"].read_text(encoding="utf-8") == "changed\n"
+    assert artifact_paths["stderr.log"].read_text(encoding="utf-8") == "warning\n"
+    assert artifact_paths["changed-files.txt"].read_text(encoding="utf-8") in (
+        "README.md\ngenerated.txt\n",
+        "generated.txt\nREADME.md\n",
+    )
+    diff_summary = artifact_paths["diff-summary.txt"].read_text(encoding="utf-8")
+    assert "README.md | 2 +-" in diff_summary
+    assert "Untracked files:" in diff_summary
+    assert "- generated.txt" in diff_summary
+
+
+# ---------------------------------------------------------------------------
+# git status parsing
+# ---------------------------------------------------------------------------
+
+
+def test_parse_git_status_entries_handles_rename_and_untracked() -> None:
+    """Porcelain output should preserve the destination path for renames."""
+    output = "R  old-name.py\0new-name.py\0?? notes.txt\0"
+
+    assert _parse_git_status_entries(output) == [
+        ("R ", "new-name.py"),
+        ("??", "notes.txt"),
+    ]
+
+
+def test_parse_git_status_entries_falls_back_when_rename_target_is_missing() -> None:
+    """Malformed rename entries should keep the original path instead of crashing."""
+    output = "R  old-name.py\0"
+
+    assert _parse_git_status_entries(output) == [("R ", "old-name.py")]
 
 
 # ---------------------------------------------------------------------------
