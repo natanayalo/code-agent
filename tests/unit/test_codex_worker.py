@@ -178,7 +178,7 @@ def test_codex_worker_masks_repo_url_in_logs_and_context(
     assert getattr(workspace_request, "repo_url") == "https://token@github.com/example/repo.git"
 
     start_record = next(
-        record for record in caplog.records if record.message == "Starting Codex worker run"
+        record for record in caplog.records if record.getMessage() == "Starting Codex worker run"
     )
     assert getattr(start_record, "repo_url") == "https://****@github.com/example/repo.git"
 
