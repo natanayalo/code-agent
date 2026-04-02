@@ -13,7 +13,9 @@ from sandbox import (
 from workers import CodexWorker, WorkerRequest
 from workers.codex_worker import (
     DEFAULT_WORKSPACE_ROOT_ENV_VAR,
+    _build_test_result_details,
     _default_workspace_root,
+    _serialize_context,
 )
 
 
@@ -90,6 +92,25 @@ def test_default_workspace_root_supports_environment_override(
     assert _default_workspace_root() == Path("~/custom-codex-root").expanduser()
 
 
+def test_serialize_context_uses_compact_json() -> None:
+    """Context passed through env vars should avoid pretty-print padding."""
+    payload = _serialize_context({"project": [{"memory_key": "pitfall"}]})
+
+    assert payload == '{"project": [{"memory_key": "pitfall"}]}'
+    assert "\n" not in payload
+
+
+def test_build_test_result_details_prefers_stderr_on_failure() -> None:
+    """Failure summaries should surface stderr before stdout."""
+    details = _build_test_result_details(
+        exit_code=1,
+        stdout="partial progress\n",
+        stderr="Traceback: boom\n",
+    )
+
+    assert details == "STDERR:\nTraceback: boom\n\nSTDOUT:\npartial progress"
+
+
 def test_codex_worker_maps_sandbox_result_into_worker_contract(tmp_path: Path) -> None:
     """A successful sandbox run should be exposed through the shared worker contract."""
     workspace = _workspace_handle(tmp_path)
@@ -154,3 +175,39 @@ def test_codex_worker_maps_sandbox_result_into_worker_contract(tmp_path: Path) -
     assert script_path.exists()
     assert script_path.parent == (workspace.workspace_path / ".code-agent")
     assert not (workspace.repo_path / ".code-agent" / "codex_worker_task.py").exists()
+
+
+def test_codex_worker_failure_result_includes_stderr_details(tmp_path: Path) -> None:
+    """Failed toy task runs should expose stderr-rich details in the test result."""
+    workspace = _workspace_handle(tmp_path)
+    worker = CodexWorker(
+        workspace_manager=FakeWorkspaceManager(workspace),
+        sandbox_runner=FakeSandboxRunner(
+            result=DockerSandboxResult(
+                image="python:3.12-slim",
+                command=["python3", "/workspace/.code-agent/codex_worker_task.py"],
+                docker_command=["docker", "run", "python:3.12-slim"],
+                exit_code=1,
+                stdout="partial progress\n",
+                stderr="Traceback: boom\n",
+                duration_seconds=1.5,
+                files_changed=[],
+                artifacts=[],
+            )
+        ),
+    )
+
+    result = worker.run(
+        WorkerRequest(
+            session_id="session-41",
+            repo_url="https://example.com/repo.git",
+            branch="main",
+            task_text="Summarize the repo",
+        )
+    )
+
+    assert result.status == "failure"
+    assert result.test_results[0].status == "failed"
+    assert result.test_results[0].details == (
+        "STDERR:\nTraceback: boom\n\nSTDOUT:\npartial progress"
+    )

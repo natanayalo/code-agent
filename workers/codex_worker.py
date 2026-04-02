@@ -101,7 +101,27 @@ def _workspace_task_id(request: WorkerRequest) -> str:
 
 def _serialize_context(value: dict[str, object]) -> str:
     """Serialize worker context into an inspectable environment payload."""
-    return json.dumps(value, indent=2, sort_keys=True, default=str)
+    return json.dumps(value, sort_keys=True, default=str)
+
+
+def _build_test_result_details(
+    *,
+    exit_code: int,
+    stdout: str,
+    stderr: str,
+) -> str | None:
+    """Build a compact test-result detail message from sandbox output."""
+    normalized_stdout = stdout.strip()
+    normalized_stderr = stderr.strip()
+    if exit_code == 0:
+        return normalized_stdout or normalized_stderr or None
+
+    sections: list[str] = []
+    if normalized_stderr:
+        sections.append(f"STDERR:\n{normalized_stderr}")
+    if normalized_stdout:
+        sections.append(f"STDOUT:\n{normalized_stdout}")
+    return "\n\n".join(sections) or None
 
 
 def _workspace_artifacts(
@@ -276,7 +296,11 @@ class CodexWorker(Worker):
                 TestResult(
                     name="codex_worker_toy_task",
                     status="passed" if sandbox_result.exit_code == 0 else "failed",
-                    details=sandbox_result.stdout.strip() or sandbox_result.stderr.strip() or None,
+                    details=_build_test_result_details(
+                        exit_code=sandbox_result.exit_code,
+                        stdout=sandbox_result.stdout,
+                        stderr=sandbox_result.stderr,
+                    ),
                 )
             ],
             artifacts=_workspace_artifacts(workspace, sandbox_artifacts=sandbox_artifacts),
