@@ -258,7 +258,9 @@ Acceptance:
 Expand worker run metadata and output summaries beyond the baseline persistence required by T-044.
 
 Acceptance:
-- run details visible in DB/logs
+- task run records include session_id, task_id, chosen worker, route reason, workspace id, start/end timestamps, final status, changed files count, and artifact list
+- sandbox command records include command, exit code, duration, and stdout/stderr artifact locations
+- structured run summaries are queryable in DB/logs without relying only on free-form text blobs
 
 ### T-070 Implement second worker adapter
 Add remaining worker so both Claude and Codex are supported.
