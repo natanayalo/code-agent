@@ -23,12 +23,13 @@ The repo currently contains:
 - SQLite-backed checkpoint persistence helpers for durable LangGraph workflow resume
 - sandbox command artifact capture for stdout/stderr logs, changed-file snapshots, and
   diff summaries
+- an initial `CodexWorker` that provisions a real workspace, runs a deterministic toy repo
+  task in the sandbox, and returns a contract-compliant `WorkerResult`
 
 This slice intentionally does not include:
 - app DB wiring
-- worker implementations
-- real worker dispatch
-- sandbox execution logic
+- app-layer real worker dispatch wiring
+- worker-result persistence to the DB or reply layer
 - Telegram or webhook task handling
 
 ## Project Layout
@@ -132,6 +133,6 @@ The repo includes:
 ## Next Steps
 
 The current implementation targets are:
-- `T-032 Add artifact capture`
-- `T-040 Define worker interface`
-- `T-041 Implement CodexWorker or ClaudeWorker`
+- architecture checkpoint after `T-041`
+- `T-042 Add baseline worker timeout/cancel handling`
+- `T-044 Run one real orchestrator-to-worker vertical slice`

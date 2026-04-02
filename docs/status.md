@@ -28,11 +28,10 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-041 Implement `CodexWorker` through the shared worker contract (local slice, unpublished)
 
 ## Next
 
-- T-041 Implement CodexWorker or ClaudeWorker through the shared async worker contract
 - Architecture review checkpoint (after T-041): validate worker interface output and orchestrator state schema under real execution
 - T-042 Add baseline worker timeout/cancel handling
 - T-044 Run one real orchestrator-to-worker vertical slice, including the minimal HTTP submit path and DB persistence wiring
@@ -56,3 +55,5 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-031 adds Docker-based command execution with mounted workspaces and captured stdout/stderr.
 - T-032 writes per-command stdout/stderr logs plus changed-file and diff-summary artifacts into
   each sandbox workspace for later worker-run persistence.
+- The first local T-041 slice uses the existing synchronous `Worker.run(...)` contract; async
+  contract alignment should be reviewed explicitly during the post-T-041 architecture checkpoint.

@@ -8,9 +8,11 @@ from workers.base import (
     WorkerRequest,
     WorkerResult,
 )
+from workers.codex_worker import CodexWorker
 
 __all__ = [
     "ArtifactReference",
+    "CodexWorker",
     "TestResult",
     "Worker",
     "WorkerCommand",
