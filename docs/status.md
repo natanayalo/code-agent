@@ -29,6 +29,13 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 ## Next
 
 - T-040 Define worker interface
+- T-041 Implement CodexWorker or ClaudeWorker
+- Architecture review checkpoint (after T-041): validate worker interface output and orchestrator state schema under real execution
+- T-044 Run one real orchestrator-to-worker vertical slice, including the minimal HTTP submit path and DB persistence wiring
+- Milestone: Telegram ingress (T-050 to T-053)
+- T-054 Enforce sandbox execution boundary and destructive-action approval gate
+- Milestone: Memory integration (T-060 to T-064)
+- Milestone: second worker and routing (starts at T-070 after memory integration)
 
 ## Blocked
 
@@ -36,7 +43,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Milestone 1 close-out and Milestone 2 skeleton work are both active.
+- Current target order: T-032 → T-040/T-041 → architecture checkpoint → T-044 vertical slice with minimal HTTP submit path and DB persistence → Telegram ingress/adapters → T-054 sandbox hardening → T-060..T-064 memory integration → T-070+ second worker.
 - CI now validates every push, including merges to `master`, avoiding duplicate pull request branch runs while enforcing a 90% branch-coverage floor in `pytest`.
 - Protected-branch enforcement for `master` still depends on GitHub branch protection settings and required status checks.
 - T-021 adds durable LangGraph checkpointing without yet wiring orchestrator state to the app layer.

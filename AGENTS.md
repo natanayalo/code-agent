@@ -243,13 +243,13 @@ Before merging:
 ## Priorities
 
 Priority order:
-1. single end-to-end happy path
-2. safe isolation
-3. durable state
-4. useful logs
-5. second worker
-6. memory refinement
-7. more tools/channels
+1. T-032 artifact capture baseline
+2. T-040/T-041 first worker interface + implementation
+3. Vertical Slice E2E milestone (real curl → orchestrator → worker → workspace → DB → response)
+4. Telegram ingress milestone (single `/task` command through real flow)
+5. Sandbox hardening milestone (isolated execution + artifact capture + enforced destructive-action approval gate)
+6. Memory integration milestone (load_memory → execute → persist_learnings with structured, inspectable records)
+7. T-070+ second worker and routing
 
 ## Code style
 
