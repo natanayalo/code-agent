@@ -339,6 +339,13 @@ def test_parse_git_status_entries_handles_rename_and_untracked() -> None:
     ]
 
 
+def test_parse_git_status_entries_falls_back_when_rename_target_is_missing() -> None:
+    """Malformed rename entries should keep the original path instead of crashing."""
+    output = "R  old-name.py\0"
+
+    assert _parse_git_status_entries(output) == [("R ", "old-name.py")]
+
+
 # ---------------------------------------------------------------------------
 # _run_docker_command – Popen-based tests
 # ---------------------------------------------------------------------------

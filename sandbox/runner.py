@@ -401,27 +401,21 @@ def _write_text_artifact(
 def _parse_git_status_entries(status_output: str) -> list[tuple[str, str]]:
     """Parse `git status --porcelain=v1 -z` output into `(status, path)` tuples."""
     entries: list[tuple[str, str]] = []
-    tokens = status_output.split("\0")
-    index = 0
-
-    while index < len(tokens):
-        token = tokens[index]
+    tokens = iter(status_output.split("\0"))
+    for token in tokens:
         if not token:
-            index += 1
             continue
 
         status = token[:2]
         path = token[3:]
 
         if "R" in status or "C" in status:
-            next_index = index + 1
-            if next_index < len(tokens) and tokens[next_index]:
-                path = tokens[next_index]
-                index += 2
-            else:
-                index += 1
-        else:
-            index += 1
+            try:
+                new_path = next(tokens)
+                if new_path:
+                    path = new_path
+            except StopIteration:
+                pass
 
         entries.append((status, path))
 
