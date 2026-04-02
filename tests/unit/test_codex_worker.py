@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import tempfile
@@ -77,7 +78,7 @@ def test_codex_worker_requires_repo_url(tmp_path: Path) -> None:
     sandbox_runner = FakeSandboxRunner()
     worker = CodexWorker(workspace_manager=workspace_manager, sandbox_runner=sandbox_runner)
 
-    result = worker.run(WorkerRequest(task_text="Summarize the repo"))
+    result = asyncio.run(worker.run(WorkerRequest(task_text="Summarize the repo")))
 
     assert result.status == "error"
     assert result.summary == (
@@ -95,7 +96,7 @@ def test_codex_worker_rejects_blank_repo_url(tmp_path: Path) -> None:
     sandbox_runner = FakeSandboxRunner()
     worker = CodexWorker(workspace_manager=workspace_manager, sandbox_runner=sandbox_runner)
 
-    result = worker.run(WorkerRequest(task_text="Summarize the repo", repo_url="   "))
+    result = asyncio.run(worker.run(WorkerRequest(task_text="Summarize the repo", repo_url="   ")))
 
     assert result.status == "error"
     assert result.summary == (
@@ -165,12 +166,14 @@ def test_codex_worker_masks_repo_url_in_logs_and_context(
     worker = CodexWorker(workspace_manager=workspace_manager, sandbox_runner=sandbox_runner)
 
     with caplog.at_level(logging.INFO, logger="workers.codex_worker"):
-        worker.run(
-            WorkerRequest(
-                session_id="session-41",
-                repo_url="https://token@github.com/example/repo.git",
-                branch="main",
-                task_text="Summarize the repo",
+        asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-41",
+                    repo_url="https://token@github.com/example/repo.git",
+                    branch="main",
+                    task_text="Summarize the repo",
+                )
             )
         )
 
@@ -216,15 +219,17 @@ def test_codex_worker_maps_sandbox_result_into_worker_contract(tmp_path: Path) -
     )
     worker = CodexWorker(workspace_manager=workspace_manager, sandbox_runner=sandbox_runner)
 
-    result = worker.run(
-        WorkerRequest(
-            session_id="session-41",
-            repo_url="https://example.com/repo.git",
-            branch="main",
-            task_text="Summarize the repo",
-            memory_context={"project": [{"memory_key": "pitfall"}]},
-            constraints={"requires_approval": False},
-            budget={"max_minutes": 5},
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-41",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Summarize the repo",
+                memory_context={"project": [{"memory_key": "pitfall"}]},
+                constraints={"requires_approval": False},
+                budget={"max_minutes": 5},
+            )
         )
     )
 
@@ -294,12 +299,14 @@ def test_codex_worker_failure_result_includes_stderr_details(tmp_path: Path) -> 
         ),
     )
 
-    result = worker.run(
-        WorkerRequest(
-            session_id="session-41",
-            repo_url="https://example.com/repo.git",
-            branch="main",
-            task_text="Summarize the repo",
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-41",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Summarize the repo",
+            )
         )
     )
 

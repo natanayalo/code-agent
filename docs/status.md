@@ -28,7 +28,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- T-041 Implement `CodexWorker` through the shared worker contract (local slice, unpublished)
+- T-041 Implement `CodexWorker` through the shared async worker contract. PR: [#23](https://github.com/natanayalo/code-agent/pull/23)
 
 ## Next
 
@@ -55,5 +55,3 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-031 adds Docker-based command execution with mounted workspaces and captured stdout/stderr.
 - T-032 writes per-command stdout/stderr logs plus changed-file and diff-summary artifacts into
   each sandbox workspace for later worker-run persistence.
-- The first local T-041 slice uses the existing synchronous `Worker.run(...)` contract; async
-  contract alignment should be reviewed explicitly during the post-T-041 architecture checkpoint.

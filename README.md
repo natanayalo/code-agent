@@ -19,12 +19,13 @@ The repo currently contains:
 - initial SQLAlchemy models and Alembic migration scaffolding for Milestone 1
 - an initial repository layer for users, sessions, tasks, runs, and memory
 - a typed orchestrator state schema for future workflow execution
-- a LangGraph workflow skeleton that runs the happy path with a fake worker result
+- a LangGraph workflow skeleton that runs the happy path through the shared async worker contract
 - SQLite-backed checkpoint persistence helpers for durable LangGraph workflow resume
 - sandbox command artifact capture for stdout/stderr logs, changed-file snapshots, and
   diff summaries
 - an initial `CodexWorker` that provisions a real workspace, runs a deterministic toy repo
-  task in the sandbox, and returns a contract-compliant `WorkerResult`
+  task in the sandbox, and returns a contract-compliant `WorkerResult` through the shared
+  async worker interface
 
 This slice intentionally does not include:
 - app DB wiring

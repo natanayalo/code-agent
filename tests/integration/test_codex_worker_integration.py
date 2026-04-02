@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 from pathlib import Path
@@ -80,14 +81,16 @@ def test_codex_worker_runs_real_workspace_and_graph_path(tmp_path: Path) -> None
     )
     graph = build_orchestrator_graph(worker=worker)
 
-    raw_output = graph.invoke(
-        {
-            "task": {
-                "task_text": "Summarize the repo state",
-                "repo_url": str(source_repo),
-                "branch": "main",
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": "Summarize the repo state",
+                    "repo_url": str(source_repo),
+                    "branch": "main",
+                }
             }
-        }
+        )
     )
     state = OrchestratorState.model_validate(raw_output)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -210,7 +211,11 @@ class CodexWorker(Worker):
         self.sandbox_runner = sandbox_runner or DockerSandboxRunner()
         self.timeout_seconds = timeout_seconds
 
-    def run(self, request: WorkerRequest) -> WorkerResult:
+    async def run(self, request: WorkerRequest) -> WorkerResult:
+        """Provision a workspace, run the toy task, and return a typed result."""
+        return await asyncio.to_thread(self._run_sync, request)
+
+    def _run_sync(self, request: WorkerRequest) -> WorkerResult:
         """Provision a workspace, run the toy task, and return a typed result."""
         if request.repo_url is None or not request.repo_url.strip():
             return WorkerResult(
