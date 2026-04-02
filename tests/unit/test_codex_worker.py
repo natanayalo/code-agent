@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import tempfile
 from pathlib import Path
 
+import workers.codex_worker as codex_worker_module
 from sandbox import (
     DockerSandboxResult,
     SandboxArtifact,
@@ -15,7 +19,6 @@ from workers.codex_worker import (
     DEFAULT_WORKSPACE_ROOT_ENV_VAR,
     _build_test_result_details,
     _default_workspace_root,
-    _serialize_context,
 )
 
 
@@ -77,7 +80,27 @@ def test_codex_worker_requires_repo_url(tmp_path: Path) -> None:
     result = worker.run(WorkerRequest(task_text="Summarize the repo"))
 
     assert result.status == "error"
-    assert result.summary == "CodexWorker requires repo_url to provision a sandbox workspace."
+    assert result.summary == (
+        "CodexWorker requires a non-empty repo_url to provision a sandbox workspace."
+    )
+    assert result.next_action_hint == "provide_repo_url"
+    assert workspace_manager.requests == []
+    assert sandbox_runner.requests == []
+
+
+def test_codex_worker_rejects_blank_repo_url(tmp_path: Path) -> None:
+    """Blank repository URLs should be rejected before workspace validation."""
+    workspace = _workspace_handle(tmp_path)
+    workspace_manager = FakeWorkspaceManager(workspace)
+    sandbox_runner = FakeSandboxRunner()
+    worker = CodexWorker(workspace_manager=workspace_manager, sandbox_runner=sandbox_runner)
+
+    result = worker.run(WorkerRequest(task_text="Summarize the repo", repo_url="   "))
+
+    assert result.status == "error"
+    assert result.summary == (
+        "CodexWorker requires a non-empty repo_url to provision a sandbox workspace."
+    )
     assert result.next_action_hint == "provide_repo_url"
     assert workspace_manager.requests == []
     assert sandbox_runner.requests == []
@@ -92,12 +115,16 @@ def test_default_workspace_root_supports_environment_override(
     assert _default_workspace_root() == Path("~/custom-codex-root").expanduser()
 
 
-def test_serialize_context_uses_compact_json() -> None:
-    """Context passed through env vars should avoid pretty-print padding."""
-    payload = _serialize_context({"project": [{"memory_key": "pitfall"}]})
+def test_default_workspace_root_uses_uid_scoped_temp_dir(
+    monkeypatch,
+) -> None:
+    """The fallback workspace root should include the local uid to reduce collisions."""
+    monkeypatch.delenv(DEFAULT_WORKSPACE_ROOT_ENV_VAR, raising=False)
+    monkeypatch.setattr(codex_worker_module.os, "getuid", lambda: 4242)
 
-    assert payload == '{"project": [{"memory_key": "pitfall"}]}'
-    assert "\n" not in payload
+    assert _default_workspace_root() == (
+        Path(tempfile.gettempdir()) / "code-agent-workspaces-uid-4242"
+    )
 
 
 def test_build_test_result_details_prefers_stderr_on_failure() -> None:
@@ -111,6 +138,55 @@ def test_build_test_result_details_prefers_stderr_on_failure() -> None:
     assert details == "STDERR:\nTraceback: boom\n\nSTDOUT:\npartial progress"
 
 
+def test_codex_worker_masks_repo_url_in_logs_and_context(
+    tmp_path: Path,
+    caplog,
+) -> None:
+    """Credential-bearing repo URLs should be masked outside the clone request itself."""
+    workspace = _workspace_handle(tmp_path)
+    workspace_manager = FakeWorkspaceManager(workspace)
+    sandbox_runner = FakeSandboxRunner(
+        result=DockerSandboxResult(
+            image="python:3.12-slim",
+            command=[
+                "python3",
+                "/workspace/.code-agent/codex_worker_task.py",
+                "/workspace/.code-agent/codex_worker_context.json",
+            ],
+            docker_command=["docker", "run", "python:3.12-slim"],
+            exit_code=0,
+            stdout="Wrote .code-agent/codex-worker-report.md\n",
+            stderr="",
+            duration_seconds=1.5,
+            files_changed=[".code-agent/codex-worker-report.md"],
+            artifacts=[],
+        )
+    )
+    worker = CodexWorker(workspace_manager=workspace_manager, sandbox_runner=sandbox_runner)
+
+    with caplog.at_level(logging.INFO, logger="workers.codex_worker"):
+        worker.run(
+            WorkerRequest(
+                session_id="session-41",
+                repo_url="https://token@github.com/example/repo.git",
+                branch="main",
+                task_text="Summarize the repo",
+            )
+        )
+
+    workspace_request = workspace_manager.requests[0]
+    assert getattr(workspace_request, "repo_url") == "https://token@github.com/example/repo.git"
+
+    start_record = next(
+        record for record in caplog.records if record.message == "Starting Codex worker run"
+    )
+    assert getattr(start_record, "repo_url") == "https://****@github.com/example/repo.git"
+
+    context_path = workspace.workspace_path / ".code-agent" / "codex_worker_context.json"
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    assert context["repo_url"] == "https://****@github.com/example/repo.git"
+
+
 def test_codex_worker_maps_sandbox_result_into_worker_contract(tmp_path: Path) -> None:
     """A successful sandbox run should be exposed through the shared worker contract."""
     workspace = _workspace_handle(tmp_path)
@@ -118,7 +194,11 @@ def test_codex_worker_maps_sandbox_result_into_worker_contract(tmp_path: Path) -
     sandbox_runner = FakeSandboxRunner(
         result=DockerSandboxResult(
             image="python:3.12-slim",
-            command=["python3", "/workspace/.code-agent/codex_worker_task.py"],
+            command=[
+                "python3",
+                "/workspace/.code-agent/codex_worker_task.py",
+                "/workspace/.code-agent/codex_worker_context.json",
+            ],
             docker_command=["docker", "run", "python:3.12-slim"],
             exit_code=0,
             stdout="Wrote .code-agent/codex-worker-report.md\n",
@@ -167,14 +247,27 @@ def test_codex_worker_maps_sandbox_result_into_worker_contract(tmp_path: Path) -
     assert getattr(sandbox_request, "command") == [
         "python3",
         "/workspace/.code-agent/codex_worker_task.py",
+        "/workspace/.code-agent/codex_worker_context.json",
     ]
     assert getattr(sandbox_request, "working_dir") == "/workspace/repo"
-    assert getattr(sandbox_request, "environment")["TASK_TEXT"] == "Summarize the repo"
+    assert getattr(sandbox_request, "environment") == {}
 
     script_path = workspace.workspace_path / ".code-agent" / "codex_worker_task.py"
+    context_path = workspace.workspace_path / ".code-agent" / "codex_worker_context.json"
     assert script_path.exists()
+    assert context_path.exists()
     assert script_path.parent == (workspace.workspace_path / ".code-agent")
     assert not (workspace.repo_path / ".code-agent" / "codex_worker_task.py").exists()
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    assert context == {
+        "branch": "main",
+        "budget": {"max_minutes": 5},
+        "constraints": {"requires_approval": False},
+        "memory_context": {"project": [{"memory_key": "pitfall"}]},
+        "repo_url": "https://example.com/repo.git",
+        "session_id": "session-41",
+        "task_text": "Summarize the repo",
+    }
 
 
 def test_codex_worker_failure_result_includes_stderr_details(tmp_path: Path) -> None:
@@ -185,7 +278,11 @@ def test_codex_worker_failure_result_includes_stderr_details(tmp_path: Path) -> 
         sandbox_runner=FakeSandboxRunner(
             result=DockerSandboxResult(
                 image="python:3.12-slim",
-                command=["python3", "/workspace/.code-agent/codex_worker_task.py"],
+                command=[
+                    "python3",
+                    "/workspace/.code-agent/codex_worker_task.py",
+                    "/workspace/.code-agent/codex_worker_context.json",
+                ],
                 docker_command=["docker", "run", "python:3.12-slim"],
                 exit_code=1,
                 stdout="partial progress\n",

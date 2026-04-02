@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -99,7 +100,11 @@ def test_codex_worker_runs_real_workspace_and_graph_path(tmp_path: Path) -> None
     assert state.result.summary == (
         "CodexWorker completed a sandboxed toy repo task and retained the workspace."
     )
-    assert captured_command[-2:] == ["python3", "/workspace/.code-agent/codex_worker_task.py"]
+    assert captured_command[-3:] == [
+        "python3",
+        "/workspace/.code-agent/codex_worker_task.py",
+        "/workspace/.code-agent/codex_worker_context.json",
+    ]
 
     artifact_names = {artifact.name for artifact in state.result.artifacts}
     assert "workspace" in artifact_names
@@ -119,6 +124,11 @@ def test_codex_worker_runs_real_workspace_and_graph_path(tmp_path: Path) -> None
     workspace_path = Path(workspace_artifact.uri)
     assert (workspace_path / "repo" / ".code-agent" / "codex-worker-report.md").exists()
     assert (workspace_path / ".code-agent" / "codex_worker_task.py").exists()
+    context_path = workspace_path / ".code-agent" / "codex_worker_context.json"
+    assert context_path.exists()
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    assert context["task_text"] == "Summarize the repo state"
+    assert context["repo_url"] == str(source_repo)
     assert state.progress_updates == [
         "task ingested",
         "task classified as implementation",

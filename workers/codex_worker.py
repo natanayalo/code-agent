@@ -21,6 +21,7 @@ from sandbox import (
     WorkspaceManagerError,
     WorkspaceRequest,
 )
+from sandbox.workspace import _mask_url_credentials
 from workers.base import (
     ArtifactReference,
     TestResult,
@@ -36,27 +37,27 @@ DEFAULT_WORKSPACE_ROOT_ENV_VAR = "CODE_AGENT_WORKSPACE_ROOT"
 DEFAULT_SANDBOX_TIMEOUT_SECONDS = 300
 _TOY_TASK_SCRIPT_CONTAINER_PATH = "/workspace/.code-agent/codex_worker_task.py"
 _TOY_TASK_SCRIPT_RELATIVE_PATH = Path(".code-agent") / "codex_worker_task.py"
+_TOY_TASK_CONTEXT_CONTAINER_PATH = "/workspace/.code-agent/codex_worker_context.json"
+_TOY_TASK_CONTEXT_RELATIVE_PATH = Path(".code-agent") / "codex_worker_context.json"
 
 _TOY_TASK_SCRIPT = """
 from pathlib import Path
 import json
-import os
+import sys
 
 repo = Path("/workspace/repo")
+context = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 report_path = repo / ".code-agent" / "codex-worker-report.md"
 report_path.parent.mkdir(parents=True, exist_ok=True)
 top_level_entries = sorted(path.name for path in repo.iterdir())
-memory_context = json.loads(os.environ["MEMORY_CONTEXT_JSON"])
-constraints = json.loads(os.environ["CONSTRAINTS_JSON"])
-budget = json.loads(os.environ["BUDGET_JSON"])
 
 report_lines = [
     "# Codex Worker Report",
     "",
-    f"Task: {os.environ['TASK_TEXT']}",
-    f"Session: {os.environ['SESSION_ID']}",
-    f"Repo URL: {os.environ['REPO_URL']}",
-    f"Branch: {os.environ['BRANCH']}",
+    f"Task: {context['task_text']}",
+    f"Session: {context['session_id']}",
+    f"Repo URL: {context['repo_url']}",
+    f"Branch: {context['branch']}",
     "",
     "Top-level repo entries:",
 ]
@@ -65,13 +66,13 @@ report_lines.extend(
     [
         "",
         "Memory context:",
-        json.dumps(memory_context, indent=2, sort_keys=True),
+        json.dumps(context["memory_context"], indent=2, sort_keys=True),
         "",
         "Constraints:",
-        json.dumps(constraints, indent=2, sort_keys=True),
+        json.dumps(context["constraints"], indent=2, sort_keys=True),
         "",
         "Budget:",
-        json.dumps(budget, indent=2, sort_keys=True),
+        json.dumps(context["budget"], indent=2, sort_keys=True),
     ]
 )
 report_path.write_text("\\n".join(report_lines) + "\\n", encoding="utf-8")
@@ -90,7 +91,15 @@ def _default_workspace_root() -> Path:
     configured_root = os.environ.get(DEFAULT_WORKSPACE_ROOT_ENV_VAR)
     if configured_root:
         return Path(configured_root).expanduser()
-    return Path(tempfile.gettempdir()) / "code-agent-workspaces"
+    workspace_owner = "shared"
+    getuid = getattr(os, "getuid", None)
+    if callable(getuid):
+        workspace_owner = f"uid-{getuid()}"
+    else:
+        username = os.environ.get("USER") or os.environ.get("USERNAME")
+        if username:
+            workspace_owner = f"user-{_slugify(username)}"
+    return Path(tempfile.gettempdir()) / f"code-agent-workspaces-{workspace_owner}"
 
 
 def _workspace_task_id(request: WorkerRequest) -> str:
@@ -99,9 +108,17 @@ def _workspace_task_id(request: WorkerRequest) -> str:
     return f"codex-{_slugify(source)}"
 
 
-def _serialize_context(value: dict[str, object]) -> str:
-    """Serialize worker context into an inspectable environment payload."""
-    return json.dumps(value, sort_keys=True, default=str)
+def _build_execution_context(request: WorkerRequest) -> dict[str, object]:
+    """Build the inspectable worker execution context persisted in the workspace."""
+    return {
+        "task_text": request.task_text,
+        "session_id": request.session_id or "unknown",
+        "repo_url": _mask_url_credentials(request.repo_url or ""),
+        "branch": request.branch or "default",
+        "memory_context": request.memory_context,
+        "constraints": request.constraints,
+        "budget": request.budget,
+    }
 
 
 def _build_test_result_details(
@@ -150,6 +167,26 @@ def _write_toy_task_script(workspace: WorkspaceHandle) -> Path:
     return script_path
 
 
+def _write_execution_context_file(
+    workspace: WorkspaceHandle,
+    request: WorkerRequest,
+) -> Path:
+    """Persist the worker execution context under the mounted workspace root."""
+    context_path = workspace.workspace_path / _TOY_TASK_CONTEXT_RELATIVE_PATH
+    context_path.parent.mkdir(parents=True, exist_ok=True)
+    context_path.write_text(
+        json.dumps(
+            _build_execution_context(request),
+            indent=2,
+            sort_keys=True,
+            default=str,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return context_path
+
+
 class CodexWorker(Worker):
     """Execute a deterministic toy repo task through the sandbox stack."""
 
@@ -175,10 +212,12 @@ class CodexWorker(Worker):
 
     def run(self, request: WorkerRequest) -> WorkerResult:
         """Provision a workspace, run the toy task, and return a typed result."""
-        if request.repo_url is None:
+        if request.repo_url is None or not request.repo_url.strip():
             return WorkerResult(
                 status="error",
-                summary="CodexWorker requires repo_url to provision a sandbox workspace.",
+                summary=(
+                    "CodexWorker requires a non-empty repo_url " "to provision a sandbox workspace."
+                ),
                 next_action_hint="provide_repo_url",
             )
 
@@ -187,7 +226,7 @@ class CodexWorker(Worker):
             "Starting Codex worker run",
             extra={
                 "session_id": request.session_id,
-                "repo_url": request.repo_url,
+                "repo_url": _mask_url_credentials(request.repo_url),
                 "branch": request.branch,
                 "workspace_task_id": workspace_task_id,
             },
@@ -215,9 +254,10 @@ class CodexWorker(Worker):
 
         try:
             _write_toy_task_script(workspace)
+            _write_execution_context_file(workspace, request)
         except OSError as exc:
             logger.exception(
-                "Codex worker failed to prepare toy task script",
+                "Codex worker failed to prepare sandbox task files",
                 extra={
                     "session_id": request.session_id,
                     "workspace_id": workspace.workspace_id,
@@ -226,7 +266,7 @@ class CodexWorker(Worker):
             )
             return WorkerResult(
                 status="error",
-                summary=f"CodexWorker failed to prepare the sandbox task script: {exc}",
+                summary=f"CodexWorker failed to prepare the sandbox task files: {exc}",
                 artifacts=_workspace_artifacts(workspace),
                 next_action_hint="inspect_workspace_artifacts",
             )
@@ -235,16 +275,11 @@ class CodexWorker(Worker):
             sandbox_result = self.sandbox_runner.run(
                 DockerSandboxCommand(
                     workspace=workspace,
-                    command=["python3", _TOY_TASK_SCRIPT_CONTAINER_PATH],
-                    environment={
-                        "TASK_TEXT": request.task_text,
-                        "SESSION_ID": request.session_id or "unknown",
-                        "REPO_URL": request.repo_url,
-                        "BRANCH": request.branch or "default",
-                        "MEMORY_CONTEXT_JSON": _serialize_context(request.memory_context),
-                        "CONSTRAINTS_JSON": _serialize_context(request.constraints),
-                        "BUDGET_JSON": _serialize_context(request.budget),
-                    },
+                    command=[
+                        "python3",
+                        _TOY_TASK_SCRIPT_CONTAINER_PATH,
+                        _TOY_TASK_CONTEXT_CONTAINER_PATH,
+                    ],
                     timeout_seconds=self.timeout_seconds,
                 )
             )
