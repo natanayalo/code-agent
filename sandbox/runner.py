@@ -410,12 +410,9 @@ def _parse_git_status_entries(status_output: str) -> list[tuple[str, str]]:
         path = token[3:]
 
         if "R" in status or "C" in status:
-            try:
-                new_path = next(tokens)
-                if new_path:
-                    path = new_path
-            except StopIteration:
-                pass
+            new_path = next(tokens, "")
+            if new_path:
+                path = new_path
 
         entries.append((status, path))
 
