@@ -27,7 +27,7 @@ Architecture review checkpoint after T-041
 - Document mismatches before expanding scope.
 
 ## Step 8
-Vertical Slice E2E (T-044): minimal HTTP submit path + real curl -> orchestrator -> real worker -> real workspace -> DB -> response
+Baseline worker timeout handling + Vertical Slice E2E (T-042, T-044): minimal HTTP submit path + real curl -> orchestrator -> real worker -> real workspace -> DB -> response
 
 ## Step 9
 Telegram ingress and generic webhook adapters (T-050 to T-053) on top of the existing HTTP path
@@ -39,7 +39,7 @@ Sandbox hardening (T-054) with enforced destructive-action approval gate
 Memory integration loop (T-060 to T-064): load_memory -> execute -> persist_learnings
 
 ## Step 12
-Second worker and routing (T-070+)
+Structured run observability and second worker routing (T-043, T-070+)
 
 ## Step 13
 Tools, observability, and remaining hardening

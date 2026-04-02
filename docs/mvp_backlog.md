@@ -140,12 +140,21 @@ Architecture review checkpoint (non-milestone, after T-041):
 
 ## Milestone 5 - Vertical Slice E2E
 
+### T-042 Add baseline worker timeout/cancel handling
+Add the minimum timeout and cancellation behavior required so the first real worker execution path cannot hang indefinitely.
+
+Acceptance:
+- hung worker or sandbox execution fails safely within a configured timeout
+- timeout/cancel failure is surfaced back to the orchestrator without blocking the run forever
+- workspace/logs are preserved for debugging after timeout
+
 ### T-044 Run one real orchestrator-to-worker vertical slice
 Execute one real task submitted via curl, routed through orchestrator, run by the real worker in a real workspace, with results persisted and returned.
 
 Scope notes:
 - includes the minimal HTTP task submission endpoint needed for curl-based validation
 - includes persistence wiring for final result, worker run, and captured artifacts
+- builds on the baseline timeout/cancel handling from T-042
 - Telegram is explicitly out of scope for this milestone
 - hardcoded repo URL and task text are acceptable
 - no mocks or fake worker results
@@ -243,17 +252,10 @@ Acceptance:
 
 ---
 
-## Milestone 9 - Worker reliability + second worker routing
-
-### T-042 Add worker timeout/cancel handling
-Support max runtime and cancellation.
-
-Acceptance:
-- timed-out task fails safely
-- workspace/logs preserved
+## Milestone 9 - Structured run observability + second worker routing
 
 ### T-043 Add structured run logs
-Store worker run metadata and output summary.
+Expand worker run metadata and output summaries beyond the baseline persistence required by T-044.
 
 Acceptance:
 - run details visible in DB/logs
