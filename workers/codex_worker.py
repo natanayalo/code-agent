@@ -177,6 +177,34 @@ def _build_test_result_details(
     return "\n\n".join(sections) or None
 
 
+def _apply_cleanup_outcome(
+    result: WorkerResult,
+    *,
+    workspace_deleted: bool,
+) -> WorkerResult:
+    """Keep the reported result consistent with the final workspace state."""
+    if not workspace_deleted:
+        return result
+
+    if result.status == "success":
+        summary = "CodexWorker completed a sandboxed toy repo task and cleaned up the workspace."
+    elif result.status == "failure":
+        base_summary = result.summary or "CodexWorker toy repo task failed"
+        summary = f"{base_summary.rstrip('.')} and cleaned up the workspace."
+    elif result.summary:
+        summary = f"{result.summary} Workspace cleaned up per policy."
+    else:
+        summary = "CodexWorker cleaned up the workspace per policy."
+
+    return result.model_copy(
+        update={
+            "summary": summary,
+            "artifacts": [],
+            "next_action_hint": None,
+        }
+    )
+
+
 def _workspace_artifacts(
     workspace: WorkspaceHandle,
     *,
@@ -266,6 +294,9 @@ class CodexWorker(Worker):
             )
 
         workspace_task_id = _workspace_task_id(request)
+        workspace: WorkspaceHandle | None = None
+        result: WorkerResult | None = None
+        run_succeeded = False
         logger.info(
             "Starting Codex worker run",
             extra={
@@ -297,118 +328,158 @@ class CodexWorker(Worker):
             )
 
         try:
-            _write_toy_task_script(workspace)
-            _write_execution_context_file(workspace, request)
-        except TypeError as exc:
-            logger.exception(
-                "Codex worker failed to serialize sandbox execution context",
-                extra={
-                    "session_id": request.session_id,
-                    "workspace_id": workspace.workspace_id,
-                    "workspace_task_id": workspace_task_id,
-                },
-            )
-            return WorkerResult(
-                status="error",
-                summary=f"CodexWorker failed to serialize the sandbox execution context: {exc}",
-                artifacts=_workspace_artifacts(workspace),
-                next_action_hint="inspect_worker_configuration",
-            )
-        except OSError as exc:
-            logger.exception(
-                "Codex worker failed to prepare sandbox task files",
-                extra={
-                    "session_id": request.session_id,
-                    "workspace_id": workspace.workspace_id,
-                    "workspace_task_id": workspace_task_id,
-                },
-            )
-            return WorkerResult(
-                status="error",
-                summary=f"CodexWorker failed to prepare the sandbox task files: {exc}",
-                artifacts=_workspace_artifacts(workspace),
-                next_action_hint="inspect_workspace_artifacts",
-            )
-
-        try:
-            sandbox_result = self.sandbox_runner.run(
-                DockerSandboxCommand(
-                    workspace=workspace,
-                    command=[
-                        "python3",
-                        _TOY_TASK_SCRIPT_CONTAINER_PATH,
-                        _TOY_TASK_CONTEXT_CONTAINER_PATH,
-                    ],
-                    timeout_seconds=self.timeout_seconds,
+            try:
+                _write_toy_task_script(workspace)
+                _write_execution_context_file(workspace, request)
+            except TypeError as exc:
+                logger.exception(
+                    "Codex worker failed to serialize sandbox execution context",
+                    extra={
+                        "session_id": request.session_id,
+                        "workspace_id": workspace.workspace_id,
+                        "workspace_task_id": workspace_task_id,
+                    },
                 )
-            )
-        except DockerSandboxRunnerError as exc:
-            logger.exception(
-                "Codex worker sandbox execution failed",
-                extra={
-                    "session_id": request.session_id,
-                    "workspace_id": workspace.workspace_id,
-                    "workspace_task_id": workspace_task_id,
-                },
-            )
-            return WorkerResult(
-                status="error",
-                summary=f"CodexWorker sandbox execution failed: {exc}",
-                artifacts=_workspace_artifacts(workspace),
-                next_action_hint="inspect_workspace_artifacts",
-            )
-
-        command_summary = shlex.join(sandbox_result.command)
-        sandbox_artifacts = [
-            ArtifactReference(
-                name=artifact.name,
-                uri=artifact.uri,
-                artifact_type=artifact.artifact_type,
-            )
-            for artifact in sandbox_result.artifacts
-        ]
-        status: Literal["success", "failure"] = (
-            "success" if sandbox_result.exit_code == 0 else "failure"
-        )
-        summary = (
-            "CodexWorker completed a sandboxed toy repo task and retained the workspace."
-            if status == "success"
-            else f"CodexWorker toy repo task exited with code {sandbox_result.exit_code}."
-        )
-        result = WorkerResult(
-            status=status,
-            summary=summary,
-            commands_run=[
-                WorkerCommand(
-                    command=command_summary,
-                    exit_code=sandbox_result.exit_code,
-                    duration_seconds=sandbox_result.duration_seconds,
+                result = WorkerResult(
+                    status="error",
+                    summary=f"CodexWorker failed to serialize the sandbox execution context: {exc}",
+                    artifacts=_workspace_artifacts(workspace),
+                    next_action_hint="inspect_worker_configuration",
                 )
-            ],
-            files_changed=sandbox_result.files_changed,
-            test_results=[
-                TestResult(
-                    name="codex_worker_toy_task",
-                    status="passed" if sandbox_result.exit_code == 0 else "failed",
-                    details=_build_test_result_details(
+                return result
+            except OSError as exc:
+                logger.exception(
+                    "Codex worker failed to prepare sandbox task files",
+                    extra={
+                        "session_id": request.session_id,
+                        "workspace_id": workspace.workspace_id,
+                        "workspace_task_id": workspace_task_id,
+                    },
+                )
+                result = WorkerResult(
+                    status="error",
+                    summary=f"CodexWorker failed to prepare the sandbox task files: {exc}",
+                    artifacts=_workspace_artifacts(workspace),
+                    next_action_hint="inspect_workspace_artifacts",
+                )
+                return result
+
+            try:
+                sandbox_result = self.sandbox_runner.run(
+                    DockerSandboxCommand(
+                        workspace=workspace,
+                        command=[
+                            "python3",
+                            _TOY_TASK_SCRIPT_CONTAINER_PATH,
+                            _TOY_TASK_CONTEXT_CONTAINER_PATH,
+                        ],
+                        timeout_seconds=self.timeout_seconds,
+                    )
+                )
+            except DockerSandboxRunnerError as exc:
+                logger.exception(
+                    "Codex worker sandbox execution failed",
+                    extra={
+                        "session_id": request.session_id,
+                        "workspace_id": workspace.workspace_id,
+                        "workspace_task_id": workspace_task_id,
+                    },
+                )
+                result = WorkerResult(
+                    status="error",
+                    summary=f"CodexWorker sandbox execution failed: {exc}",
+                    artifacts=_workspace_artifacts(workspace),
+                    next_action_hint="inspect_workspace_artifacts",
+                )
+                return result
+
+            command_summary = shlex.join(sandbox_result.command)
+            sandbox_artifacts = [
+                ArtifactReference(
+                    name=artifact.name,
+                    uri=artifact.uri,
+                    artifact_type=artifact.artifact_type,
+                )
+                for artifact in sandbox_result.artifacts
+            ]
+            status: Literal["success", "failure"] = (
+                "success" if sandbox_result.exit_code == 0 else "failure"
+            )
+            run_succeeded = status == "success"
+            summary = (
+                "CodexWorker completed a sandboxed toy repo task and retained the workspace."
+                if status == "success"
+                else f"CodexWorker toy repo task exited with code {sandbox_result.exit_code}."
+            )
+            result = WorkerResult(
+                status=status,
+                summary=summary,
+                commands_run=[
+                    WorkerCommand(
+                        command=command_summary,
                         exit_code=sandbox_result.exit_code,
-                        stdout=sandbox_result.stdout,
-                        stderr=sandbox_result.stderr,
-                    ),
-                )
-            ],
-            artifacts=_workspace_artifacts(workspace, sandbox_artifacts=sandbox_artifacts),
-            next_action_hint="inspect_workspace_artifacts",
-        )
+                        duration_seconds=sandbox_result.duration_seconds,
+                    )
+                ],
+                files_changed=sandbox_result.files_changed,
+                test_results=[
+                    TestResult(
+                        name="codex_worker_toy_task",
+                        status="passed" if sandbox_result.exit_code == 0 else "failed",
+                        details=_build_test_result_details(
+                            exit_code=sandbox_result.exit_code,
+                            stdout=sandbox_result.stdout,
+                            stderr=sandbox_result.stderr,
+                        ),
+                    )
+                ],
+                artifacts=_workspace_artifacts(workspace, sandbox_artifacts=sandbox_artifacts),
+                next_action_hint="inspect_workspace_artifacts",
+            )
 
-        logger.info(
-            "Codex worker finished",
-            extra={
-                "session_id": request.session_id,
-                "workspace_id": workspace.workspace_id,
-                "status": result.status,
-                "files_changed_count": len(result.files_changed),
-                "artifact_count": len(result.artifacts),
-            },
-        )
-        return result
+            logger.info(
+                "Codex worker finished",
+                extra={
+                    "session_id": request.session_id,
+                    "workspace_id": workspace.workspace_id,
+                    "status": result.status,
+                    "files_changed_count": len(result.files_changed),
+                    "artifact_count": len(result.artifacts),
+                },
+            )
+            return result
+        finally:
+            try:
+                workspace_deleted = self.workspace_manager.cleanup_workspace(
+                    workspace,
+                    succeeded=run_succeeded,
+                )
+            except WorkspaceManagerError:
+                logger.exception(
+                    "Codex worker failed to clean up workspace",
+                    extra={
+                        "session_id": request.session_id,
+                        "workspace_id": workspace.workspace_id,
+                        "workspace_task_id": workspace_task_id,
+                        "run_succeeded": run_succeeded,
+                    },
+                )
+            else:
+                if workspace_deleted:
+                    assert result is not None, "worker result must exist before cleanup completes"
+                    adjusted_result = _apply_cleanup_outcome(
+                        result,
+                        workspace_deleted=workspace_deleted,
+                    )
+                    result.summary = adjusted_result.summary
+                    result.artifacts = adjusted_result.artifacts
+                    result.next_action_hint = adjusted_result.next_action_hint
+                    logger.info(
+                        "Codex worker cleanup policy deleted the workspace",
+                        extra={
+                            "session_id": request.session_id,
+                            "workspace_id": workspace.workspace_id,
+                            "workspace_task_id": workspace_task_id,
+                            "run_succeeded": run_succeeded,
+                        },
+                    )

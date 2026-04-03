@@ -29,10 +29,17 @@ class FakeWorkspaceManager:
     def __init__(self, workspace: WorkspaceHandle) -> None:
         self.workspace = workspace
         self.requests: list[object] = []
+        self.cleanup_requests: list[tuple[WorkspaceHandle, bool]] = []
 
     def create_workspace(self, request: object) -> WorkspaceHandle:
         self.requests.append(request)
         return self.workspace
+
+    def cleanup_workspace(self, workspace: WorkspaceHandle, *, succeeded: bool) -> bool:
+        self.cleanup_requests.append((workspace, succeeded))
+        if succeeded:
+            return workspace.cleanup_policy.delete_on_success
+        return not workspace.cleanup_policy.retain_on_failure
 
 
 class RaisingWorkspaceManager:
@@ -291,6 +298,7 @@ def test_codex_worker_maps_sandbox_result_into_worker_contract(tmp_path: Path) -
     assert result.artifacts[0].artifact_type == "workspace"
     assert result.artifacts[0].uri == str(workspace.workspace_path)
     assert result.artifacts[1].uri == "artifacts/command-123/stdout.log"
+    assert workspace_manager.cleanup_requests == [(workspace, True)]
 
     workspace_request = workspace_manager.requests[0]
     assert getattr(workspace_request, "cleanup_policy").delete_on_success is False
@@ -365,11 +373,62 @@ def test_codex_worker_failure_result_includes_stderr_details(tmp_path: Path) -> 
     )
 
 
+def test_codex_worker_cleans_up_on_failure_when_policy_requests_deletion(tmp_path: Path) -> None:
+    """Cleanup should still run after failed sandbox execution."""
+    workspace = _workspace_handle(tmp_path)
+    workspace.cleanup_policy = WorkspaceCleanupPolicy(
+        delete_on_success=False,
+        retain_on_failure=False,
+    )
+    workspace_manager = FakeWorkspaceManager(workspace)
+    worker = CodexWorker(
+        workspace_manager=workspace_manager,
+        sandbox_runner=FakeSandboxRunner(
+            result=DockerSandboxResult(
+                image="python:3.12-slim",
+                command=[
+                    "python3",
+                    "/workspace/.code-agent/codex_worker_task.py",
+                    "/workspace/.code-agent/codex_worker_context.json",
+                ],
+                docker_command=["docker", "run", "python:3.12-slim"],
+                exit_code=1,
+                stdout="partial progress\n",
+                stderr="Traceback: boom\n",
+                duration_seconds=1.5,
+                files_changed=[],
+                artifacts=[],
+            )
+        ),
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-41",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Summarize the repo",
+            )
+        )
+    )
+
+    assert result.status == "failure"
+    assert (
+        result.summary
+        == "CodexWorker toy repo task exited with code 1 and cleaned up the workspace."
+    )
+    assert result.artifacts == []
+    assert result.next_action_hint is None
+    assert workspace_manager.cleanup_requests == [(workspace, False)]
+
+
 def test_codex_worker_rejects_unserializable_execution_context(tmp_path: Path) -> None:
     """Unsupported context values should fail explicitly instead of being stringified."""
     workspace = _workspace_handle(tmp_path)
+    workspace_manager = FakeWorkspaceManager(workspace)
     worker = CodexWorker(
-        workspace_manager=FakeWorkspaceManager(workspace),
+        workspace_manager=workspace_manager,
         sandbox_runner=FakeSandboxRunner(),
     )
 
@@ -396,3 +455,4 @@ def test_codex_worker_rejects_unserializable_execution_context(tmp_path: Path) -
     assert result.next_action_hint == "inspect_worker_configuration"
     assert result.artifacts[0].artifact_type == "workspace"
     assert result.artifacts[0].uri == str(workspace.workspace_path)
+    assert workspace_manager.cleanup_requests == [(workspace, False)]

@@ -8,8 +8,8 @@ import subprocess
 from pathlib import Path
 
 from orchestrator import OrchestratorState, build_orchestrator_graph
-from sandbox import DockerSandboxRunner, WorkspaceManager
-from workers import CodexWorker
+from sandbox import DockerSandboxRunner, WorkspaceCleanupPolicy, WorkspaceManager
+from workers import CodexWorker, WorkerRequest
 
 
 def _run_git(command: list[str], *, cwd: Path) -> str:
@@ -143,3 +143,48 @@ def test_codex_worker_runs_real_workspace_and_graph_path(tmp_path: Path) -> None
         "result summarized",
         "memory persistence queued",
     ]
+
+
+def test_codex_worker_honors_delete_on_success_cleanup_policy(tmp_path: Path) -> None:
+    """A caller-provided cleanup policy should be enforced after a successful run."""
+    source_repo = _create_local_repo(tmp_path)
+
+    def fake_docker_command_runner(
+        command: list[str], *, timeout: int
+    ) -> subprocess.CompletedProcess[str]:
+        assert timeout == 300
+        workspace_path = _workspace_path_from_docker_command(command)
+        report_path = workspace_path / "repo" / ".code-agent" / "codex-worker-report.md"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("# Codex Worker Report\n", encoding="utf-8")
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="Wrote .code-agent/codex-worker-report.md\n",
+            stderr="",
+        )
+
+    worker = CodexWorker(
+        workspace_manager=WorkspaceManager(tmp_path / "workspaces"),
+        sandbox_runner=DockerSandboxRunner(command_runner=fake_docker_command_runner),
+        cleanup_policy=WorkspaceCleanupPolicy(delete_on_success=True, retain_on_failure=True),
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-41",
+                repo_url=str(source_repo),
+                branch="main",
+                task_text="Summarize the repo state",
+            )
+        )
+    )
+
+    assert result.status == "success"
+    assert (
+        result.summary
+        == "CodexWorker completed a sandboxed toy repo task and cleaned up the workspace."
+    )
+    assert result.artifacts == []
+    assert result.next_action_hint is None
