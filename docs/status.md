@@ -34,8 +34,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 - T-041 Implement CodexWorker or ClaudeWorker through the shared async worker contract
 - Architecture review checkpoint (after T-041): validate worker interface output and orchestrator state schema under real execution
+- T-045 Evolve sandbox to persistent container with shell sessions
+- T-046 Build structured system prompt module
+- T-047 Implement multi-turn agent loop in worker (ClaudeWorker, bash-only tools)
 - T-042 Add baseline worker timeout/cancel handling
-- T-044 Run one real orchestrator-to-worker vertical slice, including the minimal HTTP submit path and DB persistence wiring
+- T-044 Run one real orchestrator-to-worker vertical slice (multi-step agent loop, not toy script)
 - Milestone: Telegram ingress (T-050 to T-053)
 - T-054 Enforce sandbox execution boundary and destructive-action approval gate
 - Milestone: Memory integration (T-060 to T-064)
@@ -47,7 +50,8 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order: T-041 → architecture checkpoint → T-042 timeout/cancel baseline → T-044 vertical slice with minimal HTTP submit path and DB persistence → Telegram ingress/adapters → T-054 sandbox hardening → T-060..T-064 memory integration → T-043 structured run observability → T-070+ second worker.
+- Current target order: T-041 → architecture checkpoint → T-045 persistent sandbox → T-046 system prompt → T-047 agent loop → T-042 timeout/cancel → T-044 vertical slice with multi-turn agent worker, HTTP submit path, and DB persistence → Telegram ingress/adapters → T-054 sandbox hardening → T-060..T-064 memory integration → T-043 structured run observability → T-070+ second worker.
+- T-045/T-046/T-047 were added based on the reference implementation analysis (Open-SWE, Deep Agents, mini-SWE-agent, SWE-ReX, OpenHands, Stripe/Ramp/Coinbase). Key insight: every successful coding agent is built on a persistent interactive shell and a carefully engineered system prompt.
 - CI now validates every push, including merges to `master`, avoiding duplicate pull request branch runs while enforcing a 90% branch-coverage floor in `pytest`.
 - Protected-branch enforcement for `master` still depends on GitHub branch protection settings and required status checks.
 - T-021 adds durable LangGraph checkpointing without yet wiring orchestrator state to the app layer.
