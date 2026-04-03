@@ -158,6 +158,11 @@ def _default_permission_reason(default_permission: ToolPermissionLevel) -> str:
     return "Command uses the tool's default permission level " f"({default_permission.value})."
 
 
+def _unsupported_shell_feature_reason() -> str:
+    """Explain why unsupported shell syntax fails closed."""
+    return "Command uses unsupported shell features that cannot be safely classified."
+
+
 def granted_permission_from_constraints(
     constraints: Mapping[str, Any],
     *,
@@ -206,7 +211,14 @@ def _classify_token_prefix_permission(
 
 def _command_uses_unsupported_shell_features(command: str) -> bool:
     """Return whether the command relies on shell features we do not safely classify."""
-    return "$(" in command or "`" in command or "\n" in command or "\r" in command
+    return (
+        "$(" in command
+        or "`" in command
+        or "<(" in command
+        or ">(" in command
+        or "\n" in command
+        or "\r" in command
+    )
 
 
 def _command_segments(command: str) -> tuple[tuple[str, ...], ...] | None:
@@ -418,8 +430,8 @@ def _classify_bash_command_permission(
     """Return the required permission level for a bash command."""
     if _command_uses_unsupported_shell_features(command):
         return (
-            default_permission,
-            _default_permission_reason(default_permission),
+            _max_permission_level(default_permission, ToolPermissionLevel.DANGEROUS_SHELL),
+            _unsupported_shell_feature_reason(),
         )
 
     segments = _command_segments(command)

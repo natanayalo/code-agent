@@ -204,6 +204,34 @@ def test_resolve_bash_command_permission_classifies_chained_network_commands() -
     assert decision.allowed is False
 
 
+def test_resolve_bash_command_permission_fails_closed_for_subshell_syntax() -> None:
+    """Unsupported shell features should require elevated permission instead of failing open."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "$(rm -rf build)",
+        tool,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+    assert decision.allowed is False
+
+
+def test_resolve_bash_command_permission_fails_closed_for_process_substitution() -> None:
+    """Process substitution should share the unsupported-shell fail-closed path."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "echo hi <(rm -rf build)",
+        tool,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+    assert decision.allowed is False
+
+
 def test_resolve_bash_command_permission_escalates_for_dangerous_shell_commands() -> None:
     """Dangerous shell commands should require explicit dangerous-shell permission."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
