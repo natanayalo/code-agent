@@ -285,6 +285,33 @@ def _worker_result_from_sandbox_result(
     return result, status == "success"
 
 
+def _workspace_error_result(
+    *,
+    request: WorkerRequest,
+    workspace: WorkspaceHandle,
+    workspace_task_id: str,
+    exc: Exception,
+    log_message: str,
+    summary_prefix: str,
+    next_action_hint: str,
+) -> WorkerResult:
+    """Log a workspace-scoped failure and map it into the worker contract."""
+    logger.exception(
+        log_message,
+        extra={
+            "session_id": request.session_id,
+            "workspace_id": workspace.workspace_id,
+            "workspace_task_id": workspace_task_id,
+        },
+    )
+    return WorkerResult(
+        status="error",
+        summary=f"{summary_prefix}: {exc}",
+        artifacts=_workspace_artifacts(workspace),
+        next_action_hint=next_action_hint,
+    )
+
+
 class CodexWorker(Worker):
     """Execute a deterministic toy repo task through the sandbox stack."""
 
@@ -324,37 +351,27 @@ class CodexWorker(Worker):
             _write_toy_task_script(workspace)
             _write_execution_context_file(workspace, request)
         except TypeError as exc:
-            logger.exception(
-                "Codex worker failed to serialize sandbox execution context",
-                extra={
-                    "session_id": request.session_id,
-                    "workspace_id": workspace.workspace_id,
-                    "workspace_task_id": workspace_task_id,
-                },
-            )
             return (
-                WorkerResult(
-                    status="error",
-                    summary=f"CodexWorker failed to serialize the sandbox execution context: {exc}",
-                    artifacts=_workspace_artifacts(workspace),
+                _workspace_error_result(
+                    request=request,
+                    workspace=workspace,
+                    workspace_task_id=workspace_task_id,
+                    exc=exc,
+                    log_message="Codex worker failed to serialize sandbox execution context",
+                    summary_prefix="CodexWorker failed to serialize the sandbox execution context",
                     next_action_hint="inspect_worker_configuration",
                 ),
                 False,
             )
         except OSError as exc:
-            logger.exception(
-                "Codex worker failed to prepare sandbox task files",
-                extra={
-                    "session_id": request.session_id,
-                    "workspace_id": workspace.workspace_id,
-                    "workspace_task_id": workspace_task_id,
-                },
-            )
             return (
-                WorkerResult(
-                    status="error",
-                    summary=f"CodexWorker failed to prepare the sandbox task files: {exc}",
-                    artifacts=_workspace_artifacts(workspace),
+                _workspace_error_result(
+                    request=request,
+                    workspace=workspace,
+                    workspace_task_id=workspace_task_id,
+                    exc=exc,
+                    log_message="Codex worker failed to prepare sandbox task files",
+                    summary_prefix="CodexWorker failed to prepare the sandbox task files",
                     next_action_hint="inspect_workspace_artifacts",
                 ),
                 False,
@@ -373,19 +390,14 @@ class CodexWorker(Worker):
                 )
             )
         except DockerSandboxRunnerError as exc:
-            logger.exception(
-                "Codex worker sandbox execution failed",
-                extra={
-                    "session_id": request.session_id,
-                    "workspace_id": workspace.workspace_id,
-                    "workspace_task_id": workspace_task_id,
-                },
-            )
             return (
-                WorkerResult(
-                    status="error",
-                    summary=f"CodexWorker sandbox execution failed: {exc}",
-                    artifacts=_workspace_artifacts(workspace),
+                _workspace_error_result(
+                    request=request,
+                    workspace=workspace,
+                    workspace_task_id=workspace_task_id,
+                    exc=exc,
+                    log_message="Codex worker sandbox execution failed",
+                    summary_prefix="CodexWorker sandbox execution failed",
                     next_action_hint="inspect_workspace_artifacts",
                 ),
                 False,
