@@ -186,9 +186,50 @@ def test_codex_cli_worker_runs_the_shared_runtime_and_retains_the_workspace(
     assert container_manager.start_requests[0].workspace == workspace
     assert container_manager.stop_requests == [container]
     assert session.closed is True
+    assert session.calls[-1] == ("git status --short --untracked-files=all", 5)
 
     first_prompt = adapter.calls[0][0].content
     assert "## Available Tools" in first_prompt
     assert "`execute_bash`" in first_prompt
     assert "AGENTS.md guidance:" in first_prompt
     assert "README.md" in first_prompt
+
+
+def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path) -> None:
+    """Changed-file collection should respect the configured command timeout directly."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-47",
+        image="python:3.12-slim",
+    )
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="Nothing to do.")])
+    session = _FakeSession(
+        {
+            "git status --short --untracked-files=all": _command_result(
+                "git status --short --untracked-files=all",
+                output="",
+            )
+        }
+    )
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda started_container: session,
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-47-timeout",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Inspect timeout handling",
+                budget={"command_timeout_seconds": 17},
+            )
+        )
+    )
+
+    assert result.status == "success"
+    assert session.calls[-1] == ("git status --short --untracked-files=all", 17)

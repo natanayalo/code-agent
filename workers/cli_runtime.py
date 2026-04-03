@@ -128,8 +128,8 @@ def _coerce_positive_int(value: object) -> int | None:
         if not stripped:
             return None
         try:
-            parsed = int(stripped)
-        except ValueError:
+            parsed = int(float(stripped))
+        except (OverflowError, ValueError):
             return None
         return parsed if parsed > 0 else None
     return None
@@ -205,6 +205,34 @@ def format_bash_observation(
     if truncated:
         lines.append(f"[output truncated to {max_characters} characters]")
     return "\n".join(lines)
+
+
+def _split_git_status_rename_candidate(candidate: str) -> tuple[str, str] | None:
+    """Split a porcelain rename entry on the last unquoted rename separator."""
+    separator = " -> "
+    in_quotes = False
+    escaped = False
+    separator_index = -1
+
+    for index, character in enumerate(candidate):
+        if escaped:
+            escaped = False
+            continue
+        if character == "\\" and in_quotes:
+            escaped = True
+            continue
+        if character == '"':
+            in_quotes = not in_quotes
+            continue
+        if not in_quotes and candidate.startswith(separator, index):
+            separator_index = index
+
+    if separator_index == -1:
+        return None
+    return (
+        candidate[:separator_index],
+        candidate[separator_index + len(separator) :],
+    )
 
 
 def _remaining_command_timeout_seconds(
@@ -350,7 +378,10 @@ def collect_changed_files(
         status = line[:2]
         candidate = line[3:].strip()
         if "R" in status and " -> " in candidate:
-            candidate = candidate.split(" -> ", 1)[1].strip()
+            rename_parts = _split_git_status_rename_candidate(candidate)
+            if rename_parts is not None:
+                _, candidate = rename_parts
+                candidate = candidate.strip()
         if candidate.startswith('"') and candidate.endswith('"') and len(candidate) >= 2:
             candidate = candidate[1:-1]
         if candidate:

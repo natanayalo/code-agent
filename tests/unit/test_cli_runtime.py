@@ -70,6 +70,20 @@ def test_settings_from_budget_applies_supported_runtime_overrides() -> None:
     assert settings.max_observation_characters == 512
 
 
+def test_settings_from_budget_accepts_fractional_numeric_strings_like_float_inputs() -> None:
+    """Numeric strings should be coerced with the same truncation behavior as float inputs."""
+    settings = settings_from_budget(
+        {
+            "max_iterations": "2.5",
+            "command_timeout_seconds": "9.9",
+        },
+        defaults=CliRuntimeSettings(max_iterations=4, command_timeout_seconds=30),
+    )
+
+    assert settings.max_iterations == 2
+    assert settings.command_timeout_seconds == 9
+
+
 def test_format_bash_observation_truncates_long_output() -> None:
     """Shell observations should stay bounded and call out truncation explicitly."""
     observation = format_bash_observation(
@@ -224,3 +238,19 @@ def test_collect_changed_files_does_not_treat_non_rename_arrow_paths_as_renames(
     changed_files = collect_changed_files(session)
 
     assert changed_files == ["docs/name -> value.txt", "tests/path -> sample.txt"]
+
+
+def test_collect_changed_files_parses_rename_when_old_path_contains_arrow() -> None:
+    """Rename parsing should split from the right so arrows in the old path are preserved."""
+    session = _FakeSession(
+        {
+            "git status --short --untracked-files=all": _command_result(
+                "git status --short --untracked-files=all",
+                output='R  "old -> name.txt" -> "new -> name.txt"\n',
+            )
+        }
+    )
+
+    changed_files = collect_changed_files(session)
+
+    assert changed_files == ["new -> name.txt"]

@@ -312,7 +312,7 @@ class CodexCliWorker(Worker):
             )
             files_changed = collect_changed_files(
                 session,
-                timeout_seconds=min(runtime_settings.command_timeout_seconds, 10),
+                timeout_seconds=runtime_settings.command_timeout_seconds,
             )
             result = _worker_result_from_execution(
                 workspace,
