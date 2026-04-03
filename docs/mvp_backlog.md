@@ -165,10 +165,12 @@ Scope notes:
 - add `workers/prompt.py` with `build_system_prompt()` that assembles: role description, available tools, repo-level context (AGENTS.md + directory listing), task-specific context, and workflow instructions
 - each prompt section is a separate function for testability
 - reads AGENTS.md from workspace if present, gracefully skips if absent
+- workflow instructions must explicitly teach failure recovery and bounded-output habits (for example: verify assumptions after a failed command, and prefer focused reads over dumping large files)
 
 Acceptance:
 - `build_system_prompt()` produces a well-structured prompt given a `WorkerRequest` and workspace path
 - AGENTS.md injection and repo structure listing both work
+- workflow instructions explicitly cover command-failure recovery and focused/bounded output usage
 - unit tests verify prompt assembly for various input combinations
 
 ### T-047 Implement multi-turn agent loop in worker
@@ -180,6 +182,7 @@ Scope notes:
 - build system prompt via T-046's `build_system_prompt()`
 - start persistent container via T-045's container/session layer
 - start with a single `execute_bash` tool (per mini-SWE-agent's proven bash-only approach)
+- format shell observations before feeding them back to the LLM: include exit code, bounded output, and explicit truncation markers instead of raw unbounded stdout/stderr dumps
 - exit on: LLM final answer, max iterations, or budget/timeout exceeded
 - the loop is a simple while-loop, not a nested LangGraph graph
 - the worker must include its own inner-loop safety envelope (max iterations, worker-local timeout, and budget checks) so it never runs unbounded; T-042 adds the outer orchestrator-level timeout/cancel layer on top of this, but T-047 must be safe to run standalone
@@ -187,6 +190,7 @@ Scope notes:
 Acceptance:
 - worker executes a real multi-step task (e.g., create a file, run a test, fix a failure)
 - agent loop runs ≥2 iterations, demonstrating observe-then-act behavior
+- observation framing keeps shell feedback bounded and includes exit codes/truncation markers
 - timeout/budget limits terminate the loop safely
 - worker returns a clean `WorkerResult` (not an exception) when the budget or timeout is exceeded
 - `WorkerResult` accurately reflects commands run, files changed, and final status

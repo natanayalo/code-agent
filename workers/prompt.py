@@ -220,7 +220,15 @@ def build_workflow_instructions_section() -> str:
             "## Workflow Instructions",
             "- Inspect relevant files before making changes.",
             "- Prefer minimal, reviewable edits over broad rewrites.",
+            "- Use focused shell commands; avoid dumping large files or verbose output when a "
+            "narrower command will answer the question.",
             "- Use the available tools to verify behavior with focused commands.",
+            "- If a command fails, inspect the current files, paths, and assumptions before "
+            "retrying; do not blindly repeat the same command.",
+            "- When output is long or truncated, narrow it with targeted reads such as `rg`, "
+            "`sed -n`, `head`, `tail`, or focused test selectors before continuing.",
+            "- Base the next step on command exit codes and the relevant output you actually "
+            "observed.",
             "- Surface blockers or missing prerequisites explicitly instead of guessing.",
             "- End with a concise summary of changes, verification, and any follow-up needed.",
         ]
