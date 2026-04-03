@@ -163,6 +163,21 @@ def test_resolve_bash_command_permission_classifies_rmdir_and_eval_as_dangerous_
         assert decision.allowed is False
 
 
+def test_resolve_bash_command_permission_classifies_source_builtins_as_dangerous_shell() -> None:
+    """Shell built-ins that execute scripts in-process should require elevation."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    for command in ("source ./script.sh", ". ./script.sh"):
+        decision = resolve_bash_command_permission(
+            command,
+            tool,
+            granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+        )
+
+        assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+        assert decision.allowed is False
+
+
 def test_resolve_bash_command_permission_does_not_treat_release_text_as_deploy() -> None:
     """Release-like argument text should not trip deploy classification."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")

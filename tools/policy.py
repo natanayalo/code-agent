@@ -63,6 +63,8 @@ _TOKEN_PREFIX_PERMISSION_RULES: tuple[
             ("rm",),
             ("rmdir",),
             ("eval",),
+            ("source",),
+            (".",),
             ("git", "clean"),
             ("git", "reset"),
             ("mkfs",),
@@ -176,14 +178,6 @@ def granted_permission_from_constraints(
         if resolved is not None:
             return resolved
     return default
-
-
-def _command_tokens(command: str) -> tuple[str, ...] | None:
-    """Parse shell-like command tokens when the input is well formed."""
-    try:
-        return tuple(shlex.split(command, posix=True))
-    except ValueError:
-        return None
 
 
 def _command_lexemes(command: str) -> tuple[str, ...] | None:
