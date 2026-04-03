@@ -26,12 +26,18 @@ The repo currently contains:
 - an initial `CodexWorker` that provisions a real workspace, runs a deterministic toy repo
   task in the sandbox, and returns a contract-compliant `WorkerResult` through the shared
   async worker interface
+- a shared CLI runtime loop with bounded iterations, timeout-aware shell execution, and
+  structured shell observations for future multi-turn workers
+- an injectable `CodexCliWorker` scaffold that provisions a persistent sandbox container and
+  shell session, builds the structured system prompt, and returns contract-compliant
+  `WorkerResult` data through the shared worker interface
 
 This slice intentionally does not include:
 - app DB wiring
 - app-layer real worker dispatch wiring
 - worker-result persistence to the DB or reply layer
 - Telegram or webhook task handling
+- a real provider CLI subprocess adapter wired into the new shared CLI runtime
 
 ## Project Layout
 
@@ -143,6 +149,6 @@ The repo includes:
 ## Next Steps
 
 The current implementation targets are:
-- architecture checkpoint after `T-041`
-- `T-042 Add baseline worker timeout/cancel handling`
-- `T-044 Run one real orchestrator-to-worker vertical slice`
+- finish `T-047` with a real provider CLI adapter wired into the shared runtime
+- `T-048 Add an explicit tool registry and policy-aware bash tool boundary`
+- `T-049 Add the permission ladder and runtime budget ledger/enforcement`
