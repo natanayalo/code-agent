@@ -47,9 +47,10 @@ def test_build_system_prompt_includes_all_expected_sections(tmp_path: Path) -> N
     assert "workers/claude_worker.py" in prompt
     assert "Repository URL: https://***@github.com/example/repo.git" in prompt
     assert '"max_iterations": 12' in prompt
+    assert "Use the available tools with focused commands and targeted reads" in prompt
     assert "avoid dumping large files or verbose output" in prompt
     assert "If a command fails" in prompt
-    assert "When output is long or truncated" in prompt
+    assert "narrow long or truncated results" in prompt
     assert "Base the next step on command exit codes" in prompt
 
 
