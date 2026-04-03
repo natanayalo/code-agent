@@ -29,10 +29,10 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 ## In Progress
 
 - T-041 Implement `CodexWorker` through the shared async worker contract. PR: [#23](https://github.com/natanayalo/code-agent/pull/23)
+- Architecture review checkpoint (after T-041): validating route/executor alignment and honest dispatch state before expanding to multi-worker support.
 
 ## Next
 
-- Architecture review checkpoint (after T-041): validate worker interface output and orchestrator state schema under real execution
 - T-045 Evolve sandbox to persistent container with shell sessions
 - T-046 Build structured system prompt module
 - T-047 Implement multi-turn agent loop in worker (ClaudeWorker, bash-only tools)
@@ -59,3 +59,6 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-031 adds Docker-based command execution with mounted workspaces and captured stdout/stderr.
 - T-032 writes per-command stdout/stderr logs plus changed-file and diff-summary artifacts into
   each sandbox workspace for later worker-run persistence.
+- Architecture checkpoint review found two mismatches under real execution: the graph could claim
+  `claude` while only a Codex worker was wired, and `dispatch.run_id` / `dispatch.workspace_id`
+  were placeholder values before a real run existed. The current slice makes both cases explicit.

@@ -175,6 +175,29 @@ class _DefaultFakeWorker(Worker):
         return _default_worker_result_provider(request)
 
 
+def _configured_workers(worker: Worker | None = None) -> dict[str, Worker]:
+    """Return the workers that are actually wired into the graph."""
+    return {"codex": worker or _DefaultFakeWorker()}
+
+
+def _unconfigured_worker_result(worker_type: str | None) -> WorkerResult:
+    """Return a structured error when routing selects an unavailable worker."""
+    configured_workers = ", ".join(sorted(_configured_workers()))
+    selected_worker = worker_type or "unknown"
+    return WorkerResult(
+        status="error",
+        summary=(
+            f"No worker is configured for route '{selected_worker}'. "
+            f"Configured workers: {configured_workers}."
+        ),
+        commands_run=[],
+        files_changed=[],
+        test_results=[],
+        artifacts=[],
+        next_action_hint="configure_requested_worker",
+    )
+
+
 def ingest_task(state_input: OrchestratorState) -> dict[str, Any]:
     """Normalize the incoming task text before classification."""
     state = _ensure_state(state_input)
@@ -296,15 +319,12 @@ def await_approval(state_input: OrchestratorState) -> dict[str, Any]:
 
 
 def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
-    """Create a fake dispatch record for the worker run."""
+    """Record the chosen worker before awaiting execution."""
     state = _ensure_state(state_input)
-    task_identifier = state.task.task_id or "pending"
     worker_type = state.route.chosen_worker
     assert worker_type is not None, "choose_worker must set route.chosen_worker before dispatch."
     dispatch = WorkerDispatch(
-        run_id=f"run-{task_identifier}",
         worker_type=worker_type,
-        workspace_id=f"workspace-{task_identifier}",
     )
     return {
         "current_step": "dispatch_job",
@@ -316,17 +336,27 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
 def build_await_result_node(
     worker: Worker | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
-    """Create the await-result node around a fake or injected worker."""
-    bound_worker = worker or _DefaultFakeWorker()
+    """Create the await-result node around the workers wired into the graph."""
+    configured_workers = _configured_workers(worker)
 
     async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
-        request = _build_worker_request(state)
-        result = await bound_worker.run(request)
+        worker_type = state.dispatch.worker_type or state.route.chosen_worker
+        bound_worker = configured_workers.get(worker_type or "")
+        if bound_worker is None:
+            result = _unconfigured_worker_result(worker_type)
+            progress_updates = _progress_update(
+                state,
+                f"worker unavailable: {worker_type or 'unknown'}",
+            )
+        else:
+            request = _build_worker_request(state)
+            result = await bound_worker.run(request)
+            progress_updates = _progress_update(state, "worker result received")
         return {
             "current_step": "await_result",
             "result": result.model_dump(),
-            "progress_updates": _progress_update(state, "worker result received"),
+            "progress_updates": progress_updates,
         }
 
     return await_result
