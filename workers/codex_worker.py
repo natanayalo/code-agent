@@ -449,33 +449,15 @@ class CodexWorker(Worker):
             )
             return result
         finally:
-            try:
-                workspace_deleted = self.workspace_manager.cleanup_workspace(
-                    workspace,
-                    succeeded=run_succeeded,
-                )
-            except WorkspaceManagerError:
-                logger.exception(
-                    "Codex worker failed to clean up workspace",
-                    extra={
-                        "session_id": request.session_id,
-                        "workspace_id": workspace.workspace_id,
-                        "workspace_task_id": workspace_task_id,
-                        "run_succeeded": run_succeeded,
-                    },
-                )
-            else:
-                if workspace_deleted:
-                    assert result is not None, "worker result must exist before cleanup completes"
-                    adjusted_result = _apply_cleanup_outcome(
-                        result,
-                        workspace_deleted=workspace_deleted,
+            if workspace is not None:
+                try:
+                    workspace_deleted = self.workspace_manager.cleanup_workspace(
+                        workspace,
+                        succeeded=run_succeeded,
                     )
-                    result.summary = adjusted_result.summary
-                    result.artifacts = adjusted_result.artifacts
-                    result.next_action_hint = adjusted_result.next_action_hint
-                    logger.info(
-                        "Codex worker cleanup policy deleted the workspace",
+                except WorkspaceManagerError:
+                    logger.exception(
+                        "Codex worker failed to clean up workspace",
                         extra={
                             "session_id": request.session_id,
                             "workspace_id": workspace.workspace_id,
@@ -483,3 +465,21 @@ class CodexWorker(Worker):
                             "run_succeeded": run_succeeded,
                         },
                     )
+                else:
+                    if workspace_deleted and result is not None:
+                        adjusted_result = _apply_cleanup_outcome(
+                            result,
+                            workspace_deleted=workspace_deleted,
+                        )
+                        result.summary = adjusted_result.summary
+                        result.artifacts = adjusted_result.artifacts
+                        result.next_action_hint = adjusted_result.next_action_hint
+                        logger.info(
+                            "Codex worker cleanup policy deleted the workspace",
+                            extra={
+                                "session_id": request.session_id,
+                                "workspace_id": workspace.workspace_id,
+                                "workspace_task_id": workspace_task_id,
+                                "run_succeeded": run_succeeded,
+                            },
+                        )

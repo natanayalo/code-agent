@@ -8,6 +8,8 @@ import logging
 import tempfile
 from pathlib import Path
 
+import pytest
+
 import workers.codex_worker as codex_worker_module
 from sandbox import (
     DockerSandboxResult,
@@ -420,6 +422,42 @@ def test_codex_worker_cleans_up_on_failure_when_policy_requests_deletion(tmp_pat
     )
     assert result.artifacts == []
     assert result.next_action_hint is None
+    assert workspace_manager.cleanup_requests == [(workspace, False)]
+
+
+def test_codex_worker_cleanup_does_not_mask_unexpected_failures(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Unexpected failures should propagate even when cleanup deletes the workspace."""
+    workspace = _workspace_handle(tmp_path)
+    workspace.cleanup_policy = WorkspaceCleanupPolicy(
+        delete_on_success=False,
+        retain_on_failure=False,
+    )
+    workspace_manager = FakeWorkspaceManager(workspace)
+    worker = CodexWorker(
+        workspace_manager=workspace_manager,
+        sandbox_runner=FakeSandboxRunner(),
+    )
+
+    def _raise_unexpected(*_args, **_kwargs) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(codex_worker_module, "_write_toy_task_script", _raise_unexpected)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-41",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Summarize the repo",
+                )
+            )
+        )
+
     assert workspace_manager.cleanup_requests == [(workspace, False)]
 
 
