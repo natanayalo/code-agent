@@ -141,6 +141,56 @@ Architecture review checkpoint (non-milestone, after T-041):
 
 ## Milestone 5 - Vertical Slice E2E
 
+### T-045 Evolve sandbox to persistent container with shell sessions
+Add a long-lived container mode so the worker can send multiple commands iteratively
+(think → act → observe → loop) instead of one-shot `docker run` invocations.
+
+Scope notes:
+- add `sandbox/container.py` for container lifecycle: start, stop, reconnect to a named Docker container
+- add `sandbox/session.py` for shell sessions: maintain a single long-lived interactive shell process inside the container (via `docker exec -it` or equivalent piped I/O) so that environment variables, `cd`, and `export` persist across commands between agent turns; do not use a fresh `docker exec` per command
+- move or expose `_read_stream_bounded` (currently private in `sandbox/runner.py`) to a shared utility within the `sandbox` package before `session.py` depends on it
+- keep `DockerSandboxRunner` as-is (used by toy CodexWorker and existing tests)
+
+Acceptance:
+- named container can be started, used for multiple `docker exec` commands, and stopped
+- commands share filesystem state (file created in command 1 is visible in command 2)
+- output capture uses the same bounded-reader safety as the existing runner
+- container cleanup is reliable (stop + remove on session end or error)
+
+### T-046 Build structured system prompt module
+Create the prompt construction layer that assembles a system prompt from modular
+sections, following the Open-SWE pattern.
+
+Scope notes:
+- add `workers/prompt.py` with `build_system_prompt()` that assembles: role description, available tools, repo-level context (AGENTS.md + directory listing), task-specific context, and workflow instructions
+- each prompt section is a separate function for testability
+- reads AGENTS.md from workspace if present, gracefully skips if absent
+
+Acceptance:
+- `build_system_prompt()` produces a well-structured prompt given a `WorkerRequest` and workspace path
+- AGENTS.md injection and repo structure listing both work
+- unit tests verify prompt assembly for various input combinations
+
+### T-047 Implement multi-turn agent loop in worker
+Replace the one-shot toy-script pattern with an iterative agent loop: prompt → LLM →
+tool call → execute via persistent shell → feed observation back → loop.
+
+Scope notes:
+- add `workers/claude_worker.py` implementing the agent loop via Anthropic API
+- build system prompt via T-046's `build_system_prompt()`
+- start persistent container via T-045's container/session layer
+- start with a single `execute_bash` tool (per mini-SWE-agent's proven bash-only approach)
+- exit on: LLM final answer, max iterations, or budget/timeout exceeded
+- the loop is a simple while-loop, not a nested LangGraph graph
+- the worker must include its own basic timeout and max-iteration guard so it never runs unbounded; T-042 adds the orchestrator-level timeout/cancel layer on top of this, but T-047 must be safe to run standalone
+
+Acceptance:
+- worker executes a real multi-step task (e.g., create a file, run a test, fix a failure)
+- agent loop runs ≥2 iterations, demonstrating observe-then-act behavior
+- timeout/budget limits terminate the loop safely
+- worker returns a clean `WorkerResult` (not an exception) when the budget or timeout is exceeded
+- `WorkerResult` accurately reflects commands run, files changed, and final status
+
 ### T-042 Add baseline worker timeout/cancel handling
 Add the minimum timeout and cancellation behavior required so the first real worker execution path cannot hang indefinitely.
 
@@ -150,22 +200,28 @@ Acceptance:
 - workspace/logs are preserved for debugging after timeout
 
 ### T-044 Run one real orchestrator-to-worker vertical slice
-Execute one real task submitted via curl, routed through orchestrator, run by the real worker in a real workspace, with results persisted and returned.
+Execute one real task submitted via curl, routed through orchestrator, run by the multi-turn agent worker in a real workspace, with results persisted and returned.
 
 Scope notes:
+- builds on persistent sandbox (T-045), system prompt (T-046), and agent loop (T-047)
+- uses the multi-turn agent worker, not the toy CodexWorker
 - includes the minimal HTTP task submission endpoint needed for curl-based validation
+- includes a basic task status/result retrieval endpoint (GET by task_id) so callers can poll for completion
 - includes persistence wiring for final result, worker run, and captured artifacts
 - builds on the baseline timeout/cancel handling from T-042
+- worker should complete at least one multi-step coding task end-to-end
 - Telegram is explicitly out of scope for this milestone
 - hardcoded repo URL and task text are acceptable
 - no mocks or fake worker results
+- result *delivery* (push-based, e.g. Telegram reply or webhook callback) is out of scope here and covered by the Telegram ingress milestone (T-050..T-053)
 
 Acceptance:
 - `curl` submission reaches the minimal HTTP task endpoint and starts a real run
 - orchestrator routes to the implemented real worker
-- worker executes in a real workspace and returns real output
+- worker executes a multi-step task in a real workspace via the agent loop and returns real output
 - final result and run artifacts are persisted to DB
 - API returns a task identifier and initial status for the asynchronous run
+- completed result is retrievable via GET endpoint by task_id
 
 ---
 
