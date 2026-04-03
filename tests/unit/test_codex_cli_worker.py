@@ -242,7 +242,7 @@ def test_codex_cli_worker_skips_changed_file_collection_when_tool_does_not_expec
 
 
 def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path) -> None:
-    """Changed-file collection should respect the configured command timeout directly."""
+    """Changed-file collection should use the runtime timeout, not the bash tool timeout."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
         workspace=workspace,
@@ -258,11 +258,19 @@ def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path
             )
         }
     )
+    tool_registry = ToolRegistry(
+        tools=(
+            DEFAULT_TOOL_REGISTRY.require_tool("execute_bash").model_copy(
+                update={"timeout_seconds": 3}
+            ),
+        )
+    )
     worker = CodexCliWorker(
         runtime_adapter=adapter,
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(container),
         session_factory=lambda started_container: session,
+        tool_registry=tool_registry,
     )
 
     result = asyncio.run(

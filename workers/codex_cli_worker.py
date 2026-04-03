@@ -325,10 +325,7 @@ class CodexCliWorker(Worker):
             if ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts:
                 files_changed = collect_changed_files(
                     session,
-                    timeout_seconds=min(
-                        runtime_settings.command_timeout_seconds,
-                        bash_tool.timeout_seconds,
-                    ),
+                    timeout_seconds=runtime_settings.command_timeout_seconds,
                 )
             result = _worker_result_from_execution(
                 workspace,

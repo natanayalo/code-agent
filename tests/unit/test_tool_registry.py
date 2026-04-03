@@ -43,3 +43,11 @@ def test_require_tool_raises_a_typed_error_for_unknown_names() -> None:
     """Missing tools should surface a dedicated lookup error."""
     with pytest.raises(UnknownToolError, match="not registered"):
         DEFAULT_TOOL_REGISTRY.require_tool("missing_tool")
+
+
+def test_get_tool_returns_registered_definitions_for_trimmed_names() -> None:
+    """Direct lookups should still normalize names before using the cached map."""
+    tool = DEFAULT_TOOL_REGISTRY.get_tool(" execute_bash ")
+
+    assert tool is not None
+    assert tool.name == "execute_bash"

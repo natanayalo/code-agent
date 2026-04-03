@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from functools import cached_property
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -68,6 +69,11 @@ class ToolRegistry(ToolModel):
 
     tools: tuple[ToolDefinition, ...] = Field(default_factory=tuple)
 
+    @cached_property
+    def _tool_map(self) -> dict[str, ToolDefinition]:
+        """Build a name-to-definition index for fast repeated tool lookups."""
+        return {tool.name: tool for tool in self.tools}
+
     @model_validator(mode="after")
     def _validate_unique_names(self) -> ToolRegistry:
         names: set[str] = set()
@@ -90,10 +96,7 @@ class ToolRegistry(ToolModel):
         normalized_name = name.strip()
         if not normalized_name:
             return None
-        for tool in self.tools:
-            if tool.name == normalized_name:
-                return tool
-        return None
+        return self._tool_map.get(normalized_name)
 
     def require_tool(self, name: str) -> ToolDefinition:
         """Return a tool definition or raise a typed lookup error."""
