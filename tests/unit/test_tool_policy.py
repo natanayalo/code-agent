@@ -178,6 +178,70 @@ def test_resolve_bash_command_permission_classifies_source_builtins_as_dangerous
         assert decision.allowed is False
 
 
+def test_resolve_bash_command_permission_classifies_shell_wrappers_as_dangerous_shell() -> None:
+    """Nested shell execution should not bypass the permission ladder."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    for command in (
+        "bash -c 'rm -rf build'",
+        "sh -c 'rm -rf build'",
+        "zsh -c 'rm -rf build'",
+        "alias ll='rm -rf build'",
+        "function ll(){ rm -rf build; }",
+    ):
+        decision = resolve_bash_command_permission(
+            command,
+            tool,
+            granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+        )
+
+        assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+        assert decision.allowed is False
+
+
+def test_classifies_inline_interpreters_as_dangerous_shell() -> None:
+    """Inline interpreter evaluation should require elevated shell permission."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    for command in (
+        "python -c 'import os; os.remove(\"x\")'",
+        "python3 -c 'import os; os.remove(\"x\")'",
+        'node -e \'require("fs").unlinkSync("x")\'',
+        'node --eval \'require("fs").unlinkSync("x")\'',
+        "perl -e 'unlink \"x\"'",
+        "ruby -e 'File.delete(\"x\")'",
+        "php -r 'unlink(\"x\");'",
+    ):
+        decision = resolve_bash_command_permission(
+            command,
+            tool,
+            granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+        )
+
+        assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+        assert decision.allowed is False
+
+
+def test_resolve_bash_command_permission_classifies_remote_tools_as_networked_write() -> None:
+    """Remote execution and copy tools should require networked permission."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    for command in (
+        "ssh host 'uptime'",
+        "scp file host:/tmp/",
+        "rsync -av . host:/tmp/x",
+        "nc example.com 80",
+    ):
+        decision = resolve_bash_command_permission(
+            command,
+            tool,
+            granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+        )
+
+        assert decision.required_permission == ToolPermissionLevel.NETWORKED_WRITE
+        assert decision.allowed is False
+
+
 def test_resolve_bash_command_permission_does_not_treat_release_text_as_deploy() -> None:
     """Release-like argument text should not trip deploy classification."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
@@ -262,6 +326,48 @@ def test_resolve_bash_command_permission_fails_closed_for_process_substitution()
     assert decision.allowed is False
 
 
+def test_fails_closed_for_variable_expansion_in_command_word() -> None:
+    """Variable-expanded command words should fail closed instead of bypassing prefix checks."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "${CMD} -rf build",
+        tool,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+    assert decision.allowed is False
+
+
+def test_resolve_bash_command_permission_fails_closed_for_globbed_command_word() -> None:
+    """Command-word globbing should fail closed because it can hide the executable."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "r* -rf build",
+        tool,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+    assert decision.allowed is False
+
+
+def test_resolve_bash_command_permission_fails_closed_for_unparseable_commands() -> None:
+    """Malformed shell input should fail closed rather than falling back to workspace-write."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "rm 'unterminated",
+        tool,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+    assert decision.allowed is False
+
+
 def test_resolve_bash_command_permission_escalates_for_dangerous_shell_commands() -> None:
     """Dangerous shell commands should require explicit dangerous-shell permission."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
@@ -273,6 +379,34 @@ def test_resolve_bash_command_permission_escalates_for_dangerous_shell_commands(
     )
 
     assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+    assert decision.allowed is False
+
+
+def test_resolve_bash_command_permission_classifies_simple_grep_searches_as_read_only() -> None:
+    """Simple grep searches over explicit paths should remain available to read-only runs."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "grep TODO README.md",
+        tool,
+        granted_permission=ToolPermissionLevel.READ_ONLY,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.READ_ONLY
+    assert decision.allowed is True
+
+
+def test_resolve_bash_command_permission_does_not_treat_pattern_only_grep_as_read_only() -> None:
+    """Grep without an explicit path can still block on stdin and should stay conservative."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "grep TODO",
+        tool,
+        granted_permission=ToolPermissionLevel.READ_ONLY,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
     assert decision.allowed is False
 
 

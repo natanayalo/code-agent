@@ -43,6 +43,10 @@ _TOKEN_PREFIX_PERMISSION_RULES: tuple[
         (
             ("curl",),
             ("wget",),
+            ("ssh",),
+            ("scp",),
+            ("rsync",),
+            ("nc",),
             ("pip", "install"),
             ("uv", "pip", "install"),
             ("npm", "install"),
@@ -54,6 +58,24 @@ _TOKEN_PREFIX_PERMISSION_RULES: tuple[
             ("brew", "install"),
             ("git", "clone"),
             ("git", "pull"),
+        ),
+    ),
+    (
+        ToolPermissionLevel.DANGEROUS_SHELL,
+        "Command executes shell or interpreter code that cannot be safely classified.",
+        (
+            ("alias",),
+            ("function",),
+            ("bash",),
+            ("sh",),
+            ("zsh",),
+            ("python", "-c"),
+            ("python3", "-c"),
+            ("node", "-e"),
+            ("node", "--eval"),
+            ("perl", "-e"),
+            ("ruby", "-e"),
+            ("php", "-r"),
         ),
     ),
     (
@@ -115,7 +137,9 @@ _SUDO_WRAPPER_OPTIONS_WITH_ARGUMENT = frozenset(
     }
 )
 _SAFE_READ_ONLY_COMMANDS = frozenset({"cat", "head", "ls", "pwd", "tail", "wc"})
+_SAFE_GREP_EXECUTABLES = frozenset({"egrep", "fgrep", "grep"})
 _SAFE_RG_BLOCKLIST = frozenset({"--pre", "--pre-glob"})
+_UNSUPPORTED_COMMAND_WORD_GLOB_CHARS = frozenset({"*", "?", "["})
 
 
 class ToolPermissionDecision(ToolModel):
@@ -167,6 +191,14 @@ def _unsupported_shell_feature_reason() -> str:
     return "Command uses unsupported shell features that cannot be safely classified."
 
 
+def _unparseable_shell_command_reason() -> str:
+    """Explain why malformed shell syntax fails closed."""
+    return (
+        "Command could not be safely parsed and is treated as requiring elevated "
+        "shell permission."
+    )
+
+
 def granted_permission_from_constraints(
     constraints: Mapping[str, Any],
     *,
@@ -212,9 +244,29 @@ def _command_uses_unsupported_shell_features(command: str) -> bool:
         or "`" in command
         or "<(" in command
         or ">(" in command
+        or _command_word_uses_unsupported_expansion(command)
         or "\n" in command
         or "\r" in command
     )
+
+
+def _command_word_uses_unsupported_expansion(command: str) -> bool:
+    """Return whether any segment's command word uses expansion we do not safely classify."""
+    lexemes = _command_lexemes(command)
+    if lexemes is None:
+        return False
+
+    expect_command_word = True
+    for lexeme in lexemes:
+        if lexeme in _SHELL_OPERATOR_TOKENS:
+            expect_command_word = True
+            continue
+        if not expect_command_word:
+            continue
+        expect_command_word = False
+        if "${" in lexeme or any(char in lexeme for char in _UNSUPPORTED_COMMAND_WORD_GLOB_CHARS):
+            return True
+    return False
 
 
 def _command_segments(command: str) -> tuple[tuple[str, ...], ...] | None:
@@ -367,11 +419,23 @@ def _is_safe_rg_command(tokens: tuple[str, ...]) -> bool:
     )
 
 
+def _is_safe_grep_command(tokens: tuple[str, ...]) -> bool:
+    """Allow simple grep-style searches that include an explicit search path."""
+    return (
+        len(tokens) >= 3
+        and tokens[0] in _SAFE_GREP_EXECUTABLES
+        and not tokens[1].startswith("-")
+        and all(token != "-" for token in tokens[2:])
+    )
+
+
 def _is_safe_read_only_command(normalized_tokens: tuple[str, ...]) -> bool:
     """Return whether a command matches the narrow read-only allowlist."""
     executable = normalized_tokens[0]
     if executable in _SAFE_READ_ONLY_COMMANDS:
         return executable in {"ls", "pwd"} or len(normalized_tokens) > 1
+    if executable in _SAFE_GREP_EXECUTABLES:
+        return _is_safe_grep_command(normalized_tokens)
     if executable == "git":
         return len(normalized_tokens) > 1 and normalized_tokens[1] == "status"
     if executable == "rg":
@@ -431,6 +495,11 @@ def _classify_bash_command_permission(
         )
 
     segments = _command_segments(command)
+    if segments is None:
+        return (
+            _max_permission_level(default_permission, ToolPermissionLevel.DANGEROUS_SHELL),
+            _unparseable_shell_command_reason(),
+        )
     if not segments:
         return (
             default_permission,
