@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from sandbox import DockerShellCommandResult, DockerShellSessionError
+from tools import DEFAULT_TOOL_REGISTRY, ToolRegistry
 from workers.cli_runtime import (
     CliRuntimeMessage,
     CliRuntimeSettings,
@@ -95,6 +96,39 @@ def test_format_bash_observation_truncates_long_output() -> None:
     assert "Exit code: 0" in observation
     assert "abcde" in observation
     assert "[output truncated to 5 characters]" in observation
+
+
+def test_run_cli_runtime_loop_uses_registry_timeout_and_metadata() -> None:
+    """Tool registry metadata should drive the transcript and command timeout."""
+    execute_bash_tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash").model_copy(
+        update={"timeout_seconds": 3}
+    )
+    tool_registry = ToolRegistry(tools=(execute_bash_tool,))
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pwd"),
+            CliRuntimeStep(kind="final", final_output="Checked the working directory."),
+        ]
+    )
+    session = _FakeSession({"pwd": _command_result("pwd", output="/workspace/repo\n")})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=2,
+            worker_timeout_seconds=30,
+            command_timeout_seconds=9,
+        ),
+        tool_registry=tool_registry,
+    )
+
+    assert execution.status == "success"
+    assert session.calls == [("pwd", 3)]
+    assert "Required permission: workspace_write" in execution.messages[1].content
+    assert "Default timeout seconds: 3" in execution.messages[1].content
+    assert "Expected artifacts: stdout, stderr, changed_files" in execution.messages[1].content
 
 
 def test_run_cli_runtime_loop_completes_a_multi_turn_sequence() -> None:
@@ -206,6 +240,25 @@ def test_run_cli_runtime_loop_returns_shell_errors_without_raising() -> None:
     assert execution.status == "error"
     assert execution.stop_reason == "shell_error"
     assert "shell exploded" in execution.summary
+
+
+def test_run_cli_runtime_loop_returns_adapter_error_for_unknown_tools() -> None:
+    """Unknown tool requests should surface as structured adapter errors."""
+    adapter = _ScriptedAdapter(
+        [CliRuntimeStep(kind="tool_call", tool_name="missing_tool", tool_input="pwd")]
+    )
+    session = _FakeSession({})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(),
+    )
+
+    assert execution.status == "error"
+    assert execution.stop_reason == "adapter_error"
+    assert "unknown tool" in execution.summary.lower()
 
 
 def test_collect_changed_files_parses_modified_renamed_and_untracked_paths() -> None:

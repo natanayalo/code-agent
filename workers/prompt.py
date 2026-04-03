@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from tools import DEFAULT_TOOL_REGISTRY, ToolDefinition, ToolRegistry
 from workers.base import WorkerRequest
 
-DEFAULT_AVAILABLE_TOOLS = ("execute_bash",)
 DEFAULT_REPO_LISTING_MAX_DEPTH = 2
 DEFAULT_REPO_LISTING_MAX_ENTRIES = 40
 DEFAULT_AGENTS_MAX_CHARACTERS = 6000
@@ -39,18 +38,37 @@ def build_role_description_section() -> str:
 
 
 def build_available_tools_section(
-    available_tools: Sequence[str] | None = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> str:
     """Render the configured worker tool surface."""
-    normalized_tools = tuple(
-        dict.fromkeys(
-            tool.strip()
-            for tool in (available_tools or DEFAULT_AVAILABLE_TOOLS)
-            if tool is not None and tool.strip()
-        )
+    resolved_registry = tool_registry or DEFAULT_TOOL_REGISTRY
+    tools = resolved_registry.list_tools()
+    if not tools:
+        return "\n".join(["## Available Tools", "- No tools configured."])
+    tool_sections = [_render_tool_definition(tool) for tool in tools]
+    return "\n\n".join(["## Available Tools", *tool_sections])
+
+
+def _render_tool_definition(tool: ToolDefinition) -> str:
+    """Render one tool definition for prompt injection."""
+    expected_artifacts = (
+        ", ".join(f"`{artifact.value}`" for artifact in tool.expected_artifacts)
+        if tool.expected_artifacts
+        else "`none`"
     )
-    tool_lines = [f"- `{tool}`" for tool in normalized_tools] or ["- No tools configured."]
-    return "\n".join(["## Available Tools", *tool_lines])
+    return "\n".join(
+        [
+            f"### `{tool.name}`",
+            tool.description,
+            f"- Capability category: `{tool.capability_category.value}`",
+            f"- Side effect level: `{tool.side_effect_level.value}`",
+            f"- Required permission: `{tool.required_permission.value}`",
+            f"- Default timeout: `{tool.timeout_seconds}s`",
+            f"- Network required: `{'yes' if tool.network_required else 'no'}`",
+            f"- Deterministic: `{'yes' if tool.deterministic else 'no'}`",
+            f"- Expected artifacts: {expected_artifacts}",
+        ]
+    )
 
 
 def read_workspace_agents_guidance(
@@ -237,12 +255,12 @@ def build_system_prompt(
     request: WorkerRequest,
     workspace_path: Path,
     *,
-    available_tools: Sequence[str] | None = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> str:
     """Assemble the structured system prompt for a coding worker run."""
     sections = [
         build_role_description_section(),
-        build_available_tools_section(available_tools),
+        build_available_tools_section(tool_registry),
         build_repo_context_section(workspace_path),
         build_task_context_section(request),
         build_workflow_instructions_section(),

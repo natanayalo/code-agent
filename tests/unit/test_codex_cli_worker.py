@@ -12,6 +12,7 @@ from sandbox import (
     WorkspaceCleanupPolicy,
     WorkspaceHandle,
 )
+from tools import DEFAULT_TOOL_REGISTRY, ToolRegistry
 from workers import CodexCliWorker, WorkerRequest
 from workers.cli_runtime import CliRuntimeMessage, CliRuntimeStep
 
@@ -191,12 +192,57 @@ def test_codex_cli_worker_runs_the_shared_runtime_and_retains_the_workspace(
     first_prompt = adapter.calls[0][0].content
     assert "## Available Tools" in first_prompt
     assert "`execute_bash`" in first_prompt
+    assert "Required permission: `workspace_write`" in first_prompt
+    assert "Expected artifacts: `stdout`, `stderr`, `changed_files`" in first_prompt
     assert "AGENTS.md guidance:" in first_prompt
     assert "README.md" in first_prompt
 
 
+def test_codex_cli_worker_skips_changed_file_collection_when_tool_does_not_expect_it(
+    tmp_path: Path,
+) -> None:
+    """Changed-file collection should be driven by the registered tool metadata."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-47",
+        image="python:3.12-slim",
+    )
+    tool_registry = ToolRegistry(
+        tools=(
+            DEFAULT_TOOL_REGISTRY.require_tool("execute_bash").model_copy(
+                update={"expected_artifacts": ()}
+            ),
+        )
+    )
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="Nothing changed.")])
+    session = _FakeSession({})
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda started_container: session,
+        tool_registry=tool_registry,
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-47-artifacts",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Skip changed-file collection",
+            )
+        )
+    )
+
+    assert result.status == "success"
+    assert result.files_changed == []
+    assert session.calls == []
+
+
 def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path) -> None:
-    """Changed-file collection should respect the configured command timeout directly."""
+    """Changed-file collection should use the runtime timeout, not the bash tool timeout."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
         workspace=workspace,
@@ -212,11 +258,19 @@ def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path
             )
         }
     )
+    tool_registry = ToolRegistry(
+        tools=(
+            DEFAULT_TOOL_REGISTRY.require_tool("execute_bash").model_copy(
+                update={"timeout_seconds": 3}
+            ),
+        )
+    )
     worker = CodexCliWorker(
         runtime_adapter=adapter,
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(container),
         session_factory=lambda started_container: session,
+        tool_registry=tool_registry,
     )
 
     result = asyncio.run(

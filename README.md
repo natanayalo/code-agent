@@ -31,6 +31,8 @@ The repo currently contains:
 - an injectable `CodexCliWorker` scaffold that provisions a persistent sandbox container and
   shell session, builds the structured system prompt, and returns contract-compliant
   `WorkerResult` data through the shared worker interface
+- an explicit typed tool registry with a first `execute_bash` definition shared by prompt
+  construction, runtime enforcement, and worker artifact expectations
 
 This slice intentionally does not include:
 - app DB wiring
@@ -150,5 +152,5 @@ The repo includes:
 
 The current implementation targets are:
 - finish `T-047` with a real provider CLI adapter wired into the shared runtime
-- `T-048 Add an explicit tool registry and policy-aware bash tool boundary`
 - `T-049 Add the permission ladder and runtime budget ledger/enforcement`
+- `T-042 Add baseline worker timeout/cancel handling around the real worker path`
