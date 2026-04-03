@@ -23,6 +23,7 @@ from workers.codex_worker import (
     _build_test_result_details,
     _default_workspace_root,
     _jsonify_execution_context_value,
+    _load_toy_task_script_source,
 )
 
 
@@ -320,6 +321,7 @@ def test_codex_worker_maps_sandbox_result_into_worker_contract(tmp_path: Path) -
     context_path = workspace.workspace_path / ".code-agent" / "codex_worker_context.json"
     assert script_path.exists()
     assert context_path.exists()
+    assert script_path.read_text(encoding="utf-8") == _load_toy_task_script_source()
     assert script_path.parent == (workspace.workspace_path / ".code-agent")
     assert not (workspace.repo_path / ".code-agent" / "codex_worker_task.py").exists()
     context = json.loads(context_path.read_text(encoding="utf-8"))
