@@ -231,6 +231,19 @@ def test_shell_session_preserves_environment_and_working_directory(tmp_path: Pat
     assert fourth.output == "done\n"
 
 
+def test_shell_session_handles_command_ending_with_trailing_backslash(tmp_path: Path) -> None:
+    """Wrapper bookkeeping should not be folded into a trailing line continuation."""
+    container = _container_handle(tmp_path)
+
+    with DockerShellSession(container, process_factory=_local_shell_process_factory) as session:
+        result = session.execute("printf 'value' \\")
+        follow_up = session.execute("printf 'done\\n'")
+
+    assert result.exit_code == 0
+    assert result.output == "value"
+    assert follow_up.output == "done\n"
+
+
 def test_shell_session_times_out_and_closes(tmp_path: Path) -> None:
     """A timed-out command should kill the session instead of hanging indefinitely."""
     container = _container_handle(tmp_path)

@@ -38,6 +38,20 @@ class DockerShellSessionError(RuntimeError):
     """Raised when a persistent shell session fails."""
 
 
+def _wrap_command_for_persistent_shell(command: str, *, marker: str) -> bytes:
+    """Wrap a command so the session can capture its exit code without mutating its syntax."""
+    command_delimiter = f"__CODE_AGENT_COMMAND_{uuid4().hex}__"
+    return (
+        f"eval \"$(cat <<'{command_delimiter}'\n"
+        + command.rstrip("\n")
+        + "\n"
+        + command_delimiter
+        + '\n)"\n'
+        + "__code_agent_status=$?\n"
+        + f"printf '\\n{marker} %s\\n' \"$__code_agent_status\"\n"
+    ).encode("utf-8")
+
+
 class _ExitMarkerStream:
     """Expose one command's output as a bounded stream terminated by a marker line."""
 
@@ -248,12 +262,7 @@ class DockerShellSession:
                 marker_prefix=marker_prefix,
             )
 
-            wrapped_command = (
-                command.rstrip("\n")
-                + "\n"
-                + "__code_agent_status=$?\n"
-                + f"printf '\\n{marker} %s\\n' \"$__code_agent_status\"\n"
-            ).encode("utf-8")
+            wrapped_command = _wrap_command_for_persistent_shell(command, marker=marker)
 
             started_at = perf_counter()
             try:
