@@ -109,6 +109,7 @@ class CliRuntimeBudgetLedger(CliRuntimeModel):
     shell_commands_used: int = Field(default=0, ge=0)
     retries_used: int = Field(default=0, ge=0)
     verifier_passes_used: int = Field(default=0, ge=0)
+    failed_command_attempts: dict[str, int] = Field(default_factory=dict)
     wall_clock_seconds: float = Field(default=0.0, ge=0)
 
 
@@ -286,6 +287,11 @@ def _retry_command_key(command: str) -> tuple[str, ...]:
         return tuple(command.split())
 
 
+def _retry_command_budget_key(command_key: tuple[str, ...]) -> str:
+    """Render a stable dictionary key for per-command retry tracking."""
+    return shlex.join(command_key)
+
+
 def _resolve_command_timeout_seconds(
     *,
     tool: ToolDefinition,
@@ -366,8 +372,6 @@ def run_cli_runtime_loop(
     messages = [CliRuntimeMessage(role="system", content=system_prompt)]
     commands_run: list[WorkerCommand] = []
     budget_ledger = _build_budget_ledger(settings)
-    last_command_key: tuple[str, ...] | None = None
-    last_exit_code: int | None = None
 
     for iteration in range(1, settings.max_iterations + 1):
         _update_budget_ledger(
@@ -476,9 +480,9 @@ def run_cli_runtime_loop(
             )
 
         command_key = _retry_command_key(command)
-        is_retry = (
-            last_command_key == command_key and last_exit_code is not None and last_exit_code != 0
-        )
+        command_budget_key = _retry_command_budget_key(command_key)
+        previous_failures = budget_ledger.failed_command_attempts.get(command_budget_key, 0)
+        is_retry = previous_failures > 0
         if (
             settings.max_tool_calls is not None
             and budget_ledger.tool_calls_used >= settings.max_tool_calls
@@ -514,7 +518,7 @@ def run_cli_runtime_loop(
         if (
             settings.max_retries is not None
             and is_retry
-            and budget_ledger.retries_used >= settings.max_retries
+            and previous_failures > settings.max_retries
         ):
             return _budget_exceeded_result(
                 summary=(
@@ -570,8 +574,10 @@ def run_cli_runtime_loop(
                 duration_seconds=shell_result.duration_seconds,
             )
         )
-        last_command_key = command_key
-        last_exit_code = shell_result.exit_code
+        if shell_result.exit_code == 0:
+            budget_ledger.failed_command_attempts.pop(command_budget_key, None)
+        else:
+            budget_ledger.failed_command_attempts[command_budget_key] = previous_failures + 1
         _update_budget_ledger(
             budget_ledger,
             started_at=started_at,

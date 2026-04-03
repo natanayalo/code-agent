@@ -149,6 +149,7 @@ def test_run_cli_runtime_loop_uses_registry_timeout_and_metadata() -> None:
         shell_commands_used=1,
         retries_used=0,
         verifier_passes_used=0,
+        failed_command_attempts={},
         wall_clock_seconds=execution.budget_ledger.wall_clock_seconds,
     )
 
@@ -304,6 +305,41 @@ def test_run_cli_runtime_loop_treats_spacing_only_command_changes_as_retries() -
     assert execution.stop_reason == "budget_exceeded"
     assert len(session.calls) == 1
     assert execution.budget_ledger.retries_used == 0
+    assert "retry budget (0)" in execution.summary
+
+
+def test_run_cli_runtime_loop_counts_interleaved_failures_toward_retry_budget() -> None:
+    """Retry limits should still apply when the same failing command is retried later."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pytest -q"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pwd"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pytest -q"),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "pytest -q": _command_result("pytest -q", output="boom\n", exit_code=1),
+            "pwd": _command_result("pwd", output="/workspace/repo\n"),
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=4,
+            worker_timeout_seconds=30,
+            max_retries=0,
+        ),
+    )
+
+    assert execution.status == "failure"
+    assert execution.stop_reason == "budget_exceeded"
+    assert len(session.calls) == 2
+    assert execution.budget_ledger.retries_used == 0
+    assert execution.budget_ledger.failed_command_attempts == {"pytest -q": 1}
     assert "retry budget (0)" in execution.summary
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import posixpath
 import re
 import shlex
 from collections.abc import Mapping
@@ -69,10 +70,45 @@ _TOKEN_PREFIX_PERMISSION_RULES: tuple[
 )
 
 _SHELL_OPERATOR_TOKENS = frozenset({"|", "||", "&", "&&", ";", ">", ">>", "<", "<<"})
-_TOKEN_WITH_SHELL_OPERATOR_PATTERN = re.compile(r"[|&;<>]")
-_DANGEROUS_TOKEN_PATTERNS = (
-    re.compile(r"\bdrop\s+(?:database|table)\b"),
-    re.compile(r"\btruncate\s+table\b"),
+_DANGEROUS_TOKEN_PREFIXES = (
+    ("drop", "database"),
+    ("drop", "table"),
+    ("truncate", "table"),
+)
+_ENV_ASSIGNMENT_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+_ENV_WRAPPER_OPTIONS_WITH_ARGUMENT = frozenset(
+    {
+        "-c",
+        "-s",
+        "-u",
+        "--chdir",
+        "--default-signal",
+        "--ignore-signal",
+        "--split-string",
+        "--unset",
+    }
+)
+_NICE_WRAPPER_OPTIONS_WITH_ARGUMENT = frozenset({"-n"})
+_SIMPLE_WRAPPER_COMMANDS = frozenset({"builtin", "command", "nohup", "time"})
+_SUDO_WRAPPER_OPTIONS_WITH_ARGUMENT = frozenset(
+    {
+        "-c",
+        "-d",
+        "-g",
+        "-h",
+        "-p",
+        "-r",
+        "-t",
+        "-u",
+        "--chdir",
+        "--group",
+        "--host",
+        "--other-user",
+        "--prompt",
+        "--role",
+        "--type",
+        "--user",
+    }
 )
 _SAFE_READ_ONLY_COMMANDS = frozenset({"cat", "head", "ls", "pwd", "tail", "wc"})
 _SAFE_RG_BLOCKLIST = frozenset({"--pre", "--pre-glob"})
@@ -117,6 +153,11 @@ def _coerce_permission_level(value: object) -> ToolPermissionLevel | None:
     return None
 
 
+def _default_permission_reason(default_permission: ToolPermissionLevel) -> str:
+    """Render the fallback reason when a command stays at the tool's default level."""
+    return "Command uses the tool's default permission level " f"({default_permission.value})."
+
+
 def granted_permission_from_constraints(
     constraints: Mapping[str, Any],
     *,
@@ -138,14 +179,14 @@ def _command_tokens(command: str) -> tuple[str, ...] | None:
         return None
 
 
-def _has_shell_control_operators(command: str, tokens: tuple[str, ...]) -> bool:
-    """Return whether the command uses shell features that break read-only proofs."""
-    if "$(" in command or "`" in command or "\n" in command or "\r" in command:
-        return True
-    return any(
-        token in _SHELL_OPERATOR_TOKENS or _TOKEN_WITH_SHELL_OPERATOR_PATTERN.search(token)
-        for token in tokens
-    )
+def _command_lexemes(command: str) -> tuple[str, ...] | None:
+    """Parse shell lexemes while preserving control operators as standalone tokens."""
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars="|&;<>")
+        lexer.whitespace_split = True
+        return tuple(lexer)
+    except ValueError:
+        return None
 
 
 def _matches_token_prefix(tokens: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
@@ -163,9 +204,150 @@ def _classify_token_prefix_permission(
     return None
 
 
-def _contains_dangerous_token_pattern(tokens: tuple[str, ...]) -> bool:
-    """Return whether any normalized token embeds a dangerous SQL-style phrase."""
-    return any(pattern.search(token) for token in tokens for pattern in _DANGEROUS_TOKEN_PATTERNS)
+def _command_uses_unsupported_shell_features(command: str) -> bool:
+    """Return whether the command relies on shell features we do not safely classify."""
+    return "$(" in command or "`" in command or "\n" in command or "\r" in command
+
+
+def _command_segments(command: str) -> tuple[tuple[str, ...], ...] | None:
+    """Split a shell command into operator-delimited segments."""
+    lexemes = _command_lexemes(command)
+    if lexemes is None:
+        return None
+
+    segments: list[tuple[str, ...]] = []
+    current: list[str] = []
+    for lexeme in lexemes:
+        if lexeme in _SHELL_OPERATOR_TOKENS:
+            if current:
+                segments.append(tuple(current))
+                current = []
+            continue
+        current.append(lexeme)
+
+    if current:
+        segments.append(tuple(current))
+    return tuple(segments)
+
+
+def _normalize_command_word(token: str) -> str:
+    """Normalize a command word for rule matching."""
+    return posixpath.basename(token).lower()
+
+
+def _strip_leading_assignments(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    """Drop leading env-style assignments before the executable."""
+    index = 0
+    while index < len(tokens) and _ENV_ASSIGNMENT_PATTERN.match(tokens[index]):
+        index += 1
+    return tokens[index:]
+
+
+def _strip_wrapper_options(
+    tokens: tuple[str, ...],
+    *,
+    options_with_argument: frozenset[str],
+) -> tuple[str, ...]:
+    """Drop wrapper-specific options until the wrapped command begins."""
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        lowered_token = token.lower()
+        if token == "--":
+            return tokens[index + 1 :]
+        if not token.startswith("-") or token == "-":
+            return tokens[index:]
+        if lowered_token in options_with_argument:
+            index += 2
+            continue
+        if any(lowered_token.startswith(f"{option}=") for option in options_with_argument):
+            index += 1
+            continue
+        index += 1
+    return ()
+
+
+def _max_permission_level(
+    first: ToolPermissionLevel,
+    second: ToolPermissionLevel,
+) -> ToolPermissionLevel:
+    """Return the higher-ranked permission level."""
+    if permission_rank(first) >= permission_rank(second):
+        return first
+    return second
+
+
+def _unwrap_command_tokens(
+    tokens: tuple[str, ...],
+) -> tuple[tuple[str, ...], ToolPermissionLevel | None]:
+    """Strip known wrappers while preserving any permission floor they imply."""
+    remaining = _strip_leading_assignments(tokens)
+    wrapper_floor: ToolPermissionLevel | None = None
+
+    while remaining:
+        executable = _normalize_command_word(remaining[0])
+        wrapped_tokens = remaining[1:]
+        if executable == "sudo":
+            wrapper_floor = (
+                ToolPermissionLevel.DANGEROUS_SHELL
+                if wrapper_floor is None
+                else _max_permission_level(
+                    wrapper_floor,
+                    ToolPermissionLevel.DANGEROUS_SHELL,
+                )
+            )
+            remaining = _strip_leading_assignments(
+                _strip_wrapper_options(
+                    wrapped_tokens,
+                    options_with_argument=_SUDO_WRAPPER_OPTIONS_WITH_ARGUMENT,
+                )
+            )
+            continue
+        if executable == "env":
+            remaining = _strip_leading_assignments(
+                _strip_wrapper_options(
+                    wrapped_tokens,
+                    options_with_argument=_ENV_WRAPPER_OPTIONS_WITH_ARGUMENT,
+                )
+            )
+            continue
+        if executable == "nice":
+            remaining = _strip_leading_assignments(
+                _strip_wrapper_options(
+                    wrapped_tokens,
+                    options_with_argument=_NICE_WRAPPER_OPTIONS_WITH_ARGUMENT,
+                )
+            )
+            continue
+        if executable in _SIMPLE_WRAPPER_COMMANDS:
+            remaining = _strip_leading_assignments(
+                _strip_wrapper_options(
+                    wrapped_tokens,
+                    options_with_argument=frozenset(),
+                )
+            )
+            continue
+        break
+
+    return remaining, wrapper_floor
+
+
+def _normalized_tokens_for_matching(
+    tokens: tuple[str, ...],
+) -> tuple[tuple[str, ...], ToolPermissionLevel | None]:
+    """Normalize a segment into matchable tokens and any wrapper-imposed floor."""
+    remaining, wrapper_floor = _unwrap_command_tokens(tokens)
+    if not remaining:
+        return (), wrapper_floor
+    return (
+        (_normalize_command_word(remaining[0]), *(token.lower() for token in remaining[1:])),
+        wrapper_floor,
+    )
+
+
+def _contains_dangerous_token_prefix(tokens: tuple[str, ...]) -> bool:
+    """Return whether the segment starts with a destructive SQL-style phrase."""
+    return any(_matches_token_prefix(tokens, prefix) for prefix in _DANGEROUS_TOKEN_PREFIXES)
 
 
 def _is_safe_rg_command(tokens: tuple[str, ...]) -> bool:
@@ -177,16 +359,8 @@ def _is_safe_rg_command(tokens: tuple[str, ...]) -> bool:
     )
 
 
-def _is_safe_read_only_command(
-    command: str,
-    *,
-    tokens: tuple[str, ...],
-    normalized_tokens: tuple[str, ...],
-) -> bool:
+def _is_safe_read_only_command(normalized_tokens: tuple[str, ...]) -> bool:
     """Return whether a command matches the narrow read-only allowlist."""
-    if _has_shell_control_operators(command, tokens):
-        return False
-
     executable = normalized_tokens[0]
     if executable in _SAFE_READ_ONLY_COMMANDS:
         return executable in {"ls", "pwd"} or len(normalized_tokens) > 1
@@ -197,38 +371,78 @@ def _is_safe_read_only_command(
     return False
 
 
+def _classify_segment_permission(
+    segment_tokens: tuple[str, ...],
+    *,
+    default_permission: ToolPermissionLevel,
+) -> tuple[ToolPermissionLevel, str]:
+    """Return the required permission level for one shell segment."""
+    normalized_tokens, wrapper_floor = _normalized_tokens_for_matching(segment_tokens)
+    if not normalized_tokens:
+        return (
+            wrapper_floor or default_permission,
+            _default_permission_reason(default_permission),
+        )
+
+    token_prefix_decision = _classify_token_prefix_permission(normalized_tokens)
+    if token_prefix_decision is not None:
+        if wrapper_floor is None:
+            return token_prefix_decision
+        permission_level, reason = token_prefix_decision
+        return _max_permission_level(permission_level, wrapper_floor), reason
+    if _contains_dangerous_token_prefix(normalized_tokens):
+        permission_level = ToolPermissionLevel.DANGEROUS_SHELL
+        if wrapper_floor is not None:
+            permission_level = _max_permission_level(permission_level, wrapper_floor)
+        return permission_level, "Command performs a destructive shell or git operation."
+    if _is_safe_read_only_command(normalized_tokens):
+        if wrapper_floor is None:
+            return ToolPermissionLevel.READ_ONLY, "Command matches the narrow read-only allowlist."
+        return (
+            _max_permission_level(ToolPermissionLevel.READ_ONLY, wrapper_floor),
+            "Command matches the narrow read-only allowlist.",
+        )
+    if wrapper_floor is not None:
+        return wrapper_floor, "Command uses a wrapper that requires elevated shell permission."
+    return (
+        default_permission,
+        _default_permission_reason(default_permission),
+    )
+
+
 def _classify_bash_command_permission(
     command: str,
     *,
     default_permission: ToolPermissionLevel,
 ) -> tuple[ToolPermissionLevel, str]:
     """Return the required permission level for a bash command."""
-    tokens = _command_tokens(command)
-    if not tokens:
+    if _command_uses_unsupported_shell_features(command):
         return (
             default_permission,
-            f"Command uses the tool's default permission level ({default_permission.value}).",
+            _default_permission_reason(default_permission),
         )
 
-    normalized_tokens = tuple(token.lower() for token in tokens)
-    token_prefix_decision = _classify_token_prefix_permission(normalized_tokens)
-    if token_prefix_decision is not None:
-        return token_prefix_decision
-    if _contains_dangerous_token_pattern(normalized_tokens):
+    segments = _command_segments(command)
+    if not segments:
         return (
-            ToolPermissionLevel.DANGEROUS_SHELL,
-            "Command performs a destructive shell or git operation.",
+            default_permission,
+            _default_permission_reason(default_permission),
         )
-    if _is_safe_read_only_command(
-        command,
-        tokens=tokens,
-        normalized_tokens=normalized_tokens,
-    ):
-        return ToolPermissionLevel.READ_ONLY, "Command matches the narrow read-only allowlist."
-    return (
-        default_permission,
-        f"Command uses the tool's default permission level ({default_permission.value}).",
-    )
+
+    highest_permission: ToolPermissionLevel | None = None
+    highest_reason = _default_permission_reason(default_permission)
+    for segment_tokens in segments:
+        segment_permission, segment_reason = _classify_segment_permission(
+            segment_tokens,
+            default_permission=default_permission,
+        )
+        if highest_permission is None or (
+            permission_rank(segment_permission) > permission_rank(highest_permission)
+        ):
+            highest_permission = segment_permission
+            highest_reason = segment_reason
+
+    return highest_permission or default_permission, highest_reason
 
 
 def resolve_bash_command_permission(
