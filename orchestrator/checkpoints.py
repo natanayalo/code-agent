@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -32,4 +32,27 @@ def create_sqlite_checkpointer(checkpoint_path: str | Path) -> Iterator[BaseChec
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
     with SqliteSaver.from_conn_string(str(resolved_path)) as checkpointer:
+        yield checkpointer
+
+
+@asynccontextmanager
+async def create_async_sqlite_checkpointer(
+    checkpoint_path: str | Path,
+) -> AsyncIterator[BaseCheckpointSaver]:
+    """Create an async SQLite-backed checkpointer for async graph execution."""
+
+    try:
+        from langgraph.checkpoint.sqlite.aio import (  # type: ignore[import-not-found]
+            AsyncSqliteSaver,
+        )
+    except ImportError as exc:  # pragma: no cover - exercised only in misconfigured envs
+        raise RuntimeError(
+            "Async SQLite checkpoint persistence requires the "
+            "`langgraph-checkpoint-sqlite` package and `aiosqlite` to be installed."
+        ) from exc
+
+    resolved_path = Path(checkpoint_path).expanduser().resolve()
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+
+    async with AsyncSqliteSaver.from_conn_string(str(resolved_path)) as checkpointer:
         yield checkpointer

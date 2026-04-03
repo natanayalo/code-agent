@@ -19,16 +19,18 @@ The repo currently contains:
 - initial SQLAlchemy models and Alembic migration scaffolding for Milestone 1
 - an initial repository layer for users, sessions, tasks, runs, and memory
 - a typed orchestrator state schema for future workflow execution
-- a LangGraph workflow skeleton that runs the happy path with a fake worker result
+- a LangGraph workflow skeleton that runs the happy path through the shared async worker contract
 - SQLite-backed checkpoint persistence helpers for durable LangGraph workflow resume
 - sandbox command artifact capture for stdout/stderr logs, changed-file snapshots, and
   diff summaries
+- an initial `CodexWorker` that provisions a real workspace, runs a deterministic toy repo
+  task in the sandbox, and returns a contract-compliant `WorkerResult` through the shared
+  async worker interface
 
 This slice intentionally does not include:
 - app DB wiring
-- worker implementations
-- real worker dispatch
-- sandbox execution logic
+- app-layer real worker dispatch wiring
+- worker-result persistence to the DB or reply layer
 - Telegram or webhook task handling
 
 ## Project Layout
@@ -68,6 +70,15 @@ cp .env.example .env
 # edit .env and replace the example password before first run
 docker compose up --build
 ```
+
+Optional for local worker runs:
+
+```bash
+export CODE_AGENT_WORKSPACE_ROOT="$HOME/.code-agent/workspaces"
+```
+
+Set `CODE_AGENT_WORKSPACE_ROOT` if you want the Codex worker to keep sandbox workspaces
+outside the system temporary directory.
 
 If your environment uses a private or intercepting CA and Docker builds fail with SSL
 verification errors, place the CA certificate at `cert.pem` in the repository root before
@@ -132,6 +143,6 @@ The repo includes:
 ## Next Steps
 
 The current implementation targets are:
-- `T-032 Add artifact capture`
-- `T-040 Define worker interface`
-- `T-041 Implement CodexWorker or ClaudeWorker`
+- architecture checkpoint after `T-041`
+- `T-042 Add baseline worker timeout/cancel handling`
+- `T-044 Run one real orchestrator-to-worker vertical slice`

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -66,5 +67,5 @@ class Worker(ABC):
     """Shared interface every coding worker must implement."""
 
     @abstractmethod
-    def run(self, request: WorkerRequest) -> WorkerResult:
+    def run(self, request: WorkerRequest) -> Awaitable[WorkerResult]:
         """Execute a task request and return a structured result."""

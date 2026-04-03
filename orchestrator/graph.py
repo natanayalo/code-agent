@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
 from langchain_core.runnables import RunnableLambda
@@ -171,7 +171,7 @@ def _default_worker_result_provider(request: WorkerRequest) -> WorkerResult:
 class _DefaultFakeWorker(Worker):
     """Fallback worker used until a real provider-specific adapter exists."""
 
-    def run(self, request: WorkerRequest) -> WorkerResult:
+    async def run(self, request: WorkerRequest) -> WorkerResult:
         return _default_worker_result_provider(request)
 
 
@@ -315,14 +315,14 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
 
 def build_await_result_node(
     worker: Worker | None = None,
-) -> Callable[[OrchestratorState], dict[str, Any]]:
+) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around a fake or injected worker."""
     bound_worker = worker or _DefaultFakeWorker()
 
-    def await_result(state_input: OrchestratorState) -> dict[str, Any]:
+    async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
         request = _build_worker_request(state)
-        result = bound_worker.run(request)
+        result = await bound_worker.run(request)
         return {
             "current_step": "await_result",
             "result": result.model_dump(),
