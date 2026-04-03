@@ -32,11 +32,10 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-046 Build structured system prompt module
 
 ## Next
 
-- T-046 Build structured system prompt module
 - T-047 Implement multi-turn agent loop in worker (ClaudeWorker, bash-only tools, with worker-local timeout/max-iteration/budget guards)
 - T-042 Add baseline worker timeout/cancel handling (outer orchestrator-level timeout/cancel envelope around the real worker path)
 - T-044 Run one real orchestrator-to-worker vertical slice (multi-step agent loop, not toy script, with execution-path DB persistence only)
