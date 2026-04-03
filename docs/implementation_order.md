@@ -27,32 +27,47 @@ Architecture review checkpoint after T-041
 - Document mismatches before expanding scope.
 
 ## Step 8
-Persistent sandbox + prompt + self-bounded multi-turn worker (T-045 to T-047)
-- Build the long-lived container/session layer needed for iterative execution.
-- Build the structured system prompt.
-- Implement the multi-turn worker with its own inner-loop safety: max iterations, worker-local timeout, and budget checks so the worker is safe to run standalone before orchestrator timeout/cancel is added.
+Persistent sandbox + prompt foundations (T-045/T-046)
+- Keep the long-lived container/session layer stable as the execution substrate for iterative workers.
+- Keep the structured system prompt stable, but separate stable scaffold content from dynamic task/run context so CLI adapters can reuse what they control externally.
 
 ## Step 9
-Outer timeout/cancel + Vertical Slice E2E (T-042, T-044)
-- `T-042` adds the orchestrator-level timeout/cancel envelope around the real worker path.
-- `T-044` proves the minimal HTTP submit -> orchestrator -> real worker -> real workspace -> DB -> task_id/status flow.
-- DB scope here is execution-path persistence only: task/status, worker run metadata, final result fields, and captured artifacts needed for polling by `task_id`.
-- Structured memory wiring (`load_memory` / `persist_memory`) remains part of the later memory integration milestone.
+Shared CLI worker runtime (T-047)
+- Implement the first real multi-turn worker through a CLI/SDK/hook/subprocess adapter rather than assuming direct raw API ownership.
+- Reuse the existing shared worker contract, persistent sandbox, and prompt module.
+- Keep the worker safe to run standalone with max iterations, worker-local timeout, and budget guards.
 
 ## Step 10
-Telegram ingress and generic webhook adapters (T-050 to T-053) on top of the existing HTTP path
+Tool registry + permission ladder + runtime budget enforcement (T-048, T-049)
+- Add an explicit tool registry starting with a single bash tool surface.
+- Move approval enforcement from a coarse task-text gate toward the tool/command boundary.
+- Make budget a real control surface before the vertical slice depends on it.
 
 ## Step 11
-Sandbox hardening (T-054) with enforced destructive-action approval gate
+Outer timeout/cancel + Vertical Slice E2E (T-042, T-044)
+- `T-042` adds the orchestrator-level timeout/cancel envelope around the real worker path.
+- `T-044` proves the minimal HTTP submit -> orchestrator -> real CLI worker -> real workspace -> DB -> task_id/status flow.
+- DB scope here is execution-path persistence only: task/status, worker run metadata, final result fields, verifier output, and captured artifacts needed for polling by `task_id`.
 
 ## Step 12
-Memory integration loop (T-060 to T-064): load_memory -> execute -> persist_learnings
+Verifier stage + sandbox auditability (T-055, T-054)
+- Add a constrained verifier after the builder worker finishes.
+- Expand sandbox audit artifacts so verification and replay are grounded in what actually happened.
 
 ## Step 13
-Structured run observability and second worker routing (T-043, T-070+)
+Skeptical memory + compaction + stable session scaffold (T-060 to T-065)
+- Load memory as hints, not truth, with verification metadata.
+- Maintain compact session working state instead of transcript-shaped state growth.
+- Persist stable scaffold/session context separately from dynamic turn state where the CLI runtime allows it.
 
 ## Step 14
-Tools, observability, and remaining hardening
+Structured run observability and second worker routing (T-043, T-070+)
+
+## Step 15
+Telegram ingress and generic webhook adapters (T-050 to T-053) on top of the existing HTTP path once the core execution path is stable
+
+## Step 16
+External tool wrappers, MCP compatibility, and remaining hardening
 
 ## Rule
 

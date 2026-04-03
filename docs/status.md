@@ -29,20 +29,23 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - Reference-analysis plan updates for persistent shell, prompt, and agent-loop sequencing. PR: [#24](https://github.com/natanayalo/code-agent/pull/24)
 - Architecture review checkpoint: align orchestrator route and dispatch state under real worker execution. PR: [#25](https://github.com/natanayalo/code-agent/pull/25)
 - T-045 Evolve sandbox to persistent container with shell sessions. PR: [#26](https://github.com/natanayalo/code-agent/pull/26)
+- T-046 Build structured system prompt module.
 
 ## In Progress
 
-- T-046 Build structured system prompt module
+- T-047 Implement the shared CLI-driven multi-turn worker runtime.
 
 ## Next
 
-- T-047 Implement multi-turn agent loop in worker (ClaudeWorker, bash-only tools, with worker-local timeout/max-iteration/budget guards)
-- T-042 Add baseline worker timeout/cancel handling (outer orchestrator-level timeout/cancel envelope around the real worker path)
-- T-044 Run one real orchestrator-to-worker vertical slice (multi-step agent loop, not toy script, with execution-path DB persistence only)
-- Milestone: Telegram ingress (T-050 to T-053)
-- T-054 Enforce sandbox execution boundary and destructive-action approval gate
-- Milestone: Memory integration (T-060 to T-064)
-- Milestone: structured run observability and second worker routing (T-043, T-070+) after memory integration
+- T-048 Add an explicit tool registry and policy-aware bash tool boundary.
+- T-049 Add the permission ladder and runtime budget ledger/enforcement.
+- T-042 Add baseline worker timeout/cancel handling (outer orchestrator-level timeout/cancel envelope around the real worker path).
+- T-044 Run one real orchestrator-to-worker vertical slice through the CLI worker path with execution-path DB persistence only.
+- T-055 Add the constrained verifier stage.
+- T-054 Harden sandbox execution boundary and auditability.
+- Milestone: skeptical memory, compact session state, and stable session scaffold (T-060 to T-065).
+- Milestone: structured run observability and second worker routing (T-043, T-070+) after the vertical slice, verifier, and memory loop are stable.
+- Milestone: Telegram ingress (T-050 to T-053) after the core execution path is stable.
 
 ## Blocked
 
@@ -50,10 +53,12 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: T-046 system prompt → T-047 self-bounded agent loop → T-042 outer timeout/cancel → T-044 vertical slice with multi-turn agent worker, HTTP submit path, and execution-path DB persistence → Telegram ingress/adapters → T-054 sandbox hardening → T-060..T-064 memory integration → T-043 structured run observability → T-070+ second worker.
-- T-045/T-046/T-047 were added based on the reference implementation analysis (Open-SWE, Deep Agents, mini-SWE-agent, SWE-ReX, OpenHands, Stripe/Ramp/Coinbase). Key insight: every successful coding agent is built on a persistent interactive shell and a carefully engineered system prompt.
-- Safety layering is intentional: T-047 carries the inner-loop brakes (max iterations, worker-local timeout, budget checks) so the worker cannot run unbounded when exercised standalone; T-042 then adds the outer orchestrator-level timeout/cancel layer that preserves workspace/logs and surfaces timeout state without hanging the run forever.
-- T-044 DB scope is intentionally limited to execution-path persistence for task/status lookup, worker run metadata, final result fields, and captured artifacts. Wiring `load_memory` / `persist_memory` into structured memory repositories remains part of the later T-060..T-064 memory milestone.
+- Current target order from here: T-047 shared CLI worker runtime → T-048 tool registry → T-049 permission ladder + runtime budget enforcement → T-042 outer timeout/cancel → T-044 vertical slice with a real CLI worker, HTTP submit path, and execution-path DB persistence → T-055 verifier stage → T-054 sandbox auditability/hardening → T-060..T-065 skeptical memory, compact session state, and stable scaffold persistence → T-043 structured run observability → T-070+ second worker → Telegram/webhook adapters.
+- T-045 and T-046 are now both landed in-repo: the persistent container/shell primitives exist, and the structured system prompt module exists. The remaining gap is the actual CLI-driven worker loop that uses them.
+- The near-term worker plan is explicitly CLI-first. New worker work should not assume full ownership of low-level raw API payload assembly when a CLI, SDK, hook, or subprocess adapter can provide the runtime.
+- Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution so the worker cannot run unbounded when exercised standalone; T-042 then adds the outer orchestrator-level timeout/cancel layer that preserves workspace/logs and surfaces timeout state without hanging the run forever.
+- T-044 DB scope remains intentionally limited to execution-path persistence for task/status lookup, worker run metadata, final result fields, verifier output, and captured artifacts needed for polling by `task_id`.
+- The current `CodexWorker` is still a sandboxed toy executor used to prove the worker contract and artifact capture path. It is not yet the target CLI-runtime implementation.
 - CI now validates every push, including merges to `master`, avoiding duplicate pull request branch runs while enforcing a 90% branch-coverage floor in `pytest`.
 - Protected-branch enforcement for `master` still depends on GitHub branch protection settings and required status checks.
 - T-021 adds durable LangGraph checkpointing without yet wiring orchestrator state to the app layer.
