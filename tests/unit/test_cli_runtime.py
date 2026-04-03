@@ -30,6 +30,7 @@ class _FakeSession:
     def __init__(self, responses: dict[str, DockerShellCommandResult | Exception]) -> None:
         self._responses = dict(responses)
         self.calls: list[tuple[str, int]] = []
+        self.closed = False
 
     def execute(self, command: str, *, timeout_seconds: int = 300) -> DockerShellCommandResult:
         self.calls.append((command, timeout_seconds))
@@ -37,6 +38,9 @@ class _FakeSession:
         if isinstance(response, Exception):
             raise response
         return response
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def _command_result(command: str, *, output: str, exit_code: int = 0) -> DockerShellCommandResult:
@@ -204,3 +208,19 @@ def test_collect_changed_files_parses_modified_renamed_and_untracked_paths() -> 
     changed_files = collect_changed_files(session)
 
     assert changed_files == ["README.md", "new.py", "tests/test_new.py"]
+
+
+def test_collect_changed_files_does_not_treat_non_rename_arrow_paths_as_renames() -> None:
+    """Only rename status lines should split on the porcelain rename marker."""
+    session = _FakeSession(
+        {
+            "git status --short --untracked-files=all": _command_result(
+                "git status --short --untracked-files=all",
+                output=" M docs/name -> value.txt\n?? tests/path -> sample.txt\n",
+            )
+        }
+    )
+
+    changed_files = collect_changed_files(session)
+
+    assert changed_files == ["docs/name -> value.txt", "tests/path -> sample.txt"]

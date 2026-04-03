@@ -234,14 +234,11 @@ class CodexCliWorker(Worker):
             )
 
     def _close_session(self, session: ShellSessionProtocol | None) -> None:
-        """Close a shell session when the concrete implementation supports it."""
+        """Close the shell session while preserving the worker result."""
         if session is None:
             return
-        close = getattr(session, "close", None)
-        if not callable(close):
-            return
         try:
-            close()
+            session.close()
         except OSError:
             logger.exception("Codex CLI worker failed to close the persistent shell session")
 

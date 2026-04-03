@@ -110,6 +110,9 @@ class ShellSessionProtocol(Protocol):
     def execute(self, command: str, *, timeout_seconds: int = 300) -> DockerShellCommandResult:
         """Execute one shell command inside the persistent workspace session."""
 
+    def close(self) -> None:
+        """Close the shell session and release resources."""
+
 
 def _coerce_positive_int(value: object) -> int | None:
     """Return a positive integer override when one is present."""
@@ -342,12 +345,12 @@ def collect_changed_files(
 
     changed_files: list[str] = []
     for line in status_result.output.splitlines():
-        if not line.strip():
+        if len(line) < 4:
             continue
-        candidate = line[3:] if len(line) > 3 else line.strip()
-        if " -> " in candidate:
-            candidate = candidate.split(" -> ", 1)[1]
-        candidate = candidate.strip()
+        status = line[:2]
+        candidate = line[3:].strip()
+        if "R" in status and " -> " in candidate:
+            candidate = candidate.split(" -> ", 1)[1].strip()
         if candidate.startswith('"') and candidate.endswith('"') and len(candidate) >= 2:
             candidate = candidate[1:-1]
         if candidate:
