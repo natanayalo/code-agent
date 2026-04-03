@@ -30,10 +30,10 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 - T-041 Implement `CodexWorker` through the shared async worker contract. PR: [#23](https://github.com/natanayalo/code-agent/pull/23)
 - Architecture review checkpoint (after T-041): validating route/executor alignment and honest dispatch state before expanding to multi-worker support.
+- T-045 Evolve sandbox to persistent container with shell sessions: adding long-lived container lifecycle and stateful shell session primitives.
 
 ## Next
 
-- T-045 Evolve sandbox to persistent container with shell sessions
 - T-046 Build structured system prompt module
 - T-047 Implement multi-turn agent loop in worker (ClaudeWorker, bash-only tools)
 - T-042 Add baseline worker timeout/cancel handling
@@ -62,3 +62,6 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - Architecture checkpoint review found two mismatches under real execution: the graph could claim
   `claude` while only a Codex worker was wired, and `dispatch.run_id` / `dispatch.workspace_id`
   were placeholder values before a real run existed. The current slice makes both cases explicit.
+- T-045 is in progress with a persistent container manager, a long-lived shell session API, and
+  unit/integration coverage for state persistence across commands while keeping the existing
+  one-shot `DockerSandboxRunner` intact.
