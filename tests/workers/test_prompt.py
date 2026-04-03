@@ -12,6 +12,7 @@ from workers.prompt import (
     build_system_prompt,
     build_task_context_section,
     build_workspace_directory_listing,
+    read_workspace_agents_guidance,
 )
 
 
@@ -67,6 +68,15 @@ def test_build_repo_context_section_skips_missing_agents_file(tmp_path: Path) ->
     assert "AGENTS.md guidance:" not in section
 
 
+def test_read_workspace_agents_guidance_truncates_long_agents_file(tmp_path: Path) -> None:
+    """Large AGENTS.md files should be truncated before prompt injection."""
+    (tmp_path / "AGENTS.md").write_text("0123456789ABCDEFGHIJ", encoding="utf-8")
+
+    guidance = read_workspace_agents_guidance(tmp_path, max_characters=10)
+
+    assert guidance == "0123456789\n... (truncated)"
+
+
 def test_build_workspace_directory_listing_truncates_when_entry_budget_is_exceeded(
     tmp_path: Path,
 ) -> None:
@@ -120,6 +130,19 @@ def test_build_task_context_section_omits_empty_optional_context() -> None:
     assert "Memory context:" not in section
     assert "Constraints:" not in section
     assert "Budget:" not in section
+
+
+def test_build_task_context_section_masks_repo_url_credentials() -> None:
+    """Inline repository credentials should be masked in prompt context."""
+    section = build_task_context_section(
+        WorkerRequest(
+            task_text="Inspect the repository",
+            repo_url="https://token@github.com/example/repo.git",
+        )
+    )
+
+    assert "Repository URL: https://***@github.com/example/repo.git" in section
+    assert "token@github.com" not in section
 
 
 def test_build_task_context_section_handles_mixed_type_sets() -> None:
