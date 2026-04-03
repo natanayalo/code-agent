@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -132,6 +133,9 @@ def _jsonify_execution_context_value(value: object, *, field_path: str) -> objec
     """Normalize context values into JSON-safe structures without hiding bad types."""
     if value is None or isinstance(value, bool | int | float | str):
         return value
+    if isinstance(value, bytes | bytearray):
+        encoded = base64.b64encode(bytes(value)).decode("ascii")
+        return f"base64:{encoded}"
     if isinstance(value, Path | date | datetime | time):
         return str(value)
     if isinstance(value, Enum):
@@ -149,6 +153,15 @@ def _jsonify_execution_context_value(value: object, *, field_path: str) -> objec
             )
             for key, item in value.items()
         }
+    if isinstance(value, set | frozenset):
+        normalized_items = [
+            _jsonify_execution_context_value(item, field_path=f"{field_path}[{index}]")
+            for index, item in enumerate(value)
+        ]
+        return sorted(
+            normalized_items,
+            key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")),
+        )
     if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
         return [
             _jsonify_execution_context_value(item, field_path=f"{field_path}[{index}]")

@@ -22,6 +22,7 @@ from workers.codex_worker import (
     DEFAULT_WORKSPACE_ROOT_ENV_VAR,
     _build_test_result_details,
     _default_workspace_root,
+    _jsonify_execution_context_value,
 )
 
 
@@ -459,6 +460,24 @@ def test_codex_worker_cleanup_does_not_mask_unexpected_failures(
         )
 
     assert workspace_manager.cleanup_requests == [(workspace, False)]
+
+
+def test_jsonify_execution_context_value_supports_sets_and_bytes() -> None:
+    """Execution context serialization should cover common Python container types."""
+    normalized = _jsonify_execution_context_value(
+        {
+            "tags": {"beta", "alpha"},
+            "payload": b"hello",
+            "nested": [{"flags": {"z", "a"}}, bytearray(b"ok")],
+        },
+        field_path="memory_context",
+    )
+
+    assert normalized == {
+        "tags": ["alpha", "beta"],
+        "payload": "base64:aGVsbG8=",
+        "nested": [{"flags": ["a", "z"]}, "base64:b2s="],
+    }
 
 
 def test_codex_worker_rejects_unserializable_execution_context(tmp_path: Path) -> None:
