@@ -97,6 +97,8 @@ def test_codex_worker_runs_real_workspace_and_graph_path(tmp_path: Path) -> None
     assert state.current_step == "persist_memory"
     assert state.route.chosen_worker == "codex"
     assert state.dispatch.worker_type == "codex"
+    assert state.dispatch.run_id is None
+    assert state.dispatch.workspace_id is None
     assert state.result is not None
     assert state.result.status == "success"
     assert ".code-agent/codex-worker-report.md" in state.result.files_changed

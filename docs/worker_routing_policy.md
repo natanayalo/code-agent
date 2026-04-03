@@ -4,10 +4,13 @@
 
 Choose the most appropriate coding worker for a task while keeping decisions explainable.
 
-## Default workers
+## Currently configured workers
+
+- CodexWorker
+
+## Planned workers
 
 - ClaudeWorker
-- CodexWorker
 
 ## Route to ClaudeWorker when
 
@@ -18,6 +21,9 @@ Use ClaudeWorker if one or more are true:
 - task is a refactor rather than a straightforward implementation
 - prior attempt with CodexWorker failed
 - caller explicitly requests "highest quality"
+
+If ClaudeWorker is not configured yet, the orchestrator must fail explicitly rather than
+silently dispatching another worker while state still claims `claude`.
 
 ## Route to CodexWorker when
 

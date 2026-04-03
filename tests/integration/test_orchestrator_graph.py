@@ -70,6 +70,8 @@ def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
     assert state.approval.required is False
     assert state.approval.status == "not_required"
     assert state.dispatch.worker_type == "codex"
+    assert state.dispatch.run_id is None
+    assert state.dispatch.workspace_id is None
     assert len(worker.requests) == 1
     assert worker.requests[0].task_text == "Add generic webhook endpoint"
     assert worker.requests[0].repo_url == "https://github.com/natanayalo/code-agent"
@@ -163,6 +165,8 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
         assert state.route.chosen_worker == "codex"
         assert state.approval.status == "not_required"
         assert state.dispatch.worker_type == "codex"
+        assert state.dispatch.run_id is None
+        assert state.dispatch.workspace_id is None
         assert len(resumed_worker.requests) == 1
         assert resumed_worker.requests[0].task_text == "Add checkpoint persistence"
         assert state.result is not None
@@ -182,6 +186,62 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
         ]
 
     asyncio.run(scenario())
+
+
+def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None:
+    """The graph should fail explicitly instead of silently running the wrong worker."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=["workers/codex_worker.py"],
+            test_results=[{"name": "unexpected-worker-call", "status": "passed"}],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary=None,
+        )
+    )
+    graph = build_orchestrator_graph(worker=worker)
+
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": "Refactor the architecture-sensitive worker selection flow",
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                }
+            }
+        )
+    )
+
+    state = OrchestratorState.model_validate(raw_output)
+
+    assert state.current_step == "persist_memory"
+    assert state.task_kind == "architecture"
+    assert state.route.chosen_worker == "claude"
+    assert state.dispatch.worker_type == "claude"
+    assert state.dispatch.run_id is None
+    assert state.dispatch.workspace_id is None
+    assert worker.requests == []
+    assert state.result is not None
+    assert state.result.status == "error"
+    assert (
+        state.result.summary
+        == "No worker is configured for route 'claude'. Configured workers: codex."
+    )
+    assert state.result.next_action_hint == "configure_requested_worker"
+    assert state.progress_updates == [
+        "task ingested",
+        "task classified as architecture",
+        "memory context loaded",
+        "worker selected: claude",
+        "approval not required",
+        "worker dispatched",
+        "worker unavailable: claude",
+        "result summarized",
+        "memory persistence queued",
+    ]
 
 
 def test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly(
@@ -251,6 +311,8 @@ def test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly(
         assert state.approval.required is True
         assert state.approval.status == "approved"
         assert state.dispatch.worker_type == "codex"
+        assert state.dispatch.run_id is None
+        assert state.dispatch.workspace_id is None
         assert len(worker.requests) == 1
         assert worker.requests[0].task_text == "Delete files from the repo workspace"
         assert state.result is not None
