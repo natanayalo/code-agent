@@ -182,7 +182,7 @@ Scope notes:
 - start with a single `execute_bash` tool (per mini-SWE-agent's proven bash-only approach)
 - exit on: LLM final answer, max iterations, or budget/timeout exceeded
 - the loop is a simple while-loop, not a nested LangGraph graph
-- the worker must include its own basic timeout and max-iteration guard so it never runs unbounded; T-042 adds the orchestrator-level timeout/cancel layer on top of this, but T-047 must be safe to run standalone
+- the worker must include its own inner-loop safety envelope (max iterations, worker-local timeout, and budget checks) so it never runs unbounded; T-042 adds the outer orchestrator-level timeout/cancel layer on top of this, but T-047 must be safe to run standalone
 
 Acceptance:
 - worker executes a real multi-step task (e.g., create a file, run a test, fix a failure)
@@ -192,10 +192,10 @@ Acceptance:
 - `WorkerResult` accurately reflects commands run, files changed, and final status
 
 ### T-042 Add baseline worker timeout/cancel handling
-Add the minimum timeout and cancellation behavior required so the first real worker execution path cannot hang indefinitely.
+Add the outer orchestrator-level timeout and cancellation behavior required so the first real worker execution path cannot hang indefinitely even if the worker's own inner-loop guards are exhausted or fail to stop progress.
 
 Acceptance:
-- hung worker or sandbox execution fails safely within a configured timeout
+- hung worker or sandbox execution fails safely within a configured timeout enforced by the orchestrator path
 - timeout/cancel failure is surfaced back to the orchestrator without blocking the run forever
 - workspace/logs are preserved for debugging after timeout
 
@@ -207,12 +207,13 @@ Scope notes:
 - uses the multi-turn agent worker, not the toy CodexWorker
 - includes the minimal HTTP task submission endpoint needed for curl-based validation
 - includes a basic task status/result retrieval endpoint (GET by task_id) so callers can poll for completion
-- includes persistence wiring for final result, worker run, and captured artifacts
+- includes execution-path persistence wiring for task/status, final result fields, worker run metadata, and captured artifacts needed for submission + GET-by-task_id polling
 - builds on the baseline timeout/cancel handling from T-042
 - worker should complete at least one multi-step coding task end-to-end
 - Telegram is explicitly out of scope for this milestone
 - hardcoded repo URL and task text are acceptable
 - no mocks or fake worker results
+- structured memory repository wiring remains out of scope here; `load_memory` / `persist_memory` stay stubbed until T-060..T-064
 - result *delivery* (push-based, e.g. Telegram reply or webhook callback) is out of scope here and covered by the Telegram ingress milestone (T-050..T-053)
 
 Acceptance:
