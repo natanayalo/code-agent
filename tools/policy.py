@@ -61,6 +61,8 @@ _TOKEN_PREFIX_PERMISSION_RULES: tuple[
         "Command performs a destructive shell or git operation.",
         (
             ("rm",),
+            ("rmdir",),
+            ("eval",),
             ("git", "clean"),
             ("git", "reset"),
             ("mkfs",),
