@@ -10,13 +10,20 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from sandbox import DockerShellCommandResult, DockerShellSessionError
+from tools import (
+    DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS,
+    DEFAULT_TOOL_REGISTRY,
+    ToolDefinition,
+    ToolRegistry,
+    UnknownToolError,
+)
 from workers.base import WorkerCommand
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_ITERATIONS = 8
 DEFAULT_WORKER_TIMEOUT_SECONDS = 300
-DEFAULT_COMMAND_TIMEOUT_SECONDS = 60
+DEFAULT_COMMAND_TIMEOUT_SECONDS = DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS
 DEFAULT_MAX_OBSERVATION_CHARACTERS = 4000
 DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS = 10
 
@@ -47,15 +54,15 @@ class CliRuntimeStep(CliRuntimeModel):
     """One adapter decision in the CLI runtime loop."""
 
     kind: Literal["tool_call", "final"]
-    tool_name: Literal["execute_bash"] | None = None
+    tool_name: str | None = None
     tool_input: str | None = None
     final_output: str | None = None
 
     @model_validator(mode="after")
     def _validate_kind_fields(self) -> CliRuntimeStep:
         if self.kind == "tool_call":
-            if self.tool_name != "execute_bash":
-                raise ValueError("Tool calls must target execute_bash.")
+            if self.tool_name is None or not self.tool_name.strip():
+                raise ValueError("Tool calls must target a registered tool name.")
             if self.tool_input is None or not self.tool_input.strip():
                 raise ValueError("Tool calls must include a non-empty tool_input.")
             if self.final_output is not None:
@@ -173,11 +180,21 @@ def _truncate_text(text: str, *, max_characters: int) -> tuple[str, bool]:
     return text[:max_characters].rstrip(), True
 
 
-def _tool_call_transcript(command: str) -> str:
-    """Render a compact assistant transcript entry for a bash tool call."""
+def _format_expected_artifacts(tool: ToolDefinition) -> str:
+    """Render expected tool artifacts for prompt/runtime transcripts."""
+    if not tool.expected_artifacts:
+        return "none"
+    return ", ".join(artifact.value for artifact in tool.expected_artifacts)
+
+
+def _tool_call_transcript(tool: ToolDefinition, command: str) -> str:
+    """Render a compact assistant transcript entry for a tool call."""
     return "\n".join(
         [
-            "Tool call: execute_bash",
+            f"Tool call: {tool.name}",
+            f"Required permission: {tool.required_permission.value}",
+            f"Default timeout seconds: {tool.timeout_seconds}",
+            f"Expected artifacts: {_format_expected_artifacts(tool)}",
             "```bash",
             command,
             "```",
@@ -207,16 +224,17 @@ def format_bash_observation(
     return "\n".join(lines)
 
 
-def _remaining_command_timeout_seconds(
+def _resolve_command_timeout_seconds(
     *,
+    tool: ToolDefinition,
     started_at: float,
     settings: CliRuntimeSettings,
     clock: Callable[[], float],
 ) -> int:
-    """Clamp per-command timeout by the overall worker timeout budget."""
+    """Clamp per-command timeout by tool policy and the overall worker budget."""
     elapsed_seconds = clock() - started_at
     remaining_seconds = max(int(settings.worker_timeout_seconds - elapsed_seconds), 1)
-    return min(settings.command_timeout_seconds, remaining_seconds)
+    return min(settings.command_timeout_seconds, tool.timeout_seconds, remaining_seconds)
 
 
 def run_cli_runtime_loop(
@@ -225,10 +243,12 @@ def run_cli_runtime_loop(
     *,
     system_prompt: str,
     settings: CliRuntimeSettings,
+    tool_registry: ToolRegistry | None = None,
     clock: Callable[[], float] = perf_counter,
 ) -> CliRuntimeExecutionResult:
     """Drive the provider adapter through a bounded multi-turn shell loop."""
     started_at = clock()
+    resolved_registry = tool_registry or DEFAULT_TOOL_REGISTRY
     messages = [CliRuntimeMessage(role="system", content=system_prompt)]
     commands_run: list[WorkerCommand] = []
 
@@ -269,14 +289,29 @@ def run_cli_runtime_loop(
                 messages=messages,
             )
 
+        assert step.tool_name is not None  # Validated by CliRuntimeStep.
+        try:
+            tool = resolved_registry.require_tool(step.tool_name)
+        except UnknownToolError as exc:
+            return CliRuntimeExecutionResult(
+                status="error",
+                summary=f"CLI runtime adapter requested an unknown tool: {exc}",
+                stop_reason="adapter_error",
+                commands_run=commands_run,
+                messages=messages,
+            )
+
         assert step.tool_input is not None  # Validated by CliRuntimeStep.
         command = step.tool_input.strip()
-        messages.append(CliRuntimeMessage(role="assistant", content=_tool_call_transcript(command)))
+        messages.append(
+            CliRuntimeMessage(role="assistant", content=_tool_call_transcript(tool, command))
+        )
 
         try:
             shell_result = session.execute(
                 command,
-                timeout_seconds=_remaining_command_timeout_seconds(
+                timeout_seconds=_resolve_command_timeout_seconds(
+                    tool=tool,
                     started_at=started_at,
                     settings=settings,
                     clock=clock,
@@ -301,7 +336,7 @@ def run_cli_runtime_loop(
         messages.append(
             CliRuntimeMessage(
                 role="tool",
-                tool_name="execute_bash",
+                tool_name=tool.name,
                 content=format_bash_observation(
                     shell_result,
                     max_characters=settings.max_observation_characters,

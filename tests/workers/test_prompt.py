@@ -33,7 +33,7 @@ def test_build_system_prompt_includes_all_expected_sections(tmp_path: Path) -> N
         budget={"max_iterations": 12},
     )
 
-    prompt = build_system_prompt(request, tmp_path, available_tools=["execute_bash"])
+    prompt = build_system_prompt(request, tmp_path)
 
     assert "## Role" in prompt
     assert "## Available Tools" in prompt
@@ -41,6 +41,9 @@ def test_build_system_prompt_includes_all_expected_sections(tmp_path: Path) -> N
     assert "## Task Context" in prompt
     assert "## Workflow Instructions" in prompt
     assert "`execute_bash`" in prompt
+    assert "Required permission: `workspace_write`" in prompt
+    assert "Default timeout: `60s`" in prompt
+    assert "Expected artifacts: `stdout`, `stderr`, `changed_files`" in prompt
     assert "AGENTS.md guidance:" in prompt
     assert "Prefer small diffs." in prompt
     assert "README.md" in prompt

@@ -24,6 +24,13 @@ from sandbox import (
     WorkspaceRequest,
 )
 from sandbox.workspace import _mask_url_credentials
+from tools import (
+    DEFAULT_TOOL_REGISTRY,
+    EXECUTE_BASH_TOOL_NAME,
+    ToolExpectedArtifact,
+    ToolRegistry,
+    UnknownToolError,
+)
 from workers.base import ArtifactReference, Worker, WorkerRequest, WorkerResult
 from workers.cli_runtime import (
     CliRuntimeAdapter,
@@ -173,8 +180,10 @@ class CodexCliWorker(Worker):
         workspace_root: str | Path | None = None,
         cleanup_policy: WorkspaceCleanupPolicy | None = None,
         runtime_settings: CliRuntimeSettings | None = None,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self.runtime_adapter = runtime_adapter
+        self.tool_registry = tool_registry or DEFAULT_TOOL_REGISTRY
         self.cleanup_policy = cleanup_policy or WorkspaceCleanupPolicy(
             delete_on_success=False,
             retain_on_failure=True,
@@ -299,28 +308,40 @@ class CodexCliWorker(Worker):
                 request.budget,
                 defaults=self.runtime_settings,
             )
+            bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
             system_prompt = build_system_prompt(
                 request,
                 workspace.repo_path,
-                available_tools=["execute_bash"],
+                tool_registry=self.tool_registry,
             )
             execution = run_cli_runtime_loop(
                 self.runtime_adapter,
                 session,
                 system_prompt=system_prompt,
                 settings=runtime_settings,
+                tool_registry=self.tool_registry,
             )
-            files_changed = collect_changed_files(
-                session,
-                timeout_seconds=runtime_settings.command_timeout_seconds,
-            )
+            files_changed: list[str] = []
+            if ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts:
+                files_changed = collect_changed_files(
+                    session,
+                    timeout_seconds=min(
+                        runtime_settings.command_timeout_seconds,
+                        bash_tool.timeout_seconds,
+                    ),
+                )
             result = _worker_result_from_execution(
                 workspace,
                 execution,
                 files_changed=files_changed,
             )
             run_succeeded = result.status == "success"
-        except (DockerSandboxContainerError, DockerShellSessionError, OSError) as exc:
+        except (
+            DockerSandboxContainerError,
+            DockerShellSessionError,
+            OSError,
+            UnknownToolError,
+        ) as exc:
             result = _workspace_error_result(
                 request=request,
                 workspace=workspace,
