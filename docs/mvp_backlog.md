@@ -147,8 +147,8 @@ Add a long-lived container mode so the worker can send multiple commands iterati
 
 Scope notes:
 - add `sandbox/container.py` for container lifecycle: start, stop, reconnect to a named Docker container
-- add `sandbox/session.py` for shell sessions: send commands via `docker exec`, return stdout/stderr/exit_code
-- reuse the existing bounded-reader (`_read_stream_bounded`) for output capture safety
+- add `sandbox/session.py` for shell sessions: maintain a single long-lived interactive shell process inside the container (via `docker exec -it` or equivalent piped I/O) so that environment variables, `cd`, and `export` persist across commands between agent turns; do not use a fresh `docker exec` per command
+- move or expose `_read_stream_bounded` (currently private in `sandbox/runner.py`) to a shared utility within the `sandbox` package before `session.py` depends on it
 - keep `DockerSandboxRunner` as-is (used by toy CodexWorker and existing tests)
 
 Acceptance:
