@@ -150,44 +150,33 @@ class ShellSessionProtocol(Protocol):
 
 def _coerce_positive_int(value: object) -> int | None:
     """Return a positive integer override when one is present."""
+    parsed = _coerce_int(value)
+    return parsed if parsed is not None and parsed > 0 else None
+
+
+def _coerce_int(value: object) -> int | None:
+    """Parse integer-like inputs with the same truncation rules used by runtime budgets."""
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
-        return value if value > 0 else None
+        return value
     if isinstance(value, float):
-        integer_value = int(value)
-        return integer_value if integer_value > 0 else None
+        return int(value)
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:
             return None
         try:
-            parsed = int(float(stripped))
+            return int(float(stripped))
         except (OverflowError, ValueError):
             return None
-        return parsed if parsed > 0 else None
     return None
 
 
 def _coerce_non_negative_int(value: object) -> int | None:
     """Return a non-negative integer override when one is present."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value >= 0 else None
-    if isinstance(value, float):
-        integer_value = int(value)
-        return integer_value if integer_value >= 0 else None
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        try:
-            parsed = int(float(stripped))
-        except (OverflowError, ValueError):
-            return None
-        return parsed if parsed >= 0 else None
-    return None
+    parsed = _coerce_int(value)
+    return parsed if parsed is not None and parsed >= 0 else None
 
 
 def settings_from_budget(
@@ -325,6 +314,33 @@ def _update_budget_ledger(
         ledger.iterations_used = max(ledger.iterations_used, iterations_used)
 
 
+def _budget_exceeded_result(
+    *,
+    summary: str,
+    started_at: float,
+    clock: Callable[[], float],
+    iteration: int,
+    budget_ledger: CliRuntimeBudgetLedger,
+    commands_run: list[WorkerCommand],
+    messages: list[CliRuntimeMessage],
+) -> CliRuntimeExecutionResult:
+    """Build a consistent runtime result for budget-limit failures."""
+    _update_budget_ledger(
+        budget_ledger,
+        started_at=started_at,
+        clock=clock,
+        iterations_used=iteration,
+    )
+    return CliRuntimeExecutionResult(
+        status="failure",
+        summary=summary,
+        stop_reason="budget_exceeded",
+        commands_run=commands_run,
+        messages=messages,
+        budget_ledger=budget_ledger,
+    )
+
+
 def run_cli_runtime_loop(
     adapter: CliRuntimeAdapter,
     session: ShellSessionProtocol,
@@ -455,65 +471,50 @@ def run_cli_runtime_loop(
             settings.max_tool_calls is not None
             and budget_ledger.tool_calls_used >= settings.max_tool_calls
         ):
-            _update_budget_ledger(
-                budget_ledger,
-                started_at=started_at,
-                clock=clock,
-                iterations_used=iteration,
-            )
-            return CliRuntimeExecutionResult(
-                status="failure",
+            return _budget_exceeded_result(
                 summary=(
                     "CLI runtime exceeded its tool-call budget "
                     f"({settings.max_tool_calls}) before executing `{tool.name}`."
                 ),
-                stop_reason="budget_exceeded",
+                started_at=started_at,
+                clock=clock,
+                iteration=iteration,
+                budget_ledger=budget_ledger,
                 commands_run=commands_run,
                 messages=messages,
-                budget_ledger=budget_ledger,
             )
         if (
             settings.max_shell_commands is not None
             and budget_ledger.shell_commands_used >= settings.max_shell_commands
         ):
-            _update_budget_ledger(
-                budget_ledger,
-                started_at=started_at,
-                clock=clock,
-                iterations_used=iteration,
-            )
-            return CliRuntimeExecutionResult(
-                status="failure",
+            return _budget_exceeded_result(
                 summary=(
                     "CLI runtime exceeded its shell-command budget "
                     f"({settings.max_shell_commands}) before executing `{command}`."
                 ),
-                stop_reason="budget_exceeded",
+                started_at=started_at,
+                clock=clock,
+                iteration=iteration,
+                budget_ledger=budget_ledger,
                 commands_run=commands_run,
                 messages=messages,
-                budget_ledger=budget_ledger,
             )
         if (
             settings.max_retries is not None
             and is_retry
             and budget_ledger.retries_used >= settings.max_retries
         ):
-            _update_budget_ledger(
-                budget_ledger,
-                started_at=started_at,
-                clock=clock,
-                iterations_used=iteration,
-            )
-            return CliRuntimeExecutionResult(
-                status="failure",
+            return _budget_exceeded_result(
                 summary=(
                     "CLI runtime exceeded its retry budget "
                     f"({settings.max_retries}) while retrying `{command}`."
                 ),
-                stop_reason="budget_exceeded",
+                started_at=started_at,
+                clock=clock,
+                iteration=iteration,
+                budget_ledger=budget_ledger,
                 commands_run=commands_run,
                 messages=messages,
-                budget_ledger=budget_ledger,
             )
 
         budget_ledger.tool_calls_used += 1

@@ -49,6 +49,62 @@ def test_resolve_bash_command_permission_classifies_read_only_commands() -> None
     assert decision.allowed is True
 
 
+def test_resolve_bash_command_permission_does_not_treat_find_exec_as_read_only() -> None:
+    """`find -exec` should fail closed instead of bypassing the permission ladder."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "find . -type f -exec touch marker {} +",
+        tool,
+        granted_permission=ToolPermissionLevel.READ_ONLY,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
+    assert decision.allowed is False
+
+
+def test_resolve_bash_command_permission_does_not_treat_redirection_as_read_only() -> None:
+    """Shell redirection should keep otherwise safe commands out of the read-only tier."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "cat README.md > copy.txt",
+        tool,
+        granted_permission=ToolPermissionLevel.READ_ONLY,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
+    assert decision.allowed is False
+
+
+def test_resolve_bash_command_permission_does_not_treat_inline_redirection_as_read_only() -> None:
+    """Inline redirection syntax should still fail closed without whitespace separators."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "cat README.md>copy.txt",
+        tool,
+        granted_permission=ToolPermissionLevel.READ_ONLY,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
+    assert decision.allowed is False
+
+
+def test_resolve_bash_command_permission_does_not_treat_rg_preprocessors_as_read_only() -> None:
+    """Ripgrep commands that spawn preprocessors should not remain in the read-only tier."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "rg --pre 'touch marker' TODO",
+        tool,
+        granted_permission=ToolPermissionLevel.READ_ONLY,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
+    assert decision.allowed is False
+
+
 def test_resolve_bash_command_permission_escalates_for_dangerous_shell_commands() -> None:
     """Dangerous shell commands should require explicit dangerous-shell permission."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")

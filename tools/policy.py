@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from collections.abc import Mapping
 from typing import Any
 
@@ -62,23 +63,12 @@ _COMMAND_PERMISSION_RULES: tuple[
             re.compile(r"\bdd\b"),
         ),
     ),
-    (
-        ToolPermissionLevel.READ_ONLY,
-        "Command appears read-only.",
-        (
-            re.compile(r"^\s*cat\b"),
-            re.compile(r"^\s*head\b"),
-            re.compile(r"^\s*tail\b"),
-            re.compile(r"^\s*ls\b"),
-            re.compile(r"^\s*pwd\b"),
-            re.compile(r"^\s*find\b"),
-            re.compile(r"^\s*wc\b"),
-            re.compile(r"^\s*rg\b"),
-            re.compile(r"^\s*sed\s+-n\b"),
-            re.compile(r"^\s*git\s+(?:status|diff|show|log)\b"),
-        ),
-    ),
 )
+
+_SHELL_OPERATOR_TOKENS = frozenset({"|", "||", "&", "&&", ";", ">", ">>", "<", "<<"})
+_TOKEN_WITH_SHELL_OPERATOR_PATTERN = re.compile(r"[|&;<>]")
+_SAFE_READ_ONLY_COMMANDS = frozenset({"cat", "head", "ls", "pwd", "tail", "wc"})
+_SAFE_RG_BLOCKLIST = frozenset({"--pre", "--pre-glob"})
 
 
 class ToolPermissionDecision(ToolModel):
@@ -133,6 +123,49 @@ def granted_permission_from_constraints(
     return default
 
 
+def _command_tokens(command: str) -> tuple[str, ...] | None:
+    """Parse shell-like command tokens when the input is well formed."""
+    try:
+        return tuple(shlex.split(command, posix=True))
+    except ValueError:
+        return None
+
+
+def _has_shell_control_operators(command: str, tokens: tuple[str, ...]) -> bool:
+    """Return whether the command uses shell features that break read-only proofs."""
+    if "$(" in command or "`" in command or "\n" in command or "\r" in command:
+        return True
+    return any(
+        token in _SHELL_OPERATOR_TOKENS or _TOKEN_WITH_SHELL_OPERATOR_PATTERN.search(token)
+        for token in tokens
+    )
+
+
+def _is_safe_rg_command(tokens: tuple[str, ...]) -> bool:
+    """Allow plain ripgrep searches while rejecting flags that spawn helpers."""
+    return not any(
+        token in _SAFE_RG_BLOCKLIST
+        or any(token.startswith(f"{flag}=") for flag in _SAFE_RG_BLOCKLIST)
+        for token in tokens[1:]
+    )
+
+
+def _is_safe_read_only_command(command: str) -> bool:
+    """Return whether a command matches the narrow read-only allowlist."""
+    tokens = _command_tokens(command)
+    if not tokens or _has_shell_control_operators(command, tokens):
+        return False
+
+    executable = tokens[0]
+    if executable in _SAFE_READ_ONLY_COMMANDS:
+        return executable in {"ls", "pwd"} or len(tokens) > 1
+    if executable == "git":
+        return len(tokens) > 1 and tokens[1] == "status"
+    if executable == "rg":
+        return _is_safe_rg_command(tokens)
+    return False
+
+
 def _classify_bash_command_permission(
     command: str,
     *,
@@ -143,6 +176,8 @@ def _classify_bash_command_permission(
     for permission_level, reason, patterns in _COMMAND_PERMISSION_RULES:
         if any(pattern.search(normalized_command) for pattern in patterns):
             return permission_level, reason
+    if _is_safe_read_only_command(command):
+        return ToolPermissionLevel.READ_ONLY, "Command matches the narrow read-only allowlist."
     return (
         default_permission,
         f"Command uses the tool's default permission level ({default_permission.value}).",
