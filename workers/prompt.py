@@ -91,10 +91,13 @@ def build_workspace_directory_listing(
         if truncated or depth >= max_depth:
             return
 
-        children = sorted(
-            (child for child in path.iterdir() if child.name not in _SKIPPED_PATH_NAMES),
-            key=lambda child: (not child.is_dir(), child.name.lower()),
-        )
+        try:
+            children = sorted(
+                (child for child in path.iterdir() if child.name not in _SKIPPED_PATH_NAMES),
+                key=lambda child: (not child.is_dir(), child.name.lower()),
+            )
+        except OSError:
+            return
         for child in children:
             if len(entries) >= max_entries:
                 truncated = True
@@ -146,7 +149,10 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, list | tuple):
         return [_json_safe(item) for item in value]
     if isinstance(value, set | frozenset):
-        return sorted(_json_safe(item) for item in value)
+        return sorted(
+            (_json_safe(item) for item in value),
+            key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")),
+        )
     return str(value)
 
 

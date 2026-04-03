@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from workers.base import WorkerRequest
 from workers.prompt import (
     build_repo_context_section,
@@ -75,6 +77,30 @@ def test_build_workspace_directory_listing_truncates_when_entry_budget_is_exceed
     assert "... (truncated)" in listing
 
 
+def test_build_workspace_directory_listing_skips_inaccessible_subdirectories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unreadable subdirectories should not crash prompt construction."""
+    blocked_dir = tmp_path / "blocked"
+    blocked_dir.mkdir()
+    (tmp_path / "safe.txt").write_text("ok\n", encoding="utf-8")
+
+    original_iterdir = Path.iterdir
+
+    def fake_iterdir(self: Path):  # type: ignore[no-untyped-def]
+        if self == blocked_dir:
+            raise PermissionError("blocked")
+        return original_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", fake_iterdir)
+
+    listing = build_workspace_directory_listing(tmp_path, max_depth=2)
+
+    assert "blocked/" in listing
+    assert "safe.txt" in listing
+
+
 def test_build_task_context_section_omits_empty_optional_context() -> None:
     """Empty optional maps should not create empty JSON blocks in the prompt."""
     section = build_task_context_section(
@@ -89,3 +115,17 @@ def test_build_task_context_section_omits_empty_optional_context() -> None:
     assert "Memory context:" not in section
     assert "Constraints:" not in section
     assert "Budget:" not in section
+
+
+def test_build_task_context_section_handles_mixed_type_sets() -> None:
+    """Mixed-type sets should be normalized without raising during JSON rendering."""
+    section = build_task_context_section(
+        WorkerRequest(
+            task_text="Inspect the repository",
+            memory_context={"tags": {3, "alpha", ("nested", 1)}},
+        )
+    )
+
+    assert '"tags"' in section
+    assert '"alpha"' in section
+    assert "nested" in section
