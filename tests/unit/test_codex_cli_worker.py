@@ -150,9 +150,9 @@ def test_codex_cli_worker_runs_the_shared_runtime_and_retains_the_workspace(
                 "printf 'done\\n' > note.txt",
                 output="",
             ),
-            "git status --short --untracked-files=all": _command_result(
-                "git status --short --untracked-files=all",
-                output="?? note.txt\n",
+            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
+                "git status --porcelain=v1 -z --untracked-files=all",
+                output="?? note.txt\0",
             ),
         }
     )
@@ -186,7 +186,7 @@ def test_codex_cli_worker_runs_the_shared_runtime_and_retains_the_workspace(
     assert container_manager.start_requests[0].workspace == workspace
     assert container_manager.stop_requests == [container]
     assert session.closed is True
-    assert session.calls[-1] == ("git status --short --untracked-files=all", 5)
+    assert session.calls[-1] == ("git status --porcelain=v1 -z --untracked-files=all", 5)
 
     first_prompt = adapter.calls[0][0].content
     assert "## Available Tools" in first_prompt
@@ -206,8 +206,8 @@ def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path
     adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="Nothing to do.")])
     session = _FakeSession(
         {
-            "git status --short --untracked-files=all": _command_result(
-                "git status --short --untracked-files=all",
+            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
+                "git status --porcelain=v1 -z --untracked-files=all",
                 output="",
             )
         }
@@ -232,4 +232,4 @@ def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path
     )
 
     assert result.status == "success"
-    assert session.calls[-1] == ("git status --short --untracked-files=all", 17)
+    assert session.calls[-1] == ("git status --porcelain=v1 -z --untracked-files=all", 17)

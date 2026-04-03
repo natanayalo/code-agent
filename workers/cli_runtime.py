@@ -207,34 +207,6 @@ def format_bash_observation(
     return "\n".join(lines)
 
 
-def _split_git_status_rename_candidate(candidate: str) -> tuple[str, str] | None:
-    """Split a porcelain rename entry on the last unquoted rename separator."""
-    separator = " -> "
-    in_quotes = False
-    escaped = False
-    separator_index = -1
-
-    for index, character in enumerate(candidate):
-        if escaped:
-            escaped = False
-            continue
-        if character == "\\" and in_quotes:
-            escaped = True
-            continue
-        if character == '"':
-            in_quotes = not in_quotes
-            continue
-        if not in_quotes and candidate.startswith(separator, index):
-            separator_index = index
-
-    if separator_index == -1:
-        return None
-    return (
-        candidate[:separator_index],
-        candidate[separator_index + len(separator) :],
-    )
-
-
 def _remaining_command_timeout_seconds(
     *,
     started_at: float,
@@ -357,7 +329,7 @@ def collect_changed_files(
     """Collect changed paths from the git workspace when available."""
     try:
         status_result = session.execute(
-            "git status --short --untracked-files=all",
+            "git status --porcelain=v1 -z --untracked-files=all",
             timeout_seconds=timeout_seconds,
         )
     except DockerShellSessionError:
@@ -372,19 +344,15 @@ def collect_changed_files(
         return []
 
     changed_files: list[str] = []
-    for line in status_result.output.splitlines():
-        if len(line) < 4:
+    items = iter(status_result.output.split("\0"))
+    for item in items:
+        if len(item) < 4:
             continue
-        status = line[:2]
-        candidate = line[3:].strip()
-        if "R" in status and " -> " in candidate:
-            rename_parts = _split_git_status_rename_candidate(candidate)
-            if rename_parts is not None:
-                _, candidate = rename_parts
-                candidate = candidate.strip()
-        if candidate.startswith('"') and candidate.endswith('"') and len(candidate) >= 2:
-            candidate = candidate[1:-1]
-        if candidate:
-            changed_files.append(candidate)
+        status = item[:2]
+        path = item[3:]
+        if "R" in status or "C" in status:
+            next(items, None)
+        if path:
+            changed_files.append(path)
 
     return list(dict.fromkeys(changed_files))

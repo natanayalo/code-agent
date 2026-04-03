@@ -212,9 +212,9 @@ def test_collect_changed_files_parses_modified_renamed_and_untracked_paths() -> 
     """Changed file collection should normalize the common porcelain shapes we rely on."""
     session = _FakeSession(
         {
-            "git status --short --untracked-files=all": _command_result(
-                "git status --short --untracked-files=all",
-                output=" M README.md\nR  old.py -> new.py\n?? tests/test_new.py\n",
+            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
+                "git status --porcelain=v1 -z --untracked-files=all",
+                output=" M README.md\0R  new.py\0old.py\0?? tests/test_new.py\0",
             )
         }
     )
@@ -225,12 +225,12 @@ def test_collect_changed_files_parses_modified_renamed_and_untracked_paths() -> 
 
 
 def test_collect_changed_files_does_not_treat_non_rename_arrow_paths_as_renames() -> None:
-    """Only rename status lines should split on the porcelain rename marker."""
+    """NUL-delimited porcelain output should preserve literal arrows in ordinary paths."""
     session = _FakeSession(
         {
-            "git status --short --untracked-files=all": _command_result(
-                "git status --short --untracked-files=all",
-                output=" M docs/name -> value.txt\n?? tests/path -> sample.txt\n",
+            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
+                "git status --porcelain=v1 -z --untracked-files=all",
+                output=" M docs/name -> value.txt\0?? tests/path -> sample.txt\0",
             )
         }
     )
@@ -240,17 +240,17 @@ def test_collect_changed_files_does_not_treat_non_rename_arrow_paths_as_renames(
     assert changed_files == ["docs/name -> value.txt", "tests/path -> sample.txt"]
 
 
-def test_collect_changed_files_parses_rename_when_old_path_contains_arrow() -> None:
-    """Rename parsing should split from the right so arrows in the old path are preserved."""
+def test_collect_changed_files_handles_rename_paths_and_newlines_with_porcelain_z() -> None:
+    """Porcelain -z output should preserve literal rename and newline characters in paths."""
     session = _FakeSession(
         {
-            "git status --short --untracked-files=all": _command_result(
-                "git status --short --untracked-files=all",
-                output='R  "old -> name.txt" -> "new -> name.txt"\n',
+            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
+                "git status --porcelain=v1 -z --untracked-files=all",
+                output="R  new -> name.txt\0old -> name.txt\0?? line\nbreak.txt\0",
             )
         }
     )
 
     changed_files = collect_changed_files(session)
 
-    assert changed_files == ["new -> name.txt"]
+    assert changed_files == ["new -> name.txt", "line\nbreak.txt"]
