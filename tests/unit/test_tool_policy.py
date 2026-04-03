@@ -105,6 +105,62 @@ def test_resolve_bash_command_permission_does_not_treat_rg_preprocessors_as_read
     assert decision.allowed is False
 
 
+def test_resolve_bash_command_permission_classifies_quoted_rm_as_dangerous_shell() -> None:
+    """Quoted executables should still be classified after shell token parsing."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        '"rm" -rf build',
+        tool,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+    assert decision.allowed is False
+
+
+def test_resolve_bash_command_permission_classifies_escaped_curl_as_networked_write() -> None:
+    """Escaped executable text should still classify from the parsed command tokens."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        r"c\url https://example.com",
+        tool,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.NETWORKED_WRITE
+    assert decision.allowed is False
+
+
+def test_resolve_bash_command_permission_does_not_treat_release_text_as_deploy() -> None:
+    """Release-like argument text should not trip deploy classification."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        'git commit -m "release v1.0"',
+        tool,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
+    assert decision.allowed is True
+
+
+def test_resolve_bash_command_permission_does_not_treat_deploy_filenames_as_deploy() -> None:
+    """Deploy-like filenames should not override the actual executable classification."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "cat deploy.log",
+        tool,
+        granted_permission=ToolPermissionLevel.READ_ONLY,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.READ_ONLY
+    assert decision.allowed is True
+
+
 def test_resolve_bash_command_permission_escalates_for_dangerous_shell_commands() -> None:
     """Dangerous shell commands should require explicit dangerous-shell permission."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")

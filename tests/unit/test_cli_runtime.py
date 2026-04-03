@@ -277,6 +277,36 @@ def test_run_cli_runtime_loop_stops_at_the_retry_budget() -> None:
     assert "retry budget (0)" in execution.summary
 
 
+def test_run_cli_runtime_loop_treats_spacing_only_command_changes_as_retries() -> None:
+    """Retry detection should normalize token-equivalent commands before comparing them."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pytest   -q"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pytest -q"),
+        ]
+    )
+    session = _FakeSession(
+        {"pytest   -q": _command_result("pytest   -q", output="boom\n", exit_code=1)}
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=3,
+            worker_timeout_seconds=30,
+            max_retries=0,
+        ),
+    )
+
+    assert execution.status == "failure"
+    assert execution.stop_reason == "budget_exceeded"
+    assert len(session.calls) == 1
+    assert execution.budget_ledger.retries_used == 0
+    assert "retry budget (0)" in execution.summary
+
+
 def test_run_cli_runtime_loop_stops_at_the_iteration_budget() -> None:
     """The runtime should fail cleanly when no final answer appears in time."""
     adapter = _ScriptedAdapter(

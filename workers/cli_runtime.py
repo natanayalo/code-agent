@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shlex
 from collections.abc import Callable, Mapping, Sequence
 from time import perf_counter
 from typing import Any, Literal, Protocol
@@ -277,6 +278,14 @@ def format_bash_observation(
     return "\n".join(lines)
 
 
+def _retry_command_key(command: str) -> tuple[str, ...]:
+    """Normalize a command for retry-budget comparisons."""
+    try:
+        return tuple(shlex.split(command, posix=True))
+    except ValueError:
+        return tuple(command.split())
+
+
 def _resolve_command_timeout_seconds(
     *,
     tool: ToolDefinition,
@@ -357,7 +366,7 @@ def run_cli_runtime_loop(
     messages = [CliRuntimeMessage(role="system", content=system_prompt)]
     commands_run: list[WorkerCommand] = []
     budget_ledger = _build_budget_ledger(settings)
-    last_command: str | None = None
+    last_command_key: tuple[str, ...] | None = None
     last_exit_code: int | None = None
 
     for iteration in range(1, settings.max_iterations + 1):
@@ -466,7 +475,10 @@ def run_cli_runtime_loop(
                 permission_decision=permission_decision,
             )
 
-        is_retry = last_command == command and last_exit_code is not None and last_exit_code != 0
+        command_key = _retry_command_key(command)
+        is_retry = (
+            last_command_key == command_key and last_exit_code is not None and last_exit_code != 0
+        )
         if (
             settings.max_tool_calls is not None
             and budget_ledger.tool_calls_used >= settings.max_tool_calls
@@ -558,7 +570,7 @@ def run_cli_runtime_loop(
                 duration_seconds=shell_result.duration_seconds,
             )
         )
-        last_command = command
+        last_command_key = command_key
         last_exit_code = shell_result.exit_code
         _update_budget_ledger(
             budget_ledger,

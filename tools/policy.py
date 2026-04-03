@@ -19,54 +19,61 @@ _PERMISSION_ORDER = {
     ToolPermissionLevel.GIT_PUSH_OR_DEPLOY: 4,
 }
 
-_COMMAND_PERMISSION_RULES: tuple[
-    tuple[ToolPermissionLevel, str, tuple[re.Pattern[str], ...]],
+_TOKEN_PREFIX_PERMISSION_RULES: tuple[
+    tuple[ToolPermissionLevel, str, tuple[tuple[str, ...], ...]],
     ...,
 ] = (
     (
         ToolPermissionLevel.GIT_PUSH_OR_DEPLOY,
         "Command pushes changes or performs a deploy-like action.",
         (
-            re.compile(r"\bgit\s+push\b"),
-            re.compile(r"\bkubectl\s+apply\b"),
-            re.compile(r"\bterraform\s+apply\b"),
-            re.compile(r"\b(?:fly|flyctl)\s+deploy\b"),
-            re.compile(r"\bdeploy\b"),
-            re.compile(r"\brelease\b"),
+            ("git", "push"),
+            ("kubectl", "apply"),
+            ("terraform", "apply"),
+            ("fly", "deploy"),
+            ("flyctl", "deploy"),
+            ("deploy",),
+            ("release",),
         ),
     ),
     (
         ToolPermissionLevel.NETWORKED_WRITE,
         "Command writes state while depending on network access.",
         (
-            re.compile(r"\bcurl\b"),
-            re.compile(r"\bwget\b"),
-            re.compile(r"\bpip\s+install\b"),
-            re.compile(r"\buv\s+pip\s+install\b"),
-            re.compile(r"\bnpm\s+(?:install|add)\b"),
-            re.compile(r"\bpnpm\s+(?:install|add)\b"),
-            re.compile(r"\byarn\s+(?:install|add)\b"),
-            re.compile(r"\bbrew\s+install\b"),
-            re.compile(r"\bgit\s+(?:clone|pull)\b"),
+            ("curl",),
+            ("wget",),
+            ("pip", "install"),
+            ("uv", "pip", "install"),
+            ("npm", "install"),
+            ("npm", "add"),
+            ("pnpm", "install"),
+            ("pnpm", "add"),
+            ("yarn", "install"),
+            ("yarn", "add"),
+            ("brew", "install"),
+            ("git", "clone"),
+            ("git", "pull"),
         ),
     ),
     (
         ToolPermissionLevel.DANGEROUS_SHELL,
         "Command performs a destructive shell or git operation.",
         (
-            re.compile(r"\brm\b"),
-            re.compile(r"\bgit\s+clean\b"),
-            re.compile(r"\bgit\s+reset\b"),
-            re.compile(r"\bdrop\s+(?:database|table)\b"),
-            re.compile(r"\btruncate\s+table\b"),
-            re.compile(r"\bmkfs\b"),
-            re.compile(r"\bdd\b"),
+            ("rm",),
+            ("git", "clean"),
+            ("git", "reset"),
+            ("mkfs",),
+            ("dd",),
         ),
     ),
 )
 
 _SHELL_OPERATOR_TOKENS = frozenset({"|", "||", "&", "&&", ";", ">", ">>", "<", "<<"})
 _TOKEN_WITH_SHELL_OPERATOR_PATTERN = re.compile(r"[|&;<>]")
+_DANGEROUS_TOKEN_PATTERNS = (
+    re.compile(r"\bdrop\s+(?:database|table)\b"),
+    re.compile(r"\btruncate\s+table\b"),
+)
 _SAFE_READ_ONLY_COMMANDS = frozenset({"cat", "head", "ls", "pwd", "tail", "wc"})
 _SAFE_RG_BLOCKLIST = frozenset({"--pre", "--pre-glob"})
 
@@ -141,6 +148,26 @@ def _has_shell_control_operators(command: str, tokens: tuple[str, ...]) -> bool:
     )
 
 
+def _matches_token_prefix(tokens: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
+    """Return whether a tokenized command starts with the given normalized prefix."""
+    return len(tokens) >= len(prefix) and tokens[: len(prefix)] == prefix
+
+
+def _classify_token_prefix_permission(
+    tokens: tuple[str, ...],
+) -> tuple[ToolPermissionLevel, str] | None:
+    """Resolve command permissions from normalized executable/subcommand prefixes."""
+    for permission_level, reason, prefixes in _TOKEN_PREFIX_PERMISSION_RULES:
+        if any(_matches_token_prefix(tokens, prefix) for prefix in prefixes):
+            return permission_level, reason
+    return None
+
+
+def _contains_dangerous_token_pattern(tokens: tuple[str, ...]) -> bool:
+    """Return whether any normalized token embeds a dangerous SQL-style phrase."""
+    return any(pattern.search(token) for token in tokens for pattern in _DANGEROUS_TOKEN_PATTERNS)
+
+
 def _is_safe_rg_command(tokens: tuple[str, ...]) -> bool:
     """Allow plain ripgrep searches while rejecting flags that spawn helpers."""
     return not any(
@@ -150,19 +177,23 @@ def _is_safe_rg_command(tokens: tuple[str, ...]) -> bool:
     )
 
 
-def _is_safe_read_only_command(command: str) -> bool:
+def _is_safe_read_only_command(
+    command: str,
+    *,
+    tokens: tuple[str, ...],
+    normalized_tokens: tuple[str, ...],
+) -> bool:
     """Return whether a command matches the narrow read-only allowlist."""
-    tokens = _command_tokens(command)
-    if not tokens or _has_shell_control_operators(command, tokens):
+    if _has_shell_control_operators(command, tokens):
         return False
 
-    executable = tokens[0]
+    executable = normalized_tokens[0]
     if executable in _SAFE_READ_ONLY_COMMANDS:
-        return executable in {"ls", "pwd"} or len(tokens) > 1
+        return executable in {"ls", "pwd"} or len(normalized_tokens) > 1
     if executable == "git":
-        return len(tokens) > 1 and tokens[1] == "status"
+        return len(normalized_tokens) > 1 and normalized_tokens[1] == "status"
     if executable == "rg":
-        return _is_safe_rg_command(tokens)
+        return _is_safe_rg_command(normalized_tokens)
     return False
 
 
@@ -172,11 +203,27 @@ def _classify_bash_command_permission(
     default_permission: ToolPermissionLevel,
 ) -> tuple[ToolPermissionLevel, str]:
     """Return the required permission level for a bash command."""
-    normalized_command = " ".join(command.lower().split())
-    for permission_level, reason, patterns in _COMMAND_PERMISSION_RULES:
-        if any(pattern.search(normalized_command) for pattern in patterns):
-            return permission_level, reason
-    if _is_safe_read_only_command(command):
+    tokens = _command_tokens(command)
+    if not tokens:
+        return (
+            default_permission,
+            f"Command uses the tool's default permission level ({default_permission.value}).",
+        )
+
+    normalized_tokens = tuple(token.lower() for token in tokens)
+    token_prefix_decision = _classify_token_prefix_permission(normalized_tokens)
+    if token_prefix_decision is not None:
+        return token_prefix_decision
+    if _contains_dangerous_token_pattern(normalized_tokens):
+        return (
+            ToolPermissionLevel.DANGEROUS_SHELL,
+            "Command performs a destructive shell or git operation.",
+        )
+    if _is_safe_read_only_command(
+        command,
+        tokens=tokens,
+        normalized_tokens=normalized_tokens,
+    ):
         return ToolPermissionLevel.READ_ONLY, "Command matches the narrow read-only allowlist."
     return (
         default_permission,
