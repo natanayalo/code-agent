@@ -55,6 +55,10 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 - Current target order from here: T-047 shared CLI worker runtime → T-048 tool registry → T-049 permission ladder + runtime budget enforcement → T-042 outer timeout/cancel → T-044 vertical slice with a real CLI worker, HTTP submit path, and execution-path DB persistence → T-055 verifier stage → T-054 sandbox auditability/hardening → T-060..T-065 skeptical memory, compact session state, and stable scaffold persistence → T-043 structured run observability → T-070+ second worker → Telegram/webhook adapters.
 - T-045 and T-046 are now both landed in-repo: the persistent container/shell primitives exist, and the structured system prompt module exists. The remaining gap is the actual CLI-driven worker loop that uses them.
+- T-047 now has a shared CLI runtime loop in-repo plus an injectable `CodexCliWorker`
+  scaffold that provisions the workspace/container/session path and returns structured
+  results. The remaining gap is a real provider CLI adapter plus orchestrator routing onto
+  that runtime path.
 - The near-term worker plan is explicitly CLI-first. New worker work should not assume full ownership of low-level raw API payload assembly when a CLI, SDK, hook, or subprocess adapter can provide the runtime.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution so the worker cannot run unbounded when exercised standalone; T-042 then adds the outer orchestrator-level timeout/cancel layer that preserves workspace/logs and surfaces timeout state without hanging the run forever.
 - T-044 DB scope remains intentionally limited to execution-path persistence for task/status lookup, worker run metadata, final result fields, verifier output, and captured artifacts needed for polling by `task_id`.
