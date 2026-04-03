@@ -182,11 +182,13 @@ Scope notes:
 - start with a single `execute_bash` tool (per mini-SWE-agent's proven bash-only approach)
 - exit on: LLM final answer, max iterations, or budget/timeout exceeded
 - the loop is a simple while-loop, not a nested LangGraph graph
+- the worker must include its own basic timeout and max-iteration guard so it never runs unbounded; T-042 adds the orchestrator-level timeout/cancel layer on top of this, but T-047 must be safe to run standalone
 
 Acceptance:
 - worker executes a real multi-step task (e.g., create a file, run a test, fix a failure)
 - agent loop runs ≥2 iterations, demonstrating observe-then-act behavior
 - timeout/budget limits terminate the loop safely
+- worker returns a clean `WorkerResult` (not an exception) when the budget or timeout is exceeded
 - `WorkerResult` accurately reflects commands run, files changed, and final status
 
 ### T-042 Add baseline worker timeout/cancel handling
@@ -204,12 +206,14 @@ Scope notes:
 - builds on persistent sandbox (T-045), system prompt (T-046), and agent loop (T-047)
 - uses the multi-turn agent worker, not the toy CodexWorker
 - includes the minimal HTTP task submission endpoint needed for curl-based validation
+- includes a basic task status/result retrieval endpoint (GET by task_id) so callers can poll for completion
 - includes persistence wiring for final result, worker run, and captured artifacts
 - builds on the baseline timeout/cancel handling from T-042
 - worker should complete at least one multi-step coding task end-to-end
 - Telegram is explicitly out of scope for this milestone
 - hardcoded repo URL and task text are acceptable
 - no mocks or fake worker results
+- result *delivery* (push-based, e.g. Telegram reply or webhook callback) is out of scope here and covered by the Telegram ingress milestone (T-050..T-053)
 
 Acceptance:
 - `curl` submission reaches the minimal HTTP task endpoint and starts a real run
@@ -217,6 +221,7 @@ Acceptance:
 - worker executes a multi-step task in a real workspace via the agent loop and returns real output
 - final result and run artifacts are persisted to DB
 - API returns a task identifier and initial status for the asynchronous run
+- completed result is retrievable via GET endpoint by task_id
 
 ---
 
