@@ -15,13 +15,11 @@ from uuid import uuid4
 
 from pydantic import Field
 
+from sandbox.container import build_container_name
+from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
 from sandbox.workspace import SandboxModel, WorkspaceHandle, _mask_url_credentials
 
 logger = logging.getLogger(__name__)
-
-# Maximum bytes captured from stdout/stderr. Output beyond this is discarded
-# to prevent disk or memory exhaustion from runaway sandbox processes.
-MAX_OUTPUT_SIZE_BYTES = 2 * 1024 * 1024  # 2 MB
 
 
 class DockerCommandRunner(Protocol):
@@ -77,7 +75,7 @@ class DockerSandboxOutputLimitError(DockerSandboxRunnerError):
 
 def _build_container_name(workspace: WorkspaceHandle) -> str:
     """Build a deterministic docker container name for a workspace run."""
-    return f"sandbox-{workspace.workspace_id}"
+    return build_container_name(workspace)
 
 
 def _extract_container_name(command: list[str]) -> str | None:
@@ -109,53 +107,10 @@ def _kill_docker_container(command: list[str]) -> None:
         )
 
 
-def _read_stream_bounded(
-    stream: typing.IO[bytes],
-    limit: int,
-    on_limit: typing.Callable[[], None] | None = None,
-) -> bytearray:
-    """Read from *stream* into a bytearray, discarding bytes beyond *limit*.
-
-    If *on_limit* is provided, it is invoked if the captured data exceeds *limit*,
-    and the stream reading terminates early.
-
-    The stream is drained to its end unless *on_limit* is called, so the subprocess
-    pipe never blocks regardless of how much data the container produces.
-
-    Partial data already read is preserved if the stream is closed or an I/O
-    error occurs mid-read (e.g. during cleanup to unblock a hanging reader).
-    """
-    buf = bytearray()
-    try:
-        for chunk in iter(lambda: stream.read(65536), b""):
-            remaining = (limit + 1) - len(buf)
-            if remaining > 0:
-                buf.extend(chunk[:remaining])
-            if len(buf) > limit:
-                if on_limit:
-                    on_limit()
-                    # Stop reading early if the limit was reached—usually because
-                    # the process is being killed to prevent further exhaustion.
-                    return buf
-                # Continue draining the stream to prevent the subprocess from
-                # blocking on a full pipe, but discard additional bytes.
-    except (OSError, ValueError):
-        # Stream closed or became unavailable (e.g. pipe forcibly closed during
-        # cleanup).  Return whatever was captured so far.
-        pass
-    return buf
+_read_stream_bounded = read_stream_bounded
 
 
-def _decode_bounded(buf: bytearray, limit: int) -> str:
-    """Decode *buf* to a string, appending a truncation marker when needed.
-
-    Decoding the whole buffer (at most limit+1 bytes) before truncating avoids
-    splitting a multi-byte UTF-8 sequence at the boundary.
-    """
-    text = buf.decode("utf-8", errors="replace")
-    if len(buf) > limit:
-        text = text[:limit] + "\n... (truncated)"
-    return text
+_decode_bounded = decode_bounded
 
 
 def _build_docker_run_command(

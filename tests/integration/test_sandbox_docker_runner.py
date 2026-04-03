@@ -8,7 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from sandbox import DockerSandboxCommand, DockerSandboxRunner, WorkspaceManager, WorkspaceRequest
+from sandbox import (
+    DockerSandboxCommand,
+    DockerSandboxContainerManager,
+    DockerSandboxContainerRequest,
+    DockerSandboxRunner,
+    DockerShellSession,
+    WorkspaceManager,
+    WorkspaceRequest,
+)
 
 
 def _run_git(command: list[str], *, cwd: Path) -> str:
@@ -113,3 +121,40 @@ def test_docker_sandbox_runner_executes_command_in_container(tmp_path: Path) -> 
     assert (workspace.repo_path / "docker-output.txt").read_text(encoding="utf-8") == (
         "sandbox runner\n"
     )
+
+
+def test_persistent_shell_session_preserves_state_across_commands(tmp_path: Path) -> None:
+    """A long-lived shell session should preserve env, cwd, and filesystem state."""
+    image = os.environ.get("CODE_AGENT_TEST_DOCKER_IMAGE", "python:3.12-slim")
+    if not _docker_and_image_available(image):
+        pytest.skip(f"Docker daemon or image {image!r} is unavailable")
+
+    source_repo = _create_local_repo(tmp_path)
+    workspace_manager = WorkspaceManager(tmp_path / "workspaces")
+    workspace = workspace_manager.create_workspace(
+        WorkspaceRequest(task_id="task-45", repo_url=str(source_repo))
+    )
+
+    container_manager = DockerSandboxContainerManager(default_image=image)
+    container = container_manager.start(DockerSandboxContainerRequest(workspace=workspace))
+
+    try:
+        reconnected = container_manager.reconnect(container)
+        assert reconnected.container_name == container.container_name
+
+        with DockerShellSession(container) as session:
+            first = session.execute("export GREETING=hello; cd .git")
+            second = session.execute('printf "%s:%s\\n" "$GREETING" "$(pwd)"')
+            third = session.execute("cd ..; printf 'notes\\n' > session-output.txt")
+            fourth = session.execute("cat session-output.txt")
+
+        assert first.exit_code == 0
+        assert second.exit_code == 0
+        assert second.output.strip() == "hello:/workspace/repo/.git"
+        assert third.exit_code == 0
+        assert fourth.output == "notes\n"
+        assert (workspace.repo_path / "session-output.txt").read_text(encoding="utf-8") == (
+            "notes\n"
+        )
+    finally:
+        container_manager.stop(container)
