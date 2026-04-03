@@ -30,6 +30,7 @@ from tools import (
     ToolExpectedArtifact,
     ToolRegistry,
     UnknownToolError,
+    granted_permission_from_constraints,
 )
 from workers.base import ArtifactReference, Worker, WorkerRequest, WorkerResult
 from workers.cli_runtime import (
@@ -117,7 +118,9 @@ def _apply_cleanup_outcome(result: WorkerResult, *, workspace_deleted: bool) -> 
 
 def _next_action_hint(execution: CliRuntimeExecutionResult) -> str:
     """Return the best follow-up hint for a retained workspace."""
-    if execution.stop_reason in {"max_iterations", "worker_timeout"}:
+    if execution.stop_reason == "permission_required":
+        return "request_higher_permission"
+    if execution.stop_reason in {"max_iterations", "worker_timeout", "budget_exceeded"}:
         return "increase_budget_or_reduce_scope"
     if execution.stop_reason == "adapter_error":
         return "inspect_worker_configuration"
@@ -308,6 +311,7 @@ class CodexCliWorker(Worker):
                 request.budget,
                 defaults=self.runtime_settings,
             )
+            granted_permission = granted_permission_from_constraints(request.constraints)
             bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
             system_prompt = build_system_prompt(
                 request,
@@ -320,6 +324,7 @@ class CodexCliWorker(Worker):
                 system_prompt=system_prompt,
                 settings=runtime_settings,
                 tool_registry=self.tool_registry,
+                granted_permission=granted_permission,
             )
             files_changed: list[str] = []
             if ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts:

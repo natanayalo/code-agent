@@ -287,3 +287,46 @@ def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path
 
     assert result.status == "success"
     assert session.calls[-1] == ("git status --porcelain=v1 -z --untracked-files=all", 17)
+
+
+def test_codex_cli_worker_requests_higher_permission_for_blocked_commands(tmp_path: Path) -> None:
+    """Permission-required runtime failures should map to a clear worker follow-up hint."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-47",
+        image="python:3.12-slim",
+    )
+    adapter = _ScriptedAdapter(
+        [CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="rm -rf build")]
+    )
+    session = _FakeSession(
+        {
+            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
+                "git status --porcelain=v1 -z --untracked-files=all",
+                output="",
+            )
+        }
+    )
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda started_container: session,
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-49-permission",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Attempt a blocked shell action",
+                constraints={"granted_permission": "workspace_write"},
+            )
+        )
+    )
+
+    assert result.status == "failure"
+    assert result.next_action_hint == "request_higher_permission"
+    assert "dangerous_shell" in (result.summary or "")
