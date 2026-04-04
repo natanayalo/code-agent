@@ -715,7 +715,7 @@ def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
 
     # 2. Test Results
     failed_tests = [t for t in state.result.test_results if t.status in ("failed", "error")]
-    status: Literal["passed", "failed", "warning"]
+    status: Literal["passed", "failed", "warning"] = "warning"
     if state.result.test_results:
         status = "failed" if failed_tests else "passed"
         msg = f"{len(failed_tests)} failed" if failed_tests else "All tests passed"
