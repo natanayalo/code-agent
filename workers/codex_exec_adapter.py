@@ -133,7 +133,9 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         self.model = model.strip() if model is not None and model.strip() else None
         self.profile = profile.strip() if profile is not None and profile.strip() else None
         self.sandbox_mode = sandbox_mode.strip() or DEFAULT_CODEX_SANDBOX_MODE
-        self.request_timeout_seconds = max(int(request_timeout_seconds), 1)
+        self.request_timeout_seconds = _coerce_positive_int(
+            request_timeout_seconds, default=DEFAULT_CODEX_REQUEST_TIMEOUT_SECONDS
+        )
         self.working_directory = Path(working_directory or tempfile.gettempdir()).expanduser()
         self.config_overrides = tuple(
             override.strip()
