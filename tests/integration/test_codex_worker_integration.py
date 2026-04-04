@@ -142,6 +142,7 @@ def test_codex_worker_runs_real_workspace_and_graph_path(tmp_path: Path) -> None
         "approval not required",
         "worker dispatched",
         "worker result received",
+        "verification passed",
         "result summarized",
         "memory persistence queued",
     ]
