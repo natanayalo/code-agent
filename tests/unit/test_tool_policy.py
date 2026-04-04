@@ -327,6 +327,20 @@ def test_resolve_bash_command_permission_fails_closed_for_subshell_syntax() -> N
     assert decision.allowed is False
 
 
+def test_resolve_bash_command_permission_fails_closed_for_grouping_subshells() -> None:
+    """Grouping parens should share the unsupported-shell fail-closed path."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "(rm -rf build)",
+        tool,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+    assert decision.allowed is False
+
+
 def test_resolve_bash_command_permission_fails_closed_for_process_substitution() -> None:
     """Process substitution should share the unsupported-shell fail-closed path."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")

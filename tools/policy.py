@@ -244,6 +244,8 @@ def _command_uses_unsupported_shell_features(command: str) -> bool:
         or "`" in command
         or "<(" in command
         or ">(" in command
+        or "(" in command
+        or ")" in command
         or _command_word_uses_unsupported_expansion(command)
         or "\n" in command
         or "\r" in command
