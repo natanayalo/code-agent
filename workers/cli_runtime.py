@@ -163,7 +163,10 @@ def _coerce_int(value: object) -> int | None:
     if isinstance(value, int):
         return value
     if isinstance(value, float):
-        return int(value)
+        try:
+            return int(value)
+        except (OverflowError, ValueError):
+            return None
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:

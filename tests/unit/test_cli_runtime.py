@@ -9,6 +9,7 @@ from workers.cli_runtime import (
     CliRuntimeMessage,
     CliRuntimeSettings,
     CliRuntimeStep,
+    _coerce_non_negative_int,
     collect_changed_files,
     format_bash_observation,
     run_cli_runtime_loop,
@@ -92,6 +93,13 @@ def test_settings_from_budget_accepts_fractional_numeric_strings_like_float_inpu
 
     assert settings.max_iterations == 2
     assert settings.command_timeout_seconds == 9
+
+
+def test_coerce_non_negative_int_rejects_non_finite_floats() -> None:
+    """NaN and infinity should be ignored instead of crashing runtime budget parsing."""
+    assert _coerce_non_negative_int(float("nan")) is None
+    assert _coerce_non_negative_int(float("inf")) is None
+    assert _coerce_non_negative_int(float("-inf")) is None
 
 
 def test_format_bash_observation_truncates_long_output() -> None:

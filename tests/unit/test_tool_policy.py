@@ -77,6 +77,20 @@ def test_resolve_bash_command_permission_does_not_treat_redirection_as_read_only
     assert decision.allowed is False
 
 
+def test_safe_named_redirection_target_stays_out_of_read_only() -> None:
+    """Write redirection should not become read-only just because the target looks harmless."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "cat secret > pwd",
+        tool,
+        granted_permission=ToolPermissionLevel.READ_ONLY,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
+    assert decision.allowed is False
+
+
 def test_resolve_bash_command_permission_does_not_treat_inline_redirection_as_read_only() -> None:
     """Inline redirection syntax should still fail closed without whitespace separators."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")

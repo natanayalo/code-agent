@@ -140,6 +140,7 @@ _UNSUPPORTED_COMMAND_WORD_GLOB_CHARS = frozenset({"*", "?", "[", "{"})
 _SAFE_GIT_READ_ONLY_SUBCOMMANDS = frozenset(
     {"status", "log", "diff", "show", "ls-files", "rev-parse", "blame"}
 )
+_WRITE_REDIRECTION_OPERATORS = frozenset({">", ">>"})
 
 
 class ToolPermissionDecision(ToolModel):
@@ -439,6 +440,14 @@ def _is_safe_grep_command(tokens: tuple[str, ...]) -> bool:
     )
 
 
+def _command_uses_write_redirection(command: str) -> bool:
+    """Return whether the command writes through shell redirection operators."""
+    lexemes = _command_lexemes(command)
+    if lexemes is None:
+        return False
+    return any(lexeme in _WRITE_REDIRECTION_OPERATORS for lexeme in lexemes)
+
+
 def _is_safe_read_only_command(normalized_tokens: tuple[str, ...]) -> bool:
     """Return whether a command matches the narrow read-only allowlist."""
     executable = normalized_tokens[0]
@@ -511,8 +520,14 @@ def _classify_bash_command_permission(
             _default_permission_reason(default_permission),
         )
 
-    highest_permission: ToolPermissionLevel | None = None
-    highest_reason = _default_permission_reason(default_permission)
+    highest_permission = (
+        ToolPermissionLevel.WORKSPACE_WRITE if _command_uses_write_redirection(command) else None
+    )
+    highest_reason = (
+        "Command writes via shell redirection."
+        if highest_permission is not None
+        else _default_permission_reason(default_permission)
+    )
     for segment_tokens in segments:
         segment_permission, segment_reason = _classify_segment_permission(
             segment_tokens,
