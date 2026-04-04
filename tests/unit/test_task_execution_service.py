@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
+import pytest
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
+from db.enums import TaskStatus
 from orchestrator import (
     ApprovalCheckpoint,
     MemoryContext,
@@ -18,7 +21,14 @@ from orchestrator import (
     WorkerResult,
 )
 from orchestrator import execution as execution_module
-from repositories import create_engine_from_url, create_session_factory
+from repositories import (
+    SessionRepository,
+    TaskRepository,
+    UserRepository,
+    create_engine_from_url,
+    create_session_factory,
+    session_scope,
+)
 from workers import Worker, WorkerRequest
 
 
@@ -104,3 +114,167 @@ def test_task_execution_service_reuses_one_compiled_graph(
 
     assert len(build_calls) == 1
     assert len(fake_graph.calls) == 2
+
+
+@pytest.mark.anyio
+async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -> None:
+    """Async task execution should route sync persistence work through anyio's threadpool."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    fake_graph = _FakeGraph()
+    monkeypatch.setattr(
+        execution_module,
+        "build_orchestrator_graph",
+        lambda *, worker: fake_graph,
+    )
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Run the task service",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+    persisted = execution_module._PersistedTaskContext(
+        user_id="user-1",
+        session_id="session-1",
+        channel="http",
+        external_thread_id="thread-1",
+        task_id="task-1",
+    )
+
+    snapshot = execution_module.TaskSnapshot(
+        task_id="task-1",
+        session_id="session-1",
+        status="completed",
+        task_text=submission.task_text,
+        repo_url=submission.repo_url,
+        branch=submission.branch,
+        priority=submission.priority,
+        chosen_worker="codex",
+        route_reason="implementation_default",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+
+    recorded_calls: list[str] = []
+
+    async def fake_run_sync(func):
+        recorded_calls.append(func.func.__name__)
+        return func()
+
+    def fake_mark_task_in_progress(*, task_id: str) -> None:
+        return None
+
+    def fake_persist_execution_outcome(**kwargs) -> None:
+        return None
+
+    def fake_get_task(task_id: str) -> execution_module.TaskSnapshot:
+        return snapshot
+
+    def fake_log_task_outcome(task_snapshot: execution_module.TaskSnapshot) -> None:
+        return None
+
+    monkeypatch.setattr(execution_module.to_thread, "run_sync", fake_run_sync)
+    monkeypatch.setattr(service, "_mark_task_in_progress", fake_mark_task_in_progress)
+    monkeypatch.setattr(service, "_persist_execution_outcome", fake_persist_execution_outcome)
+    monkeypatch.setattr(service, "get_task", fake_get_task)
+    monkeypatch.setattr(service, "_log_task_outcome", fake_log_task_outcome)
+
+    await service.submit_task(submission, persisted)
+
+    assert recorded_calls == [
+        "fake_mark_task_in_progress",
+        "fake_persist_execution_outcome",
+        "fake_get_task",
+    ]
+
+
+def test_create_task_recovers_from_duplicate_user_and_session_race(monkeypatch) -> None:
+    """Task creation should recover if another request inserts the user/session first."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        existing_user = user_repo.create(
+            external_user_id="http:test-user",
+            display_name="Existing User",
+        )
+        existing_session = session_repo.create(
+            user_id=existing_user.id,
+            channel="http",
+            external_thread_id="thread-race",
+        )
+
+    original_get_user = UserRepository.get_by_external_user_id
+    original_get_session = SessionRepository.get_by_channel_thread
+    user_calls = 0
+    session_calls = 0
+
+    def stale_get_user(self, external_user_id: str):
+        nonlocal user_calls
+        user_calls += 1
+        if user_calls == 1:
+            return None
+        return original_get_user(self, external_user_id)
+
+    def stale_get_session(self, *, channel: str, external_thread_id: str):
+        nonlocal session_calls
+        session_calls += 1
+        if session_calls == 1:
+            return None
+        return original_get_session(
+            self,
+            channel=channel,
+            external_thread_id=external_thread_id,
+        )
+
+    monkeypatch.setattr(UserRepository, "get_by_external_user_id", stale_get_user)
+    monkeypatch.setattr(SessionRepository, "get_by_channel_thread", stale_get_session)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    task_snapshot, persisted = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="Recover from create race",
+            repo_url="https://github.com/natanayalo/code-agent",
+            session=execution_module.SubmissionSession(
+                external_user_id="http:test-user",
+                external_thread_id="thread-race",
+            ),
+        )
+    )
+
+    assert persisted.user_id == existing_user.id
+    assert persisted.session_id == existing_session.id
+    assert task_snapshot.status == TaskStatus.PENDING.value
+
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+
+        assert user_repo.get_by_external_user_id("http:test-user") is not None
+        recovered_session = session_repo.get_by_channel_thread(
+            channel="http",
+            external_thread_id="thread-race",
+        )
+        assert recovered_session is not None
+        assert len(session_repo.list_by_user(existing_user.id)) == 1
+        assert len(task_repo.list_by_session(existing_session.id)) == 1

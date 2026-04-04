@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
+from anyio import to_thread
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from db.base import utc_now
 from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
+from db.models import (
+    Session as ConversationSession,
+)
+from db.models import User
 from orchestrator.graph import build_orchestrator_graph
 from orchestrator.state import OrchestratorState, SessionRef
 from repositories import (
@@ -191,7 +199,7 @@ class TaskExecutionService:
         persisted: _PersistedTaskContext,
     ) -> None:
         """Execute one previously persisted task request in the background."""
-        self._mark_task_in_progress(task_id=persisted.task_id)
+        await self._run_blocking(self._mark_task_in_progress, task_id=persisted.task_id)
         started_at = utc_now()
         logger.info(
             "Starting execution-path task run",
@@ -215,21 +223,22 @@ class TaskExecutionService:
                     "task_id": persisted.task_id,
                 },
             )
-            self._mark_task_failed(task_id=persisted.task_id)
-            task_snapshot = self.get_task(persisted.task_id)
+            await self._run_blocking(self._mark_task_failed, task_id=persisted.task_id)
+            task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
             if task_snapshot is None:
                 raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
             self._log_task_outcome(task_snapshot)
             return None
 
         finished_at = utc_now()
-        self._persist_execution_outcome(
+        await self._run_blocking(
+            self._persist_execution_outcome,
             task_id=persisted.task_id,
             state=state,
             started_at=started_at,
             finished_at=finished_at,
         )
-        task_snapshot = self.get_task(persisted.task_id)
+        task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
         if task_snapshot is None:
             raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
         self._log_task_outcome(task_snapshot)
@@ -305,7 +314,9 @@ class TaskExecutionService:
 
             user = user_repo.get_by_external_user_id(submission.session.external_user_id)
             if user is None:
-                user = user_repo.create(
+                user = self._create_or_get_user(
+                    session,
+                    user_repo,
                     external_user_id=submission.session.external_user_id,
                     display_name=submission.session.display_name,
                 )
@@ -315,14 +326,15 @@ class TaskExecutionService:
                 external_thread_id=submission.session.external_thread_id,
             )
             if conversation_session is None:
-                conversation_session = session_repo.create(
+                conversation_session = self._create_or_get_session(
+                    session,
+                    session_repo,
                     user_id=user.id,
                     channel=submission.session.channel,
                     external_thread_id=submission.session.external_thread_id,
                     last_seen_at=now,
                 )
-            else:
-                session_repo.touch(session_id=conversation_session.id, seen_at=now)
+            session_repo.touch(session_id=conversation_session.id, seen_at=now)
 
             task = task_repo.create(
                 session_id=conversation_session.id,
@@ -389,6 +401,65 @@ class TaskExecutionService:
         with session_scope(self.session_factory) as session:
             task_repo = TaskRepository(session)
             task_repo.update_status(task_id=task_id, status=TaskStatus.FAILED)
+
+    async def _run_blocking(
+        self,
+        func: Callable[..., Any],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """Run a synchronous persistence operation in a worker thread."""
+        return await to_thread.run_sync(partial(func, *args, **kwargs))
+
+    def _create_or_get_user(
+        self,
+        session: Session,
+        user_repo: UserRepository,
+        *,
+        external_user_id: str,
+        display_name: str | None,
+    ) -> User:
+        """Create a user or recover the concurrently inserted row."""
+        try:
+            with session.begin_nested():
+                return user_repo.create(
+                    external_user_id=external_user_id,
+                    display_name=display_name,
+                )
+        except IntegrityError:
+            existing_user = user_repo.get_by_external_user_id(external_user_id)
+            if existing_user is None:
+                raise
+            return existing_user
+
+    def _create_or_get_session(
+        self,
+        session: Session,
+        session_repo: SessionRepository,
+        *,
+        user_id: str,
+        channel: str,
+        external_thread_id: str,
+        last_seen_at: datetime,
+    ) -> ConversationSession:
+        """Create a session or recover the concurrently inserted row."""
+        try:
+            with session.begin_nested():
+                return session_repo.create(
+                    user_id=user_id,
+                    channel=channel,
+                    external_thread_id=external_thread_id,
+                    last_seen_at=last_seen_at,
+                )
+        except IntegrityError:
+            existing_session = session_repo.get_by_channel_thread(
+                channel=channel,
+                external_thread_id=external_thread_id,
+            )
+            if existing_session is None:
+                raise
+            return existing_session
 
     def _persist_execution_outcome(
         self,

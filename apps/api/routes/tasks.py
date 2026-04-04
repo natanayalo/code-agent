@@ -11,7 +11,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 @router.post("", response_model=TaskSnapshot, status_code=status.HTTP_202_ACCEPTED)
-async def submit_task(
+def submit_task(
     payload: TaskSubmission,
     background_tasks: BackgroundTasks,
     task_service: TaskExecutionService = Depends(get_task_service),
