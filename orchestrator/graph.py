@@ -6,7 +6,6 @@ import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 from typing import Any, Literal
 
 from langchain_core.runnables import RunnableLambda
@@ -127,6 +126,72 @@ def _cancelled_worker_result() -> WorkerResult:
     )
 
 
+def _unexpected_worker_error_result(exc: Exception) -> WorkerResult:
+    """Build a structured result for unexpected worker crashes."""
+    detail = str(exc).strip()
+    summary = (
+        f"Worker execution crashed unexpectedly: {type(exc).__name__}: {detail}"
+        if detail
+        else f"Worker execution crashed unexpectedly: {type(exc).__name__}."
+    )
+    return WorkerResult(
+        status="error",
+        summary=summary,
+        commands_run=[],
+        files_changed=[],
+        test_results=[],
+        artifacts=[],
+        next_action_hint="inspect_worker_configuration",
+    )
+
+
+def _consume_worker_task_result(
+    worker_task: asyncio.Task[WorkerResult],
+    *,
+    worker_type: str,
+    session_id: str | None,
+) -> None:
+    """Drain a background worker task result so cleanup never leaks task exceptions."""
+    try:
+        worker_task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception(
+            "Worker task raised while cancellation cleanup was settling",
+            extra={
+                "session_id": session_id,
+                "worker_type": worker_type,
+            },
+        )
+
+
+async def _settle_cancelled_worker_task(
+    worker_task: asyncio.Task[WorkerResult],
+    *,
+    worker_type: str,
+    session_id: str | None,
+) -> None:
+    """Yield once so task cancellation can propagate without awaiting unbounded cleanup."""
+    worker_task.cancel()
+    await asyncio.sleep(0)
+    if worker_task.done():
+        _consume_worker_task_result(
+            worker_task,
+            worker_type=worker_type,
+            session_id=session_id,
+        )
+        return
+
+    worker_task.add_done_callback(
+        lambda task: _consume_worker_task_result(
+            task,
+            worker_type=worker_type,
+            session_id=session_id,
+        )
+    )
+
+
 async def _await_worker_with_timeout(
     worker: Worker,
     request: WorkerRequest,
@@ -152,9 +217,11 @@ async def _await_worker_with_timeout(
                 "timeout_seconds": timeout_seconds,
             },
         )
-        worker_task.cancel()
-        with suppress(asyncio.CancelledError, asyncio.TimeoutError, TimeoutError):
-            await asyncio.wait_for(worker_task, timeout=0)
+        await _settle_cancelled_worker_task(
+            worker_task,
+            worker_type=worker_type,
+            session_id=session_id,
+        )
         return _timed_out_worker_result(
             timeout_seconds
         ), f"worker timed out after {timeout_seconds}s"
@@ -166,10 +233,21 @@ async def _await_worker_with_timeout(
                 "worker_type": worker_type,
             },
         )
-        worker_task.cancel()
-        with suppress(asyncio.CancelledError, asyncio.TimeoutError, TimeoutError):
-            await asyncio.wait_for(worker_task, timeout=0)
+        await _settle_cancelled_worker_task(
+            worker_task,
+            worker_type=worker_type,
+            session_id=session_id,
+        )
         return _cancelled_worker_result(), "worker execution cancelled"
+    except Exception as exc:
+        logger.exception(
+            "Worker execution crashed unexpectedly at the orchestrator boundary",
+            extra={
+                "session_id": session_id,
+                "worker_type": worker_type,
+            },
+        )
+        return _unexpected_worker_error_result(exc), "worker crashed unexpectedly"
     return result, "worker result received"
 
 
