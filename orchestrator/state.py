@@ -19,6 +19,7 @@ WorkflowStep = Literal[
     "await_approval",
     "dispatch_job",
     "await_result",
+    "await_permission_escalation",
     "summarize_result",
     "persist_memory",
 ]

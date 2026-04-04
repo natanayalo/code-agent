@@ -1,5 +1,7 @@
 """Unit tests for the orchestrator graph internals."""
 
+from unittest.mock import patch
+
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.graph import (
     _build_worker_request,
@@ -10,6 +12,7 @@ from orchestrator.graph import (
     _is_destructive_task,
     _resolve_orchestrator_timeout_seconds,
     await_approval,
+    await_permission_escalation,
     choose_worker,
     summarize_result,
 )
@@ -173,3 +176,43 @@ def test_summarize_result_no_result():
 def test_create_in_memory_checkpointer():
     cp = create_in_memory_checkpointer()
     assert cp is not None
+
+
+def test_await_permission_escalation_approved():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "failure",
+                "next_action_hint": "request_higher_permission",
+                "requested_permission": "network_write",
+                "summary": "needs high permission",
+            },
+        }
+    )
+    with patch("orchestrator.graph.interrupt", return_value=True):
+        res = await_permission_escalation(state)
+    assert res["current_step"] == "await_permission_escalation"
+    assert res["result"] is None
+    assert res["task"]["constraints"]["granted_permission"] == "network_write"
+
+
+def test_await_permission_escalation_rejected():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "failure",
+                "next_action_hint": "request_higher_permission",
+                "requested_permission": "network_write",
+                "summary": "needs high permission",
+            },
+        }
+    )
+    with patch("orchestrator.graph.interrupt", return_value=False):
+        res = await_permission_escalation(state)
+    assert res["current_step"] == "await_permission_escalation"
+    assert (
+        res["result"]["summary"]
+        == "Permission escalation to 'network_write' was rejected. Run halted."
+    )
