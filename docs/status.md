@@ -38,10 +38,13 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-049 Add the permission ladder and runtime budget ledger/enforcement. Current slice adds
   runtime-side command permission resolution, granted-permission checks, and budget-ledger
   enforcement for tool calls, shell commands, and retries.
+- T-042 Add baseline worker timeout/cancel handling. Current slice wraps
+  `await_result` in an outer timeout/cancel envelope, resolves an orchestrator timeout from
+  the task budget, and returns structured timeout/cancel `WorkerResult` failures so the
+  graph can still summarize and persist state after a hung or cancelled worker run.
 
 ## Next
 
-- T-042 Add baseline worker timeout/cancel handling (outer orchestrator-level timeout/cancel envelope around the real worker path).
 - T-044 Run one real orchestrator-to-worker vertical slice through the CLI worker path with execution-path DB persistence only.
 - T-055 Add the constrained verifier stage.
 - T-054 Harden sandbox execution boundary and auditability.
@@ -70,6 +73,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
   tool-call, shell-command, and retry limits. The remaining gap is wiring permission-required
   outcomes into orchestrator pause/resume instead of only surfacing them as structured worker
   failures.
+- T-042's current in-repo slice adds an outer orchestrator timeout/cancel envelope around
+  `await_result`, including budget-driven timeout resolution plus structured timeout/cancel
+  `WorkerResult` failures that keep the graph moving through summary/persist steps. The
+  remaining gap is richer run/workspace diagnostics once execution-path persistence lands in
+  T-044.
 - The near-term worker plan is explicitly CLI-first. New worker work should not assume full ownership of low-level raw API payload assembly when a CLI, SDK, hook, or subprocess adapter can provide the runtime.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution so the worker cannot run unbounded when exercised standalone; T-042 then adds the outer orchestrator-level timeout/cancel layer that preserves workspace/logs and surfaces timeout state without hanging the run forever.
 - T-044 DB scope remains intentionally limited to execution-path persistence for task/status lookup, worker run metadata, final result fields, verifier output, and captured artifacts needed for polling by `task_id`.

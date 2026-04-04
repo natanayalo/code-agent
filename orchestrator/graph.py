@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import Any, Literal
 
 from langchain_core.runnables import RunnableLambda
@@ -18,6 +21,8 @@ from orchestrator.state import (
     WorkerDispatch,
 )
 from workers import Worker, WorkerRequest, WorkerResult
+
+logger = logging.getLogger(__name__)
 
 ORCHESTRATOR_NODE_SEQUENCE = (
     "ingest_task",
@@ -44,6 +49,125 @@ DESTRUCTIVE_TASK_MARKERS = (
     "rm -rf",
     "wipe data",
 )
+
+DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = 330
+ORCHESTRATOR_TIMEOUT_GRACE_SECONDS = 30
+
+
+def _coerce_positive_int(value: Any) -> int | None:
+    """Parse positive integer-like values for timeout-budget overrides."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float):
+        coerced = int(value)
+        return coerced if coerced > 0 else None
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        try:
+            coerced = int(normalized)
+        except ValueError:
+            return None
+        return coerced if coerced > 0 else None
+    return None
+
+
+def _resolve_orchestrator_timeout_seconds(state: OrchestratorState) -> int:
+    """Resolve the outer worker timeout envelope from the task budget."""
+    budget = state.task.budget
+
+    explicit_timeout = _coerce_positive_int(budget.get("orchestrator_timeout_seconds"))
+    if explicit_timeout is not None:
+        return explicit_timeout
+
+    worker_timeout_seconds = _coerce_positive_int(budget.get("worker_timeout_seconds"))
+    if worker_timeout_seconds is None:
+        max_minutes = _coerce_positive_int(budget.get("max_minutes"))
+        if max_minutes is not None:
+            worker_timeout_seconds = max_minutes * 60
+
+    if worker_timeout_seconds is not None:
+        return worker_timeout_seconds + ORCHESTRATOR_TIMEOUT_GRACE_SECONDS
+
+    return DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS
+
+
+def _timed_out_worker_result(timeout_seconds: int) -> WorkerResult:
+    """Build a structured timeout result for the outer orchestrator envelope."""
+    return WorkerResult(
+        status="failure",
+        summary=(
+            "Worker execution exceeded the orchestrator timeout envelope "
+            f"({timeout_seconds}s) and was cancelled."
+        ),
+        commands_run=[],
+        files_changed=[],
+        test_results=[],
+        artifacts=[],
+        next_action_hint="inspect_workspace_artifacts",
+    )
+
+
+def _cancelled_worker_result() -> WorkerResult:
+    """Build a structured result for an externally cancelled worker run."""
+    return WorkerResult(
+        status="failure",
+        summary="Worker execution was cancelled before it returned a result.",
+        commands_run=[],
+        files_changed=[],
+        test_results=[],
+        artifacts=[],
+        next_action_hint="await_manual_follow_up",
+    )
+
+
+async def _await_worker_with_timeout(
+    worker: Worker,
+    request: WorkerRequest,
+    *,
+    worker_type: str,
+    session_id: str | None,
+    timeout_seconds: int,
+) -> tuple[WorkerResult, str]:
+    """Run a worker behind the outer orchestrator timeout/cancel envelope."""
+
+    async def run_worker() -> WorkerResult:
+        return await worker.run(request)
+
+    worker_task: asyncio.Task[WorkerResult] = asyncio.create_task(run_worker())
+    try:
+        result = await asyncio.wait_for(asyncio.shield(worker_task), timeout=timeout_seconds)
+    except TimeoutError:
+        logger.warning(
+            "Worker execution exceeded the orchestrator timeout envelope",
+            extra={
+                "session_id": session_id,
+                "worker_type": worker_type,
+                "timeout_seconds": timeout_seconds,
+            },
+        )
+        worker_task.cancel()
+        with suppress(asyncio.CancelledError, TimeoutError):
+            await asyncio.wait_for(worker_task, timeout=0)
+        return _timed_out_worker_result(
+            timeout_seconds
+        ), f"worker timed out after {timeout_seconds}s"
+    except asyncio.CancelledError:
+        logger.warning(
+            "Worker execution was cancelled at the orchestrator boundary",
+            extra={
+                "session_id": session_id,
+                "worker_type": worker_type,
+            },
+        )
+        worker_task.cancel()
+        with suppress(asyncio.CancelledError, TimeoutError):
+            await asyncio.wait_for(worker_task, timeout=0)
+        return _cancelled_worker_result(), "worker execution cancelled"
+    return result, "worker result received"
 
 
 def _ensure_state(state: OrchestratorState | dict[str, Any]) -> OrchestratorState:
@@ -351,8 +475,14 @@ def build_await_result_node(
             )
         else:
             request = _build_worker_request(state)
-            result = await bound_worker.run(request)
-            progress_updates = _progress_update(state, "worker result received")
+            result, progress_message = await _await_worker_with_timeout(
+                bound_worker,
+                request,
+                worker_type=worker_type or "unknown",
+                session_id=request.session_id,
+                timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+            )
+            progress_updates = _progress_update(state, progress_message)
         return {
             "current_step": "await_result",
             "result": result.model_dump(),

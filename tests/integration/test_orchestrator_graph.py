@@ -34,6 +34,32 @@ class UnexpectedWorker(Worker):
         raise AssertionError(self.message)
 
 
+class SlowWorker(Worker):
+    """Test worker that can be timed out or cancelled by the orchestrator."""
+
+    def __init__(self, *, delay_seconds: float) -> None:
+        self.delay_seconds = delay_seconds
+        self.requests: list[WorkerRequest] = []
+        self.cancelled = False
+
+    async def run(self, request: WorkerRequest) -> WorkerResult:
+        self.requests.append(request)
+        try:
+            await asyncio.sleep(self.delay_seconds)
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        return WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=[],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary="Slow worker finished.",
+        )
+
+
 def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
     """The compiled graph should complete the documented happy-path node sequence."""
     worker = StaticWorker(
@@ -380,6 +406,100 @@ def test_orchestrator_graph_stops_when_approval_is_rejected(tmp_path: Path) -> N
             "worker selected: codex",
             "approval requested",
             "approval rejected",
+            "result summarized",
+            "memory persistence queued",
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_orchestrator_graph_returns_a_structured_timeout_result() -> None:
+    """The outer orchestrator timeout should fail safely instead of hanging forever."""
+    worker = SlowWorker(delay_seconds=5)
+    graph = build_orchestrator_graph(worker=worker)
+
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": "Run the slow worker path",
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                    "budget": {"orchestrator_timeout_seconds": 1},
+                }
+            }
+        )
+    )
+
+    state = OrchestratorState.model_validate(raw_output)
+
+    assert state.current_step == "persist_memory"
+    assert len(worker.requests) == 1
+    assert worker.cancelled is True
+    assert state.result is not None
+    assert state.result.status == "failure"
+    assert state.result.summary == (
+        "Worker execution exceeded the orchestrator timeout envelope (1s) and was cancelled."
+    )
+    assert state.result.next_action_hint == "inspect_workspace_artifacts"
+    assert state.progress_updates == [
+        "task ingested",
+        "task classified as implementation",
+        "memory context loaded",
+        "worker selected: codex",
+        "approval not required",
+        "worker dispatched",
+        "worker timed out after 1s",
+        "result summarized",
+        "memory persistence queued",
+    ]
+
+
+def test_orchestrator_graph_surfaces_worker_cancellation_as_a_result() -> None:
+    """Cancelling the graph during worker execution should still produce a typed failure."""
+
+    async def scenario() -> None:
+        worker = SlowWorker(delay_seconds=5)
+        graph = build_orchestrator_graph(worker=worker)
+
+        graph_task = asyncio.create_task(
+            graph.ainvoke(
+                {
+                    "task": {
+                        "task_text": "Cancel the worker path",
+                        "repo_url": "https://github.com/natanayalo/code-agent",
+                        "branch": "master",
+                    }
+                }
+            )
+        )
+
+        for _ in range(100):
+            if worker.requests:
+                break
+            await asyncio.sleep(0.01)
+        assert worker.requests, "Worker never started before cancellation."
+
+        graph_task.cancel()
+        raw_output = await graph_task
+        state = OrchestratorState.model_validate(raw_output)
+
+        assert state.current_step == "persist_memory"
+        assert worker.cancelled is True
+        assert state.result is not None
+        assert state.result.status == "failure"
+        assert state.result.summary == (
+            "Worker execution was cancelled before it returned a result."
+        )
+        assert state.result.next_action_hint == "await_manual_follow_up"
+        assert state.progress_updates == [
+            "task ingested",
+            "task classified as implementation",
+            "memory context loaded",
+            "worker selected: codex",
+            "approval not required",
+            "worker dispatched",
+            "worker execution cancelled",
             "result summarized",
             "memory persistence queued",
         ]
