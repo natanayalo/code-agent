@@ -197,6 +197,84 @@ async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -
     ]
 
 
+@pytest.mark.anyio
+async def test_submit_task_marks_task_failed_when_outcome_persistence_crashes(
+    monkeypatch,
+) -> None:
+    """Persistence failures should not leave the task stuck in progress."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Fail after orchestration finishes",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+    _, persisted = service.create_task(submission)
+
+    async def run_blocking(func, /, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    async def fake_run_orchestrator(
+        _submission: execution_module.TaskSubmission,
+        _persisted: execution_module._PersistedTaskContext,
+    ) -> OrchestratorState:
+        return OrchestratorState(
+            current_step="persist_memory",
+            session=SessionRef(
+                session_id=persisted.session_id,
+                user_id=persisted.user_id,
+                channel=persisted.channel,
+                external_thread_id=persisted.external_thread_id,
+                active_task_id=persisted.task_id,
+                status="active",
+            ),
+            task=TaskRequest(
+                task_id=persisted.task_id,
+                task_text=submission.task_text,
+                repo_url=submission.repo_url,
+                branch=submission.branch,
+                priority=submission.priority,
+                worker_override=submission.worker_override,
+                constraints=dict(submission.constraints),
+                budget=dict(submission.budget),
+            ),
+            normalized_task_text=submission.task_text,
+            task_kind="implementation",
+            memory=MemoryContext(),
+            route=RouteDecision(
+                chosen_worker="codex",
+                route_reason="implementation_default",
+                override_applied=False,
+            ),
+            approval=ApprovalCheckpoint(),
+            dispatch=WorkerDispatch(worker_type="codex"),
+            result=WorkerResult(status="success", summary="orchestrator finished"),
+        )
+
+    def fake_persist_execution_outcome(**kwargs) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(service, "_run_blocking", run_blocking)
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_persist_execution_outcome", fake_persist_execution_outcome)
+
+    await service.submit_task(submission, persisted)
+
+    task_snapshot = service.get_task(persisted.task_id)
+    assert task_snapshot is not None
+    assert task_snapshot.status == TaskStatus.FAILED.value
+    assert task_snapshot.latest_run is None
+
+
 def test_create_task_recovers_from_duplicate_user_and_session_race(monkeypatch) -> None:
     """Task creation should recover if another request inserts the user/session first."""
     engine = create_engine_from_url(

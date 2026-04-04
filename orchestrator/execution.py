@@ -215,9 +215,17 @@ class TaskExecutionService:
 
         try:
             state = await self._run_orchestrator(submission, persisted)
+            finished_at = utc_now()
+            await self._run_blocking(
+                self._persist_execution_outcome,
+                task_id=persisted.task_id,
+                state=state,
+                started_at=started_at,
+                finished_at=finished_at,
+            )
         except Exception:
             logger.exception(
-                "Task execution crashed before the orchestrator returned a final state",
+                "Task execution failed before the final outcome was fully persisted",
                 extra={
                     "session_id": persisted.session_id,
                     "task_id": persisted.task_id,
@@ -230,14 +238,6 @@ class TaskExecutionService:
             self._log_task_outcome(task_snapshot)
             return None
 
-        finished_at = utc_now()
-        await self._run_blocking(
-            self._persist_execution_outcome,
-            task_id=persisted.task_id,
-            state=state,
-            started_at=started_at,
-            finished_at=finished_at,
-        )
         task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
         if task_snapshot is None:
             raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")

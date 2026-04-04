@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -180,9 +180,7 @@ class TaskRepository:
         if task is None:
             return None
 
-        task.chosen_worker = (
-            chosen_worker if isinstance(chosen_worker, WorkerType) else WorkerType(chosen_worker)
-        )
+        task.chosen_worker = cast(WorkerType | None, chosen_worker)
         task.route_reason = route_reason
         self.session.flush()
         return task
@@ -192,7 +190,7 @@ class TaskRepository:
         if task is None:
             return None
 
-        task.status = status if isinstance(status, TaskStatus) else TaskStatus(status)
+        task.status = cast(TaskStatus, status)
         self.session.flush()
         return task
 
@@ -219,13 +217,11 @@ class WorkerRunRepository:
     ) -> WorkerRun:
         worker_run = WorkerRun(
             task_id=task_id,
-            worker_type=(
-                worker_type if isinstance(worker_type, WorkerType) else WorkerType(worker_type)
-            ),
+            worker_type=worker_type,
             workspace_id=workspace_id,
             started_at=started_at,
             finished_at=finished_at,
-            status=(status if isinstance(status, WorkerRunStatus) else WorkerRunStatus(status)),
+            status=status,
             summary=summary,
             commands_run=commands_run,
             files_changed_count=files_changed_count,
@@ -261,9 +257,7 @@ class WorkerRunRepository:
         if worker_run is None:
             return None
 
-        worker_run.status = (
-            status if isinstance(status, WorkerRunStatus) else WorkerRunStatus(status)
-        )
+        worker_run.status = cast(WorkerRunStatus, status)
         worker_run.finished_at = finished_at
         if summary is not None:
             worker_run.summary = summary
@@ -294,11 +288,7 @@ class ArtifactRepository:
     ) -> Artifact:
         artifact = Artifact(
             run_id=run_id,
-            artifact_type=(
-                artifact_type
-                if isinstance(artifact_type, ArtifactType)
-                else ArtifactType(artifact_type)
-            ),
+            artifact_type=artifact_type,
             name=name,
             uri=uri,
             artifact_metadata=artifact_metadata,
