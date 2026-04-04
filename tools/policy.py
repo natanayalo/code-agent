@@ -245,12 +245,22 @@ def _command_uses_unsupported_shell_features(command: str) -> bool:
         or "`" in command
         or "<(" in command
         or ">(" in command
-        or "(" in command
-        or ")" in command
+        or _command_uses_grouping_parens(command)
         or _command_word_uses_unsupported_expansion(command)
         or "\n" in command
         or "\r" in command
     )
+
+
+def _command_uses_grouping_parens(command: str) -> bool:
+    """Return whether the command uses unquoted grouping parens."""
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars="|&;<>()")
+        lexer.whitespace_split = True
+        lexemes = tuple(lexer)
+    except ValueError:
+        return False
+    return "(" in lexemes or ")" in lexemes
 
 
 def _command_word_uses_unsupported_expansion(command: str) -> bool:

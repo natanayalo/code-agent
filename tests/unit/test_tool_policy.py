@@ -355,6 +355,20 @@ def test_resolve_bash_command_permission_fails_closed_for_grouping_subshells() -
     assert decision.allowed is False
 
 
+def test_resolve_bash_command_permission_does_not_treat_quoted_parentheses_as_grouping() -> None:
+    """Quoted arguments with parentheses should not trigger unsupported-shell detection."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        'git commit -m "fix (bug)"',
+        tool,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
+    assert decision.allowed is True
+
+
 def test_resolve_bash_command_permission_fails_closed_for_process_substitution() -> None:
     """Process substitution should share the unsupported-shell fail-closed path."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
