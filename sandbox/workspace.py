@@ -9,7 +9,7 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -26,9 +26,18 @@ class CommandRunner(Protocol):
 
 
 class SandboxModel(BaseModel):
-    """Base model for sandbox boundary objects."""
+    """Base model for sandbox-related data structures."""
 
     model_config = ConfigDict(extra="forbid")
+
+
+class SandboxArtifact(SandboxModel):
+    """A persisted artifact produced by a sandbox command run."""
+
+    name: str
+    uri: str
+    artifact_type: str | None = None
+    artifact_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkspaceCleanupPolicy(SandboxModel):

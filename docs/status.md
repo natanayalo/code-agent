@@ -38,13 +38,13 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-049 Wire permission-required outcomes into orchestrator pause/resume. PR: [#37](https://github.com/natanayalo/code-agent/pull/37)
 - T-042 Orchestrator Timeout Diagnostics: extract partial execution results and workspace artifacts after worker cancellation. (Local verification complete)
 - T-055 Add the constrained verifier stage. PR: [#38](https://github.com/natanayalo/code-agent/pull/38)
+- T-054 Harden sandbox execution boundary and auditability. (Verified with SecretRedactor, PathPolicy, and shared audit integration)
 
 ## In Progress
 
 - None
 
 ## Next
-- T-054 Harden sandbox execution boundary and auditability.
 - Milestone: skeptical memory, compact session state, and stable session scaffold (T-060 to T-065).
 - Milestone: structured run observability and second worker routing (T-043, T-070+) after the vertical slice, verifier, and memory loop are stable.
 - Milestone: Telegram ingress (T-050 to T-053) after the core execution path is stable.

@@ -7,17 +7,22 @@ import os
 import shlex
 import subprocess
 import threading
-import typing
-from pathlib import Path
 from time import perf_counter
 from typing import Protocol
-from uuid import uuid4
 
 from pydantic import Field
 
+from sandbox.audit import capture_audit_artifacts
 from sandbox.container import build_container_name
+from sandbox.policy import PathPolicy
+from sandbox.redact import SecretRedactor
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
-from sandbox.workspace import SandboxModel, WorkspaceHandle, _mask_url_credentials
+from sandbox.workspace import (
+    SandboxArtifact,
+    SandboxModel,
+    WorkspaceHandle,
+    _mask_url_credentials,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +30,13 @@ logger = logging.getLogger(__name__)
 class DockerCommandRunner(Protocol):
     """Protocol for running docker commands on the host."""
 
-    def __call__(self, command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]: ...
+    def __call__(
+        self,
+        command: list[str],
+        *,
+        timeout: int,
+        redactor: SecretRedactor | None = None,
+    ) -> subprocess.CompletedProcess[str]: ...
 
 
 class DockerSandboxCommand(SandboxModel):
@@ -40,6 +51,8 @@ class DockerSandboxCommand(SandboxModel):
     network_enabled: bool = False
     memory_limit: str | None = "1g"
     cpu_limit: float | None = 1.0
+    secrets: dict[str, str] = Field(default_factory=dict)
+    path_policy: PathPolicy | None = None
 
 
 class DockerSandboxResult(SandboxModel):
@@ -54,15 +67,6 @@ class DockerSandboxResult(SandboxModel):
     duration_seconds: float = Field(ge=0)
     files_changed: list[str] = Field(default_factory=list)
     artifacts: list[SandboxArtifact] = Field(default_factory=list)
-
-
-class SandboxArtifact(SandboxModel):
-    """A persisted artifact produced by a sandbox command run."""
-
-    name: str
-    uri: str
-    artifact_type: str | None = None
-    artifact_metadata: dict[str, typing.Any] = Field(default_factory=dict)
 
 
 class DockerSandboxRunnerError(RuntimeError):
@@ -119,7 +123,12 @@ def _build_docker_run_command(
     image: str,
     docker_binary: str = "docker",
 ) -> list[str]:
-    """Build a deterministic docker run command for the sandbox request."""
+    if request.path_policy:
+        if not request.path_policy.check_path(request.working_dir):
+            raise DockerSandboxRunnerError(
+                f"Working directory is denied by path policy: {request.working_dir}"
+            )
+
     container_name = _build_container_name(request.workspace)
     command = [
         docker_binary,
@@ -176,6 +185,7 @@ def _run_docker_command(
     command: list[str],
     *,
     timeout: int,
+    redactor: SecretRedactor | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run docker and safely capture stdout/stderr up to MAX_OUTPUT_SIZE_BYTES.
 
@@ -298,222 +308,16 @@ def _run_docker_command(
     stdout_str = _decode_bounded(stdout_buf, MAX_OUTPUT_SIZE_BYTES)
     stderr_str = _decode_bounded(stderr_buf, MAX_OUTPUT_SIZE_BYTES)
 
+    if redactor:
+        stdout_str = redactor.redact(stdout_str)
+        stderr_str = redactor.redact(stderr_str)
+
     return subprocess.CompletedProcess(
         args=command,
         returncode=proc.returncode,
         stdout=stdout_str,
         stderr=stderr_str,
     )
-
-
-def _run_git_command(
-    command: list[str],
-    *,
-    cwd: Path,
-    timeout: int = 30,
-) -> subprocess.CompletedProcess[bytes]:
-    """Run a git inspection command against the workspace repo."""
-    env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    return subprocess.run(
-        command,
-        cwd=cwd,
-        env=env,
-        check=False,
-        capture_output=True,
-        timeout=timeout,
-    )
-
-
-def _artifact_run_directory(workspace: WorkspaceHandle) -> Path:
-    """Create a unique artifact directory for one sandbox command result."""
-    artifact_dir = workspace.workspace_path / _ARTIFACT_ROOT_DIR
-    artifact_dir = artifact_dir / f"{_ARTIFACT_RUN_DIR_PREFIX}{uuid4().hex[:8]}"
-    artifact_dir.mkdir(parents=True, exist_ok=False)
-    return artifact_dir
-
-
-def _write_text_artifact(
-    workspace: WorkspaceHandle,
-    artifact_dir: Path,
-    *,
-    filename: str,
-    content: str,
-    artifact_type: str,
-    artifact_metadata: dict[str, typing.Any] | None = None,
-) -> SandboxArtifact:
-    """Persist a text artifact under the workspace artifact directory."""
-    artifact_path = artifact_dir / filename
-    artifact_path.write_text(content, encoding="utf-8")
-    return SandboxArtifact(
-        name=filename,
-        uri=str(artifact_path.relative_to(workspace.workspace_path)),
-        artifact_type=artifact_type,
-        artifact_metadata=artifact_metadata or {},
-    )
-
-
-def _parse_git_status_entries(status_output: str) -> list[tuple[str, str]]:
-    """Parse `git status --porcelain=v1 -z` output into `(status, path)` tuples."""
-    entries: list[tuple[str, str]] = []
-    tokens = iter(status_output.split("\0"))
-    for token in tokens:
-        if not token:
-            continue
-
-        status = token[:2]
-        path = token[3:]
-
-        if "R" in status or "C" in status:
-            new_path = next(tokens, "")
-            if new_path:
-                path = new_path
-
-        entries.append((status, path))
-
-    return entries
-
-
-def _format_changed_files(files_changed: list[str]) -> str:
-    """Render the changed-file snapshot as a readable text artifact."""
-    if not files_changed:
-        return "No changed files detected.\n"
-    return "".join(f"{path}\n" for path in files_changed)
-
-
-def _build_diff_summary(
-    repo_path: Path,
-    *,
-    untracked_files: list[str],
-) -> str | None:
-    """Build an optional diff summary artifact for tracked and untracked changes."""
-    sections: list[str] = []
-    head_check = _run_git_command(["git", "rev-parse", "--verify", "HEAD"], cwd=repo_path)
-    if head_check.returncode == 0:
-        tracked_diff = _run_git_command(
-            ["git", "diff", "--stat", "--summary", "HEAD", "--"],
-            cwd=repo_path,
-        )
-        if tracked_diff.returncode == 0:
-            tracked_summary = tracked_diff.stdout.decode("utf-8", errors="replace").strip()
-            if tracked_summary:
-                sections.append(tracked_summary)
-        else:
-            logger.warning(
-                "Failed to collect sandbox diff summary",
-                extra={
-                    "repo_path": str(repo_path),
-                    "stderr": tracked_diff.stderr.decode("utf-8", errors="replace").strip(),
-                },
-            )
-
-    if untracked_files:
-        sections.append(
-            "Untracked files:\n" + "".join(f"- {path}\n" for path in untracked_files).rstrip()
-        )
-
-    summary = "\n\n".join(section for section in sections if section).strip()
-    return summary or None
-
-
-def _capture_artifacts(
-    request: DockerSandboxCommand,
-    *,
-    stdout: str,
-    stderr: str,
-    exit_code: int,
-) -> tuple[list[str], list[SandboxArtifact]]:
-    """Persist command artifacts and snapshot workspace changes after a sandbox run."""
-    artifact_dir = _artifact_run_directory(request.workspace)
-    artifacts = [
-        _write_text_artifact(
-            request.workspace,
-            artifact_dir,
-            filename="stdout.log",
-            content=stdout,
-            artifact_type="log",
-            artifact_metadata={"stream": "stdout", "exit_code": exit_code},
-        ),
-        _write_text_artifact(
-            request.workspace,
-            artifact_dir,
-            filename="stderr.log",
-            content=stderr,
-            artifact_type="log",
-            artifact_metadata={"stream": "stderr", "exit_code": exit_code},
-        ),
-    ]
-
-    files_changed: list[str] = []
-    try:
-        status_result = _run_git_command(
-            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
-            cwd=request.workspace.repo_path,
-        )
-        if status_result.returncode != 0:
-            raise DockerSandboxRunnerError(
-                status_result.stderr.decode("utf-8", errors="replace").strip()
-                or "git status failed without output"
-            )
-
-        status_entries = _parse_git_status_entries(
-            status_result.stdout.decode("utf-8", errors="replace")
-        )
-        files_changed = list(dict.fromkeys(path for _status, path in status_entries))
-        untracked_files = [path for status, path in status_entries if status == "??"]
-        artifacts.append(
-            _write_text_artifact(
-                request.workspace,
-                artifact_dir,
-                filename="changed-files.txt",
-                content=_format_changed_files(files_changed),
-                artifact_type="result_summary",
-                artifact_metadata={
-                    "kind": "changed_files",
-                    "files_changed_count": len(files_changed),
-                },
-            )
-        )
-
-        diff_summary = _build_diff_summary(
-            request.workspace.repo_path,
-            untracked_files=untracked_files,
-        )
-        if diff_summary:
-            artifacts.append(
-                _write_text_artifact(
-                    request.workspace,
-                    artifact_dir,
-                    filename="diff-summary.txt",
-                    content=diff_summary + "\n",
-                    artifact_type="diff",
-                    artifact_metadata={
-                        "kind": "diff_summary",
-                        "files_changed_count": len(files_changed),
-                    },
-                )
-            )
-    except (DockerSandboxRunnerError, OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning(
-            "Failed to inspect sandbox workspace changes",
-            extra={
-                "workspace_id": request.workspace.workspace_id,
-                "task_id": request.workspace.task_id,
-                "error": str(exc),
-            },
-        )
-        artifacts.append(
-            _write_text_artifact(
-                request.workspace,
-                artifact_dir,
-                filename="changed-files.txt",
-                content=f"Failed to inspect workspace changes: {exc}\n",
-                artifact_type="result_summary",
-                artifact_metadata={"kind": "changed_files", "inspection_error": str(exc)},
-            )
-        )
-
-    return files_changed, artifacts
 
 
 class DockerSandboxRunner:
@@ -539,13 +343,20 @@ class DockerSandboxRunner:
             docker_binary=self.docker_binary,
         )
 
+        redactor = SecretRedactor(list(request.secrets.values())) if request.secrets else None
+
         logger.info(
             "Running docker sandbox command",
             extra={
                 "workspace_id": request.workspace.workspace_id,
                 "task_id": request.workspace.task_id,
                 "image": image,
-                "command": [_mask_url_credentials(arg) for arg in request.command],
+                "command": [
+                    redactor.redact(_mask_url_credentials(arg))
+                    if redactor
+                    else _mask_url_credentials(arg)
+                    for arg in request.command
+                ],
             },
         )
 
@@ -553,13 +364,19 @@ class DockerSandboxRunner:
         completed = self._command_runner(
             docker_command,
             timeout=request.timeout_seconds,
+            redactor=redactor,
         )
         duration_seconds = perf_counter() - started_at
-        files_changed, artifacts = _capture_artifacts(
-            request,
+
+        redacted_stdout = redactor.redact(completed.stdout) if redactor else completed.stdout
+        redacted_stderr = redactor.redact(completed.stderr) if redactor else completed.stderr
+
+        files_changed, artifacts = capture_audit_artifacts(
+            request.workspace,
             stdout=completed.stdout,
             stderr=completed.stderr,
             exit_code=completed.returncode,
+            redactor=redactor,
         )
 
         result = DockerSandboxResult(
@@ -567,8 +384,8 @@ class DockerSandboxRunner:
             command=request.command,
             docker_command=docker_command,
             exit_code=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
+            stdout=redacted_stdout,
+            stderr=redacted_stderr,
             duration_seconds=duration_seconds,
             files_changed=files_changed,
             artifacts=artifacts,
