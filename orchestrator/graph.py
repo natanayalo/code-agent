@@ -588,7 +588,13 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
         return {"current_step": "await_permission_escalation"}
 
     task_text = state.normalized_task_text or state.task.task_text
-    requested_permission = state.result.requested_permission or "unknown"
+    requested_permission = state.result.requested_permission
+    if not requested_permission:
+        logger.warning(
+            "Worker requested higher permission but 'requested_permission' is missing.",
+            extra={"session_id": state.session.session_id if state.session else None},
+        )
+        requested_permission = "unknown"
     reason = state.result.summary or f"Worker requested higher permission: {requested_permission}"
 
     approved = _coerce_approval_decision(
