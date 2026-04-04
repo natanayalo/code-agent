@@ -9,8 +9,7 @@ from urllib.parse import quote
 
 from orchestrator.execution import TaskExecutionService
 from repositories import create_engine_from_url, create_session_factory
-from workers import CodexCliWorker
-from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter
+from workers import CodexCliWorker, CodexExecCliRuntimeAdapter
 
 ENABLE_TASK_SERVICE_ENV_VAR: Final[str] = "CODE_AGENT_ENABLE_TASK_SERVICE"
 DATABASE_URL_ENV_VAR: Final[str] = "DATABASE_URL"
@@ -67,8 +66,9 @@ def build_task_service_from_env(
     if database_url is None:
         raise RuntimeError(
             "Task service bootstrap was enabled, but no database configuration was provided. "
-            "Set DATABASE_URL or the DATABASE_HOST/DATABASE_PORT/DATABASE_NAME/"
-            "DATABASE_USER/DATABASE_PASSWORD variables."
+            f"Set {DATABASE_URL_ENV_VAR} or the {DATABASE_HOST_ENV_VAR}/"
+            f"{DATABASE_PORT_ENV_VAR}/{DATABASE_NAME_ENV_VAR}/"
+            f"{DATABASE_USER_ENV_VAR}/{DATABASE_PASSWORD_ENV_VAR} variables."
         )
 
     if database_url.startswith("sqlite"):
