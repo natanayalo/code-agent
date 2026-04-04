@@ -49,17 +49,17 @@ def test_resolve_bash_command_permission_classifies_read_only_commands() -> None
     assert decision.allowed is True
 
 
-def test_resolve_bash_command_permission_does_not_treat_find_exec_as_read_only() -> None:
-    """`find -exec` should fail closed instead of bypassing the permission ladder."""
+def test_resolve_bash_command_permission_classifies_find_exec_as_dangerous_shell() -> None:
+    """`find -exec` should require dangerous-shell permission instead of bypassing the ladder."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
 
     decision = resolve_bash_command_permission(
         "find . -type f -exec touch marker {} +",
         tool,
-        granted_permission=ToolPermissionLevel.READ_ONLY,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
     )
 
-    assert decision.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
+    assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
     assert decision.allowed is False
 
 
@@ -341,6 +341,21 @@ def test_resolve_bash_command_permission_fails_closed_for_subshell_syntax() -> N
     assert decision.allowed is False
 
 
+def test_single_quoted_literals_do_not_trigger_substitution_detection() -> None:
+    """Single-quoted literals should not be escalated just because they resemble shell syntax."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    for command in ("echo 'Value is $(10)'", "echo '`literal`'"):
+        decision = resolve_bash_command_permission(
+            command,
+            tool,
+            granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+        )
+
+        assert decision.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
+        assert decision.allowed is True
+
+
 def test_resolve_bash_command_permission_fails_closed_for_grouping_subshells() -> None:
     """Grouping parens should share the unsupported-shell fail-closed path."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
@@ -404,6 +419,20 @@ def test_fails_closed_for_variable_expansion_in_command_word() -> None:
 
         assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
         assert decision.allowed is False
+
+
+def test_resolve_bash_command_permission_classifies_xargs_as_dangerous_shell() -> None:
+    """`xargs` should fail closed because it delegates execution to another command."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "xargs rm -rf < files.txt",
+        tool,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+    assert decision.allowed is False
 
 
 def test_resolve_bash_command_permission_fails_closed_for_globbed_command_word() -> None:

@@ -99,6 +99,7 @@ _TOKEN_PREFIX_PERMISSION_RULES: tuple[
 
 _SHELL_OPERATOR_TOKENS = frozenset({"|", "||", "&", "&&", ";", ">", ">>", "<", "<<"})
 _ENV_ASSIGNMENT_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+_FIND_SUBCOMMAND_FLAGS = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 _ENV_WRAPPER_OPTIONS_WITH_ARGUMENT = frozenset(
     {
         "-c",
@@ -241,10 +242,7 @@ def _classify_token_prefix_permission(
 def _command_uses_unsupported_shell_features(command: str) -> bool:
     """Return whether the command relies on shell features we do not safely classify."""
     return (
-        "$(" in command
-        or "`" in command
-        or "<(" in command
-        or ">(" in command
+        _command_uses_unquoted_shell_substitution(command)
         or _command_uses_grouping_parens(command)
         or _command_word_uses_unsupported_expansion(command)
         or "\n" in command
@@ -261,6 +259,38 @@ def _command_uses_grouping_parens(command: str) -> bool:
     except ValueError:
         return False
     return "(" in lexemes or ")" in lexemes
+
+
+def _command_uses_unquoted_shell_substitution(command: str) -> bool:
+    """Return whether the command uses substitution syntax outside single quotes."""
+    in_single_quotes = False
+    in_double_quotes = False
+    escaped = False
+
+    for index, char in enumerate(command):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and not in_single_quotes:
+            escaped = True
+            continue
+        if char == "'" and not in_double_quotes:
+            in_single_quotes = not in_single_quotes
+            continue
+        if char == '"' and not in_single_quotes:
+            in_double_quotes = not in_double_quotes
+            continue
+        if in_single_quotes:
+            continue
+        if char == "`":
+            return True
+        if (
+            command.startswith("$(", index)
+            or command.startswith("<(", index)
+            or command.startswith(">(", index)
+        ):
+            return True
+    return False
 
 
 def _command_word_uses_unsupported_expansion(command: str) -> bool:
@@ -471,6 +501,26 @@ def _is_safe_read_only_command(normalized_tokens: tuple[str, ...]) -> bool:
     return False
 
 
+def _classify_nested_command_runner_permission(
+    normalized_tokens: tuple[str, ...],
+) -> tuple[ToolPermissionLevel, str] | None:
+    """Fail closed on commands that delegate execution to nested subcommands."""
+    executable = normalized_tokens[0]
+    if executable == "xargs":
+        return (
+            ToolPermissionLevel.DANGEROUS_SHELL,
+            "Command delegates execution to a nested subcommand that cannot be safely classified.",
+        )
+    if executable == "find" and any(
+        token in _FIND_SUBCOMMAND_FLAGS for token in normalized_tokens[1:]
+    ):
+        return (
+            ToolPermissionLevel.DANGEROUS_SHELL,
+            "Command delegates execution to a nested subcommand that cannot be safely classified.",
+        )
+    return None
+
+
 def _classify_segment_permission(
     segment_tokens: tuple[str, ...],
     *,
@@ -483,6 +533,13 @@ def _classify_segment_permission(
             wrapper_floor or default_permission,
             _default_permission_reason(default_permission),
         )
+
+    nested_command_runner_decision = _classify_nested_command_runner_permission(normalized_tokens)
+    if nested_command_runner_decision is not None:
+        if wrapper_floor is None:
+            return nested_command_runner_decision
+        permission_level, reason = nested_command_runner_decision
+        return _max_permission_level(permission_level, wrapper_floor), reason
 
     token_prefix_decision = _classify_token_prefix_permission(normalized_tokens)
     if token_prefix_decision is not None:
