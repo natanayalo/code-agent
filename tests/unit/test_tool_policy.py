@@ -384,10 +384,18 @@ def test_resolve_bash_command_permission_fails_closed_for_process_substitution()
 
 
 def test_fails_closed_for_variable_expansion_in_command_word() -> None:
-    """Variable-expanded command words should fail closed instead of bypassing prefix checks."""
+    """Expanded command words should fail closed even after assignments and wrappers."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
 
-    for command in ("${CMD} -rf build", "CMD=rm; $CMD -rf build"):
+    for command in (
+        "${CMD} -rf build",
+        "CMD=rm; $CMD -rf build",
+        "VAR=1 $CMD -rf build",
+        "VAR=1 env $CMD -rf build",
+        "VAR=1 command $CMD -rf build",
+        "VAR=1 nice $CMD -rf build",
+        "VAR=1 nohup $CMD -rf build",
+    ):
         decision = resolve_bash_command_permission(
             command,
             tool,

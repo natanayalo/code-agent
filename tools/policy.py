@@ -265,19 +265,18 @@ def _command_uses_grouping_parens(command: str) -> bool:
 
 def _command_word_uses_unsupported_expansion(command: str) -> bool:
     """Return whether any segment's command word uses expansion we do not safely classify."""
-    lexemes = _command_lexemes(command)
-    if lexemes is None:
+    segments = _command_segments(command)
+    if segments is None:
         return False
 
-    expect_command_word = True
-    for lexeme in lexemes:
-        if lexeme in _SHELL_OPERATOR_TOKENS:
-            expect_command_word = True
+    for segment_tokens in segments:
+        remaining, _ = _unwrap_command_tokens(segment_tokens)
+        if not remaining:
             continue
-        if not expect_command_word:
-            continue
-        expect_command_word = False
-        if "$" in lexeme or any(char in lexeme for char in _UNSUPPORTED_COMMAND_WORD_GLOB_CHARS):
+        command_word = remaining[0]
+        if "$" in command_word or any(
+            char in command_word for char in _UNSUPPORTED_COMMAND_WORD_GLOB_CHARS
+        ):
             return True
     return False
 
