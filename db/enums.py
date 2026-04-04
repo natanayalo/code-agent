@@ -49,6 +49,7 @@ class ArtifactType(StrEnum):
     DIFF = "diff"
     TEST_REPORT = "test_report"
     RESULT_SUMMARY = "result_summary"
+    WORKSPACE = "workspace"
 
 
 def build_sql_enum(enum_class: type[StrEnum], *, name: str) -> SQLAlchemyEnum:

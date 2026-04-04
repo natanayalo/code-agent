@@ -50,6 +50,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "diff",
             "test_report",
             "result_summary",
+            "workspace",
         },
     },
 }
