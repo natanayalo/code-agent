@@ -216,3 +216,21 @@ def test_await_permission_escalation_rejected():
         res["result"]["summary"]
         == "Permission escalation to 'network_write' was rejected. Run halted."
     )
+    assert res["result"]["next_action_hint"] == "await_manual_follow_up"
+
+
+def test_await_permission_escalation_missing_permission():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "failure",
+                "next_action_hint": "request_higher_permission",
+                "summary": "needs high permission",
+            },
+        }
+    )
+    res = await_permission_escalation(state)
+    assert res["current_step"] == "await_permission_escalation"
+    assert res["result"]["status"] == "error"
+    assert res["result"]["next_action_hint"] == "inspect_worker_configuration"

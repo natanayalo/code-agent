@@ -590,11 +590,24 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
     task_text = state.normalized_task_text or state.task.task_text
     requested_permission = state.result.requested_permission
     if not requested_permission:
-        logger.warning(
+        logger.error(
             "Worker requested higher permission but 'requested_permission' is missing.",
             extra={"session_id": state.session.session_id if state.session else None},
         )
-        requested_permission = "unknown"
+        failed_result = state.result.model_copy(
+            update={
+                "status": "error",
+                "summary": "Worker requested higher permission but did not specify which one.",
+                "next_action_hint": "inspect_worker_configuration",
+            }
+        )
+        return {
+            "current_step": "await_permission_escalation",
+            "result": failed_result.model_dump(),
+            "progress_updates": _progress_update(
+                state, "permission request failed: missing permission name"
+            ),
+        }
     reason = state.result.summary or f"Worker requested higher permission: {requested_permission}"
 
     approved = _coerce_approval_decision(
@@ -630,6 +643,7 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
                     f"Permission escalation to '{requested_permission}' "
                     "was rejected. Run halted."
                 ),
+                "next_action_hint": "await_manual_follow_up",
             }
         )
         return {
