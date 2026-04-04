@@ -242,6 +242,21 @@ def test_resolve_bash_command_permission_classifies_remote_tools_as_networked_wr
         assert decision.allowed is False
 
 
+def test_resolve_bash_command_permission_classifies_networked_git_commands() -> None:
+    """Git commands that contact remotes should require networked permission."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    for command in ("git fetch origin", "git ls-remote origin"):
+        decision = resolve_bash_command_permission(
+            command,
+            tool,
+            granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+        )
+
+        assert decision.required_permission == ToolPermissionLevel.NETWORKED_WRITE
+        assert decision.allowed is False
+
+
 def test_resolve_bash_command_permission_does_not_treat_release_text_as_deploy() -> None:
     """Release-like argument text should not trip deploy classification."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
@@ -330,14 +345,15 @@ def test_fails_closed_for_variable_expansion_in_command_word() -> None:
     """Variable-expanded command words should fail closed instead of bypassing prefix checks."""
     tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
 
-    decision = resolve_bash_command_permission(
-        "${CMD} -rf build",
-        tool,
-        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
-    )
+    for command in ("${CMD} -rf build", "CMD=rm; $CMD -rf build"):
+        decision = resolve_bash_command_permission(
+            command,
+            tool,
+            granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+        )
 
-    assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
-    assert decision.allowed is False
+        assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+        assert decision.allowed is False
 
 
 def test_resolve_bash_command_permission_fails_closed_for_globbed_command_word() -> None:
@@ -346,6 +362,20 @@ def test_resolve_bash_command_permission_fails_closed_for_globbed_command_word()
 
     decision = resolve_bash_command_permission(
         "r* -rf build",
+        tool,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+    assert decision.allowed is False
+
+
+def test_resolve_bash_command_permission_fails_closed_for_brace_expansion_in_command_word() -> None:
+    """Brace-expanded command words should fail closed because they can hide executables."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "{r,m} -rf build",
         tool,
         granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
     )
@@ -394,6 +424,43 @@ def test_resolve_bash_command_permission_classifies_simple_grep_searches_as_read
 
     assert decision.required_permission == ToolPermissionLevel.READ_ONLY
     assert decision.allowed is True
+
+
+def test_resolve_bash_command_permission_classifies_safe_git_reads_as_read_only() -> None:
+    """Common read-only git inspection commands should stay available in read-only mode."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    for command in (
+        "git log --oneline",
+        "git diff -- README.md",
+        "git show HEAD~1",
+        "git ls-files",
+        "git rev-parse HEAD",
+        "git blame README.md",
+        "git grep TODO -- README.md",
+    ):
+        decision = resolve_bash_command_permission(
+            command,
+            tool,
+            granted_permission=ToolPermissionLevel.READ_ONLY,
+        )
+
+        assert decision.required_permission == ToolPermissionLevel.READ_ONLY
+        assert decision.allowed is True
+
+
+def test_git_grep_without_pattern_stays_out_of_read_only() -> None:
+    """Git grep should remain conservative when it lacks a real search pattern."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+
+    decision = resolve_bash_command_permission(
+        "git grep -",
+        tool,
+        granted_permission=ToolPermissionLevel.READ_ONLY,
+    )
+
+    assert decision.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
+    assert decision.allowed is False
 
 
 def test_resolve_bash_command_permission_does_not_treat_pattern_only_grep_as_read_only() -> None:

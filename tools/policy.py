@@ -39,7 +39,7 @@ _TOKEN_PREFIX_PERMISSION_RULES: tuple[
     ),
     (
         ToolPermissionLevel.NETWORKED_WRITE,
-        "Command writes state while depending on network access.",
+        "Command requires network access.",
         (
             ("curl",),
             ("wget",),
@@ -58,6 +58,8 @@ _TOKEN_PREFIX_PERMISSION_RULES: tuple[
             ("brew", "install"),
             ("git", "clone"),
             ("git", "pull"),
+            ("git", "fetch"),
+            ("git", "ls-remote"),
         ),
     ),
     (
@@ -96,11 +98,6 @@ _TOKEN_PREFIX_PERMISSION_RULES: tuple[
 )
 
 _SHELL_OPERATOR_TOKENS = frozenset({"|", "||", "&", "&&", ";", ">", ">>", "<", "<<"})
-_DANGEROUS_TOKEN_PREFIXES = (
-    ("drop", "database"),
-    ("drop", "table"),
-    ("truncate", "table"),
-)
 _ENV_ASSIGNMENT_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 _ENV_WRAPPER_OPTIONS_WITH_ARGUMENT = frozenset(
     {
@@ -139,7 +136,10 @@ _SUDO_WRAPPER_OPTIONS_WITH_ARGUMENT = frozenset(
 _SAFE_READ_ONLY_COMMANDS = frozenset({"cat", "head", "ls", "pwd", "tail", "wc"})
 _SAFE_GREP_EXECUTABLES = frozenset({"egrep", "fgrep", "grep"})
 _SAFE_RG_BLOCKLIST = frozenset({"--pre", "--pre-glob"})
-_UNSUPPORTED_COMMAND_WORD_GLOB_CHARS = frozenset({"*", "?", "["})
+_UNSUPPORTED_COMMAND_WORD_GLOB_CHARS = frozenset({"*", "?", "[", "{"})
+_SAFE_GIT_READ_ONLY_SUBCOMMANDS = frozenset(
+    {"status", "log", "diff", "show", "ls-files", "rev-parse", "blame"}
+)
 
 
 class ToolPermissionDecision(ToolModel):
@@ -264,7 +264,7 @@ def _command_word_uses_unsupported_expansion(command: str) -> bool:
         if not expect_command_word:
             continue
         expect_command_word = False
-        if "${" in lexeme or any(char in lexeme for char in _UNSUPPORTED_COMMAND_WORD_GLOB_CHARS):
+        if "$" in lexeme or any(char in lexeme for char in _UNSUPPORTED_COMMAND_WORD_GLOB_CHARS):
             return True
     return False
 
@@ -405,11 +405,6 @@ def _normalized_tokens_for_matching(
     )
 
 
-def _contains_dangerous_token_prefix(tokens: tuple[str, ...]) -> bool:
-    """Return whether the segment starts with a destructive SQL-style phrase."""
-    return any(_matches_token_prefix(tokens, prefix) for prefix in _DANGEROUS_TOKEN_PREFIXES)
-
-
 def _is_safe_rg_command(tokens: tuple[str, ...]) -> bool:
     """Allow plain ripgrep searches while rejecting flags that spawn helpers."""
     return not any(
@@ -417,6 +412,19 @@ def _is_safe_rg_command(tokens: tuple[str, ...]) -> bool:
         or any(token.startswith(f"{flag}=") for flag in _SAFE_RG_BLOCKLIST)
         for token in tokens[1:]
     )
+
+
+def _is_safe_git_read_only_command(tokens: tuple[str, ...]) -> bool:
+    """Allow a narrow set of read-only git subcommands."""
+    if len(tokens) < 2:
+        return False
+
+    subcommand = tokens[1]
+    if subcommand in _SAFE_GIT_READ_ONLY_SUBCOMMANDS:
+        return True
+    if subcommand != "grep":
+        return False
+    return len(tokens) > 2 and all(token != "-" for token in tokens[2:])
 
 
 def _is_safe_grep_command(tokens: tuple[str, ...]) -> bool:
@@ -437,7 +445,7 @@ def _is_safe_read_only_command(normalized_tokens: tuple[str, ...]) -> bool:
     if executable in _SAFE_GREP_EXECUTABLES:
         return _is_safe_grep_command(normalized_tokens)
     if executable == "git":
-        return len(normalized_tokens) > 1 and normalized_tokens[1] == "status"
+        return _is_safe_git_read_only_command(normalized_tokens)
     if executable == "rg":
         return _is_safe_rg_command(normalized_tokens)
     return False
@@ -462,11 +470,6 @@ def _classify_segment_permission(
             return token_prefix_decision
         permission_level, reason = token_prefix_decision
         return _max_permission_level(permission_level, wrapper_floor), reason
-    if _contains_dangerous_token_prefix(normalized_tokens):
-        permission_level = ToolPermissionLevel.DANGEROUS_SHELL
-        if wrapper_floor is not None:
-            permission_level = _max_permission_level(permission_level, wrapper_floor)
-        return permission_level, "Command performs a destructive shell or git operation."
     if _is_safe_read_only_command(normalized_tokens):
         if wrapper_floor is None:
             return ToolPermissionLevel.READ_ONLY, "Command matches the narrow read-only allowlist."
