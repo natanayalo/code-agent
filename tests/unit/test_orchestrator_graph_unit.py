@@ -18,6 +18,7 @@ from orchestrator.graph import (
     await_permission_escalation,
     choose_worker,
     summarize_result,
+    verify_result,
 )
 from orchestrator.state import OrchestratorState
 from workers import WorkerRequest, WorkerResult
@@ -270,3 +271,54 @@ async def test_await_worker_with_timeout_partial_result():
     assert res.summary == "partial state flushed"
     assert res.commands_run[0].command == "echo 1"
     assert hint == "worker timed out but yielded partial state after 1s"
+
+
+def test_verify_result_passed():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "success",
+                "files_changed": ["file1.py"],
+                "test_results": [{"name": "test1", "status": "passed"}],
+            },
+        }
+    )
+    res = verify_result(state)
+    assert res["current_step"] == "verify_result"
+    assert res["verification"]["status"] == "passed"
+    assert len(res["verification"]["items"]) == 3
+
+
+def test_verify_result_failed_tests():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "success",
+                "files_changed": ["file1.py"],
+                "test_results": [{"name": "test1", "status": "failed"}],
+            },
+        }
+    )
+    res = verify_result(state)
+    assert res["verification"]["status"] == "failed"
+    assert res["verification"]["items"][1]["label"] == "test_results"
+    assert res["verification"]["items"][1]["status"] == "failed"
+
+
+def test_verify_result_warning_no_changes():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "success",
+                "files_changed": [],
+                "test_results": [{"name": "test1", "status": "passed"}],
+            },
+        }
+    )
+    res = verify_result(state)
+    assert res["verification"]["status"] == "warning"
+    assert res["verification"]["items"][2]["label"] == "file_changes"
+    assert res["verification"]["items"][2]["status"] == "warning"

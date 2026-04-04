@@ -20,6 +20,7 @@ WorkflowStep = Literal[
     "dispatch_job",
     "await_result",
     "await_permission_escalation",
+    "verify_result",
     "summarize_result",
     "persist_memory",
 ]
@@ -105,6 +106,22 @@ class PersistMemoryEntry(OrchestratorModel):
     repo_url: str | None = None
 
 
+class VerificationReportItem(OrchestratorModel):
+    """A single diagnostic result from the verification stage."""
+
+    label: str = Field(min_length=1)
+    status: Literal["passed", "failed", "warning"]
+    message: str | None = None
+
+
+class VerificationReport(OrchestratorModel):
+    """Summarized outcome of the constrained verification stage."""
+
+    status: Literal["passed", "failed", "warning"]
+    summary: str | None = None
+    items: list[VerificationReportItem] = Field(default_factory=list)
+
+
 class OrchestratorState(OrchestratorModel):
     """Top-level state handed between orchestrator workflow nodes."""
 
@@ -118,6 +135,7 @@ class OrchestratorState(OrchestratorModel):
     approval: ApprovalCheckpoint = Field(default_factory=ApprovalCheckpoint)
     dispatch: WorkerDispatch = Field(default_factory=WorkerDispatch)
     result: WorkerResult | None = None
+    verification: VerificationReport | None = None
     memory_to_persist: list[PersistMemoryEntry] = Field(default_factory=list)
     progress_updates: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)

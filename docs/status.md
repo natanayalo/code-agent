@@ -37,10 +37,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-044 / T-047 Wire real provider CLI adapter into the app path. PR: [#36](https://github.com/natanayalo/code-agent/pull/36)
 - T-049 Wire permission-required outcomes into orchestrator pause/resume. PR: [#37](https://github.com/natanayalo/code-agent/pull/37)
 - T-042 Orchestrator Timeout Diagnostics: extract partial execution results and workspace artifacts after worker cancellation. (Local verification complete)
+- T-055 Add the constrained verifier stage. PR: [#38](https://github.com/natanayalo/code-agent/pull/38)
 
 ## In Progress
 
-- T-055 Add the constrained verifier stage.
+- None
 
 ## Next
 - T-054 Harden sandbox execution boundary and auditability.

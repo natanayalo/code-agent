@@ -152,6 +152,7 @@ def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
         "approval not required",
         "worker dispatched",
         "worker result received",
+        "verification passed",
         "result summarized",
         "memory persistence queued",
     ]
@@ -245,6 +246,7 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
             "approval not required",
             "worker dispatched",
             "worker result received",
+            "verification passed",
             "result summarized",
             "memory persistence queued",
         ]
@@ -303,6 +305,7 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
         "approval not required",
         "worker dispatched",
         "worker unavailable: claude",
+        "verification failed",
         "result summarized",
         "memory persistence queued",
     ]
@@ -391,6 +394,7 @@ def test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly(
             "approval granted",
             "worker dispatched",
             "worker result received",
+            "verification passed",
             "result summarized",
             "memory persistence queued",
         ]
@@ -488,6 +492,7 @@ def test_orchestrator_graph_returns_a_structured_timeout_result() -> None:
         "approval not required",
         "worker dispatched",
         "worker timed out after 1s",
+        "verification failed",
         "result summarized",
         "memory persistence queued",
     ]
@@ -538,6 +543,7 @@ def test_orchestrator_graph_surfaces_worker_cancellation_as_a_result() -> None:
             "approval not required",
             "worker dispatched",
             "worker execution cancelled",
+            "verification failed",
             "result summarized",
             "memory persistence queued",
         ]
@@ -580,6 +586,7 @@ def test_orchestrator_graph_returns_a_structured_error_for_worker_crashes() -> N
         "approval not required",
         "worker dispatched",
         "worker crashed unexpectedly",
+        "verification failed",
         "result summarized",
         "memory persistence queued",
     ]
@@ -621,6 +628,7 @@ def test_orchestrator_graph_timeout_path_tolerates_cleanup_exceptions() -> None:
         "approval not required",
         "worker dispatched",
         "worker timed out after 1s",
+        "verification failed",
         "result summarized",
         "memory persistence queued",
     ]
