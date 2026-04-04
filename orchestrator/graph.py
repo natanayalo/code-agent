@@ -61,15 +61,18 @@ def _coerce_positive_int(value: Any) -> int | None:
     if isinstance(value, int):
         return value if value > 0 else None
     if isinstance(value, float):
-        coerced = int(value)
+        try:
+            coerced = int(value)
+        except (OverflowError, ValueError):
+            return None
         return coerced if coerced > 0 else None
     if isinstance(value, str):
         normalized = value.strip()
         if not normalized:
             return None
         try:
-            coerced = int(normalized)
-        except ValueError:
+            coerced = int(float(normalized))
+        except (OverflowError, ValueError):
             return None
         return coerced if coerced > 0 else None
     return None
@@ -150,7 +153,7 @@ async def _await_worker_with_timeout(
             },
         )
         worker_task.cancel()
-        with suppress(asyncio.CancelledError, TimeoutError):
+        with suppress(asyncio.CancelledError, asyncio.TimeoutError, TimeoutError):
             await asyncio.wait_for(worker_task, timeout=0)
         return _timed_out_worker_result(
             timeout_seconds
@@ -164,7 +167,7 @@ async def _await_worker_with_timeout(
             },
         )
         worker_task.cancel()
-        with suppress(asyncio.CancelledError, TimeoutError):
+        with suppress(asyncio.CancelledError, asyncio.TimeoutError, TimeoutError):
             await asyncio.wait_for(worker_task, timeout=0)
         return _cancelled_worker_result(), "worker execution cancelled"
     return result, "worker result received"

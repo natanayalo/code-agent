@@ -102,6 +102,19 @@ def test_resolve_orchestrator_timeout_seconds_prefers_explicit_override() -> Non
     assert _resolve_orchestrator_timeout_seconds(state) == 45
 
 
+def test_resolve_orchestrator_timeout_seconds_accepts_float_like_strings() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Run a worker",
+                "budget": {"orchestrator_timeout_seconds": "45.0"},
+            }
+        }
+    )
+
+    assert _resolve_orchestrator_timeout_seconds(state) == 45
+
+
 def test_resolve_orchestrator_timeout_seconds_falls_back_to_worker_budget() -> None:
     state = OrchestratorState.model_validate(
         {
