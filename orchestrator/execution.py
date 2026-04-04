@@ -9,6 +9,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from anyio import to_thread
 from pydantic import BaseModel, ConfigDict, Field
@@ -152,7 +153,14 @@ def _workspace_id_from_artifacts(artifacts: list[ArtifactReference]) -> str | No
     """Infer the workspace id from the retained workspace artifact path."""
     for artifact in artifacts:
         if artifact.artifact_type == ArtifactType.WORKSPACE.value or artifact.name == "workspace":
-            candidate = Path(artifact.uri).name.strip()
+            parsed_uri = urlparse(artifact.uri)
+            candidate = ""
+            if parsed_uri.scheme and parsed_uri.path:
+                candidate = Path(unquote(parsed_uri.path)).name.strip()
+            elif parsed_uri.scheme and parsed_uri.netloc:
+                candidate = parsed_uri.netloc.strip()
+            else:
+                candidate = Path(unquote(artifact.uri)).name.strip()
             if candidate:
                 return candidate
     return None
@@ -234,7 +242,14 @@ class TaskExecutionService:
             await self._run_blocking(self._mark_task_failed, task_id=persisted.task_id)
             task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
             if task_snapshot is None:
-                raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
+                logger.error(
+                    "Failed to reload task snapshot after marking a background task as failed",
+                    extra={
+                        "session_id": persisted.session_id,
+                        "task_id": persisted.task_id,
+                    },
+                )
+                return None
             self._log_task_outcome(task_snapshot)
             return None
 
@@ -484,28 +499,29 @@ class TaskExecutionService:
 
             task_repo.update_status(task_id=task_id, status=_task_status_from_result(state))
 
-            if state.result is None or state.dispatch.worker_type is None:
+            if state.dispatch.worker_type is None:
                 return
 
-            artifact_index = [
-                artifact.model_dump(mode="json") for artifact in state.result.artifacts
-            ]
+            result = state.result
+            artifacts = result.artifacts if result is not None else []
+            artifact_index = [artifact.model_dump(mode="json") for artifact in artifacts]
             worker_run = worker_run_repo.create(
                 task_id=task_id,
                 worker_type=state.dispatch.worker_type,
-                workspace_id=_workspace_id_from_artifacts(state.result.artifacts),
+                workspace_id=_workspace_id_from_artifacts(artifacts),
                 started_at=started_at,
                 finished_at=finished_at,
                 status=_worker_run_status_from_result(state),
-                summary=state.result.summary,
+                summary=result.summary if result is not None else "Worker did not return a result.",
                 commands_run=[
-                    command.model_dump(mode="json") for command in state.result.commands_run
+                    command.model_dump(mode="json")
+                    for command in (result.commands_run if result is not None else [])
                 ],
-                files_changed_count=len(state.result.files_changed),
+                files_changed_count=len(result.files_changed) if result is not None else 0,
                 artifact_index=artifact_index,
             )
 
-            for artifact in state.result.artifacts:
+            for artifact in artifacts:
                 artifact_type = _artifact_type_for_persistence(artifact)
                 if artifact_type is None:
                     continue

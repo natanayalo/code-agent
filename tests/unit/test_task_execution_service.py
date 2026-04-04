@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime
 
 import pytest
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
-from db.enums import TaskStatus
+from db.enums import TaskStatus, WorkerRunStatus
 from orchestrator import (
     ApprovalCheckpoint,
     MemoryContext,
@@ -29,7 +30,7 @@ from repositories import (
     create_session_factory,
     session_scope,
 )
-from workers import Worker, WorkerRequest
+from workers import ArtifactReference, Worker, WorkerRequest
 
 
 class _StaticWorker(Worker):
@@ -114,6 +115,34 @@ def test_task_execution_service_reuses_one_compiled_graph(
 
     assert len(build_calls) == 1
     assert len(fake_graph.calls) == 2
+
+
+def test_workspace_id_from_artifacts_supports_url_and_custom_workspace_uris() -> None:
+    """Workspace ids should still be inferred when artifact URIs are not plain local paths."""
+    assert (
+        execution_module._workspace_id_from_artifacts(
+            [
+                ArtifactReference(
+                    name="workspace",
+                    uri="https://artifacts.example.com/runs/workspace-1234?signature=abc",
+                    artifact_type="workspace",
+                )
+            ]
+        )
+        == "workspace-1234"
+    )
+    assert (
+        execution_module._workspace_id_from_artifacts(
+            [
+                ArtifactReference(
+                    name="workspace",
+                    uri="workspace://workspace-5678",
+                    artifact_type="workspace",
+                )
+            ]
+        )
+        == "workspace-5678"
+    )
 
 
 @pytest.mark.anyio
@@ -273,6 +302,144 @@ async def test_submit_task_marks_task_failed_when_outcome_persistence_crashes(
     assert task_snapshot is not None
     assert task_snapshot.status == TaskStatus.FAILED.value
     assert task_snapshot.latest_run is None
+
+
+@pytest.mark.anyio
+async def test_submit_task_logs_and_exits_when_failed_task_cannot_be_reloaded(
+    monkeypatch,
+    caplog,
+) -> None:
+    """The background task should not crash if the failed task snapshot cannot be reloaded."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Fail and skip reload",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+    persisted = execution_module._PersistedTaskContext(
+        user_id="user-1",
+        session_id="session-1",
+        channel="http",
+        external_thread_id="thread-1",
+        task_id="task-1",
+    )
+
+    async def run_blocking(func, /, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    async def fake_run_orchestrator(
+        _submission: execution_module.TaskSubmission,
+        _persisted: execution_module._PersistedTaskContext,
+    ) -> OrchestratorState:
+        raise RuntimeError("orchestrator boom")
+
+    def fake_mark_task_in_progress(*, task_id: str) -> None:
+        return None
+
+    def fake_mark_task_failed(*, task_id: str) -> None:
+        return None
+
+    def fake_get_task(task_id: str) -> None:
+        return None
+
+    def fake_log_task_outcome(task_snapshot: execution_module.TaskSnapshot) -> None:
+        raise AssertionError("should not log a missing snapshot")
+
+    monkeypatch.setattr(service, "_run_blocking", run_blocking)
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_mark_task_in_progress", fake_mark_task_in_progress)
+    monkeypatch.setattr(service, "_mark_task_failed", fake_mark_task_failed)
+    monkeypatch.setattr(service, "get_task", fake_get_task)
+    monkeypatch.setattr(service, "_log_task_outcome", fake_log_task_outcome)
+
+    with caplog.at_level(logging.ERROR):
+        await service.submit_task(submission, persisted)
+
+    assert "Failed to reload task snapshot after marking a background task as failed" in caplog.text
+
+
+def test_persist_execution_outcome_creates_error_worker_run_without_result() -> None:
+    """Missing worker results should still leave an error worker-run record for observability."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Persist an error run",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+    _, persisted = service.create_task(submission)
+
+    state = OrchestratorState(
+        current_step="persist_memory",
+        session=SessionRef(
+            session_id=persisted.session_id,
+            user_id=persisted.user_id,
+            channel=persisted.channel,
+            external_thread_id=persisted.external_thread_id,
+            active_task_id=persisted.task_id,
+            status="active",
+        ),
+        task=TaskRequest(
+            task_id=persisted.task_id,
+            task_text=submission.task_text,
+            repo_url=submission.repo_url,
+            branch=submission.branch,
+            priority=submission.priority,
+            worker_override=submission.worker_override,
+            constraints=dict(submission.constraints),
+            budget=dict(submission.budget),
+        ),
+        normalized_task_text=submission.task_text,
+        task_kind="implementation",
+        memory=MemoryContext(),
+        route=RouteDecision(
+            chosen_worker="codex",
+            route_reason="implementation_default",
+            override_applied=False,
+        ),
+        approval=ApprovalCheckpoint(),
+        dispatch=WorkerDispatch(worker_type="codex"),
+        result=None,
+    )
+
+    started_at = datetime.now()
+    finished_at = datetime.now()
+    service._persist_execution_outcome(
+        task_id=persisted.task_id,
+        state=state,
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+
+    task_snapshot = service.get_task(persisted.task_id)
+    assert task_snapshot is not None
+    assert task_snapshot.status == TaskStatus.FAILED.value
+    assert task_snapshot.chosen_worker == "codex"
+    assert task_snapshot.route_reason == "implementation_default"
+    assert task_snapshot.latest_run is not None
+    assert task_snapshot.latest_run.status == WorkerRunStatus.ERROR.value
+    assert task_snapshot.latest_run.summary == "Worker did not return a result."
+    assert task_snapshot.latest_run.artifact_index == []
+    assert task_snapshot.latest_run.files_changed_count == 0
 
 
 def test_create_task_recovers_from_duplicate_user_and_session_race(monkeypatch) -> None:
