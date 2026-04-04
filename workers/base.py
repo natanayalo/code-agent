@@ -56,6 +56,7 @@ class WorkerResult(WorkerModel):
 
     status: Literal["success", "failure", "error"]
     summary: str | None = None
+    requested_permission: str | None = None
     commands_run: list[WorkerCommand] = Field(default_factory=list)
     files_changed: list[str] = Field(default_factory=list)
     test_results: list[TestResult] = Field(default_factory=list)

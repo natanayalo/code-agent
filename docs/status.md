@@ -34,18 +34,13 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-047 Shared CLI-driven multi-turn worker runtime slice (without provider wiring). PR: [#31](https://github.com/natanayalo/code-agent/pull/31)
 - T-049 Permission ladder and runtime budget ledger/enforcement slice. PR: [#33](https://github.com/natanayalo/code-agent/pull/33)
 - T-042 Baseline worker timeout/cancel envelope slice. PR: [#34](https://github.com/natanayalo/code-agent/pull/34)
-- T-044 Task submission API (`POST /tasks`, `GET /tasks/{task_id}`) and execution DB persistence slice. PR: [#35](https://github.com/natanayalo/code-agent/pull/35)
+- T-044 / T-047 Wire real provider CLI adapter into the app path. PR: [#36](https://github.com/natanayalo/code-agent/pull/36)
 
 ## In Progress
 
-- T-044 / T-047 Wire a real provider CLI adapter into the app path. Current slice adds a
-  concrete `codex exec` adapter for the shared CLI runtime, env-driven API bootstrap for the
-  real `TaskExecutionService`, and focused adapter/bootstrap tests. Remaining work is live
-  end-to-end validation in a configured Codex CLI environment and publishing the slice.
+- T-049: Wire permission-required outcomes into orchestrator pause/resume instead of only surfacing them as structured worker failures.
 
 ## Next
-
-- T-049: Wire permission-required outcomes into orchestrator pause/resume instead of only surfacing them as structured worker failures.
 - T-042: Add richer run/workspace diagnostics on timeout now that execution-path persistence has landed.
 - T-055 Add the constrained verifier stage.
 - T-054 Harden sandbox execution boundary and auditability.

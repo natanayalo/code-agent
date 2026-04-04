@@ -134,9 +134,15 @@ def _worker_result_from_execution(
     files_changed: list[str],
 ) -> WorkerResult:
     """Map the shared CLI runtime output into the worker contract."""
+    requested_permission = (
+        execution.permission_decision.required_permission.value
+        if execution.permission_decision is not None
+        else None
+    )
     return WorkerResult(
         status=execution.status,
         summary=execution.summary,
+        requested_permission=requested_permission,
         commands_run=execution.commands_run,
         files_changed=files_changed,
         artifacts=_workspace_artifacts(workspace),

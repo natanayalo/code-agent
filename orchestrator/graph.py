@@ -573,6 +573,96 @@ def build_await_result_node(
     return await_result
 
 
+def _route_after_await_result(state_input: OrchestratorState) -> str:
+    """Route from await_result either to summarize_result or await_permission_escalation."""
+    state = _ensure_state(state_input)
+    if state.result is not None and state.result.next_action_hint == "request_higher_permission":
+        return "await_permission_escalation"
+    return "summarize_result"
+
+
+def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any]:
+    """Pause the graph to request higher tool permissions from the caller."""
+    state = _ensure_state(state_input)
+    if not state.result or state.result.next_action_hint != "request_higher_permission":
+        return {"current_step": "await_permission_escalation"}
+
+    task_text = state.normalized_task_text or state.task.task_text
+    requested_permission = state.result.requested_permission
+    if not requested_permission:
+        logger.error(
+            "Worker requested higher permission but 'requested_permission' is missing.",
+            extra={"session_id": state.session.session_id if state.session else None},
+        )
+        failed_result = state.result.model_copy(
+            update={
+                "status": "error",
+                "summary": "Worker requested higher permission but did not specify which one.",
+                "next_action_hint": "inspect_worker_configuration",
+            }
+        )
+        return {
+            "current_step": "await_permission_escalation",
+            "result": failed_result.model_dump(),
+            "progress_updates": _progress_update(
+                state, "permission request failed: missing permission name"
+            ),
+        }
+    reason = state.result.summary or f"Worker requested higher permission: {requested_permission}"
+
+    approved = _coerce_approval_decision(
+        interrupt(
+            {
+                "approval_type": "permission_escalation",
+                "reason": reason,
+                "resume_token": f"permission-{state.task.task_id or 'pending'}",
+                "task_text": task_text,
+                "chosen_worker": state.route.chosen_worker,
+                "requested_permission": requested_permission,
+            }
+        )
+    )
+
+    if approved:
+        new_constraints = dict(state.task.constraints)
+        new_constraints["granted_permission"] = requested_permission
+        updated_task = state.task.model_copy(update={"constraints": new_constraints})
+
+        return {
+            "current_step": "await_permission_escalation",
+            "task": updated_task.model_dump(),
+            "result": None,
+            "progress_updates": _progress_update(
+                state, f"permission '{requested_permission}' granted"
+            ),
+        }
+    else:
+        failed_result = state.result.model_copy(
+            update={
+                "summary": (
+                    f"Permission escalation to '{requested_permission}' "
+                    "was rejected. Run halted."
+                ),
+                "next_action_hint": "await_manual_follow_up",
+            }
+        )
+        return {
+            "current_step": "await_permission_escalation",
+            "result": failed_result.model_dump(),
+            "progress_updates": _progress_update(
+                state, f"permission '{requested_permission}' rejected"
+            ),
+        }
+
+
+def _route_after_await_permission_escalation(state_input: OrchestratorState) -> str:
+    """Route back to dispatch if approved, else summarize failure."""
+    state = _ensure_state(state_input)
+    if state.result is None:
+        return "dispatch_job"
+    return "summarize_result"
+
+
 def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
     """Ensure the worker result has a human-readable summary."""
     state = _ensure_state(state_input)
@@ -631,6 +721,7 @@ def build_orchestrator_graph(
         "await_result",
         RunnableLambda(build_await_result_node(worker)),
     )
+    builder.add_node("await_permission_escalation", RunnableLambda(await_permission_escalation))
     builder.add_node("summarize_result", RunnableLambda(summarize_result))
     builder.add_node("persist_memory", RunnableLambda(persist_memory))
     builder.add_edge(START, "ingest_task")
@@ -655,7 +746,22 @@ def build_orchestrator_graph(
         },
     )
     builder.add_edge("dispatch_job", "await_result")
-    builder.add_edge("await_result", "summarize_result")
+    builder.add_conditional_edges(
+        "await_result",
+        RunnableLambda(_route_after_await_result),
+        {
+            "await_permission_escalation": "await_permission_escalation",
+            "summarize_result": "summarize_result",
+        },
+    )
+    builder.add_conditional_edges(
+        "await_permission_escalation",
+        RunnableLambda(_route_after_await_permission_escalation),
+        {
+            "dispatch_job": "dispatch_job",
+            "summarize_result": "summarize_result",
+        },
+    )
     builder.add_edge("summarize_result", "persist_memory")
     builder.add_edge("persist_memory", END)
     return builder.compile(
