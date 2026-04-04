@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -177,9 +176,21 @@ class TaskExecutionService:
         self.session_factory = session_factory
         self.worker = worker
 
-    def submit_task(self, submission: TaskSubmission) -> TaskSnapshot:
-        """Create a task, run the orchestrator, and persist the execution outcome."""
-        persisted = self._persist_submission(submission)
+    def create_task(self, submission: TaskSubmission) -> tuple[TaskSnapshot, _PersistedTaskContext]:
+        """Persist a new task request and return the initial pollable snapshot."""
+        persisted = self._persist_submission(submission, status=TaskStatus.PENDING)
+        task_snapshot = self.get_task(persisted.task_id)
+        if task_snapshot is None:
+            raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
+        return task_snapshot, persisted
+
+    async def submit_task(
+        self,
+        submission: TaskSubmission,
+        persisted: _PersistedTaskContext,
+    ) -> None:
+        """Execute one previously persisted task request in the background."""
+        self._mark_task_in_progress(task_id=persisted.task_id)
         started_at = utc_now()
         logger.info(
             "Starting execution-path task run",
@@ -194,7 +205,7 @@ class TaskExecutionService:
         )
 
         try:
-            state = self._run_orchestrator(submission, persisted)
+            state = await self._run_orchestrator(submission, persisted)
         except Exception:
             logger.exception(
                 "Task execution crashed before the orchestrator returned a final state",
@@ -203,14 +214,12 @@ class TaskExecutionService:
                     "task_id": persisted.task_id,
                 },
             )
-            with session_scope(self.session_factory) as session:
-                task_repo = TaskRepository(session)
-                task_repo.update_status(task_id=persisted.task_id, status=TaskStatus.FAILED.value)
+            self._mark_task_failed(task_id=persisted.task_id)
             task_snapshot = self.get_task(persisted.task_id)
             if task_snapshot is None:
                 raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
             self._log_task_outcome(task_snapshot)
-            return task_snapshot
+            return None
 
         finished_at = utc_now()
         self._persist_execution_outcome(
@@ -223,7 +232,7 @@ class TaskExecutionService:
         if task_snapshot is None:
             raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
         self._log_task_outcome(task_snapshot)
-        return task_snapshot
+        return None
 
     def get_task(self, task_id: str) -> TaskSnapshot | None:
         """Load the current persisted task state and its latest worker run."""
@@ -280,7 +289,12 @@ class TaskExecutionService:
                 latest_run=latest_run_snapshot,
             )
 
-    def _persist_submission(self, submission: TaskSubmission) -> _PersistedTaskContext:
+    def _persist_submission(
+        self,
+        submission: TaskSubmission,
+        *,
+        status: TaskStatus,
+    ) -> _PersistedTaskContext:
         """Create or restore the session scaffolding for a submitted task."""
         now = utc_now()
         with session_scope(self.session_factory) as session:
@@ -314,7 +328,7 @@ class TaskExecutionService:
                 task_text=submission.task_text,
                 repo_url=submission.repo_url,
                 branch=submission.branch,
-                status=TaskStatus.IN_PROGRESS.value,
+                status=status,
                 priority=submission.priority,
             )
             session_repo.set_active_task(
@@ -329,42 +343,52 @@ class TaskExecutionService:
                 task_id=task.id,
             )
 
-    def _run_orchestrator(
+    async def _run_orchestrator(
         self,
         submission: TaskSubmission,
         persisted: _PersistedTaskContext,
     ) -> OrchestratorState:
         """Execute the orchestrator graph for one submitted task."""
         graph = build_orchestrator_graph(worker=self.worker)
-        raw_output = asyncio.run(
-            graph.ainvoke(
-                {
-                    "session": SessionRef(
-                        session_id=persisted.session_id,
-                        user_id=persisted.user_id,
-                        channel=persisted.channel,
-                        external_thread_id=persisted.external_thread_id,
-                        active_task_id=persisted.task_id,
-                        status="active",
-                    ).model_dump(),
-                    "task": {
-                        "task_id": persisted.task_id,
-                        "task_text": submission.task_text,
-                        "repo_url": submission.repo_url,
-                        "branch": submission.branch,
-                        "priority": submission.priority,
-                        "worker_override": (
-                            submission.worker_override.value
-                            if submission.worker_override is not None
-                            else None
-                        ),
-                        "constraints": dict(submission.constraints),
-                        "budget": dict(submission.budget),
-                    },
-                }
-            )
+        raw_output = await graph.ainvoke(
+            {
+                "session": SessionRef(
+                    session_id=persisted.session_id,
+                    user_id=persisted.user_id,
+                    channel=persisted.channel,
+                    external_thread_id=persisted.external_thread_id,
+                    active_task_id=persisted.task_id,
+                    status="active",
+                ).model_dump(),
+                "task": {
+                    "task_id": persisted.task_id,
+                    "task_text": submission.task_text,
+                    "repo_url": submission.repo_url,
+                    "branch": submission.branch,
+                    "priority": submission.priority,
+                    "worker_override": (
+                        submission.worker_override.value
+                        if submission.worker_override is not None
+                        else None
+                    ),
+                    "constraints": dict(submission.constraints),
+                    "budget": dict(submission.budget),
+                },
+            }
         )
         return OrchestratorState.model_validate(raw_output)
+
+    def _mark_task_in_progress(self, *, task_id: str) -> None:
+        """Mark a queued task as in progress when background execution begins."""
+        with session_scope(self.session_factory) as session:
+            task_repo = TaskRepository(session)
+            task_repo.update_status(task_id=task_id, status=TaskStatus.IN_PROGRESS)
+
+    def _mark_task_failed(self, *, task_id: str) -> None:
+        """Persist a failed task status after background execution crashes."""
+        with session_scope(self.session_factory) as session:
+            task_repo = TaskRepository(session)
+            task_repo.update_status(task_id=task_id, status=TaskStatus.FAILED)
 
     def _persist_execution_outcome(
         self,

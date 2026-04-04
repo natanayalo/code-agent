@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from apps.api.dependencies import get_task_service
 from orchestrator.execution import TaskExecutionService, TaskSnapshot, TaskSubmission
@@ -10,13 +10,16 @@ from orchestrator.execution import TaskExecutionService, TaskSnapshot, TaskSubmi
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
-@router.post("", response_model=TaskSnapshot, status_code=status.HTTP_201_CREATED)
-def submit_task(
+@router.post("", response_model=TaskSnapshot, status_code=status.HTTP_202_ACCEPTED)
+async def submit_task(
     payload: TaskSubmission,
+    background_tasks: BackgroundTasks,
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> TaskSnapshot:
-    """Create a task, execute it through the orchestrator, and persist the outcome."""
-    return task_service.submit_task(payload)
+    """Create a task, enqueue it for execution, and return the pollable snapshot."""
+    task_snapshot, persisted = task_service.create_task(payload)
+    background_tasks.add_task(task_service.submit_task, payload, persisted)
+    return task_snapshot
 
 
 @router.get("/{task_id}", response_model=TaskSnapshot)

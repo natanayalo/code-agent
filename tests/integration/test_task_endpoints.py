@@ -86,7 +86,7 @@ def client(session_factory) -> Iterator[TestClient]:
 def test_submit_task_persists_execution_path_and_allows_polling(
     client: TestClient, session_factory
 ) -> None:
-    """Submitting a task should persist task, run, and artifact state for later polling."""
+    """Submitting a task should return a pollable snapshot and persist the eventual result."""
     response = client.post(
         "/tasks",
         json={
@@ -102,14 +102,26 @@ def test_submit_task_persists_execution_path_and_allows_polling(
         },
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     payload = response.json()
     task_id = payload["task_id"]
-    latest_run = payload["latest_run"]
 
-    assert payload["status"] == "completed"
-    assert payload["chosen_worker"] == "codex"
-    assert payload["route_reason"] == "implementation_default"
+    assert payload["status"] == "pending"
+    assert payload["chosen_worker"] is None
+    assert payload["route_reason"] is None
+    assert payload["latest_run"] is None
+
+    get_response = client.get(f"/tasks/{task_id}")
+    latest_run = get_response.json()["latest_run"]
+
+    assert get_response.status_code == 200
+    assert get_response.json()["task_id"] == task_id
+    assert get_response.json()["status"] == "completed"
+    assert get_response.json()["chosen_worker"] == "codex"
+    assert get_response.json()["route_reason"] == "implementation_default"
+    assert get_response.json()["latest_run"]["summary"] == (
+        "Created note.txt and retained the workspace for inspection."
+    )
     assert latest_run["status"] == "success"
     assert latest_run["worker_type"] == "codex"
     assert latest_run["workspace_id"] == "workspace-task-44-1234"
@@ -123,14 +135,6 @@ def test_submit_task_persists_execution_path_and_allows_polling(
     ]
     assert latest_run["artifacts"][0]["artifact_type"] == "workspace"
     assert latest_run["artifacts"][0]["name"] == "workspace"
-
-    get_response = client.get(f"/tasks/{task_id}")
-
-    assert get_response.status_code == 200
-    assert get_response.json()["task_id"] == task_id
-    assert get_response.json()["latest_run"]["summary"] == (
-        "Created note.txt and retained the workspace for inspection."
-    )
 
     worker = client.app.state.test_worker
     assert len(worker.requests) == 1
