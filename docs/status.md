@@ -30,16 +30,17 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - Architecture review checkpoint: align orchestrator route and dispatch state under real worker execution. PR: [#25](https://github.com/natanayalo/code-agent/pull/25)
 - T-045 Evolve sandbox to persistent container with shell sessions. PR: [#26](https://github.com/natanayalo/code-agent/pull/26)
 - T-046 Build structured system prompt module.
+- T-048 Add an explicit tool registry and policy-aware bash tool boundary. PR: [#32](https://github.com/natanayalo/code-agent/pull/32)
 
 ## In Progress
 
 - T-047 Implement the shared CLI-driven multi-turn worker runtime.
-- T-048 Add an explicit tool registry and policy-aware bash tool boundary. Local slice is
-  implemented and verified on branch; awaiting publish.
+- T-049 Add the permission ladder and runtime budget ledger/enforcement. Current slice adds
+  runtime-side command permission resolution, granted-permission checks, and budget-ledger
+  enforcement for tool calls, shell commands, and retries.
 
 ## Next
 
-- T-049 Add the permission ladder and runtime budget ledger/enforcement.
 - T-042 Add baseline worker timeout/cancel handling (outer orchestrator-level timeout/cancel envelope around the real worker path).
 - T-044 Run one real orchestrator-to-worker vertical slice through the CLI worker path with execution-path DB persistence only.
 - T-055 Add the constrained verifier stage.
@@ -64,6 +65,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
   CLI runtime consume the same registry metadata, and the worker uses the registry's expected
   artifacts to decide whether to collect changed-file state. T-049 remains responsible for
   turning `required_permission` metadata into a real approval ladder and budget ledger.
+- T-049's current in-repo slice adds a command-policy layer for `execute_bash`, explicit
+  granted-permission checks at the runtime boundary, and a typed budget ledger that enforces
+  tool-call, shell-command, and retry limits. The remaining gap is wiring permission-required
+  outcomes into orchestrator pause/resume instead of only surfacing them as structured worker
+  failures.
 - The near-term worker plan is explicitly CLI-first. New worker work should not assume full ownership of low-level raw API payload assembly when a CLI, SDK, hook, or subprocess adapter can provide the runtime.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution so the worker cannot run unbounded when exercised standalone; T-042 then adds the outer orchestrator-level timeout/cancel layer that preserves workspace/logs and surfaces timeout state without hanging the run forever.
 - T-044 DB scope remains intentionally limited to execution-path persistence for task/status lookup, worker run metadata, final result fields, verifier output, and captured artifacts needed for polling by `task_id`.

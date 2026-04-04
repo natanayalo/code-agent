@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from sandbox import DockerShellCommandResult, DockerShellSessionError
-from tools import DEFAULT_TOOL_REGISTRY, ToolRegistry
+from tools import DEFAULT_TOOL_REGISTRY, ToolPermissionLevel, ToolRegistry
 from workers.cli_runtime import (
+    CliRuntimeBudgetLedger,
     CliRuntimeMessage,
     CliRuntimeSettings,
     CliRuntimeStep,
+    _coerce_non_negative_int,
     collect_changed_files,
     format_bash_observation,
     run_cli_runtime_loop,
@@ -60,6 +62,10 @@ def test_settings_from_budget_applies_supported_runtime_overrides() -> None:
             "max_iterations": "12",
             "max_minutes": 2,
             "command_timeout_seconds": 9,
+            "max_tool_calls": "5",
+            "max_shell_commands": 6,
+            "max_retries": 0,
+            "max_verifier_passes": "1",
             "max_observation_characters": 512,
         },
         defaults=CliRuntimeSettings(max_iterations=4, worker_timeout_seconds=30),
@@ -68,6 +74,10 @@ def test_settings_from_budget_applies_supported_runtime_overrides() -> None:
     assert settings.max_iterations == 12
     assert settings.worker_timeout_seconds == 120
     assert settings.command_timeout_seconds == 9
+    assert settings.max_tool_calls == 5
+    assert settings.max_shell_commands == 6
+    assert settings.max_retries == 0
+    assert settings.max_verifier_passes == 1
     assert settings.max_observation_characters == 512
 
 
@@ -83,6 +93,13 @@ def test_settings_from_budget_accepts_fractional_numeric_strings_like_float_inpu
 
     assert settings.max_iterations == 2
     assert settings.command_timeout_seconds == 9
+
+
+def test_coerce_non_negative_int_rejects_non_finite_floats() -> None:
+    """NaN and infinity should be ignored instead of crashing runtime budget parsing."""
+    assert _coerce_non_negative_int(float("nan")) is None
+    assert _coerce_non_negative_int(float("inf")) is None
+    assert _coerce_non_negative_int(float("-inf")) is None
 
 
 def test_format_bash_observation_truncates_long_output() -> None:
@@ -129,6 +146,20 @@ def test_run_cli_runtime_loop_uses_registry_timeout_and_metadata() -> None:
     assert "Required permission: workspace_write" in execution.messages[1].content
     assert "Default timeout seconds: 3" in execution.messages[1].content
     assert "Expected artifacts: stdout, stderr, changed_files" in execution.messages[1].content
+    assert execution.budget_ledger == CliRuntimeBudgetLedger(
+        max_iterations=2,
+        max_tool_calls=None,
+        max_shell_commands=None,
+        max_retries=None,
+        max_verifier_passes=None,
+        iterations_used=2,
+        tool_calls_used=1,
+        shell_commands_used=1,
+        retries_used=0,
+        verifier_passes_used=0,
+        failed_command_attempts={},
+        wall_clock_seconds=execution.budget_ledger.wall_clock_seconds,
+    )
 
 
 def test_run_cli_runtime_loop_completes_a_multi_turn_sequence() -> None:
@@ -173,6 +204,153 @@ def test_run_cli_runtime_loop_completes_a_multi_turn_sequence() -> None:
     assert "Exit code: 0" in execution.messages[2].content
 
 
+def test_run_cli_runtime_loop_blocks_commands_that_require_higher_permission() -> None:
+    """Commands above the granted permission level should fail before shell execution."""
+    adapter = _ScriptedAdapter(
+        [CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="rm -rf build")]
+    )
+    session = _FakeSession({})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=1, worker_timeout_seconds=30),
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert execution.status == "failure"
+    assert execution.stop_reason == "permission_required"
+    assert execution.permission_decision is not None
+    assert execution.permission_decision.required_permission == ToolPermissionLevel.DANGEROUS_SHELL
+    assert session.calls == []
+    assert "Required: dangerous_shell; granted: workspace_write" in execution.summary
+
+
+def test_run_cli_runtime_loop_stops_at_the_tool_call_budget() -> None:
+    """Tool-call limits should stop the runtime before an extra shell execution starts."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pwd"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="ls"),
+        ]
+    )
+    session = _FakeSession({"pwd": _command_result("pwd", output="/workspace/repo\n")})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=3,
+            worker_timeout_seconds=30,
+            max_tool_calls=1,
+        ),
+    )
+
+    assert execution.status == "failure"
+    assert execution.stop_reason == "budget_exceeded"
+    assert len(session.calls) == 1
+    assert execution.budget_ledger.tool_calls_used == 1
+    assert execution.budget_ledger.shell_commands_used == 1
+    assert "tool-call budget (1)" in execution.summary
+
+
+def test_run_cli_runtime_loop_stops_at_the_retry_budget() -> None:
+    """Retry limits should block repeated failing commands before another shell run."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pytest -q"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pytest -q"),
+        ]
+    )
+    session = _FakeSession(
+        {"pytest -q": _command_result("pytest -q", output="boom\n", exit_code=1)}
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=3,
+            worker_timeout_seconds=30,
+            max_retries=0,
+        ),
+    )
+
+    assert execution.status == "failure"
+    assert execution.stop_reason == "budget_exceeded"
+    assert len(session.calls) == 1
+    assert execution.budget_ledger.retries_used == 0
+    assert "retry budget (0)" in execution.summary
+
+
+def test_run_cli_runtime_loop_treats_spacing_only_command_changes_as_retries() -> None:
+    """Retry detection should normalize token-equivalent commands before comparing them."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pytest   -q"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pytest -q"),
+        ]
+    )
+    session = _FakeSession(
+        {"pytest   -q": _command_result("pytest   -q", output="boom\n", exit_code=1)}
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=3,
+            worker_timeout_seconds=30,
+            max_retries=0,
+        ),
+    )
+
+    assert execution.status == "failure"
+    assert execution.stop_reason == "budget_exceeded"
+    assert len(session.calls) == 1
+    assert execution.budget_ledger.retries_used == 0
+    assert "retry budget (0)" in execution.summary
+
+
+def test_run_cli_runtime_loop_counts_interleaved_failures_toward_retry_budget() -> None:
+    """Retry limits should still apply when the same failing command is retried later."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pytest -q"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pwd"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pytest -q"),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "pytest -q": _command_result("pytest -q", output="boom\n", exit_code=1),
+            "pwd": _command_result("pwd", output="/workspace/repo\n"),
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=4,
+            worker_timeout_seconds=30,
+            max_retries=0,
+        ),
+    )
+
+    assert execution.status == "failure"
+    assert execution.stop_reason == "budget_exceeded"
+    assert len(session.calls) == 2
+    assert execution.budget_ledger.retries_used == 0
+    assert execution.budget_ledger.failed_command_attempts == {"pytest -q": 1}
+    assert "retry budget (0)" in execution.summary
+
+
 def test_run_cli_runtime_loop_stops_at_the_iteration_budget() -> None:
     """The runtime should fail cleanly when no final answer appears in time."""
     adapter = _ScriptedAdapter(
@@ -202,7 +380,7 @@ def test_run_cli_runtime_loop_stops_at_the_worker_timeout() -> None:
         ]
     )
     session = _FakeSession({"pwd": _command_result("pwd", output="/workspace/repo\n")})
-    clock_values = iter([0.0, 0.0, 0.0, 2.0])
+    clock_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0])
 
     execution = run_cli_runtime_loop(
         adapter,
