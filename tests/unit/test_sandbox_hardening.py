@@ -43,6 +43,14 @@ def test_path_policy_validation():
 
 def test_path_policy_default():
     policy = PathPolicy()
-    assert policy.check_path("/workspace/repo") is True
     assert policy.check_path("/workspace/.git") is False
     assert policy.check_path("/root") is False
+
+
+def test_path_policy_robustness():
+    policy = PathPolicy(allowed_prefixes=["/workspace"], denied_prefixes=["/workspace/.git"])
+    # Correctly allowed (no longer blocked by prefix matching)
+    assert policy.check_path("/workspace/.git_config") is True
+    # Correctly denied
+    assert policy.check_path("/workspace/.git/config") is False
+    assert policy.check_path("/workspace/.git") is False

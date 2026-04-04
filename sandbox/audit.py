@@ -174,12 +174,17 @@ def capture_audit_artifacts(
         )
         files_changed = list(dict.fromkeys(path for _status, path in status_entries))
         untracked_files = [path for status, path in status_entries if status == "??"]
+        changed_files_content = (
+            redactor.redact(format_changed_files(files_changed))
+            if redactor
+            else format_changed_files(files_changed)
+        )
         artifacts.append(
             write_text_artifact(
                 workspace,
                 artifact_dir,
                 filename="changed-files.txt",
-                content=format_changed_files(files_changed),
+                content=changed_files_content,
                 artifact_type="result_summary",
                 artifact_metadata={
                     "kind": "changed_files",
@@ -193,12 +198,13 @@ def capture_audit_artifacts(
             untracked_files=untracked_files,
         )
         if diff_summary:
+            diff_content = (redactor.redact(diff_summary) if redactor else diff_summary) + "\n"
             artifacts.append(
                 write_text_artifact(
                     workspace,
                     artifact_dir,
                     filename="diff-summary.txt",
-                    content=diff_summary + "\n",
+                    content=diff_content,
                     artifact_type="diff",
                     artifact_metadata={
                         "kind": "diff_summary",

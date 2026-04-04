@@ -16,23 +16,22 @@ class PathPolicy(SandboxModel):
     denied_prefixes: list[str] = Field(default_factory=lambda: ["/workspace/.git"])
 
     def check_path(self, path: str | Path) -> bool:
-        """Return True if the path is allowed by the policy."""
-        try:
-            # We use string-based prefix matching for sandbox paths.
-            # These are usually absolute paths inside the container (e.g. /workspace/repo).
-            path_str = str(path)
-
-            # Deny takes precedence
-            for denied in sorted(self.denied_prefixes, key=len, reverse=True):
-                if path_str.startswith(denied):
+        """Return True if path is allowed, False if it is explicitly denied or prefix missing."""
+        p = Path(path)
+        # Deny takes precedence
+        for denied in self.denied_prefixes:
+            try:
+                if p.is_relative_to(denied):
                     return False
+            except ValueError:
+                continue
 
-            # Must be in an allowed prefix
-            for allowed in sorted(self.allowed_prefixes, key=len, reverse=True):
-                if path_str.startswith(allowed):
+        # Must be in an allowed prefix
+        for allowed in self.allowed_prefixes:
+            try:
+                if p.is_relative_to(allowed):
                     return True
+            except ValueError:
+                continue
 
-            # Default to deny if no allowed prefix matches
-            return False
-        except Exception:
-            return False
+        return False
