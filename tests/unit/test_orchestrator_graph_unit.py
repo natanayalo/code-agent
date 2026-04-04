@@ -1,6 +1,9 @@
 """Unit tests for the orchestrator graph internals."""
 
+import asyncio
 from unittest.mock import patch
+
+import pytest
 
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.graph import (
@@ -17,7 +20,7 @@ from orchestrator.graph import (
     summarize_result,
 )
 from orchestrator.state import OrchestratorState
-from workers import WorkerRequest
+from workers import WorkerRequest, WorkerResult
 
 
 def test_ensure_state_from_dict():
@@ -234,3 +237,36 @@ def test_await_permission_escalation_missing_permission():
     assert res["current_step"] == "await_permission_escalation"
     assert res["result"]["status"] == "error"
     assert res["result"]["next_action_hint"] == "inspect_worker_configuration"
+
+
+@pytest.mark.anyio
+async def test_await_worker_with_timeout_partial_result():
+    from orchestrator.graph import _await_worker_with_timeout
+    from workers.base import Worker
+
+    class SlowWorker(Worker):
+        async def run(self, request):
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                return WorkerResult(
+                    status="error",
+                    summary="partial state flushed",
+                    next_action_hint="inspect_workspace_artifacts",
+                    commands_run=[{"command": "echo 1"}],
+                )
+            return WorkerResult(status="success", summary="done")
+
+    worker = SlowWorker()
+    res, hint = await _await_worker_with_timeout(
+        worker,
+        request=WorkerRequest(session_id="test", task_text="test"),
+        worker_type="slow",
+        session_id="test",
+        timeout_seconds=1,
+    )
+
+    assert res.status == "error"
+    assert res.summary == "partial state flushed"
+    assert res.commands_run[0].command == "echo 1"
+    assert hint == "worker timed out but yielded partial state after 1s"

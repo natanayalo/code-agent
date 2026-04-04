@@ -7,6 +7,9 @@ import logging
 import os
 import re
 import tempfile
+import threading
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Protocol
 
@@ -207,7 +210,19 @@ class CodexCliWorker(Worker):
 
     async def run(self, request: WorkerRequest) -> WorkerResult:
         """Provision a workspace, run the CLI loop, and return a typed result."""
-        return await asyncio.to_thread(self._run_sync, request)
+        cancel_event = threading.Event()
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(
+            None, partial(self._run_sync, request, cancel_token=cancel_event.is_set)
+        )
+        try:
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            cancel_event.set()
+            try:
+                return await asyncio.wait_for(asyncio.shield(future), timeout=2.0)
+            except TimeoutError as exc:
+                raise asyncio.CancelledError("Graceful shutdown of sync worker timed out.") from exc
 
     def _cleanup_workspace(
         self,
@@ -260,7 +275,11 @@ class CodexCliWorker(Worker):
         except OSError:
             logger.exception("Codex CLI worker failed to close the persistent shell session")
 
-    def _run_sync(self, request: WorkerRequest) -> WorkerResult:
+    def _run_sync(
+        self,
+        request: WorkerRequest,
+        cancel_token: Callable[[], bool] | None = None,
+    ) -> WorkerResult:
         """Provision a workspace, run the CLI runtime, and return a typed result."""
         if request.repo_url is None or not request.repo_url.strip():
             return WorkerResult(
@@ -332,7 +351,9 @@ class CodexCliWorker(Worker):
                 tool_registry=self.tool_registry,
                 granted_permission=granted_permission,
                 working_directory=workspace.repo_path,
+                cancel_token=cancel_token,
             )
+
             files_changed: list[str] = []
             if ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts:
                 files_changed = collect_changed_files(
@@ -344,6 +365,10 @@ class CodexCliWorker(Worker):
                 execution,
                 files_changed=files_changed,
             )
+            if cancel_token and cancel_token():
+                result.status = "error"
+                result.summary = "CLI runtime loop was cancelled by the orchestrator timeout."
+                result.next_action_hint = "inspect_workspace_artifacts"
             run_succeeded = result.status == "success"
         except (
             DockerSandboxContainerError,

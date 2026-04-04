@@ -375,6 +375,7 @@ def run_cli_runtime_loop(
     granted_permission: ToolPermissionLevel = ToolPermissionLevel.WORKSPACE_WRITE,
     clock: Callable[[], float] = perf_counter,
     working_directory: Path | None = None,
+    cancel_token: Callable[[], bool] | None = None,
 ) -> CliRuntimeExecutionResult:
     """Drive the provider adapter through a bounded multi-turn shell loop."""
     started_at = clock()
@@ -390,6 +391,17 @@ def run_cli_runtime_loop(
             clock=clock,
             iterations_used=iteration - 1,
         )
+
+        if cancel_token is not None and cancel_token():
+            return CliRuntimeExecutionResult(
+                status="error",
+                summary="CLI runtime loop was cancelled by the orchestrator timeout.",
+                stop_reason="worker_timeout",
+                commands_run=commands_run,
+                messages=messages,
+                budget_ledger=budget_ledger,
+            )
+
         if clock() - started_at >= settings.worker_timeout_seconds:
             return CliRuntimeExecutionResult(
                 status="failure",

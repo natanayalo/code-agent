@@ -35,14 +35,14 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-049 Permission ladder and runtime budget ledger/enforcement slice. PR: [#33](https://github.com/natanayalo/code-agent/pull/33)
 - T-042 Baseline worker timeout/cancel envelope slice. PR: [#34](https://github.com/natanayalo/code-agent/pull/34)
 - T-044 / T-047 Wire real provider CLI adapter into the app path. PR: [#36](https://github.com/natanayalo/code-agent/pull/36)
+- T-049 Wire permission-required outcomes into orchestrator pause/resume. PR: [#37](https://github.com/natanayalo/code-agent/pull/37)
+- T-042 Orchestrator Timeout Diagnostics: extract partial execution results and workspace artifacts after worker cancellation. (Local verification complete)
 
 ## In Progress
 
-- T-049: Wire permission-required outcomes into orchestrator pause/resume instead of only surfacing them as structured worker failures.
+- T-055 Add the constrained verifier stage.
 
 ## Next
-- T-042: Add richer run/workspace diagnostics on timeout now that execution-path persistence has landed.
-- T-055 Add the constrained verifier stage.
 - T-054 Harden sandbox execution boundary and auditability.
 - Milestone: skeptical memory, compact session state, and stable session scaffold (T-060 to T-065).
 - Milestone: structured run observability and second worker routing (T-043, T-070+) after the vertical slice, verifier, and memory loop are stable.
