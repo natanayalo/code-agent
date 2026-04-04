@@ -171,25 +171,33 @@ async def _settle_cancelled_worker_task(
     *,
     worker_type: str,
     session_id: str | None,
-) -> None:
-    """Yield once so task cancellation can propagate without awaiting unbounded cleanup."""
+    grace_period_seconds: int = 3,
+) -> WorkerResult | None:
+    """Cancel the task and optionally wait for it to yield a graceful partial result."""
     worker_task.cancel()
-    await asyncio.sleep(0)
-    if worker_task.done():
-        _consume_worker_task_result(
-            worker_task,
-            worker_type=worker_type,
-            session_id=session_id,
-        )
-        return
 
-    worker_task.add_done_callback(
-        lambda task: _consume_worker_task_result(
-            task,
-            worker_type=worker_type,
-            session_id=session_id,
+    try:
+        return await asyncio.wait_for(asyncio.shield(worker_task), timeout=grace_period_seconds)
+    except (TimeoutError, asyncio.CancelledError):
+        pass
+    except Exception:
+        pass
+
+    if worker_task.done() and not worker_task.cancelled():
+        try:
+            return worker_task.result()
+        except Exception:
+            pass
+
+    if not worker_task.done():
+        worker_task.add_done_callback(
+            lambda task: _consume_worker_task_result(
+                task,
+                worker_type=worker_type,
+                session_id=session_id,
+            )
         )
-    )
+    return None
 
 
 async def _await_worker_with_timeout(
@@ -217,11 +225,17 @@ async def _await_worker_with_timeout(
                 "timeout_seconds": timeout_seconds,
             },
         )
-        await _settle_cancelled_worker_task(
+        partial_result = await _settle_cancelled_worker_task(
             worker_task,
             worker_type=worker_type,
             session_id=session_id,
         )
+        if partial_result is not None:
+            return (
+                partial_result,
+                (f"worker timed out but yielded partial state " f"after {timeout_seconds}s"),
+            )
+
         return _timed_out_worker_result(
             timeout_seconds
         ), f"worker timed out after {timeout_seconds}s"
@@ -233,11 +247,14 @@ async def _await_worker_with_timeout(
                 "worker_type": worker_type,
             },
         )
-        await _settle_cancelled_worker_task(
+        partial_result = await _settle_cancelled_worker_task(
             worker_task,
             worker_type=worker_type,
             session_id=session_id,
         )
+        if partial_result is not None:
+            return partial_result, "worker execution cancelled but yielded partial state"
+
         return _cancelled_worker_result(), "worker execution cancelled"
     except Exception as exc:
         logger.exception(

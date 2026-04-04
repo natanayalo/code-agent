@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from sandbox import (
     DockerSandboxContainer,
     DockerSandboxContainerRequest,
@@ -335,3 +337,69 @@ def test_codex_cli_worker_requests_higher_permission_for_blocked_commands(tmp_pa
     assert result.status == "failure"
     assert result.next_action_hint == "request_higher_permission"
     assert "dangerous_shell" in (result.summary or "")
+
+
+@pytest.mark.anyio
+async def test_codex_cli_worker_returns_partial_result_on_cancellation(tmp_path: Path) -> None:
+    """The CLI worker should catch cancellation and return the partial runtime state."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-cancel",
+        image="python:3.12-slim",
+    )
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(container)
+
+    class _HangingAdapter:
+        def __init__(self):
+            self.called = asyncio.Event()
+
+        def next_step(self, messages, **kwargs):
+            # Simulate a very long thought/command
+            import time
+
+            time.sleep(1.2)
+            return CliRuntimeStep(kind="final", final_output="Unreachable")
+
+    adapter = _HangingAdapter()
+    session = _FakeSession(
+        {
+            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
+                "git status --porcelain=v1 -z --untracked-files=all",
+                output="",
+            )
+        }
+    )
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+        session_factory=lambda started_container: session,
+    )
+
+    request = WorkerRequest(
+        session_id="session-cancel",
+        repo_url="https://example.com/repo.git",
+        branch="main",
+        task_text="This will be cancelled",
+    )
+
+    # Start the worker task
+    worker_task = asyncio.create_task(worker.run(request))
+
+    # Wait a bit for it to start
+    await asyncio.sleep(0.5)
+
+    # Cancel it
+    worker_task.cancel()
+
+    # Wait for the worker to settle and yield the partial result
+    result = await worker_task
+
+    assert result.status == "error"
+    assert result.next_action_hint == "inspect_workspace_artifacts"
+    assert "loop was cancelled" in (result.summary or "")
+    assert workspace_manager.cleanup_requests == [(workspace, False)]
+    assert container_manager.stop_requests == [container]
+    assert session.closed is True
