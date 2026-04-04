@@ -175,6 +175,7 @@ class TaskExecutionService:
     ) -> None:
         self.session_factory = session_factory
         self.worker = worker
+        self.graph = build_orchestrator_graph(worker=worker)
 
     def create_task(self, submission: TaskSubmission) -> tuple[TaskSnapshot, _PersistedTaskContext]:
         """Persist a new task request and return the initial pollable snapshot."""
@@ -349,8 +350,7 @@ class TaskExecutionService:
         persisted: _PersistedTaskContext,
     ) -> OrchestratorState:
         """Execute the orchestrator graph for one submitted task."""
-        graph = build_orchestrator_graph(worker=self.worker)
-        raw_output = await graph.ainvoke(
+        raw_output = await self.graph.ainvoke(
             {
                 "session": SessionRef(
                     session_id=persisted.session_id,
