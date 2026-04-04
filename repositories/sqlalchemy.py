@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
 from db.models import (
     Artifact,
     PersonalMemory,
@@ -172,24 +173,24 @@ class TaskRepository:
         self,
         *,
         task_id: str,
-        chosen_worker: str,
+        chosen_worker: str | WorkerType,
         route_reason: str,
     ) -> Task | None:
         task = self.get(task_id)
         if task is None:
             return None
 
-        task.chosen_worker = chosen_worker
+        task.chosen_worker = cast(WorkerType | None, chosen_worker)
         task.route_reason = route_reason
         self.session.flush()
         return task
 
-    def update_status(self, *, task_id: str, status: str) -> Task | None:
+    def update_status(self, *, task_id: str, status: str | TaskStatus) -> Task | None:
         task = self.get(task_id)
         if task is None:
             return None
 
-        task.status = status
+        task.status = cast(TaskStatus, status)
         self.session.flush()
         return task
 
@@ -204,9 +205,9 @@ class WorkerRunRepository:
         self,
         *,
         task_id: str,
-        worker_type: str,
+        worker_type: str | WorkerType,
         started_at: datetime,
-        status: str,
+        status: str | WorkerRunStatus,
         workspace_id: str | None = None,
         finished_at: datetime | None = None,
         summary: str | None = None,
@@ -245,7 +246,7 @@ class WorkerRunRepository:
         self,
         *,
         run_id: str,
-        status: str,
+        status: str | WorkerRunStatus,
         finished_at: datetime,
         summary: str | None = None,
         commands_run: list[dict[str, Any]] | None = None,
@@ -256,7 +257,7 @@ class WorkerRunRepository:
         if worker_run is None:
             return None
 
-        worker_run.status = status
+        worker_run.status = cast(WorkerRunStatus, status)
         worker_run.finished_at = finished_at
         if summary is not None:
             worker_run.summary = summary
@@ -280,7 +281,7 @@ class ArtifactRepository:
         self,
         *,
         run_id: str,
-        artifact_type: str,
+        artifact_type: str | ArtifactType,
         name: str,
         uri: str,
         artifact_metadata: dict[str, Any] | None = None,
