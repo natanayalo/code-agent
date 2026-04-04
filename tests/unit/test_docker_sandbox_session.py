@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from sandbox.container import DockerSandboxContainer
+from sandbox.policy import PathPolicy
 from sandbox.session import (
     DockerShellSession,
     DockerShellSessionError,
@@ -348,3 +349,51 @@ def test_shell_session_close_handles_broken_pipe_and_wait_timeouts(tmp_path: Pat
     session.close()
 
     assert process.killed is True
+
+
+def test_session_redacts_secrets(tmp_path: Path) -> None:
+    """The session should redact known secrets from command output."""
+    container = _container_handle(tmp_path)
+
+    with DockerShellSession(
+        container,
+        process_factory=_local_shell_process_factory,
+        secrets={"api_key": "password123"},
+    ) as session:
+        result = session.execute("echo my secret is password123")
+        assert result.output == "my secret is [REDACTED]\n"
+
+
+def test_session_enforces_path_policy(tmp_path: Path) -> None:
+    """The session should reject commands that touch denied paths."""
+    container = _container_handle(tmp_path)
+    policy = PathPolicy(denied_prefixes=["/etc/shadow"])
+
+    with DockerShellSession(
+        container,
+        process_factory=_local_shell_process_factory,
+        path_policy=policy,
+    ) as session:
+        # Note: best-effort check on the command string.
+        with pytest.raises(DockerShellSessionError, match="Command may touch a denied path"):
+            session.execute("cat /etc/shadow")
+
+
+def test_session_captures_audit(tmp_path: Path) -> None:
+    """The session should capture audit artifacts and filesystem changes after execution."""
+    container = _container_handle(tmp_path)
+    repo_path = container.workspace.repo_path
+    # Initialize a real repo so capture_audit_artifacts can run git status.
+    subprocess.run(["git", "init", "--initial-branch", "main"], cwd=repo_path, check=True)
+
+    with DockerShellSession(container, process_factory=_local_shell_process_factory) as session:
+        # We must cd because the local /bin/sh doesn't start in repo_path.
+        result = session.execute(
+            f"cd {shlex.quote(str(repo_path))} && echo 'hello world' > hello.txt",
+            capture_audit=True,
+        )
+
+    assert result.exit_code == 0
+    assert "hello.txt" in result.files_changed
+    assert any(a.name == "stdout.log" for a in result.artifacts)
+    assert any(a.name == "changed-files.txt" for a in result.artifacts)
