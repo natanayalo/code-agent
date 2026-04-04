@@ -8,6 +8,7 @@ from orchestrator.graph import (
     _default_worker_result_provider,
     _ensure_state,
     _is_destructive_task,
+    _resolve_orchestrator_timeout_seconds,
     await_approval,
     choose_worker,
     summarize_result,
@@ -82,6 +83,62 @@ def test_build_worker_request_from_state():
     assert request.task_text == "Add worker interface"
     assert request.constraints == {"requires_approval": False}
     assert request.budget == {"max_minutes": 15}
+
+
+def test_resolve_orchestrator_timeout_seconds_prefers_explicit_override() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Run a worker",
+                "budget": {
+                    "orchestrator_timeout_seconds": "45",
+                    "worker_timeout_seconds": 12,
+                    "max_minutes": 9,
+                },
+            }
+        }
+    )
+
+    assert _resolve_orchestrator_timeout_seconds(state) == 45
+
+
+def test_resolve_orchestrator_timeout_seconds_accepts_float_like_strings() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Run a worker",
+                "budget": {"orchestrator_timeout_seconds": "45.0"},
+            }
+        }
+    )
+
+    assert _resolve_orchestrator_timeout_seconds(state) == 45
+
+
+def test_resolve_orchestrator_timeout_seconds_falls_back_to_worker_budget() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Run a worker",
+                "budget": {"worker_timeout_seconds": 12},
+            }
+        }
+    )
+
+    assert _resolve_orchestrator_timeout_seconds(state) == 42
+
+
+def test_resolve_orchestrator_timeout_seconds_falls_back_to_max_minutes() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Run a worker",
+                "budget": {"max_minutes": 2},
+            }
+        }
+    )
+
+    assert _resolve_orchestrator_timeout_seconds(state) == 150
 
 
 def test_choose_worker_override():
