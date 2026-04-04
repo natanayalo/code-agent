@@ -394,7 +394,7 @@ def run_cli_runtime_loop(
 
         if cancel_token is not None and cancel_token():
             return CliRuntimeExecutionResult(
-                status="failure",
+                status="error",
                 summary="CLI runtime loop was cancelled by the orchestrator timeout.",
                 stop_reason="worker_timeout",
                 commands_run=commands_run,

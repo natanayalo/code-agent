@@ -181,12 +181,22 @@ async def _settle_cancelled_worker_task(
     except (TimeoutError, asyncio.CancelledError):
         pass
     except Exception:
+        logger.warning(
+            "Unexpected exception while waiting for graceful worker cancellation",
+            exc_info=True,
+            extra={"session_id": session_id, "worker_type": worker_type},
+        )
         pass
 
     if worker_task.done() and not worker_task.cancelled():
         try:
             return worker_task.result()
         except Exception:
+            logger.warning(
+                "Unexpected exception while extracting worker task result after cancellation",
+                exc_info=True,
+                extra={"session_id": session_id, "worker_type": worker_type},
+            )
             pass
 
     if not worker_task.done():

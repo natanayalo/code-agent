@@ -221,8 +221,8 @@ class CodexCliWorker(Worker):
             cancel_event.set()
             try:
                 return await asyncio.wait_for(asyncio.shield(future), timeout=2.0)
-            except TimeoutError:
-                raise
+            except TimeoutError as exc:
+                raise asyncio.CancelledError("Graceful shutdown of sync worker timed out.") from exc
 
     def _cleanup_workspace(
         self,
