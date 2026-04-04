@@ -281,13 +281,15 @@ def test_verify_result_passed():
                 "status": "success",
                 "files_changed": ["file1.py"],
                 "test_results": [{"name": "test1", "status": "passed"}],
+                "commands_run": [{"command": "pytest", "exit_code": 0}],
             },
         }
     )
     res = verify_result(state)
     assert res["current_step"] == "verify_result"
     assert res["verification"]["status"] == "passed"
-    assert len(res["verification"]["items"]) == 3
+    # Status, Tests, Files, Commands
+    assert len(res["verification"]["items"]) == 4
 
 
 def test_verify_result_failed_tests():
@@ -322,3 +324,23 @@ def test_verify_result_warning_no_changes():
     assert res["verification"]["status"] == "warning"
     assert res["verification"]["items"][2]["label"] == "file_changes"
     assert res["verification"]["items"][2]["status"] == "warning"
+
+
+def test_verify_result_failed_with_changes():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "failure",
+                "files_changed": ["partial.py"],
+                "test_results": [],
+            },
+        }
+    )
+    res = verify_result(state)
+    # Failed worker status makes it failed overall, but check file_changes warning
+    assert res["verification"]["status"] == "failed"
+    # Find file_changes item
+    file_changes = next(i for i in res["verification"]["items"] if i["label"] == "file_changes")
+    assert file_changes["status"] == "warning"
+    assert "but changed 1 files" in file_changes["message"]

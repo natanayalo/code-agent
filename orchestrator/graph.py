@@ -739,6 +739,17 @@ def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
                 message="Worker reported success but no files were changed.",
             )
         )
+    elif state.result.status != "success" and state.result.files_changed:
+        items.append(
+            VerificationReportItem(
+                label="file_changes",
+                status="warning",
+                message=(
+                    f"Worker reported {state.result.status} "
+                    f"but changed {len(state.result.files_changed)} files."
+                ),
+            )
+        )
     else:
         items.append(
             VerificationReportItem(
@@ -756,6 +767,14 @@ def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
                 label="command_audit",
                 status="warning",
                 message=f"{len(failed_commands)} commands exited with non-zero status.",
+            )
+        )
+    else:
+        items.append(
+            VerificationReportItem(
+                label="command_audit",
+                status="passed",
+                message=f"All {len(state.result.commands_run)} commands exited successfully.",
             )
         )
 
