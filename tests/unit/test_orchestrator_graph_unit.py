@@ -18,6 +18,7 @@ from orchestrator.graph import (
     await_permission_escalation,
     choose_worker,
     summarize_result,
+    verify_result,
 )
 from orchestrator.state import OrchestratorState
 from workers import WorkerRequest, WorkerResult
@@ -270,3 +271,76 @@ async def test_await_worker_with_timeout_partial_result():
     assert res.summary == "partial state flushed"
     assert res.commands_run[0].command == "echo 1"
     assert hint == "worker timed out but yielded partial state after 1s"
+
+
+def test_verify_result_passed():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "success",
+                "files_changed": ["file1.py"],
+                "test_results": [{"name": "test1", "status": "passed"}],
+                "commands_run": [{"command": "pytest", "exit_code": 0}],
+            },
+        }
+    )
+    res = verify_result(state)
+    assert res["current_step"] == "verify_result"
+    assert res["verification"]["status"] == "passed"
+    # Status, Tests, Files, Commands
+    assert len(res["verification"]["items"]) == 4
+
+
+def test_verify_result_failed_tests():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "success",
+                "files_changed": ["file1.py"],
+                "test_results": [{"name": "test1", "status": "failed"}],
+            },
+        }
+    )
+    res = verify_result(state)
+    assert res["verification"]["status"] == "failed"
+    assert res["verification"]["items"][1]["label"] == "test_results"
+    assert res["verification"]["items"][1]["status"] == "failed"
+
+
+def test_verify_result_warning_no_changes():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "success",
+                "files_changed": [],
+                "test_results": [{"name": "test1", "status": "passed"}],
+            },
+        }
+    )
+    res = verify_result(state)
+    assert res["verification"]["status"] == "warning"
+    assert res["verification"]["items"][2]["label"] == "file_changes"
+    assert res["verification"]["items"][2]["status"] == "warning"
+
+
+def test_verify_result_failed_with_changes():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "failure",
+                "files_changed": ["partial.py"],
+                "test_results": [],
+            },
+        }
+    )
+    res = verify_result(state)
+    # Failed worker status makes it failed overall, but check file_changes warning
+    assert res["verification"]["status"] == "failed"
+    # Find file_changes item
+    file_changes = next(i for i in res["verification"]["items"] if i["label"] == "file_changes")
+    assert file_changes["status"] == "warning"
+    assert "but changed 1 files" in file_changes["message"]

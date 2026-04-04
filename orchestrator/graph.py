@@ -17,6 +17,8 @@ from orchestrator.state import (
     ApprovalCheckpoint,
     OrchestratorState,
     RouteDecision,
+    VerificationReport,
+    VerificationReportItem,
     WorkerDispatch,
 )
 from workers import Worker, WorkerRequest, WorkerResult
@@ -32,6 +34,7 @@ ORCHESTRATOR_NODE_SEQUENCE = (
     "await_approval",
     "dispatch_job",
     "await_result",
+    "verify_result",
     "summarize_result",
     "persist_memory",
 )
@@ -601,11 +604,11 @@ def build_await_result_node(
 
 
 def _route_after_await_result(state_input: OrchestratorState) -> str:
-    """Route from await_result either to summarize_result or await_permission_escalation."""
+    """Route from await_result either to verify_result or await_permission_escalation."""
     state = _ensure_state(state_input)
     if state.result is not None and state.result.next_action_hint == "request_higher_permission":
         return "await_permission_escalation"
-    return "summarize_result"
+    return "verify_result"
 
 
 def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any]:
@@ -683,11 +686,118 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
 
 
 def _route_after_await_permission_escalation(state_input: OrchestratorState) -> str:
-    """Route back to dispatch if approved, else summarize failure."""
+    """Route back to dispatch if approved, else verify failure through verification."""
     state = _ensure_state(state_input)
     if state.result is None:
         return "dispatch_job"
-    return "summarize_result"
+    return "verify_result"
+
+
+def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
+    """Perform deterministic checks on the worker output before summarization."""
+    state = _ensure_state(state_input)
+    if state.result is None:
+        return {
+            "current_step": "verify_result",
+            "progress_updates": _progress_update(state, "verification skipped: no result"),
+        }
+
+    items: list[VerificationReportItem] = []
+
+    # 1. Worker Status
+    items.append(
+        VerificationReportItem(
+            label="worker_status",
+            status="passed" if state.result.status == "success" else "failed",
+            message=f"Worker reported status: {state.result.status}",
+        )
+    )
+
+    # 2. Test Results
+    failed_tests = [t for t in state.result.test_results if t.status in ("failed", "error")]
+    status: Literal["passed", "failed", "warning"] = "warning"
+    if state.result.test_results:
+        status = "failed" if failed_tests else "passed"
+        msg = f"{len(failed_tests)} failed" if failed_tests else "All tests passed"
+    else:
+        status = "warning"
+        msg = "No test results reported"
+    items.append(
+        VerificationReportItem(
+            label="test_results",
+            status=status,
+            message=msg,
+        )
+    )
+
+    # 3. File Changes
+    if state.result.status == "success" and not state.result.files_changed:
+        items.append(
+            VerificationReportItem(
+                label="file_changes",
+                status="warning",
+                message="Worker reported success but no files were changed.",
+            )
+        )
+    elif state.result.status != "success" and state.result.files_changed:
+        items.append(
+            VerificationReportItem(
+                label="file_changes",
+                status="warning",
+                message=(
+                    f"Worker reported {state.result.status} "
+                    f"but changed {len(state.result.files_changed)} files."
+                ),
+            )
+        )
+    else:
+        items.append(
+            VerificationReportItem(
+                label="file_changes",
+                status="passed",
+                message=f"{len(state.result.files_changed)} files changed.",
+            )
+        )
+
+    # 4. Command Audit
+    failed_commands = [c for c in state.result.commands_run if c.exit_code != 0]
+    if failed_commands:
+        items.append(
+            VerificationReportItem(
+                label="command_audit",
+                status="warning",
+                message=f"{len(failed_commands)} commands exited with non-zero status.",
+            )
+        )
+    else:
+        items.append(
+            VerificationReportItem(
+                label="command_audit",
+                status="passed",
+                message=f"All {len(state.result.commands_run)} commands exited successfully.",
+            )
+        )
+
+    # Calculate overall status
+    report_status: Literal["passed", "failed", "warning"]
+    if any(i.status == "failed" for i in items):
+        report_status = "failed"
+    elif any(i.status == "warning" for i in items):
+        report_status = "warning"
+    else:
+        report_status = "passed"
+
+    report = VerificationReport(
+        status=report_status,
+        summary=f"Verification {report_status}: {len(items)} checks run.",
+        items=items,
+    )
+
+    return {
+        "current_step": "verify_result",
+        "verification": report.model_dump(),
+        "progress_updates": _progress_update(state, f"verification {report_status}"),
+    }
 
 
 def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
@@ -749,6 +859,7 @@ def build_orchestrator_graph(
         RunnableLambda(build_await_result_node(worker)),
     )
     builder.add_node("await_permission_escalation", RunnableLambda(await_permission_escalation))
+    builder.add_node("verify_result", RunnableLambda(verify_result))
     builder.add_node("summarize_result", RunnableLambda(summarize_result))
     builder.add_node("persist_memory", RunnableLambda(persist_memory))
     builder.add_edge(START, "ingest_task")
@@ -778,7 +889,7 @@ def build_orchestrator_graph(
         RunnableLambda(_route_after_await_result),
         {
             "await_permission_escalation": "await_permission_escalation",
-            "summarize_result": "summarize_result",
+            "verify_result": "verify_result",
         },
     )
     builder.add_conditional_edges(
@@ -786,9 +897,10 @@ def build_orchestrator_graph(
         RunnableLambda(_route_after_await_permission_escalation),
         {
             "dispatch_job": "dispatch_job",
-            "summarize_result": "summarize_result",
+            "verify_result": "verify_result",
         },
     )
+    builder.add_edge("verify_result", "summarize_result")
     builder.add_edge("summarize_result", "persist_memory")
     builder.add_edge("persist_memory", END)
     return builder.compile(
