@@ -29,27 +29,24 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - Reference-analysis plan updates for persistent shell, prompt, and agent-loop sequencing. PR: [#24](https://github.com/natanayalo/code-agent/pull/24)
 - Architecture review checkpoint: align orchestrator route and dispatch state under real worker execution. PR: [#25](https://github.com/natanayalo/code-agent/pull/25)
 - T-045 Evolve sandbox to persistent container with shell sessions. PR: [#26](https://github.com/natanayalo/code-agent/pull/26)
-- T-046 Build structured system prompt module.
+- T-046 Build structured system prompt module. PR: [#28](https://github.com/natanayalo/code-agent/pull/28)
 - T-048 Add an explicit tool registry and policy-aware bash tool boundary. PR: [#32](https://github.com/natanayalo/code-agent/pull/32)
+- T-047 Shared CLI-driven multi-turn worker runtime slice (without provider wiring). PR: [#31](https://github.com/natanayalo/code-agent/pull/31)
+- T-049 Permission ladder and runtime budget ledger/enforcement slice. PR: [#33](https://github.com/natanayalo/code-agent/pull/33)
+- T-042 Baseline worker timeout/cancel envelope slice. PR: [#34](https://github.com/natanayalo/code-agent/pull/34)
+- T-044 Task submission API (`POST /tasks`, `GET /tasks/{task_id}`) and execution DB persistence slice. PR: [#35](https://github.com/natanayalo/code-agent/pull/35)
 
 ## In Progress
 
-- T-047 Implement the shared CLI-driven multi-turn worker runtime.
-- T-049 Add the permission ladder and runtime budget ledger/enforcement. Current slice adds
-  runtime-side command permission resolution, granted-permission checks, and budget-ledger
-  enforcement for tool calls, shell commands, and retries.
-- T-042 Add baseline worker timeout/cancel handling. Current slice wraps
-  `await_result` in an outer timeout/cancel envelope, resolves an orchestrator timeout from
-  the task budget, and returns structured timeout/cancel `WorkerResult` failures so the
-  graph can still summarize and persist state after a hung or cancelled worker run.
-- T-044 Run one real orchestrator-to-worker vertical slice. Current slice adds minimal
-  `POST /tasks` submission plus `GET /tasks/{task_id}` polling, restores or creates the
-  HTTP session/task scaffold, runs the orchestrator through the injected worker seam, and
-  persists task status, route metadata, worker-run metadata, and retained workspace
-  artifacts for polling by `task_id`.
+- T-044 / T-047 Wire a real provider CLI adapter into the app path. Current slice adds a
+  concrete `codex exec` adapter for the shared CLI runtime, env-driven API bootstrap for the
+  real `TaskExecutionService`, and focused adapter/bootstrap tests. Remaining work is live
+  end-to-end validation in a configured Codex CLI environment and publishing the slice.
 
 ## Next
 
+- T-049: Wire permission-required outcomes into orchestrator pause/resume instead of only surfacing them as structured worker failures.
+- T-042: Add richer run/workspace diagnostics on timeout now that execution-path persistence has landed.
 - T-055 Add the constrained verifier stage.
 - T-054 Harden sandbox execution boundary and auditability.
 - Milestone: skeptical memory, compact session state, and stable session scaffold (T-060 to T-065).
@@ -64,28 +61,10 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 - Current target order from here: T-047 shared CLI worker runtime → T-048 tool registry → T-049 permission ladder + runtime budget enforcement → T-042 outer timeout/cancel → T-044 vertical slice with a real CLI worker, HTTP submit path, and execution-path DB persistence → T-055 verifier stage → T-054 sandbox auditability/hardening → T-060..T-065 skeptical memory, compact session state, and stable scaffold persistence → T-043 structured run observability → T-070+ second worker → Telegram/webhook adapters.
 - T-045 and T-046 are now both landed in-repo: the persistent container/shell primitives exist, and the structured system prompt module exists. The remaining gap is the actual CLI-driven worker loop that uses them.
-- T-047 now has a shared CLI runtime loop in-repo plus an injectable `CodexCliWorker`
-  scaffold that provisions the workspace/container/session path and returns structured
-  results. The remaining gap is a real provider CLI adapter plus orchestrator routing onto
-  that runtime path.
-- T-048 now has a typed `execute_bash` tool registry in-repo. The prompt builder and shared
-  CLI runtime consume the same registry metadata, and the worker uses the registry's expected
-  artifacts to decide whether to collect changed-file state. T-049 remains responsible for
-  turning `required_permission` metadata into a real approval ladder and budget ledger.
-- T-049's current in-repo slice adds a command-policy layer for `execute_bash`, explicit
-  granted-permission checks at the runtime boundary, and a typed budget ledger that enforces
-  tool-call, shell-command, and retry limits. The remaining gap is wiring permission-required
-  outcomes into orchestrator pause/resume instead of only surfacing them as structured worker
-  failures.
-- T-042's current in-repo slice adds an outer orchestrator timeout/cancel envelope around
-  `await_result`, including budget-driven timeout resolution plus structured timeout/cancel
-  `WorkerResult` failures that keep the graph moving through summary/persist steps. The
-  remaining gap is richer run/workspace diagnostics once execution-path persistence lands in
-  T-044.
-- T-044's current in-repo slice adds the minimal task submission/status API plus
-  execution-path DB persistence for route metadata, worker runs, and retained workspace
-  artifacts. The remaining gap is wiring a real provider CLI adapter into the app path so
-  the HTTP flow exercises the actual multi-turn CLI worker without test-time injection.
+- T-044 / T-047 is now partially wired in-repo: the app can bootstrap the real
+  `TaskExecutionService` from env, and `CodexCliWorker` can now delegate planning turns to a
+  concrete `codex exec` adapter instead of a test-only scripted adapter. The remaining gap is
+  live validation with a configured CLI/auth environment and publishing this slice.
 - The near-term worker plan is explicitly CLI-first. New worker work should not assume full ownership of low-level raw API payload assembly when a CLI, SDK, hook, or subprocess adapter can provide the runtime.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution so the worker cannot run unbounded when exercised standalone; T-042 then adds the outer orchestrator-level timeout/cancel layer that preserves workspace/logs and surfaces timeout state without hanging the run forever.
 - T-044 DB scope remains intentionally limited to execution-path persistence for task/status lookup, worker run metadata, final result fields, verifier output, and captured artifacts needed for polling by `task_id`.

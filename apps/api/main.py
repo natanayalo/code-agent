@@ -6,17 +6,19 @@ from fastapi import FastAPI
 
 from apps.api.routes.health import router as health_router
 from apps.api.routes.tasks import router as tasks_router
+from apps.api.task_service_factory import build_task_service_from_env
 from orchestrator.execution import TaskExecutionService
 
 
 def create_app(*, task_service: TaskExecutionService | None = None) -> FastAPI:
     """Create a FastAPI app with optional task-execution dependencies."""
+    resolved_task_service = task_service or build_task_service_from_env()
     app = FastAPI(
         title="code-agent",
         version="0.1.0",
         description="Bootstrap API for the code-agent service.",
     )
-    app.state.task_service = task_service
+    app.state.task_service = resolved_task_service
     app.include_router(health_router)
     app.include_router(tasks_router)
     return app
