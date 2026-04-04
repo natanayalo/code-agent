@@ -51,7 +51,12 @@ class _ScriptedAdapter:
         self._steps = list(steps)
         self.calls: list[list[CliRuntimeMessage]] = []
 
-    def next_step(self, messages: list[CliRuntimeMessage]) -> CliRuntimeStep:
+    def next_step(
+        self,
+        messages: list[CliRuntimeMessage],
+        *,
+        working_directory: Path | None = None,
+    ) -> CliRuntimeStep:
         self.calls.append(list(messages))
         if not self._steps:
             raise AssertionError("Adapter received more turns than expected.")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import shlex
 from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal, Protocol
 
@@ -136,7 +137,12 @@ class CliRuntimeExecutionResult(CliRuntimeModel):
 class CliRuntimeAdapter(Protocol):
     """Provider-specific adapter used by the shared CLI runtime loop."""
 
-    def next_step(self, messages: Sequence[CliRuntimeMessage]) -> CliRuntimeStep:
+    def next_step(
+        self,
+        messages: Sequence[CliRuntimeMessage],
+        *,
+        working_directory: Path | None = None,
+    ) -> CliRuntimeStep:
         """Return the next tool call or final answer."""
 
 
@@ -368,6 +374,7 @@ def run_cli_runtime_loop(
     tool_registry: ToolRegistry | None = None,
     granted_permission: ToolPermissionLevel = ToolPermissionLevel.WORKSPACE_WRITE,
     clock: Callable[[], float] = perf_counter,
+    working_directory: Path | None = None,
 ) -> CliRuntimeExecutionResult:
     """Drive the provider adapter through a bounded multi-turn shell loop."""
     started_at = clock()
@@ -397,7 +404,10 @@ def run_cli_runtime_loop(
             )
 
         try:
-            step = adapter.next_step(tuple(messages))
+            step = adapter.next_step(
+                tuple(messages),
+                working_directory=working_directory,
+            )
         except Exception as exc:
             logger.exception("CLI runtime adapter failed", extra={"iteration": iteration})
             _update_budget_ledger(

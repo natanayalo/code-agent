@@ -325,6 +325,7 @@ class CodexCliWorker(Worker):
                 settings=runtime_settings,
                 tool_registry=self.tool_registry,
                 granted_permission=granted_permission,
+                working_directory=workspace.repo_path,
             )
             files_changed: list[str] = []
             if ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts:

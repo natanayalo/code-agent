@@ -73,6 +73,25 @@ Start the bootstrap API locally:
 python -m uvicorn apps.api.main:app --reload
 ```
 
+Enable the real task-submission path locally:
+
+```bash
+export DATABASE_URL="postgresql+psycopg://code_agent:<your-password>@localhost:5432/code_agent"
+export CODE_AGENT_ENABLE_TASK_SERVICE=1
+python -m uvicorn apps.api.main:app --reload
+```
+
+When `CODE_AGENT_ENABLE_TASK_SERVICE=1`, the app bootstraps the real `TaskExecutionService`
+and routes submitted tasks through `CodexCliWorker`, which shells out to the local `codex`
+CLI for bounded turn-by-turn planning. Optional adapter overrides:
+
+```bash
+export CODE_AGENT_CODEX_CLI_BIN=/path/to/codex
+export CODE_AGENT_CODEX_MODEL=gpt-5.4
+export CODE_AGENT_CODEX_PROFILE=default
+export CODE_AGENT_CODEX_TIMEOUT_SECONDS=120
+```
+
 Run the local container stack:
 
 ```bash

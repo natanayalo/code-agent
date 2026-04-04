@@ -238,6 +238,8 @@ def build_workflow_instructions_section() -> str:
             "## Workflow Instructions",
             "- Inspect relevant files before making changes.",
             "- Prefer minimal, reviewable edits over broad rewrites.",
+            "- The persistent shell already starts in the checked-out workspace repository; "
+            "treat `repo_url` as the clone source, not as a filesystem path to `cd` into.",
             "- Use the available tools with focused commands and targeted reads; avoid dumping "
             "large files or verbose output, and narrow long or truncated results with `rg`, "
             "`sed -n`, `head`, `tail`, or focused test selectors before continuing.",
