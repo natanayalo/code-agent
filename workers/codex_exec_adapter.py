@@ -74,8 +74,14 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
             "matching the provided schema."
         ),
         "Choose one of two actions:",
-        ('- {"kind":"tool_call","tool_name":"execute_bash",' '"tool_input":"<one shell command>"}'),
-        '- {"kind":"final","final_output":"<final summary for the user>"}',
+        (
+            '- {"kind":"tool_call","tool_name":"execute_bash",'
+            '"tool_input":"<one shell command>","final_output":null}'
+        ),
+        (
+            '- {"kind":"final","final_output":"<final summary for the user>",'
+            '"tool_name":null,"tool_input":null}'
+        ),
         "Rules:",
         "- Use only the `execute_bash` tool.",
         "- Request one focused shell command at a time.",
@@ -163,7 +169,13 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
             env=resolved_env,
         )
 
-    def _build_command(self, *, output_schema_path: Path, output_message_path: Path) -> list[str]:
+    def _build_command(
+        self,
+        *,
+        output_schema_path: Path,
+        output_message_path: Path,
+        working_directory: Path | None = None,
+    ) -> list[str]:
         """Build the `codex exec` argv for one adapter turn."""
         command = [
             self.executable,
@@ -179,7 +191,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
             str(output_message_path),
             "--ephemeral",
             "-C",
-            str(self.working_directory),
+            str(working_directory or self.working_directory),
         ]
         if self.model is not None:
             command.extend(["--model", self.model])
@@ -190,7 +202,12 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         command.append("-")
         return command
 
-    def next_step(self, messages: Sequence[CliRuntimeMessage]) -> CliRuntimeStep:
+    def next_step(
+        self,
+        messages: Sequence[CliRuntimeMessage],
+        *,
+        working_directory: Path | None = None,
+    ) -> CliRuntimeStep:
         """Ask the Codex CLI for the next runtime step."""
         prompt = _build_adapter_prompt(messages)
         with tempfile.TemporaryDirectory(prefix="code-agent-codex-step-") as temp_dir_name:
@@ -207,6 +224,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
                     self._build_command(
                         output_schema_path=schema_path,
                         output_message_path=output_message_path,
+                        working_directory=working_directory,
                     ),
                     input=prompt,
                     text=True,
