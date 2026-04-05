@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,27 @@ from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeStep
 
 # Use a test-specific DB
 TEST_DATABASE_URL = "sqlite:///test_vertical_slice.sqlite"
+
+
+def _run_git(command: list[str], *, cwd: Path) -> str:
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip()
+
+
+def _docker_available() -> bool:
+    docker_info = subprocess.run(
+        ["docker", "info"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return docker_info.returncode == 0
 
 
 class _ScriptedAdapter(CliRuntimeAdapter):
@@ -51,6 +73,9 @@ def session_factory():
 @pytest.mark.anyio
 async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path):
     """The full stack should ingest a task, run it in a sandbox, and persist the result."""
+    if not _docker_available():
+        pytest.skip("Docker daemon is unavailable")
+
     # 1. Setup real components with mocked turns
     adapter = _ScriptedAdapter(
         [
@@ -96,11 +121,21 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path):
     repo_path.mkdir()
     (repo_path / "README.md").write_text("# Dummy Repo", encoding="utf-8")
 
-    import subprocess
-
-    subprocess.run(["git", "init", "--initial-branch=master"], cwd=repo_path, check=True)
-    subprocess.run(["git", "add", "."], cwd=repo_path, check=True)
-    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=repo_path, check=True)
+    _run_git(["git", "init", "--initial-branch=master"], cwd=repo_path)
+    _run_git(["git", "add", "."], cwd=repo_path)
+    _run_git(
+        [
+            "git",
+            "-c",
+            "user.name=Codex",
+            "-c",
+            "user.email=codex@example.com",
+            "commit",
+            "-m",
+            "Initial commit",
+        ],
+        cwd=repo_path,
+    )
 
     task_text = "Create hello.txt in the dummy repo"
     repo_url = f"file://{repo_path.resolve()}"
