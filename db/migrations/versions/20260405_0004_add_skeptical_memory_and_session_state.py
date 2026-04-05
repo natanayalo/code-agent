@@ -1,13 +1,12 @@
 """Add skeptical memory and session state"""
 
+import sqlalchemy as sa
+from alembic import op
+
 revision = "15bca5e3069c"
 down_revision = "20260404_0003"
 branch_labels = None
 depends_on = None
-
-
-import sqlalchemy as sa
-from alembic import op
 
 
 def upgrade() -> None:
@@ -44,22 +43,34 @@ def upgrade() -> None:
         op.f("ix_session_states_session_id"), "session_states", ["session_id"], unique=True
     )
     op.add_column("memory_personal", sa.Column("source", sa.String(length=255), nullable=True))
-    op.add_column("memory_personal", sa.Column("confidence", sa.Float(), nullable=False))
+    op.add_column(
+        "memory_personal",
+        sa.Column("confidence", sa.Float(), server_default=sa.text("1.0"), nullable=False),
+    )
     op.add_column("memory_personal", sa.Column("scope", sa.String(length=255), nullable=True))
     op.add_column(
         "memory_personal", sa.Column("last_verified_at", sa.DateTime(timezone=True), nullable=True)
     )
     op.add_column(
-        "memory_personal", sa.Column("requires_verification", sa.Boolean(), nullable=False)
+        "memory_personal",
+        sa.Column(
+            "requires_verification", sa.Boolean(), server_default=sa.text("true"), nullable=False
+        ),
     )
     op.add_column("memory_project", sa.Column("source", sa.String(length=255), nullable=True))
-    op.add_column("memory_project", sa.Column("confidence", sa.Float(), nullable=False))
+    op.add_column(
+        "memory_project",
+        sa.Column("confidence", sa.Float(), server_default=sa.text("1.0"), nullable=False),
+    )
     op.add_column("memory_project", sa.Column("scope", sa.String(length=255), nullable=True))
     op.add_column(
         "memory_project", sa.Column("last_verified_at", sa.DateTime(timezone=True), nullable=True)
     )
     op.add_column(
-        "memory_project", sa.Column("requires_verification", sa.Boolean(), nullable=False)
+        "memory_project",
+        sa.Column(
+            "requires_verification", sa.Boolean(), server_default=sa.text("true"), nullable=False
+        ),
     )
     op.add_column("worker_runs", sa.Column("files_changed", sa.JSON(), nullable=True))
     # ### end Alembic commands ###
