@@ -24,6 +24,7 @@ dev = [
     "psycopg[binary]>=3.2,<4.0",
     "PyYAML>=6.0,<7.0",
     "pytest>=8.4,<10.0",
+    "pytest-asyncio>=0.24,<1.0",
     "pytest-cov>=7.0,<8.0",
 ]
 

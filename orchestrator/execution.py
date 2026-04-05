@@ -85,8 +85,11 @@ class WorkerRunSnapshot(ExecutionModel):
     started_at: datetime
     finished_at: datetime | None = None
     summary: str | None = None
+    requested_permission: str | None = None
     commands_run: list[dict[str, Any]] = Field(default_factory=list)
     files_changed_count: int = 0
+    budget_usage: dict[str, Any] | None = None
+    verifier_outcome: dict[str, Any] | None = None
     artifact_index: list[dict[str, Any]] = Field(default_factory=list)
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
 
@@ -283,8 +286,11 @@ class TaskExecutionService:
                     started_at=latest_run.started_at,
                     finished_at=latest_run.finished_at,
                     summary=latest_run.summary,
+                    requested_permission=latest_run.requested_permission,
                     commands_run=list(latest_run.commands_run or []),
                     files_changed_count=latest_run.files_changed_count,
+                    budget_usage=latest_run.budget_usage or {},
+                    verifier_outcome=latest_run.verifier_outcome,
                     artifact_index=list(latest_run.artifact_index or []),
                     artifacts=[
                         ArtifactSnapshot(
@@ -507,17 +513,24 @@ class TaskExecutionService:
             artifact_index = [artifact.model_dump(mode="json") for artifact in artifacts]
             worker_run = worker_run_repo.create(
                 task_id=task_id,
+                session_id=state.session.session_id if state.session else None,
                 worker_type=state.dispatch.worker_type,
                 workspace_id=_workspace_id_from_artifacts(artifacts),
                 started_at=started_at,
                 finished_at=finished_at,
                 status=_worker_run_status_from_result(state),
                 summary=result.summary if result is not None else "Worker did not return a result.",
+                requested_permission=result.requested_permission if result is not None else None,
                 commands_run=[
                     command.model_dump(mode="json")
                     for command in (result.commands_run if result is not None else [])
                 ],
                 files_changed_count=len(result.files_changed) if result is not None else 0,
+                files_changed=result.files_changed if result is not None else [],
+                budget_usage=result.budget_usage if result is not None else {},
+                verifier_outcome=state.verification.model_dump(mode="json")
+                if state.verification
+                else None,
                 artifact_index=artifact_index,
             )
 
@@ -548,7 +561,11 @@ class TaskExecutionService:
                 if latest_run and latest_run.finished_at is not None
                 else None,
                 "final_status": task_snapshot.status,
+                "requested_permission": latest_run.requested_permission if latest_run else None,
+                "budget_usage": latest_run.budget_usage if latest_run else {},
+                "verifier_outcome": latest_run.verifier_outcome if latest_run else None,
                 "changed_files_count": latest_run.files_changed_count if latest_run else 0,
+                "commands_run": latest_run.commands_run if latest_run else [],
                 "artifact_list": [
                     {
                         "name": artifact.name,

@@ -34,6 +34,7 @@ class WorkerCommand(WorkerModel):
     command: str
     exit_code: int | None = None
     duration_seconds: float | None = Field(default=None, ge=0)
+    output_artifact_uri: str | None = None
 
 
 class TestResult(WorkerModel):
@@ -62,6 +63,7 @@ class WorkerResult(WorkerModel):
     files_changed: list[str] = Field(default_factory=list)
     test_results: list[TestResult] = Field(default_factory=list)
     artifacts: list[ArtifactReference] = Field(default_factory=list)
+    budget_usage: dict[str, Any] = Field(default_factory=dict)
     next_action_hint: str | None = None
 
 

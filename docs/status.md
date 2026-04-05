@@ -46,7 +46,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Next
 - Milestone: skeptical memory, compact session state, and stable session scaffold (T-060 to T-065).
-- Milestone: structured run observability and second worker routing (T-043, T-070+) after the vertical slice, verifier, and memory loop are stable.
+- Milestone: Second Worker Integration (T-070+).
 - Milestone: Telegram ingress (T-050 to T-053) after the core execution path is stable.
 
 ## Blocked
@@ -55,7 +55,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: T-047 shared CLI worker runtime → T-048 tool registry → T-049 permission ladder + runtime budget enforcement → T-042 outer timeout/cancel → T-044 vertical slice with a real CLI worker, HTTP submit path, and execution-path DB persistence → T-055 verifier stage → T-054 sandbox auditability/hardening → T-060..T-065 skeptical memory, compact session state, and stable scaffold persistence → T-043 structured run observability → T-070+ second worker → Telegram/webhook adapters.
+- Current target order from here: T-060..T-065 skeptical memory, compact session state, and stable scaffold persistence → T-070+ second worker → Telegram/webhook adapters.
 - T-045 and T-046 are now both landed in-repo: the persistent container/shell primitives exist, and the structured system prompt module exists. The remaining gap is the actual CLI-driven worker loop that uses them.
 - T-044 / T-047 is now partially wired in-repo: the app can bootstrap the real
   `TaskExecutionService` from env, and `CodexCliWorker` can now delegate planning turns to a

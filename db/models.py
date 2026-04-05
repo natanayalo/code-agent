@@ -5,7 +5,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -66,6 +76,7 @@ class Session(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     user: Mapped[User] = relationship(back_populates="sessions")
     tasks: Mapped[list[Task]] = relationship(back_populates="session")
+    session_state: Mapped[SessionState | None] = relationship(back_populates="session")
 
     @validates("status")
     def _coerce_status(self, _key: str, value: SessionStatus | str) -> SessionStatus:
@@ -128,14 +139,19 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
         nullable=False,
         index=True,
     )
+    session_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     worker_type: Mapped[WorkerType] = mapped_column(WORKER_TYPE_ENUM, nullable=False)
     workspace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[WorkerRunStatus] = mapped_column(WORKER_RUN_STATUS_ENUM, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_permission: Mapped[str | None] = mapped_column(String(255), nullable=True)
     commands_run: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     files_changed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    files_changed: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    budget_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    verifier_outcome: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     artifact_index: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
 
     task: Mapped[Task] = relationship(back_populates="worker_runs")
@@ -202,6 +218,15 @@ class PersonalMemory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     memory_key: Mapped[str] = mapped_column(String(255), nullable=False)
     value: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
+    # Skepticism metadata (T-060)
+    source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    scope: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    requires_verification: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
     user: Mapped[User] = relationship(back_populates="personal_memories")
 
 
@@ -216,3 +241,31 @@ class ProjectMemory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     repo_url: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
     memory_key: Mapped[str] = mapped_column(String(255), nullable=False)
     value: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+
+    # Skepticism metadata (T-060)
+    source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    scope: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    requires_verification: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class SessionState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Compact session working state (T-061)."""
+
+    __tablename__ = "session_states"
+
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    active_goal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decisions_made: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    identified_risks: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    files_touched: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+
+    session: Mapped[Session] = relationship(back_populates="session_state")

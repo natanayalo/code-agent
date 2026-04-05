@@ -17,6 +17,7 @@ from orchestrator.state import (
     ApprovalCheckpoint,
     OrchestratorState,
     RouteDecision,
+    SessionStateUpdate,
     VerificationReport,
     VerificationReportItem,
     WorkerDispatch,
@@ -821,16 +822,25 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
     else:
         result = state.result
 
+    # Extract session state update (T-062)
+    session_state_update = SessionStateUpdate(
+        active_goal=state.task.task_text,
+        files_touched=result.files_changed,
+        # TODO: extract decisions_made and identified_risks from result.summary or a dedicated field
+    )
+
     return {
         "current_step": "summarize_result",
         "result": result.model_dump(),
-        "progress_updates": _progress_update(state, "result summarized"),
+        "session_state_update": session_state_update.model_dump(),
+        "progress_updates": _progress_update(state, "result summarized and session state updated"),
     }
 
 
 def persist_memory(state_input: OrchestratorState) -> dict[str, Any]:
     """Terminate the happy path without yet writing memory anywhere."""
     state = _ensure_state(state_input)
+    # Placeholder for skeptical memory update
     return {
         "current_step": "persist_memory",
         "memory_to_persist": [entry.model_dump() for entry in state.memory_to_persist],

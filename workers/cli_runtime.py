@@ -592,11 +592,16 @@ def run_cli_runtime_loop(
             )
 
         budget_ledger.shell_commands_used += 1
+        output_artifact_uri = next(
+            (a.uri for a in shell_result.artifacts if a.artifact_type == "log"),
+            None,
+        )
         commands_run.append(
             WorkerCommand(
                 command=command,
                 exit_code=shell_result.exit_code,
                 duration_seconds=shell_result.duration_seconds,
+                output_artifact_uri=output_artifact_uri,
             )
         )
         if shell_result.exit_code == 0:
