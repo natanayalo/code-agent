@@ -290,10 +290,10 @@ class TaskExecutionService:
                     finished_at=latest_run.finished_at,
                     summary=latest_run.summary,
                     requested_permission=latest_run.requested_permission,
-                    budget_usage=dict(latest_run.budget_usage or {})
+                    budget_usage=dict(latest_run.budget_usage)
                     if latest_run.budget_usage is not None
                     else None,
-                    verifier_outcome=dict(latest_run.verifier_outcome or {})
+                    verifier_outcome=dict(latest_run.verifier_outcome)
                     if latest_run.verifier_outcome is not None
                     else None,
                     commands_run=list(latest_run.commands_run or []),
