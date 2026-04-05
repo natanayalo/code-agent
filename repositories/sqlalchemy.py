@@ -171,13 +171,11 @@ class SessionStateRepository:
         if active_goal is not None:
             state.active_goal = active_goal
         if decisions_made is not None:
-            state.decisions_made = {**(state.decisions_made or {}), **decisions_made}
+            state.decisions_made = {**state.decisions_made, **decisions_made}
         if identified_risks is not None:
-            state.identified_risks = {**(state.identified_risks or {}), **identified_risks}
+            state.identified_risks = {**state.identified_risks, **identified_risks}
         if files_touched is not None:
-            state.files_touched = list(
-                dict.fromkeys([*(state.files_touched or []), *files_touched])
-            )
+            state.files_touched = list(dict.fromkeys([*state.files_touched, *files_touched]))
         self.session.flush()
 
         return state
