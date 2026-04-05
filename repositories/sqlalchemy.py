@@ -161,20 +161,23 @@ class SessionStateRepository:
                 with self.session.begin_nested():
                     self.session.add(state)
                     self.session.flush()
+                return state
             except IntegrityError:
                 state = self.get(session_id)
                 if state is None:
                     raise
-        else:
-            if active_goal is not None:
-                state.active_goal = active_goal
-            if decisions_made is not None:
-                state.decisions_made = decisions_made
-            if identified_risks is not None:
-                state.identified_risks = identified_risks
-            if files_touched is not None:
-                state.files_touched = files_touched
-            self.session.flush()
+
+        # Update either the existing or concurrently-inserted state
+        if active_goal is not None:
+            state.active_goal = active_goal
+        if decisions_made is not None:
+            state.decisions_made = decisions_made
+        if identified_risks is not None:
+            state.identified_risks = identified_risks
+        if files_touched is not None:
+            state.files_touched = files_touched
+        self.session.flush()
+
         return state
 
 
