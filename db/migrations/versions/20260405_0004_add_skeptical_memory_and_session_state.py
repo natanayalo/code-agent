@@ -15,9 +15,24 @@ def upgrade() -> None:
         "session_states",
         sa.Column("session_id", sa.String(length=36), nullable=False),
         sa.Column("active_goal", sa.Text(), nullable=True),
-        sa.Column("decisions_made", sa.JSON(), nullable=False),
-        sa.Column("identified_risks", sa.JSON(), nullable=False),
-        sa.Column("files_touched", sa.JSON(), nullable=False),
+        sa.Column(
+            "decisions_made",
+            sa.JSON(),
+            nullable=False,
+            server_default=sa.text("'{}'"),
+        ),
+        sa.Column(
+            "identified_risks",
+            sa.JSON(),
+            nullable=False,
+            server_default=sa.text("'{}'"),
+        ),
+        sa.Column(
+            "files_touched",
+            sa.JSON(),
+            nullable=False,
+            server_default=sa.text("'[]'"),
+        ),
         sa.Column("id", sa.String(length=36), nullable=False),
         sa.Column(
             "created_at",
