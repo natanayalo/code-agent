@@ -426,15 +426,6 @@ class PersonalMemoryRepository:
                 user_id=user_id,
                 memory_key=memory_key,
                 value=value,
-                source=None if source is _UNSET else cast(str | None, source),
-                confidence=1.0 if confidence is _UNSET else cast(float, confidence),
-                scope=None if scope is _UNSET else cast(str | None, scope),
-                last_verified_at=(
-                    None if last_verified_at is _UNSET else cast(datetime | None, last_verified_at)
-                ),
-                requires_verification=(
-                    True if requires_verification is _UNSET else cast(bool, requires_verification)
-                ),
             )
             try:
                 with self.session.begin_nested():
@@ -501,15 +492,6 @@ class ProjectMemoryRepository:
                 repo_url=repo_url,
                 memory_key=memory_key,
                 value=value,
-                source=None if source is _UNSET else cast(str | None, source),
-                confidence=1.0 if confidence is _UNSET else cast(float, confidence),
-                scope=None if scope is _UNSET else cast(str | None, scope),
-                last_verified_at=(
-                    None if last_verified_at is _UNSET else cast(datetime | None, last_verified_at)
-                ),
-                requires_verification=(
-                    True if requires_verification is _UNSET else cast(bool, requires_verification)
-                ),
             )
             try:
                 with self.session.begin_nested():
