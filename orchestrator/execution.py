@@ -27,6 +27,7 @@ from orchestrator.state import OrchestratorState, SessionRef
 from repositories import (
     ArtifactRepository,
     SessionRepository,
+    SessionStateRepository,
     TaskRepository,
     UserRepository,
     WorkerRunRepository,
@@ -521,6 +522,13 @@ class TaskExecutionService:
                 files_changed=result.files_changed if result is not None else [],
                 artifact_index=artifact_index,
             )
+
+            if state.session is not None and state.session_state_update is not None:
+                session_state_repo = SessionStateRepository(session)
+                session_state_repo.upsert(
+                    session_id=state.session.session_id,
+                    **state.session_state_update.model_dump(exclude_none=True),
+                )
 
             for artifact in artifacts:
                 artifact_type = _artifact_type_for_persistence(artifact)
