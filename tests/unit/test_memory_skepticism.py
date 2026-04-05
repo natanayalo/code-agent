@@ -68,6 +68,39 @@ def test_personal_memory_skepticism_metadata(session):
     assert memory_updated.requires_verification is True
 
 
+def test_personal_memory_upsert_preserves_metadata_when_omitted(session):
+    """Personal memory updates should not reset metadata when args are omitted."""
+    user_repo = UserRepository(session)
+    user = user_repo.create(external_user_id="user_omitted")
+
+    memory_repo = PersonalMemoryRepository(session)
+    now = datetime.now(UTC)
+
+    memory_repo.upsert(
+        user_id=user.id,
+        memory_key="editor",
+        value={"theme": "dark"},
+        source="user_instruction",
+        confidence=0.7,
+        scope="global",
+        last_verified_at=now,
+        requires_verification=False,
+    )
+
+    memory_updated = memory_repo.upsert(
+        user_id=user.id,
+        memory_key="editor",
+        value={"theme": "light"},
+    )
+
+    assert memory_updated.value == {"theme": "light"}
+    assert memory_updated.source == "user_instruction"
+    assert memory_updated.confidence == 0.7
+    assert memory_updated.scope == "global"
+    assert memory_updated.last_verified_at == now.replace(tzinfo=None)
+    assert memory_updated.requires_verification is False
+
+
 def test_project_memory_skepticism_metadata(session):
     """Project memory should store and retrieve skepticism metadata."""
     memory_repo = ProjectMemoryRepository(session)
@@ -84,6 +117,36 @@ def test_project_memory_skepticism_metadata(session):
     assert memory.source == "repo_analysis"
     assert memory.confidence == 0.8
     assert memory.requires_verification is True  # Default
+
+
+def test_project_memory_upsert_preserves_metadata_when_omitted(session):
+    """Project memory updates should not reset metadata when args are omitted."""
+    memory_repo = ProjectMemoryRepository(session)
+    now = datetime.now(UTC)
+
+    memory_repo.upsert(
+        repo_url="https://github.com/org/repo",
+        memory_key="build_cmd",
+        value={"cmd": "make build"},
+        source="repo_analysis",
+        confidence=0.8,
+        scope="repo",
+        last_verified_at=now,
+        requires_verification=False,
+    )
+
+    memory_updated = memory_repo.upsert(
+        repo_url="https://github.com/org/repo",
+        memory_key="build_cmd",
+        value={"cmd": "make test"},
+    )
+
+    assert memory_updated.value == {"cmd": "make test"}
+    assert memory_updated.source == "repo_analysis"
+    assert memory_updated.confidence == 0.8
+    assert memory_updated.scope == "repo"
+    assert memory_updated.last_verified_at == now.replace(tzinfo=None)
+    assert memory_updated.requires_verification is False
 
 
 def test_session_state_repository_upsert_and_get(session):

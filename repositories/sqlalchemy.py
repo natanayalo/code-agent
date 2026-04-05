@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -22,6 +22,8 @@ from db.models import (
 from db.models import (
     Session as ConversationSession,
 )
+
+_UNSET: Final = object()
 
 
 class UserRepository:
@@ -53,20 +55,25 @@ def _apply_memory_metadata(
     memory_entry: PersonalMemory | ProjectMemory,
     *,
     value: dict[str, Any],
-    source: str | None,
-    confidence: float,
-    scope: str | None,
-    last_verified_at: datetime | None,
-    requires_verification: bool,
+    source: str | None | object = _UNSET,
+    confidence: float | object = _UNSET,
+    scope: str | None | object = _UNSET,
+    last_verified_at: datetime | None | object = _UNSET,
+    requires_verification: bool | object = _UNSET,
 ) -> None:
     """Apply the shared skeptical-memory metadata fields to a memory entry."""
 
     memory_entry.value = value
-    memory_entry.source = source
-    memory_entry.confidence = confidence
-    memory_entry.scope = scope
-    memory_entry.last_verified_at = last_verified_at
-    memory_entry.requires_verification = requires_verification
+    if source is not _UNSET:
+        memory_entry.source = cast(str | None, source)
+    if confidence is not _UNSET:
+        memory_entry.confidence = cast(float, confidence)
+    if scope is not _UNSET:
+        memory_entry.scope = cast(str | None, scope)
+    if last_verified_at is not _UNSET:
+        memory_entry.last_verified_at = cast(datetime | None, last_verified_at)
+    if requires_verification is not _UNSET:
+        memory_entry.requires_verification = cast(bool, requires_verification)
 
 
 class SessionRepository:
@@ -405,11 +412,11 @@ class PersonalMemoryRepository:
         user_id: str,
         memory_key: str,
         value: dict[str, Any],
-        source: str | None = None,
-        confidence: float = 1.0,
-        scope: str | None = None,
-        last_verified_at: datetime | None = None,
-        requires_verification: bool = True,
+        source: str | None | object = _UNSET,
+        confidence: float | object = _UNSET,
+        scope: str | None | object = _UNSET,
+        last_verified_at: datetime | None | object = _UNSET,
+        requires_verification: bool | object = _UNSET,
     ) -> PersonalMemory:
         memory_entry = self.get(user_id=user_id, memory_key=memory_key)
         if memory_entry is None:
@@ -417,11 +424,15 @@ class PersonalMemoryRepository:
                 user_id=user_id,
                 memory_key=memory_key,
                 value=value,
-                source=source,
-                confidence=confidence,
-                scope=scope,
-                last_verified_at=last_verified_at,
-                requires_verification=requires_verification,
+                source=None if source is _UNSET else cast(str | None, source),
+                confidence=1.0 if confidence is _UNSET else cast(float, confidence),
+                scope=None if scope is _UNSET else cast(str | None, scope),
+                last_verified_at=(
+                    None if last_verified_at is _UNSET else cast(datetime | None, last_verified_at)
+                ),
+                requires_verification=(
+                    True if requires_verification is _UNSET else cast(bool, requires_verification)
+                ),
             )
             try:
                 with self.session.begin_nested():
@@ -476,11 +487,11 @@ class ProjectMemoryRepository:
         repo_url: str,
         memory_key: str,
         value: dict[str, Any],
-        source: str | None = None,
-        confidence: float = 1.0,
-        scope: str | None = None,
-        last_verified_at: datetime | None = None,
-        requires_verification: bool = True,
+        source: str | None | object = _UNSET,
+        confidence: float | object = _UNSET,
+        scope: str | None | object = _UNSET,
+        last_verified_at: datetime | None | object = _UNSET,
+        requires_verification: bool | object = _UNSET,
     ) -> ProjectMemory:
         memory_entry = self.get(repo_url=repo_url, memory_key=memory_key)
         if memory_entry is None:
@@ -488,11 +499,15 @@ class ProjectMemoryRepository:
                 repo_url=repo_url,
                 memory_key=memory_key,
                 value=value,
-                source=source,
-                confidence=confidence,
-                scope=scope,
-                last_verified_at=last_verified_at,
-                requires_verification=requires_verification,
+                source=None if source is _UNSET else cast(str | None, source),
+                confidence=1.0 if confidence is _UNSET else cast(float, confidence),
+                scope=None if scope is _UNSET else cast(str | None, scope),
+                last_verified_at=(
+                    None if last_verified_at is _UNSET else cast(datetime | None, last_verified_at)
+                ),
+                requires_verification=(
+                    True if requires_verification is _UNSET else cast(bool, requires_verification)
+                ),
             )
             try:
                 with self.session.begin_nested():
