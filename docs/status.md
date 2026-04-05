@@ -38,17 +38,17 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-049 Wire permission-required outcomes into orchestrator pause/resume. PR: [#37](https://github.com/natanayalo/code-agent/pull/37)
 - T-042 Orchestrator Timeout Diagnostics: extract partial execution results and workspace artifacts after worker cancellation. (Local verification complete)
 - T-055 Add the constrained verifier stage. PR: [#38](https://github.com/natanayalo/code-agent/pull/38)
-- T-054 Harden sandbox execution boundary and auditability. (Verified with SecretRedactor, PathPolicy, and shared audit integration)
-- Milestone 8: Skeptical memory, compact session state, and stable session scaffold (T-060 to T-065). (Verified with schema metadata and SessionState repository)
+- Milestone 6: Sandbox hardening (T-054/T-055). Verified with strict path policies, secret redaction, and complete audit capture.
+- Milestone 7: Skeptical memory, compact session state, and stable session scaffold (T-060 to T-065). Verified with schema metadata and SessionState repository.
 
 ## In Progress
 
 - None
 
 ## Next
-- Milestone: structured run observability (T-043).
-- Milestone: second worker routing and Claude adapter (T-070+).
-- Milestone: Telegram ingress (T-050 to T-053).
+- Milestone 8: structured run observability (T-043).
+- Milestone 9: second worker routing and Claude adapter (T-070+).
+- Milestone 10: Telegram ingress (T-050 to T-053).
 
 ## Blocked
 
@@ -56,13 +56,13 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: Milestone 9 (T-043 structured run observability) → Milestone 10 (T-070+ second worker) → Milestone 6 (Telegram/webhook adapters).
+- Current target order from here: Milestone 8 (T-043 structured run observability) → Milestone 9 (T-070+ second worker) → Milestone 10 (Telegram/webhook adapters).
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.
 - T-055 (Verifier) performs deterministic checks on worker output, including test results and command audit logs, before final summarization.
 - T-054 (Sandbox Hardening) ensures strict path policies, secret redaction, and complete audit artifact capture for all sandbox executions.
-- Milestone 8 (Memory Integration) adds skepticism metadata (provenance, confidence) to all memory entries and maintains a compact `SessionState` for cross-task goal and risk tracking.
+- Milestone 7 (Memory Integration) adds skepticism metadata (provenance, confidence) to all memory entries and maintains a compact `SessionState` for cross-task goal and risk tracking.
 - The near-term worker plan is explicitly CLI-first. New worker work should not assume full ownership of low-level raw API payload assembly when a CLI, SDK, hook, or subprocess adapter can provide the runtime.
 - T-044 DB scope remains intentionally limited to execution-path persistence for task/status lookup, worker run metadata, final result fields, verifier output, and captured artifacts needed for polling by `task_id`.
 - The original `CodexWorker` remains in the repo as a sandboxed toy executor for contract/proof-of-path testing, but is superseded by `CodexCliWorker` for real tasks.

@@ -195,7 +195,7 @@ Project memory:
 - architecture notes
 - known pitfalls
 
-**Skeletal Skepticism (T-060)**: 
+**Skeletal Skepticism (T-060)**:
 Memory is treated as a high-confidence "hint" rather than ground truth. Each entry must store:
 - `source`: where the memory came from
 - `confidence`: 0.0 to 1.0 score
@@ -253,13 +253,13 @@ Before merging:
 ## Priorities
 
 Priority order:
-1. [DONE] T-032 artifact capture baseline
-2. [DONE] T-040/T-041 first worker interface + implementation
-3. [DONE] T-042 + Vertical Slice E2E milestone (timeout-safe real curl → HTTP submit → orchestrator → worker → workspace → DB → task_id/status)
-4. [DONE] Sandbox hardening milestone (isolated execution + artifact capture + enforced destructive-action approval gate)
-5. [DONE] Memory integration milestone (load_memory → execute → persist_learnings with structured, inspectable records)
-6. T-043 structured run observability + T-070+ second worker and routing
-7. Telegram ingress milestone (single `/task` command through real flow)
+1. [DONE] Milestone 3: Artifact capture baseline (T-032)
+2. [DONE] Milestone 4: First worker interface + implementation (T-040/T-041)
+3. [DONE] Milestone 5: Vertical Slice E2E milestone (T-042 + T-044)
+4. [DONE] Milestone 6: Sandbox hardening milestone (T-054/T-055)
+5. [DONE] Milestone 7: Memory integration milestone (T-060 to T-065)
+6. Milestone 8: Structured run observability (T-043) + Milestone 9: Second worker and routing (T-070+)
+7. Milestone 10: Telegram ingress milestone (T-050 to T-053)
 
 ## Code style
 

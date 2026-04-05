@@ -13,15 +13,15 @@ The repo currently contains:
 - agent development rules plus triggerable repo skills in `.agents/`
 - architecture and planning docs in `docs/`
 - live progress tracking in `docs/status.md`
-- a FastAPI bootstrap app with a functional `TaskExecutionService` for Milestone 5/7
+- a FastAPI bootstrap app with a functional `TaskExecutionService` for Milestone 5
 - a local Docker Compose stack for `api` + `postgres`
-- SQLAlchemy models and Alembic migrations for users, sessions, tasks, runs, artifacts, and skeptical memory (Milestone 8)
+- SQLAlchemy models and Alembic migrations for users, sessions, tasks, runs, artifacts, and skeptical memory (Milestone 7)
 - a LangGraph orchestrator that executes the full vertical slice (Ingest -> Graph -> Worker -> Sandbox -> DB)
 - sandbox command artifact capture and shared audit integration
 - a production-class `CodexCliWorker` that provisions a persistent sandbox container, manages shell sessions, and uses a real provider CLI adapter
 - an explicit typed tool registry with policy-aware bash tools and budget enforcement
-- **Skeptical Memory (Milestone 8)**: structured memory entries with provenance, confidence, and verification metadata
-- **Compact Session State (Milestone 8)**: persistent context (goals, decisions, risks) across multiple task iterations
+- **Skeptical Memory (Milestone 7)**: structured memory entries with provenance, confidence, and verification metadata
+- **Compact Session State (Milestone 7)**: persistent context (goals, decisions, risks) across multiple task iterations
 
 This slice intentionally does not include:
 - Telegram or webhook task handle-off
@@ -157,6 +157,6 @@ The repo includes:
 ## Next Steps
 
 The current implementation targets are:
-- **Milestone 9**: Structured run observability and diagnostic logging (T-043)
-- **Milestone 10**: Second worker integration (Claude) and routing improvements (T-070+)
-- **Milestone 6**: Telegram and webhook adapter ingress (T-050 to T-053)
+- **Milestone 8**: Structured run observability and diagnostic logging (T-043)
+- **Milestone 9**: Second worker integration (Claude) and routing improvements (T-070+)
+- **Milestone 10**: Telegram and webhook adapter ingress (T-050 to T-053)
