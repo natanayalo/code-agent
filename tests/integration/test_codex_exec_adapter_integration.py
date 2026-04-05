@@ -44,7 +44,12 @@ prompt = sys.stdin.read()
 if args.output_last_message:
     output_path = Path(args.output_last_message)
     # We always return a success tool-call if not instructed otherwise
-    response = {"kind": "tool_call", "tool_name": "execute_bash", "tool_input": "pwd", "final_output": None}
+    response = {
+        "kind": "tool_call",
+        "tool_name": "execute_bash",
+        "tool_input": "pwd",
+        "final_output": None,
+    }
     output_path.write_text(json.dumps(response), encoding="utf-8")
 
 sys.exit(0)
