@@ -98,7 +98,7 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path):
         def execute(self, command, **kwargs):
             if command == "git status --porcelain=v1 -z --untracked-files=all":
                 return DockerShellCommandResult(
-                    command=command, output=" M hello.txt\0", exit_code=0, duration_seconds=0.1
+                    command=command, output="?? hello.txt\0", exit_code=0, duration_seconds=0.1
                 )
             return self._real.execute(command, **kwargs)
 
