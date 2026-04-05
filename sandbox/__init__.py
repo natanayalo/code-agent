@@ -6,15 +6,18 @@ from sandbox.container import (
     DockerSandboxContainerManager,
     DockerSandboxContainerRequest,
 )
+from sandbox.policy import PathPolicy
+from sandbox.redact import SecretRedactor
 from sandbox.runner import (
     DockerSandboxCommand,
     DockerSandboxResult,
     DockerSandboxRunner,
     DockerSandboxRunnerError,
-    SandboxArtifact,
 )
 from sandbox.session import DockerShellCommandResult, DockerShellSession, DockerShellSessionError
 from sandbox.workspace import (
+    SandboxArtifact,
+    SandboxModel,
     WorkspaceCleanupPolicy,
     WorkspaceHandle,
     WorkspaceManager,
@@ -27,6 +30,8 @@ __all__ = [
     "DockerSandboxContainerError",
     "DockerSandboxContainerManager",
     "DockerSandboxContainerRequest",
+    "PathPolicy",
+    "SecretRedactor",
     "DockerSandboxCommand",
     "DockerSandboxResult",
     "DockerSandboxRunner",
@@ -35,6 +40,7 @@ __all__ = [
     "DockerShellSession",
     "DockerShellSessionError",
     "SandboxArtifact",
+    "SandboxModel",
     "WorkspaceCleanupPolicy",
     "WorkspaceHandle",
     "WorkspaceManager",

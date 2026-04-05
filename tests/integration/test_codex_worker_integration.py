@@ -8,7 +8,12 @@ import subprocess
 from pathlib import Path
 
 from orchestrator import OrchestratorState, build_orchestrator_graph
-from sandbox import DockerSandboxRunner, WorkspaceCleanupPolicy, WorkspaceManager
+from sandbox import (
+    DockerSandboxRunner,
+    SecretRedactor,
+    WorkspaceCleanupPolicy,
+    WorkspaceManager,
+)
 from workers import CodexWorker, WorkerRequest
 
 
@@ -60,7 +65,7 @@ def test_codex_worker_runs_real_workspace_and_graph_path(tmp_path: Path) -> None
     captured_command: list[str] = []
 
     def fake_docker_command_runner(
-        command: list[str], *, timeout: int
+        command: list[str], *, timeout: int, redactor: SecretRedactor | None = None
     ) -> subprocess.CompletedProcess[str]:
         assert timeout == 300
         captured_command[:] = command
@@ -153,7 +158,7 @@ def test_codex_worker_honors_delete_on_success_cleanup_policy(tmp_path: Path) ->
     source_repo = _create_local_repo(tmp_path)
 
     def fake_docker_command_runner(
-        command: list[str], *, timeout: int
+        command: list[str], *, timeout: int, redactor: SecretRedactor | None = None
     ) -> subprocess.CompletedProcess[str]:
         assert timeout == 300
         workspace_path = _workspace_path_from_docker_command(command)
