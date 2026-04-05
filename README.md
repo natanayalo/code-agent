@@ -13,35 +13,20 @@ The repo currently contains:
 - agent development rules plus triggerable repo skills in `.agents/`
 - architecture and planning docs in `docs/`
 - live progress tracking in `docs/status.md`
-- a minimal FastAPI bootstrap app for Milestone 0
-- local `/health` and `/ready` endpoints for service verification
+- a FastAPI bootstrap app with a functional `TaskExecutionService` for Milestone 5
 - a local Docker Compose stack for `api` + `postgres`
-- initial SQLAlchemy models and Alembic migration scaffolding for Milestone 1
-- an initial repository layer for users, sessions, tasks, runs, and memory
-- a typed orchestrator state schema for future workflow execution
-- a LangGraph workflow skeleton that runs the happy path through the shared async worker contract
-- SQLite-backed checkpoint persistence helpers for durable LangGraph workflow resume
-- sandbox command artifact capture for stdout/stderr logs, changed-file snapshots, and
-  diff summaries
-- an initial `CodexWorker` that provisions a real workspace, runs a deterministic toy repo
-  task in the sandbox, and returns a contract-compliant `WorkerResult` through the shared
-  async worker interface
-- a shared CLI runtime loop with bounded iterations, timeout-aware shell execution, and
-  structured shell observations for future multi-turn workers
-- an injectable `CodexCliWorker` scaffold that provisions a persistent sandbox container and
-  shell session, builds the structured system prompt, and returns contract-compliant
-  `WorkerResult` data through the shared worker interface
-- an explicit typed tool registry with a first `execute_bash` definition shared by prompt
-  construction, runtime enforcement, and worker artifact expectations
-- a runtime-side permission ladder and budget ledger baseline for CLI worker loops, including
-  command-level permission checks plus tracked tool-call, shell-command, and retry limits
+- SQLAlchemy models and Alembic migrations for users, sessions, tasks, runs, artifacts, and skeptical memory (Milestone 7)
+- a LangGraph orchestrator that executes the full vertical slice (Ingest -> Graph -> Worker -> Sandbox -> DB)
+- sandbox command artifact capture and shared audit integration
+- a production-class `CodexCliWorker` that provisions a persistent sandbox container, manages shell sessions, and uses a real provider CLI adapter
+- an explicit typed tool registry with policy-aware bash tools and budget enforcement
+- **Skeptical Memory (Milestone 7)**: structured memory entries with provenance, confidence, and verification metadata
+- **Compact Session State (Milestone 7)**: persistent context (goals, decisions, risks) across multiple task iterations
 
 This slice intentionally does not include:
-- app DB wiring
-- app-layer real worker dispatch wiring
-- worker-result persistence to the DB or reply layer
-- Telegram or webhook task handling
-- a real provider CLI subprocess adapter wired into the new shared CLI runtime
+- Telegram or webhook task handle-off
+- a multi-user SaaS layer
+- a second worker (Claude) for routing validation
 
 ## Project Layout
 
@@ -172,7 +157,6 @@ The repo includes:
 ## Next Steps
 
 The current implementation targets are:
-- finish `T-047` with a real provider CLI adapter wired into the shared runtime
-- continue `T-049` by wiring permission-required runtime outcomes into orchestrator
-  pause/resume and expanding the budget ledger where later stages need it
-- `T-042 Add baseline worker timeout/cancel handling around the real worker path`
+- **Milestone 8**: Structured run observability and diagnostic logging (T-043)
+- **Milestone 9**: Second worker integration (Claude) and routing improvements (T-070+)
+- **Milestone 10**: Telegram and webhook adapter ingress (T-050 to T-053)

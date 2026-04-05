@@ -39,8 +39,8 @@ Do not build these yet:
    - worker owns repo task execution
 
 2. Keep provider-specific logic isolated
-   - all Claude-specific logic stays in workers/claude_worker.py
-   - all Codex-specific logic stays in workers/codex_worker.py
+   - all Claude-specific logic stays in workers/claude_worker.py (and related adapters)
+   - all Codex-specific logic stays in workers/codex_cli_worker.py (and related adapters)
 
 3. Default to safe execution
    - use isolated workspaces
@@ -195,10 +195,20 @@ Project memory:
 - architecture notes
 - known pitfalls
 
-Session state:
-- task progress
-- worker choice
-- run history for current thread
+**Skeletal Skepticism (T-060)**:
+Memory is treated as a high-confidence "hint" rather than ground truth. Each entry must store:
+- `source`: where the memory came from
+- `confidence`: 0.0 to 1.0 score
+- `scope`: application range (global, repo, branch)
+- `last_verified_at`: when the information was last proved correct in a sandbox
+- `requires_verification`: flag to force a skeptical re-check
+
+**Compact Session State (T-061)**:
+Preserves critical context across turns to maintain consistency:
+- `active_goal`: the specific outcome currently being pursued
+- `decisions_made`: key architectural or implementation choices recorded during the session
+- `identified_risks`: potential pitfalls or constraints surfaced by the worker
+- `files_touched`: unique list of files modified during the current session
 
 Memory must be:
 - structured
@@ -243,13 +253,13 @@ Before merging:
 ## Priorities
 
 Priority order:
-1. T-032 artifact capture baseline
-2. T-040/T-041 first worker interface + implementation
-3. T-042 + Vertical Slice E2E milestone (timeout-safe real curl → HTTP submit → orchestrator → worker → workspace → DB → task_id/status)
-4. Telegram ingress milestone (single `/task` command through real flow)
-5. Sandbox hardening milestone (isolated execution + artifact capture + enforced destructive-action approval gate)
-6. Memory integration milestone (load_memory → execute → persist_learnings with structured, inspectable records)
-7. T-043 structured run observability + T-070+ second worker and routing
+1. [DONE] Milestone 3: Artifact capture baseline (T-032)
+2. [DONE] Milestone 4: First worker interface + implementation (T-040/T-041)
+3. [DONE] Milestone 5: Vertical Slice E2E milestone (T-042 + T-044)
+4. [DONE] Milestone 6: Sandbox hardening milestone (T-054/T-055)
+5. [DONE] Milestone 7: Memory integration milestone (T-060 to T-065)
+6. Milestone 8: Structured run observability (T-043) + Milestone 9: Second worker and routing (T-070+)
+7. Milestone 10: Telegram ingress milestone (T-050 to T-053)
 
 ## Code style
 

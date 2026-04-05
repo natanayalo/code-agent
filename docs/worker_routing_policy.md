@@ -6,11 +6,11 @@ Choose the most appropriate coding worker for a task while keeping decisions exp
 
 ## Currently configured workers
 
-- `CodexWorker` toy sandbox executor for contract/proof-of-path testing
+- `CodexCliWorker`: Production-class worker using the `codex exec` CLI adapter and persistent shell sessions.
+- `CodexWorker`: legacy toy sandbox executor for contract/proof-of-path testing.
 
 ## Planned workers
 
-- `CodexCliWorker`
 - `ClaudeCodeCliWorker`
 
 ## Route to Claude-family worker when

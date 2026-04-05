@@ -264,40 +264,7 @@ Acceptance:
 
 ---
 
-## Milestone 6 - Telegram ingress (minimal real flow)
-
-### T-050 Add generic webhook adapter
-Accept JSON webhook payloads and translate them onto the existing HTTP task submission path.
-
-Acceptance:
-- posting a webhook payload creates a task through the existing HTTP path
-
-### T-051 Add Telegram webhook adapter
-Receive Telegram messages and map them to sessions.
-
-Acceptance:
-- Telegram message triggers workflow
-
-### T-052 Add progress replies
-Send progress updates back to Telegram/webhook callback.
-
-Acceptance:
-- user sees at least start / running / done or failed
-
-### T-053 Add dedupe protection
-Prevent duplicate webhook deliveries from creating duplicate tasks.
-
-Acceptance:
-- repeated delivery is idempotent
-
-Acceptance for milestone completion:
-- one `/task` command from Telegram is accepted by the bot
-- Telegram task is submitted to the existing HTTP task path
-- chat receives at least one progress update and one final result from the real flow
-
----
-
-## Milestone 7 - Sandbox hardening
+## Milestone 6 - Sandbox hardening
 
 ### T-054 Harden sandbox execution boundary and auditability
 Harden execution so one real command runs only inside the sandbox with complete audit artifacts and replay-friendly metadata.
@@ -328,7 +295,7 @@ Acceptance:
 
 ---
 
-## Milestone 8 - Memory integration
+## Milestone 7 - Memory integration
 
 ### T-060 Add skeptical memory schema and metadata
 Store memory as structured hints with explicit provenance and verification metadata.
@@ -377,7 +344,7 @@ Acceptance:
 
 ---
 
-## Milestone 9 - Structured run observability + second worker routing
+## Milestone 8 - Structured run observability
 
 ### T-043 Add structured run logs
 Expand worker run metadata and output summaries beyond the baseline persistence required by T-044.
@@ -387,6 +354,10 @@ Acceptance:
 - sandbox command records include command, exit code, duration, and stdout/stderr artifact locations
 - permission escalations, budget usage, and verifier outcomes are queryable in persisted run data
 - structured run summaries are queryable in DB/logs without relying only on free-form text blobs
+
+---
+
+## Milestone 9 - Second worker routing
 
 ### T-070 Implement second worker adapter
 Add remaining worker so both Claude and Codex are supported.
@@ -409,7 +380,40 @@ Acceptance:
 
 ---
 
-## Milestone 10 - Tools
+## Milestone 10 - Telegram ingress (minimal real flow)
+
+### T-050 Add generic webhook adapter
+Accept JSON webhook payloads and translate them onto the existing HTTP task submission path.
+
+Acceptance:
+- posting a webhook payload creates a task through the existing HTTP path
+
+### T-051 Add Telegram webhook adapter
+Receive Telegram messages and map them to sessions.
+
+Acceptance:
+- Telegram message triggers workflow
+
+### T-052 Add progress replies
+Send progress updates back to Telegram/webhook callback.
+
+Acceptance:
+- user sees at least start / running / done or failed
+
+### T-053 Add dedupe protection
+Prevent duplicate webhook deliveries from creating duplicate tasks.
+
+Acceptance:
+- repeated delivery is idempotent
+
+Acceptance for milestone completion:
+- one `/task` command from Telegram is accepted by the bot
+- Telegram task is submitted to the existing HTTP task path
+- chat receives at least one progress update and one final result from the real flow
+
+---
+
+## Milestone 11 - Tools
 
 ### T-080 Add git utility wrapper
 Expose git status, diff, branch, commit helpers.
@@ -437,7 +441,7 @@ Acceptance:
 
 ---
 
-## Milestone 11 - Observability + replay
+## Milestone 12 - Observability + replay
 
 ### T-090 Add task timeline
 Track state transitions and important events.
@@ -459,7 +463,7 @@ Acceptance:
 
 ---
 
-## Milestone 12 - Hardening
+## Milestone 13 - Hardening
 
 ### T-100 Secret scoping
 Inject only minimum required secrets per run.
