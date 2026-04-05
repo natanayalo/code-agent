@@ -437,8 +437,10 @@ def test_persist_execution_outcome_creates_error_worker_run_without_result() -> 
     assert task_snapshot.chosen_worker == "codex"
     assert task_snapshot.route_reason == "implementation_default"
     assert task_snapshot.latest_run is not None
+    assert task_snapshot.latest_run.session_id == persisted.session_id
     assert task_snapshot.latest_run.status == WorkerRunStatus.ERROR.value
     assert task_snapshot.latest_run.summary == "Worker did not return a result."
+    assert task_snapshot.latest_run.verifier_outcome is None
     assert task_snapshot.latest_run.artifact_index == []
     assert task_snapshot.latest_run.files_changed_count == 0
 
@@ -496,8 +498,15 @@ def test_persist_execution_outcome_persists_session_state_update() -> None:
         result=WorkerResult(
             status="success",
             summary="done",
+            requested_permission="workspace_write",
+            budget_usage={"iterations_used": 1, "tool_calls_used": 1},
             files_changed=["orchestrator/execution.py"],
         ),
+        verification={
+            "status": "passed",
+            "summary": "Verifier accepted the run.",
+            "items": [{"label": "worker_status", "status": "passed"}],
+        },
         session_state_update={
             "active_goal": "Persist session state",
             "decisions_made": {"worker": "codex"},
@@ -514,6 +523,20 @@ def test_persist_execution_outcome_persists_session_state_update() -> None:
         started_at=started_at,
         finished_at=finished_at,
     )
+
+    task_snapshot = service.get_task(persisted.task_id)
+    assert task_snapshot is not None
+    assert task_snapshot.latest_run is not None
+    assert task_snapshot.latest_run.requested_permission == "workspace_write"
+    assert task_snapshot.latest_run.budget_usage == {
+        "iterations_used": 1,
+        "tool_calls_used": 1,
+    }
+    assert task_snapshot.latest_run.verifier_outcome == {
+        "status": "passed",
+        "summary": "Verifier accepted the run.",
+        "items": [{"label": "worker_status", "status": "passed", "message": None}],
+    }
 
     with session_scope(session_factory) as session:
         session_state_repo = SessionStateRepository(session)

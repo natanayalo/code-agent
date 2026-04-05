@@ -109,6 +109,7 @@ def test_worker_run_and_artifact_repositories_support_crud(session_factory) -> N
         task = task_repo.create(session_id=conversation_session.id, task_text="Run worker")
         worker_run = worker_run_repo.create(
             task_id=task.id,
+            session_id=conversation_session.id,
             worker_type="codex",
             started_at=datetime.now(UTC),
             status="running",
@@ -126,6 +127,9 @@ def test_worker_run_and_artifact_repositories_support_crud(session_factory) -> N
             status="success",
             finished_at=datetime.now(UTC),
             summary="Task completed",
+            requested_permission="workspace_write",
+            budget_usage={"iterations_used": 2, "wall_clock_seconds": 1.5},
+            verifier_outcome={"status": "passed", "summary": "Verifier accepted output."},
             commands_run=[{"command": "pytest", "exit_code": 0}],
             files_changed_count=2,
             artifact_index=[{"name": "stdout.log"}],
@@ -134,7 +138,14 @@ def test_worker_run_and_artifact_repositories_support_crud(session_factory) -> N
         stored_run = worker_run_repo.get(worker_run.id)
         assert stored_run is not None
         assert stored_run.status is WorkerRunStatus.SUCCESS
+        assert stored_run.session_id == conversation_session.id
         assert stored_run.summary == "Task completed"
+        assert stored_run.requested_permission == "workspace_write"
+        assert stored_run.budget_usage == {"iterations_used": 2, "wall_clock_seconds": 1.5}
+        assert stored_run.verifier_outcome == {
+            "status": "passed",
+            "summary": "Verifier accepted output.",
+        }
         assert stored_run.files_changed_count == 2
         assert len(worker_run_repo.list_by_task(task.id)) == 1
         artifacts = artifact_repo.list_by_run(worker_run.id)
@@ -162,10 +173,14 @@ def test_worker_run_complete_preserves_existing_optional_fields(session_factory)
         )
         worker_run = worker_run_repo.create(
             task_id=task.id,
+            session_id=conversation_session.id,
             worker_type="codex",
             started_at=datetime.now(UTC),
             status="running",
             summary="Keep this summary",
+            requested_permission="workspace_write",
+            budget_usage={"iterations_used": 1},
+            verifier_outcome={"status": "warning"},
             commands_run=[{"command": "pytest", "exit_code": 0}],
             artifact_index=[{"name": "stdout.log"}],
         )
@@ -181,6 +196,9 @@ def test_worker_run_complete_preserves_existing_optional_fields(session_factory)
         assert stored_run is not None
         assert stored_run.status is WorkerRunStatus.SUCCESS
         assert stored_run.summary == "Keep this summary"
+        assert stored_run.requested_permission == "workspace_write"
+        assert stored_run.budget_usage == {"iterations_used": 1}
+        assert stored_run.verifier_outcome == {"status": "warning"}
         assert stored_run.commands_run == [{"command": "pytest", "exit_code": 0}]
         assert stored_run.artifact_index == [{"name": "stdout.log"}]
 

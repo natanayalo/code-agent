@@ -76,9 +76,15 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     assert {"task_text", "chosen_worker", "route_reason"} <= {
         column["name"] for column in inspector.get_columns("tasks")
     }
-    assert {"commands_run", "artifact_index", "files_changed_count"} <= {
-        column["name"] for column in inspector.get_columns("worker_runs")
-    }
+    assert {
+        "session_id",
+        "requested_permission",
+        "budget_usage",
+        "verifier_outcome",
+        "commands_run",
+        "artifact_index",
+        "files_changed_count",
+    } <= {column["name"] for column in inspector.get_columns("worker_runs")}
     session_state_columns = {
         column["name"]: column for column in inspector.get_columns("session_states")
     }

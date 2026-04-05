@@ -139,18 +139,27 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
         nullable=False,
         index=True,
     )
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     worker_type: Mapped[WorkerType] = mapped_column(WORKER_TYPE_ENUM, nullable=False)
     workspace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[WorkerRunStatus] = mapped_column(WORKER_RUN_STATUS_ENUM, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_permission: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    budget_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    verifier_outcome: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     commands_run: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     files_changed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     files_changed: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     artifact_index: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
 
     task: Mapped[Task] = relationship(back_populates="worker_runs")
+    session: Mapped[Session | None] = relationship()
     artifacts: Mapped[list[Artifact]] = relationship(back_populates="worker_run")
 
     @validates("worker_type")

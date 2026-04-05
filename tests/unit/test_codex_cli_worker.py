@@ -185,6 +185,9 @@ def test_codex_cli_worker_runs_the_shared_runtime_and_retains_the_workspace(
 
     assert result.status == "success"
     assert result.summary == "Created note.txt and summarized the change."
+    assert result.budget_usage is not None
+    assert result.budget_usage["iterations_used"] == 2
+    assert result.budget_usage["shell_commands_used"] == 1
     assert [command.command for command in result.commands_run] == ["printf 'done\\n' > note.txt"]
     assert result.files_changed == ["note.txt"]
     assert result.next_action_hint == "inspect_workspace_artifacts"
