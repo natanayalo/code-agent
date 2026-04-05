@@ -518,6 +518,7 @@ class TaskExecutionService:
                     for command in (result.commands_run if result is not None else [])
                 ],
                 files_changed_count=len(result.files_changed) if result is not None else 0,
+                files_changed=result.files_changed if result is not None else [],
                 artifact_index=artifact_index,
             )
 
