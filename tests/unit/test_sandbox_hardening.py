@@ -47,6 +47,14 @@ def test_path_policy_default():
     assert policy.check_path("/root") is False
 
 
+def test_path_policy_traversal():
+    policy = PathPolicy(allowed_prefixes=["/workspace"], denied_prefixes=["/workspace/.git"])
+    # Test path traversal attempts
+    assert policy.check_path("/workspace/repo/../../etc/passwd") is False
+    assert policy.check_path("/workspace/../../etc/shadow") is False
+    assert policy.check_path("/workspace/repo/../.git/config") is False
+
+
 def test_path_policy_robustness():
     policy = PathPolicy(allowed_prefixes=["/workspace"], denied_prefixes=["/workspace/.git"])
     # Correctly allowed (no longer blocked by prefix matching)

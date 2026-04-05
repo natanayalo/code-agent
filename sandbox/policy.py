@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pydantic import Field
@@ -17,7 +18,7 @@ class PathPolicy(SandboxModel):
 
     def check_path(self, path: str | Path) -> bool:
         """Return True if path is allowed, False if it is explicitly denied or prefix missing."""
-        p = Path(path)
+        p = Path(os.path.normpath(str(path)))
         # Deny takes precedence
         for denied in self.denied_prefixes:
             try:

@@ -221,12 +221,15 @@ def capture_audit_artifacts(
                 "error": str(exc),
             },
         )
+        content = f"Failed to inspect workspace changes: {exc}\n"
+        if redactor:
+            content = redactor.redact(content)
         artifacts.append(
             write_text_artifact(
                 workspace,
                 artifact_dir,
                 filename="changed-files.txt",
-                content=f"Failed to inspect workspace changes: {exc}\n",
+                content=content,
                 artifact_type="result_summary",
                 artifact_metadata={"kind": "changed_files", "inspection_error": str(exc)},
             )
