@@ -49,6 +49,26 @@ class UserRepository:
         return self.session.scalar(statement)
 
 
+def _apply_memory_metadata(
+    memory_entry: PersonalMemory | ProjectMemory,
+    *,
+    value: dict[str, Any],
+    source: str | None,
+    confidence: float,
+    scope: str | None,
+    last_verified_at: datetime | None,
+    requires_verification: bool,
+) -> None:
+    """Apply the shared skeptical-memory metadata fields to a memory entry."""
+
+    memory_entry.value = value
+    memory_entry.source = source
+    memory_entry.confidence = confidence
+    memory_entry.scope = scope
+    memory_entry.last_verified_at = last_verified_at
+    memory_entry.requires_verification = requires_verification
+
+
 class SessionRepository:
     """Persist and query conversation sessions."""
 
@@ -411,22 +431,16 @@ class PersonalMemoryRepository:
                 memory_entry = self.get(user_id=user_id, memory_key=memory_key)
                 if memory_entry is None:
                     raise
-
-                memory_entry.value = value
-                memory_entry.source = source
-                memory_entry.confidence = confidence
-                memory_entry.scope = scope
-                memory_entry.last_verified_at = last_verified_at
-                memory_entry.requires_verification = requires_verification
-                self.session.flush()
-        else:
-            memory_entry.value = value
-            memory_entry.source = source
-            memory_entry.confidence = confidence
-            memory_entry.scope = scope
-            memory_entry.last_verified_at = last_verified_at
-            memory_entry.requires_verification = requires_verification
-            self.session.flush()
+        _apply_memory_metadata(
+            memory_entry,
+            value=value,
+            source=source,
+            confidence=confidence,
+            scope=scope,
+            last_verified_at=last_verified_at,
+            requires_verification=requires_verification,
+        )
+        self.session.flush()
         return memory_entry
 
     def delete(self, *, user_id: str, memory_key: str) -> bool:
@@ -488,22 +502,16 @@ class ProjectMemoryRepository:
                 memory_entry = self.get(repo_url=repo_url, memory_key=memory_key)
                 if memory_entry is None:
                     raise
-
-                memory_entry.value = value
-                memory_entry.source = source
-                memory_entry.confidence = confidence
-                memory_entry.scope = scope
-                memory_entry.last_verified_at = last_verified_at
-                memory_entry.requires_verification = requires_verification
-                self.session.flush()
-        else:
-            memory_entry.value = value
-            memory_entry.source = source
-            memory_entry.confidence = confidence
-            memory_entry.scope = scope
-            memory_entry.last_verified_at = last_verified_at
-            memory_entry.requires_verification = requires_verification
-            self.session.flush()
+        _apply_memory_metadata(
+            memory_entry,
+            value=value,
+            source=source,
+            confidence=confidence,
+            scope=scope,
+            last_verified_at=last_verified_at,
+            requires_verification=requires_verification,
+        )
+        self.session.flush()
         return memory_entry
 
     def delete(self, *, repo_url: str, memory_key: str) -> bool:
