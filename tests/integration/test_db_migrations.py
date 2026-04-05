@@ -14,6 +14,7 @@ EXPECTED_TABLES = {
     "memory_personal",
     "memory_project",
     "sessions",
+    "session_states",
     "tasks",
     "users",
     "worker_runs",
@@ -78,6 +79,12 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     assert {"commands_run", "artifact_index", "files_changed_count"} <= {
         column["name"] for column in inspector.get_columns("worker_runs")
     }
+    session_state_columns = {
+        column["name"]: column for column in inspector.get_columns("session_states")
+    }
+    assert session_state_columns["decisions_made"]["default"] == "'{}'"
+    assert session_state_columns["identified_risks"]["default"] == "'{}'"
+    assert session_state_columns["files_touched"]["default"] == "'[]'"
 
     for table_name, expected_constraints in EXPECTED_CHECK_CONSTRAINTS.items():
         actual_constraints = {

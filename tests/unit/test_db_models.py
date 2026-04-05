@@ -13,6 +13,7 @@ EXPECTED_TABLES = {
     "memory_personal",
     "memory_project",
     "sessions",
+    "session_states",
     "tasks",
     "users",
     "worker_runs",

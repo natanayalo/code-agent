@@ -24,6 +24,7 @@ from orchestrator import (
 from orchestrator import execution as execution_module
 from repositories import (
     SessionRepository,
+    SessionStateRepository,
     TaskRepository,
     UserRepository,
     create_engine_from_url,
@@ -440,6 +441,89 @@ def test_persist_execution_outcome_creates_error_worker_run_without_result() -> 
     assert task_snapshot.latest_run.summary == "Worker did not return a result."
     assert task_snapshot.latest_run.artifact_index == []
     assert task_snapshot.latest_run.files_changed_count == 0
+
+
+def test_persist_execution_outcome_persists_session_state_update() -> None:
+    """Execution persistence should store the compact session working state."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Persist session state",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+    _, persisted = service.create_task(submission)
+
+    state = OrchestratorState(
+        current_step="persist_memory",
+        session=SessionRef(
+            session_id=persisted.session_id,
+            user_id=persisted.user_id,
+            channel=persisted.channel,
+            external_thread_id=persisted.external_thread_id,
+            active_task_id=persisted.task_id,
+            status="active",
+        ),
+        task=TaskRequest(
+            task_id=persisted.task_id,
+            task_text=submission.task_text,
+            repo_url=submission.repo_url,
+            branch=submission.branch,
+            priority=submission.priority,
+            worker_override=submission.worker_override,
+            constraints=dict(submission.constraints),
+            budget=dict(submission.budget),
+        ),
+        normalized_task_text=submission.task_text,
+        task_kind="implementation",
+        memory=MemoryContext(),
+        route=RouteDecision(
+            chosen_worker="codex",
+            route_reason="implementation_default",
+            override_applied=False,
+        ),
+        approval=ApprovalCheckpoint(),
+        dispatch=WorkerDispatch(worker_type="codex"),
+        result=WorkerResult(
+            status="success",
+            summary="done",
+            files_changed=["orchestrator/execution.py"],
+        ),
+        session_state_update={
+            "active_goal": "Persist session state",
+            "decisions_made": {"worker": "codex"},
+            "identified_risks": {"network": "restricted"},
+            "files_touched": ["orchestrator/execution.py"],
+        },
+    )
+
+    started_at = datetime.now()
+    finished_at = datetime.now()
+    service._persist_execution_outcome(
+        task_id=persisted.task_id,
+        state=state,
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+
+    with session_scope(session_factory) as session:
+        session_state_repo = SessionStateRepository(session)
+        session_state = session_state_repo.get(persisted.session_id)
+
+        assert session_state is not None
+        assert session_state.active_goal == "Persist session state"
+        assert session_state.decisions_made == {"worker": "codex"}
+        assert session_state.identified_risks == {"network": "restricted"}
+        assert session_state.files_touched == ["orchestrator/execution.py"]
 
 
 def test_create_task_recovers_from_duplicate_user_and_session_race(monkeypatch) -> None:

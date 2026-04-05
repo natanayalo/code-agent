@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -104,6 +105,20 @@ class PersistMemoryEntry(OrchestratorModel):
     memory_key: str
     value: dict[str, Any]
     repo_url: str | None = None
+    source: str | None = None
+    confidence: float = 1.0
+    scope: str | None = None
+    last_verified_at: datetime | None = None
+    requires_verification: bool = True
+
+
+class SessionStateUpdate(OrchestratorModel):
+    """A compact session state update to be persisted (T-062)."""
+
+    active_goal: str | None = None
+    decisions_made: dict[str, Any] | None = None
+    identified_risks: dict[str, Any] | None = None
+    files_touched: list[str] | None = None
 
 
 class VerificationReportItem(OrchestratorModel):
@@ -140,3 +155,4 @@ class OrchestratorState(OrchestratorModel):
     progress_updates: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     attempt_count: int = Field(default=0, ge=0)
+    session_state_update: SessionStateUpdate | None = None

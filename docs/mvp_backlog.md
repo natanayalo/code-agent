@@ -310,6 +310,8 @@ Store concise working state for long-running sessions instead of relying on tran
 Acceptance:
 - compact session state preserves: current goal, decisions made, files touched, unresolved risks, and user/project preferences
 - compact state can be created/read/updated independently from transcript history
+- compact state update semantics are explicit and tested, including whether nested JSON fields use shallow merge or deep merge behavior
+- compact state callers can intentionally distinguish between omitting a field and explicitly clearing it where that behavior is supported
 
 ### T-062 Add skeptical memory retrieval and verification policy
 Load relevant memory before routing/dispatch while treating stored claims as hints rather than truth.
@@ -329,6 +331,7 @@ Run the full memory loop on a real task execution path with skeptical retrieval 
 
 Acceptance:
 - orchestrator loads structured memory before dispatch on a real task
+- worker/orchestrator integration carries structured session-state fields for decisions made and identified risks instead of relying on heuristic parsing of free-form summaries
 - execution persists verified learnings back to memory stores
 - updated compact session working state is persisted after each real run
 - stored memory is inspectable and retrievable via repositories/endpoints

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -14,6 +14,7 @@ from db.models import (
     Artifact,
     PersonalMemory,
     ProjectMemory,
+    SessionState,
     Task,
     User,
     WorkerRun,
@@ -21,6 +22,8 @@ from db.models import (
 from db.models import (
     Session as ConversationSession,
 )
+
+_UNSET: Final = object()
 
 
 class UserRepository:
@@ -46,6 +49,31 @@ class UserRepository:
     def get_by_external_user_id(self, external_user_id: str) -> User | None:
         statement = select(User).where(User.external_user_id == external_user_id)
         return self.session.scalar(statement)
+
+
+def _apply_memory_metadata(
+    memory_entry: PersonalMemory | ProjectMemory,
+    *,
+    value: dict[str, Any],
+    source: str | None | object = _UNSET,
+    confidence: float | object = _UNSET,
+    scope: str | None | object = _UNSET,
+    last_verified_at: datetime | None | object = _UNSET,
+    requires_verification: bool | object = _UNSET,
+) -> None:
+    """Apply the shared skeptical-memory metadata fields to a memory entry."""
+
+    memory_entry.value = value
+    if source is not _UNSET:
+        memory_entry.source = cast(str | None, source)
+    if confidence is not _UNSET:
+        memory_entry.confidence = cast(float, confidence)
+    if scope is not _UNSET:
+        memory_entry.scope = cast(str | None, scope)
+    if last_verified_at is not _UNSET:
+        memory_entry.last_verified_at = cast(datetime | None, last_verified_at)
+    if requires_verification is not _UNSET:
+        memory_entry.requires_verification = cast(bool, requires_verification)
 
 
 class SessionRepository:
@@ -126,6 +154,60 @@ class SessionRepository:
         conversation_session.last_seen_at = seen_at
         self.session.flush()
         return conversation_session
+
+
+class SessionStateRepository:
+    """Persist and query compact session working state."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def get(self, session_id: str) -> SessionState | None:
+        statement = select(SessionState).where(SessionState.session_id == session_id)
+        return self.session.scalar(statement)
+
+    def upsert(
+        self,
+        *,
+        session_id: str,
+        active_goal: str | None = None,
+        decisions_made: dict[str, Any] | None = None,
+        identified_risks: dict[str, Any] | None = None,
+        files_touched: list[str] | None = None,
+    ) -> SessionState:
+        state = self.get(session_id)
+        if state is None:
+            state = SessionState(
+                session_id=session_id,
+                active_goal=active_goal,
+                decisions_made=decisions_made or {},
+                identified_risks=identified_risks or {},
+                files_touched=files_touched or [],
+            )
+            try:
+                with self.session.begin_nested():
+                    self.session.add(state)
+                    self.session.flush()
+                return state
+            except IntegrityError:
+                state = self.get(session_id)
+                if state is None:
+                    raise
+
+        # Update either the existing or concurrently-inserted state
+        if active_goal is not None:
+            state.active_goal = active_goal
+        if decisions_made is not None:
+            state.decisions_made = {**(state.decisions_made or {}), **decisions_made}
+        if identified_risks is not None:
+            state.identified_risks = {**(state.identified_risks or {}), **identified_risks}
+        if files_touched is not None:
+            state.files_touched = list(
+                dict.fromkeys([*(state.files_touched or []), *files_touched])
+            )
+        self.session.flush()
+
+        return state
 
 
 class TaskRepository:
@@ -213,6 +295,7 @@ class WorkerRunRepository:
         summary: str | None = None,
         commands_run: list[dict[str, Any]] | None = None,
         files_changed_count: int = 0,
+        files_changed: list[str] | None = None,
         artifact_index: list[dict[str, Any]] | None = None,
     ) -> WorkerRun:
         worker_run = WorkerRun(
@@ -225,6 +308,7 @@ class WorkerRunRepository:
             summary=summary,
             commands_run=commands_run,
             files_changed_count=files_changed_count,
+            files_changed=files_changed,
             artifact_index=artifact_index,
         )
         self.session.add(worker_run)
@@ -251,6 +335,7 @@ class WorkerRunRepository:
         summary: str | None = None,
         commands_run: list[dict[str, Any]] | None = None,
         files_changed_count: int | None = None,
+        files_changed: list[str] | None = None,
         artifact_index: list[dict[str, Any]] | None = None,
     ) -> WorkerRun | None:
         worker_run = self.get(run_id)
@@ -265,6 +350,8 @@ class WorkerRunRepository:
             worker_run.commands_run = commands_run
         if files_changed_count is not None:
             worker_run.files_changed_count = files_changed_count
+        if files_changed is not None:
+            worker_run.files_changed = files_changed
         if artifact_index is not None:
             worker_run.artifact_index = artifact_index
         self.session.flush()
@@ -327,6 +414,11 @@ class PersonalMemoryRepository:
         user_id: str,
         memory_key: str,
         value: dict[str, Any],
+        source: str | None | object = _UNSET,
+        confidence: float | object = _UNSET,
+        scope: str | None | object = _UNSET,
+        last_verified_at: datetime | None | object = _UNSET,
+        requires_verification: bool | object = _UNSET,
     ) -> PersonalMemory:
         memory_entry = self.get(user_id=user_id, memory_key=memory_key)
         if memory_entry is None:
@@ -343,12 +435,16 @@ class PersonalMemoryRepository:
                 memory_entry = self.get(user_id=user_id, memory_key=memory_key)
                 if memory_entry is None:
                     raise
-
-                memory_entry.value = value
-                self.session.flush()
-        else:
-            memory_entry.value = value
-            self.session.flush()
+        _apply_memory_metadata(
+            memory_entry,
+            value=value,
+            source=source,
+            confidence=confidence,
+            scope=scope,
+            last_verified_at=last_verified_at,
+            requires_verification=requires_verification,
+        )
+        self.session.flush()
         return memory_entry
 
     def delete(self, *, user_id: str, memory_key: str) -> bool:
@@ -384,6 +480,11 @@ class ProjectMemoryRepository:
         repo_url: str,
         memory_key: str,
         value: dict[str, Any],
+        source: str | None | object = _UNSET,
+        confidence: float | object = _UNSET,
+        scope: str | None | object = _UNSET,
+        last_verified_at: datetime | None | object = _UNSET,
+        requires_verification: bool | object = _UNSET,
     ) -> ProjectMemory:
         memory_entry = self.get(repo_url=repo_url, memory_key=memory_key)
         if memory_entry is None:
@@ -400,12 +501,16 @@ class ProjectMemoryRepository:
                 memory_entry = self.get(repo_url=repo_url, memory_key=memory_key)
                 if memory_entry is None:
                     raise
-
-                memory_entry.value = value
-                self.session.flush()
-        else:
-            memory_entry.value = value
-            self.session.flush()
+        _apply_memory_metadata(
+            memory_entry,
+            value=value,
+            source=source,
+            confidence=confidence,
+            scope=scope,
+            last_verified_at=last_verified_at,
+            requires_verification=requires_verification,
+        )
+        self.session.flush()
         return memory_entry
 
     def delete(self, *, repo_url: str, memory_key: str) -> bool:
