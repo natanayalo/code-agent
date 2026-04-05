@@ -12,9 +12,12 @@ from uuid import uuid4
 
 from pydantic import Field
 
+from sandbox.audit import capture_audit_artifacts
 from sandbox.container import DockerSandboxContainer
+from sandbox.policy import PathPolicy
+from sandbox.redact import SecretRedactor
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
-from sandbox.workspace import SandboxModel, _mask_url_credentials
+from sandbox.workspace import SandboxArtifact, SandboxModel, _mask_url_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +35,8 @@ class DockerShellCommandResult(SandboxModel):
     output: str
     exit_code: int
     duration_seconds: float = Field(ge=0)
+    files_changed: list[str] = Field(default_factory=list)
+    artifacts: list[SandboxArtifact] = Field(default_factory=list)
 
 
 class DockerShellSessionError(RuntimeError):
@@ -183,12 +188,16 @@ class DockerShellSession:
         output_limit_bytes: int = MAX_OUTPUT_SIZE_BYTES,
         close_timeout_seconds: int = 5,
         process_factory: ShellProcessFactory | None = None,
+        secrets: dict[str, str] | None = None,
+        path_policy: PathPolicy | None = None,
     ) -> None:
         self.container = container
         self.docker_binary = docker_binary
         self.shell_binary = shell_binary
         self.output_limit_bytes = output_limit_bytes
         self.close_timeout_seconds = close_timeout_seconds
+        self.redactor = SecretRedactor(list((secrets or {}).values()))
+        self.path_policy = path_policy
         self._lock = threading.Lock()
         self._stdout_tail = bytearray()
         self._closed = False
@@ -245,10 +254,28 @@ class DockerShellSession:
         self._close_process_pipes()
         self._closed = True
 
-    def execute(self, command: str, *, timeout_seconds: int = 300) -> DockerShellCommandResult:
+    def execute(
+        self,
+        command: str,
+        *,
+        timeout_seconds: int = 300,
+        capture_audit: bool = True,
+    ) -> DockerShellCommandResult:
         """Execute one shell command while preserving session state for later commands."""
         if not command.strip():
             raise DockerShellSessionError("Persistent shell session requires a non-empty command.")
+
+        # Best-effort path policy check
+        if self.path_policy:
+            # We check the command string for any denied prefixes.
+            # This is not perfect for aliased or relative paths but provides a basic guard.
+            # Real enforcement should happen via filesystem permissions or restricted shells.
+            for denied in self.path_policy.denied_prefixes:
+                if denied in command:
+                    raise DockerShellSessionError(
+                        f"Command may touch a denied path ({denied}): "
+                        f"{self.redactor.redact(command)}"
+                    )
 
         with self._lock:
             if self._closed or self._process.poll() is not None:
@@ -303,6 +330,8 @@ class DockerShellSession:
                 self._terminate_process()
                 reader_thread.join()
                 output = decode_bounded(output_buf, self.output_limit_bytes).strip()
+                # Redact partial output
+                output = self.redactor.redact(output)
                 detail = f" Partial output:\n{output}" if output else ""
                 raise DockerShellSessionError(
                     f"Persistent shell session command timed out after {timeout_seconds}s: "
@@ -319,6 +348,9 @@ class DockerShellSession:
                 ) from first_error
 
             output = decode_bounded(output_buf, self.output_limit_bytes)
+            # Redact output
+            output = self.redactor.redact(output)
+
             if limit_exceeded.is_set():
                 raise DockerShellSessionError(
                     f"Persistent shell session output limit exceeded "
@@ -331,11 +363,28 @@ class DockerShellSession:
                     f"command: {command}\nPartial output:\n{output}"
                 )
 
+            duration_seconds = perf_counter() - started_at
+
+            files_changed: list[str] = []
+            artifacts: list[SandboxArtifact] = []
+
+            if capture_audit:
+                # We use STDOUT as the only stream for persistent sessions.
+                files_changed, artifacts = capture_audit_artifacts(
+                    self.container.workspace,
+                    stdout=output,
+                    stderr="",
+                    exit_code=stream.exit_code,
+                    redactor=self.redactor,
+                )
+
             return DockerShellCommandResult(
                 command=command,
                 output=output,
                 exit_code=stream.exit_code,
-                duration_seconds=perf_counter() - started_at,
+                duration_seconds=duration_seconds,
+                files_changed=files_changed,
+                artifacts=artifacts,
             )
 
     def close(self) -> None:

@@ -11,6 +11,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from sandbox.audit import (
+    parse_git_status_entries as _parse_git_status_entries,
+)
+from sandbox.policy import PathPolicy
+from sandbox.redact import SecretRedactor
 from sandbox.runner import (
     MAX_OUTPUT_SIZE_BYTES,
     DockerSandboxCommand,
@@ -19,10 +24,9 @@ from sandbox.runner import (
     DockerSandboxRunnerError,
     _build_container_name,
     _build_docker_run_command,
-    _parse_git_status_entries,
-    _read_stream_bounded,
     _run_docker_command,
 )
+from sandbox.streams import read_stream_bounded as _read_stream_bounded
 from sandbox.workspace import WorkspaceCleanupPolicy, WorkspaceHandle
 
 
@@ -221,7 +225,12 @@ def test_runner_returns_structured_result(tmp_path: Path) -> None:
         command=["python3", "-c", "print('sandbox')"],
     )
 
-    def fake_runner(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+    def fake_runner(
+        command: list[str],
+        *,
+        timeout: int,
+        redactor: SecretRedactor | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         assert timeout == 300
         return subprocess.CompletedProcess(
             args=command,
@@ -263,7 +272,12 @@ def test_runner_uses_request_image_override(tmp_path: Path) -> None:
 
     captured_command: list[str] = []
 
-    def fake_runner(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+    def fake_runner(
+        command: list[str],
+        *,
+        timeout: int,
+        redactor: SecretRedactor | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         del timeout
         captured_command.extend(command)
         return subprocess.CompletedProcess(
@@ -288,7 +302,12 @@ def test_runner_captures_changed_files_and_diff_summary(tmp_path: Path) -> None:
         command=["python3", "-c", "print('changed')"],
     )
 
-    def fake_runner(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+    def fake_runner(
+        command: list[str],
+        *,
+        timeout: int,
+        redactor: SecretRedactor | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         del command, timeout
         (workspace.repo_path / "README.md").write_text("sandbox runner updated\n", encoding="utf-8")
         (workspace.repo_path / "generated.txt").write_text("generated\n", encoding="utf-8")
@@ -618,3 +637,55 @@ def test_run_docker_command_closes_pipe_when_thread_hangs() -> None:
 
     assert result.returncode == 0
     assert stdout_pipe.closed
+
+
+def test_runner_redacts_secrets(tmp_path: Path) -> None:
+    """The runner should redact known secrets from stdout, stderr, and logs."""
+    request = DockerSandboxCommand(
+        workspace=_workspace_handle(tmp_path, initialize_git=True),
+        command=["echo", "my secret is password123"],
+        secrets={"api_key": "password123"},
+    )
+
+    def fake_runner(
+        command: list[str],
+        *,
+        timeout: int,
+        redactor: SecretRedactor | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert redactor is not None
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="my secret is password123\n",
+            stderr="error with password123\n",
+        )
+
+    runner = DockerSandboxRunner(command_runner=fake_runner)
+    result = runner.run(request)
+
+    assert result.stdout == "my secret is [REDACTED]\n"
+    assert result.stderr == "error with [REDACTED]\n"
+
+    artifact_paths = {
+        artifact.name: request.workspace.workspace_path / artifact.uri
+        for artifact in result.artifacts
+    }
+    assert artifact_paths["stdout.log"].read_text(encoding="utf-8") == "my secret is [REDACTED]\n"
+    assert artifact_paths["stderr.log"].read_text(encoding="utf-8") == "error with [REDACTED]\n"
+
+
+def test_build_docker_run_command_enforces_path_policy(tmp_path: Path) -> None:
+    """The runner should reject requests whose working directory is denied by policy."""
+    policy = PathPolicy(denied_prefixes=["/workspace/repo"])
+    request = DockerSandboxCommand(
+        workspace=_workspace_handle(tmp_path),
+        command=["ls"],
+        working_dir="/workspace/repo",
+        path_policy=policy,
+    )
+
+    with pytest.raises(
+        DockerSandboxRunnerError, match="Working directory is denied by path policy"
+    ):
+        _build_docker_run_command(request, image="alpine")
