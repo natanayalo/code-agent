@@ -116,9 +116,9 @@ class SessionStateUpdate(OrchestratorModel):
     """A compact session state update to be persisted (T-062)."""
 
     active_goal: str | None = None
-    decisions_made: dict[str, Any] = Field(default_factory=dict)
-    identified_risks: dict[str, Any] = Field(default_factory=dict)
-    files_touched: list[str] = Field(default_factory=list)
+    decisions_made: dict[str, Any] | None = None
+    identified_risks: dict[str, Any] | None = None
+    files_touched: list[str] | None = None
 
 
 class VerificationReportItem(OrchestratorModel):

@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from db.base import Base
+from orchestrator.state import SessionStateUpdate
 from repositories.sqlalchemy import (
     PersonalMemoryRepository,
     ProjectMemoryRepository,
@@ -121,3 +122,53 @@ def test_session_state_repository_upsert_and_get(session):
     assert state_updated.identified_risks == {"timeout": "high"}
     assert state_updated.files_touched == ["main.py"]  # Preserved
     assert state_updated.decisions_made == {"use_hooks": True}  # Preserved
+
+
+def test_session_state_repository_merges_updates(session):
+    """Session state updates should accumulate context instead of replacing it."""
+    user_repo = UserRepository(session)
+    user = user_repo.create(external_user_id="user_3")
+
+    session_repo = SessionRepository(session)
+    conv_session = session_repo.create(
+        user_id=user.id, channel="test", external_thread_id="thread_2"
+    )
+
+    state_repo = SessionStateRepository(session)
+    state_repo.upsert(
+        session_id=conv_session.id,
+        decisions_made={"worker": "codex", "format": "markdown"},
+        identified_risks={"timeout": "medium"},
+        files_touched=["orchestrator/graph.py", "workers/codex_worker.py"],
+    )
+
+    merged_state = state_repo.upsert(
+        session_id=conv_session.id,
+        decisions_made={"format": "plain", "retry": "allowed"},
+        identified_risks={"network": "restricted"},
+        files_touched=["workers/codex_worker.py", "repositories/sqlalchemy.py"],
+    )
+
+    assert merged_state.decisions_made == {
+        "worker": "codex",
+        "format": "plain",
+        "retry": "allowed",
+    }
+    assert merged_state.identified_risks == {
+        "timeout": "medium",
+        "network": "restricted",
+    }
+    assert merged_state.files_touched == [
+        "orchestrator/graph.py",
+        "workers/codex_worker.py",
+        "repositories/sqlalchemy.py",
+    ]
+
+
+def test_session_state_update_defaults_to_optional_fields():
+    """SessionStateUpdate should preserve omitted fields as None for partial updates."""
+    update = SessionStateUpdate(active_goal="Keep current context")
+
+    assert update.decisions_made is None
+    assert update.identified_risks is None
+    assert update.files_touched is None
