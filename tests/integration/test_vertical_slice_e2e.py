@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import subprocess
 from pathlib import Path
 
@@ -15,9 +14,6 @@ from orchestrator.execution import TaskExecutionService
 from repositories import create_engine_from_url, create_session_factory
 from workers import CodexCliWorker
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeStep
-
-# Use a test-specific DB
-TEST_DATABASE_URL = "sqlite:///test_vertical_slice.sqlite"
 
 
 def _run_git(command: list[str], *, cwd: Path) -> str:
@@ -52,9 +48,10 @@ class _ScriptedAdapter(CliRuntimeAdapter):
 
 
 @pytest.fixture
-def session_factory():
+def session_factory(tmp_path: Path):
     """Create a test session factory with an initialized schema."""
-    engine = create_engine_from_url(TEST_DATABASE_URL)
+    database_path = tmp_path / "test_vertical_slice.sqlite"
+    engine = create_engine_from_url(f"sqlite:///{database_path}")
     # Note: For real integration, we'd run migrations.
     # For this E2E test, we'll manually create tables
     from db.models import Base
@@ -66,8 +63,6 @@ def session_factory():
 
     # Cleanup
     Base.metadata.drop_all(engine)
-    if os.path.exists("test_vertical_slice.sqlite"):
-        os.remove("test_vertical_slice.sqlite")
 
 
 @pytest.mark.anyio

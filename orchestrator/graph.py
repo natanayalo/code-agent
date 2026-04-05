@@ -824,7 +824,7 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
 
     # Extract session state update (T-062)
     session_state_update = SessionStateUpdate(
-        active_goal=state.task.task_text,
+        active_goal=state.normalized_task_text or state.task.task_text,
         files_touched=result.files_changed,
         # TODO: extract decisions_made and identified_risks from result.summary or a dedicated field
     )

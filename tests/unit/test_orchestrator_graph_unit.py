@@ -177,6 +177,28 @@ def test_summarize_result_no_result():
     assert res["result"]["status"] == "error"
 
 
+def test_summarize_result_uses_normalized_task_text_for_active_goal():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "  demo  "},
+            "normalized_task_text": "demo",
+            "result": {
+                "status": "success",
+                "summary": "done",
+                "commands_run": [],
+                "files_changed": ["demo.txt"],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+
+    res = summarize_result(state)
+
+    assert res["session_state_update"]["active_goal"] == "demo"
+    assert res["session_state_update"]["files_touched"] == ["demo.txt"]
+
+
 def test_create_in_memory_checkpointer():
     cp = create_in_memory_checkpointer()
     assert cp is not None
