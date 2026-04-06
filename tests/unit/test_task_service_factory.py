@@ -8,7 +8,7 @@ import pytest
 
 from apps.api.main import create_app
 from apps.api.task_service_factory import build_task_service_from_env
-from workers import CodexCliWorker, CodexExecCliRuntimeAdapter
+from workers import CodexCliWorker, CodexExecCliRuntimeAdapter, GeminiCliWorker
 
 
 def test_build_task_service_from_env_returns_none_when_disabled() -> None:
@@ -35,6 +35,21 @@ def test_build_task_service_from_env_builds_a_codex_cli_worker(tmp_path: Path) -
     assert service is not None
     assert isinstance(service.worker, CodexCliWorker)
     assert isinstance(service.worker.runtime_adapter, CodexExecCliRuntimeAdapter)
+
+
+def test_build_task_service_from_env_builds_gemini_worker_when_configured(tmp_path: Path) -> None:
+    """When Gemini env vars are set the service should wire a GeminiCliWorker."""
+    database_path = tmp_path / "code-agent.db"
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+            "CODE_AGENT_GEMINI_CLI_BIN": "/usr/local/bin/gemini",
+        }
+    )
+
+    assert service is not None
+    assert isinstance(service.gemini_worker, GeminiCliWorker)
 
 
 def test_create_app_uses_env_bootstrap_when_no_task_service_is_injected(

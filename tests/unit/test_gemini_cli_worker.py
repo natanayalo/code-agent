@@ -11,6 +11,7 @@ from sandbox import (
     DockerShellCommandResult,
     WorkspaceCleanupPolicy,
     WorkspaceHandle,
+    WorkspaceManagerError,
 )
 from tools import DEFAULT_TOOL_REGISTRY
 from workers import GeminiCliWorker, WorkerRequest
@@ -159,6 +160,34 @@ def test_gemini_cli_worker_errors_without_repo_url(tmp_path: Path) -> None:
     assert result.status == "error"
     assert "repo_url" in (result.summary or "")
     assert result.next_action_hint == "provide_repo_url"
+
+
+def test_gemini_cli_worker_errors_when_workspace_provisioning_fails(tmp_path: Path) -> None:
+    """Worker should return an error result when workspace creation raises."""
+
+    class _FailingWorkspaceManager:
+        def create_workspace(self, request: object) -> WorkspaceHandle:
+            raise WorkspaceManagerError("disk full")
+
+        def cleanup_workspace(self, workspace: WorkspaceHandle, *, succeeded: bool) -> bool:
+            return False
+
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FailingWorkspaceManager(),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _: _FakeSession({}),
+    )
+
+    result = asyncio.run(
+        worker.run(WorkerRequest(task_text="do something", repo_url="https://example.com/repo.git"))
+    )
+
+    assert result.status == "error"
+    assert "disk full" in (result.summary or "")
+    assert result.next_action_hint == "inspect_worker_configuration"
 
 
 def test_gemini_cli_worker_workspace_task_id_uses_gemini_prefix(tmp_path: Path) -> None:
