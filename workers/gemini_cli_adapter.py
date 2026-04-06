@@ -23,7 +23,7 @@ GEMINI_TIMEOUT_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TIMEOUT_SECONDS"
 _JSON_FENCE_RE: re.Pattern[str] = re.compile(
     r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE
 )
-_BARE_JSON_RE: re.Pattern[str] = re.compile(r"\{.*\}", re.DOTALL)
+_BARE_JSON_RE: re.Pattern[str] = re.compile(r"\{.*?\}", re.DOTALL)
 
 
 def _coerce_positive_int(value: object, *, default: int) -> int:

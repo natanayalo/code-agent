@@ -19,20 +19,25 @@ def _check_condition(column_name: str, values: tuple[str, ...]) -> str:
 
 
 def upgrade() -> None:
-    # Update any existing rows that reference the old value.
+    # Drop constraints first to allow updating rows to the new value.
+    with op.batch_alter_table("tasks") as batch_op:
+        batch_op.drop_constraint("ck_tasks_worker_type")
+
+    with op.batch_alter_table("worker_runs") as batch_op:
+        batch_op.drop_constraint("ck_worker_runs_worker_type")
+
+    # Update existing rows.
     op.execute("UPDATE tasks SET chosen_worker = 'gemini' WHERE chosen_worker = 'claude'")
     op.execute("UPDATE worker_runs SET worker_type = 'gemini' WHERE worker_type = 'claude'")
 
     # Re-create check constraints with the new enum vocabulary.
     with op.batch_alter_table("tasks") as batch_op:
-        batch_op.drop_constraint("ck_tasks_worker_type")
         batch_op.create_check_constraint(
             op.f("ck_tasks_worker_type"),
             _check_condition("chosen_worker", NEW_WORKER_TYPE_VALUES),
         )
 
     with op.batch_alter_table("worker_runs") as batch_op:
-        batch_op.drop_constraint("ck_worker_runs_worker_type")
         batch_op.create_check_constraint(
             op.f("ck_worker_runs_worker_type"),
             _check_condition("worker_type", NEW_WORKER_TYPE_VALUES),
@@ -40,18 +45,25 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Drop new constraints first to allow reverting rows to the old value.
+    with op.batch_alter_table("tasks") as batch_op:
+        batch_op.drop_constraint("ck_tasks_worker_type")
+
+    with op.batch_alter_table("worker_runs") as batch_op:
+        batch_op.drop_constraint("ck_worker_runs_worker_type")
+
+    # Revert existing rows.
     op.execute("UPDATE tasks SET chosen_worker = 'claude' WHERE chosen_worker = 'gemini'")
     op.execute("UPDATE worker_runs SET worker_type = 'claude' WHERE worker_type = 'gemini'")
 
+    # Re-create check constraints with the old enum vocabulary.
     with op.batch_alter_table("tasks") as batch_op:
-        batch_op.drop_constraint("ck_tasks_worker_type")
         batch_op.create_check_constraint(
             op.f("ck_tasks_worker_type"),
             _check_condition("chosen_worker", OLD_WORKER_TYPE_VALUES),
         )
 
     with op.batch_alter_table("worker_runs") as batch_op:
-        batch_op.drop_constraint("ck_worker_runs_worker_type")
         batch_op.create_check_constraint(
             op.f("ck_worker_runs_worker_type"),
             _check_condition("worker_type", OLD_WORKER_TYPE_VALUES),
