@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
@@ -183,6 +183,17 @@ def _artifact_type_for_persistence(artifact: ArtifactReference) -> str | None:
             extra={"artifact_name": artifact.name, "artifact_type": artifact.artifact_type},
         )
         return None
+
+
+def _serialize_verification_report(report: object | None) -> dict[str, Any] | None:
+    """Normalize verification state from either a Pydantic model or a raw mapping."""
+    if report is None:
+        return None
+    if hasattr(report, "model_dump"):
+        return report.model_dump(mode="json")
+    if isinstance(report, Mapping):
+        return dict(report)
+    raise TypeError(f"Unsupported verification report type: {type(report).__name__}")
 
 
 class TaskExecutionService:
@@ -525,11 +536,7 @@ class TaskExecutionService:
                 summary=result.summary if result is not None else "Worker did not return a result.",
                 requested_permission=result.requested_permission if result is not None else None,
                 budget_usage=result.budget_usage if result is not None else None,
-                verifier_outcome=(
-                    state.verification.model_dump(mode="json")
-                    if state.verification is not None
-                    else None
-                ),
+                verifier_outcome=_serialize_verification_report(state.verification),
                 commands_run=[
                     command.model_dump(mode="json")
                     for command in (result.commands_run if result is not None else [])
