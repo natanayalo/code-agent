@@ -290,12 +290,8 @@ class TaskExecutionService:
                     finished_at=latest_run.finished_at,
                     summary=latest_run.summary,
                     requested_permission=latest_run.requested_permission,
-                    budget_usage=dict(latest_run.budget_usage)
-                    if latest_run.budget_usage is not None
-                    else None,
-                    verifier_outcome=dict(latest_run.verifier_outcome)
-                    if latest_run.verifier_outcome is not None
-                    else None,
+                    budget_usage=latest_run.budget_usage,
+                    verifier_outcome=latest_run.verifier_outcome,
                     commands_run=list(latest_run.commands_run or []),
                     files_changed_count=latest_run.files_changed_count,
                     artifact_index=list(latest_run.artifact_index or []),

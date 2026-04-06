@@ -76,6 +76,7 @@ class Session(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     user: Mapped[User] = relationship(back_populates="sessions")
     tasks: Mapped[list[Task]] = relationship(back_populates="session")
+    worker_runs: Mapped[list[WorkerRun]] = relationship(back_populates="session")
     session_state: Mapped[SessionState | None] = relationship(back_populates="session")
 
     @validates("status")
@@ -159,7 +160,7 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
     artifact_index: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
 
     task: Mapped[Task] = relationship(back_populates="worker_runs")
-    session: Mapped[Session | None] = relationship()
+    session: Mapped[Session | None] = relationship(back_populates="worker_runs")
     artifacts: Mapped[list[Artifact]] = relationship(back_populates="worker_run")
 
     @validates("worker_type")
