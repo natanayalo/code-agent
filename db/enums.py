@@ -27,7 +27,7 @@ class TaskStatus(StrEnum):
 class WorkerType(StrEnum):
     """Supported worker identifiers stored in persistence."""
 
-    CLAUDE = "claude"
+    GEMINI = "gemini"
     CODEX = "codex"
 
 

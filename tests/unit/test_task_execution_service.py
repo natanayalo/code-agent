@@ -88,7 +88,7 @@ def test_task_execution_service_reuses_one_compiled_graph(
     fake_graph = _FakeGraph()
     build_calls: list[Worker] = []
 
-    def fake_build_orchestrator_graph(*, worker: Worker) -> _FakeGraph:
+    def fake_build_orchestrator_graph(*, worker: Worker, gemini_worker=None) -> _FakeGraph:
         build_calls.append(worker)
         return fake_graph
 
@@ -161,7 +161,7 @@ async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -
     monkeypatch.setattr(
         execution_module,
         "build_orchestrator_graph",
-        lambda *, worker: fake_graph,
+        lambda *, worker, gemini_worker=None: fake_graph,
     )
 
     service = execution_module.TaskExecutionService(

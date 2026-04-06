@@ -26,7 +26,7 @@ The repo currently contains:
 This slice intentionally does not include:
 - Telegram or webhook task handle-off
 - a multi-user SaaS layer
-- a second worker (Claude) for routing validation
+- a second worker (Gemini CLI) for routing validation
 
 ## Project Layout
 
@@ -158,5 +158,5 @@ The repo includes:
 
 The current implementation targets are:
 - **Milestone 8**: Structured run observability and diagnostic logging (T-043)
-- **Milestone 9**: Second worker integration (Claude) and routing improvements (T-070+)
+- **Milestone 9**: Second worker integration (Gemini CLI) and routing improvements (T-070+)
 - **Milestone 10**: Telegram and webhook adapter ingress (T-050 to T-053)

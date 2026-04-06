@@ -1,0 +1,227 @@
+"""Unit tests for the Gemini CLI worker."""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+from sandbox import (
+    DockerSandboxContainer,
+    DockerSandboxContainerRequest,
+    DockerShellCommandResult,
+    WorkspaceCleanupPolicy,
+    WorkspaceHandle,
+)
+from tools import DEFAULT_TOOL_REGISTRY
+from workers import GeminiCliWorker, WorkerRequest
+from workers.cli_runtime import CliRuntimeMessage, CliRuntimeStep
+
+
+class _FakeWorkspaceManager:
+    def __init__(self, workspace: WorkspaceHandle) -> None:
+        self.workspace = workspace
+        self.requests: list[object] = []
+        self.cleanup_requests: list[tuple[WorkspaceHandle, bool]] = []
+
+    def create_workspace(self, request: object) -> WorkspaceHandle:
+        self.requests.append(request)
+        return self.workspace
+
+    def cleanup_workspace(self, workspace: WorkspaceHandle, *, succeeded: bool) -> bool:
+        self.cleanup_requests.append((workspace, succeeded))
+        return False
+
+
+class _FakeContainerManager:
+    def __init__(self, container: DockerSandboxContainer) -> None:
+        self.container = container
+        self.start_requests: list[DockerSandboxContainerRequest] = []
+        self.stop_requests: list[DockerSandboxContainer] = []
+
+    def start(self, request: DockerSandboxContainerRequest) -> DockerSandboxContainer:
+        self.start_requests.append(request)
+        return self.container
+
+    def stop(self, container: DockerSandboxContainer) -> None:
+        self.stop_requests.append(container)
+
+
+class _ScriptedAdapter:
+    def __init__(self, steps: list[CliRuntimeStep]) -> None:
+        self._steps = list(steps)
+        self.calls: list[list[CliRuntimeMessage]] = []
+
+    def next_step(
+        self,
+        messages: list[CliRuntimeMessage],
+        *,
+        working_directory: Path | None = None,
+    ) -> CliRuntimeStep:
+        self.calls.append(list(messages))
+        if not self._steps:
+            raise AssertionError("Adapter received more turns than expected.")
+        return self._steps.pop(0)
+
+
+class _FakeSession:
+    def __init__(self, responses: dict[str, DockerShellCommandResult]) -> None:
+        self.responses = dict(responses)
+        self.calls: list[tuple[str, int]] = []
+        self.closed = False
+
+    def execute(self, command: str, *, timeout_seconds: int = 300) -> DockerShellCommandResult:
+        self.calls.append((command, timeout_seconds))
+        return self.responses[command]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _make_workspace(tmp_path: Path) -> WorkspaceHandle:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    (repo_path / "AGENTS.md").write_text("# Agents\n", encoding="utf-8")
+    return WorkspaceHandle(
+        workspace_id="ws-gemini-test",
+        task_id="gemini-cli-test-task",
+        workspace_path=tmp_path,
+        repo_path=repo_path,
+        repo_url="https://example.com/repo.git",
+        branch="main",
+        cleanup_policy=WorkspaceCleanupPolicy(delete_on_success=False, retain_on_failure=True),
+    )
+
+
+def _make_container(workspace: WorkspaceHandle) -> DockerSandboxContainer:
+    return DockerSandboxContainer(
+        container_name="test-gemini-container",
+        image="python:3.12-slim",
+        workspace=workspace,
+    )
+
+
+def test_gemini_cli_worker_runs_successfully(tmp_path: Path) -> None:
+    """Worker should return a success result when the adapter finishes cleanly."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    git_status_result = DockerShellCommandResult(
+        command="git status --porcelain=v1 -z --untracked-files=all",
+        exit_code=0,
+        output="",
+        duration_seconds=0.0,
+    )
+    session = _FakeSession(
+        {
+            "git status --porcelain=v1 -z --untracked-files=all": git_status_result,
+        }
+    )
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="final", final_output="All done."),
+        ]
+    )
+    worker = GeminiCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _: session,
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+        cleanup_policy=WorkspaceCleanupPolicy(delete_on_success=False, retain_on_failure=True),
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                task_text="List files",
+                repo_url="https://github.com/example/repo.git",
+            )
+        )
+    )
+
+    assert result.status == "success"
+    assert "All done." in (result.summary or "")
+    assert session.closed is True
+
+
+def test_gemini_cli_worker_errors_without_repo_url(tmp_path: Path) -> None:
+    """Worker should refuse to run when repo_url is absent."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _: _FakeSession({}),
+    )
+
+    result = asyncio.run(worker.run(WorkerRequest(task_text="do something")))
+
+    assert result.status == "error"
+    assert "repo_url" in (result.summary or "")
+    assert result.next_action_hint == "provide_repo_url"
+
+
+def test_gemini_cli_worker_workspace_task_id_uses_gemini_prefix(tmp_path: Path) -> None:
+    """Workspace task IDs should carry the gemini-cli prefix."""
+    from workers.gemini_cli_worker import _workspace_task_id
+
+    request = WorkerRequest(task_text="build the feature", repo_url="https://example.com/repo")
+    task_id = _workspace_task_id(request)
+    assert task_id.startswith("gemini-cli-")
+
+
+def test_gemini_cli_worker_uses_session_id_in_workspace_task_id() -> None:
+    """When session_id is present it should be used over task_text for the workspace ID."""
+    from workers.gemini_cli_worker import _workspace_task_id
+
+    request = WorkerRequest(
+        task_text="build the feature",
+        session_id="session-abc-123",
+        repo_url="https://example.com/repo",
+    )
+    task_id = _workspace_task_id(request)
+    assert task_id.startswith("gemini-cli-")
+    assert "session" in task_id
+
+
+def test_gemini_cli_worker_cleanup_applied_on_success(tmp_path: Path) -> None:
+    """When the workspace is deleted on success the artifact list should be cleared."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+
+    class _DeletingManager:
+        def __init__(self, ws: WorkspaceHandle) -> None:
+            self.workspace = ws
+
+        def create_workspace(self, request: object) -> WorkspaceHandle:
+            return self.workspace
+
+        def cleanup_workspace(self, workspace: WorkspaceHandle, *, succeeded: bool) -> bool:
+            return True  # signals deleted
+
+    session = _FakeSession(
+        {
+            "git status --porcelain=v1 -z --untracked-files=all": DockerShellCommandResult(
+                command="git status --porcelain=v1 -z --untracked-files=all",
+                exit_code=0,
+                output="",
+                duration_seconds=0.0,
+            )
+        }
+    )
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="Done.")])
+    worker = GeminiCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_DeletingManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _: session,
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+        cleanup_policy=WorkspaceCleanupPolicy(delete_on_success=True, retain_on_failure=False),
+    )
+
+    result = asyncio.run(
+        worker.run(WorkerRequest(task_text="t", repo_url="https://example.com/repo"))
+    )
+
+    assert result.artifacts == []
+    assert "cleaned up" in (result.summary or "").lower()

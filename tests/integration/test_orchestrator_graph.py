@@ -285,8 +285,8 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
 
     assert state.current_step == "persist_memory"
     assert state.task_kind == "architecture"
-    assert state.route.chosen_worker == "claude"
-    assert state.dispatch.worker_type == "claude"
+    assert state.route.chosen_worker == "gemini"
+    assert state.dispatch.worker_type == "gemini"
     assert state.dispatch.run_id is None
     assert state.dispatch.workspace_id is None
     assert worker.requests == []
@@ -294,17 +294,17 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
     assert state.result.status == "error"
     assert (
         state.result.summary
-        == "No worker is configured for route 'claude'. Configured workers: codex."
+        == "No worker is configured for route 'gemini'. Configured workers: codex."
     )
     assert state.result.next_action_hint == "configure_requested_worker"
     assert state.progress_updates == [
         "task ingested",
         "task classified as architecture",
         "memory context loaded",
-        "worker selected: claude",
+        "worker selected: gemini",
         "approval not required",
         "worker dispatched",
-        "worker unavailable: claude",
+        "worker unavailable: gemini",
         "verification failed",
         "result summarized and session state updated",
         "memory persistence queued",

@@ -21,7 +21,7 @@ def test_build_system_prompt_includes_all_expected_sections(tmp_path: Path) -> N
     (tmp_path / "AGENTS.md").write_text("Prefer small diffs.\n", encoding="utf-8")
     (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
     (tmp_path / "workers").mkdir()
-    (tmp_path / "workers" / "claude_worker.py").write_text("pass\n", encoding="utf-8")
+    (tmp_path / "workers" / "gemini_cli_worker.py").write_text("pass\n", encoding="utf-8")
 
     request = WorkerRequest(
         session_id="session-46",
@@ -48,7 +48,7 @@ def test_build_system_prompt_includes_all_expected_sections(tmp_path: Path) -> N
     assert "Prefer small diffs." in prompt
     assert "README.md" in prompt
     assert "workers/" in prompt
-    assert "workers/claude_worker.py" in prompt
+    assert "workers/gemini_cli_worker.py" in prompt
     assert "Repository URL: https://***@github.com/example/repo.git" in prompt
     assert '"max_iterations": 12' in prompt
     assert "Use the available tools with focused commands and targeted reads" in prompt
