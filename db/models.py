@@ -140,7 +140,7 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
         index=True,
     )
     session_id: Mapped[str | None] = mapped_column(
-        ForeignKey("sessions.id", ondelete="SET NULL"),
+        ForeignKey("sessions.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )

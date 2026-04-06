@@ -85,6 +85,13 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
         "artifact_index",
         "files_changed_count",
     } <= {column["name"] for column in inspector.get_columns("worker_runs")}
+    worker_run_foreign_keys = {
+        foreign_key["name"]: foreign_key
+        for foreign_key in inspector.get_foreign_keys("worker_runs")
+    }
+    assert worker_run_foreign_keys["fk_worker_runs_session_id_sessions"]["options"] == {
+        "ondelete": "CASCADE"
+    }
     session_state_columns = {
         column["name"]: column for column in inspector.get_columns("session_states")
     }

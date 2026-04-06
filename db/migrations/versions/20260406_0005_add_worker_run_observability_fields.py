@@ -21,7 +21,7 @@ def upgrade() -> None:
             "sessions",
             ["session_id"],
             ["id"],
-            ondelete="SET NULL",
+            ondelete="CASCADE",
         )
 
 
