@@ -34,6 +34,8 @@ class WorkerCommand(WorkerModel):
     command: str
     exit_code: int | None = None
     duration_seconds: float | None = Field(default=None, ge=0)
+    stdout_artifact_uri: str | None = None
+    stderr_artifact_uri: str | None = None
 
 
 class TestResult(WorkerModel):
@@ -58,6 +60,7 @@ class WorkerResult(WorkerModel):
     status: Literal["success", "failure", "error"]
     summary: str | None = None
     requested_permission: str | None = None
+    budget_usage: dict[str, Any] | None = None
     commands_run: list[WorkerCommand] = Field(default_factory=list)
     files_changed: list[str] = Field(default_factory=list)
     test_results: list[TestResult] = Field(default_factory=list)

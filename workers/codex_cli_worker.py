@@ -146,6 +146,7 @@ def _worker_result_from_execution(
         status=execution.status,
         summary=execution.summary,
         requested_permission=requested_permission,
+        budget_usage=execution.budget_ledger.model_dump(mode="json"),
         commands_run=execution.commands_run,
         files_changed=files_changed,
         artifacts=_workspace_artifacts(workspace),

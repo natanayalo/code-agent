@@ -437,8 +437,10 @@ def test_persist_execution_outcome_creates_error_worker_run_without_result() -> 
     assert task_snapshot.chosen_worker == "codex"
     assert task_snapshot.route_reason == "implementation_default"
     assert task_snapshot.latest_run is not None
+    assert task_snapshot.latest_run.session_id == persisted.session_id
     assert task_snapshot.latest_run.status == WorkerRunStatus.ERROR.value
     assert task_snapshot.latest_run.summary == "Worker did not return a result."
+    assert task_snapshot.latest_run.verifier_outcome is None
     assert task_snapshot.latest_run.artifact_index == []
     assert task_snapshot.latest_run.files_changed_count == 0
 
@@ -496,8 +498,15 @@ def test_persist_execution_outcome_persists_session_state_update() -> None:
         result=WorkerResult(
             status="success",
             summary="done",
+            requested_permission="workspace_write",
+            budget_usage={"iterations_used": 1, "tool_calls_used": 1},
             files_changed=["orchestrator/execution.py"],
         ),
+        verification={
+            "status": "passed",
+            "summary": "Verifier accepted the run.",
+            "items": [{"label": "worker_status", "status": "passed"}],
+        },
         session_state_update={
             "active_goal": "Persist session state",
             "decisions_made": {"worker": "codex"},
@@ -515,6 +524,20 @@ def test_persist_execution_outcome_persists_session_state_update() -> None:
         finished_at=finished_at,
     )
 
+    task_snapshot = service.get_task(persisted.task_id)
+    assert task_snapshot is not None
+    assert task_snapshot.latest_run is not None
+    assert task_snapshot.latest_run.requested_permission == "workspace_write"
+    assert task_snapshot.latest_run.budget_usage == {
+        "iterations_used": 1,
+        "tool_calls_used": 1,
+    }
+    assert task_snapshot.latest_run.verifier_outcome == {
+        "status": "passed",
+        "summary": "Verifier accepted the run.",
+        "items": [{"label": "worker_status", "status": "passed", "message": None}],
+    }
+
     with session_scope(session_factory) as session:
         session_state_repo = SessionStateRepository(session)
         session_state = session_state_repo.get(persisted.session_id)
@@ -524,6 +547,81 @@ def test_persist_execution_outcome_persists_session_state_update() -> None:
         assert session_state.decisions_made == {"worker": "codex"}
         assert session_state.identified_risks == {"network": "restricted"}
         assert session_state.files_touched == ["orchestrator/execution.py"]
+
+
+def test_persist_execution_outcome_accepts_raw_verification_mapping() -> None:
+    """Execution persistence should tolerate verification payloads that are plain dicts."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Persist raw verification mapping",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+    _, persisted = service.create_task(submission)
+
+    state = OrchestratorState.model_construct(
+        current_step="persist_memory",
+        session=SessionRef(
+            session_id=persisted.session_id,
+            user_id=persisted.user_id,
+            channel=persisted.channel,
+            external_thread_id=persisted.external_thread_id,
+            active_task_id=persisted.task_id,
+            status="active",
+        ),
+        task=TaskRequest(
+            task_id=persisted.task_id,
+            task_text=submission.task_text,
+            repo_url=submission.repo_url,
+            branch=submission.branch,
+            priority=submission.priority,
+            worker_override=submission.worker_override,
+            constraints=dict(submission.constraints),
+            budget=dict(submission.budget),
+        ),
+        normalized_task_text=submission.task_text,
+        task_kind="implementation",
+        memory=MemoryContext(),
+        route=RouteDecision(
+            chosen_worker="codex",
+            route_reason="implementation_default",
+            override_applied=False,
+        ),
+        approval=ApprovalCheckpoint(),
+        dispatch=WorkerDispatch(worker_type="codex"),
+        result=WorkerResult(status="success", summary="done"),
+        verification={
+            "status": "passed",
+            "summary": "Verifier accepted the run.",
+            "items": [],
+        },
+    )
+
+    service._persist_execution_outcome(
+        task_id=persisted.task_id,
+        state=state,
+        started_at=datetime.now(),
+        finished_at=datetime.now(),
+    )
+
+    task_snapshot = service.get_task(persisted.task_id)
+    assert task_snapshot is not None
+    assert task_snapshot.latest_run is not None
+    assert task_snapshot.latest_run.verifier_outcome == {
+        "status": "passed",
+        "summary": "Verifier accepted the run.",
+        "items": [],
+    }
 
 
 def test_create_task_recovers_from_duplicate_user_and_session_race(monkeypatch) -> None:

@@ -357,6 +357,10 @@ Acceptance:
 - sandbox command records include command, exit code, duration, and stdout/stderr artifact locations
 - permission escalations, budget usage, and verifier outcomes are queryable in persisted run data
 - structured run summaries are queryable in DB/logs without relying only on free-form text blobs
+- `worker_runs` persists structured observability fields for `session_id`, `requested_permission`, `budget_usage`, and `verifier_outcome`
+- persisted command records can carry artifact references for captured stdout/stderr logs when those artifacts exist
+- task snapshot/read APIs expose the latest-run structured observability fields needed for inspection without requiring direct DB reads
+- tests cover both persistence and retrieval of the new observability fields
 
 ---
 

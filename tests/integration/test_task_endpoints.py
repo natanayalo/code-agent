@@ -54,11 +54,14 @@ def client(session_factory) -> Iterator[TestClient]:
         WorkerResult(
             status="success",
             summary="Created note.txt and retained the workspace for inspection.",
+            budget_usage={"iterations_used": 2, "tool_calls_used": 1},
             commands_run=[
                 {
                     "command": "printf 'done\\n' > note.txt",
                     "exit_code": 0,
                     "duration_seconds": 0.1,
+                    "stdout_artifact_uri": "artifacts/stdout.log",
+                    "stderr_artifact_uri": "artifacts/stderr.log",
                 }
             ],
             files_changed=["note.txt"],
@@ -123,9 +126,21 @@ def test_submit_task_persists_execution_path_and_allows_polling(
         "Created note.txt and retained the workspace for inspection."
     )
     assert latest_run["status"] == "success"
+    assert latest_run["session_id"] == payload["session_id"]
     assert latest_run["worker_type"] == "codex"
     assert latest_run["workspace_id"] == "workspace-task-44-1234"
+    assert latest_run["budget_usage"] == {"iterations_used": 2, "tool_calls_used": 1}
+    assert latest_run["verifier_outcome"]["status"] == "warning"
     assert latest_run["files_changed_count"] == 1
+    assert latest_run["commands_run"] == [
+        {
+            "command": "printf 'done\\n' > note.txt",
+            "exit_code": 0,
+            "duration_seconds": 0.1,
+            "stdout_artifact_uri": "artifacts/stdout.log",
+            "stderr_artifact_uri": "artifacts/stderr.log",
+        }
+    ]
     assert latest_run["artifact_index"] == [
         {
             "name": "workspace",
@@ -156,7 +171,10 @@ def test_submit_task_persists_execution_path_and_allows_polling(
         assert len(worker_runs) == 1
         worker_run = worker_runs[0]
         assert worker_run.status is WorkerRunStatus.SUCCESS
+        assert worker_run.session_id == payload["session_id"]
         assert worker_run.workspace_id == "workspace-task-44-1234"
+        assert worker_run.budget_usage == {"iterations_used": 2, "tool_calls_used": 1}
+        assert worker_run.verifier_outcome["status"] == "warning"
         assert worker_run.files_changed_count == 1
 
         artifacts = artifact_repo.list_by_run(worker_run.id)

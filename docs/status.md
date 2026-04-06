@@ -43,10 +43,9 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- Milestone 8: structured run observability (T-043).
 
 ## Next
-- Milestone 8: structured run observability (T-043).
 - Milestone 9: second worker routing and Claude adapter (T-070+).
 - Milestone 10: Telegram ingress (T-050 to T-053).
 

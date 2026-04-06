@@ -287,12 +287,16 @@ class WorkerRunRepository:
         self,
         *,
         task_id: str,
+        session_id: str | None = None,
         worker_type: str | WorkerType,
         started_at: datetime,
         status: str | WorkerRunStatus,
         workspace_id: str | None = None,
         finished_at: datetime | None = None,
         summary: str | None = None,
+        requested_permission: str | None = None,
+        budget_usage: dict[str, Any] | None = None,
+        verifier_outcome: dict[str, Any] | None = None,
         commands_run: list[dict[str, Any]] | None = None,
         files_changed_count: int = 0,
         files_changed: list[str] | None = None,
@@ -300,12 +304,16 @@ class WorkerRunRepository:
     ) -> WorkerRun:
         worker_run = WorkerRun(
             task_id=task_id,
+            session_id=session_id,
             worker_type=worker_type,
             workspace_id=workspace_id,
             started_at=started_at,
             finished_at=finished_at,
             status=status,
             summary=summary,
+            requested_permission=requested_permission,
+            budget_usage=budget_usage,
+            verifier_outcome=verifier_outcome,
             commands_run=commands_run,
             files_changed_count=files_changed_count,
             files_changed=files_changed,
@@ -333,6 +341,9 @@ class WorkerRunRepository:
         status: str | WorkerRunStatus,
         finished_at: datetime,
         summary: str | None = None,
+        requested_permission: str | None = None,
+        budget_usage: dict[str, Any] | None = None,
+        verifier_outcome: dict[str, Any] | None = None,
         commands_run: list[dict[str, Any]] | None = None,
         files_changed_count: int | None = None,
         files_changed: list[str] | None = None,
@@ -346,6 +357,12 @@ class WorkerRunRepository:
         worker_run.finished_at = finished_at
         if summary is not None:
             worker_run.summary = summary
+        if requested_permission is not None:
+            worker_run.requested_permission = requested_permission
+        if budget_usage is not None:
+            worker_run.budget_usage = budget_usage
+        if verifier_outcome is not None:
+            worker_run.verifier_outcome = verifier_outcome
         if commands_run is not None:
             worker_run.commands_run = commands_run
         if files_changed_count is not None:
