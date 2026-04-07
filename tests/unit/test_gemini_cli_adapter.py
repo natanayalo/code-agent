@@ -236,6 +236,13 @@ class TestExtractJson:
         result = _extract_json(raw)
         assert result == raw
 
+    def test_non_json_braces_in_prose_skipped(self) -> None:
+        # Prose containing a non-JSON balanced brace before the real object
+        valid = '{"kind":"final","tool_name":null,"tool_input":null,"final_output":"ok"}'
+        raw = f"This is a set {{a, b}}. The tool call is {valid}"
+        result = _extract_json(raw)
+        assert result == valid
+
 
 class TestBuildAdapterPrompt:
     def test_prompt_includes_transcript_heading(self) -> None:

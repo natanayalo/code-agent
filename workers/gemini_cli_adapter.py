@@ -96,41 +96,52 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
 
 
 def _extract_json(text: str) -> str:
-    """Extract the first complete JSON object from a Gemini CLI response.
+    """Extract the first valid JSON object from a Gemini CLI response.
 
-    Uses brace-counting with string awareness so that nested objects and
-    strings containing braces are handled correctly.  Stops at the matching
-    closing brace for the first ``{`` found, so multiple top-level objects
-    (e.g. a thought block followed by a tool-call block) do not produce
-    invalid concatenated JSON.
+    Uses brace-counting with string awareness to find balanced ``{...}``
+    candidates, then validates each with ``json.loads`` before returning it.
+    This handles nested objects, prose with embedded non-JSON braces (e.g.
+    ``{a, b}``), trailing prose, and markdown-fenced responses correctly.
     """
+    import json as _json  # local import to avoid shadowing the module name at top level
+
     stripped = text.strip()
-    start = stripped.find("{")
-    if start == -1:
-        raise RuntimeError(
-            f"No JSON object found in Gemini CLI response: {_truncate_detail(stripped)}"
-        )
-    depth = 0
-    in_string = False
-    escape_next = False
-    for i, ch in enumerate(stripped[start:], start=start):
-        if escape_next:
-            escape_next = False
-            continue
-        if in_string:
-            if ch == "\\":
-                escape_next = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return stripped[start : i + 1]
+    search_from = 0
+    while True:
+        start = stripped.find("{", search_from)
+        if start == -1:
+            break
+        depth = 0
+        in_string = False
+        escape_next = False
+        end = -1
+        for i, ch in enumerate(stripped[start:], start=start):
+            if escape_next:
+                escape_next = False
+                continue
+            if in_string:
+                if ch == "\\":
+                    escape_next = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end == -1:
+            break
+        candidate = stripped[start : end + 1]
+        try:
+            _json.loads(candidate)
+            return candidate
+        except ValueError:
+            search_from = end + 1
     raise RuntimeError(f"No JSON object found in Gemini CLI response: {_truncate_detail(stripped)}")
 
 
