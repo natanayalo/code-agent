@@ -258,8 +258,9 @@ Priority order:
 3. [DONE] Milestone 5: Vertical Slice E2E milestone (T-042 + T-044)
 4. [DONE] Milestone 6: Sandbox hardening milestone (T-054/T-055)
 5. [DONE] Milestone 7: Memory integration milestone (T-060 to T-065)
-6. Milestone 8: Structured run observability (T-043) + Milestone 9: Second worker and routing (T-070+)
-7. Milestone 10: Telegram ingress milestone (T-050 to T-053)
+6. [DONE] Milestone 8: Structured run observability (T-043) + Milestone 9: T-070 second worker (GeminiCliWorker)
+7. Milestone 9 (remaining): T-071 routing heuristics + T-072 manual override
+8. Milestone 10: Telegram ingress milestone (T-050 to T-053)
 
 ## Code style
 
