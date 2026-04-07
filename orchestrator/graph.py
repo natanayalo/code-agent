@@ -553,6 +553,16 @@ def _compute_route_decision(
                     route_reason=escalation_reason,
                     override_applied=False,
                 )
+            # Alternate unavailable — fail explicitly rather than blind retry of the failed worker.
+            logger.warning(
+                "Escalation requires alternate worker but it is unavailable; failing explicitly",
+                extra={"prior_worker": prior_worker, "alternate_worker": alternate},
+            )
+            return RouteDecision(
+                chosen_worker=alternate,
+                route_reason="runtime_unavailable",
+                override_applied=False,
+            )
 
     # T-071: heuristic 2 — explicit budget preference.
     budget = state.task.budget
@@ -674,6 +684,7 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
     )
     return {
         "current_step": "dispatch_job",
+        "attempt_count": state.attempt_count + 1,
         "dispatch": dispatch.model_dump(),
         "progress_updates": _progress_update(state, "worker dispatched"),
     }

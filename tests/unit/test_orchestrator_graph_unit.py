@@ -327,8 +327,8 @@ def test_compute_route_previous_worker_failed_escalation():
     assert route.route_reason == "previous_worker_failed"
 
 
-def test_compute_route_escalation_skipped_when_alternate_unavailable():
-    """T-071: escalation skipped when alternate unavailable; falls through to shape heuristics."""
+def test_compute_route_escalation_fails_explicitly_when_alternate_unavailable():
+    """T-071: escalation needed but alternate unavailable → explicit failure, not blind retry."""
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "fix the code"},
@@ -349,10 +349,10 @@ def test_compute_route_escalation_skipped_when_alternate_unavailable():
             },
         }
     )
-    # Only codex is available; gemini escalation not possible → falls through to task shape.
+    # Only codex is available; gemini escalation not possible → explicit failure, not blind retry.
     route = _compute_route_decision(state, _CODEX_ONLY)
-    assert route.chosen_worker == "codex"
-    assert route.route_reason == "cheap_mechanical_change"
+    assert route.chosen_worker == "gemini"  # desired alternate
+    assert route.route_reason == "runtime_unavailable"
 
 
 def test_build_choose_worker_node_binds_available_workers():
@@ -437,6 +437,36 @@ def test_summarize_result_uses_normalized_task_text_for_active_goal():
 def test_create_in_memory_checkpointer():
     cp = create_in_memory_checkpointer()
     assert cp is not None
+
+
+def test_dispatch_job_increments_attempt_count():
+    """dispatch_job must increment attempt_count so the escalation heuristic is reachable."""
+    from orchestrator.graph import dispatch_job
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "route": {"chosen_worker": "codex", "route_reason": "cheap_mechanical_change"},
+            "attempt_count": 0,
+        }
+    )
+    result = dispatch_job(state)
+    assert result["attempt_count"] == 1
+
+
+def test_dispatch_job_increments_attempt_count_on_retry():
+    """attempt_count accumulates across dispatch calls."""
+    from orchestrator.graph import dispatch_job
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "route": {"chosen_worker": "gemini", "route_reason": "verifier_failed_previous_run"},
+            "attempt_count": 1,
+        }
+    )
+    result = dispatch_job(state)
+    assert result["attempt_count"] == 2
 
 
 def test_await_permission_escalation_approved():
