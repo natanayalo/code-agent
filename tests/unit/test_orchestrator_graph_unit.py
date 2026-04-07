@@ -367,7 +367,39 @@ def test_build_choose_worker_node_binds_available_workers():
     assert res["route"]["route_reason"] == "runtime_unavailable"
 
 
-def test_await_approval_not_required():
+def test_compute_route_neither_worker_available():
+    """_route_by_preference keeps the preferred intent when neither worker is available."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "demo"}, "task_kind": "architecture"}
+    )
+    # Empty available set: neither gemini nor codex is configured.
+    route = _compute_route_decision(state, frozenset())
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "runtime_unavailable"
+
+
+def test_compute_route_escalation_skipped_when_prior_attempt_succeeded():
+    """T-071: no escalation when the prior attempt produced a successful result."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "fix the code"},
+            "task_kind": "implementation",
+            "attempt_count": 1,
+            "dispatch": {"worker_type": "codex"},
+            "result": {
+                "status": "success",
+                "commands_run": [],
+                "files_changed": ["x.py"],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    # Prior attempt succeeded → escalation skipped → falls through to task shape.
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "codex"
+    assert route.route_reason == "cheap_mechanical_change"
+
     state = OrchestratorState.model_validate({"task": {"task_text": "demo"}})
     state.approval.required = False
     res = await_approval(state)

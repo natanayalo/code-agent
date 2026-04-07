@@ -60,7 +60,7 @@ class _FakeGraph:
             memory=MemoryContext(),
             route=RouteDecision(
                 chosen_worker="codex",
-                route_reason="implementation_default",
+                route_reason="cheap_mechanical_change",
                 override_applied=False,
             ),
             approval=ApprovalCheckpoint(),
@@ -189,7 +189,7 @@ async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -
         branch=submission.branch,
         priority=submission.priority,
         chosen_worker="codex",
-        route_reason="implementation_default",
+        route_reason="cheap_mechanical_change",
         created_at=datetime.now(),
         updated_at=datetime.now(),
     )
@@ -282,7 +282,7 @@ async def test_submit_task_marks_task_failed_when_outcome_persistence_crashes(
             memory=MemoryContext(),
             route=RouteDecision(
                 chosen_worker="codex",
-                route_reason="implementation_default",
+                route_reason="cheap_mechanical_change",
                 override_applied=False,
             ),
             approval=ApprovalCheckpoint(),
@@ -414,7 +414,7 @@ def test_persist_execution_outcome_creates_error_worker_run_without_result() -> 
         memory=MemoryContext(),
         route=RouteDecision(
             chosen_worker="codex",
-            route_reason="implementation_default",
+            route_reason="cheap_mechanical_change",
             override_applied=False,
         ),
         approval=ApprovalCheckpoint(),
@@ -435,7 +435,7 @@ def test_persist_execution_outcome_creates_error_worker_run_without_result() -> 
     assert task_snapshot is not None
     assert task_snapshot.status == TaskStatus.FAILED.value
     assert task_snapshot.chosen_worker == "codex"
-    assert task_snapshot.route_reason == "implementation_default"
+    assert task_snapshot.route_reason == "cheap_mechanical_change"
     assert task_snapshot.latest_run is not None
     assert task_snapshot.latest_run.session_id == persisted.session_id
     assert task_snapshot.latest_run.status == WorkerRunStatus.ERROR.value
@@ -490,7 +490,7 @@ def test_persist_execution_outcome_persists_session_state_update() -> None:
         memory=MemoryContext(),
         route=RouteDecision(
             chosen_worker="codex",
-            route_reason="implementation_default",
+            route_reason="cheap_mechanical_change",
             override_applied=False,
         ),
         approval=ApprovalCheckpoint(),
@@ -594,7 +594,7 @@ def test_persist_execution_outcome_accepts_raw_verification_mapping() -> None:
         memory=MemoryContext(),
         route=RouteDecision(
             chosen_worker="codex",
-            route_reason="implementation_default",
+            route_reason="cheap_mechanical_change",
             override_applied=False,
         ),
         approval=ApprovalCheckpoint(),
