@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -18,12 +17,6 @@ _DETAIL_PREVIEW_CHARACTERS: Final[int] = 1200
 GEMINI_EXECUTABLE_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_CLI_BIN"
 GEMINI_MODEL_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_MODEL"
 GEMINI_TIMEOUT_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TIMEOUT_SECONDS"
-
-# Gemini may wrap its JSON in a markdown code fence.
-_JSON_FENCE_RE: re.Pattern[str] = re.compile(
-    r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE
-)
-_BARE_JSON_RE: re.Pattern[str] = re.compile(r"\{.*?\}", re.DOTALL)
 
 
 def _coerce_positive_int(value: object, *, default: int) -> int:
@@ -103,20 +96,16 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
 
 
 def _extract_json(text: str) -> str:
-    """Extract the first JSON object from a Gemini CLI response.
+    """Extract the outermost JSON object from a Gemini CLI response.
 
-    Gemini may wrap the JSON in a markdown code fence or include surrounding prose.
-    Try bare JSON first, then fenced, then substring search.
+    Uses find/rfind to locate the outermost braces so that nested objects,
+    trailing prose, and markdown-fenced responses are all handled correctly.
     """
     stripped = text.strip()
-    if stripped.startswith("{"):
-        return stripped
-    fence_match = _JSON_FENCE_RE.search(stripped)
-    if fence_match:
-        return fence_match.group(1).strip()
-    bare_match = _BARE_JSON_RE.search(stripped)
-    if bare_match:
-        return bare_match.group(0).strip()
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return stripped[start : end + 1].strip()
     raise RuntimeError(f"No JSON object found in Gemini CLI response: {_truncate_detail(stripped)}")
 
 

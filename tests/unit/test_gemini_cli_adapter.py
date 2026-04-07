@@ -205,6 +205,20 @@ class TestExtractJson:
         with pytest.raises(RuntimeError, match="No JSON object found"):
             _extract_json("No JSON here at all.")
 
+    def test_nested_json_extracted_correctly(self) -> None:
+        raw = (
+            '{"kind":"final","metadata":{"x":1},'
+            '"tool_name":null,"tool_input":null,"final_output":"ok"}'
+        )
+        result = _extract_json(raw)
+        assert result == raw
+
+    def test_trailing_prose_stripped(self) -> None:
+        raw = '{"kind":"final","final_output":"done","tool_name":null,"tool_input":null} Done.'
+        result = _extract_json(raw)
+        assert result.endswith("}")
+        assert "Done." not in result
+
 
 class TestBuildAdapterPrompt:
     def test_prompt_includes_transcript_heading(self) -> None:
