@@ -68,5 +68,6 @@ Example reason codes:
 - `verifier_failed_previous_run`
 - `manual_override`
 - `ambiguous_task`
-- `runtime_unavailable`
 - `budget_preference`
+- `preferred_unavailable` (heuristic preferred worker absent; fallback used, task proceeds)
+- `runtime_unavailable` (requested worker absent and no viable fallback; dispatch will fail)

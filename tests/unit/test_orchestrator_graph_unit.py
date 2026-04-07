@@ -231,13 +231,13 @@ def test_compute_route_budget_prefer_low_cost():
 
 
 def test_compute_route_budget_prefer_high_quality_fallback_when_gemini_unavailable():
-    """T-071: falls back to codex with runtime_unavailable when gemini isn't configured."""
+    """T-071: falls back to codex with preferred_unavailable when gemini isn't configured."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "demo", "budget": {"prefer_high_quality": True}}}
     )
     route = _compute_route_decision(state, _CODEX_ONLY)
     assert route.chosen_worker == "codex"
-    assert route.route_reason == "runtime_unavailable"
+    assert route.route_reason == "preferred_unavailable"
 
 
 def test_compute_route_task_kind_architecture():
@@ -271,13 +271,13 @@ def test_compute_route_task_kind_implementation():
 
 
 def test_compute_route_task_kind_implementation_fallback_when_codex_unavailable():
-    """T-071: falls back to gemini when codex is unavailable for an implementation task."""
+    """T-071: falls back to gemini with preferred_unavailable when codex is unavailable."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "add a helper"}, "task_kind": "implementation"}
     )
     route = _compute_route_decision(state, _GEMINI_ONLY)
     assert route.chosen_worker == "gemini"
-    assert route.route_reason == "runtime_unavailable"
+    assert route.route_reason == "preferred_unavailable"
 
 
 def test_compute_route_verifier_failure_escalation():
@@ -360,11 +360,11 @@ def test_build_choose_worker_node_binds_available_workers():
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "demo"}, "task_kind": "architecture"}
     )
-    # With only codex available, architecture task should fall back to codex.
+    # With only codex available, gemini-preferred architecture task falls back to codex.
     node = build_choose_worker_node(frozenset({"codex"}))
     res = node(state)
     assert res["route"]["chosen_worker"] == "codex"
-    assert res["route"]["route_reason"] == "runtime_unavailable"
+    assert res["route"]["route_reason"] == "preferred_unavailable"
 
 
 def test_compute_route_neither_worker_available():

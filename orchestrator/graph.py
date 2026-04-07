@@ -480,7 +480,12 @@ def _route_by_preference(
     reason: str,
     available_workers: frozenset[str],
 ) -> RouteDecision:
-    """Pick the preferred worker when available, otherwise fall back with runtime_unavailable."""
+    """Pick the preferred worker when available, or the fallback with an explicit reason.
+
+    - preferred available  → reason (e.g. 'high_stakes_refactor')
+    - fallback available   → 'preferred_unavailable'  (task runs on the fallback)
+    - neither available    → 'runtime_unavailable'    (dispatch will fail explicitly)
+    """
     if preferred in available_workers:
         return RouteDecision(
             chosen_worker=preferred,
@@ -490,7 +495,7 @@ def _route_by_preference(
     if fallback in available_workers:
         return RouteDecision(
             chosen_worker=fallback,
-            route_reason="runtime_unavailable",
+            route_reason="preferred_unavailable",
             override_applied=False,
         )
     # Neither available - keep the preferred intent; dispatch will fail explicitly.
