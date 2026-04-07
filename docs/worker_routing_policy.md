@@ -8,10 +8,11 @@ Choose the most appropriate coding worker for a task while keeping decisions exp
 
 - `CodexCliWorker`: Production-class worker using the `codex exec` CLI adapter and persistent shell sessions.
 - `CodexWorker`: legacy toy sandbox executor for contract/proof-of-path testing.
+- `GeminiCliWorker`: Production-class worker using the Gemini CLI adapter and persistent shell sessions.
 
 ## Planned workers
 
-- `GeminiCliWorker`
+None — both workers are available.
 
 ## Route to Gemini-family worker when
 

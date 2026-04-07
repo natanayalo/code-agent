@@ -10,12 +10,14 @@ from orchestrator.graph import (
     _build_worker_request,
     _classify_task_kind,
     _coerce_approval_decision,
+    _compute_route_decision,
     _default_worker_result_provider,
     _ensure_state,
     _is_destructive_task,
     _resolve_orchestrator_timeout_seconds,
     await_approval,
     await_permission_escalation,
+    build_choose_worker_node,
     choose_worker,
     summarize_result,
     verify_result,
@@ -154,6 +156,8 @@ def test_choose_worker_override():
     )
     res = choose_worker(state)
     assert res["route"]["chosen_worker"] == "codex"
+    assert res["route"]["route_reason"] == "manual_override"
+    assert res["route"]["override_applied"] is True
 
 
 def test_choose_worker_architecture_default():
@@ -162,6 +166,205 @@ def test_choose_worker_architecture_default():
     )
     res = choose_worker(state)
     assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["route_reason"] == "high_stakes_refactor"
+
+
+# ---------------------------------------------------------------------------
+# _compute_route_decision unit tests (T-071 / T-072)
+# ---------------------------------------------------------------------------
+
+_ALL_WORKERS: frozenset[str] = frozenset({"codex", "gemini"})
+_CODEX_ONLY: frozenset[str] = frozenset({"codex"})
+_GEMINI_ONLY: frozenset[str] = frozenset({"gemini"})
+
+
+def test_compute_route_override_available():
+    """T-072: manual override is honoured when the worker is available."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "demo", "worker_override": "gemini"}}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "manual_override"
+    assert route.override_applied is True
+
+
+def test_compute_route_override_unavailable_fails_explicitly():
+    """T-072: manual override for an unavailable worker returns runtime_unavailable."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "demo", "worker_override": "gemini"}}
+    )
+    route = _compute_route_decision(state, _CODEX_ONLY)
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "runtime_unavailable"
+    assert route.override_applied is True
+
+
+def test_compute_route_codex_override_available():
+    """T-072: codex manual override is honoured."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "demo", "worker_override": "codex"}}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "codex"
+    assert route.route_reason == "manual_override"
+
+
+def test_compute_route_budget_prefer_high_quality():
+    """T-071: prefer_high_quality budget hint routes to gemini."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "demo", "budget": {"prefer_high_quality": True}}}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "budget_preference"
+
+
+def test_compute_route_budget_prefer_low_cost():
+    """T-071: prefer_low_cost budget hint routes to codex."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "demo", "budget": {"prefer_low_cost": True}}}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "codex"
+    assert route.route_reason == "budget_preference"
+
+
+def test_compute_route_budget_prefer_high_quality_fallback_when_gemini_unavailable():
+    """T-071: falls back to codex with runtime_unavailable when gemini isn't configured."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "demo", "budget": {"prefer_high_quality": True}}}
+    )
+    route = _compute_route_decision(state, _CODEX_ONLY)
+    assert route.chosen_worker == "codex"
+    assert route.route_reason == "runtime_unavailable"
+
+
+def test_compute_route_task_kind_architecture():
+    """T-071: architecture task shape routes to gemini with high_stakes_refactor."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "refactor the module"}, "task_kind": "architecture"}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "high_stakes_refactor"
+
+
+def test_compute_route_task_kind_ambiguous():
+    """T-071: ambiguous task shape routes to gemini with ambiguous_task."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "investigate logs"}, "task_kind": "ambiguous"}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "ambiguous_task"
+
+
+def test_compute_route_task_kind_implementation():
+    """T-071: implementation task shape routes to codex with cheap_mechanical_change."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "add a helper"}, "task_kind": "implementation"}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "codex"
+    assert route.route_reason == "cheap_mechanical_change"
+
+
+def test_compute_route_task_kind_implementation_fallback_when_codex_unavailable():
+    """T-071: falls back to gemini when codex is unavailable for an implementation task."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "add a helper"}, "task_kind": "implementation"}
+    )
+    route = _compute_route_decision(state, _GEMINI_ONLY)
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "runtime_unavailable"
+
+
+def test_compute_route_verifier_failure_escalation():
+    """T-071: failed prior verifier escalates to alternate worker."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "fix the code"},
+            "attempt_count": 1,
+            "dispatch": {"worker_type": "codex"},
+            "verification": {
+                "status": "failed",
+                "summary": "tests failed",
+                "items": [{"label": "worker_status", "status": "failed"}],
+            },
+            "result": {
+                "status": "failure",
+                "commands_run": [],
+                "files_changed": [],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "verifier_failed_previous_run"
+
+
+def test_compute_route_previous_worker_failed_escalation():
+    """T-071: non-success result with no prior verifier escalates via previous_worker_failed."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "fix the code"},
+            "attempt_count": 1,
+            "dispatch": {"worker_type": "codex"},
+            "result": {
+                "status": "failure",
+                "commands_run": [],
+                "files_changed": [],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "previous_worker_failed"
+
+
+def test_compute_route_escalation_skipped_when_alternate_unavailable():
+    """T-071: escalation skipped when alternate unavailable; falls through to shape heuristics."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "fix the code"},
+            "task_kind": "implementation",
+            "attempt_count": 1,
+            "dispatch": {"worker_type": "codex"},
+            "verification": {
+                "status": "failed",
+                "summary": "tests failed",
+                "items": [{"label": "worker_status", "status": "failed"}],
+            },
+            "result": {
+                "status": "failure",
+                "commands_run": [],
+                "files_changed": [],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    # Only codex is available; gemini escalation not possible → falls through to task shape.
+    route = _compute_route_decision(state, _CODEX_ONLY)
+    assert route.chosen_worker == "codex"
+    assert route.route_reason == "cheap_mechanical_change"
+
+
+def test_build_choose_worker_node_binds_available_workers():
+    """build_choose_worker_node creates a node that uses the bound available workers."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "demo"}, "task_kind": "architecture"}
+    )
+    # With only codex available, architecture task should fall back to codex.
+    node = build_choose_worker_node(frozenset({"codex"}))
+    res = node(state)
+    assert res["route"]["chosen_worker"] == "codex"
+    assert res["route"]["route_reason"] == "runtime_unavailable"
 
 
 def test_await_approval_not_required():
