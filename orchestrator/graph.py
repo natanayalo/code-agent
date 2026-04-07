@@ -538,6 +538,7 @@ def _compute_route_decision(
             escalation_reason = None
 
         if escalation_reason is not None:
+            # TODO: generalise alternate selection when the worker pool grows beyond two.
             alternate: WorkerType = "gemini" if prior_worker != "gemini" else "codex"
             if alternate in available_workers:
                 logger.info(
