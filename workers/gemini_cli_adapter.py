@@ -76,14 +76,18 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
             "with no surrounding text, no markdown fences, and no explanation."
         ),
         "Choose one of two actions:",
-        (
-            '{"kind":"tool_call","tool_name":"execute_bash",'
-            '"tool_input":"<one shell command>","final_output":null}'
-        ),
-        (
-            '{"kind":"final","final_output":"<final summary for the user>",'
-            '"tool_name":null,"tool_input":null}'
-        ),
+        CliRuntimeStep(
+            kind="tool_call",
+            tool_name="execute_bash",
+            tool_input="<one shell command>",
+            final_output=None,
+        ).model_dump_json(),
+        CliRuntimeStep(
+            kind="final",
+            final_output="<final summary for the user>",
+            tool_name=None,
+            tool_input=None,
+        ).model_dump_json(),
         "Rules:",
         "- Use only the `execute_bash` tool.",
         "- Request one focused shell command at a time.",
