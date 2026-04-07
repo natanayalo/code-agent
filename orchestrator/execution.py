@@ -204,10 +204,12 @@ class TaskExecutionService:
         *,
         session_factory: sessionmaker[Session],
         worker: Worker,
+        gemini_worker: Worker | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.worker = worker
-        self.graph = build_orchestrator_graph(worker=worker)
+        self.gemini_worker = gemini_worker
+        self.graph = build_orchestrator_graph(worker=worker, gemini_worker=gemini_worker)
 
     def create_task(self, submission: TaskSubmission) -> tuple[TaskSnapshot, _PersistedTaskContext]:
         """Persist a new task request and return the initial pollable snapshot."""

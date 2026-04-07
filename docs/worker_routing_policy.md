@@ -11,11 +11,11 @@ Choose the most appropriate coding worker for a task while keeping decisions exp
 
 ## Planned workers
 
-- `ClaudeCodeCliWorker`
+- `GeminiCliWorker`
 
-## Route to Claude-family worker when
+## Route to Gemini-family worker when
 
-Use the Claude-family worker if one or more are true:
+Use the Gemini-family worker if one or more are true:
 - task is ambiguous
 - task spans many files
 - task is architecture-sensitive
@@ -24,9 +24,9 @@ Use the Claude-family worker if one or more are true:
 - prior verifier output suggests the cheaper worker under-scoped the task
 - caller explicitly requests "highest quality"
 
-If the requested Claude-family runtime is not configured or not available in the current
+If the requested Gemini-family runtime is not configured or not available in the current
 environment, the orchestrator must fail explicitly rather than silently dispatching another
-worker while state still claims `claude`.
+worker while state still claims `gemini`.
 
 ## Route to Codex-family worker when
 

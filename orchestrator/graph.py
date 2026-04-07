@@ -411,9 +411,15 @@ class _DefaultFakeWorker(Worker):
         return _default_worker_result_provider(request)
 
 
-def _configured_workers(worker: Worker | None = None) -> dict[str, Worker]:
+def _configured_workers(
+    worker: Worker | None = None,
+    gemini_worker: Worker | None = None,
+) -> dict[str, Worker]:
     """Return the workers that are actually wired into the graph."""
-    return {"codex": worker or _DefaultFakeWorker()}
+    result: dict[str, Worker] = {"codex": worker or _DefaultFakeWorker()}
+    if gemini_worker is not None:
+        result["gemini"] = gemini_worker
+    return result
 
 
 def _unconfigured_worker_result(worker_type: str | None) -> WorkerResult:
@@ -479,7 +485,7 @@ def choose_worker(state_input: OrchestratorState) -> dict[str, Any]:
         )
     elif state.task_kind in {"architecture", "ambiguous"}:
         route = RouteDecision(
-            chosen_worker="claude",
+            chosen_worker="gemini",
             route_reason="complex_reasoning_default",
             override_applied=False,
         )
@@ -571,9 +577,10 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
 
 def build_await_result_node(
     worker: Worker | None = None,
+    gemini_worker: Worker | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around the workers wired into the graph."""
-    configured_workers = _configured_workers(worker)
+    configured_workers = _configured_workers(worker, gemini_worker)
 
     async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
@@ -851,6 +858,7 @@ def persist_memory(state_input: OrchestratorState) -> dict[str, Any]:
 def build_orchestrator_graph(
     *,
     worker: Worker | None = None,
+    gemini_worker: Worker | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
     interrupt_before: Literal["*"] | list[str] | None = None,
     interrupt_after: Literal["*"] | list[str] | None = None,
@@ -866,7 +874,7 @@ def build_orchestrator_graph(
     builder.add_node("dispatch_job", RunnableLambda(dispatch_job))
     builder.add_node(
         "await_result",
-        RunnableLambda(build_await_result_node(worker)),
+        RunnableLambda(build_await_result_node(worker, gemini_worker)),
     )
     builder.add_node("await_permission_escalation", RunnableLambda(await_permission_escalation))
     builder.add_node("verify_result", RunnableLambda(verify_result))

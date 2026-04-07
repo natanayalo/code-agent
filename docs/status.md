@@ -40,13 +40,14 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-055 Add the constrained verifier stage. PR: [#38](https://github.com/natanayalo/code-agent/pull/38)
 - Milestone 6: Sandbox hardening (T-054/T-055). Verified with strict path policies, secret redaction, and complete audit capture.
 - Milestone 7: Skeptical memory, compact session state, and stable session scaffold (T-060 to T-065). Verified with schema metadata and SessionState repository.
+- Milestone 8: Structured run observability (T-043). PR: [#45](https://github.com/natanayalo/code-agent/pull/45)
 
 ## In Progress
 
-- Milestone 8: structured run observability (T-043).
+- Milestone 9: second worker routing — Gemini CLI adapter (T-070).
 
 ## Next
-- Milestone 9: second worker routing and Claude adapter (T-070+).
+- Milestone 9: T-071 routing heuristics + T-072 manual override.
 - Milestone 10: Telegram ingress (T-050 to T-053).
 
 ## Blocked
@@ -62,7 +63,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-055 (Verifier) performs deterministic checks on worker output, including test results and command audit logs, before final summarization.
 - T-054 (Sandbox Hardening) ensures strict path policies, secret redaction, and complete audit artifact capture for all sandbox executions.
 - Milestone 7 (Memory Integration) adds skepticism metadata (provenance, confidence) to all memory entries and maintains a compact `SessionState` for cross-task goal and risk tracking.
-- The near-term worker plan is explicitly CLI-first. New worker work should not assume full ownership of low-level raw API payload assembly when a CLI, SDK, hook, or subprocess adapter can provide the runtime.
+- The near-term worker plan is explicitly CLI-first. The second worker will be a Gemini CLI adapter. New worker work should not assume full ownership of low-level raw API payload assembly when a CLI, SDK, hook, or subprocess adapter can provide the runtime.
 - T-044 DB scope remains intentionally limited to execution-path persistence for task/status lookup, worker run metadata, final result fields, verifier output, and captured artifacts needed for polling by `task_id`.
 - The original `CodexWorker` remains in the repo as a sandboxed toy executor for contract/proof-of-path testing, but is superseded by `CodexCliWorker` for real tasks.
 - CI validates every push, including merges to `master`, enforcing a 90% branch-coverage floor in `pytest`.

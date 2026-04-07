@@ -28,10 +28,10 @@ flowchart TD
     O --> Q[Job Queue]
 
     Q --> D[Worker Dispatcher]
-    D --> CW[Claude CLI Worker]
+    D --> GW[Gemini CLI Worker]
     D --> OW[Codex CLI Worker]
 
-    CW --> C[CLI Runtime Adapter]
+    GW --> C[CLI Runtime Adapter]
     OW --> C
     C --> X[Sandbox Workspace]
 
@@ -101,7 +101,7 @@ Responsibilities:
 
 Workers:
 
-- Claude CLI worker
+- Gemini CLI worker
 - Codex CLI worker
 
 All workers implement the same interface.
@@ -249,7 +249,7 @@ Fields:
 
 ## Routing policy
 
-### Route to Claude-family worker when
+### Route to Gemini-family worker when
 
 - task is high-stakes
 - task is ambiguous
@@ -335,7 +335,7 @@ Use:
 - LangGraph
 - Postgres
 - Docker sandbox
-- CLI-first Claude + Codex worker adapters over the shared worker interface
+- CLI-first Gemini + Codex worker adapters over the shared worker interface
 - simple structured memory tables with verification metadata and compact session state
 
 Do not add in v1:

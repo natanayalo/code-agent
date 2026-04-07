@@ -161,7 +161,7 @@ def test_choose_worker_architecture_default():
         {"task": {"task_text": "demo"}, "task_kind": "architecture"}
     )
     res = choose_worker(state)
-    assert res["route"]["chosen_worker"] == "claude"
+    assert res["route"]["chosen_worker"] == "gemini"
 
 
 def test_await_approval_not_required():

@@ -21,8 +21,11 @@ Use this skill for repo-specific triage after pull request review feedback is co
 ## Replying and Resolving Threads
 
 - To reply to and resolve individual inline GitHub review comments natively, use the `gh api graphql` command.
-- Find thread IDs using: `gh api graphql -F owner="{owner}" -F name="{repo}" -F pr={PR_NUMBER} -f query='query($owner: String!, $name: String!, $pr: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $pr) { reviewThreads(first: 10) { nodes { id isResolved comments(first: 1) { nodes { body } } } } } } }'`
-- Reply and resolve a specific thread: `gh api graphql -F id="{THREAD_ID}" -F body="{REPLY_TEXT}" -f query='mutation($id: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) { comment { id } } resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }'`
+- Always prefix `gh api graphql` with `GH_PAGER=cat` to suppress the interactive pager in automation.
+- Find thread IDs using: `GH_PAGER=cat gh api graphql -F owner="{owner}" -F name="{repo}" -F pr={PR_NUMBER} -f query='query($owner: String!, $name: String!, $pr: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $pr) { reviewThreads(first: 20) { nodes { id isResolved comments(first: 5) { nodes { body author { login } } } } } } } }'`
+  - Use `first: 20` for threads (not 10) and `first: 5` for comments so full thread history (including prior replies) is visible.
+  - Check `isResolved` and read the full comment thread before patching — a previous session may have already fixed it.
+- Reply and resolve a specific thread: `GH_PAGER=cat gh api graphql -F id="{THREAD_ID}" -F body="{REPLY_TEXT}" -f query='mutation($id: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) { comment { id } } resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }'`
 
 ## Triage workflow
 
@@ -40,13 +43,13 @@ Use this skill for repo-specific triage after pull request review feedback is co
 
 - Keep each edit traceable to a review point.
 - Do not smuggle unrelated improvements into a review-fix commit.
-- Check whether the current branch already satisfies a comment before patching.
+- Check whether the current branch already satisfies a comment before patching. If `git status` shows a clean tree, check `git log --oneline -5` to confirm whether the fix was committed in an earlier step.
 
 ## Verification pattern
 
-- Propose targeted `pre-commit run --files <changed files>`
-- Propose the narrowest relevant tests
-- Do not run commands without approval
+- Run `pytest` on the affected unit/integration tests after each fix — this is always safe in this repo per AGENTS.md.
+- Run `pre-commit run --files <changed files>` when the change touches linted code.
+- Do not run deploy commands or destructive operations without approval.
 
 ## Summary expectations
 

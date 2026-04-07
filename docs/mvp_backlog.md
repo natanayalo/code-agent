@@ -124,7 +124,7 @@ Create shared task/result models and abstract worker interface.
 Acceptance:
 - orchestrator can call fake worker through interface
 
-### T-041 Implement CodexWorker or ClaudeWorker
+### T-041 Implement CodexWorker or GeminiWorker
 Pick one first and integrate with real task execution through the shared async worker contract.
 
 Acceptance:
@@ -179,7 +179,7 @@ Replace the one-shot toy-script pattern with an iterative agent loop: prompt →
 runtime adapter → tool call → execute via persistent shell → feed observation back → loop.
 
 Scope notes:
-- add a shared CLI runtime layer under `workers/` plus provider-specific adapters such as `ClaudeCodeCliWorker` and `CodexCliWorker`
+- add a shared CLI runtime layer under `workers/` plus provider-specific adapters such as `GeminiCliWorker` and `CodexCliWorker`
 - build system prompt via T-046's `build_system_prompt()`
 - start persistent container via T-045's container/session layer
 - start with a single `execute_bash` tool (per mini-SWE-agent's proven bash-only approach)
@@ -367,7 +367,7 @@ Acceptance:
 ## Milestone 9 - Second worker routing
 
 ### T-070 Implement second worker adapter
-Add remaining worker so both Claude and Codex are supported.
+Add remaining worker so both Gemini and Codex are supported.
 
 Acceptance:
 - both workers runnable via the same orchestrator path and shared CLI-runtime abstractions

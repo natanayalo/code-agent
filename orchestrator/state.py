@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from workers import WorkerResult
 
-WorkerType = Literal["claude", "codex"]
+WorkerType = Literal["gemini", "codex"]
 MemoryCategory = Literal["personal", "project"]
 WorkflowStep = Literal[
     "ingest_task",

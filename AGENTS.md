@@ -39,7 +39,7 @@ Do not build these yet:
    - worker owns repo task execution
 
 2. Keep provider-specific logic isolated
-   - all Claude-specific logic stays in workers/claude_worker.py (and related adapters)
+   - all Gemini-specific logic stays in workers/gemini_cli_worker.py (and related adapters)
    - all Codex-specific logic stays in workers/codex_cli_worker.py (and related adapters)
 
 3. Default to safe execution
