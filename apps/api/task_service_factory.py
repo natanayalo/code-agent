@@ -15,7 +15,11 @@ from workers import (
     GeminiCliRuntimeAdapter,
     GeminiCliWorker,
 )
-from workers.gemini_cli_adapter import GEMINI_EXECUTABLE_ENV_VAR, GEMINI_MODEL_ENV_VAR
+from workers.gemini_cli_adapter import (
+    GEMINI_EXECUTABLE_ENV_VAR,
+    GEMINI_MODEL_ENV_VAR,
+    GEMINI_TIMEOUT_ENV_VAR,
+)
 
 ENABLE_TASK_SERVICE_ENV_VAR: Final[str] = "CODE_AGENT_ENABLE_TASK_SERVICE"
 DATABASE_URL_ENV_VAR: Final[str] = "DATABASE_URL"
@@ -87,7 +91,10 @@ def build_task_service_from_env(
     session_factory = create_session_factory(engine)
     codex_worker = CodexCliWorker(runtime_adapter=CodexExecCliRuntimeAdapter.from_env(resolved_env))
     gemini_worker: GeminiCliWorker | None = None
-    if resolved_env.get(GEMINI_EXECUTABLE_ENV_VAR) or resolved_env.get(GEMINI_MODEL_ENV_VAR):
+    if any(
+        resolved_env.get(k)
+        for k in (GEMINI_EXECUTABLE_ENV_VAR, GEMINI_MODEL_ENV_VAR, GEMINI_TIMEOUT_ENV_VAR)
+    ):
         gemini_worker = GeminiCliWorker(
             runtime_adapter=GeminiCliRuntimeAdapter.from_env(resolved_env)
         )
