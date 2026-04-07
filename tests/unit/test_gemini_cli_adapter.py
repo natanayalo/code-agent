@@ -219,6 +219,23 @@ class TestExtractJson:
         assert result.endswith("}")
         assert "Done." not in result
 
+    def test_multiple_top_level_objects_returns_first(self) -> None:
+        first = (
+            '{"kind":"tool_call","tool_name":"execute_bash","tool_input":"ls","final_output":null}'
+        )
+        raw = f'{{"kind":"thought","text":"thinking"}} {first}'
+        result = _extract_json(raw)
+        assert result == '{"kind":"thought","text":"thinking"}'
+
+    def test_string_containing_braces_not_confused(self) -> None:
+        # tool_input contains braces that must not confuse brace counting
+        raw = (
+            '{"kind":"tool_call","tool_name":"execute_bash"'
+            ',"tool_input":"cat {a,b}.py","final_output":null}'
+        )
+        result = _extract_json(raw)
+        assert result == raw
+
 
 class TestBuildAdapterPrompt:
     def test_prompt_includes_transcript_heading(self) -> None:

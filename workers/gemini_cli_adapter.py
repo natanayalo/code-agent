@@ -96,16 +96,41 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
 
 
 def _extract_json(text: str) -> str:
-    """Extract the outermost JSON object from a Gemini CLI response.
+    """Extract the first complete JSON object from a Gemini CLI response.
 
-    Uses find/rfind to locate the outermost braces so that nested objects,
-    trailing prose, and markdown-fenced responses are all handled correctly.
+    Uses brace-counting with string awareness so that nested objects and
+    strings containing braces are handled correctly.  Stops at the matching
+    closing brace for the first ``{`` found, so multiple top-level objects
+    (e.g. a thought block followed by a tool-call block) do not produce
+    invalid concatenated JSON.
     """
     stripped = text.strip()
     start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return stripped[start : end + 1].strip()
+    if start == -1:
+        raise RuntimeError(
+            f"No JSON object found in Gemini CLI response: {_truncate_detail(stripped)}"
+        )
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i, ch in enumerate(stripped[start:], start=start):
+        if escape_next:
+            escape_next = False
+            continue
+        if in_string:
+            if ch == "\\":
+                escape_next = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return stripped[start : i + 1]
     raise RuntimeError(f"No JSON object found in Gemini CLI response: {_truncate_detail(stripped)}")
 
 
