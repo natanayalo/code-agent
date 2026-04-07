@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -103,8 +104,6 @@ def _extract_json(text: str) -> str:
     This handles nested objects, prose with embedded non-JSON braces (e.g.
     ``{a, b}``), trailing prose, and markdown-fenced responses correctly.
     """
-    import json as _json  # local import to avoid shadowing the module name at top level
-
     stripped = text.strip()
     search_from = 0
     while True:
@@ -138,7 +137,7 @@ def _extract_json(text: str) -> str:
             break
         candidate = stripped[start : end + 1]
         try:
-            _json.loads(candidate)
+            json.loads(candidate)
             return candidate
         except ValueError:
             search_from = end + 1
