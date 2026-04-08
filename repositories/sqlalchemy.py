@@ -312,20 +312,6 @@ class InboundDeliveryRepository:
         )
         return self.session.scalar(statement)
 
-    def attach_task(
-        self,
-        *,
-        channel: str,
-        delivery_id: str,
-        task_id: str,
-    ) -> InboundDelivery | None:
-        delivery = self.get_by_channel_delivery(channel=channel, delivery_id=delivery_id)
-        if delivery is None:
-            return None
-        delivery.task_id = task_id
-        self.session.flush()
-        return delivery
-
     def attach_task_if_unassigned(
         self,
         *,
