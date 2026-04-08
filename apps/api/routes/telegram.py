@@ -93,6 +93,7 @@ class TelegramWebhookResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 _CHANNEL = "telegram"
+_MAX_TEXT_LENGTH = 10_000
 
 
 def _build_display_name(user: TelegramUser | None) -> str | None:
@@ -166,7 +167,7 @@ def receive_telegram_update(
         )
         return TelegramWebhookResponse(ok=True, detail="no_text")
 
-    if len(text) > 10_000:
+    if len(text) > _MAX_TEXT_LENGTH:
         logger.warning(
             "telegram update_id=%d message_id=%d text exceeds 10 000 chars, ignoring",
             update.update_id,
