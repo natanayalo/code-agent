@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -32,10 +33,11 @@ def create_app(*, task_service: TaskExecutionService | None = None) -> FastAPI:
                 app.state.task_service = task_service
             yield
         finally:
-            try:
-                await outbound_http_clients.telegram.aclose()
-            finally:
-                await outbound_http_clients.webhook.aclose()
+            await asyncio.gather(
+                outbound_http_clients.telegram.aclose(),
+                outbound_http_clients.webhook.aclose(),
+                return_exceptions=True,
+            )
 
     app = FastAPI(
         title="code-agent",

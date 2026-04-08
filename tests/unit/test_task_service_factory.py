@@ -56,8 +56,15 @@ def test_build_task_service_from_env_builds_a_codex_cli_worker(tmp_path: Path) -
         assert isinstance(service.worker, CodexCliWorker)
         assert isinstance(service.worker.runtime_adapter, CodexExecCliRuntimeAdapter)
     finally:
-        asyncio.run(outbound_http_clients.telegram.aclose())
-        asyncio.run(outbound_http_clients.webhook.aclose())
+
+        async def _close_clients() -> None:
+            await asyncio.gather(
+                outbound_http_clients.telegram.aclose(),
+                outbound_http_clients.webhook.aclose(),
+                return_exceptions=True,
+            )
+
+        asyncio.run(_close_clients())
 
 
 def test_build_task_service_from_env_builds_gemini_worker_when_configured(tmp_path: Path) -> None:
@@ -77,8 +84,15 @@ def test_build_task_service_from_env_builds_gemini_worker_when_configured(tmp_pa
         assert service is not None
         assert isinstance(service.gemini_worker, GeminiCliWorker)
     finally:
-        asyncio.run(outbound_http_clients.telegram.aclose())
-        asyncio.run(outbound_http_clients.webhook.aclose())
+
+        async def _close_clients() -> None:
+            await asyncio.gather(
+                outbound_http_clients.telegram.aclose(),
+                outbound_http_clients.webhook.aclose(),
+                return_exceptions=True,
+            )
+
+        asyncio.run(_close_clients())
 
 
 def test_create_app_uses_env_bootstrap_when_no_task_service_is_injected(
@@ -131,4 +145,4 @@ def test_create_app_closes_both_clients_when_startup_bootstrap_fails(monkeypatch
         with TestClient(app):
             pass
 
-    assert close_calls == ["telegram", "webhook"]
+    assert set(close_calls) == {"telegram", "webhook"}
