@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -54,8 +55,6 @@ def test_build_task_service_from_env_builds_a_codex_cli_worker(tmp_path: Path) -
         assert isinstance(service.worker, CodexCliWorker)
         assert isinstance(service.worker.runtime_adapter, CodexExecCliRuntimeAdapter)
     finally:
-        import asyncio
-
         asyncio.run(outbound_http_clients.telegram.aclose())
         asyncio.run(outbound_http_clients.webhook.aclose())
 
@@ -77,8 +76,6 @@ def test_build_task_service_from_env_builds_gemini_worker_when_configured(tmp_pa
         assert service is not None
         assert isinstance(service.gemini_worker, GeminiCliWorker)
     finally:
-        import asyncio
-
         asyncio.run(outbound_http_clients.telegram.aclose())
         asyncio.run(outbound_http_clients.webhook.aclose())
 
