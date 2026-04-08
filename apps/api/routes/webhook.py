@@ -39,10 +39,10 @@ class WebhookPayload(BaseModel):
     budget: dict[str, Any] = Field(default_factory=dict)
 
     # --- caller / session identity ---
-    source: str = Field(default="webhook", min_length=1)
-    external_user_id: str | None = None
-    external_thread_id: str | None = None
-    display_name: str | None = None
+    source: str = Field(default="webhook", min_length=1, max_length=100)
+    external_user_id: str | None = Field(default=None, max_length=255)
+    external_thread_id: str | None = Field(default=None, max_length=255)
+    display_name: str | None = Field(default=None, max_length=255)
 
 
 def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:

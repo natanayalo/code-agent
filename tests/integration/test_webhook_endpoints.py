@@ -194,6 +194,36 @@ def test_webhook_rejects_task_text_exceeding_max_length(client: TestClient) -> N
     assert response.status_code == 422
 
 
+def test_webhook_rejects_source_exceeding_max_length(client: TestClient) -> None:
+    """source longer than 100 characters should be rejected with 422."""
+    response = client.post("/webhook", json={"task_text": "ok", "source": "s" * 101})
+    assert response.status_code == 422
+
+
+def test_webhook_rejects_external_user_id_exceeding_max_length(
+    client: TestClient,
+) -> None:
+    """external_user_id longer than 255 characters should be rejected with 422."""
+    response = client.post("/webhook", json={"task_text": "ok", "external_user_id": "u" * 256})
+    assert response.status_code == 422
+
+
+def test_webhook_rejects_external_thread_id_exceeding_max_length(
+    client: TestClient,
+) -> None:
+    """external_thread_id longer than 255 characters should be rejected with 422."""
+    response = client.post("/webhook", json={"task_text": "ok", "external_thread_id": "t" * 256})
+    assert response.status_code == 422
+
+
+def test_webhook_rejects_display_name_exceeding_max_length(
+    client: TestClient,
+) -> None:
+    """display_name longer than 255 characters should be rejected with 422."""
+    response = client.post("/webhook", json={"task_text": "ok", "display_name": "d" * 256})
+    assert response.status_code == 422
+
+
 def test_webhook_rejects_missing_task_text(client: TestClient) -> None:
     """Missing task_text should be rejected with 422."""
     response = client.post("/webhook", json={"repo_url": "https://example.com/repo"})
