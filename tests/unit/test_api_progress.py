@@ -6,7 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from apps.api.progress import TelegramProgressNotifier, WebhookCallbackProgressNotifier
+from apps.api.progress import (
+    TelegramProgressNotifier,
+    WebhookCallbackProgressNotifier,
+    _format_telegram_message,
+)
 from orchestrator.execution import ProgressEvent, SubmissionSession, TaskSubmission
 
 
@@ -111,3 +115,20 @@ async def test_webhook_callback_progress_notifier_posts_event_payload(monkeypatc
             },
         )
     ]
+
+
+def test_format_telegram_message_truncates_started_text_to_platform_limit() -> None:
+    """Started messages should be truncated to stay within Telegram's 4096-char limit."""
+    event = ProgressEvent(
+        phase="started",
+        task_id="task-1",
+        session_id="session-1",
+        channel="telegram",
+        external_thread_id="telegram:chat:99",
+        task_text="x" * 10_000,
+    )
+
+    message = _format_telegram_message(event)
+
+    assert len(message) == 4096
+    assert message.endswith("...")

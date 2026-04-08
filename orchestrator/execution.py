@@ -531,9 +531,7 @@ class TaskExecutionService:
             if existing_delivery is None:
                 raise
             if existing_delivery.task_id is None:
-                raise RuntimeError(
-                    "Duplicate delivery exists without an attached task; retry the request."
-                )
+                return None
             return existing_delivery
 
     @staticmethod

@@ -23,6 +23,7 @@ from orchestrator import (
 )
 from orchestrator import execution as execution_module
 from repositories import (
+    InboundDeliveryRepository,
     SessionRepository,
     SessionStateRepository,
     TaskRepository,
@@ -197,6 +198,53 @@ def test_create_task_outcome_returns_existing_task_for_duplicate_delivery() -> N
     with session_scope(session_factory) as session:
         tasks = TaskRepository(session).list_by_session(first.task_snapshot.session_id)
         assert len(tasks) == 1
+
+
+def test_create_task_outcome_recovers_stale_delivery_without_task_id() -> None:
+    """A stale delivery claim without a linked task should be recoverable on retry."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    with session_scope(session_factory) as session:
+        InboundDeliveryRepository(session).create(
+            channel="telegram",
+            delivery_id="stale-123",
+            task_id=None,
+        )
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Recover stale delivery",
+        session=execution_module.SubmissionSession(
+            channel="telegram",
+            external_user_id="telegram:user:42",
+            external_thread_id="telegram:chat:100",
+        ),
+    )
+
+    outcome = service.create_task_outcome(
+        submission,
+        delivery_key=execution_module.DeliveryKey(channel="telegram", delivery_id="stale-123"),
+    )
+
+    assert outcome.duplicate is False
+    assert outcome.persisted is not None
+
+    with session_scope(session_factory) as session:
+        delivery = InboundDeliveryRepository(session).get_by_channel_delivery(
+            channel="telegram",
+            delivery_id="stale-123",
+        )
+        assert delivery is not None
+        assert delivery.task_id == outcome.task_snapshot.task_id
 
 
 @pytest.mark.anyio

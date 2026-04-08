@@ -10,12 +10,22 @@ import httpx
 from orchestrator.execution import ProgressEvent, ProgressNotifier, TaskSubmission
 
 _TELEGRAM_CHAT_ID_PATTERN = re.compile(r"^telegram:chat:(-?\d+)$")
+_TELEGRAM_MESSAGE_LIMIT = 4096
+_TELEGRAM_STARTED_PREFIX = "Task {task_id} started.\n\n"
+_TELEGRAM_ELLIPSIS = "..."
 
 
 def _format_telegram_message(event: ProgressEvent) -> str:
     """Render a compact Telegram message for one lifecycle event."""
     if event.phase == "started":
-        return f"Task {event.task_id} started.\n\n{event.task_text}"
+        prefix = _TELEGRAM_STARTED_PREFIX.format(task_id=event.task_id)
+        max_task_text_len = _TELEGRAM_MESSAGE_LIMIT - len(prefix)
+        if len(event.task_text) <= max_task_text_len:
+            display_text = event.task_text
+        else:
+            truncated_len = max(max_task_text_len - len(_TELEGRAM_ELLIPSIS), 0)
+            display_text = event.task_text[:truncated_len] + _TELEGRAM_ELLIPSIS
+        return f"{prefix}{display_text}"
     if event.phase == "running":
         return f"Task {event.task_id} is running."
     if event.phase == "completed":
