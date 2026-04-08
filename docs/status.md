@@ -46,10 +46,10 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-050 Generic webhook adapter (Milestone 10).
 
 ## Next
-- Milestone 10: Telegram ingress (T-050 to T-053).
+- T-051 Telegram webhook adapter, T-052 progress replies, T-053 dedupe protection.
 
 ## Blocked
 

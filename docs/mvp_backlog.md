@@ -496,3 +496,19 @@ Add cleanup and retention for workspaces and artifacts.
 
 Acceptance:
 - stale resources cleaned up automatically
+
+### T-104 Add API authentication
+Add shared-secret or signature-based authentication for the HTTP task and webhook endpoints.
+
+Scope notes:
+- protect both `/tasks` and `/webhook` with a consistent auth mechanism
+- support at minimum a shared secret via header (e.g., `X-Webhook-Token`) for generic callers
+- support provider-specific signature verification (e.g., Telegram `X-Telegram-Bot-Api-Secret-Token`) where applicable
+- auth should be a FastAPI dependency so it is reusable across routers
+- unauthenticated requests should be rejected with 401/403 before any task processing begins
+
+Acceptance:
+- unauthenticated requests to `/tasks` and `/webhook` are rejected
+- authenticated requests proceed normally
+- Telegram adapter uses provider-specific verification when available
+- auth mechanism is configurable via environment variable, not hardcoded
