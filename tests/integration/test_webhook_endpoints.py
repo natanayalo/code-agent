@@ -194,6 +194,20 @@ def test_webhook_rejects_task_text_exceeding_max_length(client: TestClient) -> N
     assert response.status_code == 422
 
 
+def test_webhook_rejects_repo_url_exceeding_max_length(client: TestClient) -> None:
+    """repo_url longer than 2048 characters should be rejected with 422."""
+    response = client.post(
+        "/webhook", json={"task_text": "ok", "repo_url": "https://x.com/" + "a" * 2035}
+    )
+    assert response.status_code == 422
+
+
+def test_webhook_rejects_branch_exceeding_max_length(client: TestClient) -> None:
+    """branch longer than 255 characters should be rejected with 422."""
+    response = client.post("/webhook", json={"task_text": "ok", "branch": "b" * 256})
+    assert response.status_code == 422
+
+
 def test_webhook_rejects_source_exceeding_max_length(client: TestClient) -> None:
     """source longer than 100 characters should be rejected with 422."""
     response = client.post("/webhook", json={"task_text": "ok", "source": "s" * 101})

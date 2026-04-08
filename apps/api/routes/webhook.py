@@ -31,8 +31,8 @@ class WebhookPayload(BaseModel):
 
     # --- task identity fields ---
     task_text: str = Field(min_length=1, max_length=10_000)
-    repo_url: str | None = None
-    branch: str | None = None
+    repo_url: str | None = Field(default=None, max_length=2048)
+    branch: str | None = Field(default=None, max_length=255)
     priority: int = Field(default=0, ge=0)
     worker_override: WorkerType | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
