@@ -128,13 +128,18 @@ def test_webhook_defaults_external_ids_when_omitted(
 def test_webhook_anonymous_requests_get_isolated_sessions(
     client: TestClient,
 ) -> None:
-    """Two anonymous calls (no external IDs) must produce different session_ids."""
+    """Two anonymous calls share one stable User but get different session_ids.
+
+    anonymous external_user_id is the stable sentinel "webhook:{source}:anonymous",
+    while external_thread_id uses a unique UUID per call — so sessions are isolated
+    but the User table does not grow unboundedly.
+    """
     r1 = client.post("/webhook", json={"task_text": "task one"})
     r2 = client.post("/webhook", json={"task_text": "task two"})
 
     assert r1.status_code == 202
     assert r2.status_code == 202
-    # Distinct UUIDs are generated for each call, so sessions are isolated.
+    # Unique thread UUIDs guarantee distinct Session records (different session_ids).
     assert r1.json()["session_id"] != r2.json()["session_id"]
 
 

@@ -57,13 +57,17 @@ def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
 
     # Namespace caller-supplied IDs with "webhook:{source}:" so they remain
     # isolated from identically-named users/threads in other adapters (the
-    # UserRepository lookup is global with no channel scoping).  Fall back to
-    # unique UUIDs for fully anonymous calls so each request gets its own
-    # isolated User and Session records.
+    # UserRepository lookup is global with no channel scoping).
+    #
+    # For fully anonymous calls (no external_user_id supplied) we use a stable
+    # per-source sentinel ("webhook:{source}:anonymous") so all anonymous callers
+    # from the same source share one User row rather than creating a new User for
+    # every request.  Task isolation is still guaranteed because external_thread_id
+    # falls back to a unique UUID, giving each anonymous request its own Session.
     external_user_id = (
         f"webhook:{payload.source}:{payload.external_user_id}"
         if payload.external_user_id
-        else f"webhook:anon-{uuid.uuid4().hex}"
+        else f"webhook:{payload.source}:anonymous"
     )
     external_thread_id = payload.external_thread_id or str(uuid.uuid4())
 
