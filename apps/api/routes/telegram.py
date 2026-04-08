@@ -48,14 +48,12 @@ class TelegramChat(BaseModel):
 class TelegramMessage(BaseModel):
     """Partial Telegram Message object."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     message_id: int
     chat: TelegramChat
     from_: TelegramUser | None = Field(default=None, alias="from")
     text: str | None = None
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
 
 class TelegramUpdate(BaseModel):
@@ -103,11 +101,8 @@ def _build_display_name(user: TelegramUser | None) -> str | None:
     return " ".join(parts) if parts else user.username
 
 
-def _to_task_submission(update: TelegramUpdate) -> TaskSubmission:
-    """Convert a Telegram Update containing a text message into a TaskSubmission."""
-    msg = update.message
-    assert msg is not None  # caller must check before calling
-
+def _to_task_submission(msg: TelegramMessage, text: str) -> TaskSubmission:
+    """Convert a Telegram message and its text into a TaskSubmission."""
     # Use the Telegram chat id as the thread identifier so all messages in
     # the same conversation hit the same Session.
     external_thread_id = f"telegram:chat:{msg.chat.id}"
@@ -127,7 +122,7 @@ def _to_task_submission(update: TelegramUpdate) -> TaskSubmission:
         display_name=_build_display_name(msg.from_),
     )
     return TaskSubmission(
-        task_text=msg.text,  # type: ignore[arg-type]  # caller verifies non-None
+        task_text=text,
         session=session,
     )
 
@@ -177,7 +172,7 @@ def receive_telegram_update(
         )
         return TelegramWebhookResponse(ok=True, detail="text_too_long")
 
-    submission = _to_task_submission(update)
+    submission = _to_task_submission(msg, text)
     task_snapshot, persisted = task_service.create_task(submission)
     background_tasks.add_task(task_service.submit_task, submission, persisted)
 
