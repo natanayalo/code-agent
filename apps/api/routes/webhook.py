@@ -27,10 +27,10 @@ class WebhookPayload(BaseModel):
     direct ``/tasks`` submission path.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     # --- task identity fields ---
-    task_text: str = Field(min_length=1)
+    task_text: str = Field(min_length=1, max_length=10_000)
     repo_url: str | None = None
     branch: str | None = None
     priority: int = Field(default=0, ge=0)

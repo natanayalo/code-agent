@@ -106,8 +106,9 @@ def test_webhook_sets_channel_from_source(client: TestClient, session_factory) -
     assert get_resp.status_code == 200
 
     req = worker.requests[0]
-    # The session channel propagated through the execution path
-    assert req is not None
+    # Verify the task text from the payload was passed through to the worker.
+    # (Channel is stored on the DB session record, not on WorkerRequest.)
+    assert req.task_text == "run linter"
 
 
 def test_webhook_defaults_external_ids_when_omitted(
@@ -178,6 +179,18 @@ def test_webhook_returns_404_for_unknown_task(client: TestClient) -> None:
 def test_webhook_rejects_empty_task_text(client: TestClient) -> None:
     """Empty task_text should be rejected with 422."""
     response = client.post("/webhook", json={"task_text": ""})
+    assert response.status_code == 422
+
+
+def test_webhook_rejects_whitespace_only_task_text(client: TestClient) -> None:
+    """Whitespace-only task_text should be rejected with 422 after stripping."""
+    response = client.post("/webhook", json={"task_text": "   "})
+    assert response.status_code == 422
+
+
+def test_webhook_rejects_task_text_exceeding_max_length(client: TestClient) -> None:
+    """task_text longer than 10 000 characters should be rejected with 422."""
+    response = client.post("/webhook", json={"task_text": "x" * 10_001})
     assert response.status_code == 422
 
 
