@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, inspect
 EXPECTED_TABLES = {
     "alembic_version",
     "artifacts",
+    "inbound_deliveries",
     "memory_personal",
     "memory_project",
     "sessions",
