@@ -44,13 +44,15 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-070 Implement GeminiCliWorker + GeminiCliRuntimeAdapter as second worker. PR: [#46](https://github.com/natanayalo/code-agent/pull/46)
 - T-071 routing heuristics + T-072 manual override. PR: [#47](https://github.com/natanayalo/code-agent/pull/47)
 - T-050 Generic webhook adapter. PR: [#48](https://github.com/natanayalo/code-agent/pull/48)
+- T-051 Telegram webhook adapter (Milestone 10). PR: [#49](https://github.com/natanayalo/code-agent/pull/49)
 
 ## In Progress
 
-- T-051 Telegram webhook adapter (Milestone 10).
+- T-052 Progress replies (Milestone 10).
+- T-053 Dedupe protection for repeated webhook deliveries (Milestone 10, locally verified).
 
 ## Next
-- T-052 Progress replies, T-053 dedupe protection.
+- Milestone 10 completion / publish remaining slices.
 
 ## Blocked
 

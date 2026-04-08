@@ -33,6 +33,16 @@ class StaticWorker(Worker):
         return self.result
 
 
+class RecordingProgressNotifier:
+    """Capture progress events emitted during Telegram requests."""
+
+    def __init__(self) -> None:
+        self.events = []
+
+    async def notify(self, *, submission, event) -> None:
+        self.events.append(event)
+
+
 @pytest.fixture
 def session_factory():
     """SQLite-backed session factory for Telegram endpoint tests."""
@@ -48,6 +58,7 @@ def session_factory():
 @pytest.fixture
 def client(session_factory) -> Iterator[TestClient]:
     """Test client wired with the execution-path task service."""
+    notifier = RecordingProgressNotifier()
     worker = StaticWorker(
         WorkerResult(
             status="success",
@@ -63,9 +74,11 @@ def client(session_factory) -> Iterator[TestClient]:
         task_service=TaskExecutionService(
             session_factory=session_factory,
             worker=worker,
+            progress_notifier=notifier,
         )
     )
     app.state.test_worker = worker
+    app.state.test_notifier = notifier
     with TestClient(app) as test_client:
         yield test_client
 
@@ -142,6 +155,30 @@ def test_telegram_task_persisted(client: TestClient, session_factory) -> None:
         task = TaskRepository(session).get(task_id)
         assert task is not None
         assert task.status is TaskStatus.COMPLETED
+
+
+def test_telegram_duplicate_update_is_idempotent(client: TestClient) -> None:
+    """Retrying the same Telegram update should return the original task only once."""
+    first = client.post("/telegram/webhook", json=_text_update("fix the tests", update_id=77))
+    second = client.post("/telegram/webhook", json=_text_update("fix the tests", update_id=77))
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["task_id"] == first.json()["task_id"]
+    assert second.json()["detail"] == "duplicate_delivery"
+
+    worker = client.app.state.test_worker
+    assert len(worker.requests) == 1
+
+
+def test_telegram_progress_notifications_cover_start_running_done(client: TestClient) -> None:
+    """Telegram tasks should emit the minimum progress lifecycle states."""
+    response = client.post("/telegram/webhook", json=_text_update("ship it", update_id=88))
+
+    assert response.status_code == 200
+    notifier = client.app.state.test_notifier
+    assert [event.phase for event in notifier.events] == ["started", "running", "completed"]
+    assert all(event.channel == "telegram" for event in notifier.events)
 
 
 def test_telegram_display_name_from_first_last(client: TestClient) -> None:

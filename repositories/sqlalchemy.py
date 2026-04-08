@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
 from db.models import (
     Artifact,
+    InboundDelivery,
     PersonalMemory,
     ProjectMemory,
     SessionState,
@@ -275,6 +276,55 @@ class TaskRepository:
         task.status = cast(TaskStatus, status)
         self.session.flush()
         return task
+
+
+class InboundDeliveryRepository:
+    """Persist and query webhook delivery dedupe claims."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(
+        self,
+        *,
+        channel: str,
+        delivery_id: str,
+        task_id: str | None = None,
+    ) -> InboundDelivery:
+        delivery = InboundDelivery(
+            channel=channel,
+            delivery_id=delivery_id,
+            task_id=task_id,
+        )
+        self.session.add(delivery)
+        self.session.flush()
+        return delivery
+
+    def get_by_channel_delivery(
+        self,
+        *,
+        channel: str,
+        delivery_id: str,
+    ) -> InboundDelivery | None:
+        statement = select(InboundDelivery).where(
+            InboundDelivery.channel == channel,
+            InboundDelivery.delivery_id == delivery_id,
+        )
+        return self.session.scalar(statement)
+
+    def attach_task(
+        self,
+        *,
+        channel: str,
+        delivery_id: str,
+        task_id: str,
+    ) -> InboundDelivery | None:
+        delivery = self.get_by_channel_delivery(channel=channel, delivery_id=delivery_id)
+        if delivery is None:
+            return None
+        delivery.task_id = task_id
+        self.session.flush()
+        return delivery
 
 
 class WorkerRunRepository:

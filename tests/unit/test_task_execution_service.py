@@ -73,6 +73,21 @@ class _FakeGraph:
         ).model_dump(mode="json")
 
 
+class _RecordingProgressNotifier:
+    """Capture progress events emitted by the task execution service."""
+
+    def __init__(self) -> None:
+        self.events: list[execution_module.ProgressEvent] = []
+
+    async def notify(
+        self,
+        *,
+        submission: execution_module.TaskSubmission,
+        event: execution_module.ProgressEvent,
+    ) -> None:
+        self.events.append(event)
+
+
 def test_task_execution_service_reuses_one_compiled_graph(
     monkeypatch,
 ) -> None:
@@ -144,6 +159,44 @@ def test_workspace_id_from_artifacts_supports_url_and_custom_workspace_uris() ->
         )
         == "workspace-5678"
     )
+
+
+def test_create_task_outcome_returns_existing_task_for_duplicate_delivery() -> None:
+    """Duplicate delivery keys should resolve to the original task without new persistence."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Run the task service",
+        session=execution_module.SubmissionSession(
+            channel="telegram",
+            external_user_id="telegram:user:42",
+            external_thread_id="telegram:chat:100",
+        ),
+    )
+    delivery_key = execution_module.DeliveryKey(channel="telegram", delivery_id="123")
+
+    first = service.create_task_outcome(submission, delivery_key=delivery_key)
+    second = service.create_task_outcome(submission, delivery_key=delivery_key)
+
+    assert first.duplicate is False
+    assert first.persisted is not None
+    assert second.duplicate is True
+    assert second.persisted is None
+    assert second.task_snapshot.task_id == first.task_snapshot.task_id
+
+    with session_scope(session_factory) as session:
+        tasks = TaskRepository(session).list_by_session(first.task_snapshot.session_id)
+        assert len(tasks) == 1
 
 
 @pytest.mark.anyio
@@ -225,6 +278,104 @@ async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -
         "fake_persist_execution_outcome",
         "fake_get_task",
     ]
+
+
+@pytest.mark.anyio
+async def test_submit_task_emits_progress_notifications_for_success(monkeypatch) -> None:
+    """Successful task execution should emit started, running, and completed updates."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    notifier = _RecordingProgressNotifier()
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+        progress_notifier=notifier,
+    )
+    submission = execution_module.TaskSubmission(task_text="Notify success")
+    persisted = execution_module._PersistedTaskContext(
+        user_id="user-1",
+        session_id="session-1",
+        channel="telegram",
+        external_thread_id="telegram:chat:100",
+        task_id="task-1",
+    )
+
+    async def run_blocking(func, /, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    async def fake_run_orchestrator(
+        _submission: execution_module.TaskSubmission,
+        _persisted: execution_module._PersistedTaskContext,
+    ) -> OrchestratorState:
+        return OrchestratorState(
+            current_step="persist_memory",
+            session=SessionRef(
+                session_id=persisted.session_id,
+                user_id=persisted.user_id,
+                channel=persisted.channel,
+                external_thread_id=persisted.external_thread_id,
+                active_task_id=persisted.task_id,
+                status="active",
+            ),
+            task=TaskRequest(
+                task_id=persisted.task_id,
+                task_text=submission.task_text,
+                repo_url=submission.repo_url,
+                branch=submission.branch,
+                priority=submission.priority,
+                worker_override=submission.worker_override,
+                constraints=dict(submission.constraints),
+                budget=dict(submission.budget),
+            ),
+            normalized_task_text=submission.task_text,
+            task_kind="implementation",
+            memory=MemoryContext(),
+            route=RouteDecision(
+                chosen_worker="codex",
+                route_reason="cheap_mechanical_change",
+                override_applied=False,
+            ),
+            approval=ApprovalCheckpoint(),
+            dispatch=WorkerDispatch(worker_type="codex"),
+            result=WorkerResult(status="success", summary="all done"),
+        )
+
+    completed_snapshot = execution_module.TaskSnapshot(
+        task_id=persisted.task_id,
+        session_id=persisted.session_id,
+        status="completed",
+        task_text=submission.task_text,
+        priority=submission.priority,
+        chosen_worker="codex",
+        route_reason="cheap_mechanical_change",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        latest_run=execution_module.WorkerRunSnapshot(
+            run_id="run-1",
+            worker_type="codex",
+            status="success",
+            started_at=datetime.now(),
+            summary="all done",
+        ),
+    )
+
+    monkeypatch.setattr(service, "_run_blocking", run_blocking)
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_mark_task_in_progress", lambda *, task_id: None)
+    monkeypatch.setattr(service, "_persist_execution_outcome", lambda **kwargs: None)
+    monkeypatch.setattr(service, "get_task", lambda task_id: completed_snapshot)
+    monkeypatch.setattr(service, "_log_task_outcome", lambda task_snapshot: None)
+
+    await service.submit_task(submission, persisted)
+
+    assert [event.phase for event in notifier.events] == ["started", "running", "completed"]
+    assert notifier.events[-1].summary == "all done"
 
 
 @pytest.mark.anyio
@@ -367,6 +518,58 @@ async def test_submit_task_logs_and_exits_when_failed_task_cannot_be_reloaded(
         await service.submit_task(submission, persisted)
 
     assert "Failed to reload task snapshot after marking a background task as failed" in caplog.text
+
+
+@pytest.mark.anyio
+async def test_submit_task_emits_failed_notification_when_snapshot_reload_fails(
+    monkeypatch,
+) -> None:
+    """Failure notifications should still be emitted when the final task snapshot is missing."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    notifier = _RecordingProgressNotifier()
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+        progress_notifier=notifier,
+    )
+    submission = execution_module.TaskSubmission(task_text="Notify failure")
+    persisted = execution_module._PersistedTaskContext(
+        user_id="user-1",
+        session_id="session-1",
+        channel="http",
+        external_thread_id="thread-1",
+        task_id="task-1",
+    )
+
+    async def run_blocking(func, /, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    async def fake_run_orchestrator(
+        _submission: execution_module.TaskSubmission,
+        _persisted: execution_module._PersistedTaskContext,
+    ) -> OrchestratorState:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(service, "_run_blocking", run_blocking)
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_mark_task_in_progress", lambda *, task_id: None)
+    monkeypatch.setattr(service, "_mark_task_failed", lambda *, task_id: None)
+    monkeypatch.setattr(service, "get_task", lambda task_id: None)
+    monkeypatch.setattr(service, "_log_task_outcome", lambda task_snapshot: None)
+
+    await service.submit_task(submission, persisted)
+
+    assert [event.phase for event in notifier.events] == ["started", "running", "failed"]
+    assert notifier.events[-1].summary == (
+        "Task execution failed and the final snapshot could not be reloaded."
+    )
 
 
 def test_persist_execution_outcome_creates_error_worker_run_without_result() -> None:

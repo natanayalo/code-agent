@@ -110,6 +110,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     session: Mapped[Session] = relationship(back_populates="tasks")
     worker_runs: Mapped[list[WorkerRun]] = relationship(back_populates="task")
+    inbound_deliveries: Mapped[list[InboundDelivery]] = relationship(back_populates="task")
 
     @validates("status")
     def _coerce_status(self, _key: str, value: TaskStatus | str) -> TaskStatus:
@@ -206,6 +207,29 @@ class Artifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         """Normalize assigned artifact types to the canonical enum."""
 
         return ArtifactType(value)
+
+
+class InboundDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A dedupe record for externally delivered webhook events."""
+
+    __tablename__ = "inbound_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "channel",
+            "delivery_id",
+            name="uq_inbound_deliveries_channel_delivery_id",
+        ),
+    )
+
+    channel: Mapped[str] = mapped_column(String(50), nullable=False)
+    delivery_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    task: Mapped[Task | None] = relationship(back_populates="inbound_deliveries")
 
 
 class PersonalMemory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
