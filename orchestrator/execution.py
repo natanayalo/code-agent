@@ -19,11 +19,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from db.base import utc_now
 from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
 from db.models import (
-    InboundDelivery,
-    User,
+    Session as ConversationSession,
 )
 from db.models import (
-    Session as ConversationSession,
+    User,
 )
 from orchestrator.graph import build_orchestrator_graph
 from orchestrator.state import OrchestratorState, SessionRef
@@ -451,14 +450,6 @@ class TaskExecutionService:
             session_repo = SessionRepository(session)
             task_repo = TaskRepository(session)
 
-            if delivery_key is not None:
-                existing_delivery = self._claim_delivery(
-                    delivery_repo=delivery_repo,
-                    delivery_key=delivery_key,
-                )
-                if existing_delivery is not None:
-                    return None, existing_delivery.task_id
-
             user = user_repo.get_by_external_user_id(submission.session.external_user_id)
             if user is None:
                 user = self._create_or_get_user(
@@ -496,11 +487,14 @@ class TaskExecutionService:
                 active_task_id=task.id,
             )
             if delivery_key is not None:
-                delivery_repo.attach_task(
-                    channel=delivery_key.channel,
-                    delivery_id=delivery_key.delivery_id,
+                duplicate_task_id = self._link_delivery_to_task(
+                    delivery_repo=delivery_repo,
+                    delivery_key=delivery_key,
                     task_id=task.id,
                 )
+                if duplicate_task_id is not None:
+                    session.rollback()
+                    return None, duplicate_task_id
             return _PersistedTaskContext(
                 user_id=user.id,
                 session_id=conversation_session.id,
@@ -509,18 +503,20 @@ class TaskExecutionService:
                 task_id=task.id,
             ), None
 
-    def _claim_delivery(
+    def _link_delivery_to_task(
         self,
         *,
         delivery_repo: InboundDeliveryRepository,
         delivery_key: DeliveryKey,
-    ) -> InboundDelivery | None:
-        """Create a delivery-claim row or return the already-linked duplicate."""
+        task_id: str,
+    ) -> str | None:
+        """Atomically bind a delivery key to a task or return the existing duplicate task id."""
         try:
             with delivery_repo.session.begin_nested():
                 delivery_repo.create(
                     channel=delivery_key.channel,
                     delivery_id=delivery_key.delivery_id,
+                    task_id=task_id,
                 )
             return None
         except IntegrityError:
@@ -531,8 +527,24 @@ class TaskExecutionService:
             if existing_delivery is None:
                 raise
             if existing_delivery.task_id is None:
-                return None
-            return existing_delivery
+                claimed_delivery = delivery_repo.attach_task_if_unassigned(
+                    channel=delivery_key.channel,
+                    delivery_id=delivery_key.delivery_id,
+                    task_id=task_id,
+                )
+                if claimed_delivery is not None:
+                    return None
+                existing_delivery = delivery_repo.get_by_channel_delivery(
+                    channel=delivery_key.channel,
+                    delivery_id=delivery_key.delivery_id,
+                )
+                if existing_delivery is None:
+                    raise
+                if existing_delivery.task_id is None:
+                    raise RuntimeError(
+                        "Inbound delivery exists without a task_id after dedupe retry."
+                    )
+            return existing_delivery.task_id
 
     @staticmethod
     def _task_summary(task_snapshot: TaskSnapshot) -> str | None:

@@ -18,24 +18,33 @@ _TELEGRAM_STARTED_PREFIX = "Task {task_id} started.\n\n"
 _TELEGRAM_ELLIPSIS = "..."
 
 
+def _truncate_telegram_text(text: str, max_len: int) -> str:
+    """Trim dynamic Telegram content so the final message fits the platform limit."""
+    if len(text) <= max_len:
+        return text
+    truncated_len = max(max_len - len(_TELEGRAM_ELLIPSIS), 0)
+    return text[:truncated_len] + _TELEGRAM_ELLIPSIS
+
+
 def _format_telegram_message(event: ProgressEvent) -> str:
     """Render a compact Telegram message for one lifecycle event."""
     if event.phase == "started":
         prefix = _TELEGRAM_STARTED_PREFIX.format(task_id=event.task_id)
-        max_task_text_len = _TELEGRAM_MESSAGE_LIMIT - len(prefix)
-        if len(event.task_text) <= max_task_text_len:
-            display_text = event.task_text
-        else:
-            truncated_len = max(max_task_text_len - len(_TELEGRAM_ELLIPSIS), 0)
-            display_text = event.task_text[:truncated_len] + _TELEGRAM_ELLIPSIS
-        return f"{prefix}{display_text}"
+        detail = _truncate_telegram_text(
+            event.task_text,
+            _TELEGRAM_MESSAGE_LIMIT - len(prefix),
+        )
+        return f"{prefix}{detail}"
     if event.phase == "running":
         return f"Task {event.task_id} is running."
-    if event.phase == "completed":
-        detail = event.summary or "Task completed."
-        return f"Task {event.task_id} completed.\n\n{detail}"
-    detail = event.summary or "Task failed."
-    return f"Task {event.task_id} failed.\n\n{detail}"
+    phase_label = "completed" if event.phase == "completed" else "failed"
+    prefix = f"Task {event.task_id} {phase_label}.\n\n"
+    detail = event.summary or f"Task {phase_label}."
+    truncated_detail = _truncate_telegram_text(
+        detail,
+        _TELEGRAM_MESSAGE_LIMIT - len(prefix),
+    )
+    return f"{prefix}{truncated_detail}"
 
 
 class CompositeProgressNotifier:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Final, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -325,6 +325,30 @@ class InboundDeliveryRepository:
         delivery.task_id = task_id
         self.session.flush()
         return delivery
+
+    def attach_task_if_unassigned(
+        self,
+        *,
+        channel: str,
+        delivery_id: str,
+        task_id: str,
+    ) -> InboundDelivery | None:
+        statement = (
+            update(InboundDelivery)
+            .where(
+                InboundDelivery.channel == channel,
+                InboundDelivery.delivery_id == delivery_id,
+                InboundDelivery.task_id.is_(None),
+            )
+            .values(task_id=task_id)
+            .returning(InboundDelivery.id)
+        )
+        result = self.session.execute(statement)
+        updated_id = result.scalar_one_or_none()
+        if updated_id is None:
+            return None
+        self.session.flush()
+        return self.get_by_channel_delivery(channel=channel, delivery_id=delivery_id)
 
 
 class WorkerRunRepository:

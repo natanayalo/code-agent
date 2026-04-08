@@ -148,6 +148,25 @@ def test_format_telegram_message_truncates_started_text_to_platform_limit() -> N
     assert message.endswith("...")
 
 
+def test_format_telegram_message_truncates_completed_summary_to_platform_limit() -> None:
+    """Completed messages should also be truncated to stay within Telegram's limit."""
+    event = ProgressEvent(
+        phase="completed",
+        task_id="task-1",
+        session_id="session-1",
+        channel="telegram",
+        external_thread_id="telegram:chat:99",
+        task_text="Run tests",
+        summary="y" * 10_000,
+    )
+
+    message = _format_telegram_message(event)
+
+    assert len(message) == 4096
+    assert message.startswith("Task task-1 completed.\n\n")
+    assert message.endswith("...")
+
+
 @pytest.mark.anyio
 async def test_composite_progress_notifier_logs_and_continues_after_failure(
     caplog: pytest.LogCaptureFixture,
