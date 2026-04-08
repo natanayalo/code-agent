@@ -41,13 +41,14 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - Milestone 6: Sandbox hardening (T-054/T-055). Verified with strict path policies, secret redaction, and complete audit capture.
 - Milestone 7: Skeptical memory, compact session state, and stable session scaffold (T-060 to T-065). Verified with schema metadata and SessionState repository.
 - Milestone 8: Structured run observability (T-043). PR: [#45](https://github.com/natanayalo/code-agent/pull/45)
+- T-070 Implement GeminiCliWorker + GeminiCliRuntimeAdapter as second worker. PR: [#46](https://github.com/natanayalo/code-agent/pull/46)
+- T-071 routing heuristics + T-072 manual override. PR: [#47](https://github.com/natanayalo/code-agent/pull/47)
 
 ## In Progress
 
-- Milestone 9: second worker routing — Gemini CLI adapter (T-070).
+- None
 
 ## Next
-- Milestone 9: T-071 routing heuristics + T-072 manual override.
 - Milestone 10: Telegram ingress (T-050 to T-053).
 
 ## Blocked

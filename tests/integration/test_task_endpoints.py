@@ -121,7 +121,7 @@ def test_submit_task_persists_execution_path_and_allows_polling(
     assert get_response.json()["task_id"] == task_id
     assert get_response.json()["status"] == "completed"
     assert get_response.json()["chosen_worker"] == "codex"
-    assert get_response.json()["route_reason"] == "implementation_default"
+    assert get_response.json()["route_reason"] == "cheap_mechanical_change"
     assert get_response.json()["latest_run"]["summary"] == (
         "Created note.txt and retained the workspace for inspection."
     )

@@ -21,6 +21,7 @@ from orchestrator.state import (
     VerificationReport,
     VerificationReportItem,
     WorkerDispatch,
+    WorkerType,
 )
 from workers import Worker, WorkerRequest, WorkerResult
 
@@ -473,33 +474,152 @@ def load_memory(state_input: OrchestratorState) -> dict[str, Any]:
     }
 
 
-def choose_worker(state_input: OrchestratorState) -> dict[str, Any]:
-    """Apply a minimal routing heuristic for the happy path graph."""
-    state = _ensure_state(state_input)
+def _route_by_preference(
+    preferred: WorkerType,
+    fallback: WorkerType,
+    reason: str,
+    available_workers: frozenset[str],
+) -> RouteDecision:
+    """Pick the preferred worker when available, or the fallback with an explicit reason.
 
+    - preferred available  → reason (e.g. 'high_stakes_refactor')
+    - fallback available   → 'preferred_unavailable'  (task runs on the fallback)
+    - neither available    → 'runtime_unavailable'    (dispatch will fail explicitly)
+    """
+    if preferred in available_workers:
+        return RouteDecision(
+            chosen_worker=preferred,
+            route_reason=reason,
+            override_applied=False,
+        )
+    if fallback in available_workers:
+        return RouteDecision(
+            chosen_worker=fallback,
+            route_reason="preferred_unavailable",
+            override_applied=False,
+        )
+    # Neither available - keep the preferred intent; dispatch will fail explicitly.
+    return RouteDecision(
+        chosen_worker=preferred,
+        route_reason="runtime_unavailable",
+        override_applied=False,
+    )
+
+
+def _compute_route_decision(
+    state: OrchestratorState,
+    available_workers: frozenset[str],
+) -> RouteDecision:
+    """Apply T-071 routing heuristics and T-072 manual override in priority order."""
+
+    # T-072: manual override — honor when the requested runtime is available;
+    # fail explicitly otherwise so state never silently claims a worker that isn't present.
     if state.task.worker_override is not None:
-        route = RouteDecision(
-            chosen_worker=state.task.worker_override,
-            route_reason="manual_override",
+        worker_override = state.task.worker_override
+        if worker_override in available_workers:
+            return RouteDecision(
+                chosen_worker=worker_override,
+                route_reason="manual_override",
+                override_applied=True,
+            )
+        logger.warning(
+            "Manual override requested unavailable worker; routing will fail at dispatch",
+            extra={"worker": worker_override, "available": sorted(available_workers)},
+        )
+        return RouteDecision(
+            chosen_worker=worker_override,
+            route_reason="runtime_unavailable",
             override_applied=True,
         )
-    elif state.task_kind in {"architecture", "ambiguous"}:
-        route = RouteDecision(
-            chosen_worker="gemini",
-            route_reason="complex_reasoning_default",
-            override_applied=False,
-        )
-    else:
-        route = RouteDecision(
-            chosen_worker="codex",
-            route_reason="implementation_default",
-            override_applied=False,
-        )
 
+    # T-071: heuristic 1 — escalate to an alternate worker after prior failure.
+    if state.attempt_count > 0 and state.dispatch.worker_type is not None:
+        prior_worker: WorkerType = state.dispatch.worker_type
+        if state.verification is not None and state.verification.status == "failed":
+            escalation_reason: str | None = "verifier_failed_previous_run"
+        elif state.result is not None and state.result.status != "success":
+            escalation_reason = "previous_worker_failed"
+        else:
+            escalation_reason = None
+
+        if escalation_reason is not None:
+            # TODO: generalise alternate selection when the worker pool grows beyond two.
+            alternate: WorkerType = "gemini" if prior_worker != "gemini" else "codex"
+            if alternate in available_workers:
+                logger.info(
+                    "Routing to alternate worker due to prior failure",
+                    extra={
+                        "prior_worker": prior_worker,
+                        "alternate_worker": alternate,
+                        "reason": escalation_reason,
+                    },
+                )
+                return RouteDecision(
+                    chosen_worker=alternate,
+                    route_reason=escalation_reason,
+                    override_applied=False,
+                )
+            # Alternate unavailable — fail explicitly rather than blind retry of the failed worker.
+            logger.warning(
+                "Escalation requires alternate worker but it is unavailable; failing explicitly",
+                extra={"prior_worker": prior_worker, "alternate_worker": alternate},
+            )
+            return RouteDecision(
+                chosen_worker=alternate,
+                route_reason="runtime_unavailable",
+                override_applied=False,
+            )
+
+    # T-071: heuristic 2 — explicit budget preference.
+    budget = state.task.budget
+    if budget.get("prefer_high_quality"):
+        return _route_by_preference("gemini", "codex", "budget_preference", available_workers)
+    if budget.get("prefer_low_cost"):
+        return _route_by_preference("codex", "gemini", "budget_preference", available_workers)
+
+    # T-071: heuristic 3 — task shape.
+    task_kind = state.task_kind
+    if task_kind == "architecture":
+        return _route_by_preference("gemini", "codex", "high_stakes_refactor", available_workers)
+    if task_kind == "ambiguous":
+        return _route_by_preference("gemini", "codex", "ambiguous_task", available_workers)
+    return _route_by_preference("codex", "gemini", "cheap_mechanical_change", available_workers)
+
+
+def build_choose_worker_node(
+    available_workers: frozenset[str],
+) -> Callable[[OrchestratorState], dict[str, Any]]:
+    """Create the choose-worker node bound to the given set of available workers."""
+
+    def choose_worker_node(state_input: OrchestratorState) -> dict[str, Any]:
+        state = _ensure_state(state_input)
+        route = _compute_route_decision(state, available_workers)
+        return {
+            "current_step": "choose_worker",
+            "route": route.model_dump(),
+            "progress_updates": _progress_update(
+                state,
+                f"worker selected: {route.chosen_worker} (reason: {route.route_reason})",
+            ),
+        }
+
+    return choose_worker_node
+
+
+def choose_worker(state_input: OrchestratorState) -> dict[str, Any]:
+    """Apply routing heuristics; treats all known workers as available.
+
+    Use build_choose_worker_node() when the graph knows which workers are wired in.
+    """
+    state = _ensure_state(state_input)
+    route = _compute_route_decision(state, frozenset({"codex", "gemini"}))
     return {
         "current_step": "choose_worker",
         "route": route.model_dump(),
-        "progress_updates": _progress_update(state, f"worker selected: {route.chosen_worker}"),
+        "progress_updates": _progress_update(
+            state,
+            f"worker selected: {route.chosen_worker} (reason: {route.route_reason})",
+        ),
     }
 
 
@@ -570,6 +690,7 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
     )
     return {
         "current_step": "dispatch_job",
+        "attempt_count": state.attempt_count + 1,
         "dispatch": dispatch.model_dump(),
         "progress_updates": _progress_update(state, "worker dispatched"),
     }
@@ -868,7 +989,8 @@ def build_orchestrator_graph(
     builder.add_node("ingest_task", RunnableLambda(ingest_task))
     builder.add_node("classify_task", RunnableLambda(classify_task))
     builder.add_node("load_memory", RunnableLambda(load_memory))
-    builder.add_node("choose_worker", RunnableLambda(choose_worker))
+    available_workers: frozenset[str] = frozenset(_configured_workers(worker, gemini_worker).keys())
+    builder.add_node("choose_worker", RunnableLambda(build_choose_worker_node(available_workers)))
     builder.add_node("check_approval", RunnableLambda(check_approval))
     builder.add_node("await_approval", RunnableLambda(await_approval))
     builder.add_node("dispatch_job", RunnableLambda(dispatch_job))

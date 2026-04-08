@@ -366,7 +366,7 @@ Acceptance:
 
 ## Milestone 9 - Second worker routing
 
-### T-070 Implement second worker adapter
+### T-070 Implement second worker adapter ✅
 Add remaining worker so both Gemini and Codex are supported.
 
 Acceptance:

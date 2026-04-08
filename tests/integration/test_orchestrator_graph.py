@@ -148,7 +148,7 @@ def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
         "task ingested",
         "task classified as implementation",
         "memory context loaded",
-        "worker selected: codex",
+        "worker selected: codex (reason: cheap_mechanical_change)",
         "approval not required",
         "worker dispatched",
         "worker result received",
@@ -195,7 +195,7 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
             "task ingested",
             "task classified as implementation",
             "memory context loaded",
-            "worker selected: codex",
+            "worker selected: codex (reason: cheap_mechanical_change)",
             "approval not required",
             "worker dispatched",
         ]
@@ -242,7 +242,7 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
             "task ingested",
             "task classified as implementation",
             "memory context loaded",
-            "worker selected: codex",
+            "worker selected: codex (reason: cheap_mechanical_change)",
             "approval not required",
             "worker dispatched",
             "worker result received",
@@ -255,7 +255,7 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
 
 
 def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None:
-    """The graph should fail explicitly instead of silently running the wrong worker."""
+    """A manual override for an unconfigured worker must fail explicitly, not silently fall back."""
     worker = StaticWorker(
         WorkerResult(
             status="success",
@@ -273,9 +273,10 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
         graph.ainvoke(
             {
                 "task": {
-                    "task_text": "Refactor the architecture-sensitive worker selection flow",
+                    "task_text": "Run a task with explicit gemini override",
                     "repo_url": "https://github.com/natanayalo/code-agent",
                     "branch": "master",
+                    "worker_override": "gemini",
                 }
             }
         )
@@ -284,8 +285,9 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
     state = OrchestratorState.model_validate(raw_output)
 
     assert state.current_step == "persist_memory"
-    assert state.task_kind == "architecture"
     assert state.route.chosen_worker == "gemini"
+    assert state.route.route_reason == "runtime_unavailable"
+    assert state.route.override_applied is True
     assert state.dispatch.worker_type == "gemini"
     assert state.dispatch.run_id is None
     assert state.dispatch.workspace_id is None
@@ -299,9 +301,9 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
     assert state.result.next_action_hint == "configure_requested_worker"
     assert state.progress_updates == [
         "task ingested",
-        "task classified as architecture",
+        "task classified as implementation",
         "memory context loaded",
-        "worker selected: gemini",
+        "worker selected: gemini (reason: runtime_unavailable)",
         "approval not required",
         "worker dispatched",
         "worker unavailable: gemini",
@@ -366,7 +368,7 @@ def test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly(
                 "task ingested",
                 "task classified as implementation",
                 "memory context loaded",
-                "worker selected: codex",
+                "worker selected: codex (reason: cheap_mechanical_change)",
                 "approval requested",
             ]
 
@@ -389,7 +391,7 @@ def test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly(
             "task ingested",
             "task classified as implementation",
             "memory context loaded",
-            "worker selected: codex",
+            "worker selected: codex (reason: cheap_mechanical_change)",
             "approval requested",
             "approval granted",
             "worker dispatched",
@@ -445,7 +447,7 @@ def test_orchestrator_graph_stops_when_approval_is_rejected(tmp_path: Path) -> N
             "task ingested",
             "task classified as implementation",
             "memory context loaded",
-            "worker selected: codex",
+            "worker selected: codex (reason: cheap_mechanical_change)",
             "approval requested",
             "approval rejected",
             "result summarized and session state updated",
@@ -488,7 +490,7 @@ def test_orchestrator_graph_returns_a_structured_timeout_result() -> None:
         "task ingested",
         "task classified as implementation",
         "memory context loaded",
-        "worker selected: codex",
+        "worker selected: codex (reason: cheap_mechanical_change)",
         "approval not required",
         "worker dispatched",
         "worker timed out after 1s",
@@ -539,7 +541,7 @@ def test_orchestrator_graph_surfaces_worker_cancellation_as_a_result() -> None:
             "task ingested",
             "task classified as implementation",
             "memory context loaded",
-            "worker selected: codex",
+            "worker selected: codex (reason: cheap_mechanical_change)",
             "approval not required",
             "worker dispatched",
             "worker execution cancelled",
@@ -582,7 +584,7 @@ def test_orchestrator_graph_returns_a_structured_error_for_worker_crashes() -> N
         "task ingested",
         "task classified as implementation",
         "memory context loaded",
-        "worker selected: codex",
+        "worker selected: codex (reason: cheap_mechanical_change)",
         "approval not required",
         "worker dispatched",
         "worker crashed unexpectedly",
@@ -624,7 +626,7 @@ def test_orchestrator_graph_timeout_path_tolerates_cleanup_exceptions() -> None:
         "task ingested",
         "task classified as implementation",
         "memory context loaded",
-        "worker selected: codex",
+        "worker selected: codex (reason: cheap_mechanical_change)",
         "approval not required",
         "worker dispatched",
         "worker timed out after 1s",
