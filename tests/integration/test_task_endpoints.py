@@ -201,3 +201,28 @@ def test_get_task_returns_not_found_for_unknown_task(client: TestClient) -> None
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Task 'task-missing' was not found."}
+
+
+@pytest.mark.parametrize(
+    "callback_url",
+    [
+        "ftp://callbacks.example.com/status",
+        "http://localhost/callback",
+        "http://127.0.0.1/callback",
+        "http://192.168.1.10/callback",
+    ],
+)
+def test_submit_task_rejects_unsafe_callback_urls(
+    client: TestClient,
+    callback_url: str,
+) -> None:
+    """Direct task submissions should reject callback URLs that are obvious SSRF targets."""
+    response = client.post(
+        "/tasks",
+        json={
+            "task_text": "Create a note and report the result",
+            "callback_url": callback_url,
+        },
+    )
+
+    assert response.status_code == 422

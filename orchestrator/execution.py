@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ from typing import Any, Literal, Protocol
 from urllib.parse import unquote, urlparse
 
 from anyio import to_thread
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -56,6 +57,38 @@ class SubmissionSession(ExecutionModel):
     display_name: str | None = None
 
 
+def _validate_callback_url(value: str | None) -> str | None:
+    """Reject callback targets that are malformed or obviously unsafe for outbound POSTs."""
+    if value is None:
+        return None
+
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("callback_url must use http or https.")
+    if not parsed.netloc or parsed.hostname is None:
+        raise ValueError("callback_url must be an absolute URL with a hostname.")
+
+    hostname = parsed.hostname.strip().lower()
+    if hostname == "localhost":
+        raise ValueError("callback_url must not target localhost.")
+
+    try:
+        host_ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return value
+
+    if (
+        host_ip.is_private
+        or host_ip.is_loopback
+        or host_ip.is_link_local
+        or host_ip.is_multicast
+        or host_ip.is_reserved
+        or host_ip.is_unspecified
+    ):
+        raise ValueError("callback_url must not target a private or local address.")
+    return value
+
+
 class TaskSubmission(ExecutionModel):
     """HTTP payload accepted by the minimal task-submission endpoint."""
 
@@ -68,6 +101,12 @@ class TaskSubmission(ExecutionModel):
     budget: dict[str, Any] = Field(default_factory=dict)
     callback_url: str | None = Field(default=None, max_length=2048)
     session: SubmissionSession = Field(default_factory=SubmissionSession)
+
+    @field_validator("callback_url")
+    @classmethod
+    def validate_callback_url(cls, value: str | None) -> str | None:
+        """Ensure callback URLs are safe for outbound progress delivery."""
+        return _validate_callback_url(value)
 
 
 class ArtifactSnapshot(ExecutionModel):

@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.api.dependencies import get_task_service
 from db.enums import WorkerType
@@ -16,6 +16,7 @@ from orchestrator.execution import (
     TaskExecutionService,
     TaskSnapshot,
     TaskSubmission,
+    _validate_callback_url,
 )
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
@@ -50,6 +51,12 @@ class WebhookPayload(BaseModel):
     display_name: str | None = Field(default=None, max_length=255)
     delivery_id: str | None = Field(default=None, min_length=1, max_length=255)
     callback_url: str | None = Field(default=None, max_length=2048)
+
+    @field_validator("callback_url")
+    @classmethod
+    def validate_callback_url(cls, value: str | None) -> str | None:
+        """Reject malformed or obviously unsafe callback targets at request validation time."""
+        return _validate_callback_url(value)
 
 
 def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:

@@ -378,6 +378,28 @@ def test_webhook_rejects_negative_priority(client: TestClient) -> None:
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "callback_url",
+    [
+        "file:///etc/passwd",
+        "http://localhost/callback",
+        "http://127.0.0.1/callback",
+        "http://169.254.169.254/latest/meta-data",
+        "http://10.0.0.8/callback",
+    ],
+)
+def test_webhook_rejects_unsafe_callback_urls(
+    client: TestClient,
+    callback_url: str,
+) -> None:
+    """callback_url must not allow obvious SSRF targets."""
+    response = client.post(
+        "/webhook",
+        json={"task_text": "ok", "callback_url": callback_url},
+    )
+    assert response.status_code == 422
+
+
 def test_webhook_unconfigured_service_returns_503(client: TestClient) -> None:
     """The /webhook endpoint with no configured service should return 503."""
     app = create_app()  # no task_service → service is not configured
