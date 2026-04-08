@@ -43,13 +43,14 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - Milestone 8: Structured run observability (T-043). PR: [#45](https://github.com/natanayalo/code-agent/pull/45)
 - T-070 Implement GeminiCliWorker + GeminiCliRuntimeAdapter as second worker. PR: [#46](https://github.com/natanayalo/code-agent/pull/46)
 - T-071 routing heuristics + T-072 manual override. PR: [#47](https://github.com/natanayalo/code-agent/pull/47)
+- T-050 Generic webhook adapter. PR: [#48](https://github.com/natanayalo/code-agent/pull/48)
 
 ## In Progress
 
-- T-050 Generic webhook adapter (Milestone 10).
+- T-051 Telegram webhook adapter (Milestone 10).
 
 ## Next
-- T-051 Telegram webhook adapter, T-052 progress replies, T-053 dedupe protection.
+- T-052 Progress replies, T-053 dedupe protection.
 
 ## Blocked
 
