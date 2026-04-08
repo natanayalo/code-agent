@@ -462,6 +462,14 @@ Acceptance:
 - per-backend failures are logged with backend identity and do not suppress sibling deliveries
 - per-backend timeouts are enforced so stuck callbacks do not block task completion
 
+### T-086 Harden outbound callback SSRF defenses beyond literal-IP validation
+Strengthen progress webhook callback delivery against DNS rebinding and hostname-based private-network targeting.
+
+Acceptance:
+- outbound callback delivery validates resolved destination addresses, not just literal IP hosts
+- private, loopback, link-local, reserved, multicast, and unspecified targets are blocked even when reached through hostnames
+- the chosen mitigation is documented clearly, whether it is transport-level IP pinning, egress policy enforcement, or both
+
 ---
 
 ## Milestone 12 - Observability + replay
