@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 
@@ -24,7 +24,7 @@ _DEFAULT_OUTBOUND_TIMEOUT_SECONDS = 10.0
 class HttpPostClient(Protocol):
     """Narrow async HTTP client surface required by the notifier adapters."""
 
-    async def post(self, url: str, *, json: dict) -> httpx.Response:
+    async def post(self, url: str, *, json: Any) -> httpx.Response:
         """Send a JSON POST request."""
 
 
