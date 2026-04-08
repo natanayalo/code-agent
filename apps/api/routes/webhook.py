@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, status
@@ -47,9 +48,15 @@ class WebhookPayload(BaseModel):
 
 def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
     """Map a generic webhook payload onto the canonical TaskSubmission model."""
-    channel = payload.source
-    external_user_id = payload.external_user_id or f"{channel}:anonymous"
-    external_thread_id = payload.external_thread_id or f"{channel}-default"
+    # Always prefix the channel with "webhook:" so webhook-sourced sessions are
+    # never confused with native integrations (e.g. "telegram" vs "webhook:telegram").
+    channel = f"webhook:{payload.source}"
+
+    # Use caller-supplied IDs when provided.  Fall back to unique UUIDs so that
+    # each anonymous request gets its own isolated User and Session records and
+    # does not collide with other anonymous calls from the same source.
+    external_user_id = payload.external_user_id or f"webhook:anon-{uuid.uuid4().hex}"
+    external_thread_id = payload.external_thread_id or str(uuid.uuid4())
 
     session = SubmissionSession(
         channel=channel,
