@@ -54,6 +54,7 @@ class TelegramMessage(BaseModel):
     chat: TelegramChat
     from_: TelegramUser | None = Field(default=None, alias="from")
     text: str | None = None
+    caption: str | None = None
 
 
 class TelegramUpdate(BaseModel):
@@ -156,7 +157,7 @@ def receive_telegram_update(
         logger.debug("telegram update_id=%d has no message, ignoring", update.update_id)
         return TelegramWebhookResponse(ok=True, detail="no_message")
 
-    text = (msg.text or "").strip()
+    text = (msg.text or msg.caption or "").strip()
     if not text:
         logger.debug(
             "telegram update_id=%d message_id=%d has no text, ignoring",
