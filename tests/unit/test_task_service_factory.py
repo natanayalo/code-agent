@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -98,3 +99,36 @@ def test_create_app_uses_env_bootstrap_when_no_task_service_is_injected(
     with TestClient(app) as client:
         assert client.app.state.task_service is sentinel
         assert "outbound_http_clients" in seen_kwargs
+
+
+def test_create_app_closes_both_clients_when_startup_bootstrap_fails(monkeypatch) -> None:
+    """Startup failures should still close both shared outbound clients."""
+    close_calls: list[str] = []
+
+    class _FakeClient:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        async def aclose(self) -> None:
+            close_calls.append(self.name)
+
+    outbound_http_clients = SimpleNamespace(
+        telegram=_FakeClient("telegram"),
+        webhook=_FakeClient("webhook"),
+    )
+    monkeypatch.setattr(
+        "apps.api.main.create_outbound_http_clients",
+        lambda: outbound_http_clients,
+    )
+    monkeypatch.setattr(
+        "apps.api.main.build_task_service_from_env",
+        lambda **_: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    app = create_app()
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with TestClient(app):
+            pass
+
+    assert close_calls == ["telegram", "webhook"]

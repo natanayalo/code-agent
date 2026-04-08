@@ -22,18 +22,20 @@ def create_app(*, task_service: TaskExecutionService | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         outbound_http_clients = create_outbound_http_clients()
-        app.state.outbound_http_clients = outbound_http_clients
-        if task_service is None:
-            app.state.task_service = build_task_service_from_env(
-                outbound_http_clients=outbound_http_clients
-            )
-        else:
-            app.state.task_service = task_service
         try:
+            app.state.outbound_http_clients = outbound_http_clients
+            if task_service is None:
+                app.state.task_service = build_task_service_from_env(
+                    outbound_http_clients=outbound_http_clients
+                )
+            else:
+                app.state.task_service = task_service
             yield
         finally:
-            await outbound_http_clients.telegram.aclose()
-            await outbound_http_clients.webhook.aclose()
+            try:
+                await outbound_http_clients.telegram.aclose()
+            finally:
+                await outbound_http_clients.webhook.aclose()
 
     app = FastAPI(
         title="code-agent",
