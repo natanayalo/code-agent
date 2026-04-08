@@ -33,6 +33,16 @@ class StaticWorker(Worker):
         return self.result
 
 
+class RecordingProgressNotifier:
+    """Capture progress events emitted during webhook requests."""
+
+    def __init__(self) -> None:
+        self.events = []
+
+    async def notify(self, *, submission, event) -> None:
+        self.events.append((submission, event))
+
+
 @pytest.fixture
 def session_factory():
     """SQLite-backed session factory for webhook endpoint tests."""
@@ -48,6 +58,7 @@ def session_factory():
 @pytest.fixture
 def client(session_factory) -> Iterator[TestClient]:
     """Test client wired with the execution-path task service."""
+    notifier = RecordingProgressNotifier()
     worker = StaticWorker(
         WorkerResult(
             status="success",
@@ -63,9 +74,11 @@ def client(session_factory) -> Iterator[TestClient]:
         task_service=TaskExecutionService(
             session_factory=session_factory,
             worker=worker,
+            progress_notifier=notifier,
         )
     )
     app.state.test_worker = worker
+    app.state.test_notifier = notifier
     with TestClient(app) as test_client:
         yield test_client
 
@@ -206,6 +219,51 @@ def test_webhook_full_payload_creates_and_completes_task(
         assert task.status is TaskStatus.COMPLETED
 
 
+def test_webhook_delivery_id_is_idempotent(client: TestClient) -> None:
+    """A repeated webhook delivery_id should return the first task without re-running work."""
+    payload = {
+        "task_text": "Create a README file",
+        "source": "github-actions",
+        "external_user_id": "github-actions:bot",
+        "external_thread_id": "pr-123",
+        "delivery_id": "delivery-1",
+    }
+
+    first = client.post("/webhook", json=payload)
+    second = client.post("/webhook", json=payload)
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert second.json()["task_id"] == first.json()["task_id"]
+
+    worker = client.app.state.test_worker
+    assert len(worker.requests) == 1
+
+
+def test_webhook_progress_notifications_include_callback_url_submission(
+    client: TestClient,
+) -> None:
+    """Webhook progress delivery should preserve the callback target on submission."""
+    response = client.post(
+        "/webhook",
+        json={
+            "task_text": "Create a README file",
+            "source": "github-actions",
+            "external_user_id": "github-actions:bot",
+            "external_thread_id": "pr-123",
+            "callback_url": "https://callbacks.example.com/task-status",
+        },
+    )
+
+    assert response.status_code == 202
+    notifier = client.app.state.test_notifier
+    assert [event.phase for _, event in notifier.events] == ["started", "running", "completed"]
+    assert all(
+        submission.callback_url == "https://callbacks.example.com/task-status"
+        for submission, _ in notifier.events
+    )
+
+
 def test_webhook_returns_404_for_unknown_task(client: TestClient) -> None:
     """GET /tasks/<unknown> should still return 404 after a webhook submission."""
     response = client.get("/tasks/task-does-not-exist")
@@ -317,6 +375,28 @@ def test_webhook_display_name_forwarded(client: TestClient) -> None:
 def test_webhook_rejects_negative_priority(client: TestClient) -> None:
     """Priority below 0 should be rejected with 422."""
     response = client.post("/webhook", json={"task_text": "ok", "priority": -1})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "callback_url",
+    [
+        "file:///etc/passwd",
+        "http://localhost/callback",
+        "http://127.0.0.1/callback",
+        "http://169.254.169.254/latest/meta-data",
+        "http://10.0.0.8/callback",
+    ],
+)
+def test_webhook_rejects_unsafe_callback_urls(
+    client: TestClient,
+    callback_url: str,
+) -> None:
+    """callback_url must not allow obvious SSRF targets."""
+    response = client.post(
+        "/webhook",
+        json={"task_text": "ok", "callback_url": callback_url},
+    )
     assert response.status_code == 422
 
 

@@ -10,6 +10,7 @@ from db.enums import ArtifactType, SessionStatus, TaskStatus, WorkerRunStatus, W
 
 EXPECTED_TABLES = {
     "artifacts",
+    "inbound_deliveries",
     "memory_personal",
     "memory_project",
     "sessions",

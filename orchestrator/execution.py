@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Protocol
 from urllib.parse import unquote, urlparse
 
 from anyio import to_thread
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -21,11 +22,14 @@ from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
 from db.models import (
     Session as ConversationSession,
 )
-from db.models import User
+from db.models import (
+    User,
+)
 from orchestrator.graph import build_orchestrator_graph
 from orchestrator.state import OrchestratorState, SessionRef
 from repositories import (
     ArtifactRepository,
+    InboundDeliveryRepository,
     SessionRepository,
     SessionStateRepository,
     TaskRepository,
@@ -53,6 +57,38 @@ class SubmissionSession(ExecutionModel):
     display_name: str | None = None
 
 
+def _validate_callback_url(value: str | None) -> str | None:
+    """Reject callback targets that are malformed or obviously unsafe for outbound POSTs."""
+    if value is None:
+        return None
+
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("callback_url must use http or https.")
+    if not parsed.netloc or parsed.hostname is None:
+        raise ValueError("callback_url must be an absolute URL with a hostname.")
+
+    hostname = parsed.hostname.strip().lower()
+    if hostname == "localhost":
+        raise ValueError("callback_url must not target localhost.")
+
+    try:
+        host_ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return value
+
+    if (
+        host_ip.is_private
+        or host_ip.is_loopback
+        or host_ip.is_link_local
+        or host_ip.is_multicast
+        or host_ip.is_reserved
+        or host_ip.is_unspecified
+    ):
+        raise ValueError("callback_url must not target a private or local address.")
+    return value
+
+
 class TaskSubmission(ExecutionModel):
     """HTTP payload accepted by the minimal task-submission endpoint."""
 
@@ -63,7 +99,14 @@ class TaskSubmission(ExecutionModel):
     worker_override: WorkerType | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
+    callback_url: str | None = Field(default=None, max_length=2048)
     session: SubmissionSession = Field(default_factory=SubmissionSession)
+
+    @field_validator("callback_url")
+    @classmethod
+    def validate_callback_url(cls, value: str | None) -> str | None:
+        """Ensure callback URLs are safe for outbound progress delivery."""
+        return _validate_callback_url(value)
 
 
 class ArtifactSnapshot(ExecutionModel):
@@ -114,6 +157,14 @@ class TaskSnapshot(ExecutionModel):
 
 
 @dataclass(frozen=True)
+class DeliveryKey:
+    """A caller-supplied idempotency key for one inbound delivery."""
+
+    channel: str
+    delivery_id: str
+
+
+@dataclass(frozen=True)
 class _PersistedTaskContext:
     """The DB-backed task/session identifiers needed during execution."""
 
@@ -122,6 +173,35 @@ class _PersistedTaskContext:
     channel: str
     external_thread_id: str
     task_id: str
+
+
+@dataclass(frozen=True)
+class CreateTaskOutcome:
+    """Result of persisting or deduping a submitted task."""
+
+    task_snapshot: TaskSnapshot
+    persisted: _PersistedTaskContext | None
+    duplicate: bool = False
+
+
+@dataclass(frozen=True)
+class ProgressEvent:
+    """A task lifecycle update emitted by the execution service."""
+
+    phase: Literal["started", "running", "completed", "failed"]
+    task_id: str
+    session_id: str
+    channel: str
+    external_thread_id: str
+    task_text: str
+    summary: str | None = None
+
+
+class ProgressNotifier(Protocol):
+    """Async sink for task lifecycle updates."""
+
+    async def notify(self, *, submission: TaskSubmission, event: ProgressEvent) -> None:
+        """Deliver one task lifecycle event."""
 
 
 def _enum_value(value: object | None) -> str | None:
@@ -205,19 +285,49 @@ class TaskExecutionService:
         session_factory: sessionmaker[Session],
         worker: Worker,
         gemini_worker: Worker | None = None,
+        progress_notifier: ProgressNotifier | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.worker = worker
         self.gemini_worker = gemini_worker
+        self.progress_notifier = progress_notifier
         self.graph = build_orchestrator_graph(worker=worker, gemini_worker=gemini_worker)
 
     def create_task(self, submission: TaskSubmission) -> tuple[TaskSnapshot, _PersistedTaskContext]:
         """Persist a new task request and return the initial pollable snapshot."""
-        persisted = self._persist_submission(submission, status=TaskStatus.PENDING)
-        task_snapshot = self.get_task(persisted.task_id)
+        outcome = self.create_task_outcome(submission)
+        if outcome.persisted is None:
+            raise RuntimeError("Expected a fresh task, but a duplicate delivery was returned.")
+        return outcome.task_snapshot, outcome.persisted
+
+    def create_task_outcome(
+        self,
+        submission: TaskSubmission,
+        *,
+        delivery_key: DeliveryKey | None = None,
+    ) -> CreateTaskOutcome:
+        """Persist a task request or return the previously created task for a duplicate delivery."""
+        if delivery_key is not None and delivery_key.channel != submission.session.channel:
+            raise ValueError(
+                "delivery_key.channel must match submission.session.channel for dedupe."
+            )
+        persisted, duplicate_task_id = self._persist_submission(
+            submission,
+            status=TaskStatus.PENDING,
+            delivery_key=delivery_key,
+        )
+        task_id = duplicate_task_id or (persisted.task_id if persisted is not None else None)
+        if task_id is None:
+            raise RuntimeError("Task persistence did not produce a task id.")
+
+        task_snapshot = self.get_task(task_id)
         if task_snapshot is None:
-            raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
-        return task_snapshot, persisted
+            raise RuntimeError(f"Persisted task '{task_id}' could not be reloaded.")
+        return CreateTaskOutcome(
+            task_snapshot=task_snapshot,
+            persisted=persisted,
+            duplicate=duplicate_task_id is not None,
+        )
 
     async def submit_task(
         self,
@@ -226,6 +336,16 @@ class TaskExecutionService:
     ) -> None:
         """Execute one previously persisted task request in the background."""
         await self._run_blocking(self._mark_task_in_progress, task_id=persisted.task_id)
+        await self._emit_progress(
+            submission,
+            persisted,
+            phase="started",
+        )
+        await self._emit_progress(
+            submission,
+            persisted,
+            phase="running",
+        )
         started_at = utc_now()
         logger.info(
             "Starting execution-path task run",
@@ -267,14 +387,32 @@ class TaskExecutionService:
                         "task_id": persisted.task_id,
                     },
                 )
+                await self._emit_progress(
+                    submission,
+                    persisted,
+                    phase="failed",
+                    summary="Task execution failed and the final snapshot could not be reloaded.",
+                )
                 return None
             self._log_task_outcome(task_snapshot)
+            await self._emit_progress(
+                submission,
+                persisted,
+                phase="failed",
+                summary=self._task_summary(task_snapshot),
+            )
             return None
 
         task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
         if task_snapshot is None:
             raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
         self._log_task_outcome(task_snapshot)
+        await self._emit_progress(
+            submission,
+            persisted,
+            phase="completed" if task_snapshot.status == TaskStatus.COMPLETED.value else "failed",
+            summary=self._task_summary(task_snapshot),
+        )
         return None
 
     def get_task(self, task_id: str) -> TaskSnapshot | None:
@@ -341,10 +479,12 @@ class TaskExecutionService:
         submission: TaskSubmission,
         *,
         status: TaskStatus,
-    ) -> _PersistedTaskContext:
+        delivery_key: DeliveryKey | None = None,
+    ) -> tuple[_PersistedTaskContext | None, str | None]:
         """Create or restore the session scaffolding for a submitted task."""
         now = utc_now()
         with session_scope(self.session_factory) as session:
+            delivery_repo = InboundDeliveryRepository(session)
             user_repo = UserRepository(session)
             session_repo = SessionRepository(session)
             task_repo = TaskRepository(session)
@@ -385,12 +525,104 @@ class TaskExecutionService:
                 session_id=conversation_session.id,
                 active_task_id=task.id,
             )
+            if delivery_key is not None:
+                duplicate_task_id = self._link_delivery_to_task(
+                    delivery_repo=delivery_repo,
+                    delivery_key=delivery_key,
+                    task_id=task.id,
+                )
+                if duplicate_task_id is not None:
+                    session.rollback()
+                    return None, duplicate_task_id
             return _PersistedTaskContext(
                 user_id=user.id,
                 session_id=conversation_session.id,
                 channel=conversation_session.channel,
                 external_thread_id=conversation_session.external_thread_id,
                 task_id=task.id,
+            ), None
+
+    def _link_delivery_to_task(
+        self,
+        *,
+        delivery_repo: InboundDeliveryRepository,
+        delivery_key: DeliveryKey,
+        task_id: str,
+    ) -> str | None:
+        """Atomically bind a delivery key to a task or return the existing duplicate task id."""
+        try:
+            with delivery_repo.session.begin_nested():
+                delivery_repo.create(
+                    channel=delivery_key.channel,
+                    delivery_id=delivery_key.delivery_id,
+                    task_id=task_id,
+                )
+            return None
+        except IntegrityError:
+            existing_delivery = delivery_repo.get_by_channel_delivery(
+                channel=delivery_key.channel,
+                delivery_id=delivery_key.delivery_id,
+            )
+            if existing_delivery is None:
+                raise
+            if existing_delivery.task_id is None:
+                claimed_delivery = delivery_repo.attach_task_if_unassigned(
+                    channel=delivery_key.channel,
+                    delivery_id=delivery_key.delivery_id,
+                    task_id=task_id,
+                )
+                if claimed_delivery is not None:
+                    return None
+                existing_delivery = delivery_repo.get_by_channel_delivery(
+                    channel=delivery_key.channel,
+                    delivery_id=delivery_key.delivery_id,
+                )
+                if existing_delivery is None:
+                    raise
+                if existing_delivery.task_id is None:
+                    raise RuntimeError(
+                        "Inbound delivery exists without a task_id after dedupe retry."
+                    )
+            return existing_delivery.task_id
+
+    @staticmethod
+    def _task_summary(task_snapshot: TaskSnapshot) -> str | None:
+        """Return the latest human-readable outcome summary for notifications."""
+        if task_snapshot.latest_run is not None and task_snapshot.latest_run.summary is not None:
+            return task_snapshot.latest_run.summary
+        return None
+
+    async def _emit_progress(
+        self,
+        submission: TaskSubmission,
+        persisted: _PersistedTaskContext,
+        *,
+        phase: Literal["started", "running", "completed", "failed"],
+        summary: str | None = None,
+    ) -> None:
+        """Best-effort lifecycle notification that never breaks task execution."""
+        if self.progress_notifier is None:
+            return
+        event = ProgressEvent(
+            phase=phase,
+            task_id=persisted.task_id,
+            session_id=persisted.session_id,
+            channel=persisted.channel,
+            external_thread_id=persisted.external_thread_id,
+            task_text=submission.task_text,
+            summary=summary,
+        )
+        try:
+            await self.progress_notifier.notify(submission=submission, event=event)
+        except Exception:
+            logger.warning(
+                "Progress notification failed",
+                exc_info=True,
+                extra={
+                    "session_id": persisted.session_id,
+                    "task_id": persisted.task_id,
+                    "phase": phase,
+                },
             )
 
     async def _run_orchestrator(

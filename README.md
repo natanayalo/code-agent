@@ -77,6 +77,18 @@ export CODE_AGENT_CODEX_PROFILE=default
 export CODE_AGENT_CODEX_TIMEOUT_SECONDS=120
 ```
 
+Optional progress delivery for Milestone 10:
+
+```bash
+export CODE_AGENT_TELEGRAM_BOT_TOKEN=<telegram-bot-token>
+export CODE_AGENT_TELEGRAM_API_BASE_URL=https://api.telegram.org
+```
+
+When `CODE_AGENT_TELEGRAM_BOT_TOKEN` is set, Telegram-submitted tasks send `started`,
+`running`, and final `completed`/`failed` updates back to the originating chat. Generic
+webhook submissions can also provide `callback_url` in the payload to receive the same
+lifecycle updates as JSON callbacks.
+
 Run the local container stack:
 
 ```bash

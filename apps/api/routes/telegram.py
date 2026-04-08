@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from apps.api.dependencies import get_task_service
 from orchestrator.execution import (
+    DeliveryKey,
     SubmissionSession,
     TaskExecutionService,
     TaskSubmission,
@@ -176,16 +177,25 @@ def receive_telegram_update(
         return TelegramWebhookResponse(ok=True, detail="text_too_long")
 
     submission = _to_task_submission(msg, text)
-    task_snapshot, persisted = task_service.create_task(submission)
-    background_tasks.add_task(task_service.submit_task, submission, persisted)
+    outcome = task_service.create_task_outcome(
+        submission,
+        delivery_key=DeliveryKey(
+            channel=_CHANNEL,
+            delivery_id=str(update.update_id),
+        ),
+    )
+    if outcome.persisted is not None:
+        background_tasks.add_task(task_service.submit_task, submission, outcome.persisted)
 
     logger.info(
-        "telegram update_id=%d enqueued task_id=%s",
+        "telegram update_id=%d %s task_id=%s",
         update.update_id,
-        task_snapshot.task_id,
+        "deduped" if outcome.duplicate else "enqueued",
+        outcome.task_snapshot.task_id,
     )
     return TelegramWebhookResponse(
         ok=True,
-        task_id=task_snapshot.task_id,
-        session_id=task_snapshot.session_id,
+        task_id=outcome.task_snapshot.task_id,
+        session_id=outcome.task_snapshot.session_id,
+        detail="duplicate_delivery" if outcome.duplicate else None,
     )

@@ -6,15 +6,17 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.api.dependencies import get_task_service
 from db.enums import WorkerType
 from orchestrator.execution import (
+    DeliveryKey,
     SubmissionSession,
     TaskExecutionService,
     TaskSnapshot,
     TaskSubmission,
+    _validate_callback_url,
 )
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
@@ -47,6 +49,14 @@ class WebhookPayload(BaseModel):
     external_user_id: str | None = Field(default=None, max_length=146)
     external_thread_id: str | None = Field(default=None, max_length=255)
     display_name: str | None = Field(default=None, max_length=255)
+    delivery_id: str | None = Field(default=None, min_length=1, max_length=255)
+    callback_url: str | None = Field(default=None, max_length=2048)
+
+    @field_validator("callback_url")
+    @classmethod
+    def validate_callback_url(cls, value: str | None) -> str | None:
+        """Reject malformed or obviously unsafe callback targets at request validation time."""
+        return _validate_callback_url(value)
 
 
 def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
@@ -85,6 +95,7 @@ def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
         worker_override=payload.worker_override,
         constraints=payload.constraints,
         budget=payload.budget,
+        callback_url=payload.callback_url,
         session=session,
     )
 
@@ -102,6 +113,14 @@ def receive_webhook(
     all execution, persistence, and observability behaviour is shared.
     """
     submission = _to_task_submission(payload)
-    task_snapshot, persisted = task_service.create_task(submission)
-    background_tasks.add_task(task_service.submit_task, submission, persisted)
-    return task_snapshot
+    outcome = task_service.create_task_outcome(
+        submission,
+        delivery_key=(
+            DeliveryKey(channel=submission.session.channel, delivery_id=payload.delivery_id)
+            if payload.delivery_id is not None
+            else None
+        ),
+    )
+    if outcome.persisted is not None:
+        background_tasks.add_task(task_service.submit_task, submission, outcome.persisted)
+    return outcome.task_snapshot

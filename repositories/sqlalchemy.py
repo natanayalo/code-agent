@@ -5,13 +5,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Final, cast
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
 from db.models import (
     Artifact,
+    InboundDelivery,
     PersonalMemory,
     ProjectMemory,
     SessionState,
@@ -275,6 +276,65 @@ class TaskRepository:
         task.status = cast(TaskStatus, status)
         self.session.flush()
         return task
+
+
+class InboundDeliveryRepository:
+    """Persist and query webhook delivery dedupe claims."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(
+        self,
+        *,
+        channel: str,
+        delivery_id: str,
+        task_id: str | None = None,
+    ) -> InboundDelivery:
+        delivery = InboundDelivery(
+            channel=channel,
+            delivery_id=delivery_id,
+            task_id=task_id,
+        )
+        self.session.add(delivery)
+        self.session.flush()
+        return delivery
+
+    def get_by_channel_delivery(
+        self,
+        *,
+        channel: str,
+        delivery_id: str,
+    ) -> InboundDelivery | None:
+        statement = select(InboundDelivery).where(
+            InboundDelivery.channel == channel,
+            InboundDelivery.delivery_id == delivery_id,
+        )
+        return self.session.scalar(statement)
+
+    def attach_task_if_unassigned(
+        self,
+        *,
+        channel: str,
+        delivery_id: str,
+        task_id: str,
+    ) -> InboundDelivery | None:
+        statement = (
+            update(InboundDelivery)
+            .where(
+                InboundDelivery.channel == channel,
+                InboundDelivery.delivery_id == delivery_id,
+                InboundDelivery.task_id.is_(None),
+            )
+            .values(task_id=task_id)
+            .returning(InboundDelivery.id)
+        )
+        result = self.session.execute(statement)
+        updated_id = result.scalar_one_or_none()
+        if updated_id is None:
+            return None
+        self.session.flush()
+        return self.get_by_channel_delivery(channel=channel, delivery_id=delivery_id)
 
 
 class WorkerRunRepository:

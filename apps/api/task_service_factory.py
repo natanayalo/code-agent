@@ -7,7 +7,12 @@ from collections.abc import Mapping
 from typing import Final
 from urllib.parse import quote
 
-from orchestrator.execution import TaskExecutionService
+from apps.api.progress import (
+    CompositeProgressNotifier,
+    TelegramProgressNotifier,
+    WebhookCallbackProgressNotifier,
+)
+from orchestrator.execution import ProgressNotifier, TaskExecutionService
 from repositories import create_engine_from_url, create_session_factory
 from workers import (
     CodexCliWorker,
@@ -30,6 +35,8 @@ DATABASE_NAME_ENV_VAR: Final[str] = "POSTGRES_DB"
 DATABASE_USER_ENV_VAR: Final[str] = "POSTGRES_USER"
 DATABASE_PASSWORD_ENV_VAR: Final[str] = "POSTGRES_PASSWORD"
 DEFAULT_DATABASE_DRIVER: Final[str] = "postgresql+psycopg"
+TELEGRAM_BOT_TOKEN_ENV_VAR: Final[str] = "CODE_AGENT_TELEGRAM_BOT_TOKEN"
+TELEGRAM_API_BASE_URL_ENV_VAR: Final[str] = "CODE_AGENT_TELEGRAM_API_BASE_URL"
 
 
 def _is_enabled(value: str | None) -> bool:
@@ -98,8 +105,21 @@ def build_task_service_from_env(
         gemini_worker = GeminiCliWorker(
             runtime_adapter=GeminiCliRuntimeAdapter.from_env(resolved_env)
         )
+    progress_notifiers: list[ProgressNotifier] = [WebhookCallbackProgressNotifier()]
+    telegram_bot_token = resolved_env.get(TELEGRAM_BOT_TOKEN_ENV_VAR)
+    if telegram_bot_token:
+        progress_notifiers.append(
+            TelegramProgressNotifier(
+                bot_token=telegram_bot_token,
+                api_base_url=resolved_env.get(
+                    TELEGRAM_API_BASE_URL_ENV_VAR,
+                    "https://api.telegram.org",
+                ),
+            )
+        )
     return TaskExecutionService(
         session_factory=session_factory,
         worker=codex_worker,
         gemini_worker=gemini_worker,
+        progress_notifier=CompositeProgressNotifier(progress_notifiers),
     )

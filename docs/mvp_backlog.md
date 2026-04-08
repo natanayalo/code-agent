@@ -446,6 +446,30 @@ Add tool boundary ready for MCP migration.
 Acceptance:
 - at least one tool accessible through abstraction without bypassing the internal policy-aware tool registry
 
+### T-084 Add lifespan-managed shared HTTP clients for outbound notifier adapters
+Introduce app-owned async HTTP clients for outbound integrations such as Telegram progress delivery and webhook callbacks.
+
+Acceptance:
+- outbound notifier adapters can reuse shared HTTP clients without per-notification client construction
+- client lifecycle is explicitly owned by app startup/shutdown or equivalent test-safe hooks
+- tests verify clients are closed cleanly
+
+### T-085 Isolate parallel progress notifier delivery
+Dispatch progress notifications to multiple backends without allowing one slow backend to delay the others.
+
+Acceptance:
+- notifier fan-out runs in parallel
+- per-backend failures are logged with backend identity and do not suppress sibling deliveries
+- per-backend timeouts are enforced so stuck callbacks do not block task completion
+
+### T-086 Harden outbound callback SSRF defenses beyond literal-IP validation
+Strengthen progress webhook callback delivery against DNS rebinding and hostname-based private-network targeting.
+
+Acceptance:
+- outbound callback delivery validates resolved destination addresses, not just literal IP hosts
+- private, loopback, link-local, reserved, multicast, and unspecified targets are blocked even when reached through hostnames
+- the chosen mitigation is documented clearly, whether it is transport-level IP pinning, egress policy enforcement, or both
+
 ---
 
 ## Milestone 12 - Observability + replay
