@@ -180,7 +180,7 @@ def test_telegram_channel_post_no_sender(client: TestClient) -> None:
     """Channel posts (no 'from' field) should still create a task."""
     update = {
         "update_id": 12,
-        "message": {
+        "channel_post": {
             "message_id": 12,
             "chat": {"id": 3},
             "text": "channel broadcast task",

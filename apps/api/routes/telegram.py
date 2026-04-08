@@ -59,8 +59,8 @@ class TelegramMessage(BaseModel):
 class TelegramUpdate(BaseModel):
     """Partial Telegram Update object.
 
-    Only ``message`` is handled in this slice.  Edited messages, channel
-    posts, callback queries, etc. are silently acknowledged (200 OK) without
+    Only ``message`` and ``channel_post`` are handled in this slice.  Edited
+    messages, callback queries, etc. are silently acknowledged (200 OK) without
     creating a task.
     """
 
@@ -68,6 +68,7 @@ class TelegramUpdate(BaseModel):
 
     update_id: int
     message: TelegramMessage | None = None
+    channel_post: TelegramMessage | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +150,7 @@ def receive_telegram_update(
     therefore return 200 even for non-message updates (edited messages, polls,
     etc.) or messages with no text content.
     """
-    msg = update.message
+    msg = update.message or update.channel_post
 
     if msg is None:
         logger.debug("telegram update_id=%d has no message, ignoring", update.update_id)
