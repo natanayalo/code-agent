@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Protocol
 
 import httpx
 
@@ -16,6 +18,34 @@ _TELEGRAM_CHAT_ID_PATTERN = re.compile(r"^telegram:chat:(-?\d+)$")
 _TELEGRAM_MESSAGE_LIMIT = 4096
 _TELEGRAM_STARTED_PREFIX = "Task {task_id} started.\n\n"
 _TELEGRAM_ELLIPSIS = "..."
+_DEFAULT_OUTBOUND_TIMEOUT_SECONDS = 10.0
+
+
+class HttpPostClient(Protocol):
+    """Narrow async HTTP client surface required by the notifier adapters."""
+
+    async def post(self, url: str, *, json: dict) -> httpx.Response:
+        """Send a JSON POST request."""
+
+
+@dataclass(frozen=True)
+class OutboundHttpClients:
+    """Shared async HTTP clients owned by the app lifespan."""
+
+    telegram: httpx.AsyncClient
+    webhook: httpx.AsyncClient
+
+
+def create_outbound_http_clients(
+    *,
+    timeout_seconds: float = _DEFAULT_OUTBOUND_TIMEOUT_SECONDS,
+) -> OutboundHttpClients:
+    """Create shared async clients for outbound notifier delivery."""
+    timeout = httpx.Timeout(timeout_seconds)
+    return OutboundHttpClients(
+        telegram=httpx.AsyncClient(timeout=timeout),
+        webhook=httpx.AsyncClient(timeout=timeout),
+    )
 
 
 def _truncate_telegram_text(text: str, max_len: int) -> str:
@@ -76,12 +106,12 @@ class TelegramProgressNotifier:
         self,
         *,
         bot_token: str,
+        client: HttpPostClient,
         api_base_url: str = "https://api.telegram.org",
-        timeout_seconds: float = 10.0,
     ) -> None:
         self.bot_token = bot_token
+        self.client = client
         self.api_base_url = api_base_url.rstrip("/")
-        self.timeout_seconds = timeout_seconds
 
     async def notify(self, *, submission: TaskSubmission, event: ProgressEvent) -> None:
         if event.channel != "telegram":
@@ -94,19 +124,18 @@ class TelegramProgressNotifier:
             )
 
         chat_id = int(match.group(1))
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.post(
-                f"{self.api_base_url}/bot{self.bot_token}/sendMessage",
-                json={"chat_id": chat_id, "text": _format_telegram_message(event)},
-            )
-            response.raise_for_status()
+        response = await self.client.post(
+            f"{self.api_base_url}/bot{self.bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": _format_telegram_message(event)},
+        )
+        response.raise_for_status()
 
 
 class WebhookCallbackProgressNotifier:
     """POST task lifecycle updates to a caller-supplied callback URL."""
 
-    def __init__(self, *, timeout_seconds: float = 10.0) -> None:
-        self.timeout_seconds = timeout_seconds
+    def __init__(self, *, client: HttpPostClient) -> None:
+        self.client = client
 
     async def notify(self, *, submission: TaskSubmission, event: ProgressEvent) -> None:
         if submission.callback_url is None:
@@ -121,6 +150,5 @@ class WebhookCallbackProgressNotifier:
             "channel": event.channel,
             "external_thread_id": event.external_thread_id,
         }
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.post(submission.callback_url, json=payload)
-            response.raise_for_status()
+        response = await self.client.post(submission.callback_url, json=payload)
+        response.raise_for_status()
