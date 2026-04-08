@@ -41,7 +41,10 @@ class WebhookPayload(BaseModel):
 
     # --- caller / session identity ---
     source: str = Field(default="webhook", min_length=1, max_length=100)
-    external_user_id: str | None = Field(default=None, max_length=255)
+    # external_user_id is stored as "webhook:{source}:{external_user_id}" (max 255
+    # chars in the DB).  With "webhook:" (8) + source (≤100) + ":" (1) = ≤109 chars
+    # of fixed overhead, the raw caller-supplied value is capped at 255-109 = 146.
+    external_user_id: str | None = Field(default=None, max_length=146)
     external_thread_id: str | None = Field(default=None, max_length=255)
     display_name: str | None = Field(default=None, max_length=255)
 
@@ -52,10 +55,16 @@ def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
     # never confused with native integrations (e.g. "telegram" vs "webhook:telegram").
     channel = f"webhook:{payload.source}"
 
-    # Use caller-supplied IDs when provided.  Fall back to unique UUIDs so that
-    # each anonymous request gets its own isolated User and Session records and
-    # does not collide with other anonymous calls from the same source.
-    external_user_id = payload.external_user_id or f"webhook:anon-{uuid.uuid4().hex}"
+    # Namespace caller-supplied IDs with "webhook:{source}:" so they remain
+    # isolated from identically-named users/threads in other adapters (the
+    # UserRepository lookup is global with no channel scoping).  Fall back to
+    # unique UUIDs for fully anonymous calls so each request gets its own
+    # isolated User and Session records.
+    external_user_id = (
+        f"webhook:{payload.source}:{payload.external_user_id}"
+        if payload.external_user_id
+        else f"webhook:anon-{uuid.uuid4().hex}"
+    )
     external_thread_id = payload.external_thread_id or str(uuid.uuid4())
 
     session = SubmissionSession(

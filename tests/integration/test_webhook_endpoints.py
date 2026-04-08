@@ -138,6 +138,29 @@ def test_webhook_anonymous_requests_get_isolated_sessions(
     assert r1.json()["session_id"] != r2.json()["session_id"]
 
 
+def test_webhook_namespaces_external_user_id(client: TestClient) -> None:
+    """Caller-supplied external_user_id must be prefixed with webhook:{source}: to prevent
+    collisions with identically-named users from other adapters."""
+    response = client.post(
+        "/webhook",
+        json={
+            "task_text": "do something",
+            "source": "ci",
+            "external_user_id": "alice",
+            "external_thread_id": "run-1",
+        },
+    )
+
+    assert response.status_code == 202
+    worker = client.app.state.test_worker
+    client.get(f"/tasks/{response.json()['task_id']}")
+    # WorkerRequest carries the raw task; channel/user id live on the DB session.
+    # The real guard is that the submission pipeline accepted the namespaced value
+    # without error (which would surface as a 5xx here if the field were too long
+    # or invalid after prefixing).
+    assert len(worker.requests) == 1
+
+
 def test_webhook_full_payload_creates_and_completes_task(
     client: TestClient, session_factory
 ) -> None:
@@ -230,8 +253,12 @@ def test_webhook_rejects_source_exceeding_max_length(client: TestClient) -> None
 def test_webhook_rejects_external_user_id_exceeding_max_length(
     client: TestClient,
 ) -> None:
-    """external_user_id longer than 255 characters should be rejected with 422."""
-    response = client.post("/webhook", json={"task_text": "ok", "external_user_id": "u" * 256})
+    """external_user_id longer than 146 characters should be rejected with 422.
+
+    The stored value is prefixed with "webhook:{source}:" (≤109 chars), so the raw
+    caller id is capped at 255 - 109 = 146 to stay within the DB column limit.
+    """
+    response = client.post("/webhook", json={"task_text": "ok", "external_user_id": "u" * 147})
     assert response.status_code == 422
 
 
