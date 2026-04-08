@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Sequence
 
 import httpx
 
 from orchestrator.execution import ProgressEvent, ProgressNotifier, TaskSubmission
+
+logger = logging.getLogger(__name__)
 
 _TELEGRAM_CHAT_ID_PATTERN = re.compile(r"^telegram:chat:(-?\d+)$")
 _TELEGRAM_MESSAGE_LIMIT = 4096
@@ -43,7 +46,18 @@ class CompositeProgressNotifier:
 
     async def notify(self, *, submission: TaskSubmission, event: ProgressEvent) -> None:
         for notifier in self.notifiers:
-            await notifier.notify(submission=submission, event=event)
+            try:
+                await notifier.notify(submission=submission, event=event)
+            except Exception:
+                logger.warning(
+                    "Progress notification failed for notifier",
+                    extra={
+                        "notifier_type": type(notifier).__name__,
+                        "task_id": event.task_id,
+                        "phase": event.phase,
+                    },
+                    exc_info=True,
+                )
 
 
 class TelegramProgressNotifier:

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from apps.api.progress import (
+    CompositeProgressNotifier,
     TelegramProgressNotifier,
     WebhookCallbackProgressNotifier,
     _format_telegram_message,
@@ -29,6 +30,19 @@ class _FakeAsyncClient:
     async def post(self, url: str, json: dict) -> SimpleNamespace:
         self.recorder.append((url, json))
         return SimpleNamespace(raise_for_status=lambda: None)
+
+
+class _FailingNotifier:
+    async def notify(self, *, submission: TaskSubmission, event: ProgressEvent) -> None:
+        raise RuntimeError("boom")
+
+
+class _RecordingNotifier:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def notify(self, *, submission: TaskSubmission, event: ProgressEvent) -> None:
+        self.calls += 1
 
 
 @pytest.mark.anyio
@@ -132,3 +146,28 @@ def test_format_telegram_message_truncates_started_text_to_platform_limit() -> N
 
     assert len(message) == 4096
     assert message.endswith("...")
+
+
+@pytest.mark.anyio
+async def test_composite_progress_notifier_logs_and_continues_after_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One notifier failure should not stop later progress notifiers from running."""
+    notifier = _RecordingNotifier()
+    composite = CompositeProgressNotifier([_FailingNotifier(), notifier])
+    submission = TaskSubmission(task_text="Run tests")
+    event = ProgressEvent(
+        phase="running",
+        task_id="task-1",
+        session_id="session-1",
+        channel="webhook:ci",
+        external_thread_id="thread-1",
+        task_text="Run tests",
+    )
+
+    with caplog.at_level("WARNING"):
+        await composite.notify(submission=submission, event=event)
+
+    assert notifier.calls == 1
+    assert "Progress notification failed for notifier" in caplog.text
+    assert caplog.records[0].notifier_type == "_FailingNotifier"
