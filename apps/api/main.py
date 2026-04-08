@@ -41,8 +41,6 @@ def create_app(*, task_service: TaskExecutionService | None = None) -> FastAPI:
         description="Bootstrap API for the code-agent service.",
         lifespan=lifespan,
     )
-    if task_service is not None:
-        app.state.task_service = task_service
     app.include_router(health_router)
     app.include_router(tasks_router)
     app.include_router(webhook_router)
