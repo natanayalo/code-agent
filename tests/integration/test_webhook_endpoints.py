@@ -196,6 +196,22 @@ def test_webhook_rejects_extra_fields(client: TestClient) -> None:
     assert response.status_code == 422
 
 
+def test_webhook_display_name_forwarded(client: TestClient) -> None:
+    """display_name in the payload should be accepted without error."""
+    response = client.post(
+        "/webhook",
+        json={
+            "task_text": "greet the user",
+            "display_name": "Alice",
+            "source": "test",
+            "external_user_id": "test:alice",
+            "external_thread_id": "thread-1",
+        },
+    )
+    assert response.status_code == 202
+    assert response.json()["task_id"]
+
+
 def test_webhook_rejects_negative_priority(client: TestClient) -> None:
     """Priority below 0 should be rejected with 422."""
     response = client.post("/webhook", json={"task_text": "ok", "priority": -1})

@@ -42,6 +42,7 @@ class WebhookPayload(BaseModel):
     source: str = Field(default="webhook", min_length=1)
     external_user_id: str | None = None
     external_thread_id: str | None = None
+    display_name: str | None = None
 
 
 def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
@@ -54,6 +55,7 @@ def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
         channel=channel,
         external_user_id=external_user_id,
         external_thread_id=external_thread_id,
+        display_name=payload.display_name,
     )
     return TaskSubmission(
         task_text=payload.task_text,
