@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from apps.api.routes.health import router as health_router
 from apps.api.routes.tasks import router as tasks_router
+from apps.api.routes.webhook import router as webhook_router
 from apps.api.task_service_factory import build_task_service_from_env
 from orchestrator.execution import TaskExecutionService
 
@@ -21,6 +22,7 @@ def create_app(*, task_service: TaskExecutionService | None = None) -> FastAPI:
     app.state.task_service = resolved_task_service
     app.include_router(health_router)
     app.include_router(tasks_router)
+    app.include_router(webhook_router)
     return app
 
 
