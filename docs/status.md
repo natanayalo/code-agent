@@ -73,3 +73,4 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - CI validates every push, including merges to `master`, enforcing a 90% branch-coverage floor in `pytest`.
 - T-021 adds durable LangGraph checkpointing; T-022 adds a destructive-action approval pause/resume path.
 - T-030/T-031/T-032 provide workspace provisioning, Docker-based execution, and artifact capture.
+- Review follow-ups identified during PR #50: add lifespan-managed shared HTTP clients for outbound notifier adapters (T-084) and isolate parallel progress notifier delivery with per-backend timeout/error handling (T-085).
