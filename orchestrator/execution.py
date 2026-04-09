@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import socket
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -57,6 +58,43 @@ class SubmissionSession(ExecutionModel):
     display_name: str | None = None
 
 
+def _is_unsafe_callback_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return whether a resolved callback destination is local-only or otherwise unsafe."""
+    return (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    )
+
+
+def _resolve_callback_hostname(hostname: str, *, port: int) -> list[str]:
+    """Resolve a callback hostname into concrete destination IP addresses."""
+    try:
+        records = socket.getaddrinfo(
+            hostname,
+            port,
+            type=socket.SOCK_STREAM,
+            proto=socket.IPPROTO_TCP,
+        )
+    except socket.gaierror as exc:
+        raise ValueError("callback_url hostname could not be resolved.") from exc
+
+    resolved_addresses: list[str] = []
+    for _, _, _, _, sockaddr in records:
+        if not sockaddr:
+            continue
+        candidate = sockaddr[0].strip()
+        if candidate:
+            resolved_addresses.append(candidate)
+
+    if not resolved_addresses:
+        raise ValueError("callback_url hostname did not resolve to any addresses.")
+    return resolved_addresses
+
+
 def _validate_callback_url(value: str | None) -> str | None:
     """Reject callback targets that are malformed or obviously unsafe for outbound POSTs."""
     if value is None:
@@ -73,19 +111,22 @@ def _validate_callback_url(value: str | None) -> str | None:
         raise ValueError("callback_url must not target localhost.")
 
     try:
-        host_ip = ipaddress.ip_address(hostname)
-    except ValueError:
-        return value
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("callback_url must include a valid port.") from exc
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
 
-    if (
-        host_ip.is_private
-        or host_ip.is_loopback
-        or host_ip.is_link_local
-        or host_ip.is_multicast
-        or host_ip.is_reserved
-        or host_ip.is_unspecified
-    ):
-        raise ValueError("callback_url must not target a private or local address.")
+    try:
+        ipaddress.ip_address(hostname)
+        resolved_addresses = [hostname]
+    except ValueError:
+        resolved_addresses = _resolve_callback_hostname(hostname, port=port)
+
+    for resolved_address in resolved_addresses:
+        host_ip = ipaddress.ip_address(resolved_address)
+        if _is_unsafe_callback_address(host_ip):
+            raise ValueError("callback_url must not target a private or local address.")
     return value
 
 

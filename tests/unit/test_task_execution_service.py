@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 from datetime import datetime
 
 import pytest
@@ -87,6 +88,69 @@ class _RecordingProgressNotifier:
         event: execution_module.ProgressEvent,
     ) -> None:
         self.events.append(event)
+
+
+def test_validate_callback_url_accepts_hostname_with_public_resolution(monkeypatch) -> None:
+    """Hostnames that resolve only to public IPs should still be allowed."""
+
+    def fake_getaddrinfo(host: str, port: int, *, type: int, proto: int):
+        assert host == "callbacks.example.com"
+        assert port == 443
+        assert type == socket.SOCK_STREAM
+        assert proto == socket.IPPROTO_TCP
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", 443))
+        ]
+
+    monkeypatch.setattr(execution_module.socket, "getaddrinfo", fake_getaddrinfo)
+
+    assert (
+        execution_module._validate_callback_url("https://callbacks.example.com/status")
+        == "https://callbacks.example.com/status"
+    )
+
+
+def test_validate_callback_url_rejects_hostname_with_private_resolution(monkeypatch) -> None:
+    """Hostname callbacks should be rejected when DNS resolves to a private address."""
+
+    def fake_getaddrinfo(host: str, port: int, *, type: int, proto: int):
+        assert host == "callbacks.example.com"
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("10.0.0.8", port))]
+
+    monkeypatch.setattr(execution_module.socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(ValueError, match="private or local address"):
+        execution_module._validate_callback_url("https://callbacks.example.com/status")
+
+
+def test_validate_callback_url_rejects_hostname_with_mixed_public_and_private_resolution(
+    monkeypatch,
+) -> None:
+    """Mixed DNS answers should fail closed when any resolved address is unsafe."""
+
+    def fake_getaddrinfo(host: str, port: int, *, type: int, proto: int):
+        assert host == "callbacks.example.com"
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port)),
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("169.254.169.254", port)),
+        ]
+
+    monkeypatch.setattr(execution_module.socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(ValueError, match="private or local address"):
+        execution_module._validate_callback_url("https://callbacks.example.com/status")
+
+
+def test_validate_callback_url_rejects_unresolvable_hostname(monkeypatch) -> None:
+    """Unresolvable callback hosts should fail closed."""
+
+    def fake_getaddrinfo(host: str, port: int, *, type: int, proto: int):
+        raise socket.gaierror("boom")
+
+    monkeypatch.setattr(execution_module.socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(ValueError, match="could not be resolved"):
+        execution_module._validate_callback_url("https://callbacks.example.com/status")
 
 
 def test_task_execution_service_reuses_one_compiled_graph(

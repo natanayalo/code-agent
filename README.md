@@ -88,6 +88,9 @@ When `CODE_AGENT_TELEGRAM_BOT_TOKEN` is set, Telegram-submitted tasks send `star
 `running`, and final `completed`/`failed` updates back to the originating chat. Generic
 webhook submissions can also provide `callback_url` in the payload to receive the same
 lifecycle updates as JSON callbacks.
+Callback targets are restricted to public HTTP(S) destinations; hostname callbacks are
+resolved during validation and rejected if any resolved address is private, loopback,
+link-local, reserved, multicast, or unspecified.
 
 Run the local container stack:
 

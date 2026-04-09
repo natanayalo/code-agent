@@ -97,7 +97,7 @@ async def test_webhook_callback_progress_notifier_posts_event_payload() -> None:
     notifier = WebhookCallbackProgressNotifier(client=_FakeAsyncClient(requests))
     submission = TaskSubmission(
         task_text="Run tests",
-        callback_url="https://callbacks.example.com/status",
+        callback_url="https://93.184.216.34/status",
         session=SubmissionSession(
             channel="webhook:ci",
             external_user_id="webhook:ci:1",
@@ -117,7 +117,7 @@ async def test_webhook_callback_progress_notifier_posts_event_payload() -> None:
 
     assert requests == [
         (
-            "https://callbacks.example.com/status",
+            "https://93.184.216.34/status",
             {
                 "task_id": "task-1",
                 "session_id": "session-1",
