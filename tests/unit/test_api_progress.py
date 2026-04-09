@@ -1,9 +1,6 @@
 """Unit tests for outbound progress notifier adapters."""
 
-from __future__ import annotations
-
-from types import SimpleNamespace
-
+import httpx
 import pytest
 
 from apps.api.progress import (
@@ -21,15 +18,10 @@ class _FakeAsyncClient:
     def __init__(self, recorder: list[tuple[str, dict]]) -> None:
         self.recorder = recorder
 
-    async def __aenter__(self) -> _FakeAsyncClient:
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        return None
-
-    async def post(self, url: str, json: dict) -> SimpleNamespace:
+    async def post(self, url: str, *, json: dict) -> httpx.Response:
         self.recorder.append((url, json))
-        return SimpleNamespace(raise_for_status=lambda: None)
+        request = httpx.Request("POST", url, json=json)
+        return httpx.Response(200, request=request)
 
 
 class _FailingNotifier:
@@ -46,16 +38,14 @@ class _RecordingNotifier:
 
 
 @pytest.mark.anyio
-async def test_telegram_progress_notifier_posts_send_message(monkeypatch) -> None:
+async def test_telegram_progress_notifier_posts_send_message() -> None:
     """Telegram progress updates should call the Telegram sendMessage API."""
     requests: list[tuple[str, dict]] = []
-    monkeypatch.setattr(
-        "apps.api.progress.httpx.AsyncClient",
-        lambda timeout: _FakeAsyncClient(requests),
-    )
 
     notifier = TelegramProgressNotifier(
-        bot_token="token-123", api_base_url="https://tg.example.com"
+        bot_token="token-123",
+        client=_FakeAsyncClient(requests),
+        api_base_url="https://tg.example.com",
     )
     submission = TaskSubmission(
         task_text="Run tests",
@@ -86,15 +76,11 @@ async def test_telegram_progress_notifier_posts_send_message(monkeypatch) -> Non
 
 
 @pytest.mark.anyio
-async def test_webhook_callback_progress_notifier_posts_event_payload(monkeypatch) -> None:
+async def test_webhook_callback_progress_notifier_posts_event_payload() -> None:
     """Webhook progress updates should POST the task lifecycle payload to the callback URL."""
     requests: list[tuple[str, dict]] = []
-    monkeypatch.setattr(
-        "apps.api.progress.httpx.AsyncClient",
-        lambda timeout: _FakeAsyncClient(requests),
-    )
 
-    notifier = WebhookCallbackProgressNotifier()
+    notifier = WebhookCallbackProgressNotifier(client=_FakeAsyncClient(requests))
     submission = TaskSubmission(
         task_text="Run tests",
         callback_url="https://callbacks.example.com/status",

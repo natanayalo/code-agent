@@ -45,14 +45,16 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-071 routing heuristics + T-072 manual override. PR: [#47](https://github.com/natanayalo/code-agent/pull/47)
 - T-050 Generic webhook adapter. PR: [#48](https://github.com/natanayalo/code-agent/pull/48)
 - T-051 Telegram webhook adapter (Milestone 10). PR: [#49](https://github.com/natanayalo/code-agent/pull/49)
+- T-052 Progress replies (Milestone 10). PR: [#50](https://github.com/natanayalo/code-agent/pull/50)
+- T-053 Dedupe protection for repeated webhook deliveries (Milestone 10). PR: [#50](https://github.com/natanayalo/code-agent/pull/50)
+- Milestone 10: Telegram ingress milestone (T-050 to T-053). PR: [#50](https://github.com/natanayalo/code-agent/pull/50)
 
 ## In Progress
 
-- T-052 Progress replies (Milestone 10).
-- T-053 Dedupe protection for repeated webhook deliveries (Milestone 10, locally verified).
+- T-084 Add lifespan-managed shared HTTP clients for outbound notifier adapters. Implemented locally with targeted pytest coverage and pre-commit verification; not yet published.
 
 ## Next
-- Milestone 10 completion / publish remaining slices.
+- T-085 Isolate parallel progress notifier delivery with per-backend timeout/error handling.
 
 ## Blocked
 
@@ -60,7 +62,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: Milestone 8 (T-043 structured run observability) → Milestone 9 (T-070+ second worker) → Milestone 10 (Telegram/webhook adapters).
+- Current target order from here: T-084 shared outbound notifier clients → T-085 parallel notifier delivery isolation → T-086 callback SSRF hardening.
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.

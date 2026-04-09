@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 from apps.api.progress import (
     CompositeProgressNotifier,
+    OutboundHttpClients,
     TelegramProgressNotifier,
     WebhookCallbackProgressNotifier,
 )
@@ -73,6 +74,8 @@ def _database_url_from_env(environ: Mapping[str, str]) -> str | None:
 
 def build_task_service_from_env(
     environ: Mapping[str, str] | None = None,
+    *,
+    outbound_http_clients: OutboundHttpClients | None = None,
 ) -> TaskExecutionService | None:
     """Build the real task service when the app is explicitly configured for it."""
     resolved_env = os.environ if environ is None else environ
@@ -105,12 +108,19 @@ def build_task_service_from_env(
         gemini_worker = GeminiCliWorker(
             runtime_adapter=GeminiCliRuntimeAdapter.from_env(resolved_env)
         )
-    progress_notifiers: list[ProgressNotifier] = [WebhookCallbackProgressNotifier()]
+    if outbound_http_clients is None:
+        raise RuntimeError(
+            "Task service bootstrap requires shared outbound HTTP clients for notifier delivery."
+        )
+    progress_notifiers: list[ProgressNotifier] = [
+        WebhookCallbackProgressNotifier(client=outbound_http_clients.webhook)
+    ]
     telegram_bot_token = resolved_env.get(TELEGRAM_BOT_TOKEN_ENV_VAR)
     if telegram_bot_token:
         progress_notifiers.append(
             TelegramProgressNotifier(
                 bot_token=telegram_bot_token,
+                client=outbound_http_clients.telegram,
                 api_base_url=resolved_env.get(
                     TELEGRAM_API_BASE_URL_ENV_VAR,
                     "https://api.telegram.org",
