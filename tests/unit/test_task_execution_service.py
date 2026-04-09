@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+import time
 from datetime import datetime
 
 import pytest
@@ -151,6 +152,23 @@ def test_validate_callback_url_rejects_unresolvable_hostname(monkeypatch) -> Non
 
     with pytest.raises(ValueError, match="could not be resolved"):
         execution_module._validate_callback_url("https://callbacks.example.com/status")
+
+
+def test_resolve_callback_hostname_times_out_when_resolution_hangs(monkeypatch) -> None:
+    """Hostname resolution should fail closed when the resolver does not return promptly."""
+
+    def slow_lookup(host: str, port: int) -> list[tuple]:
+        time.sleep(0.05)
+        return []
+
+    monkeypatch.setattr(execution_module, "_lookup_callback_hostname_records", slow_lookup)
+
+    with pytest.raises(ValueError, match="resolution timed out"):
+        execution_module._resolve_callback_hostname(
+            "callbacks.example.com",
+            port=443,
+            timeout_seconds=0.01,
+        )
 
 
 def test_is_unsafe_callback_address_rejects_ipv4_mapped_ipv6_loopback() -> None:

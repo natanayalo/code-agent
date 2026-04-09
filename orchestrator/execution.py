@@ -6,6 +6,8 @@ import ipaddress
 import logging
 import socket
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
@@ -42,6 +44,8 @@ from workers import ArtifactReference, Worker
 
 logger = logging.getLogger(__name__)
 
+_CALLBACK_RESOLUTION_TIMEOUT_SECONDS = 2.0
+
 
 class ExecutionModel(BaseModel):
     """Base model for task-execution service payloads."""
@@ -73,17 +77,34 @@ def _is_unsafe_callback_address(address: ipaddress.IPv4Address | ipaddress.IPv6A
     )
 
 
-def _resolve_callback_hostname(hostname: str, *, port: int) -> list[str]:
+def _lookup_callback_hostname_records(hostname: str, port: int) -> list[tuple]:
+    """Resolve a hostname through the system resolver using TCP-oriented address hints."""
+    return socket.getaddrinfo(
+        hostname,
+        port,
+        type=socket.SOCK_STREAM,
+        proto=socket.IPPROTO_TCP,
+    )
+
+
+def _resolve_callback_hostname(
+    hostname: str,
+    *,
+    port: int,
+    timeout_seconds: float = _CALLBACK_RESOLUTION_TIMEOUT_SECONDS,
+) -> list[str]:
     """Resolve a callback hostname into concrete destination IP addresses."""
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="callback-dns")
     try:
-        records = socket.getaddrinfo(
-            hostname,
-            port,
-            type=socket.SOCK_STREAM,
-            proto=socket.IPPROTO_TCP,
-        )
+        future = executor.submit(_lookup_callback_hostname_records, hostname, port)
+        records = future.result(timeout=timeout_seconds)
+    except FutureTimeoutError as exc:
+        future.cancel()
+        raise ValueError("callback_url hostname resolution timed out.") from exc
     except socket.gaierror as exc:
         raise ValueError("callback_url hostname could not be resolved.") from exc
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
     resolved_addresses: list[str] = []
     for _, _, _, _, sockaddr in records:
