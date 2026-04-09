@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections.abc import Sequence
@@ -80,23 +81,52 @@ def _format_telegram_message(event: ProgressEvent) -> str:
 class CompositeProgressNotifier:
     """Dispatch a progress event to multiple notifier backends."""
 
-    def __init__(self, notifiers: Sequence[ProgressNotifier]) -> None:
+    def __init__(
+        self,
+        notifiers: Sequence[ProgressNotifier],
+        *,
+        timeout_seconds: float = _DEFAULT_OUTBOUND_TIMEOUT_SECONDS,
+    ) -> None:
         self.notifiers = list(notifiers)
+        self.timeout_seconds = timeout_seconds
 
     async def notify(self, *, submission: TaskSubmission, event: ProgressEvent) -> None:
-        for notifier in self.notifiers:
-            try:
-                await notifier.notify(submission=submission, event=event)
-            except Exception:
-                logger.warning(
-                    "Progress notification failed for notifier",
-                    extra={
-                        "notifier_type": type(notifier).__name__,
-                        "task_id": event.task_id,
-                        "phase": event.phase,
-                    },
-                    exc_info=True,
-                )
+        await asyncio.gather(
+            *(
+                self._notify_one(notifier=notifier, submission=submission, event=event)
+                for notifier in self.notifiers
+            )
+        )
+
+    async def _notify_one(
+        self,
+        *,
+        notifier: ProgressNotifier,
+        submission: TaskSubmission,
+        event: ProgressEvent,
+    ) -> None:
+        notifier_type = type(notifier).__name__
+        base_log_extra = {
+            "notifier_type": notifier_type,
+            "task_id": event.task_id,
+            "phase": event.phase,
+        }
+        try:
+            await asyncio.wait_for(
+                notifier.notify(submission=submission, event=event),
+                timeout=self.timeout_seconds,
+            )
+        except TimeoutError:
+            logger.warning(
+                "Progress notification timed out for notifier",
+                extra={**base_log_extra, "timeout_seconds": self.timeout_seconds},
+            )
+        except Exception:
+            logger.warning(
+                "Progress notification failed for notifier",
+                extra=base_log_extra,
+                exc_info=True,
+            )
 
 
 class TelegramProgressNotifier:
