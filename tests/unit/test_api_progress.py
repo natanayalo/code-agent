@@ -34,9 +34,11 @@ class _FailingNotifier:
 class _RecordingNotifier:
     def __init__(self) -> None:
         self.calls = 0
+        self.notified = asyncio.Event()
 
     async def notify(self, *, submission: TaskSubmission, event: ProgressEvent) -> None:
         self.calls += 1
+        self.notified.set()
 
 
 class _BlockingNotifier:
@@ -211,7 +213,7 @@ async def test_composite_progress_notifier_runs_backends_in_parallel() -> None:
 
     notify_task = asyncio.create_task(composite.notify(submission=submission, event=event))
     await blocking_notifier.started.wait()
-    await asyncio.sleep(0)
+    await notifier.notified.wait()
 
     assert notifier.calls == 1
 
