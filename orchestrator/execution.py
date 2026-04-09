@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
 from pathlib import Path
+from threading import Lock
 from typing import Any, Literal, Protocol
 from urllib.parse import unquote, urlparse
 
@@ -45,6 +46,9 @@ from workers import ArtifactReference, Worker
 logger = logging.getLogger(__name__)
 
 _CALLBACK_RESOLUTION_TIMEOUT_SECONDS = 2.0
+_CALLBACK_DNS_EXECUTOR_MAX_WORKERS = 4
+_callback_dns_executor: ThreadPoolExecutor | None = None
+_callback_dns_executor_lock = Lock()
 
 
 class ExecutionModel(BaseModel):
@@ -87,6 +91,28 @@ def _lookup_callback_hostname_records(hostname: str, port: int) -> list[tuple]:
     )
 
 
+def _get_callback_dns_executor() -> ThreadPoolExecutor:
+    """Return the shared executor used for bounded callback DNS resolution."""
+    global _callback_dns_executor
+    with _callback_dns_executor_lock:
+        if _callback_dns_executor is None:
+            _callback_dns_executor = ThreadPoolExecutor(
+                max_workers=_CALLBACK_DNS_EXECUTOR_MAX_WORKERS,
+                thread_name_prefix="callback-dns",
+            )
+        return _callback_dns_executor
+
+
+def shutdown_callback_dns_executor() -> None:
+    """Shut down the shared callback DNS executor for app/test teardown."""
+    global _callback_dns_executor
+    with _callback_dns_executor_lock:
+        executor = _callback_dns_executor
+        _callback_dns_executor = None
+    if executor is not None:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 def _resolve_callback_hostname(
     hostname: str,
     *,
@@ -94,7 +120,7 @@ def _resolve_callback_hostname(
     timeout_seconds: float = _CALLBACK_RESOLUTION_TIMEOUT_SECONDS,
 ) -> list[str]:
     """Resolve a callback hostname into concrete destination IP addresses."""
-    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="callback-dns")
+    executor = _get_callback_dns_executor()
     try:
         future = executor.submit(_lookup_callback_hostname_records, hostname, port)
         records = future.result(timeout=timeout_seconds)
@@ -103,8 +129,6 @@ def _resolve_callback_hostname(
         raise ValueError("callback_url hostname resolution timed out.") from exc
     except socket.gaierror as exc:
         raise ValueError("callback_url hostname could not be resolved.") from exc
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
 
     resolved_addresses: list[str] = []
     for _, _, _, _, sockaddr in records:

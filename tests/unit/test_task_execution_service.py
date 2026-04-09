@@ -171,6 +171,19 @@ def test_resolve_callback_hostname_times_out_when_resolution_hangs(monkeypatch) 
         )
 
 
+def test_shutdown_callback_dns_executor_recreates_executor_on_next_use() -> None:
+    """Executor teardown should not permanently disable later callback resolution."""
+    first_executor = execution_module._get_callback_dns_executor()
+
+    execution_module.shutdown_callback_dns_executor()
+
+    second_executor = execution_module._get_callback_dns_executor()
+
+    assert second_executor is not first_executor
+
+    execution_module.shutdown_callback_dns_executor()
+
+
 def test_is_unsafe_callback_address_rejects_ipv4_mapped_ipv6_loopback() -> None:
     """IPv4-mapped IPv6 addresses should inherit unsafe checks from their IPv4 target."""
     assert execution_module._is_unsafe_callback_address(
