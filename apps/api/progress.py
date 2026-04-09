@@ -106,6 +106,11 @@ class CompositeProgressNotifier:
         event: ProgressEvent,
     ) -> None:
         notifier_type = type(notifier).__name__
+        base_log_extra = {
+            "notifier_type": notifier_type,
+            "task_id": event.task_id,
+            "phase": event.phase,
+        }
         try:
             await asyncio.wait_for(
                 notifier.notify(submission=submission, event=event),
@@ -114,21 +119,12 @@ class CompositeProgressNotifier:
         except TimeoutError:
             logger.warning(
                 "Progress notification timed out for notifier",
-                extra={
-                    "notifier_type": notifier_type,
-                    "task_id": event.task_id,
-                    "phase": event.phase,
-                    "timeout_seconds": self.timeout_seconds,
-                },
+                extra={**base_log_extra, "timeout_seconds": self.timeout_seconds},
             )
         except Exception:
             logger.warning(
                 "Progress notification failed for notifier",
-                extra={
-                    "notifier_type": notifier_type,
-                    "task_id": event.task_id,
-                    "phase": event.phase,
-                },
+                extra=base_log_extra,
                 exc_info=True,
             )
 
