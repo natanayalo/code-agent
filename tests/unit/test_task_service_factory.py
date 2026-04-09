@@ -110,6 +110,23 @@ def test_create_app_uses_env_bootstrap_when_no_task_service_is_injected(
         assert "outbound_http_clients" in seen_kwargs
 
 
+def test_create_app_with_injected_task_service_skips_outbound_client_bootstrap(
+    monkeypatch,
+) -> None:
+    """Injected task services should not create unused outbound HTTP clients."""
+    monkeypatch.setattr(
+        "apps.api.main.create_outbound_http_clients",
+        lambda: (_ for _ in ()).throw(AssertionError("should not create clients")),
+    )
+
+    sentinel = object()
+    app = create_app(task_service=sentinel)
+
+    with TestClient(app) as client:
+        assert client.app.state.task_service is sentinel
+        assert not hasattr(client.app.state, "outbound_http_clients")
+
+
 def test_create_app_closes_both_clients_when_startup_bootstrap_fails(monkeypatch) -> None:
     """Startup failures should still close both shared outbound clients."""
     close_calls: list[str] = []
