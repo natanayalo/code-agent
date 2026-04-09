@@ -1,5 +1,7 @@
 """Unit tests for outbound progress notifier adapters."""
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -35,6 +37,16 @@ class _RecordingNotifier:
 
     async def notify(self, *, submission: TaskSubmission, event: ProgressEvent) -> None:
         self.calls += 1
+
+
+class _BlockingNotifier:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def notify(self, *, submission: TaskSubmission, event: ProgressEvent) -> None:
+        self.started.set()
+        await self.release.wait()
 
 
 @pytest.mark.anyio
@@ -176,3 +188,61 @@ async def test_composite_progress_notifier_logs_and_continues_after_failure(
     assert notifier.calls == 1
     assert "Progress notification failed for notifier" in caplog.text
     assert caplog.records[0].notifier_type == "_FailingNotifier"
+
+
+@pytest.mark.anyio
+async def test_composite_progress_notifier_runs_backends_in_parallel() -> None:
+    """A slow notifier should not block sibling deliveries from starting."""
+    blocking_notifier = _BlockingNotifier()
+    notifier = _RecordingNotifier()
+    composite = CompositeProgressNotifier(
+        [blocking_notifier, notifier],
+        timeout_seconds=1.0,
+    )
+    submission = TaskSubmission(task_text="Run tests")
+    event = ProgressEvent(
+        phase="running",
+        task_id="task-1",
+        session_id="session-1",
+        channel="webhook:ci",
+        external_thread_id="thread-1",
+        task_text="Run tests",
+    )
+
+    notify_task = asyncio.create_task(composite.notify(submission=submission, event=event))
+    await blocking_notifier.started.wait()
+    await asyncio.sleep(0)
+
+    assert notifier.calls == 1
+
+    blocking_notifier.release.set()
+    await notify_task
+
+
+@pytest.mark.anyio
+async def test_composite_progress_notifier_times_out_one_backend_without_blocking_siblings(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One stuck backend should time out without suppressing sibling deliveries."""
+    blocking_notifier = _BlockingNotifier()
+    notifier = _RecordingNotifier()
+    composite = CompositeProgressNotifier(
+        [blocking_notifier, notifier],
+        timeout_seconds=0.01,
+    )
+    submission = TaskSubmission(task_text="Run tests")
+    event = ProgressEvent(
+        phase="running",
+        task_id="task-1",
+        session_id="session-1",
+        channel="webhook:ci",
+        external_thread_id="thread-1",
+        task_text="Run tests",
+    )
+
+    with caplog.at_level("WARNING"):
+        await composite.notify(submission=submission, event=event)
+
+    assert notifier.calls == 1
+    assert "Progress notification timed out for notifier" in caplog.text
+    assert caplog.records[0].notifier_type == "_BlockingNotifier"

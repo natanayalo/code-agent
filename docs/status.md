@@ -48,13 +48,14 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-052 Progress replies (Milestone 10). PR: [#50](https://github.com/natanayalo/code-agent/pull/50)
 - T-053 Dedupe protection for repeated webhook deliveries (Milestone 10). PR: [#50](https://github.com/natanayalo/code-agent/pull/50)
 - Milestone 10: Telegram ingress milestone (T-050 to T-053). PR: [#50](https://github.com/natanayalo/code-agent/pull/50)
+- T-084 Add lifespan-managed shared HTTP clients for outbound notifier adapters. PR: [#51](https://github.com/natanayalo/code-agent/pull/51)
 
 ## In Progress
 
-- T-084 Add lifespan-managed shared HTTP clients for outbound notifier adapters. Implemented locally with targeted pytest coverage and pre-commit verification; not yet published.
+- T-085 Isolate parallel progress notifier delivery with per-backend timeout/error handling.
 
 ## Next
-- T-085 Isolate parallel progress notifier delivery with per-backend timeout/error handling.
+- T-086 Harden outbound callback SSRF defenses beyond literal-IP validation.
 
 ## Blocked
 
@@ -62,7 +63,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: T-084 shared outbound notifier clients → T-085 parallel notifier delivery isolation → T-086 callback SSRF hardening.
+- Current target order from here: T-085 parallel notifier delivery isolation → T-086 callback SSRF hardening.
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.
