@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -15,6 +16,8 @@ from apps.api.routes.telegram import router as telegram_router
 from apps.api.routes.webhook import router as webhook_router
 from apps.api.task_service_factory import build_task_service_from_env
 from orchestrator.execution import TaskExecutionService
+
+logger = logging.getLogger(__name__)
 
 
 def create_app(*, task_service: TaskExecutionService | None = None) -> FastAPI:
@@ -31,11 +34,17 @@ def create_app(*, task_service: TaskExecutionService | None = None) -> FastAPI:
                 )
                 yield
             finally:
-                await asyncio.gather(
+                results = await asyncio.gather(
                     outbound_http_clients.telegram.aclose(),
                     outbound_http_clients.webhook.aclose(),
                     return_exceptions=True,
                 )
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.warning(
+                            "Failed to close outbound HTTP client during app shutdown",
+                            exc_info=result,
+                        )
         else:
             app.state.task_service = task_service
             yield

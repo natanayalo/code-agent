@@ -20,7 +20,6 @@ def _close_outbound_http_clients(outbound_http_clients) -> None:
         await asyncio.gather(
             outbound_http_clients.telegram.aclose(),
             outbound_http_clients.webhook.aclose(),
-            return_exceptions=True,
         )
 
     asyncio.run(_close_clients())
