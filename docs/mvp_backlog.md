@@ -470,6 +470,14 @@ Acceptance:
 - private, loopback, link-local, reserved, multicast, and unspecified targets are blocked even when reached through hostnames
 - the chosen mitigation is documented clearly, whether it is transport-level IP pinning, egress policy enforcement, or both
 
+### T-087 Harden outbound callback delivery transport
+Move callback protection from submission-time screening alone toward transport-time enforcement.
+
+Acceptance:
+- callback delivery validates the connected remote IP immediately before or during connect, not only at submission time
+- the implementation closes the DNS rebinding gap via IP pinning, transport-level validation, or equivalent egress control
+- hostname resolution work used for callback safety has an explicit bounded strategy rather than relying only on unbounded default resolver behavior
+
 ---
 
 ## Milestone 12 - Observability + replay

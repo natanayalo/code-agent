@@ -153,6 +153,13 @@ def test_validate_callback_url_rejects_unresolvable_hostname(monkeypatch) -> Non
         execution_module._validate_callback_url("https://callbacks.example.com/status")
 
 
+def test_is_unsafe_callback_address_rejects_ipv4_mapped_ipv6_loopback() -> None:
+    """IPv4-mapped IPv6 addresses should inherit unsafe checks from their IPv4 target."""
+    assert execution_module._is_unsafe_callback_address(
+        execution_module.ipaddress.ip_address("::ffff:127.0.0.1")
+    )
+
+
 def test_task_execution_service_reuses_one_compiled_graph(
     monkeypatch,
 ) -> None:

@@ -60,6 +60,9 @@ class SubmissionSession(ExecutionModel):
 
 def _is_unsafe_callback_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Return whether a resolved callback destination is local-only or otherwise unsafe."""
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+
     return (
         address.is_private
         or address.is_loopback
