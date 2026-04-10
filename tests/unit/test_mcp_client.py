@@ -81,24 +81,14 @@ def test_mcp_tool_client_normalizes_internal_tool_definition_lookup() -> None:
     assert tool.name == " execute_bash "
 
 
-def test_mcp_tool_client_preserves_whitespace_only_registered_names_in_descriptors() -> None:
-    """Whitespace-only registry names should not crash descriptor creation."""
-    whitespace_tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash").model_copy(
-        update={"name": "   "}
-    )
-    tool_client = McpToolClient.from_registry(ToolRegistry(tools=(whitespace_tool,)))
-
-    tool = tool_client.list_mcp_tools()[0]
-
-    assert tool.name == "   "
-    assert tool_client.get_mcp_tool("   ") is None
-
-
 def test_mcp_tool_client_rejects_duplicate_normalized_names() -> None:
     """Normalized MCP names should remain unique across the client boundary."""
     execute_bash_tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
     spaced_tool = execute_bash_tool.model_copy(update={"name": " execute_bash "})
     tool_client = McpToolClient.from_registry(ToolRegistry(tools=(execute_bash_tool, spaced_tool)))
 
-    with pytest.raises(ValueError, match="unique after normalization"):
+    with pytest.raises(
+        ValueError,
+        match=r"duplicate entries: 'execute_bash' from \[' execute_bash ', 'execute_bash'\]",
+    ):
         tool_client.require_mcp_tool("execute_bash")

@@ -91,6 +91,8 @@ class ToolRegistry(ToolModel):
         names: set[str] = set()
         duplicates: set[str] = set()
         for tool in self.tools:
+            if not tool.name.strip():
+                raise ValueError("Tool names must contain at least one non-whitespace character.")
             if tool.name in names:
                 duplicates.add(tool.name)
             names.add(tool.name)

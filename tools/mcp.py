@@ -48,15 +48,19 @@ def _build_normalized_tool_map(
 ) -> dict[str, _ToolEntryT]:
     """Index entries by normalized tool name and reject collisions."""
     normalized_entries: dict[str, _ToolEntryT] = {}
-    duplicate_names: set[str] = set()
+    duplicate_names: dict[str, set[str]] = {}
     for entry in entries:
-        normalized_name = _normalize_registered_tool_name(get_name(entry))
+        original_name = get_name(entry)
+        normalized_name = _normalize_registered_tool_name(original_name)
         if normalized_name in normalized_entries:
-            duplicate_names.add(normalized_name)
+            duplicate_names.setdefault(normalized_name, {normalized_name}).add(original_name)
             continue
         normalized_entries[normalized_name] = entry
     if duplicate_names:
-        duplicates = ", ".join(repr(name) for name in sorted(duplicate_names))
+        duplicates = ", ".join(
+            f"{normalized_name!r} from {sorted(original_names)!r}"
+            for normalized_name, original_names in sorted(duplicate_names.items())
+        )
         raise ValueError(
             "MCP-exposed tool names must remain unique after normalization; "
             f"duplicate entries: {duplicates}"
@@ -91,7 +95,10 @@ class McpToolClient(ToolModel):
     @cached_property
     def _mcp_tool_map(self) -> dict[str, McpToolDescriptor]:
         """Index MCP-style descriptors by tool name for repeated lookups."""
-        return _build_normalized_tool_map(self._mcp_tools, get_name=lambda tool: tool.name)
+        return {
+            normalized_name: _descriptor_from_tool_definition(tool)
+            for normalized_name, tool in self._tool_definition_map.items()
+        }
 
     @cached_property
     def _tool_definition_map(self) -> dict[str, ToolDefinition]:
