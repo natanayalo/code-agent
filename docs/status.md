@@ -51,13 +51,13 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-084 Add lifespan-managed shared HTTP clients for outbound notifier adapters. PR: [#51](https://github.com/natanayalo/code-agent/pull/51)
 - T-085 Isolate parallel progress notifier delivery with per-backend timeout/error handling. PR: [#52](https://github.com/natanayalo/code-agent/pull/52)
 - T-086 Harden outbound callback SSRF defenses beyond literal-IP validation. PR: [#53](https://github.com/natanayalo/code-agent/pull/53)
+- T-104 Add API authentication. PR: [#55](https://github.com/natanayalo/code-agent/pull/55)
 
 ## In Progress
 
 - None
 
 ## Next
-- T-104 Add API authentication (pulled ahead — close auth gap before adding capabilities).
 - T-083 Add MCP client abstraction.
 - T-080 Add git utility wrapper.
 - T-087 Harden outbound callback delivery transport (closes DNS rebinding gap from T-086).

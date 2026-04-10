@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 
+from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
 from db.base import Base
 from db.enums import ArtifactType, TaskStatus, WorkerRunStatus
@@ -80,10 +81,12 @@ def client(session_factory) -> Iterator[TestClient]:
         task_service=TaskExecutionService(
             session_factory=session_factory,
             worker=worker,
-        )
+        ),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
     )
     app.state.test_worker = worker
     with TestClient(app) as test_client:
+        test_client.headers["X-Webhook-Token"] = "test-shared-secret"
         yield test_client
 
 
@@ -188,7 +191,11 @@ def test_task_routes_require_a_configured_task_service() -> None:
     app = create_app()
 
     with TestClient(app) as client:
-        response = client.post("/tasks", json={"task_text": "Run the task API"})
+        response = client.post(
+            "/tasks",
+            headers={"X-Webhook-Token": "test-shared-secret"},
+            json={"task_text": "Run the task API"},
+        )
 
     assert response.status_code == 503
     assert response.json() == {
@@ -220,6 +227,7 @@ def test_submit_task_rejects_unsafe_callback_urls(
     """Direct task submissions should reject callback URLs that are obvious SSRF targets."""
     response = client.post(
         "/tasks",
+        headers={},
         json={
             "task_text": "Create a note and report the result",
             "callback_url": callback_url,
@@ -245,6 +253,7 @@ def test_submit_task_rejects_hostname_callback_urls_resolving_to_private_address
 
     response = client.post(
         "/tasks",
+        headers={},
         json={
             "task_text": "Create a note and report the result",
             "callback_url": "https://callbacks.example.com/status",
@@ -252,3 +261,88 @@ def test_submit_task_rejects_hostname_callback_urls_resolving_to_private_address
     )
 
     assert response.status_code == 422
+
+
+def test_task_routes_reject_missing_auth_header(session_factory) -> None:
+    """Task routes should reject unauthenticated requests before processing."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="ok",
+            budget_usage={},
+            commands_run=[],
+            files_changed=[],
+            artifacts=[],
+            next_action_hint=None,
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/tasks", json={"task_text": "Run the task API"})
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing X-Webhook-Token header."}
+    assert worker.requests == []
+
+
+def test_task_routes_reject_invalid_auth_header(session_factory) -> None:
+    """Task routes should reject incorrect shared-secret headers."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="ok",
+            budget_usage={},
+            commands_run=[],
+            files_changed=[],
+            artifacts=[],
+            next_action_hint=None,
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/tasks",
+            headers={"X-Webhook-Token": "wrong-secret"},
+            json={"task_text": "Run the task API"},
+        )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Invalid API authentication secret."}
+    assert worker.requests == []
+
+
+def test_task_routes_fail_closed_when_service_is_injected_without_auth_config(
+    session_factory,
+) -> None:
+    """Injected task services should still fail closed if auth config is omitted."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="ok",
+            budget_usage={},
+            commands_run=[],
+            files_changed=[],
+            artifacts=[],
+            next_action_hint=None,
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/tasks", json={"task_text": "Run the task API"})
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": "API authentication is not configured for this app instance."
+    }
+    assert worker.requests == []

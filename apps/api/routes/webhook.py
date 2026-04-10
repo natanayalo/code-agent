@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from apps.api.dependencies import get_task_service
+from apps.api.dependencies import get_task_service, require_api_auth
 from db.enums import WorkerType
 from orchestrator.execution import (
     DeliveryKey,
@@ -19,7 +19,7 @@ from orchestrator.execution import (
     _validate_callback_url,
 )
 
-router = APIRouter(prefix="/webhook", tags=["webhook"])
+router = APIRouter(prefix="/webhook", tags=["webhook"], dependencies=[Depends(require_api_auth)])
 
 
 class WebhookPayload(BaseModel):

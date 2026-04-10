@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
 from apps.api.progress import create_outbound_http_clients
 from apps.api.task_service_factory import build_task_service_from_env
@@ -101,12 +102,30 @@ def test_create_app_uses_env_bootstrap_when_no_task_service_is_injected(
         return sentinel
 
     monkeypatch.setattr("apps.api.main.build_task_service_from_env", _build_task_service_from_env)
+    monkeypatch.setattr(
+        "apps.api.main.build_api_auth_config_from_env",
+        lambda: ApiAuthConfig(shared_secret="test-shared-secret"),
+    )
 
     app = create_app()
 
     with TestClient(app) as client:
         assert client.app.state.task_service is sentinel
         assert "outbound_http_clients" in seen_kwargs
+
+
+def test_create_app_requires_api_auth_when_env_bootstrap_builds_task_service(
+    monkeypatch,
+) -> None:
+    """Env-bootstrapped task execution should fail closed without an API shared secret."""
+    monkeypatch.setattr("apps.api.main.build_task_service_from_env", lambda **_: object())
+    monkeypatch.setattr("apps.api.main.build_api_auth_config_from_env", lambda: ApiAuthConfig())
+
+    app = create_app()
+
+    with pytest.raises(RuntimeError, match="CODE_AGENT_API_SHARED_SECRET"):
+        with TestClient(app):
+            pass
 
 
 def test_create_app_with_injected_task_service_skips_outbound_client_bootstrap(

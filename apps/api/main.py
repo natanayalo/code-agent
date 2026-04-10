@@ -9,6 +9,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from apps.api.auth import (
+    API_SHARED_SECRET_ENV_VAR,
+    ApiAuthConfig,
+    build_api_auth_config_from_env,
+)
 from apps.api.progress import create_outbound_http_clients
 from apps.api.routes.health import router as health_router
 from apps.api.routes.tasks import router as tasks_router
@@ -20,7 +25,11 @@ from orchestrator.execution import TaskExecutionService, shutdown_callback_dns_e
 logger = logging.getLogger(__name__)
 
 
-def create_app(*, task_service: TaskExecutionService | None = None) -> FastAPI:
+def create_app(
+    *,
+    task_service: TaskExecutionService | None = None,
+    auth_config: ApiAuthConfig | None = None,
+) -> FastAPI:
     """Create a FastAPI app with optional task-execution dependencies."""
 
     @asynccontextmanager
@@ -29,9 +38,20 @@ def create_app(*, task_service: TaskExecutionService | None = None) -> FastAPI:
             outbound_http_clients = create_outbound_http_clients()
             try:
                 app.state.outbound_http_clients = outbound_http_clients
+                app.state.api_auth_config = (
+                    auth_config if auth_config is not None else build_api_auth_config_from_env()
+                )
                 app.state.task_service = build_task_service_from_env(
                     outbound_http_clients=outbound_http_clients
                 )
+                if (
+                    app.state.task_service is not None
+                    and app.state.api_auth_config.shared_secret is None
+                ):
+                    raise RuntimeError(
+                        "Task service bootstrap requires "
+                        f"{API_SHARED_SECRET_ENV_VAR} to protect /tasks and /webhook."
+                    )
                 yield
             finally:
                 results = await asyncio.gather(
@@ -48,6 +68,7 @@ def create_app(*, task_service: TaskExecutionService | None = None) -> FastAPI:
                 shutdown_callback_dns_executor()
         else:
             try:
+                app.state.api_auth_config = auth_config or ApiAuthConfig()
                 app.state.task_service = task_service
                 yield
             finally:
