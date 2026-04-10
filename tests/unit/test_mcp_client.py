@@ -7,7 +7,9 @@ import pytest
 from tools import (
     DEFAULT_MCP_TOOL_CLIENT,
     DEFAULT_TOOL_REGISTRY,
+    McpToolClient,
     ToolExpectedArtifact,
+    ToolRegistry,
     UnknownToolError,
 )
 
@@ -53,3 +55,15 @@ def test_require_mcp_tool_raises_a_typed_error_for_unknown_names() -> None:
     """Unknown MCP tool lookups should preserve the registry's typed error surface."""
     with pytest.raises(UnknownToolError, match="not registered"):
         DEFAULT_MCP_TOOL_CLIENT.require_mcp_tool("missing_tool")
+
+
+def test_mcp_tool_client_normalizes_descriptor_names_for_lookup() -> None:
+    """MCP lookups should still work when the registry contains accidental name spacing."""
+    spaced_tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash").model_copy(
+        update={"name": " execute_bash "}
+    )
+    tool_client = McpToolClient.from_registry(ToolRegistry(tools=(spaced_tool,)))
+
+    tool = tool_client.require_mcp_tool("execute_bash")
+
+    assert tool.name == "execute_bash"

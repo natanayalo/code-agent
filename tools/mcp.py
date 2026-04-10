@@ -26,7 +26,7 @@ class McpToolDescriptor(ToolModel):
 def _descriptor_from_tool_definition(tool: ToolDefinition) -> McpToolDescriptor:
     """Project a concrete registry definition into an MCP-ready descriptor."""
     return McpToolDescriptor(
-        name=tool.name,
+        name=tool.name.strip(),
         description=tool.description,
         input_schema=tool.mcp_input_schema,
     )
