@@ -57,7 +57,15 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - None
 
 ## Next
+- T-104 Add API authentication (pulled ahead — close auth gap before adding capabilities).
 - T-083 Add MCP client abstraction.
+- T-080 Add git utility wrapper.
+- T-087 Harden outbound callback delivery transport (closes DNS rebinding gap from T-086).
+- T-081 Add GitHub wrapper.
+- T-082 Add browser/search wrapper.
+- T-088 Read .agents/ skills and workflows from target workspace.
+- T-089 Add structured file editing tools (view_file, str_replace_editor, search).
+- T-107 Inject repo CI/build config into worker context.
 
 ## Blocked
 
@@ -65,16 +73,15 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: T-083 MCP client abstraction.
+- Current target order from here: T-104 (auth), then Milestone 11 tasks in order: T-083, T-080, T-087, T-081, T-082, T-088, T-089, T-107.
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.
 - T-055 (Verifier) performs deterministic checks on worker output, including test results and command audit logs, before final summarization.
 - T-054 (Sandbox Hardening) ensures strict path policies, secret redaction, and complete audit artifact capture for all sandbox executions.
 - Milestone 7 (Memory Integration) adds skepticism metadata (provenance, confidence) to all memory entries and maintains a compact `SessionState` for cross-task goal and risk tracking.
-- The near-term worker plan is explicitly CLI-first. The second worker will be a Gemini CLI adapter. New worker work should not assume full ownership of low-level raw API payload assembly when a CLI, SDK, hook, or subprocess adapter can provide the runtime.
+- Both workers (CodexCliWorker, GeminiCliWorker) are implemented and routable. The worker plan is CLI-first; new worker work should not assume full ownership of low-level raw API payload assembly when a CLI, SDK, hook, or subprocess adapter can provide the runtime.
 - T-044 DB scope remains intentionally limited to execution-path persistence for task/status lookup, worker run metadata, final result fields, verifier output, and captured artifacts needed for polling by `task_id`.
-- The original `CodexWorker` remains in the repo as a sandboxed toy executor for contract/proof-of-path testing, but is superseded by `CodexCliWorker` for real tasks.
 - CI validates every push, including merges to `master`, enforcing a 90% branch-coverage floor in `pytest`.
 - T-021 adds durable LangGraph checkpointing; T-022 adds a destructive-action approval pause/resume path.
 - T-030/T-031/T-032 provide workspace provisioning, Docker-based execution, and artifact capture.

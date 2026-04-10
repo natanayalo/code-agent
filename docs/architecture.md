@@ -46,7 +46,7 @@ flowchart TD
 
     O --> OBS[Tracing / Logs / Artifacts]
     V --> OBS
-    CW --> OBS
+    GW --> OBS
     OW --> OBS
 ```
 

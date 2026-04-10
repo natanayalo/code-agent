@@ -478,6 +478,80 @@ Acceptance:
 - the implementation closes the DNS rebinding gap via IP pinning, transport-level validation, or equivalent egress control
 - hostname resolution work used for callback safety has an explicit bounded strategy rather than relying only on unbounded default resolver behavior
 
+### T-088 Read .agents/ skills and workflows from target workspace
+Extend the system prompt module to discover and inject `.agents/` assets (skills, workflows, rules) from the target workspace alongside the existing `AGENTS.md` injection.
+
+Scope notes:
+- extend `workers/prompt.py` to scan `.agents/skills/`, `.agents/workflows/`, and `.agents/rules/` from the workspace root
+- inject discovered asset summaries (name + description or first lines) into the system prompt so the worker is aware of repo-specific coding patterns
+- respect the existing bounded-read safety (`DEFAULT_AGENTS_MAX_CHARACTERS`) — total injected guidance from `AGENTS.md` + `.agents/` must stay within budget
+- gracefully skip when `.agents/` is absent or empty (most repos won't have it)
+- do not require `.agents/` to follow any fixed schema beyond readable markdown files
+- a built-in default skill set for repos with no guidance is out of scope for this task
+
+Acceptance:
+- worker system prompt includes relevant `.agents/` content when present in the target workspace
+- total injected repo guidance respects the existing character budget
+- repos without `.agents/` work exactly as before
+- unit tests verify discovery, injection, and budget enforcement
+
+### T-089 Add structured file editing tools
+Add dedicated `view_file`, `str_replace_editor`, `search_file`, and `search_dir` tools alongside the existing `execute_bash` tool so the worker can read and edit files without constructing fragile shell one-liners.
+
+Scope notes:
+- implement tools as Python functions executed inside the sandbox shell session (not host-side)
+- `view_file`: read a file with optional line-range windowing; include line numbers in output
+- `str_replace_editor`: replace an exact string occurrence in a file; fail clearly on ambiguous or missing match
+- `search_file`: regex/literal search within a single file, returning matching lines with context
+- `search_dir`: regex/literal search across a directory tree, returning file paths and matching lines with context
+- register all tools in the tool registry with appropriate permission levels (`workspace_write` for editor, `read_only` for the rest)
+- feed tool definitions into prompt construction via the existing registry path
+- keep tool implementations small; delegate to shell commands where practical (e.g., `grep -rn --exclude-dir=.git --exclude-dir=__pycache__` for search_dir)
+- the worker runtime adapter must dispatch these tools the same way it dispatches `execute_bash`
+
+Acceptance:
+- worker can view, search, and edit files through dedicated tools without relying solely on bash
+- tool registry includes all new tools with correct permission metadata
+- system prompt reflects the expanded tool surface
+- str_replace_editor rejects ambiguous matches and reports clear errors
+- unit tests cover each tool's happy path and error cases
+
+### T-107 Inject repo CI/build config into worker context
+Extend the system prompt to extract and inject key build/test/lint configuration from the target workspace so the worker knows how to build and verify changes.
+
+Scope notes:
+- scan for common config files: `Makefile`, `package.json` (scripts section), `pyproject.toml` (tool/scripts/test sections), `.github/workflows/` (CI job names and trigger events), `CONTRIBUTING.md`, `Dockerfile`
+- extract only the actionable sections (e.g., `scripts` from `package.json`, `[tool.pytest]` from `pyproject.toml`) — do not dump entire files
+- inject a concise "Build & Test" section into the system prompt between repo context and task context
+- respect the existing character budget for total repo context
+- gracefully skip when none of these files exist
+
+Acceptance:
+- worker system prompt includes build/test/lint commands when discoverable from the workspace
+- extraction is bounded and does not blow up the prompt on large config files
+- repos with no recognizable build config work exactly as before
+- unit tests verify extraction for Python and Node.js project layouts
+
+---
+
+## T-104 — API authentication (pulled ahead of Milestone 12)
+
+### T-104 Add API authentication
+Add shared-secret or signature-based authentication for the HTTP task and webhook endpoints.
+
+Scope notes:
+- protect both `/tasks` and `/webhook` with a consistent auth mechanism
+- support at minimum a shared secret via header (e.g., `X-Webhook-Token`) for generic callers
+- support provider-specific signature verification (e.g., Telegram `X-Telegram-Bot-Api-Secret-Token`) where applicable
+- auth should be a FastAPI dependency so it is reusable across routers
+- unauthenticated requests should be rejected with 401/403 before any task processing begins
+
+Acceptance:
+- unauthenticated requests to `/tasks` and `/webhook` are rejected
+- authenticated requests proceed normally
+- Telegram adapter uses provider-specific verification when available
+- auth mechanism is configurable via environment variable, not hardcoded
+
 ---
 
 ## Milestone 12 - Observability + replay
@@ -529,18 +603,133 @@ Add cleanup and retention for workspaces and artifacts.
 Acceptance:
 - stale resources cleaned up automatically
 
-### T-104 Add API authentication
-Add shared-secret or signature-based authentication for the HTTP task and webhook endpoints.
+### T-105 Auto-run repo lint/format after worker completion
+Automatically run the repo's linter and formatter after the worker finishes but before verification, so the verifier and any resulting PR don't fail on style issues the model introduced.
 
 Scope notes:
-- protect both `/tasks` and `/webhook` with a consistent auth mechanism
-- support at minimum a shared secret via header (e.g., `X-Webhook-Token`) for generic callers
-- support provider-specific signature verification (e.g., Telegram `X-Telegram-Bot-Api-Secret-Token`) where applicable
-- auth should be a FastAPI dependency so it is reusable across routers
-- unauthenticated requests should be rejected with 401/403 before any task processing begins
+- detect the repo's lint/format commands from config files (e.g., `ruff format .`, `npm run lint --fix`, `Makefile` targets) or fall back to a configurable default
+- run inside the existing sandbox session after the worker declares completion
+- capture lint/format output as an artifact
+- if lint/format changes files, include those changes in the diff and artifact capture
+- do not fail the task if lint/format itself errors — surface the failure in the verifier report
+- this step runs unconditionally (not gated by permission); to prevent unintended changes, restrict the lint/format command to the set of files modified by the worker
 
 Acceptance:
-- unauthenticated requests to `/tasks` and `/webhook` are rejected
-- authenticated requests proceed normally
-- Telegram adapter uses provider-specific verification when available
-- auth mechanism is configurable via environment variable, not hardcoded
+- lint/format runs automatically after worker completion on repos with detectable tooling
+- lint-introduced file changes are captured in the diff and artifact set
+- lint/format errors are surfaced in the verifier report, not swallowed
+- repos with no detectable lint/format config skip this step cleanly
+- unit tests verify detection, execution, and error handling
+
+---
+
+## Milestone 14 - Agent intelligence
+
+### T-106 Add evaluation harness with frozen task suite
+Build a repeatable benchmark harness so prompt, routing, and tool changes can be measured against a fixed set of tasks with known-good outcomes.
+
+Scope notes:
+- define a small frozen task suite (5-10 tasks across different repo types and difficulty levels)
+- each task specifies: repo URL/fixture, task text, expected outcome criteria (files changed, tests pass, specific content present)
+- harness runs all tasks through the real orchestrator path and scores pass/fail per task
+- results are persisted as structured JSON for comparison across runs
+- harness must be runnable locally and in CI
+- do not require real API keys for the frozen suite — support a mock/replay adapter if needed
+- this is an internal developer tool, not a user-facing feature
+
+Acceptance:
+- frozen task suite exists with at least 5 tasks
+- harness runs all tasks and produces a structured pass/fail report
+- two consecutive runs on the same code produce the same scores (deterministic evaluation)
+- results are diffable across code changes
+
+### T-108 Add planning/decomposition step for complex tasks
+Add an optional planning phase where complex tasks are broken into ordered sub-steps before the worker begins execution.
+
+Scope notes:
+- add a `plan_task` step in the orchestrator between `classify_task` and `choose_worker`
+- planning triggers only when the task classifier marks the task as complex (multi-file, ambiguous, or architectural)
+- the plan is a structured list of sub-steps with expected outcomes, not free-form prose
+- the worker receives the plan as part of its task context and can reference/update step status during execution
+- plan is persisted as a task artifact for observability
+- simple tasks skip planning entirely — no added latency for straightforward changes
+- do not implement sub-task orchestration (parallel steps, sub-task spawning) yet — the plan is advisory context for a single worker run
+
+Acceptance:
+- complex tasks produce a structured plan before worker dispatch
+- simple tasks bypass planning with no overhead
+- the plan is visible in task artifacts and run logs
+- worker system prompt includes the plan when present
+- unit tests verify plan generation and bypass logic
+
+### T-109 Add context condenser for long-running agent loops
+Add an explicit strategy for managing the context window within a single worker run so that long-running tasks don't degrade as the observation history grows.
+
+Scope notes:
+- implement a condenser that summarizes older observations when the accumulated context approaches a configurable threshold
+- condensed summaries preserve: key decisions made, files modified, errors encountered, and current working state
+- the condenser runs between agent loop iterations, not during tool execution
+- condensed context replaces raw observations in the prompt — the worker sees a summary of early work plus full detail of recent work
+- keep the condenser deterministic and fast — it should not require an LLM call (use structured extraction from the observation history)
+- if the context is within budget, no condensation happens (zero overhead for short tasks)
+
+Acceptance:
+- long-running worker loops (>10 iterations) maintain effective context without exceeding the model's context window
+- condensed summaries preserve actionable state (files touched, errors, decisions)
+- short tasks incur no condensation overhead
+- unit tests verify condensation triggers, summary content, and budget enforcement
+
+### T-110 Add structured failure taxonomy for routing and recovery
+Classify worker and sandbox failures into typed categories so retry, reroute, and escalation decisions can branch on failure type instead of inspecting free-form error strings.
+
+Scope notes:
+- define a failure taxonomy enum covering at least: `compile`, `test`, `tool_runtime`, `sandbox_infra`, `timeout`, `budget_exceeded`, `permission_denied`, `context_window`, `provider_error`, `provider_auth`, `unknown`
+- extend `WorkerResult` to carry a typed `failure_kind` field alongside the existing `status` and `stop_reason`
+- the escalation policy in `worker_routing_policy.md` and the retry logic in the orchestrator should branch on `failure_kind` rather than string matching
+- sandbox command failures should propagate a classified failure kind up through the worker result
+- verifier failures should carry their own classification (e.g., `test_regression`, `scope_mismatch`, `risky_command`)
+- keep the taxonomy flat and extensible — do not build a deep hierarchy
+
+Acceptance:
+- every `WorkerResult` with `status != success` carries a typed `failure_kind`
+- orchestrator retry/reroute logic branches on `failure_kind`
+- verifier failures are classified and surfaced with their own typed category
+- unit tests verify classification for common failure scenarios (compile error, test failure, timeout, auth error)
+
+### T-111 Add worker self-review step before declaring completion
+Have the worker review its own `git diff` output against the task objective before declaring "done," catching logical errors that the deterministic verifier cannot detect.
+
+Scope notes:
+- after the worker's agent loop exits with a success indicator, generate the cumulative diff and feed it back to the model with a focused review prompt
+- the review prompt should ask: does this diff satisfy the task? are there unintended changes? are there obvious logical errors?
+- the model's self-review response is captured as a structured artifact (confidence score + issues found)
+- if the self-review identifies issues, the worker can re-enter the agent loop for a bounded number of fix iterations (max 2)
+- if the self-review passes, the worker returns its result normally
+- self-review runs inside the existing worker budget — it is not a free extra step
+- self-review is skippable via a worker constraint flag for tasks where speed matters more than correctness
+
+Acceptance:
+- worker generates and reviews its own diff before returning a success result
+- self-review output is persisted as a structured artifact with the run
+- identified issues trigger a bounded fix loop (max 2 iterations)
+- self-review respects the existing budget ledger
+- tasks can opt out of self-review via constraint
+- unit tests verify the review-then-fix loop and the opt-out path
+
+### T-112 Add context window preflight guard
+Check estimated prompt size before sending requests to the provider API so oversized requests fail fast instead of wasting a round-trip and budget.
+
+Scope notes:
+- before each LLM call in the agent loop, estimate the total prompt token count (system prompt + conversation history + tool definitions)
+- compare against the model's known context window limit (maintain a small model→context-window registry)
+- if the estimate exceeds the limit, trigger the condenser (T-109) or fail with a typed `context_window` error rather than sending the request
+- token estimation can be approximate (character-based heuristic) — it does not need to be exact
+- log a warning when the prompt exceeds 80% of the context window as an early signal
+- the guard must not add significant latency — it runs on local data, no API calls
+
+Acceptance:
+- oversized prompts are caught before the API call, not after a provider error
+- the guard triggers condensation or returns a typed error
+- a warning is logged when prompt size exceeds 80% of the context window
+- the model→context-window registry covers at least the configured Codex and Gemini models
+- unit tests verify the guard for under-limit, warning-threshold, and over-limit cases

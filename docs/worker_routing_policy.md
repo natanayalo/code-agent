@@ -7,7 +7,6 @@ Choose the most appropriate coding worker for a task while keeping decisions exp
 ## Currently configured workers
 
 - `CodexCliWorker`: Production-class worker using the `codex exec` CLI adapter and persistent shell sessions.
-- `CodexWorker`: legacy toy sandbox executor for contract/proof-of-path testing.
 - `GeminiCliWorker`: Production-class worker using the Gemini CLI adapter and persistent shell sessions.
 
 ## Planned workers
@@ -21,7 +20,7 @@ Use the Gemini-family worker if one or more are true:
 - task spans many files
 - task is architecture-sensitive
 - task is a refactor rather than a straightforward implementation
-- prior attempt with CodexWorker failed
+- prior attempt with CodexCliWorker failed
 - prior verifier output suggests the cheaper worker under-scoped the task
 - caller explicitly requests "highest quality"
 
