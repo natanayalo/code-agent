@@ -56,10 +56,9 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-080 Add git utility wrapper.
 
 ## Next
-- T-080 Add git utility wrapper.
 - T-087 Harden outbound callback delivery transport (closes DNS rebinding gap from T-086).
 - T-081 Add GitHub wrapper.
 - T-082 Add browser/search wrapper.

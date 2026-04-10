@@ -212,6 +212,69 @@ def test_run_cli_runtime_loop_completes_a_multi_turn_sequence() -> None:
     assert "Exit code: 0" in execution.messages[2].content
 
 
+def test_run_cli_runtime_loop_executes_git_helper_requests() -> None:
+    """Git helper tool calls should be normalized into safe git shell commands."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="execute_git",
+                tool_input='{"operation":"status","porcelain":true}',
+            ),
+            CliRuntimeStep(kind="final", final_output="Collected git status."),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "git status --porcelain=v1 --untracked-files=all": _command_result(
+                "git status --porcelain=v1 --untracked-files=all",
+                output=" M tools/registry.py\n",
+            )
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=2, worker_timeout_seconds=30),
+        granted_permission=ToolPermissionLevel.READ_ONLY,
+    )
+
+    assert execution.status == "success"
+    assert len(session.calls) == 1
+    assert session.calls[0][0] == "git status --porcelain=v1 --untracked-files=all"
+    assert 1 <= session.calls[0][1] <= 30
+    assert "Tool call: execute_git" in execution.messages[1].content
+    assert "Tool result: execute_git" in execution.messages[2].content
+
+
+def test_run_cli_runtime_loop_rejects_invalid_git_helper_input() -> None:
+    """Structured git helper requests should fail clearly on invalid tool input."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="execute_git",
+                tool_input='{"operation":"status","message":"bad"}',
+            )
+        ]
+    )
+    session = _FakeSession({})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=1, worker_timeout_seconds=30),
+    )
+
+    assert execution.status == "error"
+    assert execution.stop_reason == "adapter_error"
+    assert "invalid input for `execute_git`" in execution.summary
+    assert session.calls == []
+
+
 def test_run_cli_runtime_loop_blocks_commands_that_require_higher_permission() -> None:
     """Commands above the granted permission level should fail before shell execution."""
     adapter = _ScriptedAdapter(

@@ -72,8 +72,8 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
         "Choose one of two actions:",
         CliRuntimeStep(
             kind="tool_call",
-            tool_name="execute_bash",
-            tool_input="<one shell command>",
+            tool_name="<registered tool name>",
+            tool_input="<tool input string>",
             final_output=None,
         ).model_dump_json(),
         CliRuntimeStep(
@@ -83,8 +83,12 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
             tool_input=None,
         ).model_dump_json(),
         "Rules:",
-        "- Use only the `execute_bash` tool.",
-        "- Request one focused shell command at a time.",
+        "- Use only tool names listed in the system prompt's Available Tools section.",
+        "- For `execute_bash`, return one focused shell command as the tool_input string.",
+        (
+            "- For `execute_git`, return the tool_input as a compact JSON object encoded "
+            'as a string, for example {"operation":"status","porcelain":true}.'
+        ),
         "- If the transcript already contains enough information to finish, return `final`.",
         "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
         "- Return ONLY a raw JSON object. No markdown fences, no extra explanation.",
