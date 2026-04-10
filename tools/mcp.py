@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable
 from functools import cached_property
 from typing import TypeVar
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from tools.registry import (
     DEFAULT_TOOL_REGISTRY,
@@ -48,14 +48,18 @@ def _build_normalized_tool_map(
 ) -> dict[str, _ToolEntryT]:
     """Index entries by normalized tool name and reject collisions."""
     normalized_entries: dict[str, _ToolEntryT] = {}
+    first_names: dict[str, str] = {}
     duplicate_names: dict[str, set[str]] = {}
     for entry in entries:
         original_name = get_name(entry)
         normalized_name = _normalize_registered_tool_name(original_name)
         if normalized_name in normalized_entries:
-            duplicate_names.setdefault(normalized_name, {normalized_name}).add(original_name)
+            duplicate_names.setdefault(normalized_name, {first_names[normalized_name]}).add(
+                original_name
+            )
             continue
         normalized_entries[normalized_name] = entry
+        first_names[normalized_name] = original_name
     if duplicate_names:
         duplicates = ", ".join(
             f"{normalized_name!r} from {sorted(original_names)!r}"
@@ -82,6 +86,12 @@ class McpToolClient(ToolModel):
 
     registry: ToolRegistry = Field(default_factory=lambda: DEFAULT_TOOL_REGISTRY)
 
+    @model_validator(mode="after")
+    def _validate_mcp_names(self) -> McpToolClient:
+        """Ensure the registry contains no tools that collide after MCP normalization."""
+        _ = self._tool_definition_map
+        return self
+
     @classmethod
     def from_registry(cls, registry: ToolRegistry) -> McpToolClient:
         """Build a client from an explicit internal tool registry."""
@@ -90,7 +100,7 @@ class McpToolClient(ToolModel):
     @cached_property
     def _mcp_tools(self) -> tuple[McpToolDescriptor, ...]:
         """Build MCP-style descriptors from the registry once per client instance."""
-        return tuple(_descriptor_from_tool_definition(tool) for tool in self.registry.list_tools())
+        return tuple(self._mcp_tool_map.values())
 
     @cached_property
     def _mcp_tool_map(self) -> dict[str, McpToolDescriptor]:

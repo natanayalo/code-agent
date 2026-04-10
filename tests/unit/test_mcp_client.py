@@ -85,10 +85,18 @@ def test_mcp_tool_client_rejects_duplicate_normalized_names() -> None:
     """Normalized MCP names should remain unique across the client boundary."""
     execute_bash_tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
     spaced_tool = execute_bash_tool.model_copy(update={"name": " execute_bash "})
-    tool_client = McpToolClient.from_registry(ToolRegistry(tools=(execute_bash_tool, spaced_tool)))
 
     with pytest.raises(
         ValueError,
         match=r"duplicate entries: 'execute_bash' from \[' execute_bash ', 'execute_bash'\]",
     ):
-        tool_client.require_mcp_tool("execute_bash")
+        McpToolClient.from_registry(ToolRegistry(tools=(execute_bash_tool, spaced_tool)))
+
+
+def test_list_mcp_tools_uses_the_validated_mcp_tool_map() -> None:
+    """Listing MCP tools should return the validated descriptor set from the lookup map."""
+    tool_client = McpToolClient.from_registry(DEFAULT_TOOL_REGISTRY)
+
+    listed_tools = tool_client.list_mcp_tools()
+
+    assert listed_tools == tuple(tool_client._mcp_tool_map.values())
