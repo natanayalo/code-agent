@@ -31,7 +31,7 @@ def test_build_git_command_from_input_supports_branch_create() -> None:
         '{"operation":"branch","create":true,"branch_name":"task/t-080-git-wrapper"}'
     )
 
-    assert command == "git branch task/t-080-git-wrapper"
+    assert command == "git branch -- task/t-080-git-wrapper"
 
 
 def test_build_git_command_from_input_supports_commit_messages() -> None:
@@ -53,3 +53,9 @@ def test_build_git_command_from_input_rejects_invalid_field_combinations() -> No
     """Operation-specific fields should stay constrained to the supported helper shape."""
     with pytest.raises(GitToolError, match="do not support `message`"):
         build_git_command_from_input('{"operation":"status","message":"should fail"}')
+
+
+def test_build_git_command_from_input_rejects_branch_name_without_create() -> None:
+    """Branch list/show helpers should reject branch_name when create is false."""
+    with pytest.raises(GitToolError, match="do not support `branch_name`"):
+        build_git_command_from_input('{"operation":"branch","branch_name":"topic/extra"}')

@@ -76,6 +76,8 @@ class GitToolRequest(ToolModel):
             )
             if self.create and not self.branch_name:
                 raise GitToolError("Git branch creation requires branch_name.")
+            if not self.create:
+                self._reject_fields("branch_name")
             if self.show_current and self.create:
                 raise GitToolError("Git branch requests cannot combine show_current and create.")
             return self
@@ -154,7 +156,7 @@ def build_git_command(request: GitToolRequest) -> str:
             tokens.append("--show-current")
         elif request.create:
             assert request.branch_name is not None  # validated above
-            tokens.append(request.branch_name)
+            tokens.extend(["--", request.branch_name])
         else:
             tokens.append("--list")
         return shlex.join(tokens)
