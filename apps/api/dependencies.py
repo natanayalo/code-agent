@@ -62,7 +62,7 @@ def require_api_auth(request: Request) -> None:
         if getattr(request.app.state, "task_service", None) is None:
             return
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="API authentication is not configured for this app instance.",
         )
 

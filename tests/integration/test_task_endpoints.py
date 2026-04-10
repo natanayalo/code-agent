@@ -317,3 +317,32 @@ def test_task_routes_reject_invalid_auth_header(session_factory) -> None:
     assert response.status_code == 403
     assert response.json() == {"detail": "Invalid API authentication secret."}
     assert worker.requests == []
+
+
+def test_task_routes_fail_closed_when_service_is_injected_without_auth_config(
+    session_factory,
+) -> None:
+    """Injected task services should still fail closed if auth config is omitted."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="ok",
+            budget_usage={},
+            commands_run=[],
+            files_changed=[],
+            artifacts=[],
+            next_action_hint=None,
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/tasks", json={"task_text": "Run the task API"})
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": "API authentication is not configured for this app instance."
+    }
+    assert worker.requests == []
