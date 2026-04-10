@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from enum import StrEnum
 from functools import cached_property
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+if TYPE_CHECKING:
+    from tools.mcp import McpToolClient
 
 
 class ToolModel(BaseModel):
@@ -57,6 +61,7 @@ class ToolDefinition(ToolModel):
     timeout_seconds: int = Field(ge=1)
     network_required: bool = False
     expected_artifacts: tuple[ToolExpectedArtifact, ...] = Field(default_factory=tuple)
+    mcp_input_schema: dict[str, Any] = Field(default_factory=dict)
     deterministic: bool = False
 
 
@@ -74,11 +79,20 @@ class ToolRegistry(ToolModel):
         """Build a name-to-definition index for fast repeated tool lookups."""
         return {tool.name: tool for tool in self.tools}
 
+    @cached_property
+    def mcp_client(self) -> McpToolClient:
+        """Build and cache the MCP-ready client for this immutable registry."""
+        from tools.mcp import McpToolClient
+
+        return McpToolClient.from_registry(self)
+
     @model_validator(mode="after")
     def _validate_unique_names(self) -> ToolRegistry:
         names: set[str] = set()
         duplicates: set[str] = set()
         for tool in self.tools:
+            if not tool.name.strip():
+                raise ValueError("Tool names must contain at least one non-whitespace character.")
             if tool.name in names:
                 duplicates.add(tool.name)
             names.add(tool.name)
@@ -122,6 +136,18 @@ EXECUTE_BASH_TOOL = ToolDefinition(
         ToolExpectedArtifact.STDERR,
         ToolExpectedArtifact.CHANGED_FILES,
     ),
+    mcp_input_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "command": {
+                "type": "string",
+                "minLength": 1,
+                "description": "One bash command to run inside the persistent sandbox workspace.",
+            }
+        },
+        "required": ["command"],
+    },
     deterministic=False,
 )
 

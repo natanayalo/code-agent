@@ -1,5 +1,6 @@
 """Tool integration package boundary."""
 
+from tools.mcp import DEFAULT_MCP_TOOL_CLIENT, McpToolClient, McpToolDescriptor
 from tools.policy import (
     ToolPermissionDecision,
     granted_permission_from_constraints,
@@ -22,10 +23,13 @@ from tools.registry import (
 )
 
 __all__ = [
+    "DEFAULT_MCP_TOOL_CLIENT",
     "DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS",
     "DEFAULT_TOOL_REGISTRY",
     "EXECUTE_BASH_TOOL",
     "EXECUTE_BASH_TOOL_NAME",
+    "McpToolClient",
+    "McpToolDescriptor",
     "ToolPermissionDecision",
     "ToolCapabilityCategory",
     "ToolDefinition",

@@ -39,6 +39,16 @@ def test_tool_registry_rejects_duplicate_tool_names() -> None:
         ToolRegistry(tools=(execute_bash_tool, execute_bash_tool))
 
 
+def test_tool_registry_rejects_whitespace_only_tool_names() -> None:
+    """Whitespace-only tool names should fail validation at the registry boundary."""
+    whitespace_tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash").model_copy(
+        update={"name": "   "}
+    )
+
+    with pytest.raises(ValidationError, match="non-whitespace character"):
+        ToolRegistry(tools=(whitespace_tool,))
+
+
 def test_require_tool_raises_a_typed_error_for_unknown_names() -> None:
     """Missing tools should surface a dedicated lookup error."""
     with pytest.raises(UnknownToolError, match="not registered"):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from sandbox import DockerShellCommandResult, DockerShellSessionError
-from tools import DEFAULT_TOOL_REGISTRY, ToolPermissionLevel, ToolRegistry
+from tools import DEFAULT_TOOL_REGISTRY, McpToolClient, ToolPermissionLevel, ToolRegistry
 from workers.cli_runtime import (
     CliRuntimeBudgetLedger,
     CliRuntimeMessage,
@@ -122,12 +122,13 @@ def test_format_bash_observation_truncates_long_output() -> None:
     assert "[output truncated to 5 characters]" in observation
 
 
-def test_run_cli_runtime_loop_uses_registry_timeout_and_metadata() -> None:
-    """Tool registry metadata should drive the transcript and command timeout."""
+def test_run_cli_runtime_loop_uses_tool_client_timeout_and_metadata() -> None:
+    """Tool client metadata should drive the transcript and command timeout."""
     execute_bash_tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash").model_copy(
         update={"timeout_seconds": 3}
     )
     tool_registry = ToolRegistry(tools=(execute_bash_tool,))
+    tool_client = McpToolClient.from_registry(tool_registry)
     adapter = _ScriptedAdapter(
         [
             CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pwd"),
@@ -145,7 +146,7 @@ def test_run_cli_runtime_loop_uses_registry_timeout_and_metadata() -> None:
             worker_timeout_seconds=30,
             command_timeout_seconds=9,
         ),
-        tool_registry=tool_registry,
+        tool_client=tool_client,
     )
 
     assert execution.status == "success"
