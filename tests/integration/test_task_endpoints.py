@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 from collections.abc import Iterator
 
 import pytest
@@ -222,6 +223,31 @@ def test_submit_task_rejects_unsafe_callback_urls(
         json={
             "task_text": "Create a note and report the result",
             "callback_url": callback_url,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_submit_task_rejects_hostname_callback_urls_resolving_to_private_addresses(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Hostname callback targets should be rejected when DNS resolves to private IPs."""
+
+    def fake_getaddrinfo(host: str, port: int, *, type: int, proto: int):
+        assert host == "callbacks.example.com"
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.168.1.10", port))
+        ]
+
+    monkeypatch.setattr("orchestrator.execution.socket.getaddrinfo", fake_getaddrinfo)
+
+    response = client.post(
+        "/tasks",
+        json={
+            "task_text": "Create a note and report the result",
+            "callback_url": "https://callbacks.example.com/status",
         },
     )
 

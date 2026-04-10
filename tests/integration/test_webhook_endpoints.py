@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 from collections.abc import Iterator
 
 import pytest
@@ -251,7 +252,7 @@ def test_webhook_progress_notifications_include_callback_url_submission(
             "source": "github-actions",
             "external_user_id": "github-actions:bot",
             "external_thread_id": "pr-123",
-            "callback_url": "https://callbacks.example.com/task-status",
+            "callback_url": "https://93.184.216.34/task-status",
         },
     )
 
@@ -259,7 +260,7 @@ def test_webhook_progress_notifications_include_callback_url_submission(
     notifier = client.app.state.test_notifier
     assert [event.phase for _, event in notifier.events] == ["started", "running", "completed"]
     assert all(
-        submission.callback_url == "https://callbacks.example.com/task-status"
+        submission.callback_url == "https://93.184.216.34/task-status"
         for submission, _ in notifier.events
     )
 
@@ -397,6 +398,26 @@ def test_webhook_rejects_unsafe_callback_urls(
         "/webhook",
         json={"task_text": "ok", "callback_url": callback_url},
     )
+    assert response.status_code == 422
+
+
+def test_webhook_rejects_hostname_callback_urls_resolving_to_private_addresses(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Hostname callback targets should be blocked when DNS resolves to private IPs."""
+
+    def fake_getaddrinfo(host: str, port: int, *, type: int, proto: int):
+        assert host == "callbacks.example.com"
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("10.0.0.8", port))]
+
+    monkeypatch.setattr("orchestrator.execution.socket.getaddrinfo", fake_getaddrinfo)
+
+    response = client.post(
+        "/webhook",
+        json={"task_text": "ok", "callback_url": "https://callbacks.example.com/status"},
+    )
+
     assert response.status_code == 422
 
 

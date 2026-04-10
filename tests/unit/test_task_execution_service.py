@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
+import time
 from datetime import datetime
 
 import pytest
@@ -87,6 +89,141 @@ class _RecordingProgressNotifier:
         event: execution_module.ProgressEvent,
     ) -> None:
         self.events.append(event)
+
+
+def test_validate_callback_url_accepts_hostname_with_public_resolution(monkeypatch) -> None:
+    """Hostnames that resolve only to public IPs should still be allowed."""
+
+    def fake_getaddrinfo(host: str, port: int, *, type: int, proto: int):
+        assert host == "callbacks.example.com"
+        assert port == 443
+        assert type == socket.SOCK_STREAM
+        assert proto == socket.IPPROTO_TCP
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", 443))
+        ]
+
+    monkeypatch.setattr(execution_module.socket, "getaddrinfo", fake_getaddrinfo)
+
+    assert (
+        execution_module._validate_callback_url("https://callbacks.example.com/status")
+        == "https://callbacks.example.com/status"
+    )
+
+
+def test_validate_callback_url_rejects_hostname_with_private_resolution(monkeypatch) -> None:
+    """Hostname callbacks should be rejected when DNS resolves to a private address."""
+
+    def fake_getaddrinfo(host: str, port: int, *, type: int, proto: int):
+        assert host == "callbacks.example.com"
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("10.0.0.8", port))]
+
+    monkeypatch.setattr(execution_module.socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(ValueError, match="private or local address"):
+        execution_module._validate_callback_url("https://callbacks.example.com/status")
+
+
+def test_validate_callback_url_rejects_hostname_with_mixed_public_and_private_resolution(
+    monkeypatch,
+) -> None:
+    """Mixed DNS answers should fail closed when any resolved address is unsafe."""
+
+    def fake_getaddrinfo(host: str, port: int, *, type: int, proto: int):
+        assert host == "callbacks.example.com"
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port)),
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("169.254.169.254", port)),
+        ]
+
+    monkeypatch.setattr(execution_module.socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(ValueError, match="private or local address"):
+        execution_module._validate_callback_url("https://callbacks.example.com/status")
+
+
+def test_validate_callback_url_rejects_unresolvable_hostname(monkeypatch) -> None:
+    """Unresolvable callback hosts should fail closed."""
+
+    def fake_getaddrinfo(host: str, port: int, *, type: int, proto: int):
+        raise socket.gaierror("boom")
+
+    monkeypatch.setattr(execution_module.socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(ValueError, match="could not be resolved"):
+        execution_module._validate_callback_url("https://callbacks.example.com/status")
+
+
+def test_resolve_callback_hostname_times_out_when_resolution_hangs(monkeypatch) -> None:
+    """Hostname resolution should fail closed when the resolver does not return promptly."""
+
+    def slow_lookup(host: str, port: int) -> list[tuple]:
+        time.sleep(0.05)
+        return []
+
+    monkeypatch.setattr(execution_module, "_lookup_callback_hostname_records", slow_lookup)
+
+    with pytest.raises(ValueError, match="resolution timed out"):
+        execution_module._resolve_callback_hostname(
+            "callbacks.example.com",
+            port=443,
+            timeout_seconds=0.01,
+        )
+
+
+def test_resolve_callback_hostname_handles_cancelled_future(monkeypatch) -> None:
+    """Resolver cancellation should surface as a validation error rather than escape raw."""
+
+    class _CancelledFuture:
+        def result(self, timeout: float):
+            raise execution_module.FutureCancelledError()
+
+    class _FakeExecutor:
+        def submit(self, func, hostname: str, port: int):
+            return _CancelledFuture()
+
+    monkeypatch.setattr(execution_module, "_get_callback_dns_executor", lambda: _FakeExecutor())
+
+    with pytest.raises(ValueError, match="resolution was cancelled"):
+        execution_module._resolve_callback_hostname("callbacks.example.com", port=443)
+
+
+def test_resolve_callback_hostname_ignores_non_ip_address_families(monkeypatch) -> None:
+    """Only IPv4 and IPv6 `getaddrinfo` answers should be considered callback targets."""
+
+    def fake_lookup(host: str, port: int) -> list[tuple]:
+        assert host == "callbacks.example.com"
+        assert port == 443
+        return [
+            (socket.AF_UNSPEC, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("ignored", port)),
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port)),
+        ]
+
+    monkeypatch.setattr(execution_module, "_lookup_callback_hostname_records", fake_lookup)
+
+    assert execution_module._resolve_callback_hostname("callbacks.example.com", port=443) == [
+        "93.184.216.34"
+    ]
+
+
+def test_shutdown_callback_dns_executor_recreates_executor_on_next_use() -> None:
+    """Executor teardown should not permanently disable later callback resolution."""
+    first_executor = execution_module._get_callback_dns_executor()
+
+    execution_module.shutdown_callback_dns_executor()
+
+    second_executor = execution_module._get_callback_dns_executor()
+
+    assert second_executor is not first_executor
+
+    execution_module.shutdown_callback_dns_executor()
+
+
+def test_is_unsafe_callback_address_rejects_ipv4_mapped_ipv6_loopback() -> None:
+    """IPv4-mapped IPv6 addresses should inherit unsafe checks from their IPv4 target."""
+    assert execution_module._is_unsafe_callback_address(
+        execution_module.ipaddress.ip_address("::ffff:127.0.0.1")
+    )
 
 
 def test_task_execution_service_reuses_one_compiled_graph(

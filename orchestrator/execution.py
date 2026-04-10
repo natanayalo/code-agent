@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import socket
 from collections.abc import Callable, Mapping
+from concurrent.futures import CancelledError as FutureCancelledError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
 from pathlib import Path
+from threading import Lock
 from typing import Any, Literal, Protocol
 from urllib.parse import unquote, urlparse
 
@@ -41,6 +46,11 @@ from workers import ArtifactReference, Worker
 
 logger = logging.getLogger(__name__)
 
+_CALLBACK_RESOLUTION_TIMEOUT_SECONDS = 2.0
+_CALLBACK_DNS_EXECUTOR_MAX_WORKERS = 4
+_callback_dns_executor: ThreadPoolExecutor | None = None
+_callback_dns_executor_lock = Lock()
+
 
 class ExecutionModel(BaseModel):
     """Base model for task-execution service payloads."""
@@ -55,6 +65,87 @@ class SubmissionSession(ExecutionModel):
     external_user_id: str = Field(default="http:anonymous", min_length=1)
     external_thread_id: str = Field(default="http-default", min_length=1)
     display_name: str | None = None
+
+
+def _is_unsafe_callback_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return whether a resolved callback destination is local-only or otherwise unsafe."""
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+
+    return (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    )
+
+
+def _lookup_callback_hostname_records(hostname: str, port: int) -> list[tuple]:
+    """Resolve a hostname through the system resolver using TCP-oriented address hints."""
+    return socket.getaddrinfo(
+        hostname,
+        port,
+        type=socket.SOCK_STREAM,
+        proto=socket.IPPROTO_TCP,
+    )
+
+
+def _get_callback_dns_executor() -> ThreadPoolExecutor:
+    """Return the shared executor used for bounded callback DNS resolution."""
+    global _callback_dns_executor
+    with _callback_dns_executor_lock:
+        if _callback_dns_executor is None:
+            _callback_dns_executor = ThreadPoolExecutor(
+                max_workers=_CALLBACK_DNS_EXECUTOR_MAX_WORKERS,
+                thread_name_prefix="callback-dns",
+            )
+        return _callback_dns_executor
+
+
+def shutdown_callback_dns_executor() -> None:
+    """Shut down the shared callback DNS executor for app/test teardown."""
+    global _callback_dns_executor
+    with _callback_dns_executor_lock:
+        executor = _callback_dns_executor
+        _callback_dns_executor = None
+    if executor is not None:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _resolve_callback_hostname(
+    hostname: str,
+    *,
+    port: int,
+    timeout_seconds: float = _CALLBACK_RESOLUTION_TIMEOUT_SECONDS,
+) -> list[str]:
+    """Resolve a callback hostname into concrete destination IP addresses."""
+    executor = _get_callback_dns_executor()
+    try:
+        future = executor.submit(_lookup_callback_hostname_records, hostname, port)
+        records = future.result(timeout=timeout_seconds)
+    except FutureTimeoutError as exc:
+        future.cancel()
+        raise ValueError("callback_url hostname resolution timed out.") from exc
+    except socket.gaierror as exc:
+        raise ValueError("callback_url hostname could not be resolved.") from exc
+    except FutureCancelledError as exc:
+        raise ValueError("callback_url hostname resolution was cancelled.") from exc
+
+    resolved_addresses: list[str] = []
+    for family, _, _, _, sockaddr in records:
+        if family not in (socket.AF_INET, socket.AF_INET6):
+            continue
+        if not sockaddr:
+            continue
+        candidate = sockaddr[0].strip()
+        if candidate:
+            resolved_addresses.append(candidate)
+
+    if not resolved_addresses:
+        raise ValueError("callback_url hostname did not resolve to any addresses.")
+    return resolved_addresses
 
 
 def _validate_callback_url(value: str | None) -> str | None:
@@ -73,19 +164,22 @@ def _validate_callback_url(value: str | None) -> str | None:
         raise ValueError("callback_url must not target localhost.")
 
     try:
-        host_ip = ipaddress.ip_address(hostname)
-    except ValueError:
-        return value
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("callback_url must include a valid port.") from exc
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
 
-    if (
-        host_ip.is_private
-        or host_ip.is_loopback
-        or host_ip.is_link_local
-        or host_ip.is_multicast
-        or host_ip.is_reserved
-        or host_ip.is_unspecified
-    ):
-        raise ValueError("callback_url must not target a private or local address.")
+    try:
+        ipaddress.ip_address(hostname)
+        resolved_addresses = [hostname]
+    except ValueError:
+        resolved_addresses = _resolve_callback_hostname(hostname, port=port)
+
+    for resolved_address in resolved_addresses:
+        host_ip = ipaddress.ip_address(resolved_address)
+        if _is_unsafe_callback_address(host_ip):
+            raise ValueError("callback_url must not target a private or local address.")
     return value
 
 

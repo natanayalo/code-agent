@@ -126,9 +126,27 @@ def test_create_app_with_injected_task_service_skips_outbound_client_bootstrap(
         assert not hasattr(client.app.state, "outbound_http_clients")
 
 
+def test_create_app_shuts_down_callback_dns_executor_on_exit(monkeypatch) -> None:
+    """App shutdown should tear down the shared callback DNS executor."""
+    shutdown_calls: list[str] = []
+
+    monkeypatch.setattr(
+        "apps.api.main.shutdown_callback_dns_executor",
+        lambda: shutdown_calls.append("dns"),
+    )
+
+    app = create_app(task_service=object())
+
+    with TestClient(app):
+        pass
+
+    assert shutdown_calls == ["dns"]
+
+
 def test_create_app_closes_both_clients_when_startup_bootstrap_fails(monkeypatch) -> None:
     """Startup failures should still close both shared outbound clients."""
     close_calls: list[str] = []
+    dns_shutdown_calls: list[str] = []
 
     class _FakeClient:
         def __init__(self, name: str) -> None:
@@ -149,6 +167,10 @@ def test_create_app_closes_both_clients_when_startup_bootstrap_fails(monkeypatch
         "apps.api.main.build_task_service_from_env",
         lambda **_: (_ for _ in ()).throw(RuntimeError("boom")),
     )
+    monkeypatch.setattr(
+        "apps.api.main.shutdown_callback_dns_executor",
+        lambda: dns_shutdown_calls.append("dns"),
+    )
 
     app = create_app()
 
@@ -157,3 +179,4 @@ def test_create_app_closes_both_clients_when_startup_bootstrap_fails(monkeypatch
             pass
 
     assert set(close_calls) == {"telegram", "webhook"}
+    assert dns_shutdown_calls == ["dns"]

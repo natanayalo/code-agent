@@ -15,7 +15,7 @@ from apps.api.routes.tasks import router as tasks_router
 from apps.api.routes.telegram import router as telegram_router
 from apps.api.routes.webhook import router as webhook_router
 from apps.api.task_service_factory import build_task_service_from_env
-from orchestrator.execution import TaskExecutionService
+from orchestrator.execution import TaskExecutionService, shutdown_callback_dns_executor
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +45,13 @@ def create_app(*, task_service: TaskExecutionService | None = None) -> FastAPI:
                             "Failed to close outbound HTTP client during app shutdown",
                             exc_info=result,
                         )
+                shutdown_callback_dns_executor()
         else:
-            app.state.task_service = task_service
-            yield
+            try:
+                app.state.task_service = task_service
+                yield
+            finally:
+                shutdown_callback_dns_executor()
 
     app = FastAPI(
         title="code-agent",

@@ -49,13 +49,15 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-053 Dedupe protection for repeated webhook deliveries (Milestone 10). PR: [#50](https://github.com/natanayalo/code-agent/pull/50)
 - Milestone 10: Telegram ingress milestone (T-050 to T-053). PR: [#50](https://github.com/natanayalo/code-agent/pull/50)
 - T-084 Add lifespan-managed shared HTTP clients for outbound notifier adapters. PR: [#51](https://github.com/natanayalo/code-agent/pull/51)
+- T-085 Isolate parallel progress notifier delivery with per-backend timeout/error handling. PR: [#52](https://github.com/natanayalo/code-agent/pull/52)
+- T-086 Harden outbound callback SSRF defenses beyond literal-IP validation. PR: [#53](https://github.com/natanayalo/code-agent/pull/53)
 
 ## In Progress
 
-- T-085 Isolate parallel progress notifier delivery with per-backend timeout/error handling.
+- None
 
 ## Next
-- T-086 Harden outbound callback SSRF defenses beyond literal-IP validation.
+- T-083 Add MCP client abstraction.
 
 ## Blocked
 
@@ -63,7 +65,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: T-085 parallel notifier delivery isolation → T-086 callback SSRF hardening.
+- Current target order from here: T-083 MCP client abstraction.
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.
@@ -76,4 +78,4 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - CI validates every push, including merges to `master`, enforcing a 90% branch-coverage floor in `pytest`.
 - T-021 adds durable LangGraph checkpointing; T-022 adds a destructive-action approval pause/resume path.
 - T-030/T-031/T-032 provide workspace provisioning, Docker-based execution, and artifact capture.
-- Review follow-ups identified during PR #50: add lifespan-managed shared HTTP clients for outbound notifier adapters (T-084), isolate parallel progress notifier delivery with per-backend timeout/error handling (T-085), and harden callback SSRF defenses beyond literal-IP validation (T-086).
+- Review follow-ups identified during PR #50: add lifespan-managed shared HTTP clients for outbound notifier adapters (T-084, done in PR #51), isolate parallel progress notifier delivery with per-backend timeout/error handling (T-085, done in PR #52), and harden callback SSRF defenses beyond literal-IP validation (T-086, done in PR #53).
