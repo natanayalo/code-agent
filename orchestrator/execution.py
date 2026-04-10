@@ -6,6 +6,7 @@ import ipaddress
 import logging
 import socket
 from collections.abc import Callable, Mapping
+from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
@@ -129,6 +130,8 @@ def _resolve_callback_hostname(
         raise ValueError("callback_url hostname resolution timed out.") from exc
     except socket.gaierror as exc:
         raise ValueError("callback_url hostname could not be resolved.") from exc
+    except FutureCancelledError as exc:
+        raise ValueError("callback_url hostname resolution was cancelled.") from exc
 
     resolved_addresses: list[str] = []
     for _, _, _, _, sockaddr in records:

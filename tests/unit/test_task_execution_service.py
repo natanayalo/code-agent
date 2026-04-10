@@ -171,6 +171,23 @@ def test_resolve_callback_hostname_times_out_when_resolution_hangs(monkeypatch) 
         )
 
 
+def test_resolve_callback_hostname_handles_cancelled_future(monkeypatch) -> None:
+    """Resolver cancellation should surface as a validation error rather than escape raw."""
+
+    class _CancelledFuture:
+        def result(self, timeout: float):
+            raise execution_module.FutureCancelledError()
+
+    class _FakeExecutor:
+        def submit(self, func, hostname: str, port: int):
+            return _CancelledFuture()
+
+    monkeypatch.setattr(execution_module, "_get_callback_dns_executor", lambda: _FakeExecutor())
+
+    with pytest.raises(ValueError, match="resolution was cancelled"):
+        execution_module._resolve_callback_hostname("callbacks.example.com", port=443)
+
+
 def test_shutdown_callback_dns_executor_recreates_executor_on_next_use() -> None:
     """Executor teardown should not permanently disable later callback resolution."""
     first_executor = execution_module._get_callback_dns_executor()
