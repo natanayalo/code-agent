@@ -382,9 +382,7 @@ def run_cli_runtime_loop(
     """Drive the provider adapter through a bounded multi-turn shell loop."""
     started_at = clock()
     resolved_tool_client = tool_client or (
-        DEFAULT_MCP_TOOL_CLIENT
-        if tool_registry is None
-        else McpToolClient.from_registry(tool_registry)
+        DEFAULT_MCP_TOOL_CLIENT if tool_registry is None else tool_registry.mcp_client
     )
     messages = [CliRuntimeMessage(role="system", content=system_prompt)]
     commands_run: list[WorkerCommand] = []

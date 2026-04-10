@@ -43,6 +43,12 @@ def test_default_mcp_tool_client_exposes_execute_bash_descriptor() -> None:
     }
 
 
+def test_tool_registry_caches_a_reusable_mcp_client() -> None:
+    """Explicit registries should reuse one MCP client instance across repeated access."""
+    assert DEFAULT_TOOL_REGISTRY.mcp_client is DEFAULT_TOOL_REGISTRY.mcp_client
+    assert DEFAULT_TOOL_REGISTRY.mcp_client is DEFAULT_MCP_TOOL_CLIENT
+
+
 def test_require_mcp_tool_raises_a_typed_error_for_unknown_names() -> None:
     """Unknown MCP tool lookups should preserve the registry's typed error surface."""
     with pytest.raises(UnknownToolError, match="not registered"):

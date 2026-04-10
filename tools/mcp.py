@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from functools import cached_property
-from typing import Any
 
 from pydantic import Field
 
 from tools.registry import (
     DEFAULT_TOOL_REGISTRY,
-    EXECUTE_BASH_TOOL_NAME,
     ToolDefinition,
     ToolModel,
     ToolRegistry,
@@ -22,27 +20,7 @@ class McpToolDescriptor(ToolModel):
 
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
-    input_schema: dict[str, Any] = Field(default_factory=dict)
-
-
-def _mcp_input_schema_for_tool(tool_name: str) -> dict[str, Any]:
-    """Return the MCP-style input schema for a known internal tool."""
-    if tool_name == EXECUTE_BASH_TOOL_NAME:
-        return {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": (
-                        "One bash command to run inside the persistent sandbox workspace."
-                    ),
-                }
-            },
-            "required": ["command"],
-        }
-    return {"type": "object", "additionalProperties": True}
+    input_schema: dict[str, object] = Field(default_factory=dict)
 
 
 def _descriptor_from_tool_definition(tool: ToolDefinition) -> McpToolDescriptor:
@@ -50,7 +28,7 @@ def _descriptor_from_tool_definition(tool: ToolDefinition) -> McpToolDescriptor:
     return McpToolDescriptor(
         name=tool.name,
         description=tool.description,
-        input_schema=_mcp_input_schema_for_tool(tool.name),
+        input_schema=tool.mcp_input_schema,
     )
 
 
@@ -105,4 +83,4 @@ class McpToolClient(ToolModel):
         return tool
 
 
-DEFAULT_MCP_TOOL_CLIENT = McpToolClient()
+DEFAULT_MCP_TOOL_CLIENT = DEFAULT_TOOL_REGISTRY.mcp_client
