@@ -134,7 +134,9 @@ def _resolve_callback_hostname(
         raise ValueError("callback_url hostname resolution was cancelled.") from exc
 
     resolved_addresses: list[str] = []
-    for _, _, _, _, sockaddr in records:
+    for family, _, _, _, sockaddr in records:
+        if family not in (socket.AF_INET, socket.AF_INET6):
+            continue
         if not sockaddr:
             continue
         candidate = sockaddr[0].strip()

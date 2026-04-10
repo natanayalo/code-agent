@@ -188,6 +188,24 @@ def test_resolve_callback_hostname_handles_cancelled_future(monkeypatch) -> None
         execution_module._resolve_callback_hostname("callbacks.example.com", port=443)
 
 
+def test_resolve_callback_hostname_ignores_non_ip_address_families(monkeypatch) -> None:
+    """Only IPv4 and IPv6 `getaddrinfo` answers should be considered callback targets."""
+
+    def fake_lookup(host: str, port: int) -> list[tuple]:
+        assert host == "callbacks.example.com"
+        assert port == 443
+        return [
+            (socket.AF_UNSPEC, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("ignored", port)),
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", port)),
+        ]
+
+    monkeypatch.setattr(execution_module, "_lookup_callback_hostname_records", fake_lookup)
+
+    assert execution_module._resolve_callback_hostname("callbacks.example.com", port=443) == [
+        "93.184.216.34"
+    ]
+
+
 def test_shutdown_callback_dns_executor_recreates_executor_on_next_use() -> None:
     """Executor teardown should not permanently disable later callback resolution."""
     first_executor = execution_module._get_callback_dns_executor()
