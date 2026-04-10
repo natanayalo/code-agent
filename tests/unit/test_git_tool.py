@@ -16,6 +16,13 @@ def test_build_git_command_from_input_supports_status() -> None:
     assert command == "git status --porcelain=v1 --untracked-files=no"
 
 
+def test_build_git_command_from_input_supports_status_pathspecs() -> None:
+    """Status requests should forward optional pathspec filters."""
+    command = build_git_command_from_input('{"operation":"status","pathspecs":["tools","tests"]}')
+
+    assert command == "git status --untracked-files=all -- tools tests"
+
+
 def test_build_git_command_from_input_supports_diff_with_pathspecs() -> None:
     """Diff requests should preserve optional revision and pathspec filters."""
     command = build_git_command_from_input(
@@ -31,7 +38,7 @@ def test_build_git_command_from_input_supports_branch_create() -> None:
         '{"operation":"branch","create":true,"branch_name":"task/t-080-git-wrapper"}'
     )
 
-    assert command == "git branch -- task/t-080-git-wrapper"
+    assert command == "git branch task/t-080-git-wrapper"
 
 
 def test_build_git_command_from_input_supports_commit_messages() -> None:

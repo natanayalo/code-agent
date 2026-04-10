@@ -199,7 +199,7 @@ EXECUTE_GIT_TOOL = ToolDefinition(
             "pathspecs": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Optional pathspec filters for git diff.",
+                "description": "Optional pathspec filters for git status and git diff.",
             },
             "show_current": {
                 "type": "boolean",

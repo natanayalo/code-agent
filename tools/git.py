@@ -137,6 +137,9 @@ def build_git_command(request: GitToolRequest) -> str:
         tokens.append(
             "--untracked-files=all" if request.include_untracked else "--untracked-files=no"
         )
+        if request.pathspecs:
+            tokens.append("--")
+            tokens.extend(request.pathspecs)
         return shlex.join(tokens)
 
     if request.operation == GitOperation.DIFF:
@@ -156,7 +159,7 @@ def build_git_command(request: GitToolRequest) -> str:
             tokens.append("--show-current")
         elif request.create:
             assert request.branch_name is not None  # validated above
-            tokens.extend(["--", request.branch_name])
+            tokens.append(request.branch_name)
         else:
             tokens.append("--list")
         return shlex.join(tokens)
