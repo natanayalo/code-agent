@@ -62,6 +62,10 @@ class GitToolRequest(ToolModel):
                 "porcelain",
                 "show_current",
             )
+            if "include_untracked" in self.model_fields_set:
+                raise GitToolError("Git diff requests do not support `include_untracked`.")
+            if self.against is not None and self.against.startswith("-"):
+                raise GitToolError("Git diff `against` revision cannot start with a hyphen.")
             return self
 
         if self.operation == GitOperation.BRANCH:
@@ -74,6 +78,8 @@ class GitToolRequest(ToolModel):
                 "porcelain",
                 "staged",
             )
+            if self.branch_name is not None and self.branch_name.startswith("-"):
+                raise GitToolError("Git branch name cannot start with a hyphen.")
             if self.create and not self.branch_name:
                 raise GitToolError("Git branch creation requires branch_name.")
             if not self.create:

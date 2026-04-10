@@ -66,3 +66,21 @@ def test_build_git_command_from_input_rejects_branch_name_without_create() -> No
     """Branch list/show helpers should reject branch_name when create is false."""
     with pytest.raises(GitToolError, match="do not support `branch_name`"):
         build_git_command_from_input('{"operation":"branch","branch_name":"topic/extra"}')
+
+
+def test_build_git_command_from_input_rejects_diff_include_untracked_override() -> None:
+    """Diff requests should reject status-only include_untracked overrides."""
+    with pytest.raises(GitToolError, match="do not support `include_untracked`"):
+        build_git_command_from_input('{"operation":"diff","include_untracked":false}')
+
+
+def test_build_git_command_from_input_rejects_diff_against_hyphen_flags() -> None:
+    """Diff revision selectors should reject hyphen-prefixed values."""
+    with pytest.raises(GitToolError, match="cannot start with a hyphen"):
+        build_git_command_from_input('{"operation":"diff","against":"--output"}')
+
+
+def test_build_git_command_from_input_rejects_branch_name_starting_with_hyphen() -> None:
+    """Branch requests should reject hyphen-prefixed branch names."""
+    with pytest.raises(GitToolError, match="cannot start with a hyphen"):
+        build_git_command_from_input('{"operation":"branch","create":true,"branch_name":"-bad"}')
