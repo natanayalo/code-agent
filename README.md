@@ -63,12 +63,14 @@ Enable the real task-submission path locally:
 ```bash
 export DATABASE_URL="postgresql+psycopg://code_agent:<your-password>@localhost:5432/code_agent"
 export CODE_AGENT_ENABLE_TASK_SERVICE=1
+export CODE_AGENT_API_SHARED_SECRET=<shared-secret>
 python -m uvicorn apps.api.main:app --reload
 ```
 
 When `CODE_AGENT_ENABLE_TASK_SERVICE=1`, the app bootstraps the real `TaskExecutionService`
 and routes submitted tasks through `CodexCliWorker`, which shells out to the local `codex`
-CLI for bounded turn-by-turn planning. Optional adapter overrides:
+CLI for bounded turn-by-turn planning. Direct HTTP clients must send
+`X-Webhook-Token: <shared-secret>` on `/tasks` and `/webhook`. Optional adapter overrides:
 
 ```bash
 export CODE_AGENT_CODEX_CLI_BIN=/path/to/codex
@@ -82,12 +84,15 @@ Optional progress delivery for Milestone 10:
 ```bash
 export CODE_AGENT_TELEGRAM_BOT_TOKEN=<telegram-bot-token>
 export CODE_AGENT_TELEGRAM_API_BASE_URL=https://api.telegram.org
+export CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN=<telegram-webhook-secret>
 ```
 
 When `CODE_AGENT_TELEGRAM_BOT_TOKEN` is set, Telegram-submitted tasks send `started`,
 `running`, and final `completed`/`failed` updates back to the originating chat. Generic
 webhook submissions can also provide `callback_url` in the payload to receive the same
 lifecycle updates as JSON callbacks.
+If `CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN` is set, Telegram webhook deliveries must also
+include a matching `X-Telegram-Bot-Api-Secret-Token` header.
 Callback targets are restricted to public HTTP(S) destinations; hostname callbacks are
 resolved during validation and rejected if any resolved address is private, loopback,
 link-local, reserved, multicast, or unspecified.

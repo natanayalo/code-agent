@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 
+from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
 from db.base import Base
 from db.enums import TaskStatus
@@ -75,11 +76,13 @@ def client(session_factory) -> Iterator[TestClient]:
             session_factory=session_factory,
             worker=worker,
             progress_notifier=notifier,
-        )
+        ),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
     )
     app.state.test_worker = worker
     app.state.test_notifier = notifier
     with TestClient(app) as test_client:
+        test_client.headers["X-Webhook-Token"] = "test-shared-secret"
         yield test_client
 
 
@@ -312,3 +315,63 @@ def test_telegram_update_with_unknown_fields_accepted(client: TestClient) -> Non
     response = client.post("/telegram/webhook", json=update)
     assert response.status_code == 200
     assert response.json()["task_id"] is not None
+
+
+def test_telegram_webhook_rejects_missing_secret_header_when_configured(
+    session_factory,
+) -> None:
+    """Telegram verification should reject missing provider-secret headers when enabled."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="Telegram task completed.",
+            budget_usage={},
+            commands_run=[],
+            files_changed=[],
+            artifacts=[],
+            next_action_hint=None,
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
+        auth_config=ApiAuthConfig(telegram_webhook_secret="telegram-secret"),
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/telegram/webhook", json=_text_update("Run the linter"))
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing X-Telegram-Bot-Api-Secret-Token header."}
+    assert worker.requests == []
+
+
+def test_telegram_webhook_accepts_matching_secret_header_when_configured(
+    session_factory,
+) -> None:
+    """Telegram verification should allow requests with the configured secret header."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="Telegram task completed.",
+            budget_usage={},
+            commands_run=[],
+            files_changed=[],
+            artifacts=[],
+            next_action_hint=None,
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
+        auth_config=ApiAuthConfig(telegram_webhook_secret="telegram-secret"),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/telegram/webhook",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
+            json=_text_update("Run the linter"),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["task_id"] is not None
+    assert len(worker.requests) == 1

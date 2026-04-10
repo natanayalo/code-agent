@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from apps.api.dependencies import get_task_service
+from apps.api.dependencies import get_task_service, require_telegram_webhook_auth
 from orchestrator.execution import (
     DeliveryKey,
     SubmissionSession,
@@ -144,6 +144,7 @@ def _to_task_submission(msg: TelegramMessage, text: str) -> TaskSubmission:
 def receive_telegram_update(
     update: TelegramUpdate,
     background_tasks: BackgroundTasks,
+    _auth: None = Depends(require_telegram_webhook_auth),
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> TelegramWebhookResponse:
     """Accept a Telegram Update and enqueue the message text as a task.

@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 
+from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
 from db.base import Base
 from db.enums import TaskStatus
@@ -76,11 +77,13 @@ def client(session_factory) -> Iterator[TestClient]:
             session_factory=session_factory,
             worker=worker,
             progress_notifier=notifier,
-        )
+        ),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
     )
     app.state.test_worker = worker
     app.state.test_notifier = notifier
     with TestClient(app) as test_client:
+        test_client.headers["X-Webhook-Token"] = "test-shared-secret"
         yield test_client
 
 
@@ -425,5 +428,68 @@ def test_webhook_unconfigured_service_returns_503(client: TestClient) -> None:
     """The /webhook endpoint with no configured service should return 503."""
     app = create_app()  # no task_service → service is not configured
     with TestClient(app) as bare_client:
-        response = bare_client.post("/webhook", json={"task_text": "run tests"})
+        response = bare_client.post(
+            "/webhook",
+            headers={"X-Webhook-Token": "test-shared-secret"},
+            json={"task_text": "run tests"},
+        )
     assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Task execution service is not configured for this app instance."
+    }
+
+
+def test_webhook_rejects_missing_auth_header(session_factory) -> None:
+    """Generic webhooks should reject requests with no shared-secret header."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="Webhook task completed.",
+            budget_usage={},
+            commands_run=[],
+            files_changed=[],
+            artifacts=[],
+            next_action_hint=None,
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/webhook", json={"task_text": "run tests"})
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing X-Webhook-Token header."}
+    assert worker.requests == []
+
+
+def test_webhook_rejects_invalid_auth_header(session_factory) -> None:
+    """Generic webhooks should reject incorrect shared-secret headers."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="Webhook task completed.",
+            budget_usage={},
+            commands_run=[],
+            files_changed=[],
+            artifacts=[],
+            next_action_hint=None,
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhook",
+            headers={"X-Webhook-Token": "wrong-secret"},
+            json={"task_text": "run tests"},
+        )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Invalid API authentication secret."}
+    assert worker.requests == []

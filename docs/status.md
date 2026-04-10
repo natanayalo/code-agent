@@ -54,10 +54,9 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-104 Add API authentication (local slice implemented, unpublished).
 
 ## Next
-- T-104 Add API authentication (pulled ahead — close auth gap before adding capabilities).
 - T-083 Add MCP client abstraction.
 - T-080 Add git utility wrapper.
 - T-087 Harden outbound callback delivery transport (closes DNS rebinding gap from T-086).
