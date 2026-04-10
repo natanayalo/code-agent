@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from functools import cached_property
+from typing import TypeVar
 
 from pydantic import Field
 
@@ -14,6 +16,8 @@ from tools.registry import (
     UnknownToolError,
 )
 
+_ToolEntryT = TypeVar("_ToolEntryT")
+
 
 class McpToolDescriptor(ToolModel):
     """Normalized MCP-style descriptor for one exposed internal tool."""
@@ -23,10 +27,47 @@ class McpToolDescriptor(ToolModel):
     input_schema: dict[str, object] = Field(default_factory=dict)
 
 
+def _normalize_registered_tool_name(name: str) -> str:
+    """Normalize a stored tool name without collapsing whitespace-only names to empty."""
+    stripped_name = name.strip()
+    return stripped_name or name
+
+
+def _normalize_lookup_name(name: str) -> str | None:
+    """Normalize an incoming lookup key and reject blank names."""
+    normalized_name = name.strip()
+    if not normalized_name:
+        return None
+    return normalized_name
+
+
+def _build_normalized_tool_map(
+    entries: Iterable[_ToolEntryT],
+    *,
+    get_name: Callable[[_ToolEntryT], str],
+) -> dict[str, _ToolEntryT]:
+    """Index entries by normalized tool name and reject collisions."""
+    normalized_entries: dict[str, _ToolEntryT] = {}
+    duplicate_names: set[str] = set()
+    for entry in entries:
+        normalized_name = _normalize_registered_tool_name(get_name(entry))
+        if normalized_name in normalized_entries:
+            duplicate_names.add(normalized_name)
+            continue
+        normalized_entries[normalized_name] = entry
+    if duplicate_names:
+        duplicates = ", ".join(repr(name) for name in sorted(duplicate_names))
+        raise ValueError(
+            "MCP-exposed tool names must remain unique after normalization; "
+            f"duplicate entries: {duplicates}"
+        )
+    return normalized_entries
+
+
 def _descriptor_from_tool_definition(tool: ToolDefinition) -> McpToolDescriptor:
     """Project a concrete registry definition into an MCP-ready descriptor."""
     return McpToolDescriptor(
-        name=tool.name.strip(),
+        name=_normalize_registered_tool_name(tool.name),
         description=tool.description,
         input_schema=tool.mcp_input_schema,
     )
@@ -50,7 +91,15 @@ class McpToolClient(ToolModel):
     @cached_property
     def _mcp_tool_map(self) -> dict[str, McpToolDescriptor]:
         """Index MCP-style descriptors by tool name for repeated lookups."""
-        return {tool.name: tool for tool in self._mcp_tools}
+        return _build_normalized_tool_map(self._mcp_tools, get_name=lambda tool: tool.name)
+
+    @cached_property
+    def _tool_definition_map(self) -> dict[str, ToolDefinition]:
+        """Index internal definitions by normalized name for repeated lookups."""
+        return _build_normalized_tool_map(
+            self.registry.list_tools(),
+            get_name=lambda tool: tool.name,
+        )
 
     def list_tool_definitions(self) -> tuple[ToolDefinition, ...]:
         """Expose the ordered internal tool definitions behind the client boundary."""
@@ -58,11 +107,17 @@ class McpToolClient(ToolModel):
 
     def get_tool_definition(self, name: str) -> ToolDefinition | None:
         """Return an internal tool definition when present."""
-        return self.registry.get_tool(name)
+        normalized_name = _normalize_lookup_name(name)
+        if normalized_name is None:
+            return None
+        return self._tool_definition_map.get(normalized_name)
 
     def require_tool_definition(self, name: str) -> ToolDefinition:
         """Return an internal tool definition or raise a typed lookup error."""
-        return self.registry.require_tool(name)
+        tool = self.get_tool_definition(name)
+        if tool is None:
+            raise UnknownToolError(f"Tool '{name}' is not registered.")
+        return tool
 
     def list_mcp_tools(self) -> tuple[McpToolDescriptor, ...]:
         """Return the ordered MCP-style descriptors exposed by the client."""
@@ -70,8 +125,8 @@ class McpToolClient(ToolModel):
 
     def get_mcp_tool(self, name: str) -> McpToolDescriptor | None:
         """Return an MCP-style descriptor when the client exposes it."""
-        normalized_name = name.strip()
-        if not normalized_name:
+        normalized_name = _normalize_lookup_name(name)
+        if normalized_name is None:
             return None
         return self._mcp_tool_map.get(normalized_name)
 
