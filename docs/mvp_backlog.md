@@ -506,7 +506,7 @@ Scope notes:
 - `search_dir`: regex/literal search across a directory tree, returning file paths and matching lines
 - register all tools in the tool registry with appropriate permission levels (`workspace_write` for editor, `read_only` for the rest)
 - feed tool definitions into prompt construction via the existing registry path
-- keep tool implementations small; delegate to shell commands where practical (e.g., `grep -rn` for search_dir)
+- keep tool implementations small; delegate to shell commands where practical (e.g., `grep -rn --exclude-dir=.git --exclude-dir=__pycache__` for search_dir)
 - the worker runtime adapter must dispatch these tools the same way it dispatches `execute_bash`
 
 Acceptance:
@@ -592,7 +592,7 @@ Scope notes:
 - capture lint/format output as an artifact
 - if lint/format changes files, include those changes in the diff and artifact capture
 - do not fail the task if lint/format itself errors — surface the failure in the verifier report
-- this step runs unconditionally (not gated by permission) since it modifies only workspace files the worker already changed
+- this step runs unconditionally (not gated by permission); to prevent unintended changes, restrict the lint/format command to the set of files modified by the worker
 
 Acceptance:
 - lint/format runs automatically after worker completion on repos with detectable tooling
