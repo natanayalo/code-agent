@@ -259,8 +259,14 @@ Priority order:
 4. [DONE] Milestone 6: Sandbox hardening milestone (T-054/T-055)
 5. [DONE] Milestone 7: Memory integration milestone (T-060 to T-065)
 6. [DONE] Milestone 8: Structured run observability (T-043) + Milestone 9: T-070 second worker (GeminiCliWorker)
-7. Milestone 9 (remaining): T-071 routing heuristics + T-072 manual override
-8. Milestone 10: Telegram ingress milestone (T-050 to T-053)
+7. [DONE] Milestone 9 (remaining): T-071 routing heuristics + T-072 manual override
+8. [DONE] Milestone 10: Telegram ingress milestone (T-050 to T-053)
+9. [DONE] Review follow-ups: T-084, T-085, T-086
+10. T-104: API authentication (pulled from Milestone 13 — close auth gap before adding capabilities)
+11. Milestone 11: External tool wrappers and MCP compatibility (T-083, T-080, T-087, T-081, T-082, T-088, T-089, T-107)
+12. Milestone 12: Observability + replay (T-090 to T-092)
+13. Milestone 13 (remainder): Hardening (T-100 to T-103, T-105)
+14. Milestone 14: Agent intelligence (T-106, T-108, T-109, T-110, T-111, T-112)
 
 ## Code style
 
