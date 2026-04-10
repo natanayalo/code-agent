@@ -55,10 +55,9 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-083 Add MCP client abstraction (local slice implemented, unpublished).
 
 ## Next
-- T-083 Add MCP client abstraction.
 - T-080 Add git utility wrapper.
 - T-087 Harden outbound callback delivery transport (closes DNS rebinding gap from T-086).
 - T-081 Add GitHub wrapper.

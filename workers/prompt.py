@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from tools import DEFAULT_TOOL_REGISTRY, ToolDefinition, ToolRegistry
+from tools import DEFAULT_MCP_TOOL_CLIENT, McpToolClient, ToolDefinition, ToolRegistry
 from workers.base import WorkerRequest
 
 DEFAULT_REPO_LISTING_MAX_DEPTH = 2
@@ -39,10 +39,15 @@ def build_role_description_section() -> str:
 
 def build_available_tools_section(
     tool_registry: ToolRegistry | None = None,
+    tool_client: McpToolClient | None = None,
 ) -> str:
     """Render the configured worker tool surface."""
-    resolved_registry = tool_registry or DEFAULT_TOOL_REGISTRY
-    tools = resolved_registry.list_tools()
+    resolved_client = tool_client or (
+        DEFAULT_MCP_TOOL_CLIENT
+        if tool_registry is None
+        else McpToolClient.from_registry(tool_registry)
+    )
+    tools = resolved_client.list_tool_definitions()
     if not tools:
         return "\n".join(["## Available Tools", "- No tools configured."])
     tool_sections = [_render_tool_definition(tool) for tool in tools]
@@ -258,11 +263,12 @@ def build_system_prompt(
     workspace_path: Path,
     *,
     tool_registry: ToolRegistry | None = None,
+    tool_client: McpToolClient | None = None,
 ) -> str:
     """Assemble the structured system prompt for a coding worker run."""
     sections = [
         build_role_description_section(),
-        build_available_tools_section(tool_registry),
+        build_available_tools_section(tool_registry, tool_client),
         build_repo_context_section(workspace_path),
         build_task_context_section(request),
         build_workflow_instructions_section(),

@@ -14,7 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sandbox import DockerShellCommandResult, DockerShellSessionError
 from tools import (
     DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS,
-    DEFAULT_TOOL_REGISTRY,
+    DEFAULT_MCP_TOOL_CLIENT,
+    McpToolClient,
     ToolDefinition,
     ToolPermissionDecision,
     ToolPermissionLevel,
@@ -372,6 +373,7 @@ def run_cli_runtime_loop(
     system_prompt: str,
     settings: CliRuntimeSettings,
     tool_registry: ToolRegistry | None = None,
+    tool_client: McpToolClient | None = None,
     granted_permission: ToolPermissionLevel = ToolPermissionLevel.WORKSPACE_WRITE,
     clock: Callable[[], float] = perf_counter,
     working_directory: Path | None = None,
@@ -379,7 +381,11 @@ def run_cli_runtime_loop(
 ) -> CliRuntimeExecutionResult:
     """Drive the provider adapter through a bounded multi-turn shell loop."""
     started_at = clock()
-    resolved_registry = tool_registry or DEFAULT_TOOL_REGISTRY
+    resolved_tool_client = tool_client or (
+        DEFAULT_MCP_TOOL_CLIENT
+        if tool_registry is None
+        else McpToolClient.from_registry(tool_registry)
+    )
     messages = [CliRuntimeMessage(role="system", content=system_prompt)]
     commands_run: list[WorkerCommand] = []
     budget_ledger = _build_budget_ledger(settings)
@@ -458,7 +464,7 @@ def run_cli_runtime_loop(
 
         assert step.tool_name is not None  # Validated by CliRuntimeStep.
         try:
-            tool = resolved_registry.require_tool(step.tool_name)
+            tool = resolved_tool_client.require_tool_definition(step.tool_name)
         except UnknownToolError as exc:
             _update_budget_ledger(
                 budget_ledger,

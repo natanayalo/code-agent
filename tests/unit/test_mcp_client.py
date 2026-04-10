@@ -1,0 +1,49 @@
+"""Unit tests for the MCP-ready internal tool client."""
+
+from __future__ import annotations
+
+import pytest
+
+from tools import (
+    DEFAULT_MCP_TOOL_CLIENT,
+    DEFAULT_TOOL_REGISTRY,
+    ToolExpectedArtifact,
+    UnknownToolError,
+)
+
+
+def test_default_mcp_tool_client_exposes_execute_bash_definition() -> None:
+    """The MCP client should expose internal tool definitions through the registry boundary."""
+    tool = DEFAULT_MCP_TOOL_CLIENT.require_tool_definition(" execute_bash ")
+
+    assert tool == DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
+    assert tool.expected_artifacts == (
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+        ToolExpectedArtifact.CHANGED_FILES,
+    )
+
+
+def test_default_mcp_tool_client_exposes_execute_bash_descriptor() -> None:
+    """The MCP client should expose a normalized MCP-style descriptor for execute_bash."""
+    tool = DEFAULT_MCP_TOOL_CLIENT.require_mcp_tool(" execute_bash ")
+
+    assert tool.name == "execute_bash"
+    assert tool.input_schema == {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "command": {
+                "type": "string",
+                "minLength": 1,
+                "description": "One bash command to run inside the persistent sandbox workspace.",
+            }
+        },
+        "required": ["command"],
+    }
+
+
+def test_require_mcp_tool_raises_a_typed_error_for_unknown_names() -> None:
+    """Unknown MCP tool lookups should preserve the registry's typed error surface."""
+    with pytest.raises(UnknownToolError, match="not registered"):
+        DEFAULT_MCP_TOOL_CLIENT.require_mcp_tool("missing_tool")
