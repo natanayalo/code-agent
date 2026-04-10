@@ -503,7 +503,7 @@ Scope notes:
 - `view_file`: read a file with optional line-range windowing; include line numbers in output
 - `str_replace_editor`: replace an exact string occurrence in a file; fail clearly on ambiguous or missing match
 - `search_file`: regex/literal search within a single file, returning matching lines with context
-- `search_dir`: regex/literal search across a directory tree, returning file paths and matching lines
+- `search_dir`: regex/literal search across a directory tree, returning file paths and matching lines with context
 - register all tools in the tool registry with appropriate permission levels (`workspace_write` for editor, `read_only` for the rest)
 - feed tool definitions into prompt construction via the existing registry path
 - keep tool implementations small; delegate to shell commands where practical (e.g., `grep -rn --exclude-dir=.git --exclude-dir=__pycache__` for search_dir)
@@ -531,6 +531,26 @@ Acceptance:
 - extraction is bounded and does not blow up the prompt on large config files
 - repos with no recognizable build config work exactly as before
 - unit tests verify extraction for Python and Node.js project layouts
+
+---
+
+## T-104 — API authentication (pulled ahead of Milestone 12)
+
+### T-104 Add API authentication
+Add shared-secret or signature-based authentication for the HTTP task and webhook endpoints.
+
+Scope notes:
+- protect both `/tasks` and `/webhook` with a consistent auth mechanism
+- support at minimum a shared secret via header (e.g., `X-Webhook-Token`) for generic callers
+- support provider-specific signature verification (e.g., Telegram `X-Telegram-Bot-Api-Secret-Token`) where applicable
+- auth should be a FastAPI dependency so it is reusable across routers
+- unauthenticated requests should be rejected with 401/403 before any task processing begins
+
+Acceptance:
+- unauthenticated requests to `/tasks` and `/webhook` are rejected
+- authenticated requests proceed normally
+- Telegram adapter uses provider-specific verification when available
+- auth mechanism is configurable via environment variable, not hardcoded
 
 ---
 
@@ -600,22 +620,6 @@ Acceptance:
 - lint/format errors are surfaced in the verifier report, not swallowed
 - repos with no detectable lint/format config skip this step cleanly
 - unit tests verify detection, execution, and error handling
-
-### T-104 Add API authentication
-Add shared-secret or signature-based authentication for the HTTP task and webhook endpoints.
-
-Scope notes:
-- protect both `/tasks` and `/webhook` with a consistent auth mechanism
-- support at minimum a shared secret via header (e.g., `X-Webhook-Token`) for generic callers
-- support provider-specific signature verification (e.g., Telegram `X-Telegram-Bot-Api-Secret-Token`) where applicable
-- auth should be a FastAPI dependency so it is reusable across routers
-- unauthenticated requests should be rejected with 401/403 before any task processing begins
-
-Acceptance:
-- unauthenticated requests to `/tasks` and `/webhook` are rejected
-- authenticated requests proceed normally
-- Telegram adapter uses provider-specific verification when available
-- auth mechanism is configurable via environment variable, not hardcoded
 
 ---
 

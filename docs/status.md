@@ -73,7 +73,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: T-104 (auth), then Milestone 11 tasks in order: T-083, T-080, T-087, T-081, T-082.
+- Current target order from here: T-104 (auth), then Milestone 11 tasks in order: T-083, T-080, T-087, T-081, T-082, T-088, T-089, T-107.
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.
