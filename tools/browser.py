@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, ValidationError, model_validator
 
-from tools.registry import ToolModel
+from tools.registry import DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS, ToolModel
 
 _SEARCH_ENDPOINT = "https://en.wikipedia.org/w/api.php"
 
@@ -40,8 +40,12 @@ class BrowserToolRequest(ToolModel):
             assert self.url is not None
             _validate_http_url(self.url)
             self._reject_fields("query")
-            if "limit" in self.model_fields_set and self.limit != 5:
-                raise BrowserToolError("Browser fetch requests do not support custom `limit`.")
+            limit_default = type(self).model_fields["limit"].default
+            if "limit" in self.model_fields_set and self.limit != limit_default:
+                raise BrowserToolError(
+                    "Browser fetch requests do not support custom `limit` "
+                    f"(default is {limit_default})."
+                )
             return self
 
         if self.operation == BrowserOperation.SEARCH:
@@ -114,7 +118,7 @@ def build_browser_command(request: BrowserToolRequest) -> str:
         "--silent",
         "--show-error",
         "--location",
-        "--max-time=20",
+        f"--max-time={DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS}",
     ]
 
     if request.operation == BrowserOperation.FETCH:
@@ -124,12 +128,15 @@ def build_browser_command(request: BrowserToolRequest) -> str:
 
     if request.operation == BrowserOperation.SEARCH:
         assert request.query is not None
+        query = request.query
+        if query.startswith(("@", "<")):
+            query = f"\\{query}"
         tokens.extend(
             [
                 "--get",
                 f"--url={_SEARCH_ENDPOINT}",
                 "--data-urlencode=action=opensearch",
-                f"--data-urlencode=search={request.query}",
+                f"--data-urlencode=search={query}",
                 f"--data-urlencode=limit={request.limit}",
                 "--data-urlencode=namespace=0",
                 "--data-urlencode=format=json",

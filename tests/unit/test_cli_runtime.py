@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from sandbox import DockerShellCommandResult, DockerShellSessionError
-from tools import DEFAULT_TOOL_REGISTRY, McpToolClient, ToolPermissionLevel, ToolRegistry
+from tools import (
+    DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS,
+    DEFAULT_TOOL_REGISTRY,
+    McpToolClient,
+    ToolPermissionLevel,
+    ToolRegistry,
+)
 from workers.cli_runtime import (
     CliRuntimeBudgetLedger,
     CliRuntimeMessage,
@@ -291,6 +297,13 @@ def test_run_cli_runtime_loop_executes_github_helper_requests() -> None:
 
 def test_run_cli_runtime_loop_executes_browser_helper_requests() -> None:
     """Browser helper tool calls should be normalized into safe curl commands."""
+    expected_browser_command = (
+        "curl --fail --silent --show-error --location "
+        f"--max-time={DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS} --get "
+        "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
+        "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
+        "--data-urlencode=namespace=0 --data-urlencode=format=json"
+    )
     adapter = _ScriptedAdapter(
         [
             CliRuntimeStep(
@@ -303,14 +316,8 @@ def test_run_cli_runtime_loop_executes_browser_helper_requests() -> None:
     )
     session = _FakeSession(
         {
-            "curl --fail --silent --show-error --location --max-time=20 --get "
-            "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
-            "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
-            "--data-urlencode=namespace=0 --data-urlencode=format=json": _command_result(
-                "curl --fail --silent --show-error --location --max-time=20 --get "
-                "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
-                "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
-                "--data-urlencode=namespace=0 --data-urlencode=format=json",
+            expected_browser_command: _command_result(
+                expected_browser_command,
                 output='["langgraph", ["LangGraph"], ["A framework"], ["https://example.com"]]\n',
             )
         }
@@ -326,12 +333,7 @@ def test_run_cli_runtime_loop_executes_browser_helper_requests() -> None:
 
     assert execution.status == "success"
     assert len(session.calls) == 1
-    assert (
-        session.calls[0][0] == "curl --fail --silent --show-error --location --max-time=20 --get "
-        "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
-        "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
-        "--data-urlencode=namespace=0 --data-urlencode=format=json"
-    )
+    assert session.calls[0][0] == expected_browser_command
     assert 1 <= session.calls[0][1] <= 30
     assert "Tool call: execute_browser" in execution.messages[1].content
     assert "Tool result: execute_browser" in execution.messages[2].content

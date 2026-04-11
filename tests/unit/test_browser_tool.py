@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
+import shlex
+
 import pytest
 
-from tools import BrowserToolError, build_browser_command_from_input
+from tools import (
+    DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS,
+    BrowserToolError,
+    build_browser_command_from_input,
+)
+
+_CURL_PREFIX = (
+    "curl --fail --silent --show-error --location "
+    f"--max-time={DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS}"
+)
 
 
 def test_build_browser_command_from_input_supports_fetch() -> None:
@@ -13,10 +24,7 @@ def test_build_browser_command_from_input_supports_fetch() -> None:
         '{"operation":"fetch","url":"https://example.com/docs"}'
     )
 
-    assert (
-        command == "curl --fail --silent --show-error --location --max-time=20 "
-        "--url=https://example.com/docs"
-    )
+    assert command == f"{_CURL_PREFIX} --url=https://example.com/docs"
 
 
 def test_build_browser_command_from_input_supports_search_with_default_limit() -> None:
@@ -24,7 +32,7 @@ def test_build_browser_command_from_input_supports_search_with_default_limit() -
     command = build_browser_command_from_input('{"operation":"search","query":"langgraph"}')
 
     assert command == (
-        "curl --fail --silent --show-error --location --max-time=20 --get "
+        f"{_CURL_PREFIX} --get "
         "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
         "--data-urlencode=search=langgraph --data-urlencode=limit=5 "
         "--data-urlencode=namespace=0 --data-urlencode=format=json"
@@ -38,7 +46,7 @@ def test_build_browser_command_from_input_supports_search_with_explicit_limit() 
     )
 
     assert command == (
-        "curl --fail --silent --show-error --location --max-time=20 --get "
+        f"{_CURL_PREFIX} --get "
         "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
         "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
         "--data-urlencode=namespace=0 --data-urlencode=format=json"
@@ -51,10 +59,7 @@ def test_build_browser_command_from_input_allows_fetch_with_explicit_default_lim
         '{"operation":"fetch","url":"https://example.com/docs","limit":5}'
     )
 
-    assert (
-        command == "curl --fail --silent --show-error --location --max-time=20 "
-        "--url=https://example.com/docs"
-    )
+    assert command == f"{_CURL_PREFIX} --url=https://example.com/docs"
 
 
 def test_build_browser_command_from_input_rejects_fetch_with_custom_limit() -> None:
@@ -63,6 +68,29 @@ def test_build_browser_command_from_input_rejects_fetch_with_custom_limit() -> N
         build_browser_command_from_input(
             '{"operation":"fetch","url":"https://example.com/docs","limit":3}'
         )
+
+
+@pytest.mark.parametrize(
+    ("query_input", "expected_encoded_query"),
+    [
+        ("@private.txt", "\\@private.txt"),
+        ("<private.txt", "\\<private.txt"),
+    ],
+)
+def test_build_browser_command_from_input_escapes_dangerous_query_prefixes(
+    query_input: str,
+    expected_encoded_query: str,
+) -> None:
+    """Search queries starting with curl file-prefix tokens should be escaped."""
+    command = build_browser_command_from_input(
+        f'{{"operation":"search","query":"{query_input}","limit":3}}'
+    )
+
+    tokens = shlex.split(command)
+
+    assert f"--max-time={DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS}" in tokens
+    assert "--data-urlencode=action=opensearch" in tokens
+    assert f"--data-urlencode=search={expected_encoded_query}" in tokens
 
 
 def test_build_browser_command_from_input_rejects_invalid_json() -> None:
