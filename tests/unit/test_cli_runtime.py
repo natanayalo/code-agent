@@ -299,7 +299,7 @@ def test_run_cli_runtime_loop_executes_browser_helper_requests() -> None:
     """Browser helper tool calls should be normalized into safe curl commands."""
     expected_browser_command = (
         "curl --fail --silent --show-error --location "
-        f"--max-time={DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS} --get "
+        f"--max-time={DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS} --globoff --get "
         "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
         "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
         "--data-urlencode=namespace=0 --data-urlencode=format=json"

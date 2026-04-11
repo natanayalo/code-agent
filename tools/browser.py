@@ -119,6 +119,7 @@ def build_browser_command(request: BrowserToolRequest) -> str:
         "--show-error",
         "--location",
         f"--max-time={DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS}",
+        "--globoff",
     ]
 
     if request.operation == BrowserOperation.FETCH:
@@ -128,15 +129,12 @@ def build_browser_command(request: BrowserToolRequest) -> str:
 
     if request.operation == BrowserOperation.SEARCH:
         assert request.query is not None
-        query = request.query
-        if query.startswith(("@", "<")):
-            query = f"\\{query}"
         tokens.extend(
             [
                 "--get",
                 f"--url={_SEARCH_ENDPOINT}",
                 "--data-urlencode=action=opensearch",
-                f"--data-urlencode=search={query}",
+                f"--data-urlencode=search={request.query}",
                 f"--data-urlencode=limit={request.limit}",
                 "--data-urlencode=namespace=0",
                 "--data-urlencode=format=json",

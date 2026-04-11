@@ -14,7 +14,7 @@ from tools import (
 
 _CURL_PREFIX = (
     "curl --fail --silent --show-error --location "
-    f"--max-time={DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS}"
+    f"--max-time={DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS} --globoff"
 )
 
 
@@ -71,26 +71,28 @@ def test_build_browser_command_from_input_rejects_fetch_with_custom_limit() -> N
 
 
 @pytest.mark.parametrize(
-    ("query_input", "expected_encoded_query"),
+    ("query_input", "expected_query"),
     [
-        ("@private.txt", "\\@private.txt"),
-        ("<private.txt", "\\<private.txt"),
+        ("@private.txt", "@private.txt"),
+        ("<private.txt", "<private.txt"),
+        ("=private.txt", "=private.txt"),
     ],
 )
-def test_build_browser_command_from_input_escapes_dangerous_query_prefixes(
+def test_build_browser_command_from_input_preserves_literal_query_prefixes(
     query_input: str,
-    expected_encoded_query: str,
+    expected_query: str,
 ) -> None:
-    """Search queries starting with curl file-prefix tokens should be escaped."""
+    """Search queries should remain literal when passed with the name=content curl form."""
     command = build_browser_command_from_input(
         f'{{"operation":"search","query":"{query_input}","limit":3}}'
     )
 
     tokens = shlex.split(command)
 
+    assert "--globoff" in tokens
     assert f"--max-time={DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS}" in tokens
     assert "--data-urlencode=action=opensearch" in tokens
-    assert f"--data-urlencode=search={expected_encoded_query}" in tokens
+    assert f"--data-urlencode=search={expected_query}" in tokens
 
 
 def test_build_browser_command_from_input_rejects_invalid_json() -> None:
