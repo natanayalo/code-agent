@@ -12,6 +12,7 @@ from workers.base import WorkerRequest
 DEFAULT_REPO_LISTING_MAX_DEPTH = 2
 DEFAULT_REPO_LISTING_MAX_ENTRIES = 40
 DEFAULT_AGENTS_MAX_CHARACTERS = 6000
+DEFAULT_AGENTS_ASSET_READ_MAX_CHARACTERS = 8192
 _TRUNCATED_MARKER = "\n... (truncated)"
 _AGENTS_ASSET_DIRECTORIES = ("skills", "workflows", "rules")
 _SKIPPED_PATH_NAMES = {
@@ -106,6 +107,14 @@ def _truncate_to_budget(value: str, *, max_characters: int) -> str:
     return f"{value[:available].rstrip()}{marker}"
 
 
+def _read_text_prefix(path: Path, *, max_characters: int) -> str:
+    """Read up to a bounded number of characters from a text file."""
+    if max_characters <= 0:
+        return ""
+    with path.open("r", encoding="utf-8", errors="replace") as file_handle:
+        return file_handle.read(max_characters)
+
+
 def _extract_front_matter_metadata(contents: str) -> tuple[str | None, str | None, str]:
     """Extract markdown front matter name/description and return remaining body."""
     lines = contents.splitlines()
@@ -162,7 +171,10 @@ def _summarize_agents_asset(
 ) -> str | None:
     """Render one .agents markdown file into a concise prompt summary line."""
     try:
-        contents = file_path.read_text(encoding="utf-8", errors="replace").strip()
+        contents = _read_text_prefix(
+            file_path,
+            max_characters=DEFAULT_AGENTS_ASSET_READ_MAX_CHARACTERS,
+        ).strip()
     except OSError:
         return None
     if not contents:
@@ -187,6 +199,8 @@ def read_workspace_agents_assets_guidance(
         return None
 
     lines: list[str] = []
+    current_characters = 0
+    exceeded_budget = False
     agents_root = workspace_path / ".agents"
     if not agents_root.is_dir():
         return None
@@ -210,6 +224,14 @@ def read_workspace_agents_assets_guidance(
             if summary_line is None:
                 continue
             lines.append(summary_line)
+            if current_characters:
+                current_characters += 1
+            current_characters += len(summary_line)
+            if current_characters > max_characters:
+                exceeded_budget = True
+                break
+        if exceeded_budget:
+            break
 
     if not lines:
         return None
@@ -231,7 +253,10 @@ def read_workspace_repo_guidance(
 
     if agents_path.is_file():
         try:
-            agents_contents = agents_path.read_text(encoding="utf-8", errors="replace").strip()
+            agents_contents = _read_text_prefix(
+                agents_path,
+                max_characters=remaining + 1,
+            ).strip()
         except OSError:
             agents_contents = ""
         if agents_contents:
