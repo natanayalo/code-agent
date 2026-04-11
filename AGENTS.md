@@ -79,6 +79,12 @@ For each task:
 5. Run verification
 6. Summarize what changed, what was verified, and any follow-ups
 
+## Python tooling environment
+
+- Use the repository virtualenv explicitly for Python tooling and checks.
+- Prefer `.venv/bin/...` invocations (for example: `.venv/bin/pytest`, `.venv/bin/pre-commit`, `.venv/bin/ruff`, `.venv/bin/mypy`).
+- Do not rely on globally installed `python`, `pytest`, or `pre-commit` binaries.
+
 ## Definition of done
 
 A task is done only if:
