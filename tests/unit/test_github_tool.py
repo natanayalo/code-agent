@@ -16,8 +16,8 @@ def test_build_github_command_from_input_supports_pr_create_draft() -> None:
     )
 
     assert command == (
-        "gh pr create --draft --repo openai/code-agent --base master --head task/t-081 "
-        "--title 'feat: add wrapper' --body 'Adds the GitHub wrapper.'"
+        "gh pr create --draft --repo=openai/code-agent --base=master --head=task/t-081 "
+        "'--title=feat: add wrapper' '--body=Adds the GitHub wrapper.'"
     )
 
 
@@ -28,7 +28,7 @@ def test_build_github_command_from_input_supports_pr_comment() -> None:
         '"pr_number":59,"comment_body":"Looks good."}'
     )
 
-    assert command == "gh pr comment 59 --repo openai/code-agent --body 'Looks good.'"
+    assert command == "gh pr comment 59 --repo=openai/code-agent '--body=Looks good.'"
 
 
 def test_build_github_command_from_input_supports_repository_name_at_max_length() -> None:
@@ -39,7 +39,7 @@ def test_build_github_command_from_input_supports_repository_name_at_max_length(
         '"pr_number":59,"comment_body":"Looks good."}'
     )
 
-    assert command == (f"gh pr comment 59 --repo openai/{repository_name} --body 'Looks good.'")
+    assert command == (f"gh pr comment 59 --repo=openai/{repository_name} '--body=Looks good.'")
 
 
 def test_build_github_command_from_input_supports_leading_dot_repository_names() -> None:
@@ -49,7 +49,7 @@ def test_build_github_command_from_input_supports_leading_dot_repository_names()
         '"pr_number":59,"comment_body":"Looks good."}'
     )
 
-    assert command == "gh pr comment 59 --repo openai/.github --body 'Looks good.'"
+    assert command == "gh pr comment 59 --repo=openai/.github '--body=Looks good.'"
 
 
 def test_build_github_command_from_input_rejects_invalid_json() -> None:

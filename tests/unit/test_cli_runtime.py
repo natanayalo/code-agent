@@ -266,8 +266,8 @@ def test_run_cli_runtime_loop_executes_github_helper_requests() -> None:
     )
     session = _FakeSession(
         {
-            "gh pr comment 59 --repo openai/code-agent --body 'Looks good.'": _command_result(
-                "gh pr comment 59 --repo openai/code-agent --body 'Looks good.'",
+            "gh pr comment 59 --repo=openai/code-agent '--body=Looks good.'": _command_result(
+                "gh pr comment 59 --repo=openai/code-agent '--body=Looks good.'",
                 output="comment-url\n",
             )
         }
@@ -283,7 +283,7 @@ def test_run_cli_runtime_loop_executes_github_helper_requests() -> None:
 
     assert execution.status == "success"
     assert len(session.calls) == 1
-    assert session.calls[0][0] == "gh pr comment 59 --repo openai/code-agent --body 'Looks good.'"
+    assert session.calls[0][0] == "gh pr comment 59 --repo=openai/code-agent '--body=Looks good.'"
     assert 1 <= session.calls[0][1] <= 30
     assert "Tool call: execute_github" in execution.messages[1].content
     assert "Tool result: execute_github" in execution.messages[2].content

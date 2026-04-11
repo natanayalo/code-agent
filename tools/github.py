@@ -138,16 +138,11 @@ def build_github_command(request: GitHubToolRequest) -> str:
             [
                 "create",
                 "--draft",
-                "--repo",
-                request.repository_full_name,
-                "--base",
-                request.base_branch,
-                "--head",
-                request.head_branch,
-                "--title",
-                request.title,
-                "--body",
-                request.body,
+                f"--repo={request.repository_full_name}",
+                f"--base={request.base_branch}",
+                f"--head={request.head_branch}",
+                f"--title={request.title}",
+                f"--body={request.body}",
             ]
         )
         return shlex.join(tokens)
@@ -159,10 +154,8 @@ def build_github_command(request: GitHubToolRequest) -> str:
             [
                 "comment",
                 str(request.pr_number),
-                "--repo",
-                request.repository_full_name,
-                "--body",
-                request.comment_body,
+                f"--repo={request.repository_full_name}",
+                f"--body={request.comment_body}",
             ]
         )
         return shlex.join(tokens)
