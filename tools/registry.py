@@ -298,6 +298,7 @@ EXECUTE_BROWSER_TOOL = ToolDefinition(
     name=EXECUTE_BROWSER_TOOL_NAME,
     description=(
         "Run one structured browser helper request through curl. "
+        "The search operation uses the Wikipedia OpenSearch API. "
         "Provide tool_input as a JSON object string with an `operation` field "
         "plus operation-specific fields."
     ),
@@ -328,7 +329,7 @@ EXECUTE_BROWSER_TOOL = ToolDefinition(
                 "description": "Query string for search operations.",
             },
             "limit": {
-                "type": ["integer", "null"],
+                "type": "integer",
                 "minimum": 1,
                 "maximum": 10,
                 "description": "Result limit for search operations.",

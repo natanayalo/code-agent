@@ -76,11 +76,13 @@ def test_default_mcp_tool_client_exposes_execute_browser_descriptor() -> None:
     tool = DEFAULT_MCP_TOOL_CLIENT.require_mcp_tool(" execute_browser ")
 
     assert tool.name == "execute_browser"
+    assert "Wikipedia OpenSearch API" in tool.description
     assert tool.input_schema["required"] == ["operation"]
     assert tool.input_schema["properties"]["operation"]["enum"] == [
         "fetch",
         "search",
     ]
+    assert tool.input_schema["properties"]["limit"]["type"] == "integer"
 
 
 def test_tool_registry_caches_a_reusable_mcp_client() -> None:
