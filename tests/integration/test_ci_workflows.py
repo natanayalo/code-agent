@@ -80,7 +80,7 @@ def test_pytest_workflow_runs_on_push_and_enforces_coverage() -> None:
     ):
         assert expected_flag in run_step["run"]
 
-    assert upload_step["uses"] == "actions/upload-artifact@v4"
+    assert upload_step["uses"] == "actions/upload-artifact@v7"
     assert upload_step["with"]["path"] == "coverage.xml"
 
 
