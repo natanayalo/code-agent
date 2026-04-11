@@ -83,6 +83,7 @@ def test_default_mcp_tool_client_exposes_execute_browser_descriptor() -> None:
         "search",
     ]
     assert tool.input_schema["properties"]["limit"]["type"] == "integer"
+    assert tool.input_schema["properties"]["limit"]["default"] == 5
 
 
 def test_tool_registry_caches_a_reusable_mcp_client() -> None:

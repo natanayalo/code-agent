@@ -110,15 +110,22 @@ def _summarize_validation_error(exc: ValidationError) -> str:
     return f"Browser helper input validation failed: {'; '.join(details)}"
 
 
-def build_browser_command(request: BrowserToolRequest) -> str:
+def build_browser_command(
+    request: BrowserToolRequest,
+    *,
+    timeout_seconds: int | None = None,
+) -> str:
     """Render a safe shell command for one normalized browser/search request."""
+    resolved_timeout_seconds = (
+        DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds
+    )
     tokens: list[str] = [
         "curl",
         "--fail",
         "--silent",
         "--show-error",
         "--location",
-        f"--max-time={DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS}",
+        f"--max-time={resolved_timeout_seconds}",
         "--globoff",
     ]
 
@@ -145,6 +152,13 @@ def build_browser_command(request: BrowserToolRequest) -> str:
     raise BrowserToolError(f"Unsupported browser operation: {request.operation}")
 
 
-def build_browser_command_from_input(raw_input: str) -> str:
+def build_browser_command_from_input(
+    raw_input: str,
+    *,
+    timeout_seconds: int | None = None,
+) -> str:
     """Parse runtime tool input and render the corresponding browser helper command."""
-    return build_browser_command(parse_browser_tool_input(raw_input))
+    return build_browser_command(
+        parse_browser_tool_input(raw_input),
+        timeout_seconds=timeout_seconds,
+    )

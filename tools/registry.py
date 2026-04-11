@@ -332,6 +332,7 @@ EXECUTE_BROWSER_TOOL = ToolDefinition(
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 10,
+                "default": 5,
                 "description": "Result limit for search operations.",
             },
         },

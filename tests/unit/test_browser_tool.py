@@ -27,6 +27,19 @@ def test_build_browser_command_from_input_supports_fetch() -> None:
     assert command == f"{_CURL_PREFIX} --url=https://example.com/docs"
 
 
+def test_build_browser_command_from_input_supports_custom_timeout_override() -> None:
+    """The optional timeout override should flow into the rendered curl command."""
+    command = build_browser_command_from_input(
+        '{"operation":"fetch","url":"https://example.com/docs"}',
+        timeout_seconds=9,
+    )
+
+    assert command == (
+        "curl --fail --silent --show-error --location "
+        "--max-time=9 --globoff --url=https://example.com/docs"
+    )
+
+
 def test_build_browser_command_from_input_supports_search_with_default_limit() -> None:
     """Search requests should render deterministic curl commands with default limits."""
     command = build_browser_command_from_input('{"operation":"search","query":"langgraph"}')

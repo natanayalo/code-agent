@@ -313,7 +313,10 @@ def _resolve_tool_command(tool: ToolDefinition, raw_input: str) -> str:
     """Normalize tool input into the concrete shell command executed in the sandbox."""
     command = raw_input.strip()
     if tool.name == EXECUTE_BROWSER_TOOL_NAME:
-        return build_browser_command_from_input(command)
+        return build_browser_command_from_input(
+            command,
+            timeout_seconds=tool.timeout_seconds,
+        )
     if tool.name == EXECUTE_GIT_TOOL_NAME:
         return build_git_command_from_input(command)
     if tool.name == EXECUTE_GITHUB_TOOL_NAME:
