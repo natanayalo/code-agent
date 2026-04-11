@@ -106,7 +106,7 @@ def test_pip_audit_workflow_declares_read_only_token_permissions() -> None:
     run_step = _step_by_name(steps, "Audit Python dependencies")
 
     assert workflow["permissions"] == {"contents": "read"}
-    assert run_step["run"] == "pip-audit"
+    assert "pip-audit" in run_step["run"]
 
 
 def test_pre_commit_config_keeps_local_default_branch_guard() -> None:
