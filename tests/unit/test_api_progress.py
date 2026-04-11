@@ -143,7 +143,7 @@ async def test_webhook_callback_progress_notifier_revalidates_callback_target(mo
         return value
 
     monkeypatch.setattr(
-        "apps.api.progress._validate_callback_url",
+        "apps.api.progress.validate_callback_url",
         fake_validate_callback_url,
     )
 
@@ -183,7 +183,7 @@ async def test_webhook_callback_progress_notifier_fails_closed_on_revalidation_e
         raise ValueError("callback_url must not target a private or local address.")
 
     monkeypatch.setattr(
-        "apps.api.progress._validate_callback_url",
+        "apps.api.progress.validate_callback_url",
         fake_validate_callback_url,
     )
 

@@ -148,7 +148,7 @@ def _resolve_callback_hostname(
     return resolved_addresses
 
 
-def _validate_callback_url(value: str | None) -> str | None:
+def validate_callback_url(value: str | None) -> str | None:
     """Reject callback targets that are malformed or obviously unsafe for outbound POSTs."""
     if value is None:
         return None
@@ -183,6 +183,11 @@ def _validate_callback_url(value: str | None) -> str | None:
     return value
 
 
+def _validate_callback_url(value: str | None) -> str | None:
+    """Backward-compatible alias for callers/tests that still reference the private name."""
+    return validate_callback_url(value)
+
+
 class TaskSubmission(ExecutionModel):
     """HTTP payload accepted by the minimal task-submission endpoint."""
 
@@ -200,7 +205,7 @@ class TaskSubmission(ExecutionModel):
     @classmethod
     def validate_callback_url(cls, value: str | None) -> str | None:
         """Ensure callback URLs are safe for outbound progress delivery."""
-        return _validate_callback_url(value)
+        return validate_callback_url(value)
 
 
 class ArtifactSnapshot(ExecutionModel):

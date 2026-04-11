@@ -15,7 +15,7 @@ from orchestrator.execution import (
     ProgressEvent,
     ProgressNotifier,
     TaskSubmission,
-    _validate_callback_url,
+    validate_callback_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -178,7 +178,7 @@ class WebhookCallbackProgressNotifier:
 
         # Re-validate just before each outbound delivery so DNS rebinding or
         # network topology changes after ingress validation fail closed.
-        callback_url = _validate_callback_url(submission.callback_url)
+        callback_url = await asyncio.to_thread(validate_callback_url, submission.callback_url)
         if callback_url is None:
             return
 
