@@ -31,6 +31,17 @@ def test_build_github_command_from_input_supports_pr_comment() -> None:
     assert command == "gh pr comment 59 --repo openai/code-agent --body 'Looks good.'"
 
 
+def test_build_github_command_from_input_supports_repository_name_at_max_length() -> None:
+    """Repository names with 100 characters should remain valid."""
+    repository_name = "a" * 100
+    command = build_github_command_from_input(
+        f'{{"operation":"pr_comment","repository_full_name":"openai/{repository_name}",'
+        '"pr_number":59,"comment_body":"Looks good."}'
+    )
+
+    assert command == (f"gh pr comment 59 --repo openai/{repository_name} --body 'Looks good.'")
+
+
 def test_build_github_command_from_input_rejects_invalid_json() -> None:
     """The GitHub helper should fail clearly when runtime input is invalid JSON."""
     with pytest.raises(GitHubToolError, match="valid JSON"):
@@ -55,6 +66,7 @@ def test_build_github_command_from_input_rejects_invalid_repository_shape() -> N
         "owner-/repo",
         "owner/.repo",
         "owner/repo.git",
+        f"owner/{'a' * 101}",
     ],
 )
 def test_build_github_command_from_input_rejects_invalid_owner_names(
@@ -83,6 +95,15 @@ def test_build_github_command_from_input_rejects_pr_create_only_fields_on_commen
         build_github_command_from_input(
             '{"operation":"pr_comment","repository_full_name":"openai/code-agent",'
             '"pr_number":59,"comment_body":"Looks good.","title":"unexpected"}'
+        )
+
+
+def test_build_github_command_from_input_rejects_empty_unsupported_fields() -> None:
+    """Unsupported fields should be rejected even when passed as empty strings."""
+    with pytest.raises(GitHubToolError, match="do not support `title`"):
+        build_github_command_from_input(
+            '{"operation":"pr_comment","repository_full_name":"openai/code-agent",'
+            '"pr_number":59,"comment_body":"Looks good.","title":""}'
         )
 
 

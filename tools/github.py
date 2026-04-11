@@ -12,7 +12,7 @@ from pydantic import Field, ValidationError, model_validator
 from tools.registry import ToolModel
 
 _REPOSITORY_OWNER_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
-_REPOSITORY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]*$")
+_REPOSITORY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}$")
 
 
 class GitHubToolError(ValueError):
@@ -75,7 +75,7 @@ class GitHubToolRequest(ToolModel):
             if field_name not in self.model_fields_set:
                 continue
             value = getattr(self, field_name)
-            if value not in (None, ""):
+            if value is not None:
                 raise GitHubToolError(
                     f"GitHub {self.operation.value} requests do not support `{field_name}`."
                 )
