@@ -99,6 +99,16 @@ def test_pre_commit_workflow_runs_on_push_without_ci_branch_guard_failures() -> 
     assert "--hook-stage manual" in run_step["run"]
 
 
+def test_pip_audit_workflow_declares_read_only_token_permissions() -> None:
+    """pip-audit workflow should explicitly scope GITHUB_TOKEN permissions."""
+    workflow = _load_yaml(".github/workflows/pip-audit.yml")
+    steps = _job_steps(workflow, "pip-audit")
+    run_step = _step_by_name(steps, "Audit Python dependencies")
+
+    assert workflow["permissions"] == {"contents": "read"}
+    assert run_step["run"] == "pip-audit"
+
+
 def test_pre_commit_config_keeps_local_default_branch_guard() -> None:
     """Developers should still be blocked from committing directly to main/master locally."""
     config = _load_yaml(".pre-commit-config.yaml")
