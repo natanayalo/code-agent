@@ -12,6 +12,8 @@ from workers.base import WorkerRequest
 DEFAULT_REPO_LISTING_MAX_DEPTH = 2
 DEFAULT_REPO_LISTING_MAX_ENTRIES = 40
 DEFAULT_AGENTS_MAX_CHARACTERS = 6000
+_TRUNCATED_MARKER = "\n... (truncated)"
+_AGENTS_ASSET_DIRECTORIES = ("skills", "workflows", "rules")
 _SKIPPED_PATH_NAMES = {
     ".git",
     ".mypy_cache",
@@ -91,6 +93,158 @@ def read_workspace_agents_guidance(
     return f"{truncated}\n... (truncated)"
 
 
+def _truncate_to_budget(value: str, *, max_characters: int) -> str:
+    """Truncate text while keeping the result length bounded."""
+    if max_characters <= 0:
+        return ""
+    if len(value) <= max_characters:
+        return value
+    marker = _TRUNCATED_MARKER
+    if len(marker) >= max_characters:
+        return marker[:max_characters]
+    available = max_characters - len(marker)
+    return f"{value[:available].rstrip()}{marker}"
+
+
+def _extract_front_matter_metadata(contents: str) -> tuple[str | None, str | None, str]:
+    """Extract markdown front matter name/description and return remaining body."""
+    lines = contents.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None, None, contents
+
+    closing_index = None
+    for index in range(1, min(len(lines), 50)):
+        if lines[index].strip() == "---":
+            closing_index = index
+            break
+    if closing_index is None:
+        return None, None, contents
+
+    name: str | None = None
+    description: str | None = None
+    for line in lines[1:closing_index]:
+        key, separator, raw_value = line.partition(":")
+        if separator != ":":
+            continue
+        normalized_key = key.strip().lower()
+        value = raw_value.strip()
+        if not value:
+            continue
+        if normalized_key == "name":
+            name = value
+        elif normalized_key == "description":
+            description = value
+
+    body = "\n".join(lines[closing_index + 1 :]).strip()
+    return name, description, body
+
+
+def _first_meaningful_line(contents: str) -> str | None:
+    """Return the first non-empty content line useful for a compact summary."""
+    for raw_line in contents.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            stripped = line.lstrip("#").strip()
+            if stripped:
+                return stripped
+            continue
+        return line
+    return None
+
+
+def _summarize_agents_asset(
+    file_path: Path,
+    *,
+    category: str,
+    relative_path: str,
+) -> str | None:
+    """Render one .agents markdown file into a concise prompt summary line."""
+    try:
+        contents = file_path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    if not contents:
+        return None
+
+    name, description, body = _extract_front_matter_metadata(contents)
+    summary_name = name or file_path.stem
+    summary_text = description or _first_meaningful_line(body)
+
+    if summary_text:
+        return f"- {category}/{relative_path}: {summary_name} - {summary_text}"
+    return f"- {category}/{relative_path}: {summary_name}"
+
+
+def read_workspace_agents_assets_guidance(
+    workspace_path: Path,
+    *,
+    max_characters: int,
+) -> str | None:
+    """Return bounded summaries of markdown assets under .agents/."""
+    if max_characters <= 0:
+        return None
+
+    lines: list[str] = []
+    agents_root = workspace_path / ".agents"
+    if not agents_root.is_dir():
+        return None
+
+    for category in _AGENTS_ASSET_DIRECTORIES:
+        category_path = agents_root / category
+        if not category_path.is_dir():
+            continue
+        for file_path in sorted(
+            category_path.rglob("*.md"),
+            key=lambda path: path.as_posix().lower(),
+        ):
+            if not file_path.is_file():
+                continue
+            relative_path = file_path.relative_to(category_path).as_posix()
+            summary_line = _summarize_agents_asset(
+                file_path,
+                category=category,
+                relative_path=relative_path,
+            )
+            if summary_line is None:
+                continue
+            lines.append(summary_line)
+
+    if not lines:
+        return None
+    return _truncate_to_budget("\n".join(lines), max_characters=max_characters)
+
+
+def read_workspace_repo_guidance(
+    workspace_path: Path,
+    *,
+    max_characters: int = DEFAULT_AGENTS_MAX_CHARACTERS,
+) -> tuple[str | None, str | None]:
+    """Return bounded AGENTS.md and .agents guidance within one shared budget."""
+    if max_characters <= 0:
+        return None, None
+
+    agents_path = workspace_path / "AGENTS.md"
+    agents_guidance: str | None = None
+    remaining = max_characters
+
+    if agents_path.is_file():
+        try:
+            agents_contents = agents_path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            agents_contents = ""
+        if agents_contents:
+            agents_guidance = _truncate_to_budget(agents_contents, max_characters=remaining)
+            remaining -= len(agents_guidance)
+
+    agents_assets_guidance = read_workspace_agents_assets_guidance(
+        workspace_path,
+        max_characters=max(remaining, 0),
+    )
+    return agents_guidance, agents_assets_guidance
+
+
 def build_workspace_directory_listing(
     workspace_path: Path,
     *,
@@ -146,13 +300,22 @@ def build_repo_context_section(workspace_path: Path) -> str:
         build_workspace_directory_listing(workspace_path),
         "```",
     ]
-    agents_guidance = read_workspace_agents_guidance(workspace_path)
+    agents_guidance, agents_assets_guidance = read_workspace_repo_guidance(workspace_path)
     if agents_guidance is not None:
         lines.extend(
             [
                 "AGENTS.md guidance:",
                 "```text",
                 agents_guidance,
+                "```",
+            ]
+        )
+    if agents_assets_guidance is not None:
+        lines.extend(
+            [
+                ".agents guidance:",
+                "```text",
+                agents_assets_guidance,
                 "```",
             ]
         )

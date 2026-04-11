@@ -57,14 +57,13 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-087 Harden outbound callback delivery transport. PR: [#58](https://github.com/natanayalo/code-agent/pull/58)
 - CI/code-scanning follow-up: add explicit read-only workflow permissions for `pip-audit`. PR: [#59](https://github.com/natanayalo/code-agent/pull/59)
 - T-081 Add GitHub wrapper. PR: [#60](https://github.com/natanayalo/code-agent/pull/60)
+- T-082 Add browser/search wrapper. PR: [#61](https://github.com/natanayalo/code-agent/pull/61)
 
 ## In Progress
 
-- None
+- T-088 Read .agents/ skills and workflows from target workspace.
 
 ## Next
-- T-082 Add browser/search wrapper.
-- T-088 Read .agents/ skills and workflows from target workspace.
 - T-089 Add structured file editing tools (view_file, str_replace_editor, search).
 - T-107 Inject repo CI/build config into worker context.
 
@@ -74,7 +73,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: Milestone 11 tasks in order: T-082, T-088, T-089, T-107.
+- Current target order from here: Milestone 11 tasks in order: T-089, T-107.
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.
