@@ -46,6 +46,26 @@ def test_build_github_command_from_input_rejects_invalid_repository_shape() -> N
         )
 
 
+@pytest.mark.parametrize(
+    "repository_full_name",
+    [
+        "_owner/repo",
+        "owner.name/repo",
+        "-owner/repo",
+        "owner-/repo",
+    ],
+)
+def test_build_github_command_from_input_rejects_invalid_owner_names(
+    repository_full_name: str,
+) -> None:
+    """Owner names should align with GitHub account naming constraints."""
+    with pytest.raises(GitHubToolError, match="owner/name"):
+        build_github_command_from_input(
+            f'{{"operation":"pr_comment","repository_full_name":"{repository_full_name}",'
+            '"pr_number":59,"comment_body":"Looks good."}'
+        )
+
+
 def test_build_github_command_from_input_rejects_hyphen_prefixed_branches() -> None:
     """Draft PR creation should reject branch names that can be mistaken for flags."""
     with pytest.raises(GitHubToolError, match="cannot start with a hyphen"):

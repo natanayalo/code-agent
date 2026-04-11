@@ -53,7 +53,7 @@ def test_default_tool_registry_exposes_execute_github_metadata() -> None:
     assert tool.capability_category == ToolCapabilityCategory.GITHUB
     assert tool.side_effect_level == ToolSideEffectLevel.WORKSPACE_WRITE
     assert tool.required_permission == ToolPermissionLevel.NETWORKED_WRITE
-    assert tool.timeout_seconds == 45
+    assert tool.timeout_seconds == 60
     assert tool.network_required is True
     assert tool.expected_artifacts == (
         ToolExpectedArtifact.STDOUT,

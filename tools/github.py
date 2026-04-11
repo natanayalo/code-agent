@@ -11,7 +11,9 @@ from pydantic import Field, ValidationError, model_validator
 
 from tools.registry import ToolModel
 
-_REPOSITORY_FULL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_REPOSITORY_FULL_NAME_PATTERN = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}/[A-Za-z0-9_.-]+$"
+)
 
 
 class GitHubToolError(ValueError):
