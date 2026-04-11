@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from sandbox import DockerShellCommandResult, DockerShellSessionError
-from tools import DEFAULT_TOOL_REGISTRY, McpToolClient, ToolPermissionLevel, ToolRegistry
+from tools import (
+    DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS,
+    DEFAULT_TOOL_REGISTRY,
+    McpToolClient,
+    ToolPermissionLevel,
+    ToolRegistry,
+)
 from workers.cli_runtime import (
     CliRuntimeBudgetLedger,
     CliRuntimeMessage,
@@ -287,6 +293,95 @@ def test_run_cli_runtime_loop_executes_github_helper_requests() -> None:
     assert 1 <= session.calls[0][1] <= 30
     assert "Tool call: execute_github" in execution.messages[1].content
     assert "Tool result: execute_github" in execution.messages[2].content
+
+
+def test_run_cli_runtime_loop_executes_browser_helper_requests() -> None:
+    """Browser helper tool calls should be normalized into safe curl commands."""
+    expected_browser_command = (
+        "curl --fail --silent --show-error --location "
+        f"--max-time={DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS} --globoff --get "
+        "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
+        "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
+        "--data-urlencode=namespace=0 --data-urlencode=format=json"
+    )
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="execute_browser",
+                tool_input='{"operation":"search","query":"langgraph","limit":3}',
+            ),
+            CliRuntimeStep(kind="final", final_output="Collected search results."),
+        ]
+    )
+    session = _FakeSession(
+        {
+            expected_browser_command: _command_result(
+                expected_browser_command,
+                output='["langgraph", ["LangGraph"], ["A framework"], ["https://example.com"]]\n',
+            )
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=2, worker_timeout_seconds=30),
+        granted_permission=ToolPermissionLevel.NETWORKED_WRITE,
+    )
+
+    assert execution.status == "success"
+    assert len(session.calls) == 1
+    assert session.calls[0][0] == expected_browser_command
+    assert 1 <= session.calls[0][1] <= 30
+    assert "Tool call: execute_browser" in execution.messages[1].content
+    assert "Tool result: execute_browser" in execution.messages[2].content
+
+
+def test_run_cli_runtime_loop_uses_browser_tool_timeout_for_command_rendering() -> None:
+    """Browser command generation should use the timeout configured on the tool definition."""
+    browser_tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_browser").model_copy(
+        update={"timeout_seconds": 7}
+    )
+    tool_client = McpToolClient.from_registry(ToolRegistry(tools=(browser_tool,)))
+    expected_browser_command = (
+        "curl --fail --silent --show-error --location "
+        "--max-time=7 --globoff --get "
+        "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
+        "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
+        "--data-urlencode=namespace=0 --data-urlencode=format=json"
+    )
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="execute_browser",
+                tool_input='{"operation":"search","query":"langgraph","limit":3}',
+            ),
+            CliRuntimeStep(kind="final", final_output="Collected search results."),
+        ]
+    )
+    session = _FakeSession(
+        {
+            expected_browser_command: _command_result(
+                expected_browser_command,
+                output='["langgraph", ["LangGraph"], ["A framework"], ["https://example.com"]]\n',
+            )
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=2, worker_timeout_seconds=30),
+        tool_client=tool_client,
+        granted_permission=ToolPermissionLevel.NETWORKED_WRITE,
+    )
+
+    assert execution.status == "success"
+    assert session.calls == [(expected_browser_command, 7)]
 
 
 def test_run_cli_runtime_loop_rejects_invalid_git_helper_input() -> None:
