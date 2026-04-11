@@ -8,6 +8,7 @@ import pytest
 
 from workers.base import WorkerRequest
 from workers.prompt import (
+    DEFAULT_AGENTS_MAX_CHARACTERS,
     build_repo_context_section,
     build_system_prompt,
     build_task_context_section,
@@ -79,6 +80,56 @@ def test_read_workspace_agents_guidance_truncates_long_agents_file(tmp_path: Pat
     guidance = read_workspace_agents_guidance(tmp_path, max_characters=10)
 
     assert guidance == "0123456789\n... (truncated)"
+
+
+def test_build_repo_context_section_includes_agents_asset_summaries(tmp_path: Path) -> None:
+    """Repo context should include bounded summaries from .agents markdown assets."""
+    skills_dir = tmp_path / ".agents" / "skills" / "start-task"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "name: start-task",
+                "description: Start the next implementation slice safely.",
+                "---",
+                "",
+                "# Start Task",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    workflows_dir = tmp_path / ".agents" / "workflows"
+    workflows_dir.mkdir(parents=True)
+    (workflows_dir / "release.md").write_text(
+        "# Release workflow\nUse this for release-day checks.\n",
+        encoding="utf-8",
+    )
+
+    section = build_repo_context_section(tmp_path)
+
+    assert ".agents guidance:" in section
+    assert (
+        "skills/start-task/SKILL.md: start-task - " "Start the next implementation slice safely."
+    ) in section
+    assert "workflows/release.md: release - Release workflow" in section
+
+
+def test_build_repo_context_section_enforces_shared_guidance_budget(tmp_path: Path) -> None:
+    """AGENTS.md and .agents guidance should share one bounded character budget."""
+    (tmp_path / "AGENTS.md").write_text(
+        "A" * (DEFAULT_AGENTS_MAX_CHARACTERS + 50),
+        encoding="utf-8",
+    )
+    skills_dir = tmp_path / ".agents" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "tiny.md").write_text("tiny summary\n", encoding="utf-8")
+
+    section = build_repo_context_section(tmp_path)
+
+    assert "AGENTS.md guidance:" in section
+    assert "... (truncated)" in section
+    assert ".agents guidance:" not in section
 
 
 def test_build_workspace_directory_listing_truncates_when_entry_budget_is_exceeded(
