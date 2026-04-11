@@ -23,6 +23,7 @@ class ToolCapabilityCategory(StrEnum):
 
     SHELL = "shell"
     GIT = "git"
+    GITHUB = "github"
 
 
 class ToolSideEffectLevel(StrEnum):
@@ -123,8 +124,10 @@ class ToolRegistry(ToolModel):
 
 EXECUTE_BASH_TOOL_NAME = "execute_bash"
 EXECUTE_GIT_TOOL_NAME = "execute_git"
+EXECUTE_GITHUB_TOOL_NAME = "execute_github"
 DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS = 60
 DEFAULT_EXECUTE_GIT_TIMEOUT_SECONDS = 30
+DEFAULT_EXECUTE_GITHUB_TIMEOUT_SECONDS = 45
 
 EXECUTE_BASH_TOOL = ToolDefinition(
     name=EXECUTE_BASH_TOOL_NAME,
@@ -227,4 +230,68 @@ EXECUTE_GIT_TOOL = ToolDefinition(
     deterministic=False,
 )
 
-DEFAULT_TOOL_REGISTRY = ToolRegistry(tools=(EXECUTE_BASH_TOOL, EXECUTE_GIT_TOOL))
+EXECUTE_GITHUB_TOOL = ToolDefinition(
+    name=EXECUTE_GITHUB_TOOL_NAME,
+    description=(
+        "Run one structured GitHub helper request through the gh CLI. "
+        "Provide tool_input as a JSON object string with an `operation` field "
+        "plus operation-specific fields."
+    ),
+    capability_category=ToolCapabilityCategory.GITHUB,
+    side_effect_level=ToolSideEffectLevel.WORKSPACE_WRITE,
+    required_permission=ToolPermissionLevel.NETWORKED_WRITE,
+    timeout_seconds=DEFAULT_EXECUTE_GITHUB_TIMEOUT_SECONDS,
+    network_required=True,
+    expected_artifacts=(
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+        ToolExpectedArtifact.CHANGED_FILES,
+    ),
+    mcp_input_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "operation": {
+                "type": "string",
+                "enum": ["pr_create_draft", "pr_comment"],
+                "description": "GitHub helper action to execute.",
+            },
+            "repository_full_name": {
+                "type": "string",
+                "minLength": 3,
+                "description": "Repository in owner/name format.",
+            },
+            "base_branch": {
+                "type": ["string", "null"],
+                "description": "Base branch for pr_create_draft.",
+            },
+            "head_branch": {
+                "type": ["string", "null"],
+                "description": "Head branch for pr_create_draft.",
+            },
+            "title": {
+                "type": ["string", "null"],
+                "description": "PR title for pr_create_draft.",
+            },
+            "body": {
+                "type": ["string", "null"],
+                "description": "PR body for pr_create_draft.",
+            },
+            "pr_number": {
+                "type": ["integer", "null"],
+                "minimum": 1,
+                "description": "Pull request number for pr_comment.",
+            },
+            "comment_body": {
+                "type": ["string", "null"],
+                "description": "Comment body for pr_comment.",
+            },
+        },
+        "required": ["operation", "repository_full_name"],
+    },
+    deterministic=False,
+)
+
+DEFAULT_TOOL_REGISTRY = ToolRegistry(
+    tools=(EXECUTE_BASH_TOOL, EXECUTE_GIT_TOOL, EXECUTE_GITHUB_TOOL)
+)

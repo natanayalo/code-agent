@@ -59,6 +59,18 @@ def test_default_mcp_tool_client_exposes_execute_git_descriptor() -> None:
     ]
 
 
+def test_default_mcp_tool_client_exposes_execute_github_descriptor() -> None:
+    """The MCP client should expose a normalized descriptor for the GitHub helper."""
+    tool = DEFAULT_MCP_TOOL_CLIENT.require_mcp_tool(" execute_github ")
+
+    assert tool.name == "execute_github"
+    assert tool.input_schema["required"] == ["operation", "repository_full_name"]
+    assert tool.input_schema["properties"]["operation"]["enum"] == [
+        "pr_create_draft",
+        "pr_comment",
+    ]
+
+
 def test_tool_registry_caches_a_reusable_mcp_client() -> None:
     """Explicit registries should reuse one MCP client instance across repeated access."""
     assert DEFAULT_TOOL_REGISTRY.mcp_client is DEFAULT_TOOL_REGISTRY.mcp_client

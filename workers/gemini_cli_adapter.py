@@ -89,6 +89,12 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
             "- For `execute_git`, return the tool_input as a compact JSON object encoded "
             'as a string, for example {"operation":"status","porcelain":true}.'
         ),
+        (
+            "- For `execute_github`, return the tool_input as a compact JSON object encoded "
+            "as a string, for example "
+            '{"operation":"pr_comment","repository_full_name":"owner/repo",'
+            '"pr_number":1,"comment_body":"Looks good."}.'
+        ),
         "- If the transcript already contains enough information to finish, return `final`.",
         "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
         "- Return ONLY a raw JSON object. No markdown fences, no extra explanation.",
