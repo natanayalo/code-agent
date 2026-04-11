@@ -13,6 +13,7 @@ from tools.registry import ToolModel
 
 _REPOSITORY_OWNER_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
 _REPOSITORY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-][A-Za-z0-9_.-]{0,99}$")
+_RESERVED_REPOSITORY_NAMES = frozenset({".", ".."})
 
 
 class GitHubToolError(ValueError):
@@ -45,6 +46,7 @@ class GitHubToolRequest(ToolModel):
             not separator
             or not _REPOSITORY_OWNER_PATTERN.fullmatch(owner)
             or not _REPOSITORY_NAME_PATTERN.fullmatch(repository_name)
+            or repository_name in _RESERVED_REPOSITORY_NAMES
             or repository_name.lower().endswith(".git")
         ):
             raise GitHubToolError(

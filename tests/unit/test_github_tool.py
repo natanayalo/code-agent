@@ -75,6 +75,8 @@ def test_build_github_command_from_input_rejects_invalid_repository_shape() -> N
         "-owner/repo",
         "owner-/repo",
         "owner/repo.git",
+        "owner/.",
+        "owner/..",
         f"owner/{'a' * 101}",
     ],
 )
