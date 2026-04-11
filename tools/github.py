@@ -11,9 +11,8 @@ from pydantic import Field, ValidationError, model_validator
 
 from tools.registry import ToolModel
 
-_REPOSITORY_FULL_NAME_PATTERN = re.compile(
-    r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}/[A-Za-z0-9_.-]+$"
-)
+_REPOSITORY_OWNER_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
+_REPOSITORY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]*$")
 
 
 class GitHubToolError(ValueError):
@@ -41,7 +40,13 @@ class GitHubToolRequest(ToolModel):
 
     @model_validator(mode="after")
     def _validate_request(self) -> GitHubToolRequest:
-        if not _REPOSITORY_FULL_NAME_PATTERN.match(self.repository_full_name):
+        owner, separator, repository_name = self.repository_full_name.partition("/")
+        if (
+            not separator
+            or not _REPOSITORY_OWNER_PATTERN.fullmatch(owner)
+            or not _REPOSITORY_NAME_PATTERN.fullmatch(repository_name)
+            or repository_name.lower().endswith(".git")
+        ):
             raise GitHubToolError(
                 "GitHub requests require repository_full_name in 'owner/name' format."
             )
@@ -99,7 +104,23 @@ def parse_github_tool_input(raw_input: str) -> GitHubToolRequest:
     try:
         return GitHubToolRequest.model_validate(payload)
     except ValidationError as exc:
-        raise GitHubToolError(str(exc)) from exc
+        raise GitHubToolError(_summarize_validation_error(exc)) from exc
+
+
+def _summarize_validation_error(exc: ValidationError) -> str:
+    """Render concise Pydantic validation errors for LLM-facing feedback."""
+    errors = exc.errors(include_url=False, include_input=False)
+    details: list[str] = []
+    for error in errors:
+        location = ".".join(str(part) for part in error.get("loc", ()) if part != "__root__")
+        message = str(error.get("msg", "invalid value"))
+        if message.startswith("Value error, "):
+            message = message.removeprefix("Value error, ")
+        details.append(f"{location}: {message}" if location else message)
+
+    if not details:
+        return "GitHub helper input validation failed."
+    return f"GitHub helper input validation failed: {'; '.join(details)}"
 
 
 def build_github_command(request: GitHubToolRequest) -> str:

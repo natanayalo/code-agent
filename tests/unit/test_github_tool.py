@@ -53,12 +53,14 @@ def test_build_github_command_from_input_rejects_invalid_repository_shape() -> N
         "owner.name/repo",
         "-owner/repo",
         "owner-/repo",
+        "owner/.repo",
+        "owner/repo.git",
     ],
 )
 def test_build_github_command_from_input_rejects_invalid_owner_names(
     repository_full_name: str,
 ) -> None:
-    """Owner names should align with GitHub account naming constraints."""
+    """Repository identifiers should align with GitHub owner/repository constraints."""
     with pytest.raises(GitHubToolError, match="owner/name"):
         build_github_command_from_input(
             f'{{"operation":"pr_comment","repository_full_name":"{repository_full_name}",'
@@ -82,3 +84,16 @@ def test_build_github_command_from_input_rejects_pr_create_only_fields_on_commen
             '{"operation":"pr_comment","repository_full_name":"openai/code-agent",'
             '"pr_number":59,"comment_body":"Looks good.","title":"unexpected"}'
         )
+
+
+def test_build_github_command_from_input_reports_concise_validation_errors() -> None:
+    """Validation failures should be concise and exclude Pydantic docs links."""
+    with pytest.raises(GitHubToolError) as exc_info:
+        build_github_command_from_input(
+            '{"operation":"unknown","repository_full_name":"openai/code-agent"}'
+        )
+
+    message = str(exc_info.value)
+    assert "GitHub helper input validation failed" in message
+    assert "operation" in message
+    assert "errors.pydantic.dev" not in message
