@@ -289,6 +289,54 @@ def test_run_cli_runtime_loop_executes_github_helper_requests() -> None:
     assert "Tool result: execute_github" in execution.messages[2].content
 
 
+def test_run_cli_runtime_loop_executes_browser_helper_requests() -> None:
+    """Browser helper tool calls should be normalized into safe curl commands."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="execute_browser",
+                tool_input='{"operation":"search","query":"langgraph","limit":3}',
+            ),
+            CliRuntimeStep(kind="final", final_output="Collected search results."),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "curl --silent --show-error --location --max-time=20 --get "
+            "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
+            "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
+            "--data-urlencode=namespace=0 --data-urlencode=format=json": _command_result(
+                "curl --silent --show-error --location --max-time=20 --get "
+                "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
+                "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
+                "--data-urlencode=namespace=0 --data-urlencode=format=json",
+                output='["langgraph", ["LangGraph"], ["A framework"], ["https://example.com"]]\n',
+            )
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=2, worker_timeout_seconds=30),
+        granted_permission=ToolPermissionLevel.NETWORKED_WRITE,
+    )
+
+    assert execution.status == "success"
+    assert len(session.calls) == 1
+    assert (
+        session.calls[0][0] == "curl --silent --show-error --location --max-time=20 --get "
+        "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
+        "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
+        "--data-urlencode=namespace=0 --data-urlencode=format=json"
+    )
+    assert 1 <= session.calls[0][1] <= 30
+    assert "Tool call: execute_browser" in execution.messages[1].content
+    assert "Tool result: execute_browser" in execution.messages[2].content
+
+
 def test_run_cli_runtime_loop_rejects_invalid_git_helper_input() -> None:
     """Structured git helper requests should fail clearly on invalid tool input."""
     adapter = _ScriptedAdapter(

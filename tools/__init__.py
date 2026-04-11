@@ -1,5 +1,11 @@
 """Tool integration package boundary."""
 
+from tools.browser import (
+    BrowserOperation,
+    BrowserToolError,
+    BrowserToolRequest,
+    build_browser_command_from_input,
+)
 from tools.git import GitOperation, GitToolError, GitToolRequest, build_git_command_from_input
 from tools.github import (
     GitHubOperation,
@@ -17,11 +23,14 @@ from tools.policy import (
 )
 from tools.registry import (
     DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS,
+    DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS,
     DEFAULT_EXECUTE_GIT_TIMEOUT_SECONDS,
     DEFAULT_EXECUTE_GITHUB_TIMEOUT_SECONDS,
     DEFAULT_TOOL_REGISTRY,
     EXECUTE_BASH_TOOL,
     EXECUTE_BASH_TOOL_NAME,
+    EXECUTE_BROWSER_TOOL,
+    EXECUTE_BROWSER_TOOL_NAME,
     EXECUTE_GIT_TOOL,
     EXECUTE_GIT_TOOL_NAME,
     EXECUTE_GITHUB_TOOL,
@@ -37,16 +46,22 @@ from tools.registry import (
 
 __all__ = [
     "DEFAULT_MCP_TOOL_CLIENT",
+    "DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS",
     "DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS",
     "DEFAULT_EXECUTE_GITHUB_TIMEOUT_SECONDS",
     "DEFAULT_EXECUTE_GIT_TIMEOUT_SECONDS",
     "DEFAULT_TOOL_REGISTRY",
+    "EXECUTE_BROWSER_TOOL",
+    "EXECUTE_BROWSER_TOOL_NAME",
     "EXECUTE_BASH_TOOL",
     "EXECUTE_BASH_TOOL_NAME",
     "EXECUTE_GITHUB_TOOL",
     "EXECUTE_GITHUB_TOOL_NAME",
     "EXECUTE_GIT_TOOL",
     "EXECUTE_GIT_TOOL_NAME",
+    "BrowserOperation",
+    "BrowserToolError",
+    "BrowserToolRequest",
     "GitHubOperation",
     "GitHubToolError",
     "GitHubToolRequest",
@@ -64,6 +79,7 @@ __all__ = [
     "ToolSideEffectLevel",
     "UnknownToolError",
     "granted_permission_from_constraints",
+    "build_browser_command_from_input",
     "build_github_command_from_input",
     "build_git_command_from_input",
     "permission_allows",

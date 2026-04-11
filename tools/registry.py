@@ -24,6 +24,7 @@ class ToolCapabilityCategory(StrEnum):
     SHELL = "shell"
     GIT = "git"
     GITHUB = "github"
+    BROWSER = "browser"
 
 
 class ToolSideEffectLevel(StrEnum):
@@ -125,9 +126,11 @@ class ToolRegistry(ToolModel):
 EXECUTE_BASH_TOOL_NAME = "execute_bash"
 EXECUTE_GIT_TOOL_NAME = "execute_git"
 EXECUTE_GITHUB_TOOL_NAME = "execute_github"
+EXECUTE_BROWSER_TOOL_NAME = "execute_browser"
 DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS = 60
 DEFAULT_EXECUTE_GIT_TIMEOUT_SECONDS = 30
 DEFAULT_EXECUTE_GITHUB_TIMEOUT_SECONDS = 60
+DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS = 60
 
 EXECUTE_BASH_TOOL = ToolDefinition(
     name=EXECUTE_BASH_TOOL_NAME,
@@ -291,6 +294,51 @@ EXECUTE_GITHUB_TOOL = ToolDefinition(
     deterministic=False,
 )
 
+EXECUTE_BROWSER_TOOL = ToolDefinition(
+    name=EXECUTE_BROWSER_TOOL_NAME,
+    description=(
+        "Run one structured browser helper request through curl. "
+        "Provide tool_input as a JSON object string with an `operation` field "
+        "plus operation-specific fields."
+    ),
+    capability_category=ToolCapabilityCategory.BROWSER,
+    side_effect_level=ToolSideEffectLevel.READ_ONLY,
+    required_permission=ToolPermissionLevel.NETWORKED_WRITE,
+    timeout_seconds=DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS,
+    network_required=True,
+    expected_artifacts=(
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+    ),
+    mcp_input_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "operation": {
+                "type": "string",
+                "enum": ["fetch", "search"],
+                "description": "Browser helper action to execute.",
+            },
+            "url": {
+                "type": ["string", "null"],
+                "description": "HTTP(S) URL for fetch operations.",
+            },
+            "query": {
+                "type": ["string", "null"],
+                "description": "Query string for search operations.",
+            },
+            "limit": {
+                "type": ["integer", "null"],
+                "minimum": 1,
+                "maximum": 10,
+                "description": "Result limit for search operations.",
+            },
+        },
+        "required": ["operation"],
+    },
+    deterministic=False,
+)
+
 DEFAULT_TOOL_REGISTRY = ToolRegistry(
-    tools=(EXECUTE_BASH_TOOL, EXECUTE_GIT_TOOL, EXECUTE_GITHUB_TOOL)
+    tools=(EXECUTE_BASH_TOOL, EXECUTE_GIT_TOOL, EXECUTE_GITHUB_TOOL, EXECUTE_BROWSER_TOOL)
 )

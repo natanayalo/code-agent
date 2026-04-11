@@ -95,6 +95,11 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
             '{"operation":"pr_comment","repository_full_name":"owner/repo",'
             '"pr_number":1,"comment_body":"Looks good."}.'
         ),
+        (
+            "- For `execute_browser`, return the tool_input as a compact JSON object encoded "
+            "as a string, for example "
+            '{"operation":"search","query":"langgraph","limit":3}.'
+        ),
         "- If the transcript already contains enough information to finish, return `final`.",
         "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
         "- Do not wrap the JSON in Markdown or add any extra prose.",

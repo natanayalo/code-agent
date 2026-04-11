@@ -71,6 +71,18 @@ def test_default_mcp_tool_client_exposes_execute_github_descriptor() -> None:
     ]
 
 
+def test_default_mcp_tool_client_exposes_execute_browser_descriptor() -> None:
+    """The MCP client should expose a normalized descriptor for the browser helper."""
+    tool = DEFAULT_MCP_TOOL_CLIENT.require_mcp_tool(" execute_browser ")
+
+    assert tool.name == "execute_browser"
+    assert tool.input_schema["required"] == ["operation"]
+    assert tool.input_schema["properties"]["operation"]["enum"] == [
+        "fetch",
+        "search",
+    ]
+
+
 def test_tool_registry_caches_a_reusable_mcp_client() -> None:
     """Explicit registries should reuse one MCP client instance across repeated access."""
     assert DEFAULT_TOOL_REGISTRY.mcp_client is DEFAULT_TOOL_REGISTRY.mcp_client
