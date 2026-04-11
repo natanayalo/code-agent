@@ -58,7 +58,6 @@ def test_default_tool_registry_exposes_execute_github_metadata() -> None:
     assert tool.expected_artifacts == (
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,
-        ToolExpectedArtifact.CHANGED_FILES,
     )
 
 

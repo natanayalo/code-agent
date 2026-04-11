@@ -245,7 +245,6 @@ EXECUTE_GITHUB_TOOL = ToolDefinition(
     expected_artifacts=(
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,
-        ToolExpectedArtifact.CHANGED_FILES,
     ),
     mcp_input_schema={
         "type": "object",
