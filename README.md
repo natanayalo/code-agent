@@ -140,8 +140,8 @@ curl http://127.0.0.1:8000/ready
 Run the bootstrap test and linter:
 
 ```bash
-pytest
-pre-commit run --all-files
+.venv/bin/pytest
+.venv/bin/pre-commit run --all-files
 ```
 
 Commit messages are validated with Commitizen, so use Conventional Commits such as:

@@ -16,7 +16,7 @@ from orchestrator.execution import (
     TaskExecutionService,
     TaskSnapshot,
     TaskSubmission,
-    _validate_callback_url,
+    validate_callback_url,
 )
 
 router = APIRouter(prefix="/webhook", tags=["webhook"], dependencies=[Depends(require_api_auth)])
@@ -56,7 +56,7 @@ class WebhookPayload(BaseModel):
     @classmethod
     def validate_callback_url(cls, value: str | None) -> str | None:
         """Reject malformed or obviously unsafe callback targets at request validation time."""
-        return _validate_callback_url(value)
+        return validate_callback_url(value)
 
 
 def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:

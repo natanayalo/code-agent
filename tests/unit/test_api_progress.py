@@ -131,6 +131,87 @@ async def test_webhook_callback_progress_notifier_posts_event_payload() -> None:
     ]
 
 
+@pytest.mark.anyio
+async def test_webhook_callback_progress_notifier_revalidates_callback_target(monkeypatch) -> None:
+    """Delivery should re-check callback safety before posting outbound events."""
+    requests: list[tuple[str, dict]] = []
+    validated_urls: list[str] = []
+
+    def fake_validate_callback_url(value: str | None) -> str | None:
+        assert value is not None
+        validated_urls.append(value)
+        return value
+
+    monkeypatch.setattr(
+        "apps.api.progress.validate_callback_url",
+        fake_validate_callback_url,
+    )
+
+    notifier = WebhookCallbackProgressNotifier(client=_FakeAsyncClient(requests))
+    submission = TaskSubmission(
+        task_text="Run tests",
+        callback_url="https://93.184.216.34/status",
+        session=SubmissionSession(
+            channel="webhook:ci",
+            external_user_id="webhook:ci:1",
+            external_thread_id="thread-1",
+        ),
+    )
+    event = ProgressEvent(
+        phase="running",
+        task_id="task-1",
+        session_id="session-1",
+        channel="webhook:ci",
+        external_thread_id="thread-1",
+        task_text="Run tests",
+    )
+
+    await notifier.notify(submission=submission, event=event)
+
+    assert validated_urls == ["https://93.184.216.34/status"]
+    assert len(requests) == 1
+
+
+@pytest.mark.anyio
+async def test_webhook_callback_progress_notifier_fails_closed_on_revalidation_error(
+    monkeypatch,
+) -> None:
+    """Notifier should fail closed when delivery-time callback validation rejects the target."""
+    requests: list[tuple[str, dict]] = []
+
+    def fake_validate_callback_url(value: str | None) -> str | None:
+        raise ValueError("callback_url must not target a private or local address.")
+
+    monkeypatch.setattr(
+        "apps.api.progress.validate_callback_url",
+        fake_validate_callback_url,
+    )
+
+    notifier = WebhookCallbackProgressNotifier(client=_FakeAsyncClient(requests))
+    submission = TaskSubmission(
+        task_text="Run tests",
+        callback_url="https://93.184.216.34/status",
+        session=SubmissionSession(
+            channel="webhook:ci",
+            external_user_id="webhook:ci:1",
+            external_thread_id="thread-1",
+        ),
+    )
+    event = ProgressEvent(
+        phase="running",
+        task_id="task-1",
+        session_id="session-1",
+        channel="webhook:ci",
+        external_thread_id="thread-1",
+        task_text="Run tests",
+    )
+
+    with pytest.raises(ValueError, match="private or local address"):
+        await notifier.notify(submission=submission, event=event)
+
+    assert requests == []
+
+
 def test_format_telegram_message_truncates_started_text_to_platform_limit() -> None:
     """Started messages should be truncated to stay within Telegram's 4096-char limit."""
     event = ProgressEvent(

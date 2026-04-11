@@ -11,7 +11,12 @@ from typing import Any, Protocol
 
 import httpx
 
-from orchestrator.execution import ProgressEvent, ProgressNotifier, TaskSubmission
+from orchestrator.execution import (
+    ProgressEvent,
+    ProgressNotifier,
+    TaskSubmission,
+    validate_callback_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +176,12 @@ class WebhookCallbackProgressNotifier:
         if submission.callback_url is None:
             return
 
+        # Re-validate just before each outbound delivery so DNS rebinding or
+        # network topology changes after ingress validation fail closed.
+        callback_url = await asyncio.to_thread(validate_callback_url, submission.callback_url)
+        if callback_url is None:
+            return
+
         payload = {
             "task_id": event.task_id,
             "session_id": event.session_id,
@@ -180,5 +191,5 @@ class WebhookCallbackProgressNotifier:
             "channel": event.channel,
             "external_thread_id": event.external_thread_id,
         }
-        response = await self.client.post(submission.callback_url, json=payload)
+        response = await self.client.post(callback_url, json=payload)
         response.raise_for_status()
