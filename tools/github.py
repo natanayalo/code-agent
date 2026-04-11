@@ -12,7 +12,7 @@ from pydantic import Field, ValidationError, model_validator
 from tools.registry import ToolModel
 
 _REPOSITORY_OWNER_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$")
-_REPOSITORY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}$")
+_REPOSITORY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-][A-Za-z0-9_.-]{0,99}$")
 
 
 class GitHubToolError(ValueError):

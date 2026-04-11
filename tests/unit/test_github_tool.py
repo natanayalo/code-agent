@@ -42,6 +42,16 @@ def test_build_github_command_from_input_supports_repository_name_at_max_length(
     assert command == (f"gh pr comment 59 --repo openai/{repository_name} --body 'Looks good.'")
 
 
+def test_build_github_command_from_input_supports_leading_dot_repository_names() -> None:
+    """Repository names like .github should be accepted."""
+    command = build_github_command_from_input(
+        '{"operation":"pr_comment","repository_full_name":"openai/.github",'
+        '"pr_number":59,"comment_body":"Looks good."}'
+    )
+
+    assert command == "gh pr comment 59 --repo openai/.github --body 'Looks good.'"
+
+
 def test_build_github_command_from_input_rejects_invalid_json() -> None:
     """The GitHub helper should fail clearly when runtime input is invalid JSON."""
     with pytest.raises(GitHubToolError, match="valid JSON"):
@@ -64,12 +74,11 @@ def test_build_github_command_from_input_rejects_invalid_repository_shape() -> N
         "owner.name/repo",
         "-owner/repo",
         "owner-/repo",
-        "owner/.repo",
         "owner/repo.git",
         f"owner/{'a' * 101}",
     ],
 )
-def test_build_github_command_from_input_rejects_invalid_owner_names(
+def test_build_github_command_from_input_rejects_invalid_repository_identifiers(
     repository_full_name: str,
 ) -> None:
     """Repository identifiers should align with GitHub owner/repository constraints."""
