@@ -46,6 +46,21 @@ def test_default_tool_registry_exposes_execute_git_metadata() -> None:
     )
 
 
+def test_default_tool_registry_exposes_execute_github_metadata() -> None:
+    """The default registry should expose the canonical GitHub helper definition."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool(" execute_github ")
+
+    assert tool.capability_category == ToolCapabilityCategory.GITHUB
+    assert tool.side_effect_level == ToolSideEffectLevel.WORKSPACE_WRITE
+    assert tool.required_permission == ToolPermissionLevel.NETWORKED_WRITE
+    assert tool.timeout_seconds == 60
+    assert tool.network_required is True
+    assert tool.expected_artifacts == (
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+    )
+
+
 def test_tool_registry_rejects_duplicate_tool_names() -> None:
     """Duplicate tool names should fail validation at the registry boundary."""
     execute_bash_tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")

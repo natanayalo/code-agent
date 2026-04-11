@@ -16,6 +16,7 @@ from tools import (
     DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS,
     DEFAULT_MCP_TOOL_CLIENT,
     EXECUTE_GIT_TOOL_NAME,
+    EXECUTE_GITHUB_TOOL_NAME,
     McpToolClient,
     ToolDefinition,
     ToolPermissionDecision,
@@ -23,6 +24,7 @@ from tools import (
     ToolRegistry,
     UnknownToolError,
     build_git_command_from_input,
+    build_github_command_from_input,
     resolve_bash_command_permission,
 )
 from workers.base import WorkerCommand
@@ -310,6 +312,8 @@ def _resolve_tool_command(tool: ToolDefinition, raw_input: str) -> str:
     command = raw_input.strip()
     if tool.name == EXECUTE_GIT_TOOL_NAME:
         return build_git_command_from_input(command)
+    if tool.name == EXECUTE_GITHUB_TOOL_NAME:
+        return build_github_command_from_input(command)
     return command
 
 

@@ -1,0 +1,131 @@
+"""Unit tests for the structured GitHub helper wrapper."""
+
+from __future__ import annotations
+
+import pytest
+
+from tools import GitHubToolError, build_github_command_from_input
+
+
+def test_build_github_command_from_input_supports_pr_create_draft() -> None:
+    """Draft PR requests should render deterministic gh pr create commands."""
+    command = build_github_command_from_input(
+        '{"operation":"pr_create_draft","repository_full_name":"openai/code-agent",'
+        '"base_branch":"master","head_branch":"task/t-081","title":"feat: add wrapper",'
+        '"body":"Adds the GitHub wrapper."}'
+    )
+
+    assert command == (
+        "gh pr create --draft --repo=openai/code-agent --base=master --head=task/t-081 "
+        "'--title=feat: add wrapper' '--body=Adds the GitHub wrapper.'"
+    )
+
+
+def test_build_github_command_from_input_supports_pr_comment() -> None:
+    """PR comment requests should render deterministic gh pr comment commands."""
+    command = build_github_command_from_input(
+        '{"operation":"pr_comment","repository_full_name":"openai/code-agent",'
+        '"pr_number":59,"comment_body":"Looks good."}'
+    )
+
+    assert command == "gh pr comment 59 --repo=openai/code-agent '--body=Looks good.'"
+
+
+def test_build_github_command_from_input_supports_repository_name_at_max_length() -> None:
+    """Repository names with 100 characters should remain valid."""
+    repository_name = "a" * 100
+    command = build_github_command_from_input(
+        f'{{"operation":"pr_comment","repository_full_name":"openai/{repository_name}",'
+        '"pr_number":59,"comment_body":"Looks good."}'
+    )
+
+    assert command == (f"gh pr comment 59 --repo=openai/{repository_name} '--body=Looks good.'")
+
+
+def test_build_github_command_from_input_supports_leading_dot_repository_names() -> None:
+    """Repository names like .github should be accepted."""
+    command = build_github_command_from_input(
+        '{"operation":"pr_comment","repository_full_name":"openai/.github",'
+        '"pr_number":59,"comment_body":"Looks good."}'
+    )
+
+    assert command == "gh pr comment 59 --repo=openai/.github '--body=Looks good.'"
+
+
+def test_build_github_command_from_input_rejects_invalid_json() -> None:
+    """The GitHub helper should fail clearly when runtime input is invalid JSON."""
+    with pytest.raises(GitHubToolError, match="valid JSON"):
+        build_github_command_from_input("pr_comment")
+
+
+def test_build_github_command_from_input_rejects_invalid_repository_shape() -> None:
+    """GitHub helper requests should require owner/name repository identifiers."""
+    with pytest.raises(GitHubToolError, match="owner/name"):
+        build_github_command_from_input(
+            '{"operation":"pr_comment","repository_full_name":"not-valid",'
+            '"pr_number":59,"comment_body":"Looks good."}'
+        )
+
+
+@pytest.mark.parametrize(
+    "repository_full_name",
+    [
+        "_owner/repo",
+        "owner.name/repo",
+        "-owner/repo",
+        "owner-/repo",
+        "owner/repo.git",
+        "owner/.",
+        "owner/..",
+        f"owner/{'a' * 101}",
+    ],
+)
+def test_build_github_command_from_input_rejects_invalid_repository_identifiers(
+    repository_full_name: str,
+) -> None:
+    """Repository identifiers should align with GitHub owner/repository constraints."""
+    with pytest.raises(GitHubToolError, match="owner/name"):
+        build_github_command_from_input(
+            f'{{"operation":"pr_comment","repository_full_name":"{repository_full_name}",'
+            '"pr_number":59,"comment_body":"Looks good."}'
+        )
+
+
+def test_build_github_command_from_input_rejects_hyphen_prefixed_branches() -> None:
+    """Draft PR creation should reject branch names that can be mistaken for flags."""
+    with pytest.raises(GitHubToolError, match="cannot start with a hyphen"):
+        build_github_command_from_input(
+            '{"operation":"pr_create_draft","repository_full_name":"openai/code-agent",'
+            '"base_branch":"master","head_branch":"-bad","title":"t","body":"b"}'
+        )
+
+
+def test_build_github_command_from_input_rejects_pr_create_only_fields_on_comment() -> None:
+    """Comment requests should reject draft-PR-only fields."""
+    with pytest.raises(GitHubToolError, match="do not support `title`"):
+        build_github_command_from_input(
+            '{"operation":"pr_comment","repository_full_name":"openai/code-agent",'
+            '"pr_number":59,"comment_body":"Looks good.","title":"unexpected"}'
+        )
+
+
+def test_build_github_command_from_input_rejects_empty_unsupported_fields() -> None:
+    """Unsupported fields should be rejected even when passed as empty strings."""
+    with pytest.raises(GitHubToolError, match="do not support `title`"):
+        build_github_command_from_input(
+            '{"operation":"pr_comment","repository_full_name":"openai/code-agent",'
+            '"pr_number":59,"comment_body":"Looks good.","title":""}'
+        )
+
+
+def test_build_github_command_from_input_reports_concise_validation_errors() -> None:
+    """Validation failures should be concise and exclude Pydantic docs links."""
+    with pytest.raises(GitHubToolError) as exc_info:
+        build_github_command_from_input(
+            '{"operation":"unknown","repository_full_name":"openai/code-agent"}'
+        )
+
+    message = str(exc_info.value)
+    assert "GitHub helper input validation failed" in message
+    assert "operation" in message
+    assert "errors.pydantic.dev" not in message
