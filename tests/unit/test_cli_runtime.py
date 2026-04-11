@@ -303,11 +303,11 @@ def test_run_cli_runtime_loop_executes_browser_helper_requests() -> None:
     )
     session = _FakeSession(
         {
-            "curl --silent --show-error --location --max-time=20 --get "
+            "curl --fail --silent --show-error --location --max-time=20 --get "
             "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
             "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
             "--data-urlencode=namespace=0 --data-urlencode=format=json": _command_result(
-                "curl --silent --show-error --location --max-time=20 --get "
+                "curl --fail --silent --show-error --location --max-time=20 --get "
                 "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
                 "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
                 "--data-urlencode=namespace=0 --data-urlencode=format=json",
@@ -327,7 +327,7 @@ def test_run_cli_runtime_loop_executes_browser_helper_requests() -> None:
     assert execution.status == "success"
     assert len(session.calls) == 1
     assert (
-        session.calls[0][0] == "curl --silent --show-error --location --max-time=20 --get "
+        session.calls[0][0] == "curl --fail --silent --show-error --location --max-time=20 --get "
         "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
         "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
         "--data-urlencode=namespace=0 --data-urlencode=format=json"

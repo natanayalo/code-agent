@@ -40,8 +40,8 @@ class BrowserToolRequest(ToolModel):
             assert self.url is not None
             _validate_http_url(self.url)
             self._reject_fields("query")
-            if "limit" in self.model_fields_set:
-                raise BrowserToolError("Browser fetch requests do not support `limit`.")
+            if "limit" in self.model_fields_set and self.limit != 5:
+                raise BrowserToolError("Browser fetch requests do not support custom `limit`.")
             return self
 
         if self.operation == BrowserOperation.SEARCH:
@@ -108,7 +108,14 @@ def _summarize_validation_error(exc: ValidationError) -> str:
 
 def build_browser_command(request: BrowserToolRequest) -> str:
     """Render a safe shell command for one normalized browser/search request."""
-    tokens: list[str] = ["curl", "--silent", "--show-error", "--location", "--max-time=20"]
+    tokens: list[str] = [
+        "curl",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--location",
+        "--max-time=20",
+    ]
 
     if request.operation == BrowserOperation.FETCH:
         assert request.url is not None

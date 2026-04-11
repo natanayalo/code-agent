@@ -14,8 +14,8 @@ def test_build_browser_command_from_input_supports_fetch() -> None:
     )
 
     assert (
-        command
-        == "curl --silent --show-error --location --max-time=20 --url=https://example.com/docs"
+        command == "curl --fail --silent --show-error --location --max-time=20 "
+        "--url=https://example.com/docs"
     )
 
 
@@ -24,7 +24,7 @@ def test_build_browser_command_from_input_supports_search_with_default_limit() -
     command = build_browser_command_from_input('{"operation":"search","query":"langgraph"}')
 
     assert command == (
-        "curl --silent --show-error --location --max-time=20 --get "
+        "curl --fail --silent --show-error --location --max-time=20 --get "
         "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
         "--data-urlencode=search=langgraph --data-urlencode=limit=5 "
         "--data-urlencode=namespace=0 --data-urlencode=format=json"
@@ -38,11 +38,31 @@ def test_build_browser_command_from_input_supports_search_with_explicit_limit() 
     )
 
     assert command == (
-        "curl --silent --show-error --location --max-time=20 --get "
+        "curl --fail --silent --show-error --location --max-time=20 --get "
         "--url=https://en.wikipedia.org/w/api.php --data-urlencode=action=opensearch "
         "--data-urlencode=search=langgraph --data-urlencode=limit=3 "
         "--data-urlencode=namespace=0 --data-urlencode=format=json"
     )
+
+
+def test_build_browser_command_from_input_allows_fetch_with_explicit_default_limit() -> None:
+    """Fetch requests may include the default limit value without failing validation."""
+    command = build_browser_command_from_input(
+        '{"operation":"fetch","url":"https://example.com/docs","limit":5}'
+    )
+
+    assert (
+        command == "curl --fail --silent --show-error --location --max-time=20 "
+        "--url=https://example.com/docs"
+    )
+
+
+def test_build_browser_command_from_input_rejects_fetch_with_custom_limit() -> None:
+    """Fetch requests should reject non-default limits."""
+    with pytest.raises(BrowserToolError, match="custom `limit`"):
+        build_browser_command_from_input(
+            '{"operation":"fetch","url":"https://example.com/docs","limit":3}'
+        )
 
 
 def test_build_browser_command_from_input_rejects_invalid_json() -> None:
