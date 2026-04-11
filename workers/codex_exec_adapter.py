@@ -75,16 +75,20 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
         ),
         "Choose one of two actions:",
         (
-            '- {"kind":"tool_call","tool_name":"execute_bash",'
-            '"tool_input":"<one shell command>","final_output":null}'
+            '- {"kind":"tool_call","tool_name":"<registered tool name>",'
+            '"tool_input":"<tool input string>","final_output":null}'
         ),
         (
             '- {"kind":"final","final_output":"<final summary for the user>",'
             '"tool_name":null,"tool_input":null}'
         ),
         "Rules:",
-        "- Use only the `execute_bash` tool.",
-        "- Request one focused shell command at a time.",
+        "- Use only tool names listed in the system prompt's Available Tools section.",
+        "- For `execute_bash`, return one focused shell command as the tool_input string.",
+        (
+            "- For `execute_git`, return the tool_input as a compact JSON object encoded "
+            'as a string, for example {"operation":"status","porcelain":true}.'
+        ),
         "- If the transcript already contains enough information to finish, return `final`.",
         "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
         "- Do not wrap the JSON in Markdown or add any extra prose.",

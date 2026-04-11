@@ -31,6 +31,21 @@ def test_default_tool_registry_exposes_execute_bash_metadata() -> None:
     )
 
 
+def test_default_tool_registry_exposes_execute_git_metadata() -> None:
+    """The default registry should expose the canonical git helper definition."""
+    tool = DEFAULT_TOOL_REGISTRY.require_tool(" execute_git ")
+
+    assert tool.capability_category == ToolCapabilityCategory.GIT
+    assert tool.side_effect_level == ToolSideEffectLevel.WORKSPACE_WRITE
+    assert tool.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
+    assert tool.timeout_seconds == 30
+    assert tool.expected_artifacts == (
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+        ToolExpectedArtifact.CHANGED_FILES,
+    )
+
+
 def test_tool_registry_rejects_duplicate_tool_names() -> None:
     """Duplicate tool names should fail validation at the registry boundary."""
     execute_bash_tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")

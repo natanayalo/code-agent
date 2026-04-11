@@ -15,12 +15,14 @@ from sandbox import DockerShellCommandResult, DockerShellSessionError
 from tools import (
     DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS,
     DEFAULT_MCP_TOOL_CLIENT,
+    EXECUTE_GIT_TOOL_NAME,
     McpToolClient,
     ToolDefinition,
     ToolPermissionDecision,
     ToolPermissionLevel,
     ToolRegistry,
     UnknownToolError,
+    build_git_command_from_input,
     resolve_bash_command_permission,
 )
 from workers.base import WorkerCommand
@@ -267,15 +269,16 @@ def _tool_call_transcript(tool: ToolDefinition, command: str) -> str:
     )
 
 
-def format_bash_observation(
+def format_tool_observation(
     result: DockerShellCommandResult,
     *,
+    tool_name: str,
     max_characters: int,
 ) -> str:
     """Render bounded shell output for adapter follow-up turns."""
     output, truncated = _truncate_text(result.output, max_characters=max_characters)
     lines = [
-        "Tool result: execute_bash",
+        f"Tool result: {tool_name}",
         f"Command: {result.command}",
         f"Exit code: {result.exit_code}",
         f"Duration seconds: {result.duration_seconds:.3f}",
@@ -287,6 +290,27 @@ def format_bash_observation(
     if truncated:
         lines.append(f"[output truncated to {max_characters} characters]")
     return "\n".join(lines)
+
+
+def format_bash_observation(
+    result: DockerShellCommandResult,
+    *,
+    max_characters: int,
+) -> str:
+    """Backward-compatible wrapper for bash observations."""
+    return format_tool_observation(
+        result,
+        tool_name="execute_bash",
+        max_characters=max_characters,
+    )
+
+
+def _resolve_tool_command(tool: ToolDefinition, raw_input: str) -> str:
+    """Normalize tool input into the concrete shell command executed in the sandbox."""
+    command = raw_input.strip()
+    if tool.name == EXECUTE_GIT_TOOL_NAME:
+        return build_git_command_from_input(command)
+    return command
 
 
 def _retry_command_key(command: str) -> tuple[str, ...]:
@@ -480,7 +504,23 @@ def run_cli_runtime_loop(
             )
 
         assert step.tool_input is not None  # Validated by CliRuntimeStep.
-        command = step.tool_input.strip()
+        try:
+            command = _resolve_tool_command(tool, step.tool_input)
+        except ValueError as exc:
+            _update_budget_ledger(
+                budget_ledger,
+                started_at=started_at,
+                clock=clock,
+                iterations_used=iteration,
+            )
+            return CliRuntimeExecutionResult(
+                status="error",
+                summary=f"CLI runtime adapter provided invalid input for `{tool.name}`: {exc}",
+                stop_reason="adapter_error",
+                commands_run=commands_run,
+                messages=messages,
+                budget_ledger=budget_ledger,
+            )
         permission_decision = resolve_bash_command_permission(
             command,
             tool,
@@ -588,7 +628,10 @@ def run_cli_runtime_loop(
             )
             return CliRuntimeExecutionResult(
                 status="error",
-                summary=f"CLI runtime failed while executing bash at iteration {iteration}: {exc}",
+                summary=(
+                    f"CLI runtime failed while executing `{tool.name}` "
+                    f"at iteration {iteration}: {exc}"
+                ),
                 stop_reason="shell_error",
                 commands_run=commands_run,
                 messages=messages,
@@ -617,8 +660,9 @@ def run_cli_runtime_loop(
             CliRuntimeMessage(
                 role="tool",
                 tool_name=tool.name,
-                content=format_bash_observation(
+                content=format_tool_observation(
                     shell_result,
+                    tool_name=tool.name,
                     max_characters=settings.max_observation_characters,
                 ),
             )

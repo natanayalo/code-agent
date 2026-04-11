@@ -53,13 +53,13 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-086 Harden outbound callback SSRF defenses beyond literal-IP validation. PR: [#53](https://github.com/natanayalo/code-agent/pull/53)
 - T-104 Add API authentication. PR: [#55](https://github.com/natanayalo/code-agent/pull/55)
 - T-083 Add MCP client abstraction. PR: [#56](https://github.com/natanayalo/code-agent/pull/56)
+- T-080 Add git utility wrapper. PR: [#57](https://github.com/natanayalo/code-agent/pull/57)
 
 ## In Progress
 
 - None
 
 ## Next
-- T-080 Add git utility wrapper.
 - T-087 Harden outbound callback delivery transport (closes DNS rebinding gap from T-086).
 - T-081 Add GitHub wrapper.
 - T-082 Add browser/search wrapper.

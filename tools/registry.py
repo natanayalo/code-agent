@@ -22,6 +22,7 @@ class ToolCapabilityCategory(StrEnum):
     """High-level capability families supported by the worker runtime."""
 
     SHELL = "shell"
+    GIT = "git"
 
 
 class ToolSideEffectLevel(StrEnum):
@@ -121,7 +122,9 @@ class ToolRegistry(ToolModel):
 
 
 EXECUTE_BASH_TOOL_NAME = "execute_bash"
+EXECUTE_GIT_TOOL_NAME = "execute_git"
 DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS = 60
+DEFAULT_EXECUTE_GIT_TIMEOUT_SECONDS = 30
 
 EXECUTE_BASH_TOOL = ToolDefinition(
     name=EXECUTE_BASH_TOOL_NAME,
@@ -151,4 +154,77 @@ EXECUTE_BASH_TOOL = ToolDefinition(
     deterministic=False,
 )
 
-DEFAULT_TOOL_REGISTRY = ToolRegistry(tools=(EXECUTE_BASH_TOOL,))
+EXECUTE_GIT_TOOL = ToolDefinition(
+    name=EXECUTE_GIT_TOOL_NAME,
+    description=(
+        "Run one structured git helper request inside the persistent sandbox workspace. "
+        "Provide tool_input as a JSON object string with an `operation` field and "
+        "operation-specific fields such as `message`, `branch_name`, or `pathspecs`."
+    ),
+    capability_category=ToolCapabilityCategory.GIT,
+    side_effect_level=ToolSideEffectLevel.WORKSPACE_WRITE,
+    required_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    timeout_seconds=DEFAULT_EXECUTE_GIT_TIMEOUT_SECONDS,
+    network_required=False,
+    expected_artifacts=(
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+        ToolExpectedArtifact.CHANGED_FILES,
+    ),
+    mcp_input_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "operation": {
+                "type": "string",
+                "enum": ["status", "diff", "branch", "commit"],
+                "description": "Git helper action to execute.",
+            },
+            "include_untracked": {
+                "type": "boolean",
+                "description": "Whether git status should include untracked files.",
+            },
+            "porcelain": {
+                "type": "boolean",
+                "description": "Whether git status should use porcelain output.",
+            },
+            "staged": {
+                "type": "boolean",
+                "description": "Whether git diff should compare staged changes.",
+            },
+            "against": {
+                "type": ["string", "null"],
+                "description": "Optional revision or revision range for git diff.",
+            },
+            "pathspecs": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional pathspec filters for git status and git diff.",
+            },
+            "show_current": {
+                "type": "boolean",
+                "description": "Whether git branch should print the current branch name.",
+            },
+            "branch_name": {
+                "type": ["string", "null"],
+                "description": "Branch name used by git branch create.",
+            },
+            "create": {
+                "type": "boolean",
+                "description": "Whether git branch should create a new branch.",
+            },
+            "message": {
+                "type": ["string", "null"],
+                "description": "Commit message used by git commit.",
+            },
+            "include_all": {
+                "type": "boolean",
+                "description": "Whether git commit should stage tracked changes with -a.",
+            },
+        },
+        "required": ["operation"],
+    },
+    deterministic=False,
+)
+
+DEFAULT_TOOL_REGISTRY = ToolRegistry(tools=(EXECUTE_BASH_TOOL, EXECUTE_GIT_TOOL))
