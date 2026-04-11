@@ -11,6 +11,8 @@ from tools import (
     McpToolClient,
     ToolPermissionLevel,
     ToolRegistry,
+    build_str_replace_editor_command_from_input,
+    build_view_file_command_from_input,
 )
 from workers.cli_runtime import (
     CliRuntimeBudgetLedger,
@@ -339,6 +341,78 @@ def test_run_cli_runtime_loop_executes_browser_helper_requests() -> None:
     assert "Tool result: execute_browser" in execution.messages[2].content
 
 
+def test_run_cli_runtime_loop_executes_view_file_tool_requests() -> None:
+    """View-file tool calls should be normalized into bounded line-number output commands."""
+    tool_input = '{"path":"README.md","start_line":2,"end_line":4}'
+    expected_command = build_view_file_command_from_input(tool_input)
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="view_file", tool_input=tool_input),
+            CliRuntimeStep(kind="final", final_output="Viewed README segment."),
+        ]
+    )
+    session = _FakeSession(
+        {
+            expected_command: _command_result(
+                expected_command,
+                output="     2  line two\n     3  line three\n     4  line four\n",
+            )
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=2, worker_timeout_seconds=30),
+        granted_permission=ToolPermissionLevel.READ_ONLY,
+    )
+
+    assert execution.status == "success"
+    assert len(session.calls) == 1
+    assert session.calls[0][0] == expected_command
+    assert "Tool call: view_file" in execution.messages[1].content
+    assert "Tool result: view_file" in execution.messages[2].content
+
+
+def test_run_cli_runtime_loop_executes_str_replace_editor_tool_requests() -> None:
+    """str_replace_editor calls should route through the structured replacement wrapper."""
+    tool_input = '{"path":"README.md","old_text":"hello","new_text":"hello world"}'
+    expected_command = build_str_replace_editor_command_from_input(tool_input)
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="str_replace_editor",
+                tool_input=tool_input,
+            ),
+            CliRuntimeStep(kind="final", final_output="Updated README greeting."),
+        ]
+    )
+    session = _FakeSession(
+        {
+            expected_command: _command_result(
+                expected_command,
+                output="",
+            )
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=2, worker_timeout_seconds=30),
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    )
+
+    assert execution.status == "success"
+    assert len(session.calls) == 1
+    assert session.calls[0][0] == expected_command
+    assert "Tool call: str_replace_editor" in execution.messages[1].content
+    assert "Tool result: str_replace_editor" in execution.messages[2].content
+
+
 def test_run_cli_runtime_loop_uses_browser_tool_timeout_for_command_rendering() -> None:
     """Browser command generation should use the timeout configured on the tool definition."""
     browser_tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_browser").model_copy(
@@ -407,6 +481,32 @@ def test_run_cli_runtime_loop_rejects_invalid_git_helper_input() -> None:
     assert execution.status == "error"
     assert execution.stop_reason == "adapter_error"
     assert "invalid input for `execute_git`" in execution.summary
+    assert session.calls == []
+
+
+def test_run_cli_runtime_loop_rejects_invalid_str_replace_editor_input() -> None:
+    """Structured editor requests should fail clearly on invalid tool input."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="str_replace_editor",
+                tool_input='{"path":"README.md","old_text":"", "new_text":"replacement"}',
+            )
+        ]
+    )
+    session = _FakeSession({})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=1, worker_timeout_seconds=30),
+    )
+
+    assert execution.status == "error"
+    assert execution.stop_reason == "adapter_error"
+    assert "invalid input for `str_replace_editor`" in execution.summary
     assert session.calls == []
 
 

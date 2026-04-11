@@ -86,6 +86,24 @@ def test_default_mcp_tool_client_exposes_execute_browser_descriptor() -> None:
     assert tool.input_schema["properties"]["limit"]["default"] == 5
 
 
+def test_default_mcp_tool_client_exposes_view_file_descriptor() -> None:
+    """The MCP client should expose a normalized descriptor for view_file."""
+    tool = DEFAULT_MCP_TOOL_CLIENT.require_mcp_tool(" view_file ")
+
+    assert tool.name == "view_file"
+    assert tool.input_schema["required"] == ["path"]
+    assert "start_line" in tool.input_schema["properties"]
+    assert "end_line" in tool.input_schema["properties"]
+
+
+def test_default_mcp_tool_client_exposes_str_replace_editor_descriptor() -> None:
+    """The MCP client should expose a normalized descriptor for str_replace_editor."""
+    tool = DEFAULT_MCP_TOOL_CLIENT.require_mcp_tool(" str_replace_editor ")
+
+    assert tool.name == "str_replace_editor"
+    assert tool.input_schema["required"] == ["path", "old_text", "new_text"]
+
+
 def test_tool_registry_caches_a_reusable_mcp_client() -> None:
     """Explicit registries should reuse one MCP client instance across repeated access."""
     assert DEFAULT_TOOL_REGISTRY.mcp_client is DEFAULT_TOOL_REGISTRY.mcp_client

@@ -76,6 +76,43 @@ def test_default_tool_registry_exposes_execute_browser_metadata() -> None:
     )
 
 
+def test_default_tool_registry_exposes_structured_file_tool_metadata() -> None:
+    """Structured file tools should carry explicit permissions and artifact expectations."""
+    view_file = DEFAULT_TOOL_REGISTRY.require_tool("view_file")
+    search_file = DEFAULT_TOOL_REGISTRY.require_tool("search_file")
+    search_dir = DEFAULT_TOOL_REGISTRY.require_tool("search_dir")
+    replace_editor = DEFAULT_TOOL_REGISTRY.require_tool("str_replace_editor")
+
+    assert view_file.required_permission == ToolPermissionLevel.READ_ONLY
+    assert view_file.side_effect_level == ToolSideEffectLevel.READ_ONLY
+    assert view_file.expected_artifacts == (
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+    )
+
+    assert search_file.required_permission == ToolPermissionLevel.READ_ONLY
+    assert search_file.side_effect_level == ToolSideEffectLevel.READ_ONLY
+    assert search_file.expected_artifacts == (
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+    )
+
+    assert search_dir.required_permission == ToolPermissionLevel.READ_ONLY
+    assert search_dir.side_effect_level == ToolSideEffectLevel.READ_ONLY
+    assert search_dir.expected_artifacts == (
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+    )
+
+    assert replace_editor.required_permission == ToolPermissionLevel.WORKSPACE_WRITE
+    assert replace_editor.side_effect_level == ToolSideEffectLevel.WORKSPACE_WRITE
+    assert replace_editor.expected_artifacts == (
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+        ToolExpectedArtifact.CHANGED_FILES,
+    )
+
+
 def test_tool_registry_rejects_duplicate_tool_names() -> None:
     """Duplicate tool names should fail validation at the registry boundary."""
     execute_bash_tool = DEFAULT_TOOL_REGISTRY.require_tool("execute_bash")
