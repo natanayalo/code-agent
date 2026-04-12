@@ -371,7 +371,7 @@ def _build_repo_context_section_with_guidance(
 
 def _compact_json_summary(value: Any) -> str:
     """Render JSON data into one bounded line for prompt summaries."""
-    serialized = json.dumps(_json_safe(value), sort_keys=True)
+    serialized = json.dumps(_json_safe(value), sort_keys=True, separators=(",", ":"))
     return _truncate_to_budget(serialized, max_characters=_BUILD_CONTEXT_VALUE_MAX_CHARACTERS)
 
 
