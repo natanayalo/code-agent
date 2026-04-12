@@ -44,7 +44,7 @@ class SearchFileToolRequest(ToolModel):
     @model_validator(mode="after")
     def _validate_request(self) -> SearchFileToolRequest:
         _require_non_empty("path", self.path)
-        _require_non_empty("query", self.query)
+        _require_non_empty("query", self.query, allow_whitespace=True)
         return self
 
 
@@ -59,7 +59,7 @@ class SearchDirToolRequest(ToolModel):
     @model_validator(mode="after")
     def _validate_request(self) -> SearchDirToolRequest:
         _require_non_empty("path", self.path)
-        _require_non_empty("query", self.query)
+        _require_non_empty("query", self.query, allow_whitespace=True)
         return self
 
 
@@ -73,7 +73,7 @@ class StrReplaceEditorToolRequest(ToolModel):
     @model_validator(mode="after")
     def _validate_request(self) -> StrReplaceEditorToolRequest:
         _require_non_empty("path", self.path)
-        _require_non_empty("old_text", self.old_text)
+        _require_non_empty("old_text", self.old_text, allow_whitespace=True)
         if "\n" in self.old_text or "\r" in self.old_text:
             raise FileEditorToolError("str_replace_editor `old_text` must be single-line text.")
         if "\n" in self.new_text or "\r" in self.new_text:
@@ -81,8 +81,13 @@ class StrReplaceEditorToolRequest(ToolModel):
         return self
 
 
-def _require_non_empty(field_name: str, value: str | None) -> None:
-    if value is None or not value.strip():
+def _require_non_empty(
+    field_name: str,
+    value: str | None,
+    *,
+    allow_whitespace: bool = False,
+) -> None:
+    if value is None or (not value if allow_whitespace else not value.strip()):
         raise FileEditorToolError(f"File tool requests require non-empty `{field_name}`.")
 
 
@@ -221,10 +226,10 @@ def build_str_replace_editor_command(request: StrReplaceEditorToolRequest) -> st
     )
     write_command = f"{replace_command} > {shlex.quote(tmp_path)}"
     move_command = shlex.join(["mv", "--", tmp_path, request.path])
-    cleanup_command = shlex.join(["rm", "-f", "--", tmp_path])
+    cleanup_command = shlex.join(["find", tmp_path, "-maxdepth", "0", "-type", "f", "-delete"])
     return (
         f"if {check_command} && {write_command} && {move_command}; "
-        f"then true; else {cleanup_command}; false; fi"
+        f"then true; else ret=$?; {cleanup_command}; exit $ret; fi"
     )
 
 

@@ -81,6 +81,16 @@ def test_build_search_file_command_from_input_defaults_to_regex_mode() -> None:
     assert "--fixed-strings" not in command
 
 
+def test_build_search_file_command_from_input_allows_whitespace_query() -> None:
+    """search_file should allow literal whitespace-only query text."""
+    command = build_search_file_command_from_input(
+        '{"path":"src/main.py","query":"   ","regex":false}'
+    )
+
+    assert "'   '" in command
+    assert "src/main.py" in command
+
+
 def test_build_search_dir_command_from_input_requires_query() -> None:
     """search_dir requests should fail on missing query text."""
     with pytest.raises(FileEditorToolError, match="query"):
@@ -115,7 +125,10 @@ def test_build_str_replace_editor_command_from_input_renders_two_phase_update() 
     assert "str_replace_editor: old_text is ambiguous" in command
     assert "> README.md.codex_tmp_replace" in command
     assert "mv -- README.md.codex_tmp_replace README.md" in command
-    assert "else rm -f -- README.md.codex_tmp_replace; false; fi" in command
+    assert (
+        "else ret=$?; find README.md.codex_tmp_replace -maxdepth 0 "
+        "-type f -delete; exit $ret; fi" in command
+    )
 
 
 def test_build_str_replace_editor_command_from_input_rejects_multiline_values() -> None:
@@ -132,6 +145,15 @@ def test_build_str_replace_editor_command_from_input_rejects_multiline_new_text(
         build_str_replace_editor_command_from_input(
             '{"path":"README.md","old_text":"hello","new_text":"replacement\\nvalue"}'
         )
+
+
+def test_build_str_replace_editor_command_from_input_allows_whitespace_old_text() -> None:
+    """str_replace_editor should permit whitespace-only old_text values."""
+    command = build_str_replace_editor_command_from_input(
+        '{"path":"README.md","old_text":"  ","new_text":"x"}'
+    )
+
+    assert "CODEX_OLD_TEXT='  '" in command
 
 
 def test_build_str_replace_editor_command_from_input_prefixes_equals_only_path_for_awk() -> None:
