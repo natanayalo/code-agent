@@ -525,7 +525,7 @@ def _extract_yaml_top_level_keys(contents: str, *, root_key: str) -> list[str]:
         indent = len(line) - len(line.lstrip(" "))
 
         if not in_block:
-            if not stripped.startswith(f"{root_key}:"):
+            if ":" not in stripped or stripped.partition(":")[0].strip() != root_key:
                 continue
             in_block = True
             root_indent = indent
@@ -652,7 +652,7 @@ def _summarize_dockerfile(workspace_path: Path) -> str | None:
             continue
         upper = stripped.upper()
         if base_image is None and upper.startswith("FROM "):
-            base_image = stripped.split(maxsplit=1)[1]
+            base_image = stripped.partition(" ")[2].strip()
         elif entrypoint is None and upper.startswith("ENTRYPOINT "):
             entrypoint = stripped.partition(" ")[2].strip()
         elif cmd is None and upper.startswith("CMD "):

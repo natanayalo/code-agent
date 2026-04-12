@@ -419,6 +419,24 @@ def test_extract_yaml_top_level_keys_handles_inline_lists_and_invalid_names() ->
     assert missing == []
 
 
+def test_extract_yaml_top_level_keys_accepts_whitespace_before_colon() -> None:
+    """Root-key detection should tolerate valid YAML whitespace before the colon."""
+    workflow_text = "\n".join(
+        [
+            "on : [push, pull_request]",
+            "jobs :",
+            "  test:",
+            "    runs-on: ubuntu-latest",
+        ]
+    )
+
+    events = prompt._extract_yaml_top_level_keys(workflow_text, root_key="on")
+    jobs = prompt._extract_yaml_top_level_keys(workflow_text, root_key="jobs")
+
+    assert events == ["push", "pull_request"]
+    assert jobs == ["test"]
+
+
 def test_summarize_github_workflows_skips_unreadable_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -485,6 +503,13 @@ def test_summarize_dockerfile_handles_missing_instructions_and_empty_files(
     summary = prompt._summarize_dockerfile(tmp_path)
     assert summary is not None
     assert "base=python:3.12-slim" in summary
+
+
+def test_summarize_dockerfile_handles_from_without_image_value(tmp_path: Path) -> None:
+    """Malformed FROM lines should not raise and should produce no docker summary."""
+    (tmp_path / "Dockerfile").write_text("FROM \n", encoding="utf-8")
+
+    assert prompt._summarize_dockerfile(tmp_path) is None
 
 
 def test_build_build_test_section_handles_non_positive_budget(tmp_path: Path) -> None:
