@@ -397,8 +397,13 @@ def _extract_makefile_targets(contents: str) -> list[str]:
 
 def _summarize_makefile(workspace_path: Path) -> str | None:
     """Summarize actionable Makefile targets when available."""
-    makefile_path = workspace_path / "Makefile"
-    if not makefile_path.is_file():
+    makefile_path: Path | None = None
+    for candidate_name in ("GNUmakefile", "makefile", "Makefile"):
+        candidate_path = workspace_path / candidate_name
+        if candidate_path.is_file():
+            makefile_path = candidate_path
+            break
+    if makefile_path is None:
         return None
     try:
         contents = _read_text_prefix(
@@ -474,6 +479,14 @@ def _summarize_pyproject_config(workspace_path: Path) -> list[str]:
     tool_table = payload.get("tool")
     if not isinstance(tool_table, dict):
         return lines
+
+    poetry_table = tool_table.get("poetry")
+    if isinstance(poetry_table, dict):
+        poetry_scripts = poetry_table.get("scripts")
+        if isinstance(poetry_scripts, dict) and poetry_scripts:
+            lines.append(
+                f"- pyproject.toml [tool.poetry.scripts]: {_compact_json_summary(poetry_scripts)}"
+            )
 
     pytest_table = tool_table.get("pytest")
     if isinstance(pytest_table, dict) and pytest_table:

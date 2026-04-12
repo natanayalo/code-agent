@@ -381,6 +381,20 @@ def test_build_build_test_section_handles_makefile_filters_and_truncates_targets
     assert "extra" not in section
 
 
+def test_summarize_makefile_detects_gnumakefile_and_lowercase_makefile(tmp_path: Path) -> None:
+    """Makefile summary should detect GNUmakefile/makefile variants when Makefile is absent."""
+    (tmp_path / "GNUmakefile").write_text("build:\n", encoding="utf-8")
+    summary = prompt._summarize_makefile(tmp_path)
+    assert summary is not None
+    assert "build" in summary
+
+    (tmp_path / "GNUmakefile").unlink()
+    (tmp_path / "makefile").write_text("test:\n", encoding="utf-8")
+    summary = prompt._summarize_makefile(tmp_path)
+    assert summary is not None
+    assert "test" in summary
+
+
 def test_extract_makefile_targets_includes_multiple_targets_on_one_rule_line() -> None:
     """Makefile extraction should include each target declared before one colon."""
     contents = "\n".join(
@@ -452,6 +466,24 @@ def test_summarize_pyproject_config_skips_empty_pytest_ruff_and_mypy_tables(
     assert not any("[tool.pytest]" in line for line in lines)
     assert not any("[tool.ruff]" in line for line in lines)
     assert not any("[tool.mypy]" in line for line in lines)
+
+
+def test_summarize_pyproject_config_includes_tool_poetry_scripts(tmp_path: Path) -> None:
+    """Poetry script definitions should be summarized when present."""
+    (tmp_path / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[tool.poetry.scripts]",
+                'serve = "app.main:run"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    lines = prompt._summarize_pyproject_config(tmp_path)
+
+    assert any("[tool.poetry.scripts]" in line for line in lines)
+    assert any("serve" in line for line in lines)
 
 
 def test_extract_yaml_top_level_keys_handles_inline_lists_and_invalid_names() -> None:
