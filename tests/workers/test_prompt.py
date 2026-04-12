@@ -588,6 +588,45 @@ def test_summarize_dockerfile_handles_tabs_and_continuations(tmp_path: Path) -> 
     assert 'cmd=["--serve"]' in summary
 
 
+def test_summarize_dockerfile_resets_entrypoint_and_cmd_between_stages(tmp_path: Path) -> None:
+    """ENTRYPOINT and CMD should reset when Dockerfile moves to a new FROM stage."""
+    (tmp_path / "Dockerfile").write_text(
+        "\n".join(
+            [
+                "FROM python:3.12 as build",
+                'ENTRYPOINT ["python", "build.py"]',
+                'CMD ["build"]',
+                "FROM gcr.io/distroless/python3",
+                "RUN echo ready",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    summary = prompt._summarize_dockerfile(tmp_path)
+
+    assert summary is not None
+    assert "base=gcr.io/distroless/python3" in summary
+    assert "entrypoint=" not in summary
+    assert "cmd=" not in summary
+
+
+def test_combine_dockerfile_logical_lines_skips_comment_lines_between_continuations() -> None:
+    """Comment lines should not break a continued Dockerfile instruction."""
+    logical = prompt._combine_dockerfile_logical_lines(
+        "\n".join(
+            [
+                "RUN echo one \\",
+                "  && echo two \\",
+                "  # ignored comment",
+                "  && echo three",
+            ]
+        )
+    )
+
+    assert logical == ["RUN echo one && echo two && echo three"]
+
+
 def test_build_build_test_section_handles_non_positive_budget(tmp_path: Path) -> None:
     """Non-positive character budgets should suppress build/test context rendering."""
     (tmp_path / "package.json").write_text('{"scripts":{"test":"pytest -q"}}', encoding="utf-8")

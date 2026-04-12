@@ -727,6 +727,9 @@ def _summarize_dockerfile(workspace_path: Path) -> str | None:
             base_candidate = payload
             if base_candidate:
                 base_image = base_candidate
+                # ENTRYPOINT and CMD are stage-scoped; reset when switching stages.
+                entrypoint = None
+                cmd = None
         elif instruction == "ENTRYPOINT":
             entrypoint_candidate = payload
             if entrypoint_candidate:
@@ -754,6 +757,9 @@ def _combine_dockerfile_logical_lines(contents: str) -> list[str]:
     current: str | None = None
 
     for raw_line in contents.splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
         line = raw_line.rstrip()
         if current is None:
             current = line
