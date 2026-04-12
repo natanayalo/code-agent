@@ -125,7 +125,10 @@ def test_build_str_replace_editor_command_from_input_renders_two_phase_update() 
     assert "str_replace_editor: old_text is ambiguous" in command
     assert "> README.md.codex_tmp_replace" in command
     assert "mv -- README.md.codex_tmp_replace README.md" in command
-    assert "else ret=$?; rm -f -- README.md.codex_tmp_replace; exit $ret; fi" in command
+    assert (
+        "else ret=$?; unlink README.md.codex_tmp_replace 2>/dev/null || true; exit $ret; fi"
+        in command
+    )
 
 
 def test_build_str_replace_editor_command_from_input_rejects_multiline_values() -> None:

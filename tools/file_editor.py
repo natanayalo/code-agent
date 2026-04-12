@@ -226,7 +226,7 @@ def build_str_replace_editor_command(request: StrReplaceEditorToolRequest) -> st
     )
     write_command = f"{replace_command} > {shlex.quote(tmp_path)}"
     move_command = shlex.join(["mv", "--", tmp_path, request.path])
-    cleanup_command = shlex.join(["rm", "-f", "--", tmp_path])
+    cleanup_command = f"{shlex.join(['unlink', tmp_path])} 2>/dev/null || true"
     return (
         f"if {check_command} && {write_command} && {move_command}; "
         f"then true; else ret=$?; {cleanup_command}; exit $ret; fi"
