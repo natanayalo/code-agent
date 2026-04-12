@@ -105,6 +105,7 @@ def test_build_str_replace_editor_command_from_input_renders_two_phase_update() 
         '{"path":"README.md","old_text":"hello","new_text":"hello world"}'
     )
 
+    assert command.startswith("if ")
     assert "CODEX_OLD_TEXT=hello" in command
     assert "CODEX_NEW_TEXT='hello world'" in command
     assert 'ENVIRON["CODEX_OLD_TEXT"]' in command
@@ -114,6 +115,7 @@ def test_build_str_replace_editor_command_from_input_renders_two_phase_update() 
     assert "str_replace_editor: old_text is ambiguous" in command
     assert "> README.md.codex_tmp_replace" in command
     assert "mv -- README.md.codex_tmp_replace README.md" in command
+    assert "else rm -f -- README.md.codex_tmp_replace; false; fi" in command
 
 
 def test_build_str_replace_editor_command_from_input_rejects_multiline_values() -> None:
@@ -140,6 +142,16 @@ def test_build_str_replace_editor_command_from_input_prefixes_equals_only_path_f
 
     assert "./config=v1.txt" in command
     assert "./config=v1.txt.codex_tmp_replace" in command
+
+
+def test_build_str_replace_editor_command_prefixes_equals_with_slash_for_awk() -> None:
+    """awk path normalization should still prefix when '=' appears before a slash."""
+    command = build_str_replace_editor_command_from_input(
+        '{"path":"dir=config/file.txt","old_text":"a","new_text":"b"}'
+    )
+
+    assert "./dir=config/file.txt" in command
+    assert "./dir=config/file.txt.codex_tmp_replace" in command
 
 
 def test_build_str_replace_editor_command_from_input_prefixes_hyphen_path_for_awk() -> None:

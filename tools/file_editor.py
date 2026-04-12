@@ -143,8 +143,6 @@ def _normalize_awk_path_argument(path: str) -> str:
     """Ensure awk treats simple relative paths as filenames, not assignments."""
     if path.startswith(("/", "./", "../")):
         return path
-    if "/" in path:
-        return path
     if "=" in path or path.startswith("-"):
         return f"./{path}"
     return path
@@ -223,7 +221,11 @@ def build_str_replace_editor_command(request: StrReplaceEditorToolRequest) -> st
     )
     write_command = f"{replace_command} > {shlex.quote(tmp_path)}"
     move_command = shlex.join(["mv", "--", tmp_path, request.path])
-    return f"{check_command} && {write_command} && {move_command}"
+    cleanup_command = shlex.join(["rm", "-f", "--", tmp_path])
+    return (
+        f"if {check_command} && {write_command} && {move_command}; "
+        f"then true; else {cleanup_command}; false; fi"
+    )
 
 
 def build_view_file_command_from_input(raw_input: str) -> str:
