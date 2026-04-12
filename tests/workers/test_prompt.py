@@ -332,8 +332,9 @@ def test_build_build_test_section_handles_makefile_filters_and_truncates_targets
             [
                 ".PHONY: test lint",
                 "%pattern: ; @true",
+                "VERSION := 1",
                 "build:",
-                "test:",
+                "test:all",
                 "lint:",
                 "lint:",
                 "check:",
@@ -354,6 +355,8 @@ def test_build_build_test_section_handles_makefile_filters_and_truncates_targets
     assert "Makefile targets:" in section
     assert ".PHONY" not in section
     assert "%pattern" not in section
+    assert "VERSION" not in section
+    assert "test" in section
     assert "extra" not in section
 
 

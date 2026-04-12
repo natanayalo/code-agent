@@ -17,7 +17,7 @@ DEFAULT_AGENTS_MAX_CHARACTERS = 6000
 DEFAULT_AGENTS_ASSET_READ_MAX_CHARACTERS = 8192
 _TRUNCATED_MARKER = "\n... (truncated)"
 _AGENTS_ASSET_DIRECTORIES = ("skills", "workflows", "rules")
-_BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS = 16384
+_BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS = 1048576
 _BUILD_CONTEXT_ITEM_LIMIT = 8
 _BUILD_CONTEXT_VALUE_MAX_CHARACTERS = 220
 _WORKFLOW_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -379,7 +379,7 @@ def _extract_makefile_targets(contents: str) -> list[str]:
     """Extract a bounded set of non-special Makefile targets."""
     targets: list[str] = []
     for line in contents.splitlines():
-        match = re.match(r"^([A-Za-z0-9][A-Za-z0-9_.-]*):(?:\s|$)", line)
+        match = re.match(r"^([A-Za-z0-9][A-Za-z0-9_.-]*):(?!\s*=)", line)
         if match is None:
             continue
         target = match.group(1)
