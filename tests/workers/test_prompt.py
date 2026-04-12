@@ -618,3 +618,137 @@ def test_build_build_test_section_truncates_long_output(tmp_path: Path) -> None:
     assert section is not None
     assert len(section) <= 40
     assert section.endswith("... (truncated)")
+
+
+def test_build_available_tools_section_handles_empty_tool_list() -> None:
+    """Empty tool definitions should render the configured fallback message."""
+
+    class EmptyToolClient:
+        def list_tool_definitions(self) -> list[object]:
+            return []
+
+    section = prompt.build_available_tools_section(tool_client=EmptyToolClient())  # type: ignore[arg-type]
+
+    assert section == "## Available Tools\n- No tools configured."
+
+
+def test_read_workspace_agents_guidance_missing_and_short_paths(tmp_path: Path) -> None:
+    """AGENTS guidance should return None when absent and full text when within budget."""
+    assert prompt.read_workspace_agents_guidance(tmp_path) is None
+
+    (tmp_path / "AGENTS.md").write_text("Use minimal diffs.\n", encoding="utf-8")
+    assert (
+        prompt.read_workspace_agents_guidance(tmp_path, max_characters=80) == "Use minimal diffs."
+    )
+
+
+def test_read_workspace_repo_guidance_handles_zero_budget_and_agents_read_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Repo guidance should tolerate zero budget and AGENTS read failures."""
+    assert prompt.read_workspace_repo_guidance(tmp_path, max_characters=0) == (None, None)
+
+    agents_path = tmp_path / "AGENTS.md"
+    agents_path.write_text("Do not run destructive commands.\n", encoding="utf-8")
+    skills_dir = tmp_path / ".agents" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "tiny.md").write_text("# Tiny skill\n", encoding="utf-8")
+
+    original_read_text_prefix = prompt._read_text_prefix
+
+    def fake_read_text_prefix(path: Path, *, max_characters: int) -> str:
+        if path == agents_path:
+            raise OSError("denied")
+        return original_read_text_prefix(path, max_characters=max_characters)
+
+    monkeypatch.setattr(prompt, "_read_text_prefix", fake_read_text_prefix)
+
+    agents_guidance, assets_guidance = prompt.read_workspace_repo_guidance(
+        tmp_path, max_characters=120
+    )
+    assert agents_guidance is None
+    assert assets_guidance is not None
+    assert "skills/tiny.md" in assets_guidance
+
+
+def test_build_workspace_directory_listing_handles_missing_file_and_empty_workspace(
+    tmp_path: Path,
+) -> None:
+    """Listing should handle missing paths, non-directories, and empty directories."""
+    assert (
+        prompt.build_workspace_directory_listing(tmp_path / "missing")
+        == "<workspace path does not exist>"
+    )
+
+    single_file = tmp_path / "README.md"
+    single_file.write_text("# Demo\n", encoding="utf-8")
+    assert (
+        prompt.build_workspace_directory_listing(single_file)
+        == "<workspace path is not a directory>"
+    )
+
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    assert prompt.build_workspace_directory_listing(empty_dir) == "<workspace is empty>"
+
+
+def test_yaml_helpers_handle_comments_quotes_and_invalid_values() -> None:
+    """YAML helper parsing should preserve quoted fragments and drop invalid identifiers."""
+    assert prompt._strip_yaml_comment("value # comment") == "value "
+    assert prompt._strip_yaml_comment('"value # keep" # drop') == '"value # keep" '
+    assert prompt._split_inline_yaml_list_values("\"a,b\", c, 'd,e'") == ['"a,b"', "c", "'d,e'"]
+
+    assert prompt._parse_inline_yaml_key_values("workflow_dispatch") == ["workflow_dispatch"]
+    assert prompt._parse_inline_yaml_key_values('["bad$key", "push"]') == ["push"]
+
+
+def test_summarize_package_scripts_and_workflows_handle_invalid_payloads(tmp_path: Path) -> None:
+    """Config summaries should skip malformed payloads and unsupported workflow files."""
+    (tmp_path / "package.json").write_text("[]", encoding="utf-8")
+    assert prompt._summarize_package_scripts(tmp_path) is None
+
+    (tmp_path / "package.json").write_text(
+        '{"scripts":{"ok":"pytest -q","bad":5}}',
+        encoding="utf-8",
+    )
+    scripts_summary = prompt._summarize_package_scripts(tmp_path)
+    assert scripts_summary is not None
+    assert 'ok="pytest -q"' in scripts_summary
+    assert "bad" not in scripts_summary
+
+    workflows_dir = tmp_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "ignored.yml").write_text("name: ci\n", encoding="utf-8")
+    (workflows_dir / "valid.yaml").write_text("on: [push]\njobs:\n  test:\n", encoding="utf-8")
+
+    workflow_summaries = prompt._summarize_github_workflows(tmp_path)
+    assert len(workflow_summaries) == 1
+    assert "valid.yaml" in workflow_summaries[0]
+
+
+def test_normalize_command_hint_and_contributing_summary_without_hints(tmp_path: Path) -> None:
+    """Command normalization should filter noise and contributing summary may be absent."""
+    assert prompt._normalize_command_hint("") is None
+    assert prompt._normalize_command_hint("`echo hello`") is None
+    assert prompt._normalize_command_hint("`pytest -q`") == "pytest -q"
+
+    (tmp_path / "CONTRIBUTING.md").write_text("Read the guide.\n", encoding="utf-8")
+    assert prompt._summarize_contributing_commands(tmp_path) is None
+
+
+def test_combine_dockerfile_lines_json_safe_and_mask_repo_url_edges() -> None:
+    """Helper utilities should handle trailing continuations and masking edge cases."""
+    logical = prompt._combine_dockerfile_logical_lines("RUN echo hi \\\n  && echo there \\\n")
+    assert logical == ["RUN echo hi && echo there"]
+
+    normalized = prompt._json_safe({"path": Path("demo"), "items": {"z", 2}})
+    assert isinstance(normalized, dict)
+    assert normalized["path"] == "demo"
+
+    assert prompt._mask_repo_url(None) is None
+    assert prompt._mask_repo_url("github.com/example/repo.git") == "github.com/example/repo.git"
+    assert prompt._mask_repo_url("ssh://@example.com/repo.git") == "ssh://@example.com/repo.git"
+    assert (
+        prompt._mask_repo_url("https://user:token@example.com/repo.git")
+        == "https://***@example.com/repo.git"
+    )
