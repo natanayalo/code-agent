@@ -47,6 +47,13 @@ def test_build_view_file_command_from_input_rejects_descending_range() -> None:
         build_view_file_command_from_input('{"path":"src/main.py","start_line":9,"end_line":2}')
 
 
+def test_build_view_file_command_from_input_prefixes_equals_only_path_for_awk() -> None:
+    """awk paths containing '=' should be prefixed so they cannot be parsed as assignments."""
+    command = build_view_file_command_from_input('{"path":"config=v1.txt"}')
+
+    assert "./config=v1.txt" in command
+
+
 def test_build_search_file_command_from_input_supports_literal_mode() -> None:
     """search_file literal mode should map to fixed-string ripgrep flags."""
     command = build_search_file_command_from_input(
@@ -91,6 +98,11 @@ def test_build_str_replace_editor_command_from_input_renders_two_phase_update() 
         '{"path":"README.md","old_text":"hello","new_text":"hello world"}'
     )
 
+    assert "CODEX_OLD_TEXT=hello" in command
+    assert "CODEX_NEW_TEXT='hello world'" in command
+    assert 'ENVIRON["CODEX_OLD_TEXT"]' in command
+    assert 'ENVIRON["CODEX_NEW_TEXT"]' in command
+    assert "idx+1" in command
     assert "str_replace_editor: old_text not found in file." in command
     assert "str_replace_editor: old_text is ambiguous" in command
     assert "> README.md.codex_tmp_replace" in command
@@ -111,6 +123,16 @@ def test_build_str_replace_editor_command_from_input_rejects_multiline_new_text(
         build_str_replace_editor_command_from_input(
             '{"path":"README.md","old_text":"hello","new_text":"replacement\\nvalue"}'
         )
+
+
+def test_build_str_replace_editor_command_from_input_prefixes_equals_only_path_for_awk() -> None:
+    """awk file paths containing '=' should be prefixed in both check and write stages."""
+    command = build_str_replace_editor_command_from_input(
+        '{"path":"config=v1.txt","old_text":"a","new_text":"b"}'
+    )
+
+    assert "./config=v1.txt" in command
+    assert "./config=v1.txt.codex_tmp_replace" in command
 
 
 def test_file_tools_reject_invalid_json_payloads() -> None:

@@ -139,6 +139,17 @@ def _parse_str_replace_editor_tool_input(raw_input: str) -> StrReplaceEditorTool
         raise FileEditorToolError(_summarize_validation_error(exc)) from exc
 
 
+def _normalize_awk_path_argument(path: str) -> str:
+    """Ensure awk treats simple relative paths as filenames, not assignments."""
+    if path.startswith(("/", "./", "../")):
+        return path
+    if "/" in path:
+        return path
+    if "=" in path:
+        return f"./{path}"
+    return path
+
+
 def build_view_file_command(request: ViewFileToolRequest) -> str:
     """Render a safe shell command for one normalized view-file request."""
     if request.start_line is None and request.end_line is None:
@@ -151,7 +162,7 @@ def build_view_file_command(request: ViewFileToolRequest) -> str:
             program = (
                 rf"NR>={start_line} && NR<={request.end_line} " r'{printf("%6d  %s\n", NR, $0)}'
             )
-    return shlex.join(["awk", program, request.path])
+    return shlex.join(["awk", program, _normalize_awk_path_argument(request.path)])
 
 
 def build_search_file_command(request: SearchFileToolRequest) -> str:
@@ -185,8 +196,8 @@ def build_search_dir_command(request: SearchDirToolRequest) -> str:
 def build_str_replace_editor_command(request: StrReplaceEditorToolRequest) -> str:
     """Render a safe shell command for one normalized exact-string replacement request."""
     check_program = (
-        "BEGIN{count=0} "
-        "{line=$0; while((idx=index(line, old))>0){count++; line=substr(line, idx+length(old));}} "
+        'BEGIN{old=ENVIRON["CODEX_OLD_TEXT"]; count=0} '
+        "{line=$0; while((idx=index(line, old))>0){count++; line=substr(line, idx+1);}} "
         "END{"
         'if(count==0){print "str_replace_editor: old_text not found in file." '
         '> "/dev/stderr"; exit 3} '
@@ -195,24 +206,22 @@ def build_str_replace_editor_command(request: StrReplaceEditorToolRequest) -> st
         "}"
     )
     replace_program = (
-        "BEGIN{done=0} "
+        'BEGIN{old=ENVIRON["CODEX_OLD_TEXT"]; new=ENVIRON["CODEX_NEW_TEXT"]; done=0} '
         "{line=$0; if(!done){idx=index(line, old); if(idx>0){line=substr(line,1,idx-1) "
         "new substr(line, idx+length(old)); done=1}} print line}"
     )
-    tmp_path = f"{request.path}.codex_tmp_replace"
-    check_command = shlex.join(
-        ["awk", "-v", f"old={request.old_text}", check_program, request.path]
+    path_arg = _normalize_awk_path_argument(request.path)
+    tmp_path = f"{path_arg}.codex_tmp_replace"
+    check_command = (
+        f"CODEX_OLD_TEXT={shlex.quote(request.old_text)} "
+        f"{shlex.join(['awk', check_program, path_arg])}"
     )
-    replace_tokens = [
-        "awk",
-        "-v",
-        f"old={request.old_text}",
-        "-v",
-        f"new={request.new_text}",
-        replace_program,
-        request.path,
-    ]
-    write_command = f"{shlex.join(replace_tokens)} > {shlex.quote(tmp_path)}"
+    replace_command = (
+        f"CODEX_OLD_TEXT={shlex.quote(request.old_text)} "
+        f"CODEX_NEW_TEXT={shlex.quote(request.new_text)} "
+        f"{shlex.join(['awk', replace_program, path_arg])}"
+    )
+    write_command = f"{replace_command} > {shlex.quote(tmp_path)}"
     move_command = shlex.join(["mv", tmp_path, request.path])
     return f"{check_command} && {write_command} && {move_command}"
 
