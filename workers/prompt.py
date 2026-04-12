@@ -584,7 +584,10 @@ def _split_inline_yaml_list_values(raw_value: str) -> list[str]:
 
 
 def _extract_yaml_top_level_keys(contents: str, *, root_key: str) -> list[str]:
-    """Extract first-level keys from a simple YAML mapping block."""
+    """Extract first-level keys from a simple YAML mapping block.
+
+    This is an intentionally heuristic parser for prompt summaries, not a full YAML parser.
+    """
     keys: list[str] = []
     lines = contents.splitlines()
     in_block = False
@@ -775,8 +778,9 @@ def _combine_dockerfile_logical_lines(contents: str) -> list[str]:
             current = line
         else:
             current = f"{current} {line.lstrip()}"
-        if current.endswith("\\"):
-            current = current[:-1].rstrip()
+        continuation_probe = _strip_yaml_comment(current).rstrip()
+        if continuation_probe.endswith("\\"):
+            current = continuation_probe[:-1].rstrip()
             continue
         logical_lines.append(current)
         current = None
@@ -931,7 +935,14 @@ def build_system_prompt(
         workspace_path,
         max_characters=agents_guidance_budget,
     )
-    consumed_guidance_characters = len(agents_guidance or "") + len(agents_assets_guidance or "")
+    guidance_wrapper_overhead = 0
+    if agents_guidance is not None:
+        guidance_wrapper_overhead += len("AGENTS.md guidance:\n```text\n\n```")
+    if agents_assets_guidance is not None:
+        guidance_wrapper_overhead += len(".agents guidance:\n```text\n\n```")
+    consumed_guidance_characters = (
+        len(agents_guidance or "") + len(agents_assets_guidance or "") + guidance_wrapper_overhead
+    )
     build_section = build_build_test_section(
         workspace_path,
         max_characters=max(agents_guidance_budget - consumed_guidance_characters, 0),

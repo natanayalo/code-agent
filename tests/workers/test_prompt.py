@@ -169,6 +169,27 @@ def test_build_system_prompt_shares_repo_guidance_budget_with_build_test_section
     assert "## Build & Test" not in prompt
 
 
+def test_build_system_prompt_accounts_for_guidance_wrapper_overhead_in_budget(
+    tmp_path: Path,
+) -> None:
+    """Repo-context wrapper text should be counted when sharing guidance/build budgets."""
+    (tmp_path / "AGENTS.md").write_text(
+        "A" * (DEFAULT_AGENTS_MAX_CHARACTERS - 10),
+        encoding="utf-8",
+    )
+    (tmp_path / "package.json").write_text(
+        '{"scripts":{"test":"pytest -q"}}',
+        encoding="utf-8",
+    )
+
+    rendered_prompt = build_system_prompt(
+        WorkerRequest(task_text="Inspect project checks"), tmp_path
+    )
+
+    assert "AGENTS.md guidance:" in rendered_prompt
+    assert "## Build & Test" not in rendered_prompt
+
+
 def test_build_repo_context_section_skips_missing_agents_file(tmp_path: Path) -> None:
     """Missing AGENTS.md should not break repo context rendering."""
     (tmp_path / "apps").mkdir()
@@ -847,3 +868,17 @@ def test_combine_dockerfile_lines_json_safe_and_mask_repo_url_edges() -> None:
         prompt._mask_repo_url("https://user:token@example.com/repo.git")
         == "https://***@example.com/repo.git"
     )
+
+
+def test_combine_dockerfile_logical_lines_handles_inline_comment_after_backslash() -> None:
+    """Continuation detection should work when a trailing comment follows the backslash."""
+    logical = prompt._combine_dockerfile_logical_lines(
+        "\n".join(
+            [
+                "RUN echo one \\ # continue",
+                "  && echo two",
+            ]
+        )
+    )
+
+    assert logical == ["RUN echo one && echo two"]
