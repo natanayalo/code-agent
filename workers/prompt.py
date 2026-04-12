@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,15 @@ DEFAULT_AGENTS_MAX_CHARACTERS = 6000
 DEFAULT_AGENTS_ASSET_READ_MAX_CHARACTERS = 8192
 _TRUNCATED_MARKER = "\n... (truncated)"
 _AGENTS_ASSET_DIRECTORIES = ("skills", "workflows", "rules")
+_BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS = 16384
+_BUILD_CONTEXT_ITEM_LIMIT = 8
+_BUILD_CONTEXT_VALUE_MAX_CHARACTERS = 220
+_WORKFLOW_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+_COMMAND_HINT_PATTERN = re.compile(
+    r"\b("
+    r"pytest|pre-commit|ruff|mypy|tox|nox|make|npm|pnpm|yarn|docker compose|uv run|poetry run"
+    r")\b"
+)
 _SKIPPED_PATH_NAMES = {
     ".git",
     ".mypy_cache",
@@ -318,6 +329,18 @@ def build_workspace_directory_listing(
 
 def build_repo_context_section(workspace_path: Path) -> str:
     """Render repo-level prompt context from the workspace."""
+    return _build_repo_context_section_with_guidance(
+        workspace_path,
+        *read_workspace_repo_guidance(workspace_path),
+    )
+
+
+def _build_repo_context_section_with_guidance(
+    workspace_path: Path,
+    agents_guidance: str | None,
+    agents_assets_guidance: str | None,
+) -> str:
+    """Render repo-level prompt context from pre-resolved guidance snippets."""
     lines = [
         "## Repo Context",
         "Directory listing:",
@@ -325,7 +348,6 @@ def build_repo_context_section(workspace_path: Path) -> str:
         build_workspace_directory_listing(workspace_path),
         "```",
     ]
-    agents_guidance, agents_assets_guidance = read_workspace_repo_guidance(workspace_path)
     if agents_guidance is not None:
         lines.extend(
             [
@@ -345,6 +367,344 @@ def build_repo_context_section(workspace_path: Path) -> str:
             ]
         )
     return "\n".join(lines)
+
+
+def _compact_json_summary(value: Any) -> str:
+    """Render JSON data into one bounded line for prompt summaries."""
+    serialized = json.dumps(_json_safe(value), sort_keys=True)
+    return _truncate_to_budget(serialized, max_characters=_BUILD_CONTEXT_VALUE_MAX_CHARACTERS)
+
+
+def _extract_makefile_targets(contents: str) -> list[str]:
+    """Extract a bounded set of non-special Makefile targets."""
+    targets: list[str] = []
+    for line in contents.splitlines():
+        match = re.match(r"^([A-Za-z0-9][A-Za-z0-9_.-]*):(?:\s|$)", line)
+        if match is None:
+            continue
+        target = match.group(1)
+        if target.startswith(".") or "%" in target:
+            continue
+        if target not in targets:
+            targets.append(target)
+        if len(targets) >= _BUILD_CONTEXT_ITEM_LIMIT:
+            break
+    return targets
+
+
+def _summarize_makefile(workspace_path: Path) -> str | None:
+    """Summarize actionable Makefile targets when available."""
+    makefile_path = workspace_path / "Makefile"
+    if not makefile_path.is_file():
+        return None
+    try:
+        contents = _read_text_prefix(
+            makefile_path,
+            max_characters=_BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS,
+        )
+    except OSError:
+        return None
+    targets = _extract_makefile_targets(contents)
+    if not targets:
+        return None
+    joined_targets = ", ".join(targets)
+    return f"- Makefile targets: {joined_targets}"
+
+
+def _summarize_package_scripts(workspace_path: Path) -> str | None:
+    """Summarize package.json scripts in a compact, actionable form."""
+    package_json_path = workspace_path / "package.json"
+    if not package_json_path.is_file():
+        return None
+    try:
+        payload = json.loads(
+            _read_text_prefix(
+                package_json_path,
+                max_characters=_BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS,
+            )
+        )
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    scripts = payload.get("scripts")
+    if not isinstance(scripts, dict) or not scripts:
+        return None
+
+    rendered_pairs: list[str] = []
+    for script_name in sorted(scripts):
+        script_command = scripts[script_name]
+        if not isinstance(script_name, str) or not isinstance(script_command, str):
+            continue
+        rendered_pairs.append(f"{script_name}={json.dumps(script_command)}")
+        if len(rendered_pairs) >= _BUILD_CONTEXT_ITEM_LIMIT:
+            break
+    if not rendered_pairs:
+        return None
+    return f"- package.json scripts: {', '.join(rendered_pairs)}"
+
+
+def _summarize_pyproject_config(workspace_path: Path) -> list[str]:
+    """Extract concise build/test hints from pyproject.toml sections."""
+    pyproject_path = workspace_path / "pyproject.toml"
+    if not pyproject_path.is_file():
+        return []
+    try:
+        payload = tomllib.loads(
+            _read_text_prefix(
+                pyproject_path,
+                max_characters=_BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS,
+            )
+        )
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    if not isinstance(payload, dict):
+        return []
+
+    lines: list[str] = []
+    project_table = payload.get("project")
+    if isinstance(project_table, dict):
+        scripts = project_table.get("scripts")
+        if isinstance(scripts, dict) and scripts:
+            lines.append(f"- pyproject.toml [project.scripts]: {_compact_json_summary(scripts)}")
+
+    tool_table = payload.get("tool")
+    if not isinstance(tool_table, dict):
+        return lines
+
+    pytest_table = tool_table.get("pytest")
+    if isinstance(pytest_table, dict):
+        pytest_config = pytest_table.get("ini_options")
+        if isinstance(pytest_config, dict):
+            pytest_summary = _compact_json_summary(pytest_config)
+            lines.append(f"- pyproject.toml [tool.pytest.ini_options]: {pytest_summary}")
+        else:
+            pytest_summary = _compact_json_summary(pytest_table)
+            lines.append(f"- pyproject.toml [tool.pytest]: {pytest_summary}")
+
+    ruff_table = tool_table.get("ruff")
+    if isinstance(ruff_table, dict):
+        lines.append(f"- pyproject.toml [tool.ruff]: {_compact_json_summary(ruff_table)}")
+
+    mypy_table = tool_table.get("mypy")
+    if isinstance(mypy_table, dict):
+        lines.append(f"- pyproject.toml [tool.mypy]: {_compact_json_summary(mypy_table)}")
+
+    return lines[:_BUILD_CONTEXT_ITEM_LIMIT]
+
+
+def _parse_inline_yaml_key_values(raw_value: str) -> list[str]:
+    """Parse simple inline YAML values into normalized key names."""
+    stripped = raw_value.strip()
+    if not stripped:
+        return []
+    if stripped.startswith("[") and stripped.endswith("]"):
+        candidates = [item.strip() for item in stripped[1:-1].split(",")]
+    else:
+        candidates = [stripped.split("#", 1)[0].strip()]
+    keys: list[str] = []
+    for candidate in candidates:
+        normalized = candidate.strip("\"'")
+        if normalized and _WORKFLOW_KEY_PATTERN.fullmatch(normalized):
+            keys.append(normalized)
+    return keys
+
+
+def _extract_yaml_top_level_keys(contents: str, *, root_key: str) -> list[str]:
+    """Extract first-level keys from a simple YAML mapping block."""
+    keys: list[str] = []
+    lines = contents.splitlines()
+    in_block = False
+    root_indent = 0
+    child_indent: int | None = None
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+
+        if not in_block:
+            if not stripped.startswith(f"{root_key}:"):
+                continue
+            in_block = True
+            root_indent = indent
+            inline_value = stripped.partition(":")[2]
+            keys.extend(_parse_inline_yaml_key_values(inline_value))
+            continue
+
+        if indent <= root_indent:
+            break
+        if child_indent is None:
+            child_indent = indent
+        if indent != child_indent:
+            continue
+
+        candidate = stripped
+        if candidate.startswith("-"):
+            candidate = candidate[1:].strip()
+        candidate = candidate.partition(":")[0].strip().strip("\"'")
+        if not candidate or not _WORKFLOW_KEY_PATTERN.fullmatch(candidate):
+            continue
+        if candidate not in keys:
+            keys.append(candidate)
+        if len(keys) >= _BUILD_CONTEXT_ITEM_LIMIT:
+            break
+    return keys
+
+
+def _summarize_github_workflows(workspace_path: Path) -> list[str]:
+    """Summarize workflow trigger events and jobs from workflow YAML files."""
+    workflows_path = workspace_path / ".github" / "workflows"
+    if not workflows_path.is_dir():
+        return []
+
+    summaries: list[str] = []
+    workflow_files = sorted(
+        (
+            file_path
+            for file_path in workflows_path.iterdir()
+            if file_path.is_file() and file_path.suffix.lower() in {".yml", ".yaml"}
+        ),
+        key=lambda file_path: file_path.name.lower(),
+    )
+    for workflow_file in workflow_files[:_BUILD_CONTEXT_ITEM_LIMIT]:
+        try:
+            contents = _read_text_prefix(
+                workflow_file,
+                max_characters=_BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS,
+            )
+        except OSError:
+            continue
+        events = _extract_yaml_top_level_keys(contents, root_key="on")
+        jobs = _extract_yaml_top_level_keys(contents, root_key="jobs")
+        summary_parts: list[str] = []
+        if events:
+            summary_parts.append(f"on={', '.join(events)}")
+        if jobs:
+            summary_parts.append(f"jobs={', '.join(jobs)}")
+        if summary_parts:
+            summaries.append(
+                f"- .github/workflows/{workflow_file.name}: {'; '.join(summary_parts)}"
+            )
+    return summaries
+
+
+def _normalize_command_hint(raw_line: str) -> str | None:
+    """Normalize a potential command line from markdown content."""
+    normalized = raw_line.strip().lstrip("-*").strip()
+    if not normalized:
+        return None
+    if normalized.startswith("`") and normalized.endswith("`") and len(normalized) > 1:
+        normalized = normalized[1:-1].strip()
+    if not normalized:
+        return None
+    if _COMMAND_HINT_PATTERN.search(normalized) is None and not normalized.startswith(".venv/bin/"):
+        return None
+    return normalized
+
+
+def _summarize_contributing_commands(workspace_path: Path) -> str | None:
+    """Summarize actionable command hints from CONTRIBUTING.md."""
+    contributing_path = workspace_path / "CONTRIBUTING.md"
+    if not contributing_path.is_file():
+        return None
+    try:
+        contents = _read_text_prefix(
+            contributing_path,
+            max_characters=_BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS,
+        )
+    except OSError:
+        return None
+
+    command_hints: list[str] = []
+    for line in contents.splitlines():
+        normalized = _normalize_command_hint(line)
+        if normalized is None or normalized in command_hints:
+            continue
+        command_hints.append(normalized)
+        if len(command_hints) >= _BUILD_CONTEXT_ITEM_LIMIT:
+            break
+    if not command_hints:
+        return None
+    return f"- CONTRIBUTING.md commands: {'; '.join(command_hints)}"
+
+
+def _summarize_dockerfile(workspace_path: Path) -> str | None:
+    """Summarize base image and startup hints from Dockerfile."""
+    dockerfile_path = workspace_path / "Dockerfile"
+    if not dockerfile_path.is_file():
+        return None
+    try:
+        contents = _read_text_prefix(
+            dockerfile_path,
+            max_characters=_BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS,
+        )
+    except OSError:
+        return None
+
+    base_image: str | None = None
+    entrypoint: str | None = None
+    cmd: str | None = None
+    for line in contents.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        upper = stripped.upper()
+        if base_image is None and upper.startswith("FROM "):
+            base_image = stripped.split(maxsplit=1)[1]
+        elif entrypoint is None and upper.startswith("ENTRYPOINT "):
+            entrypoint = stripped.partition(" ")[2].strip()
+        elif cmd is None and upper.startswith("CMD "):
+            cmd = stripped.partition(" ")[2].strip()
+        if base_image is not None and entrypoint is not None and cmd is not None:
+            break
+
+    parts: list[str] = []
+    if base_image is not None:
+        parts.append(f"base={base_image}")
+    if entrypoint is not None:
+        parts.append(f"entrypoint={_truncate_to_budget(entrypoint, max_characters=80)}")
+    if cmd is not None:
+        parts.append(f"cmd={_truncate_to_budget(cmd, max_characters=80)}")
+    if not parts:
+        return None
+    return f"- Dockerfile: {'; '.join(parts)}"
+
+
+def build_build_test_section(
+    workspace_path: Path,
+    *,
+    max_characters: int = DEFAULT_AGENTS_MAX_CHARACTERS,
+) -> str | None:
+    """Render bounded build/test/CI context from common repo config sources."""
+    if max_characters <= 0:
+        return None
+
+    lines: list[str] = []
+    makefile_summary = _summarize_makefile(workspace_path)
+    if makefile_summary is not None:
+        lines.append(makefile_summary)
+
+    package_summary = _summarize_package_scripts(workspace_path)
+    if package_summary is not None:
+        lines.append(package_summary)
+
+    lines.extend(_summarize_pyproject_config(workspace_path))
+    lines.extend(_summarize_github_workflows(workspace_path))
+
+    contributing_summary = _summarize_contributing_commands(workspace_path)
+    if contributing_summary is not None:
+        lines.append(contributing_summary)
+
+    dockerfile_summary = _summarize_dockerfile(workspace_path)
+    if dockerfile_summary is not None:
+        lines.append(dockerfile_summary)
+
+    if not lines:
+        return None
+    section = "\n".join(["## Build & Test", *lines])
+    return _truncate_to_budget(section, max_characters=max_characters)
 
 
 def _json_safe(value: Any) -> Any:
@@ -452,10 +812,26 @@ def build_system_prompt(
     tool_client: McpToolClient | None = None,
 ) -> str:
     """Assemble the structured system prompt for a coding worker run."""
+    agents_guidance_budget = DEFAULT_AGENTS_MAX_CHARACTERS
+    agents_guidance, agents_assets_guidance = read_workspace_repo_guidance(
+        workspace_path,
+        max_characters=agents_guidance_budget,
+    )
+    consumed_guidance_characters = len(agents_guidance or "") + len(agents_assets_guidance or "")
+    build_section = build_build_test_section(
+        workspace_path,
+        max_characters=max(agents_guidance_budget - consumed_guidance_characters, 0),
+    )
+
     sections = [
         build_role_description_section(),
         build_available_tools_section(tool_registry, tool_client),
-        build_repo_context_section(workspace_path),
+        _build_repo_context_section_with_guidance(
+            workspace_path,
+            agents_guidance,
+            agents_assets_guidance,
+        ),
+        build_section or "",
         build_task_context_section(request),
         build_workflow_instructions_section(),
     ]

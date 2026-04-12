@@ -60,6 +60,113 @@ def test_build_system_prompt_includes_all_expected_sections(tmp_path: Path) -> N
     assert "Base the next step on command exit codes" in prompt
 
 
+def test_build_system_prompt_includes_build_test_section_from_repo_config(tmp_path: Path) -> None:
+    """Build/test context should be injected when common config files are present."""
+    (tmp_path / "package.json").write_text(
+        '{"scripts":{"test":"pytest -q","lint":"ruff check ."}}',
+        encoding="utf-8",
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[project]",
+                'name = "demo"',
+                "[project.scripts]",
+                'demo = "apps.main:run"',
+                "[tool.pytest.ini_options]",
+                'addopts = "-q"',
+                "[tool.ruff]",
+                "line-length = 100",
+                "[tool.mypy]",
+                "strict = true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    workflows_dir = tmp_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True)
+    (workflows_dir / "ci.yml").write_text(
+        "\n".join(
+            [
+                "on:",
+                "  push:",
+                "  pull_request:",
+                "jobs:",
+                "  test:",
+                "    runs-on: ubuntu-latest",
+                "  lint:",
+                "    runs-on: ubuntu-latest",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "CONTRIBUTING.md").write_text(
+        "\n".join(
+            [
+                "# Contributing",
+                "- `.venv/bin/pytest -q`",
+                "- `.venv/bin/pre-commit run --all-files`",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "Dockerfile").write_text(
+        "\n".join(
+            [
+                "FROM python:3.12-slim",
+                'ENTRYPOINT ["python", "-m", "uvicorn"]',
+                'CMD ["apps.api.main:app"]',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    prompt = build_system_prompt(WorkerRequest(task_text="Inspect project checks"), tmp_path)
+
+    assert "## Build & Test" in prompt
+    assert "package.json scripts: lint=" in prompt
+    assert 'test="pytest -q"' in prompt
+    assert "pyproject.toml [project.scripts]" in prompt
+    assert "pyproject.toml [tool.pytest.ini_options]" in prompt
+    assert "pyproject.toml [tool.ruff]" in prompt
+    assert "pyproject.toml [tool.mypy]" in prompt
+    assert ".github/workflows/ci.yml: on=push, pull_request; jobs=test, lint" in prompt
+    assert "CONTRIBUTING.md commands:" in prompt
+    assert ".venv/bin/pytest -q" in prompt
+    assert "Dockerfile: base=python:3.12-slim" in prompt
+
+
+def test_build_system_prompt_omits_build_test_section_without_recognized_files(
+    tmp_path: Path,
+) -> None:
+    """Build/test context should be omitted when no known config source exists."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    prompt = build_system_prompt(WorkerRequest(task_text="Inspect project checks"), tmp_path)
+
+    assert "## Build & Test" not in prompt
+
+
+def test_build_system_prompt_shares_repo_guidance_budget_with_build_test_section(
+    tmp_path: Path,
+) -> None:
+    """Build/test context should be suppressed when AGENTS guidance consumes the budget."""
+    (tmp_path / "AGENTS.md").write_text(
+        "A" * (DEFAULT_AGENTS_MAX_CHARACTERS + 32),
+        encoding="utf-8",
+    )
+    (tmp_path / "package.json").write_text(
+        '{"scripts":{"test":"pytest -q"}}',
+        encoding="utf-8",
+    )
+
+    prompt = build_system_prompt(WorkerRequest(task_text="Inspect project checks"), tmp_path)
+
+    assert "AGENTS.md guidance:" in prompt
+    assert "... (truncated)" in prompt
+    assert "## Build & Test" not in prompt
+
+
 def test_build_repo_context_section_skips_missing_agents_file(tmp_path: Path) -> None:
     """Missing AGENTS.md should not break repo context rendering."""
     (tmp_path / "apps").mkdir()
