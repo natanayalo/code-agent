@@ -457,6 +457,15 @@ def test_extract_yaml_top_level_keys_requires_root_level_and_supports_quoted_key
     assert events == ["workflow_dispatch"]
 
 
+def test_extract_yaml_top_level_keys_handles_inline_list_comments_and_quoted_commas() -> None:
+    """Inline list parsing should ignore trailing comments and preserve quoted commas."""
+    workflow_text = 'on: ["label,edited", push, workflow_dispatch] # trailing comment'
+
+    events = prompt._extract_yaml_top_level_keys(workflow_text, root_key="on")
+
+    assert events == ["push", "workflow_dispatch"]
+
+
 def test_summarize_github_workflows_skips_unreadable_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -555,6 +564,28 @@ def test_summarize_dockerfile_prefers_last_effective_instructions(tmp_path: Path
     assert 'entrypoint=["python", "-m", "app.main"]' in summary
     assert 'cmd=["--serve"]' in summary
     assert "python:3.12 as build" not in summary
+
+
+def test_summarize_dockerfile_handles_tabs_and_continuations(tmp_path: Path) -> None:
+    """Docker summary should parse tab-separated instructions and line continuations."""
+    (tmp_path / "Dockerfile").write_text(
+        "\n".join(
+            [
+                "FROM\tpython:3.12-slim",
+                'ENTRYPOINT ["python", \\',
+                '  "-m", "app.main"]',
+                'CMD\t["--serve"]',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    summary = prompt._summarize_dockerfile(tmp_path)
+
+    assert summary is not None
+    assert "base=python:3.12-slim" in summary
+    assert 'entrypoint=["python", "-m", "app.main"]' in summary
+    assert 'cmd=["--serve"]' in summary
 
 
 def test_build_build_test_section_handles_non_positive_budget(tmp_path: Path) -> None:

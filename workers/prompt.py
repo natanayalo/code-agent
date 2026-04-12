@@ -495,19 +495,83 @@ def _summarize_pyproject_config(workspace_path: Path) -> list[str]:
 
 def _parse_inline_yaml_key_values(raw_value: str) -> list[str]:
     """Parse simple inline YAML values into normalized key names."""
-    stripped = raw_value.strip()
+    stripped = _strip_yaml_comment(raw_value).strip()
     if not stripped:
         return []
     if stripped.startswith("[") and stripped.endswith("]"):
-        candidates = [item.strip() for item in stripped[1:-1].split(",")]
+        candidates = _split_inline_yaml_list_values(stripped[1:-1])
     else:
-        candidates = [stripped.split("#", 1)[0].strip()]
+        candidates = [stripped]
     keys: list[str] = []
     for candidate in candidates:
         normalized = candidate.strip("\"'")
         if normalized and _WORKFLOW_KEY_PATTERN.fullmatch(normalized):
             keys.append(normalized)
     return keys
+
+
+def _strip_yaml_comment(raw_value: str) -> str:
+    """Strip trailing YAML comments while respecting quoted text."""
+    in_single_quote = False
+    in_double_quote = False
+    escaped = False
+    result_chars: list[str] = []
+    for char in raw_value:
+        if escaped:
+            result_chars.append(char)
+            escaped = False
+            continue
+        if char == "\\" and in_double_quote:
+            result_chars.append(char)
+            escaped = True
+            continue
+        if char == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+            result_chars.append(char)
+            continue
+        if char == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+            result_chars.append(char)
+            continue
+        if char == "#" and not in_single_quote and not in_double_quote:
+            break
+        result_chars.append(char)
+    return "".join(result_chars)
+
+
+def _split_inline_yaml_list_values(raw_value: str) -> list[str]:
+    """Split inline YAML list values on commas outside quotes."""
+    values: list[str] = []
+    current_chars: list[str] = []
+    in_single_quote = False
+    in_double_quote = False
+    escaped = False
+
+    for char in raw_value:
+        if escaped:
+            current_chars.append(char)
+            escaped = False
+            continue
+        if char == "\\" and in_double_quote:
+            current_chars.append(char)
+            escaped = True
+            continue
+        if char == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+            current_chars.append(char)
+            continue
+        if char == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+            current_chars.append(char)
+            continue
+        if char == "," and not in_single_quote and not in_double_quote:
+            values.append("".join(current_chars).strip())
+            current_chars = []
+            continue
+        current_chars.append(char)
+
+    values.append("".join(current_chars).strip())
+    return values
 
 
 def _extract_yaml_top_level_keys(contents: str, *, root_key: str) -> list[str]:
@@ -647,21 +711,28 @@ def _summarize_dockerfile(workspace_path: Path) -> str | None:
     base_image: str | None = None
     entrypoint: str | None = None
     cmd: str | None = None
-    for line in contents.splitlines():
+    for line in _combine_dockerfile_logical_lines(contents):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        upper = stripped.upper()
-        if upper.startswith("FROM "):
-            base_candidate = stripped.partition(" ")[2].strip()
+        instruction_parts = stripped.split(None, 1)
+        if len(instruction_parts) < 2:
+            continue
+        instruction = instruction_parts[0].upper()
+        payload = instruction_parts[1].strip()
+        if not payload:
+            continue
+
+        if instruction == "FROM":
+            base_candidate = payload
             if base_candidate:
                 base_image = base_candidate
-        elif upper.startswith("ENTRYPOINT "):
-            entrypoint_candidate = stripped.partition(" ")[2].strip()
+        elif instruction == "ENTRYPOINT":
+            entrypoint_candidate = payload
             if entrypoint_candidate:
                 entrypoint = entrypoint_candidate
-        elif upper.startswith("CMD "):
-            cmd_candidate = stripped.partition(" ")[2].strip()
+        elif instruction == "CMD":
+            cmd_candidate = payload
             if cmd_candidate:
                 cmd = cmd_candidate
 
@@ -675,6 +746,28 @@ def _summarize_dockerfile(workspace_path: Path) -> str | None:
     if not parts:
         return None
     return f"- Dockerfile: {'; '.join(parts)}"
+
+
+def _combine_dockerfile_logical_lines(contents: str) -> list[str]:
+    """Combine Dockerfile continuation lines into logical instruction lines."""
+    logical_lines: list[str] = []
+    current: str | None = None
+
+    for raw_line in contents.splitlines():
+        line = raw_line.rstrip()
+        if current is None:
+            current = line
+        else:
+            current = f"{current} {line.lstrip()}"
+        if current.endswith("\\"):
+            current = current[:-1].rstrip()
+            continue
+        logical_lines.append(current)
+        current = None
+
+    if current is not None:
+        logical_lines.append(current)
+    return logical_lines
 
 
 def build_build_test_section(
