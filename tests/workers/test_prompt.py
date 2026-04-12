@@ -333,7 +333,7 @@ def test_build_build_test_section_handles_makefile_filters_and_truncates_targets
                 ".PHONY: test lint",
                 "%pattern: ; @true",
                 "VERSION := 1",
-                "build:",
+                "build :",
                 "test:all",
                 "lint:",
                 "lint:",
@@ -437,6 +437,26 @@ def test_extract_yaml_top_level_keys_accepts_whitespace_before_colon() -> None:
     assert jobs == ["test"]
 
 
+def test_extract_yaml_top_level_keys_requires_root_level_and_supports_quoted_keys() -> None:
+    """Root-key parsing should ignore nested keys and accept quoted top-level keys."""
+    workflow_text = "\n".join(
+        [
+            "name: ci",
+            "env:",
+            "  on: [push]",
+            '"on": [workflow_dispatch]',
+            "jobs:",
+            "  test:",
+            "    steps:",
+            "      - name: check",
+        ]
+    )
+
+    events = prompt._extract_yaml_top_level_keys(workflow_text, root_key="on")
+
+    assert events == ["workflow_dispatch"]
+
+
 def test_summarize_github_workflows_skips_unreadable_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -510,6 +530,31 @@ def test_summarize_dockerfile_handles_from_without_image_value(tmp_path: Path) -
     (tmp_path / "Dockerfile").write_text("FROM \n", encoding="utf-8")
 
     assert prompt._summarize_dockerfile(tmp_path) is None
+
+
+def test_summarize_dockerfile_prefers_last_effective_instructions(tmp_path: Path) -> None:
+    """Docker summary should reflect the final effective FROM/ENTRYPOINT/CMD instructions."""
+    (tmp_path / "Dockerfile").write_text(
+        "\n".join(
+            [
+                "FROM python:3.12 as build",
+                'ENTRYPOINT ["python", "build.py"]',
+                'CMD ["build"]',
+                "FROM gcr.io/distroless/python3",
+                'ENTRYPOINT ["python", "-m", "app.main"]',
+                'CMD ["--serve"]',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    summary = prompt._summarize_dockerfile(tmp_path)
+
+    assert summary is not None
+    assert "base=gcr.io/distroless/python3" in summary
+    assert 'entrypoint=["python", "-m", "app.main"]' in summary
+    assert 'cmd=["--serve"]' in summary
+    assert "python:3.12 as build" not in summary
 
 
 def test_build_build_test_section_handles_non_positive_budget(tmp_path: Path) -> None:

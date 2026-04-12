@@ -379,7 +379,7 @@ def _extract_makefile_targets(contents: str) -> list[str]:
     """Extract a bounded set of non-special Makefile targets."""
     targets: list[str] = []
     for line in contents.splitlines():
-        match = re.match(r"^([A-Za-z0-9][A-Za-z0-9_.-]*):(?!\s*=)", line)
+        match = re.match(r"^([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:(?!\s*=)", line)
         if match is None:
             continue
         target = match.group(1)
@@ -525,7 +525,8 @@ def _extract_yaml_top_level_keys(contents: str, *, root_key: str) -> list[str]:
         indent = len(line) - len(line.lstrip(" "))
 
         if not in_block:
-            if ":" not in stripped or stripped.partition(":")[0].strip() != root_key:
+            key_candidate = stripped.partition(":")[0].strip().strip("\"'")
+            if indent != 0 or ":" not in stripped or key_candidate != root_key:
                 continue
             in_block = True
             root_indent = indent
@@ -651,14 +652,18 @@ def _summarize_dockerfile(workspace_path: Path) -> str | None:
         if not stripped or stripped.startswith("#"):
             continue
         upper = stripped.upper()
-        if base_image is None and upper.startswith("FROM "):
-            base_image = stripped.partition(" ")[2].strip()
-        elif entrypoint is None and upper.startswith("ENTRYPOINT "):
-            entrypoint = stripped.partition(" ")[2].strip()
-        elif cmd is None and upper.startswith("CMD "):
-            cmd = stripped.partition(" ")[2].strip()
-        if base_image is not None and entrypoint is not None and cmd is not None:
-            break
+        if upper.startswith("FROM "):
+            base_candidate = stripped.partition(" ")[2].strip()
+            if base_candidate:
+                base_image = base_candidate
+        elif upper.startswith("ENTRYPOINT "):
+            entrypoint_candidate = stripped.partition(" ")[2].strip()
+            if entrypoint_candidate:
+                entrypoint = entrypoint_candidate
+        elif upper.startswith("CMD "):
+            cmd_candidate = stripped.partition(" ")[2].strip()
+            if cmd_candidate:
+                cmd = cmd_candidate
 
     parts: list[str] = []
     if base_image is not None:
