@@ -812,6 +812,10 @@ def test_yaml_helpers_handle_comments_quotes_and_invalid_values() -> None:
     """YAML helper parsing should preserve quoted fragments and drop invalid identifiers."""
     assert prompt._strip_yaml_comment("value # comment") == "value "
     assert prompt._strip_yaml_comment('"value # keep" # drop') == '"value # keep" '
+    assert (
+        prompt._strip_yaml_comment("https://example.com/docs#anchor")
+        == "https://example.com/docs#anchor"
+    )
     assert prompt._split_inline_yaml_list_values("\"a,b\", c, 'd,e'") == ['"a,b"', "c", "'d,e'"]
 
     assert prompt._parse_inline_yaml_key_values("workflow_dispatch") == ["workflow_dispatch"]
@@ -882,3 +886,17 @@ def test_combine_dockerfile_logical_lines_handles_inline_comment_after_backslash
     )
 
     assert logical == ["RUN echo one && echo two"]
+
+
+def test_combine_dockerfile_logical_lines_ignores_even_trailing_backslashes() -> None:
+    """An even number of trailing backslashes should not be treated as continuation."""
+    logical = prompt._combine_dockerfile_logical_lines(
+        "\n".join(
+            [
+                "RUN echo one \\\\",
+                "RUN echo two",
+            ]
+        )
+    )
+
+    assert logical == ["RUN echo one \\\\", "RUN echo two"]

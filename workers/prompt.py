@@ -525,7 +525,7 @@ def _strip_yaml_comment(raw_value: str) -> str:
     in_double_quote = False
     escaped = False
     result_chars: list[str] = []
-    for char in raw_value:
+    for index, char in enumerate(raw_value):
         if escaped:
             result_chars.append(char)
             escaped = False
@@ -543,7 +543,8 @@ def _strip_yaml_comment(raw_value: str) -> str:
             result_chars.append(char)
             continue
         if char == "#" and not in_single_quote and not in_double_quote:
-            break
+            if index == 0 or raw_value[index - 1].isspace():
+                break
         result_chars.append(char)
     return "".join(result_chars)
 
@@ -779,7 +780,8 @@ def _combine_dockerfile_logical_lines(contents: str) -> list[str]:
         else:
             current = f"{current} {line.lstrip()}"
         continuation_probe = _strip_yaml_comment(current).rstrip()
-        if continuation_probe.endswith("\\"):
+        trailing_backslashes = len(continuation_probe) - len(continuation_probe.rstrip("\\"))
+        if trailing_backslashes % 2 == 1:
             current = continuation_probe[:-1].rstrip()
             continue
         logical_lines.append(current)
