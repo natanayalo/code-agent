@@ -473,21 +473,27 @@ def _summarize_pyproject_config(workspace_path: Path) -> list[str]:
         return lines
 
     pytest_table = tool_table.get("pytest")
-    if isinstance(pytest_table, dict):
+    if isinstance(pytest_table, dict) and pytest_table:
         pytest_config = pytest_table.get("ini_options")
-        if isinstance(pytest_config, dict):
+        if isinstance(pytest_config, dict) and pytest_config:
             pytest_summary = _compact_json_summary(pytest_config)
             lines.append(f"- pyproject.toml [tool.pytest.ini_options]: {pytest_summary}")
         else:
-            pytest_summary = _compact_json_summary(pytest_table)
-            lines.append(f"- pyproject.toml [tool.pytest]: {pytest_summary}")
+            filtered_pytest_table = {
+                key: value
+                for key, value in pytest_table.items()
+                if not (key == "ini_options" and isinstance(value, dict) and not value)
+            }
+            if filtered_pytest_table:
+                pytest_summary = _compact_json_summary(filtered_pytest_table)
+                lines.append(f"- pyproject.toml [tool.pytest]: {pytest_summary}")
 
     ruff_table = tool_table.get("ruff")
-    if isinstance(ruff_table, dict):
+    if isinstance(ruff_table, dict) and ruff_table:
         lines.append(f"- pyproject.toml [tool.ruff]: {_compact_json_summary(ruff_table)}")
 
     mypy_table = tool_table.get("mypy")
-    if isinstance(mypy_table, dict):
+    if isinstance(mypy_table, dict) and mypy_table:
         lines.append(f"- pyproject.toml [tool.mypy]: {_compact_json_summary(mypy_table)}")
 
     return lines[:_BUILD_CONTEXT_ITEM_LIMIT]

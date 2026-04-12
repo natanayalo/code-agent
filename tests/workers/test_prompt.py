@@ -395,6 +395,30 @@ def test_summarize_pyproject_config_uses_pytest_fallback_and_skips_non_dict_tool
     assert not any("[tool.ruff]" in line for line in lines)
 
 
+def test_summarize_pyproject_config_skips_empty_pytest_ruff_and_mypy_tables(
+    tmp_path: Path,
+) -> None:
+    """Empty tool tables should not add noisy build/test summary lines."""
+    (tmp_path / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[tool.pytest]",
+                "[tool.pytest.ini_options]",
+                "[tool.ruff]",
+                "[tool.mypy]",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    lines = prompt._summarize_pyproject_config(tmp_path)
+
+    assert not any("[tool.pytest.ini_options]" in line for line in lines)
+    assert not any("[tool.pytest]" in line for line in lines)
+    assert not any("[tool.ruff]" in line for line in lines)
+    assert not any("[tool.mypy]" in line for line in lines)
+
+
 def test_extract_yaml_top_level_keys_handles_inline_lists_and_invalid_names() -> None:
     """Workflow-key extraction should parse inline lists and reject invalid identifiers."""
     workflow_text = "\n".join(
