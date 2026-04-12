@@ -54,6 +54,13 @@ def test_build_view_file_command_from_input_prefixes_equals_only_path_for_awk() 
     assert "./config=v1.txt" in command
 
 
+def test_build_view_file_command_from_input_prefixes_hyphen_path_for_awk() -> None:
+    """awk paths starting with '-' should be prefixed to avoid option interpretation."""
+    command = build_view_file_command_from_input('{"path":"-danger.txt"}')
+
+    assert "./-danger.txt" in command
+
+
 def test_build_search_file_command_from_input_supports_literal_mode() -> None:
     """search_file literal mode should map to fixed-string ripgrep flags."""
     command = build_search_file_command_from_input(
@@ -106,7 +113,7 @@ def test_build_str_replace_editor_command_from_input_renders_two_phase_update() 
     assert "str_replace_editor: old_text not found in file." in command
     assert "str_replace_editor: old_text is ambiguous" in command
     assert "> README.md.codex_tmp_replace" in command
-    assert "mv README.md.codex_tmp_replace README.md" in command
+    assert "mv -- README.md.codex_tmp_replace README.md" in command
 
 
 def test_build_str_replace_editor_command_from_input_rejects_multiline_values() -> None:
@@ -133,6 +140,16 @@ def test_build_str_replace_editor_command_from_input_prefixes_equals_only_path_f
 
     assert "./config=v1.txt" in command
     assert "./config=v1.txt.codex_tmp_replace" in command
+
+
+def test_build_str_replace_editor_command_from_input_prefixes_hyphen_path_for_awk() -> None:
+    """awk-side path usage should prefix hyphen-leading filenames in replacement mode."""
+    command = build_str_replace_editor_command_from_input(
+        '{"path":"-danger.txt","old_text":"a","new_text":"b"}'
+    )
+
+    assert "./-danger.txt" in command
+    assert "./-danger.txt.codex_tmp_replace" in command
 
 
 def test_file_tools_reject_invalid_json_payloads() -> None:

@@ -145,7 +145,7 @@ def _normalize_awk_path_argument(path: str) -> str:
         return path
     if "/" in path:
         return path
-    if "=" in path:
+    if "=" in path or path.startswith("-"):
         return f"./{path}"
     return path
 
@@ -222,7 +222,7 @@ def build_str_replace_editor_command(request: StrReplaceEditorToolRequest) -> st
         f"{shlex.join(['awk', replace_program, path_arg])}"
     )
     write_command = f"{replace_command} > {shlex.quote(tmp_path)}"
-    move_command = shlex.join(["mv", tmp_path, request.path])
+    move_command = shlex.join(["mv", "--", tmp_path, request.path])
     return f"{check_command} && {write_command} && {move_command}"
 
 
