@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
+import workers.prompt as prompt
 from workers.base import WorkerRequest
 from workers.prompt import (
     DEFAULT_AGENTS_MAX_CHARACTERS,
+    build_build_test_section,
     build_repo_context_section,
     build_system_prompt,
     build_task_context_section,
@@ -319,3 +321,196 @@ def test_build_task_context_section_handles_mixed_type_sets() -> None:
     assert '"tags"' in section
     assert '"alpha"' in section
     assert "nested" in section
+
+
+def test_build_build_test_section_handles_makefile_filters_and_truncates_targets(
+    tmp_path: Path,
+) -> None:
+    """Makefile summary should skip special targets and stop at item limit."""
+    (tmp_path / "Makefile").write_text(
+        "\n".join(
+            [
+                ".PHONY: test lint",
+                "%pattern: ; @true",
+                "build:",
+                "test:",
+                "lint:",
+                "lint:",
+                "check:",
+                "deploy:",
+                "format:",
+                "verify:",
+                "docs:",
+                "extra:",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    section = build_build_test_section(tmp_path)
+
+    assert section is not None
+    assert "## Build & Test" in section
+    assert "Makefile targets:" in section
+    assert ".PHONY" not in section
+    assert "%pattern" not in section
+    assert "extra" not in section
+
+
+def test_build_build_test_section_handles_invalid_package_and_pyproject_files(
+    tmp_path: Path,
+) -> None:
+    """Invalid config payloads should be ignored without crashing prompt assembly."""
+    (tmp_path / "package.json").write_text("{not-json", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("invalid = {", encoding="utf-8")
+
+    section = build_build_test_section(tmp_path)
+
+    assert section is None
+
+
+def test_summarize_pyproject_config_uses_pytest_fallback_and_skips_non_dict_tools(
+    tmp_path: Path,
+) -> None:
+    """Pyproject summary should include fallback pytest table and skip non-dict tools."""
+    (tmp_path / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[tool.pytest]",
+                'addopts = "-q"',
+                "[tool.mypy]",
+                "strict = true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    lines = prompt._summarize_pyproject_config(tmp_path)
+
+    assert any("[tool.pytest]" in line for line in lines)
+    assert any("[tool.mypy]" in line for line in lines)
+    assert not any("[tool.ruff]" in line for line in lines)
+
+
+def test_extract_yaml_top_level_keys_handles_inline_lists_and_invalid_names() -> None:
+    """Workflow-key extraction should parse inline lists and reject invalid identifiers."""
+    workflow_text = "\n".join(
+        [
+            'on: [push, pull_request, "workflow_dispatch", bad$key]',
+            "jobs:",
+            "  test:",
+            "    runs-on: ubuntu-latest",
+            '  "lint-job":',
+            "    runs-on: ubuntu-latest",
+            "  bad$key:",
+            "    runs-on: ubuntu-latest",
+        ]
+    )
+
+    events = prompt._extract_yaml_top_level_keys(workflow_text, root_key="on")
+    jobs = prompt._extract_yaml_top_level_keys(workflow_text, root_key="jobs")
+    missing = prompt._extract_yaml_top_level_keys(workflow_text, root_key="schedule")
+
+    assert events == ["push", "pull_request", "workflow_dispatch"]
+    assert jobs == ["test", "lint-job"]
+    assert missing == []
+
+
+def test_summarize_github_workflows_skips_unreadable_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unreadable workflow files should be skipped while readable ones remain summarized."""
+    workflows_dir = tmp_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True)
+    readable_file = workflows_dir / "a.yml"
+    unreadable_file = workflows_dir / "b.yml"
+    readable_file.write_text("on: [push]\njobs:\n  test:\n", encoding="utf-8")
+    unreadable_file.write_text("on: [pull_request]\njobs:\n  lint:\n", encoding="utf-8")
+
+    original_read_text_prefix = prompt._read_text_prefix
+
+    def fake_read_text_prefix(path: Path, *, max_characters: int) -> str:
+        if path == unreadable_file:
+            raise OSError("denied")
+        return original_read_text_prefix(path, max_characters=max_characters)
+
+    monkeypatch.setattr(prompt, "_read_text_prefix", fake_read_text_prefix)
+
+    summaries = prompt._summarize_github_workflows(tmp_path)
+
+    assert len(summaries) == 1
+    assert "a.yml" in summaries[0]
+    assert "b.yml" not in summaries[0]
+
+
+def test_summarize_contributing_commands_filters_noise_and_dedupes(tmp_path: Path) -> None:
+    """Contributing command extraction should keep actionable unique command hints only."""
+    (tmp_path / "CONTRIBUTING.md").write_text(
+        "\n".join(
+            [
+                "# Contributing",
+                "Read this guide first.",
+                "- `.venv/bin/pytest -q`",
+                "- `.venv/bin/pytest -q`",
+                "- `echo hello`",
+                "- `ruff check .`",
+                "- `docker compose up`",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    summary = prompt._summarize_contributing_commands(tmp_path)
+
+    assert summary is not None
+    assert ".venv/bin/pytest -q" in summary
+    assert "ruff check ." in summary
+    assert "docker compose up" in summary
+    assert summary.count(".venv/bin/pytest -q") == 1
+    assert "echo hello" not in summary
+
+
+def test_summarize_dockerfile_handles_missing_instructions_and_empty_files(
+    tmp_path: Path,
+) -> None:
+    """Dockerfile summary should be None when no actionable instructions are present."""
+    (tmp_path / "Dockerfile").write_text("# comment-only\n", encoding="utf-8")
+    assert prompt._summarize_dockerfile(tmp_path) is None
+
+    (tmp_path / "Dockerfile").write_text("FROM python:3.12-slim\n", encoding="utf-8")
+    summary = prompt._summarize_dockerfile(tmp_path)
+    assert summary is not None
+    assert "base=python:3.12-slim" in summary
+
+
+def test_build_build_test_section_handles_non_positive_budget(tmp_path: Path) -> None:
+    """Non-positive character budgets should suppress build/test context rendering."""
+    (tmp_path / "package.json").write_text('{"scripts":{"test":"pytest -q"}}', encoding="utf-8")
+
+    assert build_build_test_section(tmp_path, max_characters=0) is None
+
+
+def test_build_build_test_section_truncates_long_output(tmp_path: Path) -> None:
+    """Build/test section should obey max-character truncation when needed."""
+    (tmp_path / "package.json").write_text(
+        "\n".join(
+            [
+                "{",
+                '  "scripts": {',
+                '    "test": "pytest -q",',
+                '    "lint": "ruff check .",',
+                '    "type": "mypy .",',
+                '    "format": "ruff format ."',
+                "  }",
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    section = build_build_test_section(tmp_path, max_characters=40)
+
+    assert section is not None
+    assert len(section) <= 40
+    assert section.endswith("... (truncated)")
