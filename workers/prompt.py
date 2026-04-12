@@ -379,16 +379,19 @@ def _extract_makefile_targets(contents: str) -> list[str]:
     """Extract a bounded set of non-special Makefile targets."""
     targets: list[str] = []
     for line in contents.splitlines():
-        match = re.match(r"^([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:(?!\s*=)", line)
+        match = re.match(
+            r"^([A-Za-z0-9][A-Za-z0-9_.%-]*(?:\s+[A-Za-z0-9][A-Za-z0-9_.%-]*)*)\s*:(?!\s*=)",
+            line,
+        )
         if match is None:
             continue
-        target = match.group(1)
-        if target.startswith(".") or "%" in target:
-            continue
-        if target not in targets:
-            targets.append(target)
-        if len(targets) >= _BUILD_CONTEXT_ITEM_LIMIT:
-            break
+        for target in match.group(1).split():
+            if target.startswith(".") or "%" in target:
+                continue
+            if target not in targets:
+                targets.append(target)
+            if len(targets) >= _BUILD_CONTEXT_ITEM_LIMIT:
+                return targets
     return targets
 
 
@@ -589,10 +592,11 @@ def _extract_yaml_top_level_keys(contents: str, *, root_key: str) -> list[str]:
     child_indent: int | None = None
 
     for line in lines:
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+        clean_line = _strip_yaml_comment(line)
+        stripped = clean_line.strip()
+        if not stripped:
             continue
-        indent = len(line) - len(line.lstrip(" "))
+        indent = len(clean_line) - len(clean_line.lstrip(" "))
 
         if not in_block:
             key_candidate = stripped.partition(":")[0].strip().strip("\"'")

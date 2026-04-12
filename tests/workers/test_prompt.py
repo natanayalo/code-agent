@@ -360,6 +360,20 @@ def test_build_build_test_section_handles_makefile_filters_and_truncates_targets
     assert "extra" not in section
 
 
+def test_extract_makefile_targets_includes_multiple_targets_on_one_rule_line() -> None:
+    """Makefile extraction should include each target declared before one colon."""
+    contents = "\n".join(
+        [
+            "test lint: deps",
+            "deploy: all",
+        ]
+    )
+
+    targets = prompt._extract_makefile_targets(contents)
+
+    assert targets == ["test", "lint", "deploy"]
+
+
 def test_build_build_test_section_handles_invalid_package_and_pyproject_files(
     tmp_path: Path,
 ) -> None:
@@ -488,6 +502,24 @@ def test_extract_yaml_top_level_keys_handles_inline_list_comments_and_quoted_com
     events = prompt._extract_yaml_top_level_keys(workflow_text, root_key="on")
 
     assert events == ["push", "workflow_dispatch"]
+
+
+def test_extract_yaml_top_level_keys_handles_block_list_comments() -> None:
+    """Block list entries should parse even when each item includes a trailing comment."""
+    workflow_text = "\n".join(
+        [
+            "on:",
+            "  - push # ci trigger",
+            "  - pull_request # pr trigger",
+            "jobs:",
+            "  test:",
+            "    runs-on: ubuntu-latest",
+        ]
+    )
+
+    events = prompt._extract_yaml_top_level_keys(workflow_text, root_key="on")
+
+    assert events == ["push", "pull_request"]
 
 
 def test_summarize_github_workflows_skips_unreadable_files(
