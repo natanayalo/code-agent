@@ -127,10 +127,18 @@ EXECUTE_BASH_TOOL_NAME = "execute_bash"
 EXECUTE_GIT_TOOL_NAME = "execute_git"
 EXECUTE_GITHUB_TOOL_NAME = "execute_github"
 EXECUTE_BROWSER_TOOL_NAME = "execute_browser"
+VIEW_FILE_TOOL_NAME = "view_file"
+SEARCH_FILE_TOOL_NAME = "search_file"
+SEARCH_DIR_TOOL_NAME = "search_dir"
+STR_REPLACE_EDITOR_TOOL_NAME = "str_replace_editor"
 DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS = 60
 DEFAULT_EXECUTE_GIT_TIMEOUT_SECONDS = 30
 DEFAULT_EXECUTE_GITHUB_TIMEOUT_SECONDS = 60
 DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS = 60
+DEFAULT_VIEW_FILE_TIMEOUT_SECONDS = 30
+DEFAULT_SEARCH_FILE_TIMEOUT_SECONDS = 30
+DEFAULT_SEARCH_DIR_TIMEOUT_SECONDS = 30
+DEFAULT_STR_REPLACE_EDITOR_TIMEOUT_SECONDS = 60
 
 EXECUTE_BASH_TOOL = ToolDefinition(
     name=EXECUTE_BASH_TOOL_NAME,
@@ -341,6 +349,183 @@ EXECUTE_BROWSER_TOOL = ToolDefinition(
     deterministic=False,
 )
 
+VIEW_FILE_TOOL = ToolDefinition(
+    name=VIEW_FILE_TOOL_NAME,
+    description=("View file contents with line numbers, optionally bounded to a line range."),
+    capability_category=ToolCapabilityCategory.SHELL,
+    side_effect_level=ToolSideEffectLevel.READ_ONLY,
+    required_permission=ToolPermissionLevel.READ_ONLY,
+    timeout_seconds=DEFAULT_VIEW_FILE_TIMEOUT_SECONDS,
+    network_required=False,
+    expected_artifacts=(
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+    ),
+    mcp_input_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "File path relative to the workspace root.",
+            },
+            "start_line": {
+                "type": ["integer", "null"],
+                "minimum": 1,
+                "description": "Optional inclusive start line number.",
+            },
+            "end_line": {
+                "type": ["integer", "null"],
+                "minimum": 1,
+                "description": "Optional inclusive end line number.",
+            },
+        },
+        "required": ["path"],
+    },
+    deterministic=True,
+)
+
+SEARCH_FILE_TOOL = ToolDefinition(
+    name=SEARCH_FILE_TOOL_NAME,
+    description=("Search within a single file and return matching lines with context."),
+    capability_category=ToolCapabilityCategory.SHELL,
+    side_effect_level=ToolSideEffectLevel.READ_ONLY,
+    required_permission=ToolPermissionLevel.READ_ONLY,
+    timeout_seconds=DEFAULT_SEARCH_FILE_TIMEOUT_SECONDS,
+    network_required=False,
+    expected_artifacts=(
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+    ),
+    mcp_input_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "File path relative to the workspace root.",
+            },
+            "query": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Regex or literal search pattern.",
+            },
+            "regex": {
+                "type": "boolean",
+                "description": "Treat query as regex when true; literal when false.",
+                "default": True,
+            },
+            "context_lines": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 20,
+                "default": 2,
+                "description": "Number of context lines around each match.",
+            },
+        },
+        "required": ["path", "query"],
+    },
+    deterministic=True,
+)
+
+SEARCH_DIR_TOOL = ToolDefinition(
+    name=SEARCH_DIR_TOOL_NAME,
+    description=(
+        "Search recursively within a directory tree and return matching lines with context."
+    ),
+    capability_category=ToolCapabilityCategory.SHELL,
+    side_effect_level=ToolSideEffectLevel.READ_ONLY,
+    required_permission=ToolPermissionLevel.READ_ONLY,
+    timeout_seconds=DEFAULT_SEARCH_DIR_TIMEOUT_SECONDS,
+    network_required=False,
+    expected_artifacts=(
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+    ),
+    mcp_input_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "path": {
+                "type": "string",
+                "minLength": 1,
+                "default": ".",
+                "description": "Directory path relative to the workspace root.",
+            },
+            "query": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Regex or literal search pattern.",
+            },
+            "regex": {
+                "type": "boolean",
+                "description": "Treat query as regex when true; literal when false.",
+                "default": True,
+            },
+            "context_lines": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 20,
+                "default": 2,
+                "description": "Number of context lines around each match.",
+            },
+        },
+        "required": ["query"],
+    },
+    deterministic=True,
+)
+
+STR_REPLACE_EDITOR_TOOL = ToolDefinition(
+    name=STR_REPLACE_EDITOR_TOOL_NAME,
+    description=(
+        "Replace exactly one literal string occurrence in a file. "
+        "Fails when the target string is missing or ambiguous."
+    ),
+    capability_category=ToolCapabilityCategory.SHELL,
+    side_effect_level=ToolSideEffectLevel.WORKSPACE_WRITE,
+    required_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+    timeout_seconds=DEFAULT_STR_REPLACE_EDITOR_TIMEOUT_SECONDS,
+    network_required=False,
+    expected_artifacts=(
+        ToolExpectedArtifact.STDOUT,
+        ToolExpectedArtifact.STDERR,
+        ToolExpectedArtifact.CHANGED_FILES,
+    ),
+    mcp_input_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "File path relative to the workspace root.",
+            },
+            "old_text": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Exact single-line string to replace.",
+            },
+            "new_text": {
+                "type": "string",
+                "description": "Replacement single-line string.",
+            },
+        },
+        "required": ["path", "old_text", "new_text"],
+    },
+    deterministic=True,
+)
+
 DEFAULT_TOOL_REGISTRY = ToolRegistry(
-    tools=(EXECUTE_BASH_TOOL, EXECUTE_GIT_TOOL, EXECUTE_GITHUB_TOOL, EXECUTE_BROWSER_TOOL)
+    tools=(
+        EXECUTE_BASH_TOOL,
+        VIEW_FILE_TOOL,
+        SEARCH_FILE_TOOL,
+        SEARCH_DIR_TOOL,
+        STR_REPLACE_EDITOR_TOOL,
+        EXECUTE_GIT_TOOL,
+        EXECUTE_GITHUB_TOOL,
+        EXECUTE_BROWSER_TOOL,
+    )
 )

@@ -18,6 +18,10 @@ from tools import (
     EXECUTE_BROWSER_TOOL_NAME,
     EXECUTE_GIT_TOOL_NAME,
     EXECUTE_GITHUB_TOOL_NAME,
+    SEARCH_DIR_TOOL_NAME,
+    SEARCH_FILE_TOOL_NAME,
+    STR_REPLACE_EDITOR_TOOL_NAME,
+    VIEW_FILE_TOOL_NAME,
     McpToolClient,
     ToolDefinition,
     ToolPermissionDecision,
@@ -27,6 +31,10 @@ from tools import (
     build_browser_command_from_input,
     build_git_command_from_input,
     build_github_command_from_input,
+    build_search_dir_command_from_input,
+    build_search_file_command_from_input,
+    build_str_replace_editor_command_from_input,
+    build_view_file_command_from_input,
     resolve_bash_command_permission,
 )
 from workers.base import WorkerCommand
@@ -312,6 +320,14 @@ def format_bash_observation(
 def _resolve_tool_command(tool: ToolDefinition, raw_input: str) -> str:
     """Normalize tool input into the concrete shell command executed in the sandbox."""
     command = raw_input.strip()
+    if tool.name == VIEW_FILE_TOOL_NAME:
+        return build_view_file_command_from_input(command)
+    if tool.name == SEARCH_FILE_TOOL_NAME:
+        return build_search_file_command_from_input(command)
+    if tool.name == SEARCH_DIR_TOOL_NAME:
+        return build_search_dir_command_from_input(command)
+    if tool.name == STR_REPLACE_EDITOR_TOOL_NAME:
+        return build_str_replace_editor_command_from_input(command)
     if tool.name == EXECUTE_BROWSER_TOOL_NAME:
         return build_browser_command_from_input(
             command,
