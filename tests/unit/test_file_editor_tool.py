@@ -123,12 +123,11 @@ def test_build_str_replace_editor_command_from_input_renders_two_phase_update() 
     assert "idx+1" in command
     assert "str_replace_editor: old_text not found in file." in command
     assert "str_replace_editor: old_text is ambiguous" in command
-    assert "> README.md.codex_tmp_replace" in command
-    assert "mv -- README.md.codex_tmp_replace README.md" in command
-    assert (
-        "else ret=$?; unlink README.md.codex_tmp_replace 2>/dev/null || true; exit $ret; fi"
-        in command
-    )
+    assert "> README.md.codex_tmp_replace_" in command
+    assert "mv -- README.md.codex_tmp_replace_" in command
+    assert " README.md" in command
+    assert "else ret=$?; unlink README.md.codex_tmp_replace_" in command
+    assert "2>/dev/null || true; exit $ret; fi" in command
 
 
 def test_build_str_replace_editor_command_from_input_rejects_multiline_values() -> None:
@@ -163,7 +162,7 @@ def test_build_str_replace_editor_command_from_input_prefixes_equals_only_path_f
     )
 
     assert "./config=v1.txt" in command
-    assert "./config=v1.txt.codex_tmp_replace" in command
+    assert "./config=v1.txt.codex_tmp_replace_" in command
 
 
 def test_build_str_replace_editor_command_prefixes_equals_with_slash_for_awk() -> None:
@@ -173,7 +172,7 @@ def test_build_str_replace_editor_command_prefixes_equals_with_slash_for_awk() -
     )
 
     assert "./dir=config/file.txt" in command
-    assert "./dir=config/file.txt.codex_tmp_replace" in command
+    assert "./dir=config/file.txt.codex_tmp_replace_" in command
 
 
 def test_build_str_replace_editor_command_from_input_prefixes_hyphen_path_for_awk() -> None:
@@ -183,7 +182,7 @@ def test_build_str_replace_editor_command_from_input_prefixes_hyphen_path_for_aw
     )
 
     assert "./-danger.txt" in command
-    assert "./-danger.txt.codex_tmp_replace" in command
+    assert "./-danger.txt.codex_tmp_replace_" in command
 
 
 def test_file_tools_reject_invalid_json_payloads() -> None:

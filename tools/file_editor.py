@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shlex
 
@@ -214,7 +215,10 @@ def build_str_replace_editor_command(request: StrReplaceEditorToolRequest) -> st
         "new substr(line, idx+length(old)); done=1}} print line}"
     )
     path_arg = _normalize_awk_path_argument(request.path)
-    tmp_path = f"{path_arg}.codex_tmp_replace"
+    tmp_suffix = hashlib.sha256(
+        f"{request.path}\0{request.old_text}\0{request.new_text}".encode()
+    ).hexdigest()[:12]
+    tmp_path = f"{path_arg}.codex_tmp_replace_{tmp_suffix}"
     check_command = (
         f"CODEX_OLD_TEXT={shlex.quote(request.old_text)} "
         f"{shlex.join(['awk', check_program, path_arg])}"
