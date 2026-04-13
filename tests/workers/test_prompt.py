@@ -1012,6 +1012,18 @@ def test_normalize_command_hint_and_contributing_summary_without_hints(tmp_path:
     assert prompt._summarize_contributing_commands(tmp_path) is None
 
 
+def test_normalize_command_hint_supports_common_non_python_toolchains() -> None:
+    """Command normalization should recognize actionable hints across common language stacks."""
+    assert prompt._normalize_command_hint("go test ./...") == "go test ./..."
+    assert prompt._normalize_command_hint("cargo test --all") == "cargo test --all"
+    assert prompt._normalize_command_hint("composer test") == "composer test"
+    assert prompt._normalize_command_hint("mvn test") == "mvn test"
+    assert prompt._normalize_command_hint("gradle test") == "gradle test"
+    assert prompt._normalize_command_hint("rake spec") == "rake spec"
+    assert prompt._normalize_command_hint("bundle exec rspec") == "bundle exec rspec"
+    assert prompt._normalize_command_hint("dotnet test") == "dotnet test"
+
+
 def test_combine_dockerfile_lines_json_safe_and_mask_repo_url_edges() -> None:
     """Helper utilities should handle trailing continuations and masking edge cases."""
     logical = prompt._combine_dockerfile_logical_lines("RUN echo hi \\\n  && echo there \\\n")

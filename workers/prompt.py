@@ -25,6 +25,7 @@ _WORKFLOW_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
 _COMMAND_HINT_PATTERN = re.compile(
     r"\b("
     r"pytest|pre-commit|ruff|mypy|tox|nox|make|npm|pnpm|yarn|docker compose|uv run|poetry run"
+    r"|go test|cargo|composer|mvn|gradle|rake|bundle|dotnet test"
     r")\b"
 )
 _SKIPPED_PATH_NAMES = {
