@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -409,6 +410,20 @@ def test_extract_makefile_targets_includes_multiple_targets_on_one_rule_line() -
     assert targets == ["test", "lint", "deploy"]
 
 
+def test_extract_makefile_targets_includes_path_like_targets() -> None:
+    """Makefile extraction should keep path-like targets that include forward slashes."""
+    contents = "\n".join(
+        [
+            "bin/app docs/build: deps",
+            "release: all",
+        ]
+    )
+
+    targets = prompt._extract_makefile_targets(contents)
+
+    assert targets == ["bin/app", "docs/build", "release"]
+
+
 def test_build_build_test_section_handles_invalid_package_and_pyproject_files(
     tmp_path: Path,
 ) -> None:
@@ -628,6 +643,27 @@ def test_summarize_contributing_commands_filters_noise_and_dedupes(tmp_path: Pat
     assert "docker compose up" in summary
     assert summary.count(".venv/bin/pytest -q") == 1
     assert "echo hello" not in summary
+
+
+def test_summarize_contributing_commands_truncates_long_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Contributing summary should be bounded to avoid oversized single-line output."""
+    monkeypatch.setattr(prompt, "_BUILD_CONTEXT_VALUE_MAX_CHARACTERS", 40)
+    (tmp_path / "CONTRIBUTING.md").write_text(
+        "\n".join(
+            [
+                "- `.venv/bin/pytest -q --maxfail=1 --disable-warnings --strict-config`",
+                "- `ruff check . --fix --show-fixes --output-format=full`",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    summary = prompt._summarize_contributing_commands(tmp_path)
+
+    assert summary is not None
+    assert "... (truncated)" in summary
 
 
 def test_summarize_dockerfile_handles_missing_instructions_and_empty_files(
@@ -876,6 +912,45 @@ def test_summarize_package_scripts_and_workflows_handle_invalid_payloads(tmp_pat
     workflow_summaries = prompt._summarize_github_workflows(tmp_path)
     assert len(workflow_summaries) == 1
     assert "valid.yaml" in workflow_summaries[0]
+
+
+def test_summaries_truncate_large_package_scripts_and_workflow_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Package scripts and workflow on/jobs fields should stay bounded per rendered value."""
+    monkeypatch.setattr(prompt, "_BUILD_CONTEXT_VALUE_MAX_CHARACTERS", 30)
+    long_command = "python -m pytest " + "x" * 200
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"test": long_command}}),
+        encoding="utf-8",
+    )
+
+    scripts_summary = prompt._summarize_package_scripts(tmp_path)
+    assert scripts_summary is not None
+    assert "... (truncated)" in scripts_summary
+
+    workflows_dir = tmp_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "large.yml").write_text(
+        "\n".join(
+            [
+                (
+                    "on: [push, pull_request, workflow_dispatch, "
+                    "schedule, repository_dispatch, workflow_run]"
+                ),
+                "jobs:",
+                "  test:",
+                "  lint:",
+                "  package:",
+                "  publish:",
+                "  smoke:",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    workflow_summaries = prompt._summarize_github_workflows(tmp_path)
+    assert len(workflow_summaries) == 1
+    assert "... (truncated)" in workflow_summaries[0]
 
 
 def test_normalize_command_hint_and_contributing_summary_without_hints(tmp_path: Path) -> None:

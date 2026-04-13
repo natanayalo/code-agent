@@ -380,7 +380,7 @@ def _extract_makefile_targets(contents: str) -> list[str]:
     targets: list[str] = []
     for line in contents.splitlines():
         match = re.match(
-            r"^([A-Za-z0-9][A-Za-z0-9_.%-]*(?:\s+[A-Za-z0-9][A-Za-z0-9_.%-]*)*)\s*:(?!\s*=)",
+            r"^([A-Za-z0-9][A-Za-z0-9_.%/-]*(?:\s+[A-Za-z0-9][A-Za-z0-9_.%/-]*)*)\s*:(?!\s*=)",
             line,
         )
         if match is None:
@@ -444,7 +444,7 @@ def _summarize_package_scripts(workspace_path: Path) -> str | None:
         script_command = scripts[script_name]
         if not isinstance(script_name, str) or not isinstance(script_command, str):
             continue
-        rendered_pairs.append(f"{script_name}={json.dumps(script_command)}")
+        rendered_pairs.append(f"{script_name}={_compact_json_summary(script_command)}")
         if len(rendered_pairs) >= _BUILD_CONTEXT_ITEM_LIMIT:
             break
     if not rendered_pairs:
@@ -672,9 +672,17 @@ def _summarize_github_workflows(workspace_path: Path) -> list[str]:
         jobs = _extract_yaml_top_level_keys(contents, root_key="jobs")
         summary_parts: list[str] = []
         if events:
-            summary_parts.append(f"on={', '.join(events)}")
+            events_summary = _truncate_to_budget(
+                ", ".join(events),
+                max_characters=_BUILD_CONTEXT_VALUE_MAX_CHARACTERS,
+            )
+            summary_parts.append(f"on={events_summary}")
         if jobs:
-            summary_parts.append(f"jobs={', '.join(jobs)}")
+            jobs_summary = _truncate_to_budget(
+                ", ".join(jobs),
+                max_characters=_BUILD_CONTEXT_VALUE_MAX_CHARACTERS,
+            )
+            summary_parts.append(f"jobs={jobs_summary}")
         if summary_parts:
             summaries.append(
                 f"- .github/workflows/{workflow_file.name}: {'; '.join(summary_parts)}"
@@ -719,7 +727,11 @@ def _summarize_contributing_commands(workspace_path: Path) -> str | None:
             break
     if not command_hints:
         return None
-    return f"- CONTRIBUTING.md commands: {'; '.join(command_hints)}"
+    commands_summary = _truncate_to_budget(
+        "; ".join(command_hints),
+        max_characters=_BUILD_CONTEXT_VALUE_MAX_CHARACTERS,
+    )
+    return f"- CONTRIBUTING.md commands: {commands_summary}"
 
 
 def _summarize_dockerfile(workspace_path: Path) -> str | None:
