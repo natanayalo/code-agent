@@ -914,6 +914,55 @@ def test_summarize_package_scripts_and_workflows_handle_invalid_payloads(tmp_pat
     assert "valid.yaml" in workflow_summaries[0]
 
 
+def test_summarize_package_scripts_prioritizes_common_actionable_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Common script names should be prioritized when summary item cap is small."""
+    monkeypatch.setattr(prompt, "_BUILD_CONTEXT_ITEM_LIMIT", 3)
+    scripts_payload = {
+        "scripts": {
+            "a": "echo a",
+            "z": "echo z",
+            "build": "npm run build",
+            "test": "pytest -q",
+            "lint": "ruff check .",
+        }
+    }
+    (tmp_path / "package.json").write_text(json.dumps(scripts_payload), encoding="utf-8")
+
+    scripts_summary = prompt._summarize_package_scripts(tmp_path)
+
+    assert scripts_summary is not None
+    assert "build=" in scripts_summary
+    assert "lint=" in scripts_summary
+    assert "test=" in scripts_summary
+    assert "a=" not in scripts_summary
+    assert "z=" not in scripts_summary
+
+
+def test_summarize_dockerfile_uses_build_context_value_budget_for_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Docker summary command truncation should use build-context value character budget."""
+    monkeypatch.setattr(prompt, "_BUILD_CONTEXT_VALUE_MAX_CHARACTERS", 120)
+    long_payload = "x" * 100
+    (tmp_path / "Dockerfile").write_text(
+        "\n".join(
+            [
+                "FROM python:3.12",
+                f"ENTRYPOINT {long_payload}",
+                f"CMD {long_payload}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    summary = prompt._summarize_dockerfile(tmp_path)
+
+    assert summary is not None
+    assert "... (truncated)" not in summary
+
+
 def test_summaries_truncate_large_package_scripts_and_workflow_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

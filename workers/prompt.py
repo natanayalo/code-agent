@@ -20,6 +20,7 @@ _AGENTS_ASSET_DIRECTORIES = ("skills", "workflows", "rules")
 _BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS = 1048576
 _BUILD_CONTEXT_ITEM_LIMIT = 8
 _BUILD_CONTEXT_VALUE_MAX_CHARACTERS = 220
+_PRIORITY_PACKAGE_SCRIPT_NAMES = ("test", "build", "lint", "check", "start", "dev")
 _WORKFLOW_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
 _COMMAND_HINT_PATTERN = re.compile(
     r"\b("
@@ -439,8 +440,17 @@ def _summarize_package_scripts(workspace_path: Path) -> str | None:
     if not isinstance(scripts, dict) or not scripts:
         return None
 
+    priority_names = set(_PRIORITY_PACKAGE_SCRIPT_NAMES)
+    sorted_script_names = sorted(
+        scripts,
+        key=lambda script_name: (
+            script_name not in priority_names if isinstance(script_name, str) else True,
+            str(script_name),
+        ),
+    )
+
     rendered_pairs: list[str] = []
-    for script_name in sorted(scripts):
+    for script_name in sorted_script_names:
         script_command = scripts[script_name]
         if not isinstance(script_name, str) or not isinstance(script_command, str):
             continue
@@ -782,9 +792,14 @@ def _summarize_dockerfile(workspace_path: Path) -> str | None:
     if base_image is not None:
         parts.append(f"base={base_image}")
     if entrypoint is not None:
-        parts.append(f"entrypoint={_truncate_to_budget(entrypoint, max_characters=80)}")
+        parts.append(
+            "entrypoint="
+            f"{_truncate_to_budget(entrypoint, max_characters=_BUILD_CONTEXT_VALUE_MAX_CHARACTERS)}"
+        )
     if cmd is not None:
-        parts.append(f"cmd={_truncate_to_budget(cmd, max_characters=80)}")
+        parts.append(
+            f"cmd={_truncate_to_budget(cmd, max_characters=_BUILD_CONTEXT_VALUE_MAX_CHARACTERS)}"
+        )
     if not parts:
         return None
     return f"- Dockerfile: {'; '.join(parts)}"
