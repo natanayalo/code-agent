@@ -556,7 +556,7 @@ def _strip_yaml_comment(raw_value: str) -> str:
             result_chars.append(char)
             continue
         if char == "#" and not in_single_quote and not in_double_quote:
-            if index == 0 or raw_value[index - 1].isspace():
+            if index == 0 or (index > 0 and raw_value[index - 1].isspace()):
                 break
         result_chars.append(char)
     return "".join(result_chars)
