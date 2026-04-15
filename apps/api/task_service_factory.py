@@ -28,6 +28,7 @@ from workers.gemini_cli_adapter import (
 )
 
 ENABLE_TASK_SERVICE_ENV_VAR: Final[str] = "CODE_AGENT_ENABLE_TASK_SERVICE"
+DEFAULT_TASK_MAX_ATTEMPTS_ENV_VAR: Final[str] = "CODE_AGENT_QUEUE_MAX_ATTEMPTS"
 DATABASE_URL_ENV_VAR: Final[str] = "DATABASE_URL"
 DATABASE_DRIVER_ENV_VAR: Final[str] = "DATABASE_DRIVER"
 DATABASE_HOST_ENV_VAR: Final[str] = "DATABASE_HOST"
@@ -45,6 +46,20 @@ def _is_enabled(value: str | None) -> bool:
     if value is None:
         return False
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _coerce_positive_int(value: str | None, *, default: int) -> int:
+    """Parse positive integer env settings with sane fallback."""
+    if value is None:
+        return default
+    stripped = value.strip()
+    if not stripped:
+        return default
+    try:
+        parsed = int(stripped)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _database_url_from_env(environ: Mapping[str, str]) -> str | None:
@@ -132,4 +147,8 @@ def build_task_service_from_env(
         worker=codex_worker,
         gemini_worker=gemini_worker,
         progress_notifier=CompositeProgressNotifier(progress_notifiers),
+        default_task_max_attempts=_coerce_positive_int(
+            resolved_env.get(DEFAULT_TASK_MAX_ATTEMPTS_ENV_VAR),
+            default=3,
+        ),
     )

@@ -13,7 +13,9 @@ RUN set -eu; \
         cp /app/cert.pem /usr/local/share/ca-certificates/code-agent-local.crt; \
         update-ca-certificates; \
     fi; \
-    python -m pip install --upgrade pip==25.2 && pip install .
+    python -m pip install --upgrade pip==25.2 && \
+    pip install . && \
+    pip install "alembic>=1.16,<2.0" "psycopg[binary]>=3.2,<4.0"
 
 EXPOSE 8000
 

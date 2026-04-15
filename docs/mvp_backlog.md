@@ -590,6 +590,24 @@ Require approval for dangerous/destructive commands.
 Acceptance:
 - dangerous commands, networked writes, and push/deploy actions map onto explicit permission classes
 
+### T-113 Add paused-task approval decision endpoint
+Add an explicit API for approving or rejecting tasks paused by orchestrator approval interrupts.
+
+Scope notes:
+- add `POST /tasks/{task_id}/approval` with payload `{ "approved": true|false }`
+- support idempotent decision writes so repeated webhook/button deliveries do not double-apply decisions
+- when approved, resume the interrupted orchestration run from checkpoint and continue normal lifecycle
+- when rejected, terminally fail with a clear rejection summary and persist the decision metadata
+- keep `/tasks/{id}` response shape stable; expose state transitions through existing task/run fields
+- ensure queue/restart safety for decisions applied while workers or API processes restart
+
+Acceptance:
+- tasks paused for approval can be explicitly approved and continue to completion
+- tasks paused for approval can be explicitly rejected and transition to terminal failure
+- duplicate approval decision submissions are handled safely (no duplicate resumes)
+- `/tasks/{id}` reflects pause -> decision -> terminal lifecycle transitions
+- integration tests cover pause -> approve -> completed and pause -> reject -> failed
+
 ### T-102 Add quotas and budgets
 Add broader global quotas and unattended limits beyond the runtime-local budget enforcement added earlier.
 

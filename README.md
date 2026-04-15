@@ -58,18 +58,21 @@ Start the bootstrap API locally:
 python -m uvicorn apps.api.main:app --reload
 ```
 
-Enable the real task-submission path locally:
+Enable the real task-submission path locally (API process only):
 
 ```bash
 export DATABASE_URL="postgresql+psycopg://code_agent:<your-password>@localhost:5432/code_agent"
 export CODE_AGENT_ENABLE_TASK_SERVICE=1
 export CODE_AGENT_API_SHARED_SECRET=<shared-secret>
+export CODE_AGENT_RUN_API=1
+export CODE_AGENT_RUN_WORKER=0
 python -m uvicorn apps.api.main:app --reload
 ```
 
 When `CODE_AGENT_ENABLE_TASK_SERVICE=1`, the app bootstraps the real `TaskExecutionService`
-and routes submitted tasks through `CodexCliWorker`, which shells out to the local `codex`
-CLI for bounded turn-by-turn planning. Direct HTTP clients must send
+and persists submitted tasks for worker pickup. Task execution now runs in a dedicated
+worker process (`CODE_AGENT_RUN_WORKER=1`) that claims queued tasks using DB-backed leases.
+Direct HTTP clients must send
 `X-Webhook-Token: <shared-secret>` on `/tasks` and `/webhook`. Optional adapter overrides:
 
 ```bash
@@ -77,6 +80,12 @@ export CODE_AGENT_CODEX_CLI_BIN=/path/to/codex
 export CODE_AGENT_CODEX_MODEL=gpt-5.4
 export CODE_AGENT_CODEX_PROFILE=default
 export CODE_AGENT_CODEX_TIMEOUT_SECONDS=120
+export CODE_AGENT_GEMINI_CLI_BIN=/path/to/gemini
+export CODE_AGENT_GEMINI_MODEL=gemini-2.5-pro
+export CODE_AGENT_GEMINI_TIMEOUT_SECONDS=120
+export CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS=2
+export CODE_AGENT_QUEUE_LEASE_SECONDS=60
+export CODE_AGENT_QUEUE_MAX_ATTEMPTS=3
 ```
 
 Optional progress delivery for Milestone 10:
@@ -97,12 +106,33 @@ Callback targets are restricted to public HTTP(S) destinations; hostname callbac
 resolved during validation and rejected if any resolved address is private, loopback,
 link-local, reserved, multicast, or unspecified.
 
-Run the local container stack:
+Run the production-like local container stack (`postgres + migrate + api + worker`):
 
 ```bash
 cp .env.example .env
 # edit .env and replace the example password before first run
-docker compose up --build
+scripts/up.sh
+```
+
+`scripts/up.sh` uses login-based CLI auth by mounting host auth directories into the worker:
+- Codex: `${CODE_AGENT_CODEX_AUTH_DIR:-$HOME/.codex}` -> `/root/.codex` (required, read-write)
+- Gemini: `${CODE_AGENT_GEMINI_AUTH_DIR:-$HOME/.gemini}` -> `/root/.gemini` (optional, read-write)
+- Workspace root: `${CODE_AGENT_WORKSPACE_ROOT:-$HOME/.code-agent/workspaces}` mounted into
+  the worker at the same absolute path so nested sandbox `docker run --mount ...` paths resolve
+  correctly on the host daemon.
+
+Before first run, authenticate on host:
+
+```bash
+codex login
+gemini auth login
+```
+
+If host CLI binaries are unavailable, perform one-time login through the worker image:
+
+```bash
+docker compose run --rm --no-deps worker codex login
+docker compose run --rm --no-deps worker gemini auth login
 ```
 
 Optional for local worker runs:
@@ -123,12 +153,7 @@ Verify Postgres reachability from the API container:
 ```bash
 docker compose exec api python -c "import socket; socket.create_connection(('postgres', 5432), 5).close(); print('postgres reachable')"
 ```
-
-Apply the initial schema locally:
-
-```bash
-DATABASE_URL="postgresql+psycopg://code_agent:<your-password>@localhost:5432/code_agent" alembic upgrade head
-```
+The production-like script runs migrations automatically through the `migrate` service.
 
 Verify the local service:
 

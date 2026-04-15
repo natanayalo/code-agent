@@ -105,6 +105,10 @@ def _command_result(command: str, *, output: str, exit_code: int = 0) -> DockerS
     )
 
 
+def _git_status_command(container_workdir: str = "/workspace/repo") -> str:
+    return f"git -C {container_workdir} status --porcelain=v1 -z --untracked-files=all"
+
+
 def test_codex_cli_worker_requires_repo_url(tmp_path: Path) -> None:
     """The CLI worker should fail fast when it cannot provision a workspace."""
     workspace = _workspace_handle(tmp_path)
@@ -158,8 +162,8 @@ def test_codex_cli_worker_runs_the_shared_runtime_and_retains_the_workspace(
                 "printf 'done\\n' > note.txt",
                 output="",
             ),
-            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
-                "git status --porcelain=v1 -z --untracked-files=all",
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
                 output="?? note.txt\0",
             ),
         }
@@ -197,7 +201,7 @@ def test_codex_cli_worker_runs_the_shared_runtime_and_retains_the_workspace(
     assert container_manager.start_requests[0].workspace == workspace
     assert container_manager.stop_requests == [container]
     assert session.closed is True
-    assert session.calls[-1] == ("git status --porcelain=v1 -z --untracked-files=all", 5)
+    assert session.calls[-1] == (_git_status_command(container.working_dir), 5)
 
     first_prompt = adapter.calls[0][0].content
     assert "## Available Tools" in first_prompt
@@ -262,8 +266,8 @@ def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path
     adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="Nothing to do.")])
     session = _FakeSession(
         {
-            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
-                "git status --porcelain=v1 -z --untracked-files=all",
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
                 output="",
             )
         }
@@ -296,7 +300,7 @@ def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path
     )
 
     assert result.status == "success"
-    assert session.calls[-1] == ("git status --porcelain=v1 -z --untracked-files=all", 17)
+    assert session.calls[-1] == (_git_status_command(container.working_dir), 17)
 
 
 def test_codex_cli_worker_requests_higher_permission_for_blocked_commands(tmp_path: Path) -> None:
@@ -312,8 +316,8 @@ def test_codex_cli_worker_requests_higher_permission_for_blocked_commands(tmp_pa
     )
     session = _FakeSession(
         {
-            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
-                "git status --porcelain=v1 -z --untracked-files=all",
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
                 output="",
             )
         }
@@ -368,8 +372,8 @@ async def test_codex_cli_worker_returns_partial_result_on_cancellation(tmp_path:
     adapter = _HangingAdapter()
     session = _FakeSession(
         {
-            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
-                "git status --porcelain=v1 -z --untracked-files=all",
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
                 output="",
             )
         }

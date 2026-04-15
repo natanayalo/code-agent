@@ -101,19 +101,23 @@ def _make_container(workspace: WorkspaceHandle) -> DockerSandboxContainer:
     )
 
 
+def _git_status_command(container_workdir: str = "/workspace/repo") -> str:
+    return f"git -C {container_workdir} status --porcelain=v1 -z --untracked-files=all"
+
+
 def test_gemini_cli_worker_runs_successfully(tmp_path: Path) -> None:
     """Worker should return a success result when the adapter finishes cleanly."""
     workspace = _make_workspace(tmp_path)
     container = _make_container(workspace)
     git_status_result = DockerShellCommandResult(
-        command="git status --porcelain=v1 -z --untracked-files=all",
+        command=_git_status_command(container.working_dir),
         exit_code=0,
         output="",
         duration_seconds=0.0,
     )
     session = _FakeSession(
         {
-            "git status --porcelain=v1 -z --untracked-files=all": git_status_result,
+            _git_status_command(container.working_dir): git_status_result,
         }
     )
     adapter = _ScriptedAdapter(
@@ -230,8 +234,8 @@ def test_gemini_cli_worker_cleanup_applied_on_success(tmp_path: Path) -> None:
 
     session = _FakeSession(
         {
-            "git status --porcelain=v1 -z --untracked-files=all": DockerShellCommandResult(
-                command="git status --porcelain=v1 -z --untracked-files=all",
+            _git_status_command(container.working_dir): DockerShellCommandResult(
+                command=_git_status_command(container.working_dir),
                 exit_code=0,
                 output="",
                 duration_seconds=0.0,

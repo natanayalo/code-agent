@@ -50,10 +50,14 @@ def test_compose_requires_explicit_database_credentials(
         postgres_env["POSTGRES_PASSWORD"]
         == "${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}"
     )
-    assert api_env["DATABASE_NAME"] == "${POSTGRES_DB?Please set POSTGRES_DB in .env}"
-    assert api_env["DATABASE_USER"] == "${POSTGRES_USER?Please set POSTGRES_USER in .env}"
+    assert api_env["POSTGRES_DB"] == "${POSTGRES_DB?Please set POSTGRES_DB in .env}"
+    assert api_env["POSTGRES_USER"] == "${POSTGRES_USER?Please set POSTGRES_USER in .env}"
     assert (
-        api_env["DATABASE_PASSWORD"] == "${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}"
+        api_env["POSTGRES_PASSWORD"] == "${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}"
+    )
+    assert (
+        api_env["DATABASE_URL"]
+        == "postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DATABASE_HOST:-postgres}:${DATABASE_PORT:-5432}/${POSTGRES_DB}"
     )
 
 

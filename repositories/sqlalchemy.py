@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Final, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -224,8 +224,14 @@ class TaskRepository:
         task_text: str,
         repo_url: str | None = None,
         branch: str | None = None,
+        callback_url: str | None = None,
+        worker_override: str | WorkerType | None = None,
+        constraints: dict[str, Any] | None = None,
+        budget: dict[str, Any] | None = None,
         status: str = "pending",
         priority: int = 0,
+        max_attempts: int = 3,
+        next_attempt_at: datetime | None = None,
         chosen_worker: str | None = None,
         route_reason: str | None = None,
     ) -> Task:
@@ -234,8 +240,14 @@ class TaskRepository:
             task_text=task_text,
             repo_url=repo_url,
             branch=branch,
+            callback_url=callback_url,
+            worker_override=cast(WorkerType | None, worker_override),
+            constraints=constraints or {},
+            budget=budget or {},
             status=status,
             priority=priority,
+            max_attempts=max_attempts,
+            next_attempt_at=next_attempt_at,
             chosen_worker=chosen_worker,
             route_reason=route_reason,
         )
@@ -274,6 +286,155 @@ class TaskRepository:
             return None
 
         task.status = cast(TaskStatus, status)
+        self.session.flush()
+        return task
+
+    def claim_next(
+        self,
+        *,
+        worker_id: str,
+        now: datetime,
+        lease_seconds: int,
+    ) -> Task | None:
+        """Claim one available task for execution.
+
+        Claim order is highest priority then oldest created task. Claiming is optimistic/CAS:
+        if another worker has already claimed the selected task, this call retries with the next
+        candidate in the ordered set.
+        """
+        lease_expires_at = now + timedelta(seconds=max(1, lease_seconds))
+        candidates = list(
+            self.session.scalars(
+                select(Task.id)
+                .where(
+                    or_(
+                        and_(
+                            Task.status == TaskStatus.PENDING,
+                            or_(Task.next_attempt_at.is_(None), Task.next_attempt_at <= now),
+                        ),
+                        and_(
+                            Task.status == TaskStatus.IN_PROGRESS,
+                            Task.lease_expires_at.is_not(None),
+                            Task.lease_expires_at <= now,
+                        ),
+                    )
+                )
+                .order_by(Task.priority.desc(), Task.created_at.asc())
+                .limit(25)
+            )
+        )
+        for task_id in candidates:
+            claimed = self.session.execute(
+                update(Task)
+                .where(
+                    Task.id == task_id,
+                    or_(
+                        and_(
+                            Task.status == TaskStatus.PENDING,
+                            or_(Task.next_attempt_at.is_(None), Task.next_attempt_at <= now),
+                        ),
+                        and_(
+                            Task.status == TaskStatus.IN_PROGRESS,
+                            Task.lease_expires_at.is_not(None),
+                            Task.lease_expires_at <= now,
+                        ),
+                    ),
+                )
+                .values(
+                    status=TaskStatus.IN_PROGRESS,
+                    lease_owner=worker_id,
+                    lease_expires_at=lease_expires_at,
+                    attempt_count=Task.attempt_count + 1,
+                    last_error=None,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            claimed_rows = int(getattr(claimed, "rowcount", 0) or 0)
+            if claimed_rows > 0:
+                self.session.flush()
+                return self.get(task_id)
+        return None
+
+    def heartbeat_lease(
+        self,
+        *,
+        task_id: str,
+        worker_id: str,
+        now: datetime,
+        lease_seconds: int,
+    ) -> bool:
+        """Extend a claimed task lease when ownership still matches."""
+        lease_expires_at = now + timedelta(seconds=max(1, lease_seconds))
+        updated = self.session.execute(
+            update(Task)
+            .where(
+                Task.id == task_id,
+                Task.status == TaskStatus.IN_PROGRESS,
+                Task.lease_owner == worker_id,
+            )
+            .values(lease_expires_at=lease_expires_at)
+            .execution_options(synchronize_session=False)
+        )
+        updated_rows = int(getattr(updated, "rowcount", 0) or 0)
+        if updated_rows > 0:
+            self.session.flush()
+            return True
+        return False
+
+    def release_success(
+        self,
+        *,
+        task_id: str,
+    ) -> Task | None:
+        """Mark task successful and clear queue lease state."""
+        task = self.get(task_id)
+        if task is None:
+            return None
+        task.status = TaskStatus.COMPLETED
+        task.lease_owner = None
+        task.lease_expires_at = None
+        task.next_attempt_at = None
+        task.last_error = None
+        self.session.flush()
+        return task
+
+    def release_failure(
+        self,
+        *,
+        task_id: str,
+        worker_id: str,
+        now: datetime,
+        retry_backoff_seconds: int,
+    ) -> Task | None:
+        """Release a failed attempt, either requeueing or marking terminal failure."""
+        task = self.get(task_id)
+        if task is None:
+            return None
+        if task.status != TaskStatus.IN_PROGRESS or task.lease_owner != worker_id:
+            return task
+
+        task.lease_owner = None
+        task.lease_expires_at = None
+        if task.attempt_count >= task.max_attempts:
+            task.status = TaskStatus.FAILED
+            task.next_attempt_at = None
+        else:
+            task.status = TaskStatus.PENDING
+            task.next_attempt_at = now + timedelta(seconds=max(0, retry_backoff_seconds))
+        self.session.flush()
+        return task
+
+    def record_attempt_error(
+        self,
+        *,
+        task_id: str,
+        error_text: str,
+    ) -> Task | None:
+        """Persist a bounded textual error for observability/debugging."""
+        task = self.get(task_id)
+        if task is None:
+            return None
+        task.last_error = error_text[:4000]
         self.session.flush()
         return task
 

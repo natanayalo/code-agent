@@ -54,6 +54,9 @@ def test_session_and_task_repositories_support_crud(session_factory) -> None:
             task_text="Add repository layer",
             repo_url="https://github.com/natanayalo/code-agent",
             branch="master",
+            worker_override="gemini",
+            constraints={"requires_approval": True},
+            budget={"max_iterations": 8},
         )
 
         session_repo.set_active_task(
@@ -84,6 +87,9 @@ def test_session_and_task_repositories_support_crud(session_factory) -> None:
         assert stored_task.status is TaskStatus.IN_PROGRESS
         assert stored_task.chosen_worker is WorkerType.CODEX
         assert stored_task.route_reason == "cheap_mechanical_change"
+        assert stored_task.worker_override is WorkerType.GEMINI
+        assert stored_task.constraints == {"requires_approval": True}
+        assert stored_task.budget == {"max_iterations": 8}
         stored_session = session_repo.get(conversation_session.id)
         assert stored_session is not None
         assert stored_session.status is SessionStatus.ACTIVE

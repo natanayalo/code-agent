@@ -6,13 +6,13 @@ import asyncio
 import logging
 import socket
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy.pool import StaticPool
 
-from db.base import Base
-from db.enums import TaskStatus, WorkerRunStatus
+from db.base import Base, utc_now
+from db.enums import TaskStatus, WorkerRunStatus, WorkerType
 from orchestrator import (
     ApprovalCheckpoint,
     MemoryContext,
@@ -269,6 +269,59 @@ def test_task_execution_service_reuses_one_compiled_graph(
 
     assert len(build_calls) == 1
     assert len(fake_graph.calls) == 2
+
+
+def test_normalize_orchestrator_output_converts_interrupts_to_failure_result() -> None:
+    """Unresolved graph interrupts should be converted into a persistable failure shape."""
+    raw_output = {
+        "task": {"task_text": "Delete files"},
+        "__interrupt__": [
+            {
+                "value": {
+                    "approval_type": "permission_escalation",
+                    "requested_permission": "dangerous_shell",
+                    "reason": "Worker requested elevated permission.",
+                }
+            }
+        ],
+    }
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+
+    assert isinstance(normalized, dict)
+    assert "__interrupt__" not in normalized
+    state = OrchestratorState.model_validate(normalized)
+    assert state.result is not None
+    assert state.result.status == "failure"
+    assert state.result.next_action_hint == "await_manual_follow_up"
+    assert state.result.requested_permission == "dangerous_shell"
+    assert "permission escalation approval" in (state.result.summary or "")
+    assert "orchestrator interrupted awaiting manual approval" in state.errors
+
+
+def test_normalize_orchestrator_output_formats_manual_approval_summary_without_duplication() -> (
+    None
+):
+    """Manual approval summaries should not contain duplicated 'approval' wording."""
+    raw_output = {
+        "task": {"task_text": "Delete files"},
+        "__interrupt__": [
+            {
+                "value": {
+                    "approval_type": "manual_approval",
+                    "reason": "Manual approval required for this task.",
+                }
+            }
+        ],
+    }
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    state = OrchestratorState.model_validate(normalized)
+
+    assert state.result is not None
+    assert state.result.summary is not None
+    assert "manual approval approval" not in state.result.summary.lower()
+    assert "manual approval required" in state.result.summary.lower()
 
 
 def test_workspace_id_from_artifacts_supports_url_and_custom_workspace_uris() -> None:
@@ -833,6 +886,85 @@ def test_persist_execution_outcome_creates_error_worker_run_without_result() -> 
     assert task_snapshot.latest_run.files_changed_count == 0
 
 
+def test_persist_execution_outcome_falls_back_to_route_worker_when_dispatch_missing() -> None:
+    """Persisted runs should still be written when dispatch worker metadata is absent."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Persist interrupted run",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+    _, persisted = service.create_task(submission)
+
+    state = OrchestratorState(
+        current_step="await_approval",
+        session=SessionRef(
+            session_id=persisted.session_id,
+            user_id=persisted.user_id,
+            channel=persisted.channel,
+            external_thread_id=persisted.external_thread_id,
+            active_task_id=persisted.task_id,
+            status="active",
+        ),
+        task=TaskRequest(
+            task_id=persisted.task_id,
+            task_text=submission.task_text,
+            repo_url=submission.repo_url,
+            branch=submission.branch,
+            priority=submission.priority,
+            worker_override=submission.worker_override,
+            constraints=dict(submission.constraints),
+            budget=dict(submission.budget),
+        ),
+        normalized_task_text=submission.task_text,
+        task_kind="implementation",
+        memory=MemoryContext(),
+        route=RouteDecision(
+            chosen_worker="codex",
+            route_reason="cheap_mechanical_change",
+            override_applied=False,
+        ),
+        approval=ApprovalCheckpoint(
+            required=True,
+            status="pending",
+            approval_type="permission_escalation",
+        ),
+        dispatch=WorkerDispatch(worker_type=None),
+        result=WorkerResult(
+            status="failure",
+            summary="Run paused pending permission escalation approval.",
+            requested_permission="workspace_write",
+            next_action_hint="await_manual_follow_up",
+        ),
+    )
+
+    service._persist_execution_outcome(
+        task_id=persisted.task_id,
+        state=state,
+        started_at=datetime.now(),
+        finished_at=datetime.now(),
+        force_task_status=TaskStatus.FAILED,
+    )
+
+    task_snapshot = service.get_task(persisted.task_id)
+    assert task_snapshot is not None
+    assert task_snapshot.status == TaskStatus.FAILED.value
+    assert task_snapshot.latest_run is not None
+    assert task_snapshot.latest_run.worker_type == WorkerType.CODEX.value
+    assert task_snapshot.latest_run.status == WorkerRunStatus.FAILURE.value
+    assert task_snapshot.latest_run.requested_permission == "workspace_write"
+
+
 def test_persist_execution_outcome_persists_session_state_update() -> None:
     """Execution persistence should store the compact session working state."""
     engine = create_engine_from_url(
@@ -1012,6 +1144,38 @@ def test_persist_execution_outcome_accepts_raw_verification_mapping() -> None:
     }
 
 
+def test_load_submission_for_task_restores_constraints_budget_and_worker_override() -> None:
+    """Queued task loading should preserve execution controls from the submitted payload."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    task_snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="Needs approval",
+            repo_url="https://github.com/natanayalo/code-agent",
+            worker_override="gemini",
+            constraints={"requires_approval": True, "approval_reason": "manual gate"},
+            budget={"max_iterations": 5},
+        )
+    )
+
+    loaded = service._load_submission_for_task(task_id=task_snapshot.task_id)
+    assert loaded is not None
+    submission, _ = loaded
+    assert submission.worker_override == "gemini"
+    assert submission.constraints == {"requires_approval": True, "approval_reason": "manual gate"}
+    assert submission.budget == {"max_iterations": 5}
+
+
 def test_create_task_recovers_from_duplicate_user_and_session_race(monkeypatch) -> None:
     """Task creation should recover if another request inserts the user/session first."""
     engine = create_engine_from_url(
@@ -1093,3 +1257,78 @@ def test_create_task_recovers_from_duplicate_user_and_session_race(monkeypatch) 
         assert recovered_session is not None
         assert len(session_repo.list_by_user(existing_user.id)) == 1
         assert len(task_repo.list_by_session(existing_session.id)) == 1
+
+
+def test_claim_next_task_allows_single_claim_and_lease_reclaim() -> None:
+    """Only one worker should claim a pending task until the lease expires."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(task_text="claim me")
+    snapshot, _ = service.create_task(submission)
+
+    first_claim = service.claim_next_task(worker_id="worker-a", lease_seconds=60)
+    assert first_claim is not None
+    assert first_claim.task_id == snapshot.task_id
+    assert first_claim.attempt_count == 1
+    assert service.claim_next_task(worker_id="worker-b", lease_seconds=60) is None
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(snapshot.task_id)
+        assert task is not None
+        assert task.lease_expires_at is not None
+        task.lease_expires_at = task.lease_expires_at - timedelta(seconds=120)
+
+    reclaimed = service.claim_next_task(worker_id="worker-b", lease_seconds=60)
+    assert reclaimed is not None
+    assert reclaimed.task_id == snapshot.task_id
+    assert reclaimed.attempt_count == 2
+
+
+def test_release_failure_requeues_until_max_attempts_then_fails() -> None:
+    """Failed attempts should requeue until max attempts, then become terminally failed."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+        default_task_max_attempts=2,
+    )
+    snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="retry me"))
+
+    claim_one = service.claim_next_task(worker_id="worker-a", lease_seconds=60)
+    assert claim_one is not None
+    service._release_task_failure(task_id=snapshot.task_id, worker_id="worker-a")
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(snapshot.task_id)
+        assert task is not None
+        assert task.status is TaskStatus.PENDING
+        assert task.next_attempt_at is not None
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(snapshot.task_id)
+        assert task is not None
+        task.next_attempt_at = utc_now() - timedelta(seconds=1)
+
+    claim_two = service.claim_next_task(worker_id="worker-a", lease_seconds=60)
+    assert claim_two is not None
+    service._release_task_failure(task_id=snapshot.task_id, worker_id="worker-a")
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(snapshot.task_id)
+        assert task is not None
+        assert task.status is TaskStatus.FAILED
