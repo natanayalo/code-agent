@@ -465,6 +465,13 @@ def _normalize_orchestrator_graph_output(raw_output: object) -> object:
     return normalized
 
 
+def _requires_manual_follow_up(state: OrchestratorState) -> bool:
+    """Return True when a failed result should remain terminal for operator action."""
+    if state.result is None:
+        return False
+    return state.result.next_action_hint == "await_manual_follow_up"
+
+
 def _workspace_id_from_artifacts(artifacts: list[ArtifactReference]) -> str | None:
     """Infer the workspace id from the retained workspace artifact path."""
     for artifact in artifacts:
@@ -641,7 +648,13 @@ class TaskExecutionService:
         )
         return None
 
-    async def run_queued_task(self, *, task_id: str, worker_id: str) -> None:
+    async def run_queued_task(
+        self,
+        *,
+        task_id: str,
+        worker_id: str,
+        lease_seconds: int = 60,
+    ) -> None:
         """Execute one claimed queued task id and persist/release queue state."""
         loaded = await self._run_blocking(self._load_submission_for_task, task_id=task_id)
         if loaded is None:
@@ -656,7 +669,11 @@ class TaskExecutionService:
         await self._emit_progress(submission, persisted, phase="running")
 
         heartbeat_task = asyncio.create_task(
-            self._heartbeat_loop(task_id=task_id, worker_id=worker_id),
+            self._heartbeat_loop(
+                task_id=task_id,
+                worker_id=worker_id,
+                lease_seconds=lease_seconds,
+            ),
             name=f"task-heartbeat-{task_id}",
         )
         started_at = utc_now()
@@ -686,19 +703,29 @@ class TaskExecutionService:
                 )
                 await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
             else:
+                terminal_failure = _requires_manual_follow_up(state)
                 await self._run_blocking(
                     self._persist_execution_outcome,
                     task_id=persisted.task_id,
                     state=state,
                     started_at=started_at,
                     finished_at=finished_at,
-                    force_task_status=TaskStatus.FAILED,
+                    force_task_status=(
+                        TaskStatus.FAILED if terminal_failure else TaskStatus.IN_PROGRESS
+                    ),
                 )
-                await self._run_blocking(
-                    self._release_task_failure,
-                    task_id=persisted.task_id,
-                    worker_id=worker_id,
-                )
+                if terminal_failure:
+                    await self._run_blocking(
+                        self._release_task_terminal_failure,
+                        task_id=persisted.task_id,
+                        worker_id=worker_id,
+                    )
+                else:
+                    await self._run_blocking(
+                        self._release_task_failure,
+                        task_id=persisted.task_id,
+                        worker_id=worker_id,
+                    )
         except Exception as exc:
             logger.exception(
                 "Task execution failed before the final outcome was fully persisted",
@@ -734,7 +761,13 @@ class TaskExecutionService:
         )
         return None
 
-    async def _heartbeat_loop(self, *, task_id: str, worker_id: str) -> None:
+    async def _heartbeat_loop(
+        self,
+        *,
+        task_id: str,
+        worker_id: str,
+        lease_seconds: int,
+    ) -> None:
         """Best-effort lease heartbeat while task execution is in progress."""
         while True:
             await asyncio.sleep(10.0)
@@ -742,6 +775,7 @@ class TaskExecutionService:
                 self._heartbeat_task_lease,
                 task_id=task_id,
                 worker_id=worker_id,
+                lease_seconds=lease_seconds,
             )
             if not ok:
                 return None
@@ -1085,19 +1119,33 @@ class TaskExecutionService:
                 retry_backoff_seconds=15,
             )
 
+    def _release_task_terminal_failure(self, *, task_id: str, worker_id: str) -> None:
+        """Release queue lease while preserving terminal failure for manual follow-up."""
+        with session_scope(self.session_factory) as session:
+            TaskRepository(session).release_terminal_failure(
+                task_id=task_id,
+                worker_id=worker_id,
+            )
+
     def _record_task_attempt_error(self, *, task_id: str, error: str) -> None:
         """Persist an execution exception snippet on the task row."""
         with session_scope(self.session_factory) as session:
             TaskRepository(session).record_attempt_error(task_id=task_id, error_text=error)
 
-    def _heartbeat_task_lease(self, *, task_id: str, worker_id: str) -> bool:
+    def _heartbeat_task_lease(
+        self,
+        *,
+        task_id: str,
+        worker_id: str,
+        lease_seconds: int,
+    ) -> bool:
         """Extend queue lease for one in-flight task, returning False when lease is lost."""
         with session_scope(self.session_factory) as session:
             return TaskRepository(session).heartbeat_lease(
                 task_id=task_id,
                 worker_id=worker_id,
                 now=utc_now(),
-                lease_seconds=60,
+                lease_seconds=lease_seconds,
             )
 
     async def _run_blocking(
@@ -1293,4 +1341,8 @@ class TaskQueueWorker:
             if claim is None:
                 await asyncio.sleep(self.poll_interval_seconds)
                 continue
-            await self.service.run_queued_task(task_id=claim.task_id, worker_id=self.worker_id)
+            await self.service.run_queued_task(
+                task_id=claim.task_id,
+                worker_id=self.worker_id,
+                lease_seconds=self.lease_seconds,
+            )

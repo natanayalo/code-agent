@@ -1332,3 +1332,213 @@ def test_release_failure_requeues_until_max_attempts_then_fails() -> None:
         task = TaskRepository(session).get(snapshot.task_id)
         assert task is not None
         assert task.status is TaskStatus.FAILED
+
+
+def test_run_queued_task_requeues_failed_result_when_retries_remain(monkeypatch) -> None:
+    """Queued execution should preserve retryability for worker-declared failures."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="requires retry",
+            repo_url="https://github.com/natanayalo/code-agent",
+        )
+    )
+    claim = service.claim_next_task(worker_id="worker-a", lease_seconds=45)
+    assert claim is not None
+
+    async def fake_run_orchestrator(
+        _submission: execution_module.TaskSubmission,
+        persisted: execution_module.TaskSnapshot,
+    ) -> OrchestratorState:
+        return OrchestratorState(
+            current_step="run_worker",
+            session=SessionRef(
+                session_id=persisted.session_id,
+                user_id=persisted.user_id,
+                channel=persisted.channel,
+                external_thread_id=persisted.external_thread_id,
+                active_task_id=persisted.task_id,
+                status="active",
+            ),
+            task=TaskRequest(
+                task_id=persisted.task_id,
+                task_text=persisted.task_text,
+                repo_url=persisted.repo_url,
+                branch=persisted.branch,
+                priority=persisted.priority,
+                worker_override=persisted.worker_override,
+                constraints={},
+                budget={},
+            ),
+            normalized_task_text=persisted.task_text,
+            task_kind="implementation",
+            memory=MemoryContext(),
+            route=RouteDecision(
+                chosen_worker="codex",
+                route_reason="cheap_mechanical_change",
+                override_applied=False,
+            ),
+            approval=ApprovalCheckpoint(),
+            dispatch=WorkerDispatch(worker_type="codex"),
+            result=WorkerResult(
+                status="failure",
+                summary="Simulated failure should be retried.",
+            ),
+        )
+
+    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+
+    asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(snapshot.task_id)
+        assert task is not None
+        assert task.status is TaskStatus.PENDING
+        assert task.attempt_count == 1
+        assert task.next_attempt_at is not None
+        assert task.lease_owner is None
+        assert task.lease_expires_at is None
+
+
+def test_heartbeat_task_lease_uses_configured_duration(monkeypatch) -> None:
+    """Lease heartbeat should extend by the worker-configured lease duration."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="heartbeat me"))
+    claim = service.claim_next_task(worker_id="worker-a", lease_seconds=30)
+    assert claim is not None
+
+    captured: dict[str, int] = {}
+    original_heartbeat = TaskRepository.heartbeat_lease
+
+    def recording_heartbeat(
+        self: TaskRepository,
+        *,
+        task_id: str,
+        worker_id: str,
+        now: datetime,
+        lease_seconds: int,
+    ) -> bool:
+        captured["lease_seconds"] = lease_seconds
+        return original_heartbeat(
+            self,
+            task_id=task_id,
+            worker_id=worker_id,
+            now=now,
+            lease_seconds=lease_seconds,
+        )
+
+    monkeypatch.setattr(TaskRepository, "heartbeat_lease", recording_heartbeat)
+
+    assert service._heartbeat_task_lease(
+        task_id=snapshot.task_id,
+        worker_id="worker-a",
+        lease_seconds=123,
+    )
+    assert captured["lease_seconds"] == 123
+
+
+def test_run_queued_task_terminal_interrupt_sets_failed_without_requeue(monkeypatch) -> None:
+    """Manual-follow-up failures should stay terminal instead of requeueing."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="requires manual approval",
+            repo_url="https://github.com/natanayalo/code-agent",
+            constraints={"requires_approval": True},
+        )
+    )
+    claim = service.claim_next_task(worker_id="worker-a", lease_seconds=45)
+    assert claim is not None
+
+    async def fake_run_orchestrator(
+        submitted: execution_module.TaskSubmission,
+        persisted: execution_module.TaskSnapshot,
+    ) -> OrchestratorState:
+        return OrchestratorState(
+            current_step="await_approval",
+            session=SessionRef(
+                session_id=persisted.session_id,
+                user_id=persisted.user_id,
+                channel=persisted.channel,
+                external_thread_id=persisted.external_thread_id,
+                active_task_id=persisted.task_id,
+                status="active",
+            ),
+            task=TaskRequest(
+                task_id=persisted.task_id,
+                task_text=submitted.task_text,
+                repo_url=submitted.repo_url,
+                branch=submitted.branch,
+                priority=submitted.priority,
+                worker_override=submitted.worker_override,
+                constraints={"requires_approval": True},
+                budget={},
+            ),
+            normalized_task_text=submitted.task_text,
+            task_kind="implementation",
+            memory=MemoryContext(),
+            route=RouteDecision(
+                chosen_worker="codex",
+                route_reason="cheap_mechanical_change",
+                override_applied=False,
+            ),
+            approval=ApprovalCheckpoint(
+                required=True, status="pending", approval_type="manual_approval"
+            ),
+            dispatch=WorkerDispatch(worker_type="codex"),
+            result=WorkerResult(
+                status="failure",
+                summary="Run paused pending manual approval approval.",
+                next_action_hint="await_manual_follow_up",
+            ),
+        )
+
+    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+
+    asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(snapshot.task_id)
+        assert task is not None
+        assert task.status is TaskStatus.FAILED
+        assert task.next_attempt_at is None
+        assert task.lease_owner is None
+        assert task.lease_expires_at is None

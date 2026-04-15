@@ -424,6 +424,24 @@ class TaskRepository:
         self.session.flush()
         return task
 
+    def release_terminal_failure(
+        self,
+        *,
+        task_id: str,
+        worker_id: str,
+    ) -> Task | None:
+        """Mark a claimed task as terminally failed and clear queue lease state."""
+        task = self.get(task_id)
+        if task is None:
+            return None
+        if task.lease_owner == worker_id:
+            task.lease_owner = None
+            task.lease_expires_at = None
+        task.status = TaskStatus.FAILED
+        task.next_attempt_at = None
+        self.session.flush()
+        return task
+
     def record_attempt_error(
         self,
         *,

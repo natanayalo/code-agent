@@ -260,6 +260,89 @@ def test_memory_repositories_support_upsert_and_delete(session_factory) -> None:
         )
 
 
+def test_task_repository_release_terminal_failure_clears_lease(session_factory) -> None:
+    """Terminal release should mark failed, clear lease, and avoid requeue timestamps."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:terminal", display_name="Terminal")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-terminal",
+        )
+        task = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="Needs manual approval",
+        )
+        claimed = task_repo.claim_next(
+            worker_id="worker-a",
+            now=datetime.now(UTC),
+            lease_seconds=30,
+        )
+        assert claimed is not None
+
+        updated = task_repo.release_terminal_failure(task_id=task.id, worker_id="worker-a")
+        assert updated is not None
+        assert updated.status is TaskStatus.FAILED
+        assert updated.next_attempt_at is None
+        assert updated.lease_owner is None
+        assert updated.lease_expires_at is None
+
+
+def test_task_repository_queue_release_guard_paths(session_factory) -> None:
+    """Queue release helpers should handle missing rows and ownership mismatches safely."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+
+        assert task_repo.release_success(task_id="missing") is None
+        assert (
+            task_repo.release_failure(
+                task_id="missing",
+                worker_id="worker-a",
+                now=datetime.now(UTC),
+                retry_backoff_seconds=10,
+            )
+            is None
+        )
+        assert task_repo.release_terminal_failure(task_id="missing", worker_id="worker-a") is None
+        assert task_repo.record_attempt_error(task_id="missing", error_text="boom") is None
+        assert (
+            task_repo.heartbeat_lease(
+                task_id="missing",
+                worker_id="worker-a",
+                now=datetime.now(UTC),
+                lease_seconds=30,
+            )
+            is False
+        )
+
+        user = user_repo.create(external_user_id="telegram:mismatch", display_name="Mismatch")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-mismatch",
+        )
+        task = task_repo.create(session_id=conversation_session.id, task_text="mismatch release")
+        task_repo.update_status(task_id=task.id, status=TaskStatus.IN_PROGRESS)
+        seeded = task_repo.get(task.id)
+        assert seeded is not None
+        seeded.lease_owner = "worker-a"
+        returned = task_repo.release_failure(
+            task_id=task.id,
+            worker_id="worker-b",
+            now=datetime.now(UTC),
+            retry_backoff_seconds=10,
+        )
+        assert returned is not None
+        assert returned.status is TaskStatus.IN_PROGRESS
+        assert returned.lease_owner == "worker-a"
+
+
 def test_personal_memory_upsert_recovers_from_duplicate_insert_race(
     session_factory,
     monkeypatch: pytest.MonkeyPatch,

@@ -100,7 +100,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     callback_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     task_text: Mapped[str] = mapped_column(Text, nullable=False)
-    worker_override: Mapped[WorkerType | None] = mapped_column(String(50), nullable=True)
+    worker_override: Mapped[WorkerType | None] = mapped_column(WORKER_TYPE_ENUM, nullable=True)
     constraints: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     budget: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[TaskStatus] = mapped_column(
