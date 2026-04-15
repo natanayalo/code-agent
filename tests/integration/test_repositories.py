@@ -292,6 +292,38 @@ def test_task_repository_release_terminal_failure_clears_lease(session_factory) 
         assert updated.lease_expires_at is None
 
 
+def test_task_repository_claim_next_returns_fresh_claimed_task(session_factory) -> None:
+    """Claim should return current DB state even when task was loaded before claiming."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:claim-fresh", display_name="Fresh")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-claim-fresh",
+        )
+        task = task_repo.create(session_id=conversation_session.id, task_text="claim me")
+
+        # Prime the session identity map so claim_next cannot rely on stale in-memory state.
+        primed = task_repo.get(task.id)
+        assert primed is not None
+        assert primed.status is TaskStatus.PENDING
+
+        claimed = task_repo.claim_next(
+            worker_id="worker-a",
+            now=datetime.now(UTC),
+            lease_seconds=30,
+        )
+        assert claimed is not None
+        assert claimed.id == task.id
+        assert claimed.status is TaskStatus.IN_PROGRESS
+        assert claimed.lease_owner == "worker-a"
+        assert claimed.attempt_count == 1
+
+
 def test_task_repository_queue_release_guard_paths(session_factory) -> None:
     """Queue release helpers should handle missing rows and ownership mismatches safely."""
     with session_scope(session_factory) as session:

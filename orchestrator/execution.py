@@ -116,6 +116,12 @@ def shutdown_callback_dns_executor() -> None:
         executor.shutdown(wait=False, cancel_futures=True)
 
 
+def _heartbeat_interval_seconds(*, lease_seconds: int) -> float:
+    """Choose a lease heartbeat cadence that scales with lease duration."""
+    bounded_lease = max(1, int(lease_seconds))
+    return max(1.0, min(10.0, bounded_lease / 3.0))
+
+
 def _resolve_callback_hostname(
     hostname: str,
     *,
@@ -769,8 +775,9 @@ class TaskExecutionService:
         lease_seconds: int,
     ) -> None:
         """Best-effort lease heartbeat while task execution is in progress."""
+        sleep_seconds = _heartbeat_interval_seconds(lease_seconds=lease_seconds)
         while True:
-            await asyncio.sleep(10.0)
+            await asyncio.sleep(sleep_seconds)
             ok = await self._run_blocking(
                 self._heartbeat_task_lease,
                 task_id=task_id,

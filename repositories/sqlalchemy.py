@@ -352,7 +352,9 @@ class TaskRepository:
             claimed_rows = int(getattr(claimed, "rowcount", 0) or 0)
             if claimed_rows > 0:
                 self.session.flush()
-                return self.get(task_id)
+                return self.session.execute(
+                    select(Task).where(Task.id == task_id).execution_options(populate_existing=True)
+                ).scalar_one_or_none()
         return None
 
     def heartbeat_lease(

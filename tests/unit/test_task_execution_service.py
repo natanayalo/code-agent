@@ -1461,6 +1461,14 @@ def test_heartbeat_task_lease_uses_configured_duration(monkeypatch) -> None:
     assert captured["lease_seconds"] == 123
 
 
+def test_heartbeat_interval_seconds_tracks_lease_duration() -> None:
+    """Heartbeat interval should scale with lease and stay inside safe bounds."""
+    assert execution_module._heartbeat_interval_seconds(lease_seconds=3) == 1.0
+    assert execution_module._heartbeat_interval_seconds(lease_seconds=30) == 10.0
+    assert execution_module._heartbeat_interval_seconds(lease_seconds=90) == 10.0
+    assert execution_module._heartbeat_interval_seconds(lease_seconds=1) == 1.0
+
+
 def test_run_queued_task_terminal_interrupt_sets_failed_without_requeue(monkeypatch) -> None:
     """Manual-follow-up failures should stay terminal instead of requeueing."""
     engine = create_engine_from_url(
