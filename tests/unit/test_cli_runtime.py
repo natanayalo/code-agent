@@ -896,3 +896,26 @@ def test_collect_changed_files_from_repo_path_parses_porcelain_z_output(monkeypa
     changed_files = collect_changed_files_from_repo_path(Path("/tmp/repo"))
 
     assert changed_files == ["README.md", "runtime_ok_2.txt"]
+
+
+def test_collect_changed_files_from_repo_path_logs_timeout_details(monkeypatch) -> None:
+    """Host fallback should log timeout details when git status exceeds timeout."""
+
+    def _fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs["timeout"])
+
+    warning_calls: list[tuple[str, dict[str, object]]] = []
+
+    monkeypatch.setattr("workers.cli_runtime.subprocess.run", _fake_run)
+    monkeypatch.setattr(
+        "workers.cli_runtime.logger.warning",
+        lambda message, **kwargs: warning_calls.append((message, kwargs)),
+    )
+
+    changed_files = collect_changed_files_from_repo_path(Path("/tmp/repo"), timeout_seconds=7)
+
+    assert changed_files == []
+    assert warning_calls
+    assert "timed out" in warning_calls[0][0].lower()
+    assert warning_calls[0][1]["extra"] == {"timeout_seconds": 7}
+    assert warning_calls[0][1]["exc_info"] is not None

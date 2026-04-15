@@ -841,8 +841,18 @@ def collect_changed_files_from_repo_path(
             capture_output=True,
             timeout=timeout_seconds,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        logger.warning("Worker failed to collect changed files via host git status.")
+    except subprocess.TimeoutExpired as exc:
+        logger.warning(
+            "Worker git status timed out while collecting changed files via host fallback.",
+            extra={"timeout_seconds": timeout_seconds},
+            exc_info=exc,
+        )
+        return []
+    except OSError as exc:
+        logger.warning(
+            "Worker failed to collect changed files via host git status.",
+            exc_info=exc,
+        )
         return []
 
     if completed.returncode != 0:

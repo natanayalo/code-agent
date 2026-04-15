@@ -38,6 +38,16 @@ def test_runtime_mode_defaults_and_overrides() -> None:
     assert runtime_module.should_run_worker({runtime_module.RUN_WORKER_ENV_VAR: "on"}) is True
 
 
+def test_runtime_coerce_positive_int_env_defaults_and_overrides() -> None:
+    """Shared env int parser should return defaults on invalid values."""
+    assert runtime_module.coerce_positive_int_env(None, default=5) == 5
+    assert runtime_module.coerce_positive_int_env("", default=5) == 5
+    assert runtime_module.coerce_positive_int_env("abc", default=5) == 5
+    assert runtime_module.coerce_positive_int_env("0", default=5) == 5
+    assert runtime_module.coerce_positive_int_env("-1", default=5) == 5
+    assert runtime_module.coerce_positive_int_env("9", default=5) == 9
+
+
 def test_worker_coerce_positive_float_defaults_on_invalid_values() -> None:
     """Float parser should keep defaults for missing/invalid/non-positive values."""
     assert worker_main._coerce_positive_float(None, default=2.0) == 2.0

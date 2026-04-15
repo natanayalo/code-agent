@@ -13,6 +13,7 @@ from apps.api.progress import (
     TelegramProgressNotifier,
     WebhookCallbackProgressNotifier,
 )
+from apps.runtime import coerce_positive_int_env as _coerce_positive_int
 from orchestrator.execution import ProgressNotifier, TaskExecutionService
 from repositories import create_engine_from_url, create_session_factory
 from workers import (
@@ -46,20 +47,6 @@ def _is_enabled(value: str | None) -> bool:
     if value is None:
         return False
     return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _coerce_positive_int(value: str | None, *, default: int) -> int:
-    """Parse positive integer env settings with sane fallback."""
-    if value is None:
-        return default
-    stripped = value.strip()
-    if not stripped:
-        return default
-    try:
-        parsed = int(stripped)
-    except ValueError:
-        return default
-    return parsed if parsed > 0 else default
 
 
 def _database_url_from_env(environ: Mapping[str, str]) -> str | None:

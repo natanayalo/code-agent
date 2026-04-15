@@ -10,7 +10,13 @@ from uuid import uuid4
 
 from apps.api.progress import create_outbound_http_clients
 from apps.api.task_service_factory import build_task_service_from_env
-from apps.runtime import RUN_WORKER_ENV_VAR, should_run_worker
+from apps.runtime import (
+    RUN_WORKER_ENV_VAR,
+    should_run_worker,
+)
+from apps.runtime import (
+    coerce_positive_int_env as _coerce_positive_int,
+)
 from orchestrator.execution import TaskQueueWorker
 
 logger = logging.getLogger(__name__)
@@ -28,19 +34,6 @@ def _coerce_positive_float(value: str | None, *, default: float) -> float:
         return default
     try:
         parsed = float(stripped)
-    except ValueError:
-        return default
-    return parsed if parsed > 0 else default
-
-
-def _coerce_positive_int(value: str | None, *, default: int) -> int:
-    if value is None:
-        return default
-    stripped = value.strip()
-    if not stripped:
-        return default
-    try:
-        parsed = int(stripped)
     except ValueError:
         return default
     return parsed if parsed > 0 else default
@@ -93,5 +86,5 @@ def main() -> None:
     asyncio.run(run_worker_forever())
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()
