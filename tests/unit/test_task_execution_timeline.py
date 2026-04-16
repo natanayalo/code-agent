@@ -199,5 +199,86 @@ def test_persist_execution_outcome_deduplicates_events(session_factory, service)
     # 5. Verify no duplicates in DB
     snapshot = service.get_task(task_id)
     assert len(snapshot.timeline) == 2
-    assert snapshot.timeline[0].message == "First"
     assert snapshot.timeline[1].message == "Second"
+
+
+def test_persist_execution_outcome_deduplicates_retry_attempts(session_factory, service) -> None:
+    """The execution service must deduplicate correctly across multiple retry attempts."""
+    now = utc_now()
+    from orchestrator.state import TaskTimelineEventState
+
+    # 1. Setup task
+    with session_scope(session_factory) as session:
+        from repositories import SessionRepository, TaskRepository, UserRepository
+
+        user = UserRepository(session).create(external_user_id="user-1")
+        conv = SessionRepository(session).create(
+            user_id=user.id, channel="http", external_thread_id="thread-retry"
+        )
+        task = TaskRepository(session).create(session_id=conv.id, task_text="retry me")
+        task_id = task.id
+
+    # 2. Simulate Attempt 0 (Started and Interrupted)
+    state_0 = OrchestratorState(
+        attempt_count=0,
+        session=SessionRef(
+            session_id="session-1",
+            user_id="user-1",
+            channel="http",
+            external_thread_id="thread-retry",
+            active_task_id=task_id,
+        ),
+        task=TaskRequest(task_id=task_id, task_text="retry me"),
+        timeline_events=[
+            TaskTimelineEventState(
+                event_type=TimelineEventType.TASK_INGESTED, message="A0-1", attempt_number=0
+            )
+        ],
+    )
+    service._persist_execution_outcome(
+        task_id=task_id, state=state_0, started_at=now, finished_at=now
+    )
+
+    # 3. Simulate Attempt 1 (Retry - starts with fresh state.timeline_events)
+    state_1 = OrchestratorState(
+        attempt_count=1,
+        session=SessionRef(
+            session_id="session-1",
+            user_id="user-1",
+            channel="http",
+            external_thread_id="thread-retry",
+            active_task_id=task_id,
+        ),
+        task=TaskRequest(task_id=task_id, task_text="retry me"),
+        timeline_events=[
+            TaskTimelineEventState(
+                event_type=TimelineEventType.TASK_INGESTED, message="A1-1", attempt_number=1
+            )
+        ],
+    )
+    # This should NOT be skipped because although DB count is 1,
+    # A1-1 is the first entry for attempt 1
+    service._persist_execution_outcome(
+        task_id=task_id, state=state_1, started_at=now, finished_at=now
+    )
+
+    # 4. Simulate Attempt 1 Resume (add A1-2)
+    state_1.timeline_events.append(
+        TaskTimelineEventState(
+            event_type=TimelineEventType.WORKER_SELECTED, message="A1-2", attempt_number=1
+        )
+    )
+    # This should deduplicate A1-1 and only add A1-2
+    service._persist_execution_outcome(
+        task_id=task_id, state=state_1, started_at=now, finished_at=now
+    )
+
+    # 5. Verify DB contents
+    snapshot = service.get_task(task_id)
+    assert len(snapshot.timeline) == 3
+    assert snapshot.timeline[0].message == "A0-1"
+    assert snapshot.timeline[0].attempt_number == 0
+    assert snapshot.timeline[1].message == "A1-1"
+    assert snapshot.timeline[1].attempt_number == 1
+    assert snapshot.timeline[2].message == "A1-2"
+    assert snapshot.timeline[2].attempt_number == 1

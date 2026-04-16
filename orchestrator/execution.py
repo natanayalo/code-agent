@@ -257,6 +257,7 @@ class TaskTimelineEventSnapshot(ExecutionModel):
     """A granular event in a task's lifecycle (T-090)."""
 
     event_type: str
+    attempt_number: int = 0
     message: str | None = None
     payload: dict[str, Any] | None = None
     created_at: datetime
@@ -914,6 +915,7 @@ class TaskExecutionService:
                 timeline=[
                     TaskTimelineEventSnapshot(
                         event_type=_enum_value(event.event_type) or "unknown",
+                        attempt_number=event.attempt_number,
                         message=event.message,
                         payload=event.payload,
                         created_at=event.created_at,
@@ -1459,13 +1461,19 @@ class TaskExecutionService:
                 artifact_index=artifact_index,
             )
 
-            existing_count = len(task.timeline_events)
+            existing_events_current_attempt = [
+                e for e in task.timeline_events if e.attempt_number == state.attempt_count
+            ]
+            existing_count = len(existing_events_current_attempt)
+
             for i, event in enumerate(state.timeline_events):
                 if i < existing_count:
                     continue
 
                 task.timeline_events.append(
                     TaskTimelineEvent(
+                        task_id=task_id,
+                        attempt_number=state.attempt_count,
                         event_type=event.event_type,
                         message=event.message,
                         payload=event.payload,

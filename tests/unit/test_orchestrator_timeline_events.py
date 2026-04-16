@@ -76,8 +76,9 @@ def test_verify_result_emits_event():
         {"task": {"task_text": "hello"}, "result": {"status": "success", "summary": "done"}}
     )
     res = verify_result(state)
-    assert len(res["timeline_events"]) == 1
-    assert res["timeline_events"][0].event_type == TimelineEventType.VERIFICATION_COMPLETED
+    assert len(res["timeline_events"]) == 2
+    assert res["timeline_events"][0].event_type == TimelineEventType.VERIFICATION_STARTED
+    assert res["timeline_events"][1].event_type == TimelineEventType.VERIFICATION_COMPLETED
 
 
 def test_summarize_result_emits_event():

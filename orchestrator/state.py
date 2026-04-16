@@ -141,6 +141,7 @@ class TaskTimelineEventState(OrchestratorModel):
     """A granular event in a task's lifecycle captured during orchestration (T-090)."""
 
     event_type: str
+    attempt_number: int = 0
     message: str | None = None
     payload: dict[str, Any] | None = None
     created_at: datetime | None = None
