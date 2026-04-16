@@ -1466,7 +1466,12 @@ class TaskExecutionService:
             ]
             existing_count = len(existing_events_current_attempt)
 
-            for i, event in enumerate(state.timeline_events):
+            # Filter state events to only the current attempt to ensure index alignment
+            current_attempt_events = [
+                e for e in state.timeline_events if e.attempt_number == state.attempt_count
+            ]
+
+            for i, event in enumerate(current_attempt_events):
                 if i < existing_count:
                     continue
 
