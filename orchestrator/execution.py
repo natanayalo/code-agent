@@ -965,11 +965,9 @@ class TaskExecutionService:
                 source="api",
                 approved=approved,
             )
-            task_repo.update_constraints(task_id=task.id, constraints=constraints)
 
             if approved:
                 constraints["requires_approval"] = False
-                task_repo.update_constraints(task_id=task.id, constraints=constraints)
                 task.status = TaskStatus.PENDING
                 task.next_attempt_at = decided_at
                 task.last_error = None
@@ -996,6 +994,7 @@ class TaskExecutionService:
                     artifact_index=[],
                 )
 
+            task.constraints = constraints
             task.lease_owner = None
             task.lease_expires_at = None
             session.flush()
@@ -1413,7 +1412,7 @@ class TaskExecutionService:
                             else None
                         ),
                     )
-                    task_repo.update_constraints(task_id=task_id, constraints=constraints)
+                    task.constraints = constraints
 
             result = state.result
             artifacts = result.artifacts if result is not None else []
