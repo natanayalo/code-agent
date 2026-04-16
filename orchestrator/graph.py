@@ -303,11 +303,13 @@ def _timeline_event(
     event_type: str | TimelineEventType,
     message: str | None = None,
     payload: dict[str, Any] | None = None,
+    *,
+    base_events: list[TaskTimelineEventState] | None = None,
 ) -> list[TaskTimelineEventState]:
     """Append a structured timeline event while preserving prior events."""
-
+    events = base_events if base_events is not None else state.timeline_events
     return [
-        *state.timeline_events,
+        *events,
         TaskTimelineEventState(
             event_type=str(event_type),
             attempt_number=state.attempt_count,
@@ -757,14 +759,14 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
     )
     return {
         "current_step": "dispatch_job",
-        "attempt_count": state.attempt_count + 1,
+        "attempt_count": state.attempt_count,
         "dispatch": dispatch.model_dump(),
         "progress_updates": _progress_update(state, "worker dispatched"),
         "timeline_events": _timeline_event(
             state,
             TimelineEventType.WORKER_DISPATCHED,
-            message=f"Dispatched attempt {state.attempt_count + 1} to {worker_type}.",
-            payload={"attempt_count": state.attempt_count + 1, "worker_type": worker_type},
+            message=f"Dispatched attempt {state.attempt_count} to {worker_type}.",
+            payload={"attempt_count": state.attempt_count, "worker_type": worker_type},
         ),
     }
 
@@ -1030,10 +1032,11 @@ def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
         "verification": report.model_dump(),
         "progress_updates": _progress_update(state, f"verification {report_status}"),
         "timeline_events": _timeline_event(
-            state.model_copy(update={"timeline_events": events_with_start}),
+            state,
             TimelineEventType.VERIFICATION_COMPLETED,
             message=report.summary,
             payload=report.model_dump(),
+            base_events=events_with_start,
         ),
     }
 

@@ -298,6 +298,7 @@ class _PersistedTaskContext:
     channel: str
     external_thread_id: str
     task_id: str
+    attempt_count: int
 
 
 @dataclass(frozen=True)
@@ -1102,6 +1103,7 @@ class TaskExecutionService:
                 channel=conversation_session.channel,
                 external_thread_id=conversation_session.external_thread_id,
                 task_id=task.id,
+                attempt_count=task.attempt_count,
             ), None
 
     def _link_delivery_to_task(
@@ -1217,6 +1219,7 @@ class TaskExecutionService:
                     "constraints": dict(submission.constraints),
                     "budget": dict(submission.budget),
                 },
+                "attempt_count": persisted.attempt_count,
             }
         )
         normalized_output = _normalize_orchestrator_graph_output(raw_output)
@@ -1264,6 +1267,7 @@ class TaskExecutionService:
                 channel=conversation_session.channel,
                 external_thread_id=conversation_session.external_thread_id,
                 task_id=task.id,
+                attempt_count=task.attempt_count,
             )
             return submission, persisted
 
