@@ -304,12 +304,15 @@ def _timeline_event(
     payload: dict[str, Any] | None = None,
 ) -> list[TaskTimelineEventState]:
     """Append a structured timeline event while preserving prior events."""
+    from db.base import utc_now
+
     return [
         *state.timeline_events,
         TaskTimelineEventState(
             event_type=str(event_type),
             message=message,
             payload=payload,
+            created_at=utc_now(),
         ),
     ]
 

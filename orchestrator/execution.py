@@ -40,7 +40,6 @@ from repositories import (
     SessionRepository,
     SessionStateRepository,
     TaskRepository,
-    TaskTimelineRepository,
     UserRepository,
     WorkerRunRepository,
     session_scope,
@@ -860,7 +859,6 @@ class TaskExecutionService:
             task_repo = TaskRepository(session)
             worker_run_repo = WorkerRunRepository(session)
             artifact_repo = ArtifactRepository(session)
-            timeline_repo = TaskTimelineRepository(session)
 
             task = task_repo.get(task_id)
             if task is None:
@@ -916,10 +914,10 @@ class TaskExecutionService:
                     TaskTimelineEventSnapshot(
                         event_type=_enum_value(event.event_type) or "unknown",
                         message=event.message,
-                        payload=dict(event.payload) if event.payload is not None else None,
+                        payload=event.payload,
                         created_at=event.created_at,
                     )
-                    for event in timeline_repo.list_by_task(task.id)
+                    for event in task.timeline_events
                 ],
             )
 
@@ -1393,7 +1391,6 @@ class TaskExecutionService:
             task_repo = TaskRepository(session)
             worker_run_repo = WorkerRunRepository(session)
             artifact_repo = ArtifactRepository(session)
-            timeline_repo = TaskTimelineRepository(session)
 
             if state.route.chosen_worker is not None and state.route.route_reason is not None:
                 task_repo.set_route(
@@ -1461,13 +1458,16 @@ class TaskExecutionService:
                 artifact_index=artifact_index,
             )
 
+            from db.models import TaskTimelineEvent
+
             for event in state.timeline_events:
-                timeline_repo.create(
-                    task_id=task_id,
-                    event_type=event.event_type,
-                    message=event.message,
-                    payload=event.payload,
-                    created_at=event.created_at,
+                task.timeline_events.append(
+                    TaskTimelineEvent(
+                        event_type=event.event_type,
+                        message=event.message,
+                        payload=event.payload,
+                        created_at=event.created_at,
+                    )
                 )
 
             if state.session is not None and state.session_state_update is not None:
