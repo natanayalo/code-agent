@@ -1550,3 +1550,195 @@ def test_run_queued_task_terminal_interrupt_sets_failed_without_requeue(monkeypa
         assert task.next_attempt_at is None
         assert task.lease_owner is None
         assert task.lease_expires_at is None
+
+
+def test_apply_task_approval_decision_requeues_approved_task(monkeypatch) -> None:
+    """Approving a paused task should move it back to pending for queue pickup."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="requires manual approval",
+            repo_url="https://github.com/natanayalo/code-agent",
+            constraints={"requires_approval": True},
+        )
+    )
+    claim = service.claim_next_task(worker_id="worker-a", lease_seconds=45)
+    assert claim is not None
+
+    async def fake_run_orchestrator(
+        submitted: execution_module.TaskSubmission,
+        persisted: execution_module.TaskSnapshot,
+    ) -> OrchestratorState:
+        return OrchestratorState(
+            current_step="await_approval",
+            session=SessionRef(
+                session_id=persisted.session_id,
+                user_id=persisted.user_id,
+                channel=persisted.channel,
+                external_thread_id=persisted.external_thread_id,
+                active_task_id=persisted.task_id,
+                status="active",
+            ),
+            task=TaskRequest(
+                task_id=persisted.task_id,
+                task_text=submitted.task_text,
+                repo_url=submitted.repo_url,
+                branch=submitted.branch,
+                priority=submitted.priority,
+                worker_override=submitted.worker_override,
+                constraints={"requires_approval": True},
+                budget={},
+            ),
+            normalized_task_text=submitted.task_text,
+            task_kind="implementation",
+            memory=MemoryContext(),
+            route=RouteDecision(
+                chosen_worker="codex",
+                route_reason="cheap_mechanical_change",
+                override_applied=False,
+            ),
+            approval=ApprovalCheckpoint(
+                required=True, status="pending", approval_type="manual_approval"
+            ),
+            dispatch=WorkerDispatch(worker_type="codex"),
+            result=WorkerResult(
+                status="failure",
+                summary="Run paused pending manual approval.",
+                next_action_hint="await_manual_follow_up",
+            ),
+        )
+
+    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
+
+    decision = service.apply_task_approval_decision(task_id=snapshot.task_id, approved=True)
+    assert decision.status == "applied"
+    assert decision.task_snapshot is not None
+    assert decision.task_snapshot.status == TaskStatus.PENDING.value
+
+    duplicate = service.apply_task_approval_decision(task_id=snapshot.task_id, approved=True)
+    assert duplicate.status == "already_applied"
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(snapshot.task_id)
+        assert task is not None
+        assert task.status is TaskStatus.PENDING
+        assert task.next_attempt_at is not None
+        assert task.lease_owner is None
+        approval = dict(task.constraints).get("approval")
+        assert isinstance(approval, dict)
+        assert approval.get("status") == "approved"
+        assert approval.get("approved") is True
+
+
+def test_apply_task_approval_decision_reject_is_terminal_and_conflict_is_reported(
+    monkeypatch,
+) -> None:
+    """Rejected decisions stay terminal and opposite follow-up decisions are blocked."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="requires manual approval",
+            repo_url="https://github.com/natanayalo/code-agent",
+            constraints={"requires_approval": True},
+        )
+    )
+    claim = service.claim_next_task(worker_id="worker-a", lease_seconds=45)
+    assert claim is not None
+
+    async def fake_run_orchestrator(
+        submitted: execution_module.TaskSubmission,
+        persisted: execution_module.TaskSnapshot,
+    ) -> OrchestratorState:
+        return OrchestratorState(
+            current_step="await_approval",
+            session=SessionRef(
+                session_id=persisted.session_id,
+                user_id=persisted.user_id,
+                channel=persisted.channel,
+                external_thread_id=persisted.external_thread_id,
+                active_task_id=persisted.task_id,
+                status="active",
+            ),
+            task=TaskRequest(
+                task_id=persisted.task_id,
+                task_text=submitted.task_text,
+                repo_url=submitted.repo_url,
+                branch=submitted.branch,
+                priority=submitted.priority,
+                worker_override=submitted.worker_override,
+                constraints={"requires_approval": True},
+                budget={},
+            ),
+            normalized_task_text=submitted.task_text,
+            task_kind="implementation",
+            memory=MemoryContext(),
+            route=RouteDecision(
+                chosen_worker="codex",
+                route_reason="cheap_mechanical_change",
+                override_applied=False,
+            ),
+            approval=ApprovalCheckpoint(
+                required=True, status="pending", approval_type="manual_approval"
+            ),
+            dispatch=WorkerDispatch(worker_type="codex"),
+            result=WorkerResult(
+                status="failure",
+                summary="Run paused pending manual approval.",
+                next_action_hint="await_manual_follow_up",
+            ),
+        )
+
+    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
+
+    rejected = service.apply_task_approval_decision(task_id=snapshot.task_id, approved=False)
+    assert rejected.status == "applied"
+    assert rejected.task_snapshot is not None
+    assert rejected.task_snapshot.status == TaskStatus.FAILED.value
+    assert rejected.task_snapshot.latest_run is not None
+    assert "rejected" in (rejected.task_snapshot.latest_run.summary or "").lower()
+
+    duplicate = service.apply_task_approval_decision(task_id=snapshot.task_id, approved=False)
+    assert duplicate.status == "already_applied"
+
+    conflict = service.apply_task_approval_decision(task_id=snapshot.task_id, approved=True)
+    assert conflict.status == "conflict"
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(snapshot.task_id)
+        assert task is not None
+        assert task.status is TaskStatus.FAILED
+        assert task.next_attempt_at is None
+        approval = dict(task.constraints).get("approval")
+        assert isinstance(approval, dict)
+        assert approval.get("status") == "rejected"
+        assert approval.get("approved") is False

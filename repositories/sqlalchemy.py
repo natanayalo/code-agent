@@ -289,6 +289,16 @@ class TaskRepository:
         self.session.flush()
         return task
 
+    def update_constraints(self, *, task_id: str, constraints: dict[str, Any]) -> Task | None:
+        """Replace persisted task constraints with a normalized mapping."""
+        task = self.get(task_id)
+        if task is None:
+            return None
+
+        task.constraints = dict(constraints)
+        self.session.flush()
+        return task
+
     def claim_next(
         self,
         *,
