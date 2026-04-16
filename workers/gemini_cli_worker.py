@@ -42,6 +42,7 @@ from workers.cli_runtime import (
     CliRuntimeSettings,
     ShellSessionProtocol,
     collect_changed_files,
+    collect_changed_files_from_repo_path,
     run_cli_runtime_loop,
     settings_from_budget,
 )
@@ -359,8 +360,14 @@ class GeminiCliWorker(Worker):
             if ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts:
                 files_changed = collect_changed_files(
                     session,
+                    working_directory=Path(container.working_dir),
                     timeout_seconds=runtime_settings.command_timeout_seconds,
                 )
+                if not files_changed:
+                    files_changed = collect_changed_files_from_repo_path(
+                        workspace.repo_path,
+                        timeout_seconds=runtime_settings.command_timeout_seconds,
+                    )
             result = _worker_result_from_execution(
                 workspace,
                 execution,

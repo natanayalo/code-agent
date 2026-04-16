@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.api.dependencies import get_task_service, require_api_auth
@@ -103,7 +103,6 @@ def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
 @router.post("", response_model=TaskSnapshot, status_code=status.HTTP_202_ACCEPTED)
 def receive_webhook(
     payload: WebhookPayload,
-    background_tasks: BackgroundTasks,
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> TaskSnapshot:
     """Accept a generic JSON webhook and enqueue it as a task.
@@ -121,6 +120,4 @@ def receive_webhook(
             else None
         ),
     )
-    if outcome.persisted is not None:
-        background_tasks.add_task(task_service.submit_task, submission, outcome.persisted)
     return outcome.task_snapshot

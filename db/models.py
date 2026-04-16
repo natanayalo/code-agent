@@ -98,12 +98,24 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     repo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    callback_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     task_text: Mapped[str] = mapped_column(Text, nullable=False)
+    worker_override: Mapped[WorkerType | None] = mapped_column(WORKER_TYPE_ENUM, nullable=True)
+    constraints: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    budget: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[TaskStatus] = mapped_column(
         TASK_STATUS_ENUM,
         nullable=False,
         default=TaskStatus.PENDING,
     )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     chosen_worker: Mapped[WorkerType | None] = mapped_column(WORKER_TYPE_ENUM, nullable=True)
     route_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -126,6 +138,17 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     ) -> WorkerType | None:
         """Normalize assigned chosen workers to the canonical enum."""
 
+        if value is None:
+            return None
+        return WorkerType(value)
+
+    @validates("worker_override")
+    def _coerce_worker_override(
+        self,
+        _key: str,
+        value: WorkerType | str | None,
+    ) -> WorkerType | None:
+        """Normalize assigned worker overrides to the canonical enum vocabulary."""
         if value is None:
             return None
         return WorkerType(value)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.api.dependencies import get_task_service, require_telegram_webhook_auth
@@ -143,7 +143,6 @@ def _to_task_submission(msg: TelegramMessage, text: str) -> TaskSubmission:
 )
 def receive_telegram_update(
     update: TelegramUpdate,
-    background_tasks: BackgroundTasks,
     _auth: None = Depends(require_telegram_webhook_auth),
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> TelegramWebhookResponse:
@@ -185,8 +184,6 @@ def receive_telegram_update(
             delivery_id=str(update.update_id),
         ),
     )
-    if outcome.persisted is not None:
-        background_tasks.add_task(task_service.submit_task, submission, outcome.persisted)
 
     logger.info(
         "telegram update_id=%d %s task_id=%s",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
 from collections.abc import Iterator
 
@@ -35,6 +36,14 @@ class StaticWorker(Worker):
     async def run(self, request: WorkerRequest) -> WorkerResult:
         self.requests.append(request)
         return self.result
+
+
+def _run_one_queued_task(client: TestClient) -> None:
+    """Claim one queued task and execute it through the worker service."""
+    service = client.app.state.task_service
+    claim = service.claim_next_task(worker_id="test-worker", lease_seconds=60)
+    assert claim is not None
+    asyncio.run(service.run_queued_task(task_id=claim.task_id, worker_id="test-worker"))
 
 
 @pytest.fixture
@@ -118,6 +127,8 @@ def test_submit_task_persists_execution_path_and_allows_polling(
     assert payload["route_reason"] is None
     assert payload["latest_run"] is None
 
+    _run_one_queued_task(client)
+
     get_response = client.get(f"/tasks/{task_id}")
     latest_run = get_response.json()["latest_run"]
 
@@ -184,6 +195,37 @@ def test_submit_task_persists_execution_path_and_allows_polling(
         artifacts = artifact_repo.list_by_run(worker_run.id)
         assert len(artifacts) == 1
         assert artifacts[0].artifact_type is ArtifactType.WORKSPACE
+
+
+def test_queued_task_requires_approval_before_worker_dispatch(client: TestClient) -> None:
+    """requires_approval should halt execution before the worker is invoked."""
+    response = client.post(
+        "/tasks",
+        json={
+            "task_text": "Delete all local files",
+            "constraints": {"requires_approval": True, "approval_reason": "Manual safety gate"},
+            "session": {
+                "channel": "http",
+                "external_user_id": "http:test-user",
+                "external_thread_id": "thread-approval",
+            },
+        },
+    )
+    assert response.status_code == 202
+    task_id = response.json()["task_id"]
+
+    _run_one_queued_task(client)
+
+    get_response = client.get(f"/tasks/{task_id}")
+    assert get_response.status_code == 200
+    payload = get_response.json()
+    assert payload["status"] == "failed"
+    assert payload["latest_run"] is not None
+    assert payload["latest_run"]["status"] == "failure"
+    assert "manual approval" in payload["latest_run"]["summary"].lower()
+
+    worker = client.app.state.test_worker
+    assert len(worker.requests) == 0
 
 
 def test_task_routes_require_a_configured_task_service() -> None:

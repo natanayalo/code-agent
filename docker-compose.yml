@@ -15,25 +15,87 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      CODE_AGENT_RUN_API: 0
+      CODE_AGENT_RUN_WORKER: 0
+      CODE_AGENT_ENABLE_TASK_SERVICE: 1
+      CODE_AGENT_API_SHARED_SECRET: ${CODE_AGENT_API_SHARED_SECRET?Please set CODE_AGENT_API_SHARED_SECRET in .env}
+      DATABASE_HOST: ${DATABASE_HOST:-postgres}
+      DATABASE_PORT: ${DATABASE_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB?Please set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER?Please set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DATABASE_HOST:-postgres}:${DATABASE_PORT:-5432}/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
   api:
     build:
       context: .
+      dockerfile: Dockerfile
     environment:
+      CODE_AGENT_RUN_API: 1
+      CODE_AGENT_RUN_WORKER: 0
+      CODE_AGENT_ENABLE_TASK_SERVICE: 1
+      CODE_AGENT_API_SHARED_SECRET: ${CODE_AGENT_API_SHARED_SECRET?Please set CODE_AGENT_API_SHARED_SECRET in .env}
+      CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN: ${CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN:-}
       DATABASE_HOST: ${DATABASE_HOST:-postgres}
       DATABASE_PORT: ${DATABASE_PORT:-5432}
-      DATABASE_NAME: ${POSTGRES_DB?Please set POSTGRES_DB in .env}
-      DATABASE_USER: ${POSTGRES_USER?Please set POSTGRES_USER in .env}
-      DATABASE_PASSWORD: ${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB?Please set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER?Please set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DATABASE_HOST:-postgres}:${DATABASE_PORT:-5432}/${POSTGRES_DB}
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 5s
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      CODE_AGENT_RUN_API: 0
+      CODE_AGENT_RUN_WORKER: 1
+      CODE_AGENT_ENABLE_TASK_SERVICE: 1
+      CODE_AGENT_API_SHARED_SECRET: ${CODE_AGENT_API_SHARED_SECRET?Please set CODE_AGENT_API_SHARED_SECRET in .env}
+      DATABASE_HOST: ${DATABASE_HOST:-postgres}
+      DATABASE_PORT: ${DATABASE_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB?Please set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER?Please set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DATABASE_HOST:-postgres}:${DATABASE_PORT:-5432}/${POSTGRES_DB}
+      CODE_AGENT_CODEX_CLI_BIN: ${CODE_AGENT_CODEX_CLI_BIN:-codex}
+      CODE_AGENT_CODEX_MODEL: ${CODE_AGENT_CODEX_MODEL:-gpt-5.4}
+      CODE_AGENT_CODEX_SANDBOX: ${CODE_AGENT_CODEX_SANDBOX:-workspace-write}
+      CODE_AGENT_GEMINI_CLI_BIN: ${CODE_AGENT_GEMINI_CLI_BIN:-gemini}
+      CODE_AGENT_GEMINI_MODEL: ${CODE_AGENT_GEMINI_MODEL:-gemini-2.5-pro}
+      CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS: ${CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS:-2}
+      CODE_AGENT_QUEUE_LEASE_SECONDS: ${CODE_AGENT_QUEUE_LEASE_SECONDS:-60}
+      CODE_AGENT_QUEUE_MAX_ATTEMPTS: ${CODE_AGENT_QUEUE_MAX_ATTEMPTS:-3}
+      CODE_AGENT_WORKSPACE_ROOT: ${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${CODE_AGENT_CODEX_AUTH_DIR?Please set CODE_AGENT_CODEX_AUTH_DIR in env}:/root/.codex
+      - ${CODE_AGENT_GEMINI_AUTH_DIR?Please set CODE_AGENT_GEMINI_AUTH_DIR in env}:/root/.gemini
+      - ${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}:${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}
 volumes:
   postgres_data:

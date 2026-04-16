@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import socket
@@ -16,6 +17,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Literal, Protocol
 from urllib.parse import unquote, urlparse
+from uuid import uuid4
 
 from anyio import to_thread
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -42,7 +44,7 @@ from repositories import (
     WorkerRunRepository,
     session_scope,
 )
-from workers import ArtifactReference, Worker
+from workers import ArtifactReference, Worker, WorkerResult
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +114,12 @@ def shutdown_callback_dns_executor() -> None:
         _callback_dns_executor = None
     if executor is not None:
         executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _heartbeat_interval_seconds(*, lease_seconds: int) -> float:
+    """Choose a lease heartbeat cadence that scales with lease duration."""
+    bounded_lease = max(1, int(lease_seconds))
+    return max(1.0, min(10.0, bounded_lease / 3.0))
 
 
 def _resolve_callback_hostname(
@@ -284,6 +292,15 @@ class CreateTaskOutcome:
 
 
 @dataclass(frozen=True)
+class TaskClaim:
+    """A claimed task ready for worker execution."""
+
+    task_id: str
+    attempt_count: int
+    max_attempts: int
+
+
+@dataclass(frozen=True)
 class ProgressEvent:
     """A task lifecycle update emitted by the execution service."""
 
@@ -331,6 +348,134 @@ def _worker_run_status_from_result(state: OrchestratorState) -> str:
     if state.result.status == "failure":
         return WorkerRunStatus.FAILURE.value
     return WorkerRunStatus.ERROR.value
+
+
+def _worker_type_for_persistence(state: OrchestratorState) -> WorkerType:
+    """Choose a persisted worker type even when dispatch metadata is incomplete."""
+    if state.dispatch.worker_type is not None:
+        return WorkerType(state.dispatch.worker_type)
+
+    if state.route.chosen_worker is not None:
+        logger.warning(
+            "Persisting worker run with route fallback because dispatch worker type is missing.",
+            extra={"route_worker": state.route.chosen_worker},
+        )
+        return WorkerType(state.route.chosen_worker)
+
+    logger.warning(
+        "Persisting worker run with codex default because worker type is missing.",
+    )
+    return WorkerType.CODEX
+
+
+def _interrupt_payload_from_object(interrupt: object) -> dict[str, Any] | None:
+    """Extract an interrupt payload mapping from LangGraph interrupt objects."""
+    if isinstance(interrupt, Mapping):
+        candidate = interrupt.get("value")
+        if isinstance(candidate, Mapping):
+            return dict(candidate)
+        return dict(interrupt)
+
+    candidate = getattr(interrupt, "value", None)
+    if isinstance(candidate, Mapping):
+        return dict(candidate)
+    return None
+
+
+def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
+    """Build a concise failure summary when orchestration stops on an interrupt."""
+    first = payloads[0] if payloads else {}
+    approval_type = str(first.get("approval_type") or "").strip()
+    reason = str(first.get("reason") or "").strip()
+    requested_permission = str(first.get("requested_permission") or "").strip()
+
+    if approval_type == "permission_escalation":
+        if requested_permission:
+            summary = (
+                "Run paused pending permission escalation approval for "
+                f"'{requested_permission}'."
+            )
+        else:
+            summary = "Run paused pending permission escalation approval."
+    elif approval_type:
+        display_approval_type = approval_type.replace("_", " ")
+        suffix = "" if display_approval_type.endswith("approval") else " approval"
+        summary = f"Run paused pending {display_approval_type}{suffix}."
+    else:
+        summary = "Run paused pending manual approval."
+
+    if reason:
+        summary = f"{summary} {reason}"
+    return summary
+
+
+def _normalize_orchestrator_graph_output(raw_output: object) -> object:
+    """Strip transport-only interrupt keys and map unresolved interrupts to failure output."""
+    if not isinstance(raw_output, Mapping):
+        return raw_output
+
+    normalized = dict(raw_output)
+    interrupts_raw = normalized.pop("__interrupt__", None)
+    if interrupts_raw is None:
+        return normalized
+
+    interrupts: list[object]
+    if isinstance(interrupts_raw, list):
+        interrupts = list(interrupts_raw)
+    else:
+        interrupts = [interrupts_raw]
+
+    payloads = [
+        payload
+        for payload in (_interrupt_payload_from_object(interrupt) for interrupt in interrupts)
+        if payload is not None
+    ]
+    logger.warning(
+        "Orchestrator graph returned unresolved interrupts; normalizing result for persistence.",
+        extra={"interrupt_count": len(payloads) or len(interrupts)},
+    )
+
+    existing_errors = normalized.get("errors")
+    errors: list[str]
+    if isinstance(existing_errors, list):
+        errors = [str(item) for item in existing_errors]
+    else:
+        errors = []
+    errors.append("orchestrator interrupted awaiting manual approval")
+    normalized["errors"] = errors
+
+    existing_progress = normalized.get("progress_updates")
+    progress_updates: list[str]
+    if isinstance(existing_progress, list):
+        progress_updates = [str(item) for item in existing_progress]
+    else:
+        progress_updates = []
+    progress_updates.append("run interrupted pending manual approval")
+    normalized["progress_updates"] = progress_updates
+
+    if normalized.get("result") is None:
+        first_payload = payloads[0] if payloads else {}
+        requested_permission = first_payload.get("requested_permission")
+        normalized["result"] = WorkerResult(
+            status="failure",
+            summary=_interrupt_summary(payloads),
+            requested_permission=(
+                str(requested_permission).strip() if requested_permission is not None else None
+            ),
+            commands_run=[],
+            files_changed=[],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="await_manual_follow_up",
+        ).model_dump(mode="json")
+    return normalized
+
+
+def _requires_manual_follow_up(state: OrchestratorState) -> bool:
+    """Return True when a failed result should remain terminal for operator action."""
+    if state.result is None:
+        return False
+    return state.result.next_action_hint == "await_manual_follow_up"
 
 
 def _workspace_id_from_artifacts(artifacts: list[ArtifactReference]) -> str | None:
@@ -385,11 +530,13 @@ class TaskExecutionService:
         worker: Worker,
         gemini_worker: Worker | None = None,
         progress_notifier: ProgressNotifier | None = None,
+        default_task_max_attempts: int = 3,
     ) -> None:
         self.session_factory = session_factory
         self.worker = worker
         self.gemini_worker = gemini_worker
         self.progress_notifier = progress_notifier
+        self.default_task_max_attempts = max(1, int(default_task_max_attempts))
         self.graph = build_orchestrator_graph(worker=worker, gemini_worker=gemini_worker)
 
     def create_task(self, submission: TaskSubmission) -> tuple[TaskSnapshot, _PersistedTaskContext]:
@@ -413,6 +560,7 @@ class TaskExecutionService:
         persisted, duplicate_task_id = self._persist_submission(
             submission,
             status=TaskStatus.PENDING,
+            max_attempts=self.default_task_max_attempts,
             delivery_key=delivery_key,
         )
         task_id = duplicate_task_id or (persisted.task_id if persisted is not None else None)
@@ -433,18 +581,10 @@ class TaskExecutionService:
         submission: TaskSubmission,
         persisted: _PersistedTaskContext,
     ) -> None:
-        """Execute one previously persisted task request in the background."""
+        """Legacy direct execution entrypoint kept for compatibility/tests."""
         await self._run_blocking(self._mark_task_in_progress, task_id=persisted.task_id)
-        await self._emit_progress(
-            submission,
-            persisted,
-            phase="started",
-        )
-        await self._emit_progress(
-            submission,
-            persisted,
-            phase="running",
-        )
+        await self._emit_progress(submission, persisted, phase="started")
+        await self._emit_progress(submission, persisted, phase="running")
         started_at = utc_now()
         logger.info(
             "Starting execution-path task run",
@@ -514,6 +654,156 @@ class TaskExecutionService:
         )
         return None
 
+    async def run_queued_task(
+        self,
+        *,
+        task_id: str,
+        worker_id: str,
+        lease_seconds: int = 60,
+    ) -> None:
+        """Execute one claimed queued task id and persist/release queue state."""
+        loaded = await self._run_blocking(self._load_submission_for_task, task_id=task_id)
+        if loaded is None:
+            logger.warning(
+                "Skipping queued task run: task no longer exists",
+                extra={"task_id": task_id},
+            )
+            return None
+
+        submission, persisted = loaded
+        await self._emit_progress(submission, persisted, phase="started")
+        await self._emit_progress(submission, persisted, phase="running")
+
+        heartbeat_task = asyncio.create_task(
+            self._heartbeat_loop(
+                task_id=task_id,
+                worker_id=worker_id,
+                lease_seconds=lease_seconds,
+            ),
+            name=f"task-heartbeat-{task_id}",
+        )
+        started_at = utc_now()
+        logger.info(
+            "Starting execution-path task run",
+            extra={
+                "session_id": persisted.session_id,
+                "task_id": persisted.task_id,
+                "chosen_worker": None,
+                "route_reason": None,
+                "workspace_id": None,
+                "start_timestamp": started_at.isoformat(),
+                "worker_id": worker_id,
+            },
+        )
+        try:
+            state = await self._run_orchestrator(submission, persisted)
+            finished_at = utc_now()
+            if state.result is not None and state.result.status == "success":
+                await self._run_blocking(
+                    self._persist_execution_outcome,
+                    task_id=persisted.task_id,
+                    state=state,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    force_task_status=TaskStatus.COMPLETED,
+                )
+                await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
+            else:
+                terminal_failure = _requires_manual_follow_up(state)
+                await self._run_blocking(
+                    self._persist_execution_outcome,
+                    task_id=persisted.task_id,
+                    state=state,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    force_task_status=(
+                        TaskStatus.FAILED if terminal_failure else TaskStatus.IN_PROGRESS
+                    ),
+                )
+                if terminal_failure:
+                    await self._run_blocking(
+                        self._release_task_terminal_failure,
+                        task_id=persisted.task_id,
+                        worker_id=worker_id,
+                    )
+                else:
+                    await self._run_blocking(
+                        self._release_task_failure,
+                        task_id=persisted.task_id,
+                        worker_id=worker_id,
+                    )
+        except Exception as exc:
+            logger.exception(
+                "Task execution failed before the final outcome was fully persisted",
+                extra={
+                    "session_id": persisted.session_id,
+                    "task_id": persisted.task_id,
+                    "worker_id": worker_id,
+                },
+            )
+            await self._run_blocking(
+                self._record_task_attempt_error,
+                task_id=persisted.task_id,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            await self._run_blocking(
+                self._release_task_failure,
+                task_id=persisted.task_id,
+                worker_id=worker_id,
+            )
+        finally:
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
+
+        task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
+        if task_snapshot is None:
+            raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
+        self._log_task_outcome(task_snapshot)
+        await self._emit_progress(
+            submission,
+            persisted,
+            phase="completed" if task_snapshot.status == TaskStatus.COMPLETED.value else "failed",
+            summary=self._task_summary(task_snapshot),
+        )
+        return None
+
+    async def _heartbeat_loop(
+        self,
+        *,
+        task_id: str,
+        worker_id: str,
+        lease_seconds: int,
+    ) -> None:
+        """Best-effort lease heartbeat while task execution is in progress."""
+        sleep_seconds = _heartbeat_interval_seconds(lease_seconds=lease_seconds)
+        while True:
+            await asyncio.sleep(sleep_seconds)
+            ok = await self._run_blocking(
+                self._heartbeat_task_lease,
+                task_id=task_id,
+                worker_id=worker_id,
+                lease_seconds=lease_seconds,
+            )
+            if not ok:
+                return None
+
+    def claim_next_task(self, *, worker_id: str, lease_seconds: int) -> TaskClaim | None:
+        """Claim one queued task for worker execution."""
+        with session_scope(self.session_factory) as session:
+            task_repo = TaskRepository(session)
+            task = task_repo.claim_next(
+                worker_id=worker_id,
+                now=utc_now(),
+                lease_seconds=lease_seconds,
+            )
+            if task is None:
+                return None
+            return TaskClaim(
+                task_id=task.id,
+                attempt_count=task.attempt_count,
+                max_attempts=task.max_attempts,
+            )
+
     def get_task(self, task_id: str) -> TaskSnapshot | None:
         """Load the current persisted task state and its latest worker run."""
         with session_scope(self.session_factory) as session:
@@ -578,6 +868,7 @@ class TaskExecutionService:
         submission: TaskSubmission,
         *,
         status: TaskStatus,
+        max_attempts: int,
         delivery_key: DeliveryKey | None = None,
     ) -> tuple[_PersistedTaskContext | None, str | None]:
         """Create or restore the session scaffolding for a submitted task."""
@@ -617,7 +908,13 @@ class TaskExecutionService:
                 task_text=submission.task_text,
                 repo_url=submission.repo_url,
                 branch=submission.branch,
+                callback_url=submission.callback_url,
+                worker_override=submission.worker_override,
+                constraints=dict(submission.constraints),
+                budget=dict(submission.budget),
                 status=status,
+                max_attempts=max(1, max_attempts),
+                next_attempt_at=now,
                 priority=submission.priority,
             )
             session_repo.set_active_task(
@@ -756,19 +1053,107 @@ class TaskExecutionService:
                 },
             }
         )
-        return OrchestratorState.model_validate(raw_output)
+        normalized_output = _normalize_orchestrator_graph_output(raw_output)
+        return OrchestratorState.model_validate(normalized_output)
+
+    def _load_submission_for_task(
+        self,
+        *,
+        task_id: str,
+    ) -> tuple[TaskSubmission, _PersistedTaskContext] | None:
+        """Reconstruct a worker-run submission payload from persisted task/session state."""
+        with session_scope(self.session_factory) as session:
+            task_repo = TaskRepository(session)
+            session_repo = SessionRepository(session)
+            user_repo = UserRepository(session)
+
+            task = task_repo.get(task_id)
+            if task is None:
+                return None
+            conversation_session = session_repo.get(task.session_id)
+            if conversation_session is None:
+                return None
+            user = user_repo.get(conversation_session.user_id)
+            if user is None:
+                return None
+            submission = TaskSubmission(
+                task_text=task.task_text,
+                repo_url=task.repo_url,
+                branch=task.branch,
+                worker_override=task.worker_override,
+                constraints=dict(task.constraints or {}),
+                budget=dict(task.budget or {}),
+                callback_url=task.callback_url,
+                priority=task.priority,
+                session=SubmissionSession(
+                    channel=conversation_session.channel,
+                    external_user_id=user.external_user_id or "unknown",
+                    external_thread_id=conversation_session.external_thread_id,
+                    display_name=user.display_name,
+                ),
+            )
+            persisted = _PersistedTaskContext(
+                user_id=user.id,
+                session_id=conversation_session.id,
+                channel=conversation_session.channel,
+                external_thread_id=conversation_session.external_thread_id,
+                task_id=task.id,
+            )
+            return submission, persisted
 
     def _mark_task_in_progress(self, *, task_id: str) -> None:
-        """Mark a queued task as in progress when background execution begins."""
+        """Mark a queued task as in progress when direct execution begins."""
         with session_scope(self.session_factory) as session:
-            task_repo = TaskRepository(session)
-            task_repo.update_status(task_id=task_id, status=TaskStatus.IN_PROGRESS)
+            TaskRepository(session).update_status(task_id=task_id, status=TaskStatus.IN_PROGRESS)
 
     def _mark_task_failed(self, *, task_id: str) -> None:
-        """Persist a failed task status after background execution crashes."""
+        """Mark a task as failed in legacy direct execution path."""
         with session_scope(self.session_factory) as session:
-            task_repo = TaskRepository(session)
-            task_repo.update_status(task_id=task_id, status=TaskStatus.FAILED)
+            TaskRepository(session).update_status(task_id=task_id, status=TaskStatus.FAILED)
+
+    def _release_task_success(self, *, task_id: str) -> None:
+        """Mark a task attempt successful in queue state."""
+        with session_scope(self.session_factory) as session:
+            TaskRepository(session).release_success(task_id=task_id)
+
+    def _release_task_failure(self, *, task_id: str, worker_id: str) -> None:
+        """Release a failed task attempt, requeueing when attempts remain."""
+        with session_scope(self.session_factory) as session:
+            TaskRepository(session).release_failure(
+                task_id=task_id,
+                worker_id=worker_id,
+                now=utc_now(),
+                retry_backoff_seconds=15,
+            )
+
+    def _release_task_terminal_failure(self, *, task_id: str, worker_id: str) -> None:
+        """Release queue lease while preserving terminal failure for manual follow-up."""
+        with session_scope(self.session_factory) as session:
+            TaskRepository(session).release_terminal_failure(
+                task_id=task_id,
+                worker_id=worker_id,
+            )
+
+    def _record_task_attempt_error(self, *, task_id: str, error: str) -> None:
+        """Persist an execution exception snippet on the task row."""
+        with session_scope(self.session_factory) as session:
+            TaskRepository(session).record_attempt_error(task_id=task_id, error_text=error)
+
+    def _heartbeat_task_lease(
+        self,
+        *,
+        task_id: str,
+        worker_id: str,
+        lease_seconds: int,
+    ) -> bool:
+        """Extend queue lease for one in-flight task, returning False when lease is lost."""
+        with session_scope(self.session_factory) as session:
+            return TaskRepository(session).heartbeat_lease(
+                task_id=task_id,
+                worker_id=worker_id,
+                now=utc_now(),
+                lease_seconds=lease_seconds,
+            )
 
     async def _run_blocking(
         self,
@@ -836,6 +1221,7 @@ class TaskExecutionService:
         state: OrchestratorState,
         started_at: datetime,
         finished_at: datetime,
+        force_task_status: TaskStatus | None = None,
     ) -> None:
         """Persist route, task status, worker-run metadata, and artifacts."""
         with session_scope(self.session_factory) as session:
@@ -850,18 +1236,19 @@ class TaskExecutionService:
                     route_reason=state.route.route_reason,
                 )
 
-            task_repo.update_status(task_id=task_id, status=_task_status_from_result(state))
-
-            if state.dispatch.worker_type is None:
-                return
+            task_repo.update_status(
+                task_id=task_id,
+                status=force_task_status or _task_status_from_result(state),
+            )
 
             result = state.result
             artifacts = result.artifacts if result is not None else []
             artifact_index = [artifact.model_dump(mode="json") for artifact in artifacts]
+            worker_type = _worker_type_for_persistence(state)
             worker_run = worker_run_repo.create(
                 task_id=task_id,
                 session_id=state.session.session_id if state.session is not None else None,
-                worker_type=state.dispatch.worker_type,
+                worker_type=worker_type,
                 workspace_id=_workspace_id_from_artifacts(artifacts),
                 started_at=started_at,
                 finished_at=finished_at,
@@ -924,3 +1311,45 @@ class TaskExecutionService:
                 ],
             },
         )
+
+
+class TaskQueueWorker:
+    """Long-running queue poller that claims and executes queued tasks."""
+
+    def __init__(
+        self,
+        *,
+        service: TaskExecutionService,
+        worker_id: str | None = None,
+        poll_interval_seconds: float = 2.0,
+        lease_seconds: int = 60,
+    ) -> None:
+        self.service = service
+        self.worker_id = worker_id or f"worker-{uuid4().hex[:8]}"
+        self.poll_interval_seconds = max(0.25, float(poll_interval_seconds))
+        self.lease_seconds = max(15, int(lease_seconds))
+
+    async def run_forever(self) -> None:
+        """Poll for queued tasks indefinitely."""
+        logger.info(
+            "Starting task queue worker loop",
+            extra={
+                "worker_id": self.worker_id,
+                "poll_interval_seconds": self.poll_interval_seconds,
+                "lease_seconds": self.lease_seconds,
+            },
+        )
+        while True:
+            claim = await self.service._run_blocking(
+                self.service.claim_next_task,
+                worker_id=self.worker_id,
+                lease_seconds=self.lease_seconds,
+            )
+            if claim is None:
+                await asyncio.sleep(self.poll_interval_seconds)
+                continue
+            await self.service.run_queued_task(
+                task_id=claim.task_id,
+                worker_id=self.worker_id,
+                lease_seconds=self.lease_seconds,
+            )

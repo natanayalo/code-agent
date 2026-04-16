@@ -12,7 +12,11 @@ from fastapi.testclient import TestClient
 from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
 from apps.api.progress import create_outbound_http_clients
-from apps.api.task_service_factory import build_task_service_from_env
+from apps.api.task_service_factory import (
+    _coerce_positive_int,
+    _database_url_from_env,
+    build_task_service_from_env,
+)
 from workers import CodexCliWorker, CodexExecCliRuntimeAdapter, GeminiCliWorker
 
 
@@ -35,6 +39,48 @@ def test_build_task_service_from_env_requires_database_config() -> None:
     """Enabling the task service without DB settings should fail clearly."""
     with pytest.raises(RuntimeError, match="no database configuration was provided"):
         build_task_service_from_env({"CODE_AGENT_ENABLE_TASK_SERVICE": "1"})
+
+
+def test_database_url_from_env_prefers_explicit_url() -> None:
+    """Explicit DATABASE_URL should be used as-is after trimming whitespace."""
+    resolved = _database_url_from_env(
+        {
+            "DATABASE_URL": "  postgresql+psycopg://user:pass@db:5432/code_agent  ",
+            "DATABASE_HOST": "ignored",
+            "DATABASE_PORT": "5432",
+            "POSTGRES_DB": "ignored",
+            "POSTGRES_USER": "ignored",
+            "POSTGRES_PASSWORD": "ignored",
+        }
+    )
+
+    assert resolved == "postgresql+psycopg://user:pass@db:5432/code_agent"
+
+
+def test_database_url_from_env_builds_split_env_url_with_escaping() -> None:
+    """Split DB vars should produce an escaped URL when DATABASE_URL is absent."""
+    resolved = _database_url_from_env(
+        {
+            "DATABASE_DRIVER": "postgresql+psycopg",
+            "DATABASE_HOST": "localhost",
+            "DATABASE_PORT": "5432",
+            "POSTGRES_DB": "code agent",
+            "POSTGRES_USER": "user+name",
+            "POSTGRES_PASSWORD": "p@ss:word",
+        }
+    )
+
+    assert resolved == "postgresql+psycopg://user%2Bname:p%40ss%3Aword@localhost:5432/code%20agent"
+
+
+def test_coerce_positive_int_parses_and_falls_back() -> None:
+    """Positive-int parser should ignore missing, invalid, and non-positive values."""
+    assert _coerce_positive_int(None, default=3) == 3
+    assert _coerce_positive_int("  ", default=3) == 3
+    assert _coerce_positive_int("abc", default=3) == 3
+    assert _coerce_positive_int("0", default=3) == 3
+    assert _coerce_positive_int("-4", default=3) == 3
+    assert _coerce_positive_int("8", default=3) == 8
 
 
 def test_build_task_service_from_env_requires_shared_outbound_clients(tmp_path: Path) -> None:
@@ -86,6 +132,51 @@ def test_build_task_service_from_env_builds_gemini_worker_when_configured(tmp_pa
     try:
         assert service is not None
         assert isinstance(service.gemini_worker, GeminiCliWorker)
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
+def test_build_task_service_from_env_adds_telegram_progress_notifier_when_token_present(
+    tmp_path: Path,
+) -> None:
+    """Telegram notifier should be included when a bot token is configured."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+            "CODE_AGENT_TELEGRAM_BOT_TOKEN": "bot-token",
+            "CODE_AGENT_TELEGRAM_API_BASE_URL": "https://telegram.example.local",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert len(service.progress_notifier.notifiers) == 2
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
+def test_build_task_service_from_env_uses_non_sqlite_engine_path(tmp_path: Path) -> None:
+    """Split Postgres env should exercise the non-sqlite engine bootstrap path."""
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "DATABASE_HOST": "localhost",
+            "DATABASE_PORT": "5432",
+            "POSTGRES_DB": "code_agent",
+            "POSTGRES_USER": "postgres",
+            "POSTGRES_PASSWORD": "postgres",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert isinstance(service.worker, CodexCliWorker)
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
@@ -162,6 +253,17 @@ def test_create_app_shuts_down_callback_dns_executor_on_exit(monkeypatch) -> Non
     assert shutdown_calls == ["dns"]
 
 
+def test_create_app_fails_fast_when_api_runtime_is_disabled(monkeypatch) -> None:
+    """App startup should fail when API runtime mode is disabled."""
+    monkeypatch.setattr("apps.api.main.should_run_api", lambda: False)
+
+    app = create_app(task_service=object())
+
+    with pytest.raises(RuntimeError, match="API runtime is disabled"):
+        with TestClient(app):
+            pass
+
+
 def test_create_app_closes_both_clients_when_startup_bootstrap_fails(monkeypatch) -> None:
     """Startup failures should still close both shared outbound clients."""
     close_calls: list[str] = []
@@ -199,3 +301,40 @@ def test_create_app_closes_both_clients_when_startup_bootstrap_fails(monkeypatch
 
     assert set(close_calls) == {"telegram", "webhook"}
     assert dns_shutdown_calls == ["dns"]
+
+
+def test_create_app_logs_warning_when_outbound_client_close_fails(monkeypatch) -> None:
+    """App shutdown should warn if either shared outbound client fails to close."""
+    warning_calls: list[str] = []
+
+    class _FailingClient:
+        async def aclose(self) -> None:
+            raise RuntimeError("close failure")
+
+    class _OkClient:
+        async def aclose(self) -> None:
+            return None
+
+    outbound_http_clients = SimpleNamespace(
+        telegram=_FailingClient(),
+        webhook=_OkClient(),
+    )
+    monkeypatch.setattr(
+        "apps.api.main.create_outbound_http_clients",
+        lambda: outbound_http_clients,
+    )
+    monkeypatch.setattr(
+        "apps.api.main.build_task_service_from_env",
+        lambda **_: None,
+    )
+    monkeypatch.setattr(
+        "apps.api.main.logger.warning",
+        lambda message, **kwargs: warning_calls.append(message),
+    )
+
+    app = create_app()
+
+    with TestClient(app):
+        pass
+
+    assert warning_calls == ["Failed to close outbound HTTP client during app shutdown"]

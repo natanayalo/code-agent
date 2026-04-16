@@ -13,6 +13,7 @@ from apps.api.progress import (
     TelegramProgressNotifier,
     WebhookCallbackProgressNotifier,
 )
+from apps.runtime import coerce_positive_int_env as _coerce_positive_int
 from orchestrator.execution import ProgressNotifier, TaskExecutionService
 from repositories import create_engine_from_url, create_session_factory
 from workers import (
@@ -28,6 +29,7 @@ from workers.gemini_cli_adapter import (
 )
 
 ENABLE_TASK_SERVICE_ENV_VAR: Final[str] = "CODE_AGENT_ENABLE_TASK_SERVICE"
+DEFAULT_TASK_MAX_ATTEMPTS_ENV_VAR: Final[str] = "CODE_AGENT_QUEUE_MAX_ATTEMPTS"
 DATABASE_URL_ENV_VAR: Final[str] = "DATABASE_URL"
 DATABASE_DRIVER_ENV_VAR: Final[str] = "DATABASE_DRIVER"
 DATABASE_HOST_ENV_VAR: Final[str] = "DATABASE_HOST"
@@ -132,4 +134,8 @@ def build_task_service_from_env(
         worker=codex_worker,
         gemini_worker=gemini_worker,
         progress_notifier=CompositeProgressNotifier(progress_notifiers),
+        default_task_max_attempts=_coerce_positive_int(
+            resolved_env.get(DEFAULT_TASK_MAX_ATTEMPTS_ENV_VAR),
+            default=3,
+        ),
     )

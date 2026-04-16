@@ -1,0 +1,33 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_CERT=/etc/ssl/certs/ca-certificates.crt
+
+WORKDIR /app
+
+COPY . /app
+
+RUN set -eu; \
+    if [ -f /app/cert.pem ]; then \
+        cp /app/cert.pem /usr/local/share/ca-certificates/code-agent-local.crt; \
+        update-ca-certificates; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends nodejs npm ca-certificates git curl tar; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) docker_arch="x86_64" ;; \
+      arm64) docker_arch="aarch64" ;; \
+      *) echo "Unsupported architecture for Docker CLI: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://download.docker.com/linux/static/stable/${docker_arch}/docker-27.5.1.tgz" -o /tmp/docker.tgz; \
+    tar -xzf /tmp/docker.tgz -C /tmp; \
+    install -m 0755 /tmp/docker/docker /usr/local/bin/docker; \
+    rm -rf /tmp/docker /tmp/docker.tgz; \
+    rm -rf /var/lib/apt/lists/*; \
+    python -m pip install --upgrade pip==25.2; \
+    pip install . "psycopg[binary]>=3.2,<4.0"; \
+    npm install -g @openai/codex @google/gemini-cli
+
+CMD ["python", "-m", "apps.worker.main"]

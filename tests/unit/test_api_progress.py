@@ -248,6 +248,111 @@ def test_format_telegram_message_truncates_completed_summary_to_platform_limit()
     assert message.endswith("...")
 
 
+def test_format_telegram_message_for_running_phase() -> None:
+    """Running phase should render the concise in-progress message."""
+    event = ProgressEvent(
+        phase="running",
+        task_id="task-1",
+        session_id="session-1",
+        channel="telegram",
+        external_thread_id="telegram:chat:99",
+        task_text="Run tests",
+    )
+
+    assert _format_telegram_message(event) == "Task task-1 is running."
+
+
+@pytest.mark.anyio
+async def test_telegram_progress_notifier_ignores_non_telegram_channels() -> None:
+    """Telegram notifier should no-op for non-telegram events."""
+    requests: list[tuple[str, dict]] = []
+    notifier = TelegramProgressNotifier(
+        bot_token="token-123",
+        client=_FakeAsyncClient(requests),
+    )
+    submission = TaskSubmission(task_text="Run tests")
+    event = ProgressEvent(
+        phase="running",
+        task_id="task-1",
+        session_id="session-1",
+        channel="webhook:ci",
+        external_thread_id="thread-1",
+        task_text="Run tests",
+    )
+
+    await notifier.notify(submission=submission, event=event)
+
+    assert requests == []
+
+
+@pytest.mark.anyio
+async def test_telegram_progress_notifier_requires_chat_id_format() -> None:
+    """Telegram notifier should fail clearly when thread id is not telegram:chat:<id>."""
+    notifier = TelegramProgressNotifier(
+        bot_token="token-123",
+        client=_FakeAsyncClient([]),
+    )
+    submission = TaskSubmission(task_text="Run tests")
+    event = ProgressEvent(
+        phase="running",
+        task_id="task-1",
+        session_id="session-1",
+        channel="telegram",
+        external_thread_id="thread-1",
+        task_text="Run tests",
+    )
+
+    with pytest.raises(ValueError, match="telegram:chat:<id>"):
+        await notifier.notify(submission=submission, event=event)
+
+
+@pytest.mark.anyio
+async def test_webhook_callback_progress_notifier_skips_missing_callback() -> None:
+    """Webhook notifier should no-op when callback_url is absent."""
+    requests: list[tuple[str, dict]] = []
+    notifier = WebhookCallbackProgressNotifier(client=_FakeAsyncClient(requests))
+    submission = TaskSubmission(task_text="Run tests", callback_url=None)
+    event = ProgressEvent(
+        phase="running",
+        task_id="task-1",
+        session_id="session-1",
+        channel="webhook:ci",
+        external_thread_id="thread-1",
+        task_text="Run tests",
+    )
+
+    await notifier.notify(submission=submission, event=event)
+
+    assert requests == []
+
+
+@pytest.mark.anyio
+async def test_webhook_callback_progress_notifier_skips_when_revalidation_returns_none(
+    monkeypatch,
+) -> None:
+    """Webhook notifier should no-op when delivery-time validation returns None."""
+    requests: list[tuple[str, dict]] = []
+    notifier = WebhookCallbackProgressNotifier(client=_FakeAsyncClient(requests))
+    submission = TaskSubmission(
+        task_text="Run tests",
+        callback_url="https://93.184.216.34/status",
+    )
+    event = ProgressEvent(
+        phase="running",
+        task_id="task-1",
+        session_id="session-1",
+        channel="webhook:ci",
+        external_thread_id="thread-1",
+        task_text="Run tests",
+    )
+
+    monkeypatch.setattr("apps.api.progress.validate_callback_url", lambda _value: None)
+
+    await notifier.notify(submission=submission, event=event)
+
+    assert requests == []
+
+
 @pytest.mark.anyio
 async def test_composite_progress_notifier_logs_and_continues_after_failure(
     caplog: pytest.LogCaptureFixture,

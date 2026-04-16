@@ -74,9 +74,14 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     assert {"channel", "external_thread_id", "status"} <= {
         column["name"] for column in inspector.get_columns("sessions")
     }
-    assert {"task_text", "chosen_worker", "route_reason"} <= {
-        column["name"] for column in inspector.get_columns("tasks")
-    }
+    assert {
+        "task_text",
+        "worker_override",
+        "constraints",
+        "budget",
+        "chosen_worker",
+        "route_reason",
+    } <= {column["name"] for column in inspector.get_columns("tasks")}
     assert {
         "session_id",
         "requested_permission",
