@@ -13,6 +13,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from db.base import utc_now
 from db.enums import TimelineEventType
 from orchestrator.state import (
     ApprovalCheckpoint,
@@ -304,7 +305,6 @@ def _timeline_event(
     payload: dict[str, Any] | None = None,
 ) -> list[TaskTimelineEventState]:
     """Append a structured timeline event while preserving prior events."""
-    from db.base import utc_now
 
     return [
         *state.timeline_events,

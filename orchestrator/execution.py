@@ -30,6 +30,7 @@ from db.models import (
     Session as ConversationSession,
 )
 from db.models import (
+    TaskTimelineEvent,
     User,
 )
 from orchestrator.graph import build_orchestrator_graph
@@ -1457,8 +1458,6 @@ class TaskExecutionService:
                 files_changed=result.files_changed if result is not None else [],
                 artifact_index=artifact_index,
             )
-
-            from db.models import TaskTimelineEvent
 
             for event in state.timeline_events:
                 task.timeline_events.append(
