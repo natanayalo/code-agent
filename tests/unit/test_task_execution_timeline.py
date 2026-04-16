@@ -129,4 +129,75 @@ def test_persist_execution_outcome_saves_timeline(session_factory, service) -> N
     assert snapshot.timeline[0].event_type == TimelineEventType.TASK_INGESTED
     assert snapshot.timeline[0].message == "Ingested"
     assert snapshot.timeline[1].event_type == TimelineEventType.WORKER_SELECTED
+    assert snapshot.timeline[1].message == "Selected"
     assert snapshot.timeline[1].payload == {"w": "c"}
+
+
+def test_persist_execution_outcome_deduplicates_events(session_factory, service) -> None:
+    """The execution service must skip events that are already persisted (Resume scenario)."""
+    now = utc_now()
+
+    # 1. Setup task and initial state
+    with session_scope(session_factory) as session:
+        from repositories import SessionRepository, TaskRepository, UserRepository
+
+        user = UserRepository(session).create(external_user_id="user-1")
+        conv = SessionRepository(session).create(
+            user_id=user.id, channel="http", external_thread_id="thread-resume"
+        )
+        task = TaskRepository(session).create(session_id=conv.id, task_text="resume me")
+        task_id = task.id
+
+    initial_event = {
+        "event_type": TimelineEventType.TASK_INGESTED,
+        "message": "First",
+        "created_at": now,
+    }
+
+    state = OrchestratorState(
+        current_step="persist_memory",
+        session=SessionRef(
+            session_id="session-1",
+            user_id="user-1",
+            channel="http",
+            external_thread_id="thread-resume",
+            active_task_id=task_id,
+        ),
+        task=TaskRequest(task_id=task_id, task_text="resume me"),
+        timeline_events=[initial_event],
+        route=RouteDecision(chosen_worker="codex", route_reason="test"),
+        result=WorkerResult(status="success", summary="ok"),
+    )
+
+    # 2. First persistence (e.g. at a pause)
+    service._persist_execution_outcome(
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+    )
+
+    # 3. Simulate resume: state has old events + new ones
+    from orchestrator.state import TaskTimelineEventState
+
+    state.timeline_events.append(
+        TaskTimelineEventState(
+            event_type=TimelineEventType.WORKER_SELECTED,
+            message="Second",
+            created_at=now,
+        )
+    )
+
+    # 4. Second persistence
+    service._persist_execution_outcome(
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+    )
+
+    # 5. Verify no duplicates in DB
+    snapshot = service.get_task(task_id)
+    assert len(snapshot.timeline) == 2
+    assert snapshot.timeline[0].message == "First"
+    assert snapshot.timeline[1].message == "Second"

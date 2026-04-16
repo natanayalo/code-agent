@@ -1459,13 +1459,17 @@ class TaskExecutionService:
                 artifact_index=artifact_index,
             )
 
-            for event in state.timeline_events:
+            existing_count = len(task.timeline_events)
+            for i, event in enumerate(state.timeline_events):
+                if i < existing_count:
+                    continue
+
                 task.timeline_events.append(
                     TaskTimelineEvent(
                         event_type=event.event_type,
                         message=event.message,
                         payload=event.payload,
-                        created_at=event.created_at,
+                        created_at=event.created_at if event.created_at is not None else utc_now(),
                     )
                 )
 
