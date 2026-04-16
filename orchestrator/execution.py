@@ -1473,7 +1473,7 @@ class TaskExecutionService:
                 task.timeline_events.append(
                     TaskTimelineEvent(
                         task_id=task_id,
-                        attempt_number=state.attempt_count,
+                        attempt_number=event.attempt_number,
                         event_type=event.event_type,
                         message=event.message,
                         payload=event.payload,

@@ -1029,16 +1029,12 @@ def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
         "current_step": "verify_result",
         "verification": report.model_dump(),
         "progress_updates": _progress_update(state, f"verification {report_status}"),
-        "timeline_events": [
-            *events_with_start,
-            TaskTimelineEventState(
-                event_type=str(TimelineEventType.VERIFICATION_COMPLETED),
-                attempt_number=state.attempt_count,
-                message=report.summary,
-                payload=report.model_dump(),
-                created_at=utc_now(),
-            ),
-        ],
+        "timeline_events": _timeline_event(
+            state.model_copy(update={"timeline_events": events_with_start}),
+            TimelineEventType.VERIFICATION_COMPLETED,
+            message=report.summary,
+            payload=report.model_dump(),
+        ),
     }
 
 
