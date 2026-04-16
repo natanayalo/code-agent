@@ -137,6 +137,15 @@ class VerificationReport(OrchestratorModel):
     items: list[VerificationReportItem] = Field(default_factory=list)
 
 
+class TaskTimelineEventState(OrchestratorModel):
+    """A granular event in a task's lifecycle captured during orchestration (T-090)."""
+
+    event_type: str
+    message: str | None = None
+    payload: dict[str, Any] | None = None
+    created_at: datetime | None = None
+
+
 class OrchestratorState(OrchestratorModel):
     """Top-level state handed between orchestrator workflow nodes."""
 
@@ -153,6 +162,7 @@ class OrchestratorState(OrchestratorModel):
     verification: VerificationReport | None = None
     memory_to_persist: list[PersistMemoryEntry] = Field(default_factory=list)
     progress_updates: list[str] = Field(default_factory=list)
+    timeline_events: list[TaskTimelineEventState] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     attempt_count: int = Field(default=0, ge=0)
     session_state_update: SessionStateUpdate | None = None

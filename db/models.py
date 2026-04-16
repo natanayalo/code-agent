@@ -23,6 +23,7 @@ from db.enums import (
     ArtifactType,
     SessionStatus,
     TaskStatus,
+    TimelineEventType,
     WorkerRunStatus,
     WorkerType,
     build_sql_enum,
@@ -33,6 +34,7 @@ TASK_STATUS_ENUM = build_sql_enum(TaskStatus, name="task_status")
 WORKER_TYPE_ENUM = build_sql_enum(WorkerType, name="worker_type")
 WORKER_RUN_STATUS_ENUM = build_sql_enum(WorkerRunStatus, name="worker_run_status")
 ARTIFACT_TYPE_ENUM = build_sql_enum(ArtifactType, name="artifact_type")
+TIMELINE_EVENT_TYPE_ENUM = build_sql_enum(TimelineEventType, name="timeline_event_type")
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -123,6 +125,10 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     session: Mapped[Session] = relationship(back_populates="tasks")
     worker_runs: Mapped[list[WorkerRun]] = relationship(back_populates="task")
     inbound_deliveries: Mapped[list[InboundDelivery]] = relationship(back_populates="task")
+    timeline_events: Mapped[list[TaskTimelineEvent]] = relationship(
+        back_populates="task",
+        order_by="TaskTimelineEvent.created_at.asc()",
+    )
 
     @validates("status")
     def _coerce_status(self, _key: str, value: TaskStatus | str) -> TaskStatus:
@@ -322,3 +328,29 @@ class SessionState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     files_touched: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
 
     session: Mapped[Session] = relationship(back_populates="session_state")
+
+
+class TaskTimelineEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A granular event in a task's lifecycle (T-090)."""
+
+    __tablename__ = "task_timeline_events"
+
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[TimelineEventType] = mapped_column(
+        TIMELINE_EVENT_TYPE_ENUM,
+        nullable=False,
+    )
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    task: Mapped[Task] = relationship(back_populates="timeline_events")
+
+    @validates("event_type")
+    def _coerce_event_type(self, _key: str, value: TimelineEventType | str) -> TimelineEventType:
+        """Normalize assigned event types to the canonical enum."""
+
+        return TimelineEventType(value)

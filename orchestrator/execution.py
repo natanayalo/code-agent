@@ -40,6 +40,7 @@ from repositories import (
     SessionRepository,
     SessionStateRepository,
     TaskRepository,
+    TaskTimelineRepository,
     UserRepository,
     WorkerRunRepository,
     session_scope,
@@ -252,6 +253,15 @@ class WorkerRunSnapshot(ExecutionModel):
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
 
 
+class TaskTimelineEventSnapshot(ExecutionModel):
+    """A granular event in a task's lifecycle (T-090)."""
+
+    event_type: str
+    message: str | None = None
+    payload: dict[str, Any] | None = None
+    created_at: datetime
+
+
 class TaskSnapshot(ExecutionModel):
     """The persisted task view returned by POST/GET task endpoints."""
 
@@ -267,6 +277,7 @@ class TaskSnapshot(ExecutionModel):
     created_at: datetime
     updated_at: datetime
     latest_run: WorkerRunSnapshot | None = None
+    timeline: list[TaskTimelineEventSnapshot] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -849,6 +860,7 @@ class TaskExecutionService:
             task_repo = TaskRepository(session)
             worker_run_repo = WorkerRunRepository(session)
             artifact_repo = ArtifactRepository(session)
+            timeline_repo = TaskTimelineRepository(session)
 
             task = task_repo.get(task_id)
             if task is None:
@@ -900,6 +912,15 @@ class TaskExecutionService:
                 created_at=task.created_at,
                 updated_at=task.updated_at,
                 latest_run=latest_run_snapshot,
+                timeline=[
+                    TaskTimelineEventSnapshot(
+                        event_type=_enum_value(event.event_type) or "unknown",
+                        message=event.message,
+                        payload=dict(event.payload) if event.payload is not None else None,
+                        created_at=event.created_at,
+                    )
+                    for event in timeline_repo.list_by_task(task.id)
+                ],
             )
 
     def apply_task_approval_decision(
@@ -1372,6 +1393,7 @@ class TaskExecutionService:
             task_repo = TaskRepository(session)
             worker_run_repo = WorkerRunRepository(session)
             artifact_repo = ArtifactRepository(session)
+            timeline_repo = TaskTimelineRepository(session)
 
             if state.route.chosen_worker is not None and state.route.route_reason is not None:
                 task_repo.set_route(
@@ -1438,6 +1460,15 @@ class TaskExecutionService:
                 files_changed=result.files_changed if result is not None else [],
                 artifact_index=artifact_index,
             )
+
+            for event in state.timeline_events:
+                timeline_repo.create(
+                    task_id=task_id,
+                    event_type=event.event_type,
+                    message=event.message,
+                    payload=event.payload,
+                    created_at=event.created_at,
+                )
 
             if state.session is not None and state.session_state_update is not None:
                 session_state_repo = SessionStateRepository(session)

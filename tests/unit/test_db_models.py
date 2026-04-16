@@ -6,7 +6,14 @@ from sqlalchemy import Enum as SQLAlchemyEnum
 
 import db.models  # noqa: F401
 from db.base import Base
-from db.enums import ArtifactType, SessionStatus, TaskStatus, WorkerRunStatus, WorkerType
+from db.enums import (
+    ArtifactType,
+    SessionStatus,
+    TaskStatus,
+    TimelineEventType,
+    WorkerRunStatus,
+    WorkerType,
+)
 
 EXPECTED_TABLES = {
     "artifacts",
@@ -16,6 +23,7 @@ EXPECTED_TABLES = {
     "sessions",
     "session_states",
     "tasks",
+    "task_timeline_events",
     "users",
     "worker_runs",
 }
@@ -36,6 +44,7 @@ def test_model_metadata_uses_canonical_enums_for_constrained_columns() -> None:
         ("worker_runs", "worker_type"): WorkerType,
         ("worker_runs", "status"): WorkerRunStatus,
         ("artifacts", "artifact_type"): ArtifactType,
+        ("task_timeline_events", "event_type"): TimelineEventType,
     }
 
     for (table_name, column_name), enum_class in expected_columns.items():

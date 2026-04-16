@@ -13,11 +13,13 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from db.enums import TimelineEventType
 from orchestrator.state import (
     ApprovalCheckpoint,
     OrchestratorState,
     RouteDecision,
     SessionStateUpdate,
+    TaskTimelineEventState,
     VerificationReport,
     VerificationReportItem,
     WorkerDispatch,
@@ -295,6 +297,23 @@ def _progress_update(state: OrchestratorState, message: str) -> list[str]:
     return [*state.progress_updates, message]
 
 
+def _timeline_event(
+    state: OrchestratorState,
+    event_type: str | TimelineEventType,
+    message: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> list[TaskTimelineEventState]:
+    """Append a structured timeline event while preserving prior events."""
+    return [
+        *state.timeline_events,
+        TaskTimelineEventState(
+            event_type=str(event_type),
+            message=message,
+            payload=payload,
+        ),
+    ]
+
+
 def _classify_task_kind(task_text: str) -> str:
     """Apply a small heuristic classifier for the workflow skeleton."""
     normalized_text = task_text.lower()
@@ -449,6 +468,11 @@ def ingest_task(state_input: OrchestratorState) -> dict[str, Any]:
         "current_step": "ingest_task",
         "normalized_task_text": normalized_task_text,
         "progress_updates": _progress_update(state, "task ingested"),
+        "timeline_events": _timeline_event(
+            state,
+            TimelineEventType.TASK_INGESTED,
+            message="Task text normalized.",
+        ),
     }
 
 
@@ -461,6 +485,12 @@ def classify_task(state_input: OrchestratorState) -> dict[str, Any]:
         "current_step": "classify_task",
         "task_kind": task_kind,
         "progress_updates": _progress_update(state, f"task classified as {task_kind}"),
+        "timeline_events": _timeline_event(
+            state,
+            TimelineEventType.TASK_CLASSIFIED,
+            message=f"Task classified as {task_kind}.",
+            payload={"task_kind": task_kind},
+        ),
     }
 
 
@@ -471,6 +501,14 @@ def load_memory(state_input: OrchestratorState) -> dict[str, Any]:
         "current_step": "load_memory",
         "memory": state.memory.model_dump(),
         "progress_updates": _progress_update(state, "memory context loaded"),
+        "timeline_events": _timeline_event(
+            state,
+            TimelineEventType.MEMORY_LOADED,
+            message=(
+                f"Loaded {len(state.memory.personal)} personal and "
+                f"{len(state.memory.project)} project memory entries."
+            ),
+        ),
     }
 
 
@@ -601,6 +639,12 @@ def build_choose_worker_node(
                 state,
                 f"worker selected: {route.chosen_worker} (reason: {route.route_reason})",
             ),
+            "timeline_events": _timeline_event(
+                state,
+                TimelineEventType.WORKER_SELECTED,
+                message=f"Worker selected: {route.chosen_worker}",
+                payload=route.model_dump(),
+            ),
         }
 
     return choose_worker_node
@@ -632,6 +676,14 @@ def check_approval(state_input: OrchestratorState) -> dict[str, Any]:
         "current_step": "check_approval",
         "approval": approval.model_dump(),
         "progress_updates": _progress_update(state, progress_message),
+        "timeline_events": _timeline_event(
+            state,
+            TimelineEventType.APPROVAL_REQUESTED,
+            message=f"Approval requested: {approval.reason}"
+            if approval.required
+            else "Approval not required.",
+            payload=approval.model_dump() if approval.required else None,
+        ),
     }
 
 
@@ -677,6 +729,17 @@ def await_approval(state_input: OrchestratorState) -> dict[str, Any]:
             artifacts=[],
             next_action_hint="await_manual_follow_up",
         ).model_dump()
+        response["timeline_events"] = _timeline_event(
+            state,
+            TimelineEventType.APPROVAL_REJECTED,
+            message="Task expansion rejected.",
+        )
+    else:
+        response["timeline_events"] = _timeline_event(
+            state,
+            TimelineEventType.APPROVAL_GRANTED,
+            message="Task expansion approved.",
+        )
     return response
 
 
@@ -693,6 +756,12 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
         "attempt_count": state.attempt_count + 1,
         "dispatch": dispatch.model_dump(),
         "progress_updates": _progress_update(state, "worker dispatched"),
+        "timeline_events": _timeline_event(
+            state,
+            TimelineEventType.WORKER_DISPATCHED,
+            message=f"Dispatched attempt {state.attempt_count + 1} to {worker_type}.",
+            payload={"attempt_count": state.attempt_count + 1, "worker_type": worker_type},
+        ),
     }
 
 
@@ -727,6 +796,18 @@ def build_await_result_node(
             "current_step": "await_result",
             "result": result.model_dump(),
             "progress_updates": progress_updates,
+            "timeline_events": _timeline_event(
+                state,
+                (
+                    TimelineEventType.WORKER_COMPLETED
+                    if result.status == "success"
+                    else TimelineEventType.WORKER_FAILED
+                    if result.status == "failure"
+                    else TimelineEventType.WORKER_ERROR
+                ),
+                message=result.summary or progress_message,
+                payload={"status": result.status},
+            ),
         }
 
     return await_result
@@ -766,6 +847,11 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
             "progress_updates": _progress_update(
                 state, "permission request failed: missing permission name"
             ),
+            "timeline_events": _timeline_event(
+                state,
+                TimelineEventType.WORKER_ERROR,
+                message="Worker requested higher permission but did not specify which one.",
+            ),
         }
     reason = state.result.summary or f"Worker requested higher permission: {requested_permission}"
 
@@ -794,6 +880,12 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
             "progress_updates": _progress_update(
                 state, f"permission '{requested_permission}' granted"
             ),
+            "timeline_events": _timeline_event(
+                state,
+                TimelineEventType.APPROVAL_GRANTED,
+                message=f"Permission '{requested_permission}' granted.",
+                payload={"granted_permission": requested_permission},
+            ),
         }
     else:
         failed_result = state.result.model_copy(
@@ -810,6 +902,12 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
             "result": failed_result.model_dump(),
             "progress_updates": _progress_update(
                 state, f"permission '{requested_permission}' rejected"
+            ),
+            "timeline_events": _timeline_event(
+                state,
+                TimelineEventType.APPROVAL_REJECTED,
+                message=f"Permission '{requested_permission}' rejected.",
+                payload={"requested_permission": requested_permission},
             ),
         }
 
@@ -926,6 +1024,12 @@ def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
         "current_step": "verify_result",
         "verification": report.model_dump(),
         "progress_updates": _progress_update(state, f"verification {report_status}"),
+        "timeline_events": _timeline_event(
+            state,
+            TimelineEventType.VERIFICATION_COMPLETED,
+            message=report.summary,
+            payload=report.model_dump(),
+        ),
     }
 
 
@@ -962,6 +1066,14 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
         "result": result.model_dump(),
         "session_state_update": session_state_update.model_dump(),
         "progress_updates": _progress_update(state, "result summarized and session state updated"),
+        "timeline_events": _timeline_event(
+            state,
+            TimelineEventType.TASK_COMPLETED
+            if result.status == "success"
+            else TimelineEventType.TASK_FAILED,
+            message=result.summary,
+            payload={"status": result.status},
+        ),
     }
 
 

@@ -9,7 +9,13 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
+from db.enums import (
+    ArtifactType,
+    TaskStatus,
+    TimelineEventType,
+    WorkerRunStatus,
+    WorkerType,
+)
 from db.models import (
     Artifact,
     InboundDelivery,
@@ -17,6 +23,7 @@ from db.models import (
     ProjectMemory,
     SessionState,
     Task,
+    TaskTimelineEvent,
     User,
     WorkerRun,
 )
@@ -779,3 +786,39 @@ class ProjectMemoryRepository:
         self.session.delete(memory_entry)
         self.session.flush()
         return True
+
+
+class TaskTimelineRepository:
+    """Persist and query task timeline events (T-090)."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(
+        self,
+        *,
+        task_id: str,
+        event_type: str | TimelineEventType,
+        message: str | None = None,
+        payload: dict[str, Any] | None = None,
+        created_at: datetime | None = None,
+    ) -> TaskTimelineEvent:
+        event = TaskTimelineEvent(
+            task_id=task_id,
+            event_type=cast(TimelineEventType, event_type),
+            message=message,
+            payload=payload,
+        )
+        if created_at is not None:
+            event.created_at = created_at
+        self.session.add(event)
+        self.session.flush()
+        return event
+
+    def list_by_task(self, task_id: str) -> list[TaskTimelineEvent]:
+        statement = (
+            select(TaskTimelineEvent)
+            .where(TaskTimelineEvent.task_id == task_id)
+            .order_by(TaskTimelineEvent.created_at.asc())
+        )
+        return list(self.session.scalars(statement))

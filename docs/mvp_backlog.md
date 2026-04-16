@@ -556,7 +556,7 @@ Acceptance:
 
 ## Milestone 12 - Observability + replay
 
-### T-090 Add task timeline
+### [x] T-090 Add task timeline
 Track state transitions and important events.
 
 Acceptance:
