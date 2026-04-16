@@ -216,6 +216,12 @@ class TaskSubmission(ExecutionModel):
         return validate_callback_url(value)
 
 
+class TaskApprovalDecision(ExecutionModel):
+    """Decision payload for a paused task approval checkpoint."""
+
+    approved: bool
+
+
 class ArtifactSnapshot(ExecutionModel):
     """One persisted artifact returned by the task status API."""
 
@@ -318,6 +324,15 @@ class ProgressNotifier(Protocol):
 
     async def notify(self, *, submission: TaskSubmission, event: ProgressEvent) -> None:
         """Deliver one task lifecycle event."""
+
+
+@dataclass(frozen=True)
+class ApprovalDecisionResult:
+    """Outcome of applying an approval decision to a paused task."""
+
+    status: Literal["applied", "already_applied", "not_waiting", "conflict", "not_found"]
+    task_snapshot: TaskSnapshot | None = None
+    detail: str | None = None
 
 
 def _enum_value(value: object | None) -> str | None:
@@ -518,6 +533,30 @@ def _serialize_verification_report(report: object | None) -> dict[str, Any] | No
     if isinstance(report, Mapping):
         return dict(report)
     raise TypeError(f"Unsupported verification report type: {type(report).__name__}")
+
+
+def _approval_constraints_payload(
+    *,
+    status: str,
+    approval_type: str | None,
+    reason: str | None,
+    resume_token: str | None,
+    updated_at: datetime,
+    source: str,
+    approved: bool | None = None,
+) -> dict[str, Any]:
+    """Build the persisted approval checkpoint payload stored in task constraints."""
+    payload: dict[str, Any] = {
+        "status": status,
+        "approval_type": approval_type,
+        "reason": reason,
+        "resume_token": resume_token,
+        "updated_at": updated_at.isoformat(),
+        "source": source,
+    }
+    if approved is not None:
+        payload["approved"] = approved
+    return payload
 
 
 class TaskExecutionService:
@@ -862,6 +901,111 @@ class TaskExecutionService:
                 updated_at=task.updated_at,
                 latest_run=latest_run_snapshot,
             )
+
+    def apply_task_approval_decision(
+        self,
+        *,
+        task_id: str,
+        approved: bool,
+    ) -> ApprovalDecisionResult:
+        """Apply an idempotent approval decision for a paused task."""
+        decided_at = utc_now()
+        with session_scope(self.session_factory) as session:
+            task_repo = TaskRepository(session)
+            worker_run_repo = WorkerRunRepository(session)
+
+            task = task_repo.get(task_id)
+            if task is None:
+                return ApprovalDecisionResult(
+                    status="not_found",
+                    detail=f"Task '{task_id}' was not found.",
+                )
+
+            constraints = dict(task.constraints or {})
+            approval_state_raw = constraints.get("approval")
+            approval_state = (
+                dict(approval_state_raw) if isinstance(approval_state_raw, Mapping) else None
+            )
+            if approval_state is None:
+                return ApprovalDecisionResult(
+                    status="not_waiting",
+                    detail="Task is not currently awaiting a manual approval decision.",
+                )
+
+            current_status = str(approval_state.get("status") or "").strip().lower()
+            requested_status = "approved" if approved else "rejected"
+            if current_status in {"approved", "rejected"}:
+                if current_status == requested_status:
+                    return ApprovalDecisionResult(
+                        status="already_applied",
+                        task_snapshot=self.get_task(task_id),
+                    )
+                return ApprovalDecisionResult(
+                    status="conflict",
+                    detail=(
+                        "Task approval decision already recorded as "
+                        f"'{current_status}' and cannot be changed."
+                    ),
+                )
+            if current_status != "pending":
+                return ApprovalDecisionResult(
+                    status="not_waiting",
+                    detail="Task is not currently awaiting a manual approval decision.",
+                )
+
+            approval_type = str(approval_state.get("approval_type") or "").strip() or None
+            reason = str(approval_state.get("reason") or "").strip() or None
+            resume_token = str(approval_state.get("resume_token") or "").strip() or None
+            constraints["approval"] = _approval_constraints_payload(
+                status=requested_status,
+                approval_type=approval_type,
+                reason=reason,
+                resume_token=resume_token,
+                updated_at=decided_at,
+                source="api",
+                approved=approved,
+            )
+
+            if approved:
+                constraints["requires_approval"] = False
+                task.status = TaskStatus.PENDING
+                task.next_attempt_at = decided_at
+                task.last_error = None
+            else:
+                task.status = TaskStatus.FAILED
+                task.next_attempt_at = None
+                task.last_error = "Manual approval rejected via API decision endpoint."
+                worker_type = task.chosen_worker or task.worker_override or WorkerType.CODEX
+                worker_run_repo.create(
+                    task_id=task.id,
+                    session_id=task.session_id,
+                    worker_type=worker_type,
+                    workspace_id=None,
+                    started_at=decided_at,
+                    finished_at=decided_at,
+                    status=WorkerRunStatus.FAILURE,
+                    summary=(
+                        "Manual approval rejected via API decision endpoint; "
+                        "task remains failed."
+                    ),
+                    commands_run=[],
+                    files_changed_count=0,
+                    files_changed=[],
+                    artifact_index=[],
+                )
+
+            task.constraints = constraints
+            task.lease_owner = None
+            task.lease_expires_at = None
+            session.flush()
+
+        snapshot = self.get_task(task_id)
+        if snapshot is None:
+            return ApprovalDecisionResult(
+                status="not_found",
+                detail=f"Task '{task_id}' was not found after applying decision.",
+            )
+        return ApprovalDecisionResult(status="applied", task_snapshot=snapshot)
 
     def _persist_submission(
         self,
@@ -1240,6 +1384,35 @@ class TaskExecutionService:
                 task_id=task_id,
                 status=force_task_status or _task_status_from_result(state),
             )
+            task = task_repo.get(task_id)
+            if task is None:
+                raise RuntimeError(f"Task '{task_id}' disappeared while persisting execution.")
+
+            approval = state.approval
+            if approval.required:
+                approval_status = (
+                    "pending"
+                    if _requires_manual_follow_up(state) and approval.status == "pending"
+                    else approval.status
+                )
+                if approval_status in {"pending", "approved", "rejected"}:
+                    constraints = dict(task.constraints or {})
+                    constraints["approval"] = _approval_constraints_payload(
+                        status=approval_status,
+                        approval_type=approval.approval_type,
+                        reason=approval.reason,
+                        resume_token=approval.resume_token,
+                        updated_at=finished_at,
+                        source="orchestrator",
+                        approved=(
+                            True
+                            if approval_status == "approved"
+                            else False
+                            if approval_status == "rejected"
+                            else None
+                        ),
+                    )
+                    task.constraints = constraints
 
             result = state.result
             artifacts = result.artifacts if result is not None else []

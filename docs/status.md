@@ -64,9 +64,10 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 ## In Progress
 
 - T-107 Inject repo CI/build config into worker context.
+- T-113 Add paused-task approval decision endpoint (`POST /tasks/{task_id}/approval`) for pause -> approve/reject -> resume/terminal flow.
 
 ## Next
-- T-113 Add paused-task approval decision endpoint (`POST /tasks/{task_id}/approval`) for pause -> approve/reject -> resume/terminal flow.
+- T-090 Add task timeline.
 
 ## Blocked
 
