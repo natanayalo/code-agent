@@ -469,6 +469,7 @@ async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -
         channel="http",
         external_thread_id="thread-1",
         task_id="task-1",
+        attempt_count=0,
     )
 
     snapshot = execution_module.TaskSnapshot(
@@ -542,6 +543,7 @@ async def test_submit_task_emits_progress_notifications_for_success(monkeypatch)
         channel="telegram",
         external_thread_id="telegram:chat:100",
         task_id="task-1",
+        attempt_count=0,
     )
 
     async def run_blocking(func, /, *args, **kwargs):
@@ -722,6 +724,7 @@ async def test_submit_task_logs_and_exits_when_failed_task_cannot_be_reloaded(
         channel="http",
         external_thread_id="thread-1",
         task_id="task-1",
+        attempt_count=0,
     )
 
     async def run_blocking(func, /, *args, **kwargs):
@@ -784,6 +787,7 @@ async def test_submit_task_emits_failed_notification_when_snapshot_reload_fails(
         channel="http",
         external_thread_id="thread-1",
         task_id="task-1",
+        attempt_count=0,
     )
 
     async def run_blocking(func, /, *args, **kwargs):
