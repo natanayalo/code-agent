@@ -92,3 +92,20 @@ def test_summarize_result_emits_event():
     res = summarize_result(state)
     assert len(res["timeline_events"]) == 1
     assert res["timeline_events"][0].event_type == TimelineEventType.TASK_COMPLETED
+
+
+def test_timeline_sequence_stability():
+    """Events must have monotonic sequence numbers even when emitted in the same step."""
+    from orchestrator.graph import _timeline_event
+
+    state = OrchestratorState.model_validate({"task": {"task_text": "hello"}})
+    # First event
+    events = _timeline_event(state, TimelineEventType.TASK_INGESTED)
+    assert len(events) == 1
+    assert events[0].sequence_number == 0
+
+    # Second event chained
+    events = _timeline_event(state, TimelineEventType.TASK_CLASSIFIED, base_events=events)
+    assert len(events) == 2
+    assert events[0].sequence_number == 0
+    assert events[1].sequence_number == 1

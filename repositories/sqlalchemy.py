@@ -800,6 +800,7 @@ class TaskTimelineRepository:
         task_id: str,
         event_type: str | TimelineEventType,
         attempt_number: int = 0,
+        sequence_number: int = 0,
         message: str | None = None,
         payload: dict[str, Any] | None = None,
         created_at: datetime | None = None,
@@ -807,6 +808,7 @@ class TaskTimelineRepository:
         event = TaskTimelineEvent(
             task_id=task_id,
             attempt_number=attempt_number,
+            sequence_number=sequence_number,
             event_type=cast(TimelineEventType, event_type),
             message=message,
             payload=payload,

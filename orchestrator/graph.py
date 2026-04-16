@@ -313,6 +313,7 @@ def _timeline_event(
         TaskTimelineEventState(
             event_type=str(event_type),
             attempt_number=state.attempt_count,
+            sequence_number=len(events),
             message=message,
             payload=payload,
             created_at=utc_now(),

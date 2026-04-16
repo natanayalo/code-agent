@@ -142,6 +142,7 @@ class TaskTimelineEventState(OrchestratorModel):
 
     event_type: str
     attempt_number: int = 0
+    sequence_number: int = 0
     message: str | None = None
     payload: dict[str, Any] | None = None
     created_at: datetime | None = None

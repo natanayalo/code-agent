@@ -17,6 +17,7 @@ EXPECTED_TABLES = {
     "sessions",
     "session_states",
     "tasks",
+    "task_timeline_events",
     "users",
     "worker_runs",
 }
@@ -53,6 +54,23 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "test_report",
             "result_summary",
             "workspace",
+        },
+    },
+    "task_timeline_events": {
+        "ck_task_timeline_events_event_type": {
+            "ingest_task",
+            "choose_worker",
+            "approval_requested",
+            "approval_granted",
+            "approval_rejected",
+            "worker_dispatched",
+            "worker_completed",
+            "worker_failed",
+            "worker_error",
+            "verification_started",
+            "verification_completed",
+            "task_completed",
+            "task_failed",
         },
     },
 }

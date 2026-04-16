@@ -345,6 +345,11 @@ class TaskTimelineEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         default=0,
     )
+    sequence_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
     event_type: Mapped[TimelineEventType] = mapped_column(
         TIMELINE_EVENT_TYPE_ENUM,
         nullable=False,

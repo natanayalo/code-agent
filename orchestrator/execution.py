@@ -258,6 +258,7 @@ class TaskTimelineEventSnapshot(ExecutionModel):
 
     event_type: str
     attempt_number: int = 0
+    sequence_number: int = 0
     message: str | None = None
     payload: dict[str, Any] | None = None
     created_at: datetime
@@ -917,6 +918,7 @@ class TaskExecutionService:
                     TaskTimelineEventSnapshot(
                         event_type=_enum_value(event.event_type) or "unknown",
                         attempt_number=event.attempt_number,
+                        sequence_number=event.sequence_number,
                         message=event.message,
                         payload=event.payload,
                         created_at=event.created_at,
@@ -1483,6 +1485,7 @@ class TaskExecutionService:
                     TaskTimelineEvent(
                         task_id=task_id,
                         attempt_number=event.attempt_number,
+                        sequence_number=event.sequence_number,
                         event_type=event.event_type,
                         message=event.message,
                         payload=event.payload,
