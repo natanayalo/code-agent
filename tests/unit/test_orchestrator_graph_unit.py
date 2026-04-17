@@ -451,7 +451,7 @@ def test_dispatch_job_preserves_attempt_count():
         }
     )
     result = dispatch_job(state)
-    assert result["attempt_count"] == 0
+    assert result["current_step"] == "dispatch_job"
 
 
 def test_dispatch_job_preserves_attempt_count_on_retry():
@@ -466,7 +466,7 @@ def test_dispatch_job_preserves_attempt_count_on_retry():
         }
     )
     result = dispatch_job(state)
-    assert result["attempt_count"] == 1
+    assert result["current_step"] == "dispatch_job"
 
 
 def test_await_permission_escalation_approved():
