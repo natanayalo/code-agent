@@ -19,6 +19,7 @@ def upgrade() -> None:
     # Tasks
     op.create_index(op.f("ix_tasks_status"), "tasks", ["status"], unique=False)
     op.create_index(op.f("ix_tasks_attempt_count"), "tasks", ["attempt_count"], unique=False)
+    op.create_index(op.f("ix_tasks_created_at"), "tasks", ["created_at"], unique=False)
 
     # WorkerRuns
     op.create_index(
@@ -27,10 +28,13 @@ def upgrade() -> None:
     op.create_index(
         op.f("ix_worker_runs_finished_at"), "worker_runs", ["finished_at"], unique=False
     )
+    op.create_index(op.f("ix_worker_runs_started_at"), "worker_runs", ["started_at"], unique=False)
 
 
 def downgrade() -> None:
+    op.drop_index(op.f("ix_worker_runs_started_at"), table_name="worker_runs")
     op.drop_index(op.f("ix_worker_runs_finished_at"), table_name="worker_runs")
     op.drop_index(op.f("ix_worker_runs_worker_type"), table_name="worker_runs")
+    op.drop_index(op.f("ix_tasks_created_at"), table_name="tasks")
     op.drop_index(op.f("ix_tasks_attempt_count"), table_name="tasks")
     op.drop_index(op.f("ix_tasks_status"), table_name="tasks")

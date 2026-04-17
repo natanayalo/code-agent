@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -92,6 +93,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A requested unit of work within a session."""
 
     __tablename__ = "tasks"
+    __table_args__ = (Index("ix_tasks_created_at", "created_at"),)
 
     session_id: Mapped[str] = mapped_column(
         ForeignKey("sessions.id", ondelete="CASCADE"),
@@ -178,7 +180,9 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
     )
     worker_type: Mapped[WorkerType] = mapped_column(WORKER_TYPE_ENUM, nullable=False, index=True)
     workspace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
     finished_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
