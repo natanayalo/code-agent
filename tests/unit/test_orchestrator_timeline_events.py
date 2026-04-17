@@ -116,6 +116,33 @@ def test_timeline_sequence_stability():
     assert events[2].sequence_number == 2
 
 
+def test_timeline_sequence_incorporates_persisted_count():
+    """Sequence numbers must incorporate timeline_persisted_count for monotonic resumes."""
+    from orchestrator.graph import _timeline_events
+    from orchestrator.state import TaskTimelineEventState
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_id": "t1", "task_text": "demo"},
+            "attempt_count": 1,
+            "timeline_persisted_count": 5,  # 5 events already in DB
+            "timeline_events": [],
+        }
+    )
+
+    result = _timeline_events(
+        state,
+        (TimelineEventType.WORKER_SELECTED, None, None),
+    )
+
+    events = result["timeline_events"]
+    assert len(events) == 1
+    assert isinstance(events[0], TaskTimelineEventState)
+    # Sequence should start at persisted_count (5)
+    assert events[0].sequence_number == 5
+    assert events[0].attempt_number == 1
+
+
 def test_timeline_sequence_increments_across_calls():
     """Sequence numbers must increment based on existing events in the list."""
     from orchestrator.graph import _timeline_events

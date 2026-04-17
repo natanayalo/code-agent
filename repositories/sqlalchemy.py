@@ -9,6 +9,7 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from db.base import utc_now
 from db.enums import (
     ArtifactType,
     TaskStatus,
@@ -829,3 +830,29 @@ class TaskTimelineRepository:
             )
         )
         return list(self.session.scalars(statement))
+
+    def create_batch(
+        self,
+        *,
+        task_id: str,
+        events: list[dict[str, Any]],
+    ) -> list[TaskTimelineEvent]:
+        """Bulk create timeline events for a task."""
+        created = []
+        for event_data in events:
+            event = TaskTimelineEvent(
+                task_id=task_id,
+                attempt_number=event_data["attempt_number"],
+                sequence_number=event_data["sequence_number"],
+                event_type=cast(TimelineEventType, event_data["event_type"]),
+                message=event_data.get("message"),
+                payload=event_data.get("payload"),
+                created_at=event_data.get("created_at") or utc_now(),
+            )
+            # Synchronize updated_at with created_at for consistency
+            event.updated_at = event.created_at
+            self.session.add(event)
+            created.append(event)
+
+        self.session.flush()
+        return created

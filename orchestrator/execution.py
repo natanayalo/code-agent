@@ -42,6 +42,7 @@ from repositories import (
     SessionRepository,
     SessionStateRepository,
     TaskRepository,
+    TaskTimelineRepository,
     UserRepository,
     WorkerRunRepository,
     session_scope,
@@ -1495,20 +1496,11 @@ class TaskExecutionService:
             # Since sequence_number is 0-indexed, skip already persisted events
             new_events = [e for e in current_attempt_events if e.sequence_number >= persisted_count]
 
-            for event in new_events:
-                # Use common timestamp for both creation and update to satisfy DB constraints
-                event_time = event.created_at if event.created_at is not None else utc_now()
-                task.timeline_events.append(
-                    TaskTimelineEvent(
-                        task_id=task_id,
-                        attempt_number=event.attempt_number,
-                        sequence_number=event.sequence_number,
-                        event_type=event.event_type,
-                        message=event.message,
-                        payload=event.payload,
-                        created_at=event_time,
-                        updated_at=event_time,
-                    )
+            if new_events:
+                timeline_repo = TaskTimelineRepository(session)
+                timeline_repo.create_batch(
+                    task_id=task_id,
+                    events=[e.model_dump() for e in new_events],
                 )
 
             if state.session is not None and state.session_state_update is not None:

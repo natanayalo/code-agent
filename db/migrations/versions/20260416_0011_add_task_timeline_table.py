@@ -43,7 +43,16 @@ def upgrade() -> None:
         sa.Column("task_id", sa.String(length=36), nullable=False),
         sa.Column("attempt_number", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("sequence_number", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("event_type", sa.String(length=50), nullable=False),
+        sa.Column(
+            "event_type",
+            sa.Enum(
+                *TIMELINE_EVENT_TYPE_VALUES,
+                name="timeline_event_type",
+                native_enum=False,
+                create_constraint=False,
+            ),
+            nullable=False,
+        ),
         sa.Column("payload", sa.JSON(), nullable=True),
         sa.Column("message", sa.Text(), nullable=True),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_task_timeline_events")),
