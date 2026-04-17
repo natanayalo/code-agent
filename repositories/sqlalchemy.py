@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any, Final, cast
 from uuid import uuid4
 
-from sqlalchemy import and_, func, insert, or_, select, update
+from sqlalchemy import and_, case, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -476,8 +476,12 @@ class TaskRepository:
         retry_stats = self.session.execute(
             select(
                 func.count(Task.id).label("total"),
-                func.count(Task.id).filter(Task.attempt_count > 0).label("attempted"),
-                func.count(Task.id).filter(Task.attempt_count > 1).label("retried"),
+                func.coalesce(func.sum(case((Task.attempt_count > 0, 1), else_=0)), 0).label(
+                    "attempted"
+                ),
+                func.coalesce(func.sum(case((Task.attempt_count > 1, 1), else_=0)), 0).label(
+                    "retried"
+                ),
             )
         ).one()
 
@@ -663,9 +667,9 @@ class WorkerRunRepository:
                     func.extract("epoch", WorkerRun.finished_at)
                     - func.extract("epoch", WorkerRun.started_at)
                 ).label("avg_duration"),
-                func.count(WorkerRun.id)
-                .filter(WorkerRun.status == WorkerRunStatus.SUCCESS)
-                .label("success_count"),
+                func.coalesce(
+                    func.sum(case((WorkerRun.status == WorkerRunStatus.SUCCESS, 1), else_=0)), 0
+                ).label("success_count"),
                 func.count(WorkerRun.id).label("total_count"),
             ).where(WorkerRun.finished_at.is_not(None))
         ).one()
