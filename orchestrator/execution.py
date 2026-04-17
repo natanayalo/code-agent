@@ -226,6 +226,14 @@ class TaskApprovalDecision(ExecutionModel):
     approved: bool
 
 
+class TaskReplayRequest(ExecutionModel):
+    """Optional overrides when replaying an existing task."""
+
+    worker_override: WorkerType | None = None
+    constraints: dict[str, Any] | None = None
+    budget: dict[str, Any] | None = None
+
+
 class ArtifactSnapshot(ExecutionModel):
     """One persisted artifact returned by the task status API."""
 
@@ -349,6 +357,21 @@ class ApprovalDecisionResult:
 
     status: Literal["applied", "already_applied", "not_waiting", "conflict", "not_found"]
     task_snapshot: TaskSnapshot | None = None
+    detail: str | None = None
+
+
+_REPLAYABLE_STATUSES: frozenset[str] = frozenset(
+    {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value, TaskStatus.CANCELLED.value}
+)
+
+
+@dataclass(frozen=True)
+class TaskReplayResult:
+    """Outcome of replaying a prior task."""
+
+    status: Literal["created", "not_found", "not_replayable"]
+    task_snapshot: TaskSnapshot | None = None
+    source_task_id: str | None = None
     detail: str | None = None
 
 
@@ -1072,6 +1095,81 @@ class TaskExecutionService:
                 detail=f"Task '{task_id}' was not found after applying decision.",
             )
         return ApprovalDecisionResult(status="applied", task_snapshot=snapshot)
+
+    def replay_task(
+        self,
+        *,
+        source_task_id: str,
+        replay_request: TaskReplayRequest | None = None,
+    ) -> TaskReplayResult:
+        """Create a new task by replaying a prior terminal task with optional overrides."""
+        source_snapshot = self.get_task(source_task_id)
+        if source_snapshot is None:
+            return TaskReplayResult(
+                status="not_found",
+                source_task_id=source_task_id,
+                detail=f"Task '{source_task_id}' was not found.",
+            )
+        if source_snapshot.status not in _REPLAYABLE_STATUSES:
+            return TaskReplayResult(
+                status="not_replayable",
+                source_task_id=source_task_id,
+                detail=(
+                    f"Task '{source_task_id}' has status '{source_snapshot.status}' "
+                    f"and cannot be replayed. Only terminal tasks "
+                    f"(completed, failed, cancelled) are replayable."
+                ),
+            )
+
+        loaded = self._load_submission_for_task(task_id=source_task_id)
+        if loaded is None:
+            return TaskReplayResult(
+                status="not_found",
+                source_task_id=source_task_id,
+                detail=(
+                    f"Task '{source_task_id}' exists but its session or user "
+                    f"could not be resolved for replay."
+                ),
+            )
+        submission, _ = loaded
+
+        # Apply caller overrides
+        updates: dict[str, Any] = {}
+        if replay_request is not None:
+            if replay_request.worker_override is not None:
+                updates["worker_override"] = replay_request.worker_override
+            if replay_request.constraints is not None:
+                updates["constraints"] = {
+                    **dict(submission.constraints),
+                    **replay_request.constraints,
+                }
+            if replay_request.budget is not None:
+                updates["budget"] = {
+                    **dict(submission.budget),
+                    **replay_request.budget,
+                }
+        if updates:
+            submission = submission.model_copy(update=updates)
+
+        # Tag replay provenance
+        constraints = dict(submission.constraints)
+        constraints["replayed_from"] = source_task_id
+        submission = submission.model_copy(update={"constraints": constraints})
+
+        task_snapshot, _ = self.create_task(submission)
+        logger.info(
+            "Replayed task created from source",
+            extra={
+                "source_task_id": source_task_id,
+                "new_task_id": task_snapshot.task_id,
+                "worker_override": submission.worker_override,
+            },
+        )
+        return TaskReplayResult(
+            status="created",
+            task_snapshot=task_snapshot,
+            source_task_id=source_task_id,
+        )
 
     def _persist_submission(
         self,

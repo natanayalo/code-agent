@@ -64,13 +64,15 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - Runtime split and queue/persistence hardening for production-like API/worker execution. PR: [#70](https://github.com/natanayalo/code-agent/pull/70)
 - T-113 Add paused-task approval decision endpoint (`POST /tasks/{task_id}/approval`) for pause -> approve/reject -> resume/terminal flow. PR: [#71](https://github.com/natanayalo/code-agent/pull/71)
 - T-090 Add task timeline. PR: [#72](https://github.com/natanayalo/code-agent/pull/72)
+- T-091 Implement task replay mechanism. PR: [#73](https://github.com/natanayalo/code-agent/pull/73)
 
 ## In Progress
 
-- None
+- T-092 Add operational metrics.
 
 ## Next
-- T-091 Implement task replay mechanism.
+
+- None
 
 ## Blocked
 

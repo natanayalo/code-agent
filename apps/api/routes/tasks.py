@@ -8,6 +8,7 @@ from apps.api.dependencies import get_task_service, require_api_auth
 from orchestrator.execution import (
     TaskApprovalDecision,
     TaskExecutionService,
+    TaskReplayRequest,
     TaskSnapshot,
     TaskSubmission,
 )
@@ -67,5 +68,38 @@ def decide_task_approval(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Task decision was applied but the task snapshot could not be reloaded.",
+        )
+    return result.task_snapshot
+
+
+@router.post(
+    "/{task_id}/replay",
+    response_model=TaskSnapshot,
+    status_code=status.HTTP_201_CREATED,
+)
+def replay_task(
+    task_id: str,
+    payload: TaskReplayRequest | None = None,
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> TaskSnapshot:
+    """Replay a prior terminal task, creating a new task with optional overrides."""
+    result = task_service.replay_task(
+        source_task_id=task_id,
+        replay_request=payload,
+    )
+    if result.status == "not_found":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result.detail or f"Task '{task_id}' was not found.",
+        )
+    if result.status == "not_replayable":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=result.detail or "Task is not in a terminal state and cannot be replayed.",
+        )
+    if result.task_snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Replay task was created but the snapshot could not be reloaded.",
         )
     return result.task_snapshot
