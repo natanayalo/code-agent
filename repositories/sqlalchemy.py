@@ -467,23 +467,23 @@ class TaskRepository:
         self.session.flush()
         return task
 
-    def get_metrics(self) -> dict[str, Any]:
+    def get_metrics(self, since: datetime | None = None) -> dict[str, Any]:
         """Aggregate high-level task status and retry metrics."""
-        status_counts = self.session.execute(
-            select(Task.status, func.count(Task.id)).group_by(Task.status)
-        ).all()
+        status_stmt = select(Task.status, func.count(Task.id)).group_by(Task.status)
+        if since:
+            status_stmt = status_stmt.where(Task.created_at >= since)
+        status_counts = self.session.execute(status_stmt).all()
 
-        retry_stats = self.session.execute(
-            select(
-                func.count(Task.id).label("total"),
-                func.coalesce(func.sum(case((Task.attempt_count > 0, 1), else_=0)), 0).label(
-                    "attempted"
-                ),
-                func.coalesce(func.sum(case((Task.attempt_count > 1, 1), else_=0)), 0).label(
-                    "retried"
-                ),
-            )
-        ).one()
+        retry_stmt = select(
+            func.count(Task.id).label("total"),
+            func.coalesce(func.sum(case((Task.attempt_count > 0, 1), else_=0)), 0).label(
+                "attempted"
+            ),
+            func.coalesce(func.sum(case((Task.attempt_count > 1, 1), else_=0)), 0).label("retried"),
+        )
+        if since:
+            retry_stmt = retry_stmt.where(Task.created_at >= since)
+        retry_stats = self.session.execute(retry_stmt).one()
 
         return {
             "status_counts": {
@@ -653,26 +653,30 @@ class WorkerRunRepository:
         self.session.flush()
         return worker_run
 
-    def get_metrics(self) -> dict[str, Any]:
-        """Aggregate worker usage and duration metrics."""
-        worker_usage = self.session.execute(
-            select(WorkerRun.worker_type, func.count(WorkerRun.id)).group_by(WorkerRun.worker_type)
-        ).all()
+    def get_metrics(self, since: datetime | None = None) -> dict[str, Any]:
+        """Aggregate worker execution, duration, and success metrics."""
+        usage_stmt = select(WorkerRun.worker_type, func.count(WorkerRun.id)).group_by(
+            WorkerRun.worker_type
+        )
+        if since:
+            usage_stmt = usage_stmt.where(WorkerRun.started_at >= since)
+        worker_usage = self.session.execute(usage_stmt).all()
 
-        duration_stats = self.session.execute(
-            select(
-                func.avg(
-                    # NOTE: extract("epoch") is dialect-specific but handled via
-                    # SQLAlchemy translation for both Postgres and SQLite.
-                    func.extract("epoch", WorkerRun.finished_at)
-                    - func.extract("epoch", WorkerRun.started_at)
-                ).label("avg_duration"),
-                func.coalesce(
-                    func.sum(case((WorkerRun.status == WorkerRunStatus.SUCCESS, 1), else_=0)), 0
-                ).label("success_count"),
-                func.count(WorkerRun.id).label("total_count"),
-            ).where(WorkerRun.finished_at.is_not(None))
-        ).one()
+        duration_stmt = select(
+            func.avg(
+                # NOTE: extract("epoch") is dialect-specific but handled via
+                # SQLAlchemy translation for both Postgres and SQLite.
+                func.extract("epoch", WorkerRun.finished_at)
+                - func.extract("epoch", WorkerRun.started_at)
+            ).label("avg_duration"),
+            func.coalesce(
+                func.sum(case((WorkerRun.status == WorkerRunStatus.SUCCESS, 1), else_=0)), 0
+            ).label("success_count"),
+            func.count(WorkerRun.id).label("total_count"),
+        ).where(WorkerRun.finished_at.is_not(None))
+        if since:
+            duration_stmt = duration_stmt.where(WorkerRun.started_at >= since)
+        duration_stats = self.session.execute(duration_stmt).one()
 
         return {
             "worker_usage": {

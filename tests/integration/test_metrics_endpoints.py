@@ -179,3 +179,35 @@ def test_get_metrics_empty_state(client: TestClient) -> None:
     assert data["worker_usage"] == {}
     assert data["avg_duration_seconds"] == 0.0
     assert data["success_rate"] == 0.0
+
+
+def test_get_metrics_with_windowing(client: TestClient, session_factory) -> None:
+    """Metrics should be filterable by time window."""
+    now = utc_now()
+
+    with session_scope(session_factory) as session:
+        task_repo = TaskRepository(session)
+
+        # Recent task (within 24h)
+        task_repo.create(session_id="s1", task_text="recent", status=TaskStatus.COMPLETED)
+
+        # Old task (outside 24h)
+        old_task = task_repo.create(session_id="s1", task_text="old", status=TaskStatus.COMPLETED)
+        # Note: We have to manually set created_at because it's usually auto-filled
+        old_task.created_at = now - timedelta(days=2)
+        session.flush()
+
+    # Default (24h) - should only see the recent one
+    resp = client.get("/metrics")
+    assert resp.status_code == 200
+    assert resp.json()["total_tasks"] == 1
+
+    # Custom window (72h) - should see both
+    resp = client.get("/metrics?window_hours=72")
+    assert resp.status_code == 200
+    assert resp.json()["total_tasks"] == 2
+
+    # Disabled window (window_hours=0) - should see both
+    resp = client.get("/metrics?window_hours=0")
+    assert resp.status_code == 200
+    assert resp.json()["total_tasks"] == 2

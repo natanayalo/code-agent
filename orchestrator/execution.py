@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 from threading import Lock
@@ -1142,14 +1142,18 @@ class TaskExecutionService:
             )
         return ApprovalDecisionResult(status="applied", task_snapshot=snapshot)
 
-    def get_operational_metrics(self) -> OperationalMetrics:
-        """Return aggregated operational metrics across all tasks and runs."""
+    def get_operational_metrics(self, window_hours: int | None = 24) -> OperationalMetrics:
+        """Return aggregated operational metrics across tasks and runs."""
+        since = None
+        if window_hours:
+            since = utc_now() - timedelta(hours=window_hours)
+
         with session_scope(self.session_factory) as session:
             task_repo = TaskRepository(session)
             run_repo = WorkerRunRepository(session)
 
-            task_metrics = task_repo.get_metrics()
-            run_metrics = run_repo.get_metrics()
+            task_metrics = task_repo.get_metrics(since=since)
+            run_metrics = run_repo.get_metrics(since=since)
 
             return OperationalMetrics(
                 total_tasks=task_metrics["total_tasks"],
