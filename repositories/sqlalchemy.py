@@ -655,6 +655,8 @@ class WorkerRunRepository:
         duration_stats = self.session.execute(
             select(
                 func.avg(
+                    # NOTE: extract("epoch") is dialect-specific but handled via
+                    # SQLAlchemy translation for both Postgres and SQLite.
                     func.extract("epoch", WorkerRun.finished_at)
                     - func.extract("epoch", WorkerRun.started_at)
                 ).label("avg_duration"),
