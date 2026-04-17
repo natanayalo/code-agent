@@ -166,6 +166,7 @@ class OrchestratorState(OrchestratorModel):
     memory_to_persist: list[PersistMemoryEntry] = Field(default_factory=list)
     progress_updates: list[str] = Field(default_factory=list)
     timeline_events: Annotated[list[TaskTimelineEventState], add] = Field(default_factory=list)
+    current_attempt_event_count: Annotated[int, add] = Field(default=0, ge=0)
     errors: list[str] = Field(default_factory=list)
     attempt_count: int = Field(default=0, ge=0)
     session_state_update: SessionStateUpdate | None = None

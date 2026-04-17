@@ -100,16 +100,30 @@ def test_timeline_sequence_stability():
 
     state = OrchestratorState.model_validate({"task": {"task_text": "hello"}})
     # Batch emission
-    events = _timeline_events(
+    res = _timeline_events(
         state,
         (TimelineEventType.TASK_INGESTED, None, None),
         (TimelineEventType.TASK_CLASSIFIED, None, None),
         (TimelineEventType.MEMORY_LOADED, None, None),
     )
+    events = res["timeline_events"]
     assert len(events) == 3
+    assert res["current_attempt_event_count"] == 3
     assert events[0].event_type == TimelineEventType.TASK_INGESTED
     assert events[0].sequence_number == 0
     assert events[1].event_type == TimelineEventType.TASK_CLASSIFIED
     assert events[1].sequence_number == 1
     assert events[2].event_type == TimelineEventType.MEMORY_LOADED
     assert events[2].sequence_number == 2
+
+
+def test_timeline_sequence_increments_across_calls():
+    """Sequence numbers must increment correctly using the state's counter."""
+    from orchestrator.graph import _timeline_events
+
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "hello"}, "current_attempt_event_count": 5}
+    )
+    res = _timeline_events(state, (TimelineEventType.TASK_INGESTED, None, None))
+    assert res["timeline_events"][0].sequence_number == 5
+    assert res["current_attempt_event_count"] == 1
