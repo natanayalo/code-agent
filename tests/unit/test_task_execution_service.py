@@ -50,7 +50,7 @@ class _FakeGraph:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    async def ainvoke(self, payload: dict[str, object]) -> dict[str, object]:
+    async def ainvoke(self, payload: dict[str, object], **kwargs: object) -> dict[str, object]:
         self.calls.append(payload)
         session = SessionRef.model_validate(payload["session"])
         task = TaskRequest.model_validate(payload["task"])
@@ -241,7 +241,9 @@ def test_task_execution_service_reuses_one_compiled_graph(
     fake_graph = _FakeGraph()
     build_calls: list[Worker] = []
 
-    def fake_build_orchestrator_graph(*, worker: Worker, gemini_worker=None) -> _FakeGraph:
+    def fake_build_orchestrator_graph(
+        *, worker: Worker, gemini_worker=None, **kwargs
+    ) -> _FakeGraph:
         build_calls.append(worker)
         return fake_graph
 
@@ -452,7 +454,7 @@ async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -
     monkeypatch.setattr(
         execution_module,
         "build_orchestrator_graph",
-        lambda *, worker, gemini_worker=None: fake_graph,
+        lambda *, worker, gemini_worker=None, **kwargs: fake_graph,
     )
 
     service = execution_module.TaskExecutionService(
@@ -514,6 +516,7 @@ async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -
 
     assert recorded_calls == [
         "fake_mark_task_in_progress",
+        "_get_count",
         "fake_persist_execution_outcome",
         "fake_get_task",
     ]
