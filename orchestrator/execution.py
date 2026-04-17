@@ -592,7 +592,6 @@ class TaskExecutionService:
         self.progress_notifier = progress_notifier
         self.default_task_max_attempts = max(1, int(default_task_max_attempts))
         self.graph = build_orchestrator_graph(worker=worker, gemini_worker=gemini_worker)
-        self._persisted_event_counts: dict[tuple[str, int], int] = {}
 
     def create_task(self, submission: TaskSubmission) -> tuple[TaskSnapshot, _PersistedTaskContext]:
         """Persist a new task request and return the initial pollable snapshot."""
@@ -1469,22 +1468,18 @@ class TaskExecutionService:
                 artifact_index=artifact_index,
             )
 
-            # Query the number of existing events for this attempt, using cache if available
-            cache_key = (task_id, state.attempt_count)
-            existing_count = self._persisted_event_counts.get(cache_key)
-
-            if existing_count is None:
-                existing_count = (
-                    session.scalar(
-                        sa.select(sa.func.count())
-                        .select_from(TaskTimelineEvent)
-                        .where(
-                            TaskTimelineEvent.task_id == task_id,
-                            TaskTimelineEvent.attempt_number == state.attempt_count,
-                        )
+            # Query initial count of existing events for this attempt from DB to avoid duplicates
+            existing_count = (
+                session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(TaskTimelineEvent)
+                    .where(
+                        TaskTimelineEvent.task_id == task_id,
+                        TaskTimelineEvent.attempt_number == state.attempt_count,
                     )
-                    or 0
                 )
+                or 0
+            )
 
             current_attempt_events = [
                 e for e in state.timeline_events if e.attempt_number == state.attempt_count
@@ -1505,9 +1500,6 @@ class TaskExecutionService:
                         updated_at=event_time,
                     )
                 )
-
-            # Update cache with the new count
-            self._persisted_event_counts[cache_key] = len(current_attempt_events)
 
             if state.session is not None and state.session_state_update is not None:
                 session_state_repo = SessionStateRepository(session)
