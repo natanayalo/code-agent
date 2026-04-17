@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Any, Final, cast
+from uuid import uuid4
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -831,30 +832,47 @@ class TaskTimelineRepository:
         )
         return list(self.session.scalars(statement))
 
+    def count_by_attempt(self, task_id: str, attempt_number: int) -> int:
+        """Count the number of timeline events persisted for a given task attempt."""
+        return (
+            self.session.scalar(
+                select(func.count())
+                .select_from(TaskTimelineEvent)
+                .where(
+                    TaskTimelineEvent.task_id == task_id,
+                    TaskTimelineEvent.attempt_number == attempt_number,
+                )
+            )
+            or 0
+        )
+
     def create_batch(
         self,
         *,
         task_id: str,
         events: list[dict[str, Any]],
-    ) -> list[TaskTimelineEvent]:
+    ) -> None:
         """Bulk create timeline events for a task."""
-        created = []
-        for event_data in events:
-            created_at = event_data.get("created_at") or utc_now()
-            event = TaskTimelineEvent(
-                task_id=task_id,
-                attempt_number=event_data["attempt_number"],
-                sequence_number=event_data["sequence_number"],
-                event_type=cast(TimelineEventType, event_data["event_type"]),
-                message=event_data.get("message"),
-                payload=event_data.get("payload"),
-                created_at=created_at,
-            )
-            # Synchronize updated_at with created_at for consistency
-            event.updated_at = created_at
-            created.append(event)
+        if not events:
+            return
 
-        if created:
-            self.session.add_all(created)
-            self.session.flush()
-        return created
+        now = utc_now()
+        params = []
+        for e in events:
+            created_at = e.get("created_at") or now
+            params.append(
+                {
+                    "id": uuid4().hex,
+                    "task_id": task_id,
+                    "attempt_number": e["attempt_number"],
+                    "sequence_number": e["sequence_number"],
+                    "event_type": e["event_type"],
+                    "message": e.get("message"),
+                    "payload": e.get("payload"),
+                    "created_at": created_at,
+                    "updated_at": created_at,
+                }
+            )
+
+        self.session.execute(insert(TaskTimelineEvent), params)
+        self.session.flush()

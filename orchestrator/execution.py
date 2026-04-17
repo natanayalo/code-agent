@@ -20,7 +20,6 @@ from typing import Any, Literal, Protocol
 from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
-import sqlalchemy as sa
 from anyio import to_thread
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -33,7 +32,6 @@ from db.models import (
     Session as ConversationSession,
 )
 from db.models import (
-    TaskTimelineEvent,
     User,
 )
 from orchestrator.checkpoints import create_async_sqlite_checkpointer
@@ -1243,16 +1241,8 @@ class TaskExecutionService:
 
         def _get_count() -> int:
             with session_scope(self.session_factory) as session:
-                return (
-                    session.scalar(
-                        sa.select(sa.func.count())
-                        .select_from(TaskTimelineEvent)
-                        .where(
-                            TaskTimelineEvent.task_id == persisted.task_id,
-                            TaskTimelineEvent.attempt_number == persisted.attempt_count,
-                        )
-                    )
-                    or 0
+                return TaskTimelineRepository(session).count_by_attempt(
+                    task_id=persisted.task_id, attempt_number=persisted.attempt_count
                 )
 
         initial_persisted_count = await self._run_blocking(_get_count)
