@@ -410,3 +410,21 @@ def test_replay_avoids_redundant_provenance() -> None:
         final_task = TaskRepository(session).get(result3.task_snapshot.task_id)
         # Should be ["self_id", "old_id"], not ["self_id", "self_id", "old_id"]
         assert final_task.constraints["replayed_from"] == ["self_id", "old_id"]
+
+
+def test_replay_ignores_malicious_provenance_override() -> None:
+    """Manual 'replayed_from' overrides in the replay request should be ignored."""
+    service, session_factory = _make_service()
+    source_id = _create_terminal_task(service, session_factory)
+
+    malicious_request = execution_module.TaskReplayRequest(
+        constraints={"replayed_from": ["fake_id", "hacker_id"]}
+    )
+
+    result = service.replay_task(source_task_id=source_id, replay_request=malicious_request)
+
+    assert result.status == "created"
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(result.task_snapshot.task_id)
+        # Should ONLY contain the real source_id, not the malicious ones
+        assert task.constraints["replayed_from"] == [source_id]

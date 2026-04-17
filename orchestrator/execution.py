@@ -1155,9 +1155,19 @@ class TaskExecutionService:
             if replay_request.worker_override is not None:
                 updates["worker_override"] = replay_request.worker_override
             if replay_request.constraints is not None:
+                # Security: prevent callers from tampering with the audit trail
+                # by providing a manual replayed_from list.
+                safe_constraints = dict(replay_request.constraints)
+                if "replayed_from" in safe_constraints:
+                    logger.warning(
+                        "Ignoring manual 'replayed_from' in replay request for audit protection.",
+                        extra={"source_task_id": source_task_id},
+                    )
+                    del safe_constraints["replayed_from"]
+
                 updates["constraints"] = _deep_merge(
                     submission.constraints,
-                    replay_request.constraints,
+                    safe_constraints,
                 )
             if replay_request.budget is not None:
                 updates["budget"] = _deep_merge(
