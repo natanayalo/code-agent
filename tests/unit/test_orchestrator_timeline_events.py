@@ -104,8 +104,7 @@ def test_timeline_sequence_stability():
     assert len(events) == 1
     assert events[0].sequence_number == 0
 
-    # Second event chained
-    events = _timeline_event(state, TimelineEventType.TASK_CLASSIFIED, base_events=events)
-    assert len(events) == 2
-    assert events[0].sequence_number == 0
-    assert events[1].sequence_number == 1
+    # Second event in the same step (delta approach)
+    second_events = _timeline_event(state, TimelineEventType.TASK_CLASSIFIED, sequence_offset=1)
+    assert len(second_events) == 1
+    assert second_events[0].sequence_number == 1

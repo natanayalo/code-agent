@@ -300,20 +300,18 @@ def _progress_update(state: OrchestratorState, message: str) -> list[str]:
 
 def _timeline_event(
     state: OrchestratorState,
-    event_type: str | TimelineEventType,
+    event_type: TimelineEventType,
+    *,
     message: str | None = None,
     payload: dict[str, Any] | None = None,
-    *,
-    base_events: list[TaskTimelineEventState] | None = None,
+    sequence_offset: int = 0,
 ) -> list[TaskTimelineEventState]:
-    """Append a structured timeline event while preserving prior events."""
-    events = base_events if base_events is not None else state.timeline_events
+    """Create a structured timeline event for state merging."""
     return [
-        *events,
         TaskTimelineEventState(
             event_type=str(event_type),
             attempt_number=state.attempt_count,
-            sequence_number=len(events),
+            sequence_number=len(state.timeline_events) + sequence_offset,
             message=message,
             payload=payload,
             created_at=utc_now(),
@@ -1027,17 +1025,19 @@ def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
         items=items,
     )
 
-    events_with_start = _timeline_event(state, TimelineEventType.VERIFICATION_STARTED)
     return {
         "current_step": "verify_result",
         "verification": report.model_dump(),
         "progress_updates": _progress_update(state, f"verification {report_status}"),
-        "timeline_events": _timeline_event(
-            state,
-            TimelineEventType.VERIFICATION_COMPLETED,
-            message=report.summary,
-            payload=report.model_dump(),
-            base_events=events_with_start,
+        "timeline_events": (
+            _timeline_event(state, TimelineEventType.VERIFICATION_STARTED)
+            + _timeline_event(
+                state,
+                TimelineEventType.VERIFICATION_COMPLETED,
+                message=report.summary,
+                payload=report.model_dump(),
+                sequence_offset=1,
+            )
         ),
     }
 

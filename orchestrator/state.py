@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from operator import add
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -164,7 +165,7 @@ class OrchestratorState(OrchestratorModel):
     verification: VerificationReport | None = None
     memory_to_persist: list[PersistMemoryEntry] = Field(default_factory=list)
     progress_updates: list[str] = Field(default_factory=list)
-    timeline_events: list[TaskTimelineEventState] = Field(default_factory=list)
+    timeline_events: Annotated[list[TaskTimelineEventState], add] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     attempt_count: int = Field(default=0, ge=0)
     session_state_update: SessionStateUpdate | None = None

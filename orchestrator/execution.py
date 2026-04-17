@@ -1477,10 +1477,7 @@ class TaskExecutionService:
                 e for e in state.timeline_events if e.attempt_number == state.attempt_count
             ]
 
-            for i, event in enumerate(current_attempt_events):
-                if i < existing_count:
-                    continue
-
+            for event in current_attempt_events[existing_count:]:
                 task.timeline_events.append(
                     TaskTimelineEvent(
                         task_id=task_id,
