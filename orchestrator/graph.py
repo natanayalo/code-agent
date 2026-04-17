@@ -310,7 +310,10 @@ def _timeline_events(
     current_attempt_events = [
         e for e in state.timeline_events if e.attempt_number == state.attempt_count
     ]
-    base_seq = state.timeline_persisted_count + len(current_attempt_events)
+    if current_attempt_events:
+        base_seq = current_attempt_events[-1].sequence_number + 1
+    else:
+        base_seq = state.timeline_persisted_count
     now = utc_now()
 
     return {

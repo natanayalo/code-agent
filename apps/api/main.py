@@ -57,7 +57,11 @@ def create_app(
                         "Task service bootstrap requires "
                         f"{API_SHARED_SECRET_ENV_VAR} to protect /tasks and /webhook."
                     )
-                yield
+                if app.state.task_service is not None:
+                    async with app.state.task_service:
+                        yield
+                else:
+                    yield
             finally:
                 results = await asyncio.gather(
                     outbound_http_clients.telegram.aclose(),

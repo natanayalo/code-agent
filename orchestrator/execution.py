@@ -10,6 +10,7 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
@@ -21,6 +22,7 @@ from uuid import uuid4
 
 import sqlalchemy as sa
 from anyio import to_thread
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -595,11 +597,45 @@ class TaskExecutionService:
         self.progress_notifier = progress_notifier
         self.default_task_max_attempts = max(1, int(default_task_max_attempts))
         self.checkpoint_path = checkpoint_path
+        self._checkpointer: BaseCheckpointSaver | None = None
+        self._checkpointer_cm: AbstractAsyncContextManager[BaseCheckpointSaver] | None = None
+        # Default graph without checkpointer
         self.graph = build_orchestrator_graph(
             worker=worker,
             gemini_worker=gemini_worker,
-            checkpointer=None,  # Checkpointer is bound per-invocation
+            checkpointer=None,
         )
+
+    async def __aenter__(self) -> TaskExecutionService:
+        """Initialize shared resources (like checkpointers) if configured."""
+        if self.checkpoint_path and not self._checkpointer:
+            self._checkpointer_cm = create_async_sqlite_checkpointer(self.checkpoint_path)
+            self._checkpointer = await self._checkpointer_cm.__aenter__()
+            # Recompile the graph WITH the checkpointer
+            self.graph = build_orchestrator_graph(
+                worker=self.worker,
+                gemini_worker=self.gemini_worker,
+                checkpointer=self._checkpointer,
+            )
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        """Close shared resources."""
+        if self._checkpointer_cm:
+            await self._checkpointer_cm.__aexit__(exc_type, exc_val, exc_tb)
+            self._checkpointer = None
+            self._checkpointer_cm = None
+            # Revert to standard graph
+            self.graph = build_orchestrator_graph(
+                worker=self.worker,
+                gemini_worker=self.gemini_worker,
+                checkpointer=None,
+            )
 
     def create_task(self, submission: TaskSubmission) -> tuple[TaskSnapshot, _PersistedTaskContext]:
         """Persist a new task request and return the initial pollable snapshot."""
@@ -1225,44 +1261,36 @@ class TaskExecutionService:
 
         config = {"configurable": {"thread_id": persisted.task_id}}
 
-        if self.checkpoint_path:
-            async with create_async_sqlite_checkpointer(self.checkpoint_path) as checkpointer:
-                # We rebuild/recompile with the checkpointer for this invocation
-                # Alternatively, we can use a per-service checkpointer if it supports thread-safety
-                graph = build_orchestrator_graph(
-                    worker=self.worker,
-                    gemini_worker=self.gemini_worker,
-                    checkpointer=checkpointer,
-                )
-                raw_output = await graph.ainvoke(
-                    {
-                        "session": SessionRef(
-                            session_id=persisted.session_id,
-                            user_id=persisted.user_id,
-                            channel=persisted.channel,
-                            external_thread_id=persisted.external_thread_id,
-                            active_task_id=persisted.task_id,
-                            status="active",
-                        ).model_dump(),
-                        "task": {
-                            "task_id": persisted.task_id,
-                            "task_text": submission.task_text,
-                            "repo_url": submission.repo_url,
-                            "branch": submission.branch,
-                            "priority": submission.priority,
-                            "worker_override": (
-                                submission.worker_override.value
-                                if submission.worker_override is not None
-                                else None
-                            ),
-                            "constraints": dict(submission.constraints),
-                            "budget": dict(submission.budget),
-                        },
-                        "attempt_count": persisted.attempt_count,
-                        "timeline_persisted_count": initial_persisted_count,
+        if self._checkpointer:
+            raw_output = await self.graph.ainvoke(
+                {
+                    "session": SessionRef(
+                        session_id=persisted.session_id,
+                        user_id=persisted.user_id,
+                        channel=persisted.channel,
+                        external_thread_id=persisted.external_thread_id,
+                        active_task_id=persisted.task_id,
+                        status="active",
+                    ).model_dump(),
+                    "task": {
+                        "task_id": persisted.task_id,
+                        "task_text": submission.task_text,
+                        "repo_url": submission.repo_url,
+                        "branch": submission.branch,
+                        "priority": submission.priority,
+                        "worker_override": (
+                            submission.worker_override.value
+                            if submission.worker_override is not None
+                            else None
+                        ),
+                        "constraints": dict(submission.constraints),
+                        "budget": dict(submission.budget),
                     },
-                    config=config,
-                )
+                    "attempt_count": persisted.attempt_count,
+                    "timeline_persisted_count": initial_persisted_count,
+                },
+                config=config,
+            )
         else:
             raw_output = await self.graph.ainvoke(
                 {
@@ -1628,17 +1656,18 @@ class TaskQueueWorker:
                 "lease_seconds": self.lease_seconds,
             },
         )
-        while True:
-            claim = await self.service._run_blocking(
-                self.service.claim_next_task,
-                worker_id=self.worker_id,
-                lease_seconds=self.lease_seconds,
-            )
-            if claim is None:
-                await asyncio.sleep(self.poll_interval_seconds)
-                continue
-            await self.service.run_queued_task(
-                task_id=claim.task_id,
-                worker_id=self.worker_id,
-                lease_seconds=self.lease_seconds,
-            )
+        async with self.service:
+            while True:
+                claim = await self.service._run_blocking(
+                    self.service.claim_next_task,
+                    worker_id=self.worker_id,
+                    lease_seconds=self.lease_seconds,
+                )
+                if claim is None:
+                    await asyncio.sleep(self.poll_interval_seconds)
+                    continue
+                await self.service.run_queued_task(
+                    task_id=claim.task_id,
+                    worker_id=self.worker_id,
+                    lease_seconds=self.lease_seconds,
+                )
