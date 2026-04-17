@@ -107,6 +107,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     worker_override: Mapped[WorkerType | None] = mapped_column(WORKER_TYPE_ENUM, nullable=True)
     constraints: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     budget: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    secrets: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     status: Mapped[TaskStatus] = mapped_column(
         TASK_STATUS_ENUM,
         nullable=False,

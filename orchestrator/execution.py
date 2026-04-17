@@ -211,6 +211,7 @@ class TaskSubmission(ExecutionModel):
     worker_override: WorkerType | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
     callback_url: str | None = Field(default=None, max_length=2048)
     session: SubmissionSession = Field(default_factory=SubmissionSession)
 
@@ -233,6 +234,7 @@ class TaskReplayRequest(ExecutionModel):
     worker_override: WorkerType | None = None
     constraints: dict[str, Any] | None = None
     budget: dict[str, Any] | None = None
+    secrets: dict[str, str] | None = None
 
 
 class ArtifactSnapshot(ExecutionModel):
@@ -1219,6 +1221,11 @@ class TaskExecutionService:
                     replay_request.budget,
                     reserved_keys={"replayed_from"},
                 )
+            if replay_request.secrets is not None:
+                updates["secrets"] = _deep_merge(
+                    submission.secrets,
+                    replay_request.secrets,
+                )
 
         # Ensure provenance chain is included in the final set of constraints
         base_constraints = updates.get("constraints", submission.constraints)
@@ -1317,6 +1324,7 @@ class TaskExecutionService:
                 worker_override=submission.worker_override,
                 constraints=dict(submission.constraints),
                 budget=dict(submission.budget),
+                secrets=dict(submission.secrets),
                 status=status,
                 max_attempts=max(1, max_attempts),
                 next_attempt_at=now,

@@ -172,7 +172,7 @@ def test_codex_cli_worker_runs_the_shared_runtime_and_retains_the_workspace(
         runtime_adapter=adapter,
         workspace_manager=workspace_manager,
         container_manager=container_manager,
-        session_factory=lambda started_container: session,
+        session_factory=lambda started_container, **_: session,
     )
 
     result = asyncio.run(
@@ -235,7 +235,7 @@ def test_codex_cli_worker_skips_changed_file_collection_when_tool_does_not_expec
         runtime_adapter=adapter,
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(container),
-        session_factory=lambda started_container: session,
+        session_factory=lambda started_container, **_: session,
         tool_registry=tool_registry,
     )
 
@@ -283,7 +283,7 @@ def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path
         runtime_adapter=adapter,
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(container),
-        session_factory=lambda started_container: session,
+        session_factory=lambda started_container, **_: session,
         tool_registry=tool_registry,
     )
 
@@ -326,7 +326,7 @@ def test_codex_cli_worker_requests_higher_permission_for_blocked_commands(tmp_pa
         runtime_adapter=adapter,
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(container),
-        session_factory=lambda started_container: session,
+        session_factory=lambda started_container, **_: session,
     )
 
     result = asyncio.run(
@@ -382,7 +382,7 @@ async def test_codex_cli_worker_returns_partial_result_on_cancellation(tmp_path:
         runtime_adapter=adapter,
         workspace_manager=workspace_manager,
         container_manager=container_manager,
-        session_factory=lambda started_container: session,
+        session_factory=lambda started_container, **_: session,
     )
 
     request = WorkerRequest(
@@ -410,3 +410,63 @@ async def test_codex_cli_worker_returns_partial_result_on_cancellation(tmp_path:
     assert workspace_manager.cleanup_requests == [(workspace, False)]
     assert container_manager.stop_requests == [container]
     assert session.closed is True
+
+
+def test_codex_cli_worker_scopes_and_injects_secrets(tmp_path: Path) -> None:
+    """The worker should scope secrets for the container and pass all secrets for redaction."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-secrets",
+        image="python:3.12-slim",
+    )
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(container)
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
+                output="",
+            )
+        }
+    )
+
+    # Capture the secrets passed to the session factory
+    captured_session_secrets: dict[str, str] | None = None
+
+    def session_factory(started_container, *, secrets=None):
+        nonlocal captured_session_secrets
+        captured_session_secrets = secrets
+        return session
+
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="Done")])
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+        session_factory=session_factory,
+    )
+
+    request = WorkerRequest(
+        session_id="session-secrets",
+        repo_url="https://example.com/repo.git",
+        branch="main",
+        task_text="Check secrets",
+        secrets={
+            "GITHUB_TOKEN": "gh_secret",
+            "OTHER_SECRET": "other",
+        },
+    )
+
+    asyncio.run(worker.run(request))
+
+    # verify container environment (scoped)
+    start_request = container_manager.start_requests[0]
+    # execute_github is in DEFAULT_TOOL_REGISTRY and requires GITHUB_TOKEN
+    assert "GITHUB_TOKEN" in start_request.environment
+    assert start_request.environment["GITHUB_TOKEN"] == "gh_secret"
+    # OTHER_SECRET should NOT be in the container environment
+    assert "OTHER_SECRET" not in start_request.environment
+
+    # verify session secrets (all)
+    assert captured_session_secrets == request.secrets

@@ -438,6 +438,7 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         memory_context=state.memory.model_dump(),
         constraints=dict(state.task.constraints),
         budget=dict(state.task.budget),
+        secrets=dict(state.task.secrets),
     )
 
 

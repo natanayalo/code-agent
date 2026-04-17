@@ -129,7 +129,7 @@ def test_gemini_cli_worker_runs_successfully(tmp_path: Path) -> None:
         runtime_adapter=adapter,
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(container),
-        session_factory=lambda _: session,
+        session_factory=lambda _, **__: session,
         tool_registry=DEFAULT_TOOL_REGISTRY,
         cleanup_policy=WorkspaceCleanupPolicy(delete_on_success=False, retain_on_failure=True),
     )
@@ -156,7 +156,7 @@ def test_gemini_cli_worker_errors_without_repo_url(tmp_path: Path) -> None:
         runtime_adapter=_ScriptedAdapter([]),
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(container),
-        session_factory=lambda _: _FakeSession({}),
+        session_factory=lambda _, **__: _FakeSession({}),
     )
 
     result = asyncio.run(worker.run(WorkerRequest(task_text="do something")))
@@ -182,7 +182,7 @@ def test_gemini_cli_worker_errors_when_workspace_provisioning_fails(tmp_path: Pa
         runtime_adapter=_ScriptedAdapter([]),
         workspace_manager=_FailingWorkspaceManager(),
         container_manager=_FakeContainerManager(container),
-        session_factory=lambda _: _FakeSession({}),
+        session_factory=lambda _, **__: _FakeSession({}),
     )
 
     result = asyncio.run(
@@ -247,7 +247,7 @@ def test_gemini_cli_worker_cleanup_applied_on_success(tmp_path: Path) -> None:
         runtime_adapter=adapter,
         workspace_manager=_DeletingManager(workspace),
         container_manager=_FakeContainerManager(container),
-        session_factory=lambda _: session,
+        session_factory=lambda _, **__: session,
         tool_registry=DEFAULT_TOOL_REGISTRY,
         cleanup_policy=WorkspaceCleanupPolicy(delete_on_success=True, retain_on_failure=False),
     )

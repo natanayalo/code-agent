@@ -56,6 +56,7 @@ class TaskRequest(OrchestratorModel):
     worker_override: WorkerType | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
 
 
 class MemoryEntry(OrchestratorModel):

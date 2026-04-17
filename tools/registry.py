@@ -64,6 +64,7 @@ class ToolDefinition(ToolModel):
     timeout_seconds: int = Field(ge=1)
     network_required: bool = False
     expected_artifacts: tuple[ToolExpectedArtifact, ...] = Field(default_factory=tuple)
+    required_secrets: tuple[str, ...] = Field(default_factory=tuple)
     mcp_input_schema: dict[str, Any] = Field(default_factory=dict)
     deterministic: bool = False
 
@@ -121,6 +122,21 @@ class ToolRegistry(ToolModel):
         if tool is None:
             raise UnknownToolError(f"Tool '{name}' is not registered.")
         return tool
+
+    def get_scoped_secrets(
+        self,
+        *,
+        tool_names: list[str],
+        available_secrets: dict[str, str],
+    ) -> dict[str, str]:
+        """Filter available secrets to only those required by the specified tools."""
+        required_keys: set[str] = set()
+        for name in tool_names:
+            tool = self.get_tool(name)
+            if tool:
+                required_keys.update(tool.required_secrets)
+
+        return {k: v for k, v in available_secrets.items() if k in required_keys}
 
 
 EXECUTE_BASH_TOOL_NAME = "execute_bash"
@@ -257,6 +273,7 @@ EXECUTE_GITHUB_TOOL = ToolDefinition(
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,
     ),
+    required_secrets=("GITHUB_TOKEN", "GH_TOKEN"),
     mcp_input_schema={
         "type": "object",
         "additionalProperties": False,
