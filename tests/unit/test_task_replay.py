@@ -471,3 +471,31 @@ def test_replay_warns_on_corrupt_provenance_type() -> None:
         new_task = TaskRepository(session).get(result.task_snapshot.task_id)
         # Chain reset to just the immediate parent
         assert new_task.constraints["replayed_from"] == [source_id]
+
+
+def test_replay_ignores_list_nested_malicious_provenance() -> None:
+    """Manual 'replayed_from' overrides should be stripped even inside lists."""
+    service, session_factory = _make_service()
+    source_id = _create_terminal_task(service, session_factory)
+
+    list_malicious_request = execution_module.TaskReplayRequest(
+        constraints={
+            "list": [
+                {"replayed_from": ["fake_id"]},
+                {"other": "data"},
+                ["nested_list_with_dict", {"replayed_from": "hacker_id"}],
+            ]
+        }
+    )
+
+    result = service.replay_task(source_task_id=source_id, replay_request=list_malicious_request)
+
+    assert result.status == "created"
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(result.task_snapshot.task_id)
+        # Verify first item in list is stripped of the key
+        assert "replayed_from" not in task.constraints["list"][0]
+        # Verify nested list item is also stripped
+        assert "replayed_from" not in task.constraints["list"][2][1]
+        # Audit trail still works
+        assert task.constraints["replayed_from"] == [source_id]

@@ -386,13 +386,15 @@ def _deep_merge(
     merged = copy.deepcopy(target)
 
     def strip_reserved(obj: Any) -> Any:
-        if not isinstance(obj, dict):
-            return copy.deepcopy(obj)
-        return {
-            k: strip_reserved(v)
-            for k, v in obj.items()
-            if not (reserved_keys and k in reserved_keys)
-        }
+        if isinstance(obj, dict):
+            return {
+                k: strip_reserved(v)
+                for k, v in obj.items()
+                if not (reserved_keys and k in reserved_keys)
+            }
+        if isinstance(obj, list):
+            return [strip_reserved(v) for v in obj]
+        return copy.deepcopy(obj)
 
     def merge_in_place(base: dict[str, Any], overrides: dict[str, Any]) -> None:
         for key, value in overrides.items():
@@ -1209,10 +1211,10 @@ class TaskExecutionService:
         # to prevent redundant entries in the audit trail.
         existing_chain = [tid for tid in existing_chain if tid != source_task_id]
 
-        updates["constraints"] = _deep_merge(
-            base_constraints,
-            {"replayed_from": [source_task_id, *existing_chain]},
-        )
+        if "constraints" not in updates:
+            updates["constraints"] = copy.deepcopy(base_constraints)
+
+        updates["constraints"]["replayed_from"] = [source_task_id, *existing_chain]
 
         submission = submission.model_copy(update=updates)
 
