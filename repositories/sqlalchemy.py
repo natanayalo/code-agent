@@ -467,6 +467,28 @@ class TaskRepository:
         self.session.flush()
         return task
 
+    def get_metrics(self) -> dict[str, Any]:
+        """Aggregate high-level task status and retry metrics."""
+        status_counts = self.session.execute(
+            select(Task.status, func.count(Task.id)).group_by(Task.status)
+        ).all()
+
+        retry_stats = self.session.execute(
+            select(
+                func.count(Task.id).label("total"),
+                func.count(Task.id).filter(Task.attempt_count > 1).label("retried"),
+            )
+        ).one()
+
+        return {
+            "status_counts": {
+                (s.value if hasattr(s, "value") else str(s)): count for s, count in status_counts
+            },
+            "total_tasks": retry_stats.total,
+            "retried_tasks": retry_stats.retried,
+            "retry_rate": (retry_stats.retried / retry_stats.total) if retry_stats.total > 0 else 0,
+        }
+
 
 class InboundDeliveryRepository:
     """Persist and query webhook delivery dedupe claims."""
@@ -623,6 +645,35 @@ class WorkerRunRepository:
             worker_run.artifact_index = artifact_index
         self.session.flush()
         return worker_run
+
+    def get_metrics(self) -> dict[str, Any]:
+        """Aggregate worker usage and duration metrics."""
+        worker_usage = self.session.execute(
+            select(WorkerRun.worker_type, func.count(WorkerRun.id)).group_by(WorkerRun.worker_type)
+        ).all()
+
+        duration_stats = self.session.execute(
+            select(
+                func.avg(
+                    func.extract("epoch", WorkerRun.finished_at)
+                    - func.extract("epoch", WorkerRun.started_at)
+                ).label("avg_duration"),
+                func.count(WorkerRun.id)
+                .filter(WorkerRun.status == WorkerRunStatus.SUCCESS)
+                .label("success_count"),
+                func.count(WorkerRun.id).label("total_count"),
+            ).where(WorkerRun.finished_at.is_not(None))
+        ).one()
+
+        return {
+            "worker_usage": {
+                (w.value if hasattr(w, "value") else str(w)): count for w, count in worker_usage
+            },
+            "avg_duration_seconds": float(duration_stats.avg_duration or 0),
+            "success_rate": (duration_stats.success_count / duration_stats.total_count)
+            if duration_stats.total_count > 0
+            else 0,
+        }
 
 
 class ArtifactRepository:
