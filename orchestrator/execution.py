@@ -379,11 +379,15 @@ class TaskReplayResult:
 def _deep_merge(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge two dictionaries, returning a new result."""
     merged = copy.deepcopy(target)
-    for key, value in source.items():
-        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
-            merged[key] = _deep_merge(merged[key], value)
-        else:
-            merged[key] = copy.deepcopy(value)
+
+    def merge_in_place(base: dict[str, Any], overrides: dict[str, Any]) -> None:
+        for key, value in overrides.items():
+            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                merge_in_place(base[key], value)
+            else:
+                base[key] = copy.deepcopy(value)
+
+    merge_in_place(merged, source)
     return merged
 
 
