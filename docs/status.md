@@ -65,14 +65,15 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-113 Add paused-task approval decision endpoint (`POST /tasks/{task_id}/approval`) for pause -> approve/reject -> resume/terminal flow. PR: [#71](https://github.com/natanayalo/code-agent/pull/71)
 - T-090 Add task timeline. PR: [#72](https://github.com/natanayalo/code-agent/pull/72)
 - T-091 Implement task replay mechanism. PR: [#73](https://github.com/natanayalo/code-agent/pull/73)
+- T-092 Add operational metrics. PR: [#74](https://github.com/natanayalo/code-agent/pull/74)
 
 ## In Progress
 
-- T-092 Add operational metrics.
+- None
 
 ## Next
 
-- None
+- T-100 Secret scoping.
 
 ## Blocked
 

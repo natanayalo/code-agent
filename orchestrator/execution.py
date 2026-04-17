@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 from threading import Lock
@@ -292,6 +292,18 @@ class TaskSnapshot(ExecutionModel):
     updated_at: datetime
     latest_run: WorkerRunSnapshot | None = None
     timeline: list[TaskTimelineEventSnapshot] = Field(default_factory=list)
+
+
+class OperationalMetrics(ExecutionModel):
+    """Aggregated operational metrics for the service (T-092)."""
+
+    total_tasks: int
+    retried_tasks: int
+    retry_rate: float
+    status_counts: dict[str, int]
+    worker_usage: dict[str, int]
+    avg_duration_seconds: float
+    success_rate: float
 
 
 @dataclass(frozen=True)
@@ -1129,6 +1141,29 @@ class TaskExecutionService:
                 detail=f"Task '{task_id}' was not found after applying decision.",
             )
         return ApprovalDecisionResult(status="applied", task_snapshot=snapshot)
+
+    def get_operational_metrics(self, window_hours: int | None = 24) -> OperationalMetrics:
+        """Return aggregated operational metrics across tasks and runs."""
+        since = None
+        if window_hours:
+            since = utc_now() - timedelta(hours=window_hours)
+
+        with session_scope(self.session_factory) as session:
+            task_repo = TaskRepository(session)
+            run_repo = WorkerRunRepository(session)
+
+            task_metrics = task_repo.get_metrics(since=since)
+            run_metrics = run_repo.get_metrics(since=since)
+
+            return OperationalMetrics(
+                total_tasks=task_metrics["total_tasks"],
+                retried_tasks=task_metrics["retried_tasks"],
+                retry_rate=task_metrics["retry_rate"],
+                status_counts=task_metrics["status_counts"],
+                worker_usage=run_metrics["worker_usage"],
+                avg_duration_seconds=run_metrics["avg_duration_seconds"],
+                success_rate=run_metrics["success_rate"],
+            )
 
     def replay_task(
         self,

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any, Final, cast
 from uuid import uuid4
 
-from sqlalchemy import and_, func, insert, or_, select, update
+from sqlalchemy import and_, case, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -467,6 +467,35 @@ class TaskRepository:
         self.session.flush()
         return task
 
+    def get_metrics(self, since: datetime | None = None) -> dict[str, Any]:
+        """Aggregate high-level task status and retry metrics."""
+        status_stmt = select(Task.status, func.count(Task.id)).group_by(Task.status)
+        if since:
+            status_stmt = status_stmt.where(Task.created_at >= since)
+        status_counts = self.session.execute(status_stmt).all()
+
+        retry_stmt = select(
+            func.count(Task.id).label("total"),
+            func.coalesce(func.sum(case((Task.attempt_count > 0, 1), else_=0)), 0).label(
+                "attempted"
+            ),
+            func.coalesce(func.sum(case((Task.attempt_count > 1, 1), else_=0)), 0).label("retried"),
+        )
+        if since:
+            retry_stmt = retry_stmt.where(Task.created_at >= since)
+        retry_stats = self.session.execute(retry_stmt).one()
+
+        return {
+            "status_counts": {
+                (s.value if hasattr(s, "value") else str(s)): count for s, count in status_counts
+            },
+            "total_tasks": retry_stats.total,
+            "retried_tasks": retry_stats.retried,
+            "retry_rate": (retry_stats.retried / retry_stats.attempted)
+            if retry_stats.attempted > 0
+            else 0,
+        }
+
 
 class InboundDeliveryRepository:
     """Persist and query webhook delivery dedupe claims."""
@@ -623,6 +652,41 @@ class WorkerRunRepository:
             worker_run.artifact_index = artifact_index
         self.session.flush()
         return worker_run
+
+    def get_metrics(self, since: datetime | None = None) -> dict[str, Any]:
+        """Aggregate worker execution, duration, and success metrics."""
+        usage_stmt = select(WorkerRun.worker_type, func.count(WorkerRun.id)).group_by(
+            WorkerRun.worker_type
+        )
+        if since:
+            usage_stmt = usage_stmt.where(WorkerRun.started_at >= since)
+        worker_usage = self.session.execute(usage_stmt).all()
+
+        duration_stmt = select(
+            func.avg(
+                # NOTE: extract("epoch") is dialect-specific but handled via
+                # SQLAlchemy translation for both Postgres and SQLite.
+                func.extract("epoch", WorkerRun.finished_at)
+                - func.extract("epoch", WorkerRun.started_at)
+            ).label("avg_duration"),
+            func.coalesce(
+                func.sum(case((WorkerRun.status == WorkerRunStatus.SUCCESS, 1), else_=0)), 0
+            ).label("success_count"),
+            func.count(WorkerRun.id).label("total_count"),
+        ).where(WorkerRun.finished_at.is_not(None))
+        if since:
+            duration_stmt = duration_stmt.where(WorkerRun.started_at >= since)
+        duration_stats = self.session.execute(duration_stmt).one()
+
+        return {
+            "worker_usage": {
+                (w.value if hasattr(w, "value") else str(w)): count for w, count in worker_usage
+            },
+            "avg_duration_seconds": float(duration_stats.avg_duration or 0),
+            "success_rate": (duration_stats.success_count / duration_stats.total_count)
+            if duration_stats.total_count > 0
+            else 0,
+        }
 
 
 class ArtifactRepository:

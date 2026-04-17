@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -92,6 +93,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A requested unit of work within a session."""
 
     __tablename__ = "tasks"
+    __table_args__ = (Index("ix_tasks_created_at", "created_at"),)
 
     session_id: Mapped[str] = mapped_column(
         ForeignKey("sessions.id", ondelete="CASCADE"),
@@ -109,8 +111,9 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         TASK_STATUS_ENUM,
         nullable=False,
         default=TaskStatus.PENDING,
+        index=True,
     )
-    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, index=True)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lease_owner: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -175,10 +178,14 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
         nullable=True,
         index=True,
     )
-    worker_type: Mapped[WorkerType] = mapped_column(WORKER_TYPE_ENUM, nullable=False)
+    worker_type: Mapped[WorkerType] = mapped_column(WORKER_TYPE_ENUM, nullable=False, index=True)
     workspace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     status: Mapped[WorkerRunStatus] = mapped_column(WORKER_RUN_STATUS_ENUM, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     requested_permission: Mapped[str | None] = mapped_column(String(64), nullable=True)
