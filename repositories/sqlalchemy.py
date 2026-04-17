@@ -476,6 +476,7 @@ class TaskRepository:
         retry_stats = self.session.execute(
             select(
                 func.count(Task.id).label("total"),
+                func.count(Task.id).filter(Task.attempt_count > 0).label("attempted"),
                 func.count(Task.id).filter(Task.attempt_count > 1).label("retried"),
             )
         ).one()
@@ -486,7 +487,9 @@ class TaskRepository:
             },
             "total_tasks": retry_stats.total,
             "retried_tasks": retry_stats.retried,
-            "retry_rate": (retry_stats.retried / retry_stats.total) if retry_stats.total > 0 else 0,
+            "retry_rate": (retry_stats.retried / retry_stats.attempted)
+            if retry_stats.attempted > 0
+            else 0,
         }
 
 

@@ -111,7 +111,9 @@ def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factor
 
         # Create some tasks
         t1 = task_repo.create(session_id="s1", task_text="task 1", status=TaskStatus.COMPLETED)
+        t1.attempt_count = 1
         t2 = task_repo.create(session_id="s1", task_text="task 2", status=TaskStatus.FAILED)
+        t2.attempt_count = 1
         task_repo.create(session_id="s2", task_text="task 3", status=TaskStatus.PENDING)
 
         # Task with retries
@@ -149,7 +151,8 @@ def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factor
     # Task metrics
     assert data["total_tasks"] == 4
     assert data["retried_tasks"] == 1
-    assert data["retry_rate"] == 0.25
+    # 1 retried out of 3 attempted (t1, t2, t4)
+    assert data["retry_rate"] == 1 / 3
     assert data["status_counts"]["completed"] == 2
     assert data["status_counts"]["failed"] == 1
     assert data["status_counts"]["pending"] == 1
