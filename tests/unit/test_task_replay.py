@@ -428,3 +428,46 @@ def test_replay_ignores_malicious_provenance_override() -> None:
         task = TaskRepository(session).get(result.task_snapshot.task_id)
         # Should ONLY contain the real source_id, not the malicious ones
         assert task.constraints["replayed_from"] == [source_id]
+
+
+def test_replay_ignores_nested_malicious_provenance() -> None:
+    """Manual 'replayed_from' overrides should be stripped at any nesting level."""
+    service, session_factory = _make_service()
+    source_id = _create_terminal_task(service, session_factory)
+
+    nested_malicious_request = execution_module.TaskReplayRequest(
+        constraints={
+            "nested": {"replayed_from": ["fake_id"]},
+            "deep": {"deeper": {"replayed_from": "hacker_id"}},
+        }
+    )
+
+    result = service.replay_task(source_task_id=source_id, replay_request=nested_malicious_request)
+
+    assert result.status == "created"
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(result.task_snapshot.task_id)
+        assert "replayed_from" not in task.constraints["nested"]
+        assert "replayed_from" not in task.constraints["deep"]["deeper"]
+        # Audit trail still works
+        assert task.constraints["replayed_from"] == [source_id]
+
+
+def test_replay_warns_on_corrupt_provenance_type() -> None:
+    """System should handle and reset corrupt (non-str/list) provenance types."""
+    service, session_factory = _make_service()
+
+    # Create a task with a corrupt replayed_from type (dict instead of list/str)
+    source_id = _create_terminal_task(
+        service,
+        session_factory,
+        constraints={"replayed_from": {"unexpected": "type"}},
+    )
+
+    # Replay should still work but reset the chain
+    result = service.replay_task(source_task_id=source_id)
+    assert result.status == "created"
+    with session_scope(session_factory) as session:
+        new_task = TaskRepository(session).get(result.task_snapshot.task_id)
+        # Chain reset to just the immediate parent
+        assert new_task.constraints["replayed_from"] == [source_id]

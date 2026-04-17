@@ -376,16 +376,32 @@ class TaskReplayResult:
     detail: str | None = None
 
 
-def _deep_merge(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+def _deep_merge(
+    target: dict[str, Any],
+    source: dict[str, Any],
+    *,
+    reserved_keys: set[str] | None = None,
+) -> dict[str, Any]:
     """Recursively merge two dictionaries, returning a new result."""
     merged = copy.deepcopy(target)
 
+    def strip_reserved(obj: Any) -> Any:
+        if not isinstance(obj, dict):
+            return copy.deepcopy(obj)
+        return {
+            k: strip_reserved(v)
+            for k, v in obj.items()
+            if not (reserved_keys and k in reserved_keys)
+        }
+
     def merge_in_place(base: dict[str, Any], overrides: dict[str, Any]) -> None:
         for key, value in overrides.items():
+            if reserved_keys and key in reserved_keys:
+                continue
             if key in base and isinstance(base[key], dict) and isinstance(value, dict):
                 merge_in_place(base[key], value)
             else:
-                base[key] = copy.deepcopy(value)
+                base[key] = strip_reserved(value)
 
     merge_in_place(merged, source)
     return merged
@@ -1155,33 +1171,38 @@ class TaskExecutionService:
             if replay_request.worker_override is not None:
                 updates["worker_override"] = replay_request.worker_override
             if replay_request.constraints is not None:
-                # Security: prevent callers from tampering with the audit trail
-                # by providing a manual replayed_from list.
-                safe_constraints = dict(replay_request.constraints)
-                if "replayed_from" in safe_constraints:
-                    logger.warning(
-                        "Ignoring manual 'replayed_from' in replay request for audit protection.",
-                        extra={"source_task_id": source_task_id},
-                    )
-                    del safe_constraints["replayed_from"]
-
                 updates["constraints"] = _deep_merge(
                     submission.constraints,
-                    safe_constraints,
+                    replay_request.constraints,
+                    reserved_keys={"replayed_from"},
                 )
             if replay_request.budget is not None:
                 updates["budget"] = _deep_merge(
                     submission.budget,
                     replay_request.budget,
+                    reserved_keys={"replayed_from"},
                 )
 
         # Ensure provenance chain is included in the final set of constraints
         base_constraints = updates.get("constraints", submission.constraints)
-        existing_chain = base_constraints.get("replayed_from", [])
-        if isinstance(existing_chain, str):
+        existing_chain_raw = base_constraints.get("replayed_from")
+        existing_chain: list[str]
+
+        if isinstance(existing_chain_raw, str):
             # Migration safety for tasks created before replayed_from was a list
-            existing_chain = [existing_chain]
-        elif not isinstance(existing_chain, list):
+            existing_chain = [existing_chain_raw]
+        elif isinstance(existing_chain_raw, list):
+            existing_chain = list(existing_chain_raw)
+        elif existing_chain_raw is None:
+            existing_chain = []
+        else:
+            logger.warning(
+                "Unexpected replayed_from type in task constraints; resetting provenance chain.",
+                extra={
+                    "task_id": source_task_id,
+                    "actual_type": type(existing_chain_raw).__name__,
+                },
+            )
             existing_chain = []
 
         # Filter out the current source_task_id if it already exists in the chain
