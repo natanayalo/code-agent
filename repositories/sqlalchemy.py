@@ -823,6 +823,8 @@ class TaskTimelineRepository:
         statement = (
             select(TaskTimelineEvent)
             .where(TaskTimelineEvent.task_id == task_id)
-            .order_by(TaskTimelineEvent.created_at.asc())
+            .order_by(
+                TaskTimelineEvent.attempt_number.asc(), TaskTimelineEvent.sequence_number.asc()
+            )
         )
         return list(self.session.scalars(statement))
