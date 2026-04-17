@@ -192,7 +192,7 @@ def test_replay_tags_provenance_in_new_task(
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(new_task_id)
         assert task is not None
-        assert task.constraints.get("replayed_from") == source_id
+        assert task.constraints.get("replayed_from") == [source_id]
 
 
 def test_replay_unauthenticated_returns_401(session_factory) -> None:

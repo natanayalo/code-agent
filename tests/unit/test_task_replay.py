@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.pool import StaticPool
 
-from db.base import Base
+from db.base import Base, utc_now
 from db.enums import TaskStatus, WorkerType
 from orchestrator import execution as execution_module
 from repositories import (
@@ -148,11 +148,15 @@ def test_replay_with_constraint_overrides_merges() -> None:
     source_id = _create_terminal_task(
         service,
         session_factory,
-        constraints={"requires_approval": True, "max_files": 10},
+        constraints={
+            "requires_approval": True,
+            "max_files": 10,
+            "nested": {"key": "original"},
+        },
     )
 
     replay_request = execution_module.TaskReplayRequest(
-        constraints={"max_files": 20, "new_flag": True},
+        constraints={"max_files": 20, "new_flag": True, "nested": {"key": "overridden"}},
     )
     result = service.replay_task(
         source_task_id=source_id,
@@ -171,8 +175,10 @@ def test_replay_with_constraint_overrides_merges() -> None:
         assert constraints.get("max_files") == 20
         # New key added
         assert constraints.get("new_flag") is True
-        # Provenance tag set
-        assert constraints.get("replayed_from") == source_id
+        # Nested key deep merged
+        assert constraints.get("nested") == {"key": "overridden"}
+        # Provenance tag set as list
+        assert constraints.get("replayed_from") == [source_id]
 
 
 def test_replay_with_budget_overrides_merges() -> None:
@@ -212,7 +218,7 @@ def test_replay_tags_provenance() -> None:
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(result.task_snapshot.task_id)
         assert task is not None
-        assert task.constraints.get("replayed_from") == source_id
+        assert task.constraints.get("replayed_from") == [source_id]
 
 
 def test_replay_nonexistent_task_returns_not_found() -> None:
@@ -280,7 +286,11 @@ def test_replay_of_replay_succeeds() -> None:
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(second_replay.task_snapshot.task_id)
         assert task is not None
-        assert task.constraints.get("replayed_from") == first_replay.task_snapshot.task_id
+        # Should contain both IDs, newest first
+        assert task.constraints.get("replayed_from") == [
+            first_replay.task_snapshot.task_id,
+            original_id,
+        ]
 
 
 def test_replay_without_overrides_preserves_original_parameters() -> None:
@@ -321,3 +331,82 @@ def test_replay_with_none_replay_request_works() -> None:
 
     assert result.status == "created"
     assert result.task_snapshot is not None
+
+
+def test_deep_merge_is_truly_deep() -> None:
+    """_deep_merge should not share mutable references between target/source and result."""
+    target = {"list": [1, 2], "dict": {"a": 1}}
+    source = {"list": [3], "dict": {"b": 2}}
+
+    merged = execution_module._deep_merge(target, source)
+
+    # Mutate the source/target and ensure merged is unaffected
+    target["list"].append(4)
+    target["dict"]["a"] = 99
+    source["list"].append(5)
+    source["dict"]["b"] = 88
+
+    assert merged["list"] == [3]
+    assert merged["dict"] == {"a": 1, "b": 2}
+
+
+def test_replay_avoids_redundant_provenance() -> None:
+    """Replaying from the same source multiple times should not double-count it in audit trail."""
+    service, session_factory = _make_service()
+    source_id = _create_terminal_task(service, session_factory)
+
+    # First replay
+    result1 = service.replay_task(source_task_id=source_id)
+    assert result1.task_snapshot is not None
+    with session_scope(session_factory) as session:
+        task1 = TaskRepository(session).get(result1.task_snapshot.task_id)
+        assert task1.constraints["replayed_from"] == [source_id]
+        # Mark it completed so it can be replayed again (though we'll replay from source_id again)
+        TaskRepository(session).update_status(task_id=task1.id, status=TaskStatus.COMPLETED)
+
+    # Force the source ID back into the provenance chain manually to simulate a redundant state
+    # or just replay from a task that already has it.
+    # Actually, the fix is about replaying from source_id when source_id is already in the chain.
+
+    # Suppose we have a task that already has source_id in its chain
+    with session_scope(session_factory) as session:
+        # Create a task that already has source_id in replayed_from
+        submission = execution_module.TaskSubmission(
+            task_text="Re-re-play",
+            constraints={"replayed_from": [source_id, "other_id"]},
+        )
+        snapshot, _ = service.create_task(submission)
+        TaskRepository(session).update_status(task_id=snapshot.task_id, status=TaskStatus.COMPLETED)
+        branch_id = snapshot.task_id
+
+    # Now replay FROM branch_id
+    result2 = service.replay_task(source_task_id=branch_id)
+    assert result2.task_snapshot is not None
+    with session_scope(session_factory) as session:
+        task2 = TaskRepository(session).get(result2.task_snapshot.task_id)
+        # Should be [branch_id, source_id, "other_id"]
+        # If we didn't filter, and we prepended branch_id, it would be fine.
+        # But if we replayed from branch_id and branch_id was somehow already in the chain...
+        assert task2.constraints["replayed_from"] == [branch_id, source_id, "other_id"]
+
+    # The real test case: Replay from a task where the source_id is redundant
+    # (e.g. replaying from A when A is already in A's chain - shouldn't happen
+    # normally but good to guard)
+    with session_scope(session_factory) as session:
+        # We'll mock the ID to be self_id
+        task3 = TaskRepository(session).create(
+            session_id=task1.session_id,
+            task_text="Recursive provenance",
+            constraints={"replayed_from": ["self_id", "old_id"]},
+            status=TaskStatus.COMPLETED,
+            next_attempt_at=utc_now(),
+        )
+        task3.id = "self_id"
+        session.flush()
+        source_task_id = "self_id"
+
+    result3 = service.replay_task(source_task_id=source_task_id)
+    with session_scope(session_factory) as session:
+        final_task = TaskRepository(session).get(result3.task_snapshot.task_id)
+        # Should be ["self_id", "old_id"], not ["self_id", "self_id", "old_id"]
+        assert final_task.constraints["replayed_from"] == ["self_id", "old_id"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import ipaddress
 import logging
 import socket
@@ -373,6 +374,17 @@ class TaskReplayResult:
     task_snapshot: TaskSnapshot | None = None
     source_task_id: str | None = None
     detail: str | None = None
+
+
+def _deep_merge(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge two dictionaries, returning a new result."""
+    merged = copy.deepcopy(target)
+    for key, value in source.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
 
 
 def _enum_value(value: object | None) -> str | None:
@@ -1133,25 +1145,39 @@ class TaskExecutionService:
             )
         submission, _ = loaded
 
-        # Apply caller overrides and tag provenance
+        # Apply caller overrides and tag provenance with an audit chain
         updates: dict[str, Any] = {}
         if replay_request is not None:
             if replay_request.worker_override is not None:
                 updates["worker_override"] = replay_request.worker_override
             if replay_request.constraints is not None:
-                updates["constraints"] = {
-                    **submission.constraints,
-                    **replay_request.constraints,
-                }
+                updates["constraints"] = _deep_merge(
+                    submission.constraints,
+                    replay_request.constraints,
+                )
             if replay_request.budget is not None:
-                updates["budget"] = {
-                    **submission.budget,
-                    **replay_request.budget,
-                }
+                updates["budget"] = _deep_merge(
+                    submission.budget,
+                    replay_request.budget,
+                )
 
-        # Ensure provenance tag is included in the final set of constraints
+        # Ensure provenance chain is included in the final set of constraints
         base_constraints = updates.get("constraints", submission.constraints)
-        updates["constraints"] = {**base_constraints, "replayed_from": source_task_id}
+        existing_chain = base_constraints.get("replayed_from", [])
+        if isinstance(existing_chain, str):
+            # Migration safety for tasks created before replayed_from was a list
+            existing_chain = [existing_chain]
+        elif not isinstance(existing_chain, list):
+            existing_chain = []
+
+        # Filter out the current source_task_id if it already exists in the chain
+        # to prevent redundant entries in the audit trail.
+        existing_chain = [tid for tid in existing_chain if tid != source_task_id]
+
+        updates["constraints"] = _deep_merge(
+            base_constraints,
+            {"replayed_from": [source_task_id, *existing_chain]},
+        )
 
         submission = submission.model_copy(update=updates)
 
