@@ -599,24 +599,26 @@ class TaskExecutionService:
         self.checkpoint_path = checkpoint_path
         self._checkpointer: BaseCheckpointSaver | None = None
         self._checkpointer_cm: AbstractAsyncContextManager[BaseCheckpointSaver] | None = None
-        # Default graph without checkpointer
-        self.graph = build_orchestrator_graph(
-            worker=worker,
-            gemini_worker=gemini_worker,
-            checkpointer=None,
-        )
+        self._graph: Any | None = None
+
+    @property
+    def graph(self) -> Any:
+        """Lazy-loaded orchestrator graph, compiled with the current checkpointer."""
+        if self._graph is None:
+            self._graph = build_orchestrator_graph(
+                worker=self.worker,
+                gemini_worker=self.gemini_worker,
+                checkpointer=self._checkpointer,
+            )
+        return self._graph
 
     async def __aenter__(self) -> TaskExecutionService:
         """Initialize shared resources (like checkpointers) if configured."""
         if self.checkpoint_path and not self._checkpointer:
             self._checkpointer_cm = create_async_sqlite_checkpointer(self.checkpoint_path)
             self._checkpointer = await self._checkpointer_cm.__aenter__()
-            # Recompile the graph WITH the checkpointer
-            self.graph = build_orchestrator_graph(
-                worker=self.worker,
-                gemini_worker=self.gemini_worker,
-                checkpointer=self._checkpointer,
-            )
+            # Invalidate graph to force recompile with checkpointer
+            self._graph = None
         return self
 
     async def __aexit__(
@@ -630,12 +632,8 @@ class TaskExecutionService:
             await self._checkpointer_cm.__aexit__(exc_type, exc_val, exc_tb)
             self._checkpointer = None
             self._checkpointer_cm = None
-            # Revert to standard graph
-            self.graph = build_orchestrator_graph(
-                worker=self.worker,
-                gemini_worker=self.gemini_worker,
-                checkpointer=None,
-            )
+            # Invalidate graph to revert to memory-only
+            self._graph = None
 
     def create_task(self, submission: TaskSubmission) -> tuple[TaskSnapshot, _PersistedTaskContext]:
         """Persist a new task request and return the initial pollable snapshot."""
