@@ -108,7 +108,6 @@ def test_timeline_sequence_stability():
     )
     events = res["timeline_events"]
     assert len(events) == 3
-    assert res["current_attempt_event_count"] == 3
     assert events[0].event_type == TimelineEventType.TASK_INGESTED
     assert events[0].sequence_number == 0
     assert events[1].event_type == TimelineEventType.TASK_CLASSIFIED
@@ -118,12 +117,24 @@ def test_timeline_sequence_stability():
 
 
 def test_timeline_sequence_increments_across_calls():
-    """Sequence numbers must increment correctly using the state's counter."""
+    """Sequence numbers must increment based on existing events in the list."""
     from orchestrator.graph import _timeline_events
+    from orchestrator.state import TaskTimelineEventState
 
     state = OrchestratorState.model_validate(
-        {"task": {"task_text": "hello"}, "current_attempt_event_count": 5}
+        {
+            "task": {"task_text": "hello"},
+            "attempt_count": 0,
+            "timeline_events": [
+                TaskTimelineEventState(
+                    event_type=TimelineEventType.TASK_INGESTED,
+                    attempt_number=0,
+                    sequence_number=i,
+                    message=f"event {i}",
+                )
+                for i in range(5)
+            ],
+        }
     )
-    res = _timeline_events(state, (TimelineEventType.TASK_INGESTED, None, None))
+    res = _timeline_events(state, (TimelineEventType.TASK_CLASSIFIED, None, None))
     assert res["timeline_events"][0].sequence_number == 5
-    assert res["current_attempt_event_count"] == 1

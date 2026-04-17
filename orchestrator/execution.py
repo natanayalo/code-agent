@@ -1511,9 +1511,6 @@ class TaskExecutionService:
                     )
                 )
 
-            # Update state-side marker for incremental persistence in subsequent ticks
-            state.timeline_persisted_count = len(current_attempt_events)
-
             if state.session is not None and state.session_state_update is not None:
                 session_state_repo = SessionStateRepository(session)
                 session_state_repo.upsert(

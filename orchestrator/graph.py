@@ -307,7 +307,10 @@ def _timeline_events(
     Returns a dictionary intended for dictionary spreading (**) into the node response.
     Includes both the list of events and the monotonic count delta.
     """
-    base_seq = state.current_attempt_event_count
+    current_attempt_events = [
+        e for e in state.timeline_events if e.attempt_number == state.attempt_count
+    ]
+    base_seq = len(current_attempt_events)
     now = utc_now()
 
     return {
@@ -322,7 +325,6 @@ def _timeline_events(
             )
             for i, (etype, msg, payload) in enumerate(events)
         ],
-        "current_attempt_event_count": len(events),
     }
 
 
@@ -780,7 +782,6 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
     )
     return {
         "current_step": "dispatch_job",
-        "attempt_count": state.attempt_count,
         "dispatch": dispatch.model_dump(),
         "progress_updates": _progress_update(state, "worker dispatched"),
         **_timeline_event(

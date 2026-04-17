@@ -191,6 +191,7 @@ def test_persist_execution_outcome_deduplicates_events(session_factory, service)
     )
 
     # 4. Second persistence
+    state.timeline_persisted_count = 1  # Simulate DB-based re-initialization on resume
     service._persist_execution_outcome(
         task_id=task_id,
         state=state,
@@ -280,6 +281,7 @@ def test_persist_execution_outcome_deduplicates_retry_attempts(session_factory, 
         )
     )
     # This should deduplicate A1-1 and only add A1-2
+    state_1.timeline_persisted_count = 1  # Previous event for this attempt already in DB
     service._persist_execution_outcome(
         task_id=task_id, state=state_1, started_at=now, finished_at=now
     )
