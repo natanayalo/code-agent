@@ -840,6 +840,7 @@ class TaskTimelineRepository:
         """Bulk create timeline events for a task."""
         created = []
         for event_data in events:
+            created_at = event_data.get("created_at") or utc_now()
             event = TaskTimelineEvent(
                 task_id=task_id,
                 attempt_number=event_data["attempt_number"],
@@ -847,12 +848,13 @@ class TaskTimelineRepository:
                 event_type=cast(TimelineEventType, event_data["event_type"]),
                 message=event_data.get("message"),
                 payload=event_data.get("payload"),
-                created_at=event_data.get("created_at") or utc_now(),
+                created_at=created_at,
             )
             # Synchronize updated_at with created_at for consistency
-            event.updated_at = event.created_at
-            self.session.add(event)
+            event.updated_at = created_at
             created.append(event)
 
-        self.session.flush()
+        if created:
+            self.session.add_all(created)
+            self.session.flush()
         return created
