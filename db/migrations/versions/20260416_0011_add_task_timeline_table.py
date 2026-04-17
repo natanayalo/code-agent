@@ -47,6 +47,12 @@ def upgrade() -> None:
         sa.Column("payload", sa.JSON(), nullable=True),
         sa.Column("message", sa.Text(), nullable=True),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_task_timeline_events")),
+        sa.UniqueConstraint(
+            "task_id",
+            "attempt_number",
+            "sequence_number",
+            name=op.f("uq_task_timeline_events_task_attempt_seq"),
+        ),
         sa.ForeignKeyConstraint(
             ["task_id"],
             ["tasks.id"],

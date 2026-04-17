@@ -307,11 +307,13 @@ def _timeline_event(
     sequence_offset: int = 0,
 ) -> list[TaskTimelineEventState]:
     """Create a structured timeline event for state merging."""
+    # Ensure sequence number is zero-based for the current attempt even if state persists
+    attempt_events = [e for e in state.timeline_events if e.attempt_number == state.attempt_count]
     return [
         TaskTimelineEventState(
             event_type=str(event_type),
             attempt_number=state.attempt_count,
-            sequence_number=len(state.timeline_events) + sequence_offset,
+            sequence_number=len(attempt_events) + sequence_offset,
             message=message,
             payload=payload,
             created_at=utc_now(),

@@ -19,6 +19,7 @@ from typing import Any, Literal, Protocol
 from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
+import sqlalchemy as sa
 from anyio import to_thread
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
@@ -1467,17 +1468,26 @@ class TaskExecutionService:
                 artifact_index=artifact_index,
             )
 
-            existing_events_current_attempt = [
-                e for e in task.timeline_events if e.attempt_number == state.attempt_count
-            ]
-            existing_count = len(existing_events_current_attempt)
+            # Efficiently query the number of existing events for this attempt
+            existing_count = (
+                session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(TaskTimelineEvent)
+                    .where(
+                        TaskTimelineEvent.task_id == task_id,
+                        TaskTimelineEvent.attempt_number == state.attempt_count,
+                    )
+                )
+                or 0
+            )
 
-            # Filter state events to only the current attempt to ensure index alignment
             current_attempt_events = [
                 e for e in state.timeline_events if e.attempt_number == state.attempt_count
             ]
 
             for event in current_attempt_events[existing_count:]:
+                # Use common timestamp for both creation and update to satisfy DB constraints
+                event_time = event.created_at if event.created_at is not None else utc_now()
                 task.timeline_events.append(
                     TaskTimelineEvent(
                         task_id=task_id,
@@ -1486,7 +1496,8 @@ class TaskExecutionService:
                         event_type=event.event_type,
                         message=event.message,
                         payload=event.payload,
-                        created_at=event.created_at if event.created_at is not None else utc_now(),
+                        created_at=event_time,
+                        updated_at=event_time,
                     )
                 )
 

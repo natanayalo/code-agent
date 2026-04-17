@@ -134,3 +134,13 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
             assert constraint_name in actual_constraints
             for expected_value in expected_values:
                 assert expected_value in actual_constraints[constraint_name]
+
+    # Verify unique constraint on task_timeline_events
+    timeline_unique_constraints = {
+        constraint["name"]: constraint
+        for constraint in inspector.get_unique_constraints("task_timeline_events")
+    }
+    assert "uq_task_timeline_events_task_attempt_seq" in timeline_unique_constraints
+    assert timeline_unique_constraints["uq_task_timeline_events_task_attempt_seq"][
+        "column_names"
+    ] == ["task_id", "attempt_number", "sequence_number"]
