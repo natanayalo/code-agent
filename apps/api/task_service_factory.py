@@ -40,6 +40,7 @@ DATABASE_PASSWORD_ENV_VAR: Final[str] = "POSTGRES_PASSWORD"
 DEFAULT_DATABASE_DRIVER: Final[str] = "postgresql+psycopg"
 TELEGRAM_BOT_TOKEN_ENV_VAR: Final[str] = "CODE_AGENT_TELEGRAM_BOT_TOKEN"
 TELEGRAM_API_BASE_URL_ENV_VAR: Final[str] = "CODE_AGENT_TELEGRAM_API_BASE_URL"
+CHECKPOINT_DB_PATH_ENV_VAR: Final[str] = "CODE_AGENT_CHECKPOINT_DB_PATH"
 
 
 def _is_enabled(value: str | None) -> bool:
@@ -138,4 +139,5 @@ def build_task_service_from_env(
             resolved_env.get(DEFAULT_TASK_MAX_ATTEMPTS_ENV_VAR),
             default=3,
         ),
+        checkpoint_path=resolved_env.get(CHECKPOINT_DB_PATH_ENV_VAR),
     )

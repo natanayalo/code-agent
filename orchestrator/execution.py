@@ -34,6 +34,7 @@ from db.models import (
     TaskTimelineEvent,
     User,
 )
+from orchestrator.checkpoints import create_async_sqlite_checkpointer
 from orchestrator.graph import build_orchestrator_graph
 from orchestrator.state import OrchestratorState, SessionRef
 from repositories import (
@@ -586,13 +587,19 @@ class TaskExecutionService:
         gemini_worker: Worker | None = None,
         progress_notifier: ProgressNotifier | None = None,
         default_task_max_attempts: int = 3,
+        checkpoint_path: str | Path | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.worker = worker
         self.gemini_worker = gemini_worker
         self.progress_notifier = progress_notifier
         self.default_task_max_attempts = max(1, int(default_task_max_attempts))
-        self.graph = build_orchestrator_graph(worker=worker, gemini_worker=gemini_worker)
+        self.checkpoint_path = checkpoint_path
+        self.graph = build_orchestrator_graph(
+            worker=worker,
+            gemini_worker=gemini_worker,
+            checkpointer=None,  # Checkpointer is bound per-invocation
+        )
 
     def create_task(self, submission: TaskSubmission) -> tuple[TaskSnapshot, _PersistedTaskContext]:
         """Persist a new task request and return the initial pollable snapshot."""
@@ -1199,48 +1206,93 @@ class TaskExecutionService:
         persisted: _PersistedTaskContext,
     ) -> OrchestratorState:
         """Execute the orchestrator graph for one submitted task."""
-        # Query current event count to avoid redundant max() queries during sync ticks
-        with session_scope(self.session_factory) as session:
-            initial_persisted_count = (
-                session.scalar(
-                    sa.select(sa.func.count())
-                    .select_from(TaskTimelineEvent)
-                    .where(
-                        TaskTimelineEvent.task_id == persisted.task_id,
-                        TaskTimelineEvent.attempt_number == persisted.attempt_count,
-                    )
-                )
-                or 0
-            )
 
-        raw_output = await self.graph.ainvoke(
-            {
-                "session": SessionRef(
-                    session_id=persisted.session_id,
-                    user_id=persisted.user_id,
-                    channel=persisted.channel,
-                    external_thread_id=persisted.external_thread_id,
-                    active_task_id=persisted.task_id,
-                    status="active",
-                ).model_dump(),
-                "task": {
-                    "task_id": persisted.task_id,
-                    "task_text": submission.task_text,
-                    "repo_url": submission.repo_url,
-                    "branch": submission.branch,
-                    "priority": submission.priority,
-                    "worker_override": (
-                        submission.worker_override.value
-                        if submission.worker_override is not None
-                        else None
-                    ),
-                    "constraints": dict(submission.constraints),
-                    "budget": dict(submission.budget),
+        def _get_count() -> int:
+            with session_scope(self.session_factory) as session:
+                return (
+                    session.scalar(
+                        sa.select(sa.func.count())
+                        .select_from(TaskTimelineEvent)
+                        .where(
+                            TaskTimelineEvent.task_id == persisted.task_id,
+                            TaskTimelineEvent.attempt_number == persisted.attempt_count,
+                        )
+                    )
+                    or 0
+                )
+
+        initial_persisted_count = await self._run_blocking(_get_count)
+
+        config = {"configurable": {"thread_id": persisted.task_id}}
+
+        if self.checkpoint_path:
+            async with create_async_sqlite_checkpointer(self.checkpoint_path) as checkpointer:
+                # We rebuild/recompile with the checkpointer for this invocation
+                # Alternatively, we can use a per-service checkpointer if it supports thread-safety
+                graph = build_orchestrator_graph(
+                    worker=self.worker,
+                    gemini_worker=self.gemini_worker,
+                    checkpointer=checkpointer,
+                )
+                raw_output = await graph.ainvoke(
+                    {
+                        "session": SessionRef(
+                            session_id=persisted.session_id,
+                            user_id=persisted.user_id,
+                            channel=persisted.channel,
+                            external_thread_id=persisted.external_thread_id,
+                            active_task_id=persisted.task_id,
+                            status="active",
+                        ).model_dump(),
+                        "task": {
+                            "task_id": persisted.task_id,
+                            "task_text": submission.task_text,
+                            "repo_url": submission.repo_url,
+                            "branch": submission.branch,
+                            "priority": submission.priority,
+                            "worker_override": (
+                                submission.worker_override.value
+                                if submission.worker_override is not None
+                                else None
+                            ),
+                            "constraints": dict(submission.constraints),
+                            "budget": dict(submission.budget),
+                        },
+                        "attempt_count": persisted.attempt_count,
+                        "timeline_persisted_count": initial_persisted_count,
+                    },
+                    config=config,
+                )
+        else:
+            raw_output = await self.graph.ainvoke(
+                {
+                    "session": SessionRef(
+                        session_id=persisted.session_id,
+                        user_id=persisted.user_id,
+                        channel=persisted.channel,
+                        external_thread_id=persisted.external_thread_id,
+                        active_task_id=persisted.task_id,
+                        status="active",
+                    ).model_dump(),
+                    "task": {
+                        "task_id": persisted.task_id,
+                        "task_text": submission.task_text,
+                        "repo_url": submission.repo_url,
+                        "branch": submission.branch,
+                        "priority": submission.priority,
+                        "worker_override": (
+                            submission.worker_override.value
+                            if submission.worker_override is not None
+                            else None
+                        ),
+                        "constraints": dict(submission.constraints),
+                        "budget": dict(submission.budget),
+                    },
+                    "attempt_count": persisted.attempt_count,
+                    "timeline_persisted_count": initial_persisted_count,
                 },
-                "attempt_count": persisted.attempt_count,
-                "timeline_persisted_count": initial_persisted_count,
-            }
-        )
+                config=config,
+            )
         normalized_output = _normalize_orchestrator_graph_output(raw_output)
         return OrchestratorState.model_validate(normalized_output)
 
