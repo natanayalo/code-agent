@@ -1198,6 +1198,20 @@ class TaskExecutionService:
         persisted: _PersistedTaskContext,
     ) -> OrchestratorState:
         """Execute the orchestrator graph for one submitted task."""
+        # Query current event count to avoid redundant max() queries during sync ticks
+        with session_scope(self.session_factory) as session:
+            initial_persisted_count = (
+                session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(TaskTimelineEvent)
+                    .where(
+                        TaskTimelineEvent.task_id == persisted.task_id,
+                        TaskTimelineEvent.attempt_number == persisted.attempt_count,
+                    )
+                )
+                or 0
+            )
+
         raw_output = await self.graph.ainvoke(
             {
                 "session": SessionRef(
@@ -1223,6 +1237,7 @@ class TaskExecutionService:
                     "budget": dict(submission.budget),
                 },
                 "attempt_count": persisted.attempt_count,
+                "timeline_persisted_count": initial_persisted_count,
             }
         )
         normalized_output = _normalize_orchestrator_graph_output(raw_output)
@@ -1468,22 +1483,17 @@ class TaskExecutionService:
                 artifact_index=artifact_index,
             )
 
-            # Query the maximum sequence number already persisted for this attempt
-            max_seq = session.scalar(
-                sa.select(sa.func.max(TaskTimelineEvent.sequence_number)).where(
-                    TaskTimelineEvent.task_id == task_id,
-                    TaskTimelineEvent.attempt_number == state.attempt_count,
-                )
-            )
+            # Use the state-side marker of already-persisted events to avoid redundant DB queries
+            # This marker is initialized from the DB at the start of the task execution attempt.
+            persisted_count = state.timeline_persisted_count
 
             current_attempt_events = [
                 e for e in state.timeline_events if e.attempt_number == state.attempt_count
             ]
 
             # Filter for events that have not been persisted yet
-            new_events = [
-                e for e in current_attempt_events if max_seq is None or e.sequence_number > max_seq
-            ]
+            # Since sequence_number is 0-indexed, skip already persisted events
+            new_events = [e for e in current_attempt_events if e.sequence_number >= persisted_count]
 
             for event in new_events:
                 # Use common timestamp for both creation and update to satisfy DB constraints
@@ -1500,6 +1510,9 @@ class TaskExecutionService:
                         updated_at=event_time,
                     )
                 )
+
+            # Update state-side marker for incremental persistence in subsequent ticks
+            state.timeline_persisted_count = len(current_attempt_events)
 
             if state.session is not None and state.session_state_update is not None:
                 session_state_repo = SessionStateRepository(session)
