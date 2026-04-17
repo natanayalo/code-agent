@@ -1468,24 +1468,24 @@ class TaskExecutionService:
                 artifact_index=artifact_index,
             )
 
-            # Query initial count of existing events for this attempt from DB to avoid duplicates
-            existing_count = (
-                session.scalar(
-                    sa.select(sa.func.count())
-                    .select_from(TaskTimelineEvent)
-                    .where(
-                        TaskTimelineEvent.task_id == task_id,
-                        TaskTimelineEvent.attempt_number == state.attempt_count,
-                    )
+            # Query the maximum sequence number already persisted for this attempt
+            max_seq = session.scalar(
+                sa.select(sa.func.max(TaskTimelineEvent.sequence_number)).where(
+                    TaskTimelineEvent.task_id == task_id,
+                    TaskTimelineEvent.attempt_number == state.attempt_count,
                 )
-                or 0
             )
 
             current_attempt_events = [
                 e for e in state.timeline_events if e.attempt_number == state.attempt_count
             ]
 
-            for event in current_attempt_events[existing_count:]:
+            # Filter for events that have not been persisted yet
+            new_events = [
+                e for e in current_attempt_events if max_seq is None or e.sequence_number > max_seq
+            ]
+
+            for event in new_events:
                 # Use common timestamp for both creation and update to satisfy DB constraints
                 event_time = event.created_at if event.created_at is not None else utc_now()
                 task.timeline_events.append(

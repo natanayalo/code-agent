@@ -815,6 +815,7 @@ class TaskTimelineRepository:
         )
         if created_at is not None:
             event.created_at = created_at
+            event.updated_at = created_at
         self.session.add(event)
         self.session.flush()
         return event

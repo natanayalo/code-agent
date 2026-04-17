@@ -152,6 +152,7 @@ def test_persist_execution_outcome_deduplicates_events(session_factory, service)
         "event_type": TimelineEventType.TASK_INGESTED,
         "message": "First",
         "created_at": now,
+        "sequence_number": 0,
     }
 
     state = OrchestratorState(
@@ -185,6 +186,7 @@ def test_persist_execution_outcome_deduplicates_events(session_factory, service)
             event_type=TimelineEventType.WORKER_SELECTED,
             message="Second",
             created_at=now,
+            sequence_number=1,
         )
     )
 
@@ -231,7 +233,10 @@ def test_persist_execution_outcome_deduplicates_retry_attempts(session_factory, 
         task=TaskRequest(task_id=task_id, task_text="retry me"),
         timeline_events=[
             TaskTimelineEventState(
-                event_type=TimelineEventType.TASK_INGESTED, message="A0-1", attempt_number=0
+                event_type=TimelineEventType.TASK_INGESTED,
+                message="A0-1",
+                attempt_number=0,
+                sequence_number=0,
             )
         ],
     )
@@ -252,7 +257,10 @@ def test_persist_execution_outcome_deduplicates_retry_attempts(session_factory, 
         task=TaskRequest(task_id=task_id, task_text="retry me"),
         timeline_events=[
             TaskTimelineEventState(
-                event_type=TimelineEventType.TASK_INGESTED, message="A1-1", attempt_number=1
+                event_type=TimelineEventType.TASK_INGESTED,
+                message="A1-1",
+                attempt_number=1,
+                sequence_number=0,
             )
         ],
     )
@@ -265,7 +273,10 @@ def test_persist_execution_outcome_deduplicates_retry_attempts(session_factory, 
     # 4. Simulate Attempt 1 Resume (add A1-2)
     state_1.timeline_events.append(
         TaskTimelineEventState(
-            event_type=TimelineEventType.WORKER_SELECTED, message="A1-2", attempt_number=1
+            event_type=TimelineEventType.WORKER_SELECTED,
+            message="A1-2",
+            attempt_number=1,
+            sequence_number=1,
         )
     )
     # This should deduplicate A1-1 and only add A1-2
