@@ -1525,9 +1525,12 @@ class TaskExecutionService:
             # This marker is initialized from the DB at the start of the task execution attempt.
             persisted_count = state.timeline_persisted_count
 
-            current_attempt_events = [
-                e for e in state.timeline_events if e.attempt_number == state.attempt_count
-            ]
+            current_attempt_events = []
+            for e in reversed(state.timeline_events):
+                if e.attempt_number != state.attempt_count:
+                    break
+                current_attempt_events.append(e)
+            current_attempt_events.reverse()
 
             # Filter for events that have not been persisted yet
             # Since sequence_number is 0-indexed, skip already persisted events
