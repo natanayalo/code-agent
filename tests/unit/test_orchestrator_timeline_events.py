@@ -96,15 +96,20 @@ def test_summarize_result_emits_event():
 
 def test_timeline_sequence_stability():
     """Events must have monotonic sequence numbers even when emitted in the same step."""
-    from orchestrator.graph import _timeline_event
+    from orchestrator.graph import _timeline_events
 
     state = OrchestratorState.model_validate({"task": {"task_text": "hello"}})
-    # First event
-    events = _timeline_event(state, TimelineEventType.TASK_INGESTED)
-    assert len(events) == 1
+    # Batch emission
+    events = _timeline_events(
+        state,
+        (TimelineEventType.TASK_INGESTED, None, None),
+        (TimelineEventType.TASK_CLASSIFIED, None, None),
+        (TimelineEventType.MEMORY_LOADED, None, None),
+    )
+    assert len(events) == 3
+    assert events[0].event_type == TimelineEventType.TASK_INGESTED
     assert events[0].sequence_number == 0
-
-    # Second event in the same step (delta approach)
-    second_events = _timeline_event(state, TimelineEventType.TASK_CLASSIFIED, sequence_offset=1)
-    assert len(second_events) == 1
-    assert second_events[0].sequence_number == 1
+    assert events[1].event_type == TimelineEventType.TASK_CLASSIFIED
+    assert events[1].sequence_number == 1
+    assert events[2].event_type == TimelineEventType.MEMORY_LOADED
+    assert events[2].sequence_number == 2

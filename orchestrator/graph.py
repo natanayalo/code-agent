@@ -298,27 +298,42 @@ def _progress_update(state: OrchestratorState, message: str) -> list[str]:
     return [*state.progress_updates, message]
 
 
+def _timeline_events(
+    state: OrchestratorState,
+    *events: tuple[TimelineEventType, str | None, dict[str, Any] | None],
+) -> list[TaskTimelineEventState]:
+    """Create one or more structured timeline events for state merging.
+
+    All events in a single call share the same base sequence calculation to ensure monotonic
+    increments even when emitted within a single graph node turn.
+    """
+
+    attempt_events = [e for e in state.timeline_events if e.attempt_number == state.attempt_count]
+    base_seq = len(attempt_events)
+    now = utc_now()
+
+    return [
+        TaskTimelineEventState(
+            event_type=str(etype),
+            attempt_number=state.attempt_count,
+            sequence_number=base_seq + i,
+            message=msg,
+            payload=payload,
+            created_at=now,
+        )
+        for i, (etype, msg, payload) in enumerate(events)
+    ]
+
+
 def _timeline_event(
     state: OrchestratorState,
     event_type: TimelineEventType,
     *,
     message: str | None = None,
     payload: dict[str, Any] | None = None,
-    sequence_offset: int = 0,
 ) -> list[TaskTimelineEventState]:
-    """Create a structured timeline event for state merging."""
-    # Ensure sequence number is zero-based for the current attempt even if state persists
-    attempt_events = [e for e in state.timeline_events if e.attempt_number == state.attempt_count]
-    return [
-        TaskTimelineEventState(
-            event_type=str(event_type),
-            attempt_number=state.attempt_count,
-            sequence_number=len(attempt_events) + sequence_offset,
-            message=message,
-            payload=payload,
-            created_at=utc_now(),
-        ),
-    ]
+    """Shorthand for a single timeline event emission."""
+    return _timeline_events(state, (event_type, message, payload))
 
 
 def _classify_task_kind(task_text: str) -> str:
@@ -1031,15 +1046,14 @@ def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
         "current_step": "verify_result",
         "verification": report.model_dump(),
         "progress_updates": _progress_update(state, f"verification {report_status}"),
-        "timeline_events": (
-            _timeline_event(state, TimelineEventType.VERIFICATION_STARTED)
-            + _timeline_event(
-                state,
+        "timeline_events": _timeline_events(
+            state,
+            (TimelineEventType.VERIFICATION_STARTED, None, None),
+            (
                 TimelineEventType.VERIFICATION_COMPLETED,
-                message=report.summary,
-                payload=report.model_dump(),
-                sequence_offset=1,
-            )
+                report.summary,
+                report.model_dump(),
+            ),
         ),
     }
 
