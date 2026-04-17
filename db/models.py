@@ -127,7 +127,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     inbound_deliveries: Mapped[list[InboundDelivery]] = relationship(back_populates="task")
     timeline_events: Mapped[list[TaskTimelineEvent]] = relationship(
         back_populates="task",
-        order_by="TaskTimelineEvent.created_at.asc()",
+        order_by="TaskTimelineEvent.attempt_number.asc(), TaskTimelineEvent.sequence_number.asc()",
     )
 
     @validates("status")

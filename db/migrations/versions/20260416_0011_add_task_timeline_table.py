@@ -16,8 +16,10 @@ branch_labels = None
 depends_on = None
 
 TIMELINE_EVENT_TYPE_VALUES = (
-    "ingest_task",
-    "choose_worker",
+    "task_ingested",
+    "task_classified",
+    "memory_loaded",
+    "worker_selected",
     "approval_requested",
     "approval_granted",
     "approval_rejected",
