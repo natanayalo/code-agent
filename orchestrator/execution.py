@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import ipaddress
 import logging
 import socket
@@ -226,6 +227,14 @@ class TaskApprovalDecision(ExecutionModel):
     approved: bool
 
 
+class TaskReplayRequest(ExecutionModel):
+    """Optional overrides when replaying an existing task."""
+
+    worker_override: WorkerType | None = None
+    constraints: dict[str, Any] | None = None
+    budget: dict[str, Any] | None = None
+
+
 class ArtifactSnapshot(ExecutionModel):
     """One persisted artifact returned by the task status API."""
 
@@ -350,6 +359,54 @@ class ApprovalDecisionResult:
     status: Literal["applied", "already_applied", "not_waiting", "conflict", "not_found"]
     task_snapshot: TaskSnapshot | None = None
     detail: str | None = None
+
+
+_REPLAYABLE_STATUSES: frozenset[str] = frozenset(
+    {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value, TaskStatus.CANCELLED.value}
+)
+
+
+@dataclass(frozen=True)
+class TaskReplayResult:
+    """Outcome of replaying a prior task."""
+
+    status: Literal["created", "not_found", "not_replayable"]
+    task_snapshot: TaskSnapshot | None = None
+    source_task_id: str | None = None
+    detail: str | None = None
+
+
+def _deep_merge(
+    target: dict[str, Any],
+    source: dict[str, Any],
+    *,
+    reserved_keys: set[str] | None = None,
+) -> dict[str, Any]:
+    """Recursively merge two dictionaries, returning a new result."""
+    merged = copy.deepcopy(target)
+
+    def strip_reserved(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {
+                k: strip_reserved(v)
+                for k, v in obj.items()
+                if not (reserved_keys and k in reserved_keys)
+            }
+        if isinstance(obj, list):
+            return [strip_reserved(v) for v in obj]
+        return copy.deepcopy(obj)
+
+    def merge_in_place(base: dict[str, Any], overrides: dict[str, Any]) -> None:
+        for key, value in overrides.items():
+            if reserved_keys and key in reserved_keys:
+                continue
+            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                merge_in_place(base[key], value)
+            else:
+                base[key] = strip_reserved(value)
+
+    merge_in_place(merged, source)
+    return merged
 
 
 def _enum_value(value: object | None) -> str | None:
@@ -1072,6 +1129,109 @@ class TaskExecutionService:
                 detail=f"Task '{task_id}' was not found after applying decision.",
             )
         return ApprovalDecisionResult(status="applied", task_snapshot=snapshot)
+
+    def replay_task(
+        self,
+        *,
+        source_task_id: str,
+        replay_request: TaskReplayRequest | None = None,
+    ) -> TaskReplayResult:
+        """Create a new task by replaying a prior terminal task with optional overrides."""
+        source_snapshot = self.get_task(source_task_id)
+        if source_snapshot is None:
+            return TaskReplayResult(
+                status="not_found",
+                source_task_id=source_task_id,
+                detail=f"Task '{source_task_id}' was not found.",
+            )
+        if source_snapshot.status not in _REPLAYABLE_STATUSES:
+            return TaskReplayResult(
+                status="not_replayable",
+                source_task_id=source_task_id,
+                detail=(
+                    f"Task '{source_task_id}' has status '{source_snapshot.status}' "
+                    f"and cannot be replayed. Only terminal tasks "
+                    f"(completed, failed, cancelled) are replayable."
+                ),
+            )
+
+        loaded = self._load_submission_for_task(task_id=source_task_id)
+        if loaded is None:
+            return TaskReplayResult(
+                status="not_found",
+                source_task_id=source_task_id,
+                detail=(
+                    f"Task '{source_task_id}' exists but its session or user "
+                    f"could not be resolved for replay."
+                ),
+            )
+        submission, _ = loaded
+
+        # Apply caller overrides and tag provenance with an audit chain
+        updates: dict[str, Any] = {}
+        if replay_request is not None:
+            if replay_request.worker_override is not None:
+                updates["worker_override"] = replay_request.worker_override
+            if replay_request.constraints is not None:
+                updates["constraints"] = _deep_merge(
+                    submission.constraints,
+                    replay_request.constraints,
+                    reserved_keys={"replayed_from"},
+                )
+            if replay_request.budget is not None:
+                updates["budget"] = _deep_merge(
+                    submission.budget,
+                    replay_request.budget,
+                    reserved_keys={"replayed_from"},
+                )
+
+        # Ensure provenance chain is included in the final set of constraints
+        base_constraints = updates.get("constraints", submission.constraints)
+        existing_chain_raw = base_constraints.get("replayed_from")
+        existing_chain: list[str]
+
+        if isinstance(existing_chain_raw, str):
+            # Migration safety for tasks created before replayed_from was a list
+            existing_chain = [existing_chain_raw]
+        elif isinstance(existing_chain_raw, list):
+            existing_chain = list(existing_chain_raw)
+        elif existing_chain_raw is None:
+            existing_chain = []
+        else:
+            logger.warning(
+                "Unexpected replayed_from type in task constraints; resetting provenance chain.",
+                extra={
+                    "task_id": source_task_id,
+                    "actual_type": type(existing_chain_raw).__name__,
+                },
+            )
+            existing_chain = []
+
+        # Filter out the current source_task_id if it already exists in the chain
+        # to prevent redundant entries in the audit trail.
+        existing_chain = [tid for tid in existing_chain if tid != source_task_id]
+
+        if "constraints" not in updates:
+            updates["constraints"] = copy.deepcopy(base_constraints)
+
+        updates["constraints"]["replayed_from"] = [source_task_id, *existing_chain]
+
+        submission = submission.model_copy(update=updates)
+
+        task_snapshot, _ = self.create_task(submission)
+        logger.info(
+            "Replayed task created from source",
+            extra={
+                "source_task_id": source_task_id,
+                "new_task_id": task_snapshot.task_id,
+                "worker_override": submission.worker_override,
+            },
+        )
+        return TaskReplayResult(
+            status="created",
+            task_snapshot=task_snapshot,
+            source_task_id=source_task_id,
+        )
 
     def _persist_submission(
         self,
