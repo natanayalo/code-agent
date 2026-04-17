@@ -1133,28 +1133,27 @@ class TaskExecutionService:
             )
         submission, _ = loaded
 
-        # Apply caller overrides
+        # Apply caller overrides and tag provenance
         updates: dict[str, Any] = {}
         if replay_request is not None:
             if replay_request.worker_override is not None:
                 updates["worker_override"] = replay_request.worker_override
             if replay_request.constraints is not None:
                 updates["constraints"] = {
-                    **dict(submission.constraints),
+                    **submission.constraints,
                     **replay_request.constraints,
                 }
             if replay_request.budget is not None:
                 updates["budget"] = {
-                    **dict(submission.budget),
+                    **submission.budget,
                     **replay_request.budget,
                 }
-        if updates:
-            submission = submission.model_copy(update=updates)
 
-        # Tag replay provenance
-        constraints = dict(submission.constraints)
-        constraints["replayed_from"] = source_task_id
-        submission = submission.model_copy(update={"constraints": constraints})
+        # Ensure provenance tag is included in the final set of constraints
+        base_constraints = updates.get("constraints", submission.constraints)
+        updates["constraints"] = {**base_constraints, "replayed_from": source_task_id}
+
+        submission = submission.model_copy(update=updates)
 
         task_snapshot, _ = self.create_task(submission)
         logger.info(
