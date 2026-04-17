@@ -859,7 +859,7 @@ class TaskTimelineRepository:
         now = utc_now()
         params = []
         for e in events:
-            created_at = e.get("created_at") or now
+            created_at = e.get("created_at") if e.get("created_at") is not None else now
             params.append(
                 {
                     "id": uuid4().hex,

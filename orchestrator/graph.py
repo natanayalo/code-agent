@@ -307,14 +307,12 @@ def _timeline_events(
     Returns a dictionary intended for dictionary spreading (**) into the node response.
     Includes both the list of events and the monotonic count delta.
     """
-    current_attempt_events = []
-    for e in reversed(state.timeline_events):
-        if e.attempt_number != state.attempt_count:
-            break
-        current_attempt_events.append(e)
-    current_attempt_events.reverse()
-    if current_attempt_events:
-        base_seq = current_attempt_events[-1].sequence_number + 1
+    last_event = next(
+        (e for e in reversed(state.timeline_events) if e.attempt_number == state.attempt_count),
+        None,
+    )
+    if last_event:
+        base_seq = last_event.sequence_number + 1
     else:
         base_seq = state.timeline_persisted_count
 
