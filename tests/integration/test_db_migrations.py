@@ -17,6 +17,7 @@ EXPECTED_TABLES = {
     "sessions",
     "session_states",
     "tasks",
+    "task_timeline_events",
     "users",
     "worker_runs",
 }
@@ -53,6 +54,25 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "test_report",
             "result_summary",
             "workspace",
+        },
+    },
+    "task_timeline_events": {
+        "ck_task_timeline_events_event_type": {
+            "task_ingested",
+            "task_classified",
+            "memory_loaded",
+            "worker_selected",
+            "approval_requested",
+            "approval_granted",
+            "approval_rejected",
+            "worker_dispatched",
+            "worker_completed",
+            "worker_failed",
+            "worker_error",
+            "verification_started",
+            "verification_completed",
+            "task_completed",
+            "task_failed",
         },
     },
 }
@@ -114,3 +134,13 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
             assert constraint_name in actual_constraints
             for expected_value in expected_values:
                 assert expected_value in actual_constraints[constraint_name]
+
+    # Verify unique constraint on task_timeline_events
+    timeline_unique_constraints = {
+        constraint["name"]: constraint
+        for constraint in inspector.get_unique_constraints("task_timeline_events")
+    }
+    assert "uq_task_timeline_events_task_attempt_seq" in timeline_unique_constraints
+    assert timeline_unique_constraints["uq_task_timeline_events_task_attempt_seq"][
+        "column_names"
+    ] == ["task_id", "attempt_number", "sequence_number"]

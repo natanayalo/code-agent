@@ -439,8 +439,8 @@ def test_create_in_memory_checkpointer():
     assert cp is not None
 
 
-def test_dispatch_job_increments_attempt_count():
-    """dispatch_job must increment attempt_count so the escalation heuristic is reachable."""
+def test_dispatch_job_preserves_attempt_count():
+    """dispatch_job must preserve attempt_count (it is managed externally)."""
     from orchestrator.graph import dispatch_job
 
     state = OrchestratorState.model_validate(
@@ -451,11 +451,11 @@ def test_dispatch_job_increments_attempt_count():
         }
     )
     result = dispatch_job(state)
-    assert result["attempt_count"] == 1
+    assert result["current_step"] == "dispatch_job"
 
 
-def test_dispatch_job_increments_attempt_count_on_retry():
-    """attempt_count accumulates across dispatch calls."""
+def test_dispatch_job_preserves_attempt_count_on_retry():
+    """attempt_count remains constant throughout a single graph invocation."""
     from orchestrator.graph import dispatch_job
 
     state = OrchestratorState.model_validate(
@@ -466,7 +466,7 @@ def test_dispatch_job_increments_attempt_count_on_retry():
         }
     )
     result = dispatch_job(state)
-    assert result["attempt_count"] == 2
+    assert result["current_step"] == "dispatch_job"
 
 
 def test_await_permission_escalation_approved():

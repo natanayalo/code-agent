@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -185,7 +186,8 @@ def test_create_app_uses_env_bootstrap_when_no_task_service_is_injected(
     monkeypatch,
 ) -> None:
     """App startup should pick up the env-backed task service builder automatically."""
-    sentinel = object()
+    sentinel = AsyncMock()
+    sentinel.__aenter__.return_value = sentinel
     seen_kwargs: dict[str, object] = {}
 
     def _build_task_service_from_env(**kwargs):
@@ -209,7 +211,9 @@ def test_create_app_requires_api_auth_when_env_bootstrap_builds_task_service(
     monkeypatch,
 ) -> None:
     """Env-bootstrapped task execution should fail closed without an API shared secret."""
-    monkeypatch.setattr("apps.api.main.build_task_service_from_env", lambda **_: object())
+    sentinel = AsyncMock()
+    sentinel.__aenter__.return_value = sentinel
+    monkeypatch.setattr("apps.api.main.build_task_service_from_env", lambda **_: sentinel)
     monkeypatch.setattr("apps.api.main.build_api_auth_config_from_env", lambda: ApiAuthConfig())
 
     app = create_app()

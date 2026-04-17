@@ -10,6 +10,7 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
@@ -20,6 +21,7 @@ from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 from anyio import to_thread
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -32,6 +34,7 @@ from db.models import (
 from db.models import (
     User,
 )
+from orchestrator.checkpoints import create_async_sqlite_checkpointer
 from orchestrator.graph import build_orchestrator_graph
 from orchestrator.state import OrchestratorState, SessionRef
 from repositories import (
@@ -40,6 +43,7 @@ from repositories import (
     SessionRepository,
     SessionStateRepository,
     TaskRepository,
+    TaskTimelineRepository,
     UserRepository,
     WorkerRunRepository,
     session_scope,
@@ -252,6 +256,17 @@ class WorkerRunSnapshot(ExecutionModel):
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
 
 
+class TaskTimelineEventSnapshot(ExecutionModel):
+    """A granular event in a task's lifecycle (T-090)."""
+
+    event_type: str
+    attempt_number: int = 0
+    sequence_number: int = 0
+    message: str | None = None
+    payload: dict[str, Any] | None = None
+    created_at: datetime
+
+
 class TaskSnapshot(ExecutionModel):
     """The persisted task view returned by POST/GET task endpoints."""
 
@@ -267,6 +282,7 @@ class TaskSnapshot(ExecutionModel):
     created_at: datetime
     updated_at: datetime
     latest_run: WorkerRunSnapshot | None = None
+    timeline: list[TaskTimelineEventSnapshot] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -286,6 +302,7 @@ class _PersistedTaskContext:
     channel: str
     external_thread_id: str
     task_id: str
+    attempt_count: int
 
 
 @dataclass(frozen=True)
@@ -570,13 +587,51 @@ class TaskExecutionService:
         gemini_worker: Worker | None = None,
         progress_notifier: ProgressNotifier | None = None,
         default_task_max_attempts: int = 3,
+        checkpoint_path: str | Path | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.worker = worker
         self.gemini_worker = gemini_worker
         self.progress_notifier = progress_notifier
         self.default_task_max_attempts = max(1, int(default_task_max_attempts))
-        self.graph = build_orchestrator_graph(worker=worker, gemini_worker=gemini_worker)
+        self.checkpoint_path = checkpoint_path
+        self._checkpointer: BaseCheckpointSaver | None = None
+        self._checkpointer_cm: AbstractAsyncContextManager[BaseCheckpointSaver] | None = None
+        self._graph: Any | None = None
+
+    @property
+    def graph(self) -> Any:
+        """Lazy-loaded orchestrator graph, compiled with the current checkpointer."""
+        if self._graph is None:
+            self._graph = build_orchestrator_graph(
+                worker=self.worker,
+                gemini_worker=self.gemini_worker,
+                checkpointer=self._checkpointer,
+            )
+        return self._graph
+
+    async def __aenter__(self) -> TaskExecutionService:
+        """Initialize shared resources (like checkpointers) if configured."""
+        if self.checkpoint_path and not self._checkpointer:
+            self._checkpointer_cm = create_async_sqlite_checkpointer(self.checkpoint_path)
+            self._checkpointer = await self._checkpointer_cm.__aenter__()
+            # Invalidate graph to force recompile with checkpointer
+            self._graph = None
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        """Close shared resources."""
+        if self._checkpointer_cm:
+            await self._checkpointer_cm.__aexit__(exc_type, exc_val, exc_tb)
+            self._checkpointer = None
+            self._checkpointer_cm = None
+            # Invalidate graph to revert to memory-only
+            self._graph = None
 
     def create_task(self, submission: TaskSubmission) -> tuple[TaskSnapshot, _PersistedTaskContext]:
         """Persist a new task request and return the initial pollable snapshot."""
@@ -900,6 +955,17 @@ class TaskExecutionService:
                 created_at=task.created_at,
                 updated_at=task.updated_at,
                 latest_run=latest_run_snapshot,
+                timeline=[
+                    TaskTimelineEventSnapshot(
+                        event_type=_enum_value(event.event_type) or "unknown",
+                        attempt_number=event.attempt_number,
+                        sequence_number=event.sequence_number,
+                        message=event.message,
+                        payload=event.payload,
+                        created_at=event.created_at,
+                    )
+                    for event in task.timeline_events
+                ],
             )
 
     def apply_task_approval_decision(
@@ -1080,6 +1146,7 @@ class TaskExecutionService:
                 channel=conversation_session.channel,
                 external_thread_id=conversation_session.external_thread_id,
                 task_id=task.id,
+                attempt_count=task.attempt_count,
             ), None
 
     def _link_delivery_to_task(
@@ -1171,6 +1238,17 @@ class TaskExecutionService:
         persisted: _PersistedTaskContext,
     ) -> OrchestratorState:
         """Execute the orchestrator graph for one submitted task."""
+
+        def _get_count() -> int:
+            with session_scope(self.session_factory) as session:
+                return TaskTimelineRepository(session).count_by_attempt(
+                    task_id=persisted.task_id, attempt_number=persisted.attempt_count
+                )
+
+        initial_persisted_count = await self._run_blocking(_get_count)
+
+        config = {"configurable": {"thread_id": persisted.task_id}}
+
         raw_output = await self.graph.ainvoke(
             {
                 "session": SessionRef(
@@ -1195,7 +1273,10 @@ class TaskExecutionService:
                     "constraints": dict(submission.constraints),
                     "budget": dict(submission.budget),
                 },
-            }
+                "attempt_count": persisted.attempt_count,
+                "timeline_persisted_count": initial_persisted_count,
+            },
+            config=config,
         )
         normalized_output = _normalize_orchestrator_graph_output(raw_output)
         return OrchestratorState.model_validate(normalized_output)
@@ -1242,6 +1323,7 @@ class TaskExecutionService:
                 channel=conversation_session.channel,
                 external_thread_id=conversation_session.external_thread_id,
                 task_id=task.id,
+                attempt_count=task.attempt_count,
             )
             return submission, persisted
 
@@ -1439,6 +1521,28 @@ class TaskExecutionService:
                 artifact_index=artifact_index,
             )
 
+            # Use the state-side marker of already-persisted events to avoid redundant DB queries
+            # This marker is initialized from the DB at the start of the task execution attempt.
+            persisted_count = state.timeline_persisted_count
+
+            current_attempt_events = []
+            for e in reversed(state.timeline_events):
+                if e.attempt_number != state.attempt_count:
+                    break
+                current_attempt_events.append(e)
+            current_attempt_events.reverse()
+
+            # Filter for events that have not been persisted yet
+            # Since sequence_number is 0-indexed, skip already persisted events
+            new_events = [e for e in current_attempt_events if e.sequence_number >= persisted_count]
+
+            if new_events:
+                timeline_repo = TaskTimelineRepository(session)
+                timeline_repo.create_batch(
+                    task_id=task_id,
+                    events=[e.model_dump() for e in new_events],
+                )
+
             if state.session is not None and state.session_state_update is not None:
                 session_state_repo = SessionStateRepository(session)
                 session_state_repo.upsert(
@@ -1512,17 +1616,18 @@ class TaskQueueWorker:
                 "lease_seconds": self.lease_seconds,
             },
         )
-        while True:
-            claim = await self.service._run_blocking(
-                self.service.claim_next_task,
-                worker_id=self.worker_id,
-                lease_seconds=self.lease_seconds,
-            )
-            if claim is None:
-                await asyncio.sleep(self.poll_interval_seconds)
-                continue
-            await self.service.run_queued_task(
-                task_id=claim.task_id,
-                worker_id=self.worker_id,
-                lease_seconds=self.lease_seconds,
-            )
+        async with self.service:
+            while True:
+                claim = await self.service._run_blocking(
+                    self.service.claim_next_task,
+                    worker_id=self.worker_id,
+                    lease_seconds=self.lease_seconds,
+                )
+                if claim is None:
+                    await asyncio.sleep(self.poll_interval_seconds)
+                    continue
+                await self.service.run_queued_task(
+                    task_id=claim.task_id,
+                    worker_id=self.worker_id,
+                    lease_seconds=self.lease_seconds,
+                )

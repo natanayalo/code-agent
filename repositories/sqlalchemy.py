@@ -4,12 +4,20 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Any, Final, cast
+from uuid import uuid4
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
+from db.base import utc_now
+from db.enums import (
+    ArtifactType,
+    TaskStatus,
+    TimelineEventType,
+    WorkerRunStatus,
+    WorkerType,
+)
 from db.models import (
     Artifact,
     InboundDelivery,
@@ -17,6 +25,7 @@ from db.models import (
     ProjectMemory,
     SessionState,
     Task,
+    TaskTimelineEvent,
     User,
     WorkerRun,
 )
@@ -779,3 +788,91 @@ class ProjectMemoryRepository:
         self.session.delete(memory_entry)
         self.session.flush()
         return True
+
+
+class TaskTimelineRepository:
+    """Persist and query task timeline events (T-090)."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(
+        self,
+        *,
+        task_id: str,
+        event_type: str | TimelineEventType,
+        attempt_number: int = 0,
+        sequence_number: int = 0,
+        message: str | None = None,
+        payload: dict[str, Any] | None = None,
+        created_at: datetime | None = None,
+    ) -> TaskTimelineEvent:
+        event = TaskTimelineEvent(
+            task_id=task_id,
+            attempt_number=attempt_number,
+            sequence_number=sequence_number,
+            event_type=cast(TimelineEventType, event_type),
+            message=message,
+            payload=payload,
+        )
+        if created_at is not None:
+            event.created_at = created_at
+            event.updated_at = created_at
+        self.session.add(event)
+        self.session.flush()
+        return event
+
+    def list_by_task(self, task_id: str) -> list[TaskTimelineEvent]:
+        statement = (
+            select(TaskTimelineEvent)
+            .where(TaskTimelineEvent.task_id == task_id)
+            .order_by(
+                TaskTimelineEvent.attempt_number.asc(), TaskTimelineEvent.sequence_number.asc()
+            )
+        )
+        return list(self.session.scalars(statement))
+
+    def count_by_attempt(self, task_id: str, attempt_number: int) -> int:
+        """Count the number of timeline events persisted for a given task attempt."""
+        return (
+            self.session.scalar(
+                select(func.count())
+                .select_from(TaskTimelineEvent)
+                .where(
+                    TaskTimelineEvent.task_id == task_id,
+                    TaskTimelineEvent.attempt_number == attempt_number,
+                )
+            )
+            or 0
+        )
+
+    def create_batch(
+        self,
+        *,
+        task_id: str,
+        events: list[dict[str, Any]],
+    ) -> None:
+        """Bulk create timeline events for a task."""
+        if not events:
+            return
+
+        now = utc_now()
+        params = []
+        for e in events:
+            created_at = e.get("created_at") if e.get("created_at") is not None else now
+            params.append(
+                {
+                    "id": uuid4().hex,
+                    "task_id": task_id,
+                    "attempt_number": e["attempt_number"],
+                    "sequence_number": e["sequence_number"],
+                    "event_type": e["event_type"],
+                    "message": e.get("message"),
+                    "payload": e.get("payload"),
+                    "created_at": created_at,
+                    "updated_at": created_at,
+                }
+            )
+
+        self.session.execute(insert(TaskTimelineEvent), params)
+        self.session.flush()

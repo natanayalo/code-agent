@@ -13,6 +13,7 @@ from repositories.sqlalchemy import (
     SessionRepository,
     SessionStateRepository,
     TaskRepository,
+    TaskTimelineRepository,
     UserRepository,
     WorkerRunRepository,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "SessionRepository",
     "SessionStateRepository",
     "TaskRepository",
+    "TaskTimelineRepository",
     "UserRepository",
     "WorkerRunRepository",
     "create_engine_from_url",

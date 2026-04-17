@@ -52,6 +52,26 @@ class ArtifactType(StrEnum):
     WORKSPACE = "workspace"
 
 
+class TimelineEventType(StrEnum):
+    """Allowed categories for granular task timeline events."""
+
+    TASK_INGESTED = "task_ingested"
+    TASK_CLASSIFIED = "task_classified"
+    MEMORY_LOADED = "memory_loaded"
+    WORKER_SELECTED = "worker_selected"
+    APPROVAL_REQUESTED = "approval_requested"
+    APPROVAL_GRANTED = "approval_granted"
+    APPROVAL_REJECTED = "approval_rejected"
+    WORKER_DISPATCHED = "worker_dispatched"
+    WORKER_COMPLETED = "worker_completed"
+    WORKER_FAILED = "worker_failed"
+    WORKER_ERROR = "worker_error"
+    VERIFICATION_STARTED = "verification_started"
+    VERIFICATION_COMPLETED = "verification_completed"
+    TASK_COMPLETED = "task_completed"
+    TASK_FAILED = "task_failed"
+
+
 def build_sql_enum(enum_class: type[StrEnum], *, name: str) -> SQLAlchemyEnum:
     """Create a non-native SQLAlchemy enum backed by a check constraint."""
 

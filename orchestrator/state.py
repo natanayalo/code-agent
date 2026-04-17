@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from operator import add
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -137,6 +138,17 @@ class VerificationReport(OrchestratorModel):
     items: list[VerificationReportItem] = Field(default_factory=list)
 
 
+class TaskTimelineEventState(OrchestratorModel):
+    """A granular event in a task's lifecycle captured during orchestration (T-090)."""
+
+    event_type: str
+    attempt_number: int = 0
+    sequence_number: int = 0
+    message: str | None = None
+    payload: dict[str, Any] | None = None
+    created_at: datetime | None = None
+
+
 class OrchestratorState(OrchestratorModel):
     """Top-level state handed between orchestrator workflow nodes."""
 
@@ -153,6 +165,8 @@ class OrchestratorState(OrchestratorModel):
     verification: VerificationReport | None = None
     memory_to_persist: list[PersistMemoryEntry] = Field(default_factory=list)
     progress_updates: list[str] = Field(default_factory=list)
+    timeline_events: Annotated[list[TaskTimelineEventState], add] = Field(default_factory=list)
+    timeline_persisted_count: int = 0
     errors: list[str] = Field(default_factory=list)
     attempt_count: int = Field(default=0, ge=0)
     session_state_update: SessionStateUpdate | None = None

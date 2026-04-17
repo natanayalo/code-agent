@@ -60,14 +60,17 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-082 Add browser/search wrapper. PR: [#61](https://github.com/natanayalo/code-agent/pull/61)
 - T-088 Read .agents/ skills and workflows from target workspace. PR: [#62](https://github.com/natanayalo/code-agent/pull/62)
 - T-089 Add structured file editing tools (view_file, str_replace_editor, search). PR: [#63](https://github.com/natanayalo/code-agent/pull/63)
+- T-107 Inject repo CI/build config into worker context. PR: [#64](https://github.com/natanayalo/code-agent/pull/64)
+- Runtime split and queue/persistence hardening for production-like API/worker execution. PR: [#70](https://github.com/natanayalo/code-agent/pull/70)
+- T-113 Add paused-task approval decision endpoint (`POST /tasks/{task_id}/approval`) for pause -> approve/reject -> resume/terminal flow. PR: [#71](https://github.com/natanayalo/code-agent/pull/71)
+- T-090 Add task timeline. PR: [#72](https://github.com/natanayalo/code-agent/pull/72)
 
 ## In Progress
 
-- T-107 Inject repo CI/build config into worker context.
-- T-113 Add paused-task approval decision endpoint (`POST /tasks/{task_id}/approval`) for pause -> approve/reject -> resume/terminal flow.
+- None
 
 ## Next
-- T-090 Add task timeline.
+- T-091 Implement task replay mechanism.
 
 ## Blocked
 
@@ -75,7 +78,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: finish T-107, then move to Milestone 12 (T-090 to T-092).
+- Current target order from here: Milestone 12 (T-090 to T-092).
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.
