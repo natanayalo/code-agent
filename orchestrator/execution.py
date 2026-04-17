@@ -1259,66 +1259,35 @@ class TaskExecutionService:
 
         config = {"configurable": {"thread_id": persisted.task_id}}
 
-        if self._checkpointer:
-            raw_output = await self.graph.ainvoke(
-                {
-                    "session": SessionRef(
-                        session_id=persisted.session_id,
-                        user_id=persisted.user_id,
-                        channel=persisted.channel,
-                        external_thread_id=persisted.external_thread_id,
-                        active_task_id=persisted.task_id,
-                        status="active",
-                    ).model_dump(),
-                    "task": {
-                        "task_id": persisted.task_id,
-                        "task_text": submission.task_text,
-                        "repo_url": submission.repo_url,
-                        "branch": submission.branch,
-                        "priority": submission.priority,
-                        "worker_override": (
-                            submission.worker_override.value
-                            if submission.worker_override is not None
-                            else None
-                        ),
-                        "constraints": dict(submission.constraints),
-                        "budget": dict(submission.budget),
-                    },
-                    "attempt_count": persisted.attempt_count,
-                    "timeline_persisted_count": initial_persisted_count,
+        raw_output = await self.graph.ainvoke(
+            {
+                "session": SessionRef(
+                    session_id=persisted.session_id,
+                    user_id=persisted.user_id,
+                    channel=persisted.channel,
+                    external_thread_id=persisted.external_thread_id,
+                    active_task_id=persisted.task_id,
+                    status="active",
+                ).model_dump(),
+                "task": {
+                    "task_id": persisted.task_id,
+                    "task_text": submission.task_text,
+                    "repo_url": submission.repo_url,
+                    "branch": submission.branch,
+                    "priority": submission.priority,
+                    "worker_override": (
+                        submission.worker_override.value
+                        if submission.worker_override is not None
+                        else None
+                    ),
+                    "constraints": dict(submission.constraints),
+                    "budget": dict(submission.budget),
                 },
-                config=config,
-            )
-        else:
-            raw_output = await self.graph.ainvoke(
-                {
-                    "session": SessionRef(
-                        session_id=persisted.session_id,
-                        user_id=persisted.user_id,
-                        channel=persisted.channel,
-                        external_thread_id=persisted.external_thread_id,
-                        active_task_id=persisted.task_id,
-                        status="active",
-                    ).model_dump(),
-                    "task": {
-                        "task_id": persisted.task_id,
-                        "task_text": submission.task_text,
-                        "repo_url": submission.repo_url,
-                        "branch": submission.branch,
-                        "priority": submission.priority,
-                        "worker_override": (
-                            submission.worker_override.value
-                            if submission.worker_override is not None
-                            else None
-                        ),
-                        "constraints": dict(submission.constraints),
-                        "budget": dict(submission.budget),
-                    },
-                    "attempt_count": persisted.attempt_count,
-                    "timeline_persisted_count": initial_persisted_count,
-                },
-                config=config,
-            )
+                "attempt_count": persisted.attempt_count,
+                "timeline_persisted_count": initial_persisted_count,
+            },
+            config=config,
+        )
         normalized_output = _normalize_orchestrator_graph_output(raw_output)
         return OrchestratorState.model_validate(normalized_output)
 
