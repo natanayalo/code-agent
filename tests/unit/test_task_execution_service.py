@@ -461,6 +461,46 @@ def test_normalize_orchestrator_output_drops_unknown_requested_permission() -> N
     assert "network_write" not in (state.result.summary or "")
 
 
+def test_normalize_orchestrator_output_canonicalizes_existing_result_permission() -> None:
+    """Existing result payloads should also normalize requested_permission to canonical classes."""
+    raw_output = {
+        "task": {"task_text": "Fetch dependency"},
+        "result": {
+            "status": "failure",
+            "summary": "permission requested",
+            "requested_permission": "  Networked_Write ",
+            "commands_run": [],
+            "files_changed": [],
+            "test_results": [],
+            "artifacts": [],
+        },
+    }
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    assert isinstance(normalized, dict)
+    assert normalized["result"]["requested_permission"] == "networked_write"
+
+
+def test_normalize_orchestrator_output_drops_unknown_existing_result_permission() -> None:
+    """Non-canonical requested_permission values in existing results should fail closed."""
+    raw_output = {
+        "task": {"task_text": "Fetch dependency"},
+        "result": {
+            "status": "failure",
+            "summary": "permission requested",
+            "requested_permission": "network_write",
+            "commands_run": [],
+            "files_changed": [],
+            "test_results": [],
+            "artifacts": [],
+        },
+    }
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    assert isinstance(normalized, dict)
+    assert normalized["result"]["requested_permission"] is None
+
+
 def test_normalize_orchestrator_output_formats_manual_approval_summary_without_duplication() -> (
     None
 ):

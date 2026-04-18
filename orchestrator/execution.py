@@ -523,6 +523,25 @@ def _normalize_orchestrator_graph_output(raw_output: object) -> object:
         return raw_output
 
     normalized = dict(raw_output)
+    existing_result = normalized.get("result")
+    if isinstance(existing_result, Mapping):
+        normalized_result = dict(existing_result)
+        requested_permission_level = coerce_permission_level(
+            normalized_result.get("requested_permission")
+        )
+        if (
+            normalized_result.get("requested_permission") is not None
+            and requested_permission_level is None
+        ):
+            logger.warning(
+                "Ignoring unknown permission level from result payload.",
+                extra={"requested_permission": normalized_result.get("requested_permission")},
+            )
+        normalized_result["requested_permission"] = (
+            requested_permission_level.value if requested_permission_level is not None else None
+        )
+        normalized["result"] = normalized_result
+
     interrupts_raw = normalized.pop("__interrupt__", None)
     if interrupts_raw is None:
         return normalized
