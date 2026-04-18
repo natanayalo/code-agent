@@ -28,13 +28,16 @@ def _run_git(command: list[str], *, cwd: Path) -> str:
 
 
 def _docker_available() -> bool:
-    docker_info = subprocess.run(
-        ["docker", "info"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return docker_info.returncode == 0
+    try:
+        docker_info = subprocess.run(
+            ["docker", "info"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return docker_info.returncode == 0
+    except FileNotFoundError:
+        return False
 
 
 class _ScriptedAdapter(CliRuntimeAdapter):
@@ -92,8 +95,8 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path):
     from sandbox import DockerShellCommandResult, DockerShellSession
 
     class _GitMockingSession:
-        def __init__(self, container):
-            self._real = DockerShellSession(container)
+        def __init__(self, container, *, secrets=None):
+            self._real = DockerShellSession(container, secrets=secrets)
 
         def execute(self, command, **kwargs):
             if command == "git status --porcelain=v1 -z --untracked-files=all":
@@ -106,7 +109,8 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path):
             self._real.close()
 
     worker = CodexCliWorker(
-        runtime_adapter=adapter, session_factory=lambda container: _GitMockingSession(container)
+        runtime_adapter=adapter,
+        session_factory=lambda container, **kwargs: _GitMockingSession(container, **kwargs),
     )
     service = TaskExecutionService(session_factory=session_factory, worker=worker)
 

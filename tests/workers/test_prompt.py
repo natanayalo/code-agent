@@ -241,7 +241,7 @@ def test_build_repo_context_section_includes_agents_asset_summaries(tmp_path: Pa
 
     assert ".agents guidance:" in section
     assert (
-        "skills/start-task/SKILL.md: start-task - " "Start the next implementation slice safely."
+        "skills/start-task/SKILL.md: start-task - Start the next implementation slice safely."
     ) in section
     assert "workflows/release.md: release - Release workflow" in section
 

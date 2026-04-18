@@ -22,6 +22,7 @@ Use this skill for repo-specific triage after pull request review feedback is co
 
 - To reply to and resolve individual inline GitHub review comments natively, use the `gh api graphql` command.
 - Always prefix `gh api graphql` with `GH_PAGER=cat` to suppress the interactive pager in automation.
+- Note: On macOS, the `gh` binary may be located at `/opt/homebrew/bin/gh`. If `gh` is not in your PATH, use the full path.
 - Find thread IDs using: `GH_PAGER=cat gh api graphql -F owner="{owner}" -F name="{repo}" -F pr={PR_NUMBER} -f query='query($owner: String!, $name: String!, $pr: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $pr) { reviewThreads(first: 20) { nodes { id isResolved comments(first: 5) { nodes { body author { login } } } } } } } }'`
   - Use `first: 20` for threads (not 10) and `first: 5` for comments so full thread history (including prior replies) is visible.
   - Check `isResolved` and read the full comment thread before patching — a previous session may have already fixed it.

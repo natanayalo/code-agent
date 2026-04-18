@@ -7,6 +7,7 @@ import logging
 import socket
 import time
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy.pool import StaticPool
@@ -271,6 +272,118 @@ def test_task_execution_service_reuses_one_compiled_graph(
 
     assert len(build_calls) == 1
     assert len(fake_graph.calls) == 2
+
+
+def test_run_orchestrator_propagates_submission_secrets(
+    monkeypatch,
+) -> None:
+    """The execution service must include submission secrets in the orchestrator payload."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    fake_graph = _FakeGraph()
+    monkeypatch.setattr(
+        execution_module,
+        "build_orchestrator_graph",
+        lambda *, worker, gemini_worker=None, **kwargs: fake_graph,
+    )
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+
+    submission = execution_module.TaskSubmission(
+        task_text="Run with secrets",
+        secrets={"TEST_SECRET": "test-value"},
+    )
+
+    _, persisted = service.create_task(submission)
+    asyncio.run(service._run_orchestrator(submission, persisted))
+
+    assert len(fake_graph.calls) == 1
+    task_payload = fake_graph.calls[0]["task"]
+    assert task_payload["secrets"] == {"TEST_SECRET": "test-value"}
+
+
+def test_load_submission_for_task_recovers_secrets() -> None:
+    """The submission reconstruction logic must restore secrets from the persisted Task record."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Recoverable secrets",
+        secrets={"PERSISTED_SECRET": "stored-value"},
+    )
+    _, persisted = service.create_task(submission)
+
+    # Reload from database.
+    reloaded_result = service._load_submission_for_task(task_id=persisted.task_id)
+    assert reloaded_result is not None
+    reloaded_submission, _ = reloaded_result
+
+    assert reloaded_submission.secrets == {"PERSISTED_SECRET": "stored-value"}
+
+
+def test_replay_task_replaces_secrets_instead_of_merging() -> None:
+    """Replaying a task with new secrets must fully replace the old set to prevent leakage."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+
+    # Initial task with secret A
+    submission = execution_module.TaskSubmission(
+        task_text="Original task", secrets={"KEY_A": "VAL_A"}
+    )
+    _, original_persisted = service.create_task(submission)
+
+    # Mark as completed so it's replayable
+    with session_scope(session_factory) as session:
+        TaskRepository(session).update_status(
+            task_id=original_persisted.task_id, status=TaskStatus.COMPLETED
+        )
+
+    # Replay with secret B (should remove A)
+    replay_request = execution_module.TaskReplayRequest(secrets={"KEY_B": "VAL_B"})
+    replay_outcome = service.replay_task(
+        source_task_id=original_persisted.task_id,
+        replay_request=replay_request,
+    )
+
+    assert replay_outcome.status == "created"
+    assert replay_outcome.task_snapshot is not None
+    new_task_id = replay_outcome.task_snapshot.task_id
+
+    # Verify replayed task has only B
+    reloaded_result = service._load_submission_for_task(task_id=new_task_id)
+    assert reloaded_result is not None
+    reloaded_submission, _ = reloaded_result
+
+    assert reloaded_submission.secrets == {"KEY_B": "VAL_B"}
+    assert "KEY_A" not in reloaded_submission.secrets
 
 
 def test_normalize_orchestrator_output_converts_interrupts_to_failure_result() -> None:
@@ -1749,3 +1862,53 @@ def test_apply_task_approval_decision_reject_is_terminal_and_conflict_is_reporte
         assert isinstance(approval, dict)
         assert approval.get("status") == "rejected"
         assert approval.get("approved") is False
+
+
+def test_create_task_persists_encryption_metadata() -> None:
+    """Verify that TaskExecutionService correctly tags if secrets were encrypted at creation."""
+    from cryptography.fernet import Fernet
+
+    from db.models import Task
+
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+
+    # 1. Without encryption key
+    with patch.dict("os.environ", {"CODE_AGENT_ENCRYPTION_KEY": ""}, clear=False):
+        submission = execution_module.TaskSubmission(task_text="No encryption", secrets={"K": "V"})
+        _, task_p = service.create_task(submission)
+
+        with session_scope(session_factory) as session:
+            reloaded = session.get(Task, task_p.task_id)
+            assert reloaded is not None
+            assert reloaded.secrets_encrypted is False
+
+    # 2. With encryption key
+    # Use a fresh service or ensure the decorator is re-initialized (since it's a
+    # class/instance property)
+    # Actually, EncryptedJSON reads os.environ in __init__.
+    # A fresh service instantiation will trigger TaskRepository which initializes the model.
+    key = Fernet.generate_key().decode()
+    with patch.dict("os.environ", {"CODE_AGENT_ENCRYPTION_KEY": key}):
+        # Mocking the is_active() call might be cleaner if we want to avoid complex re-init
+        with patch.object(
+            execution_module.Task.secrets.property.columns[0].type, "is_active", return_value=True
+        ):
+            submission = execution_module.TaskSubmission(
+                task_text="With encryption", secrets={"K": "V"}
+            )
+            _, task_p = service.create_task(submission)
+
+            with session_scope(session_factory) as session:
+                reloaded = session.get(Task, task_p.task_id)
+                assert reloaded is not None
+                assert reloaded.secrets_encrypted is True

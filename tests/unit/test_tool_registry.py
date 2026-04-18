@@ -59,6 +59,8 @@ def test_default_tool_registry_exposes_execute_github_metadata() -> None:
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,
     )
+    assert "GITHUB_TOKEN" in tool.required_secrets
+    assert "GH_TOKEN" in tool.required_secrets
 
 
 def test_default_tool_registry_exposes_execute_browser_metadata() -> None:
@@ -143,3 +145,35 @@ def test_get_tool_returns_registered_definitions_for_trimmed_names() -> None:
 
     assert tool is not None
     assert tool.name == "execute_bash"
+
+
+def test_tool_registry_scoping() -> None:
+    """The registry should correctly filter available secrets based on required tools."""
+    available = {
+        "GITHUB_TOKEN": "secret_gh",
+        "AWS_SECRET_ACCESS_KEY": "secret_aws",
+        "OTHER_SECRET": "other",
+    }
+    # execute_github requires GITHUB_TOKEN and GH_TOKEN
+    scoped = DEFAULT_TOOL_REGISTRY.get_scoped_secrets(
+        tool_names=["execute_github", "view_file"],
+        available_secrets=available,
+    )
+
+    assert "GITHUB_TOKEN" in scoped
+    assert scoped["GITHUB_TOKEN"] == "secret_gh"
+    assert "AWS_SECRET_ACCESS_KEY" not in scoped
+
+
+def test_tool_registry_scope_all_secrets() -> None:
+    """The scope_secrets helper should use all registered tools automatically."""
+    available = {
+        "GITHUB_TOKEN": "secret_gh",
+        "OTHER_SECRET": "other",
+    }
+    # DEFAULT_TOOL_REGISTRY includes execute_github which requires GITHUB_TOKEN.
+    scoped = DEFAULT_TOOL_REGISTRY.scope_secrets(available)
+
+    assert "GITHUB_TOKEN" in scoped
+    assert scoped["GITHUB_TOKEN"] == "secret_gh"
+    assert "OTHER_SECRET" not in scoped

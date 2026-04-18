@@ -251,7 +251,7 @@ async def _await_worker_with_timeout(
         if partial_result is not None:
             return (
                 partial_result,
-                (f"worker timed out but yielded partial state " f"after {timeout_seconds}s"),
+                (f"worker timed out but yielded partial state after {timeout_seconds}s"),
             )
 
         return _timed_out_worker_result(
@@ -438,6 +438,8 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         memory_context=state.memory.model_dump(),
         constraints=dict(state.task.constraints),
         budget=dict(state.task.budget),
+        secrets=dict(state.task.secrets),
+        tools=state.task.tools,
     )
 
 
@@ -924,8 +926,7 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
         failed_result = state.result.model_copy(
             update={
                 "summary": (
-                    f"Permission escalation to '{requested_permission}' "
-                    "was rejected. Run halted."
+                    f"Permission escalation to '{requested_permission}' was rejected. Run halted."
                 ),
                 "next_action_hint": "await_manual_follow_up",
             }

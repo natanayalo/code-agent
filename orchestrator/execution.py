@@ -33,6 +33,7 @@ from db.models import (
     Session as ConversationSession,
 )
 from db.models import (
+    Task,
     User,
 )
 from orchestrator.checkpoints import create_async_sqlite_checkpointer
@@ -211,6 +212,8 @@ class TaskSubmission(ExecutionModel):
     worker_override: WorkerType | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
+    tools: list[str] | None = None
     callback_url: str | None = Field(default=None, max_length=2048)
     session: SubmissionSession = Field(default_factory=SubmissionSession)
 
@@ -233,6 +236,7 @@ class TaskReplayRequest(ExecutionModel):
     worker_override: WorkerType | None = None
     constraints: dict[str, Any] | None = None
     budget: dict[str, Any] | None = None
+    secrets: dict[str, str] | None = None
 
 
 class ArtifactSnapshot(ExecutionModel):
@@ -493,8 +497,7 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
     if approval_type == "permission_escalation":
         if requested_permission:
             summary = (
-                "Run paused pending permission escalation approval for "
-                f"'{requested_permission}'."
+                f"Run paused pending permission escalation approval for '{requested_permission}'."
             )
         else:
             summary = "Run paused pending permission escalation approval."
@@ -1120,8 +1123,7 @@ class TaskExecutionService:
                     finished_at=decided_at,
                     status=WorkerRunStatus.FAILURE,
                     summary=(
-                        "Manual approval rejected via API decision endpoint; "
-                        "task remains failed."
+                        "Manual approval rejected via API decision endpoint; task remains failed."
                     ),
                     commands_run=[],
                     files_changed_count=0,
@@ -1164,6 +1166,11 @@ class TaskExecutionService:
                 avg_duration_seconds=run_metrics["avg_duration_seconds"],
                 success_rate=run_metrics["success_rate"],
             )
+
+    def is_secret_encryption_active(self) -> bool:
+        """Return True if secret encryption is active."""
+        # We check the model directly to see if the decorator is active.
+        return Task.is_secret_encryption_active()
 
     def replay_task(
         self,
@@ -1219,6 +1226,8 @@ class TaskExecutionService:
                     replay_request.budget,
                     reserved_keys={"replayed_from"},
                 )
+            if replay_request.secrets is not None:
+                updates["secrets"] = dict(replay_request.secrets)
 
         # Ensure provenance chain is included in the final set of constraints
         base_constraints = updates.get("constraints", submission.constraints)
@@ -1315,8 +1324,16 @@ class TaskExecutionService:
                 branch=submission.branch,
                 callback_url=submission.callback_url,
                 worker_override=submission.worker_override,
-                constraints=dict(submission.constraints),
                 budget=dict(submission.budget),
+                secrets=dict(submission.secrets),
+                # Store tools in constraints to avoid a schema migration for now
+                constraints={
+                    **(submission.constraints or {}),
+                    "tools": submission.tools,
+                }
+                if submission.tools is not None
+                else dict(submission.constraints),
+                secrets_encrypted=self.is_secret_encryption_active(),
                 status=status,
                 max_attempts=max(1, max_attempts),
                 next_attempt_at=now,
@@ -1467,6 +1484,8 @@ class TaskExecutionService:
                     ),
                     "constraints": dict(submission.constraints),
                     "budget": dict(submission.budget),
+                    "secrets": dict(submission.secrets),
+                    "tools": submission.tools,
                 },
                 "attempt_count": persisted.attempt_count,
                 "timeline_persisted_count": initial_persisted_count,
@@ -1503,7 +1522,11 @@ class TaskExecutionService:
                 worker_override=task.worker_override,
                 constraints=dict(task.constraints or {}),
                 budget=dict(task.budget or {}),
+                secrets=dict(task.secrets or {}),
                 callback_url=task.callback_url,
+                tools=(task.constraints or {}).get("tools")
+                if isinstance(task.constraints, dict)
+                else None,
                 priority=task.priority,
                 session=SubmissionSession(
                     channel=conversation_session.channel,

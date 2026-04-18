@@ -189,7 +189,7 @@ class TestExtractJson:
         assert result.startswith("{")
 
     def test_json_in_plain_fence(self) -> None:
-        raw = '```\n{"kind":"final","final_output":"ok"' ',"tool_name":null,"tool_input":null}\n```'
+        raw = '```\n{"kind":"final","final_output":"ok","tool_name":null,"tool_input":null}\n```'
         result = _extract_json(raw)
         assert result.startswith("{")
 

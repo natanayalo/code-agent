@@ -56,7 +56,12 @@ DEFAULT_WORKSPACE_ROOT_ENV_VAR = "CODE_AGENT_WORKSPACE_ROOT"
 class ShellSessionFactory(Protocol):
     """Factory for opening a persistent shell session in a running container."""
 
-    def __call__(self, container: DockerSandboxContainer) -> ShellSessionProtocol:
+    def __call__(
+        self,
+        container: DockerSandboxContainer,
+        *,
+        secrets: dict[str, str] | None = None,
+    ) -> ShellSessionProtocol:
         """Return a ready-to-use shell session."""
 
 
@@ -207,7 +212,9 @@ class GeminiCliWorker(Worker):
             cleanup_policy=self.cleanup_policy,
         )
         self.container_manager = container_manager or DockerSandboxContainerManager()
-        self._session_factory = session_factory or (lambda container: DockerShellSession(container))
+        self._session_factory = session_factory or (
+            lambda container, secrets=None: DockerShellSession(container, secrets=secrets)
+        )
         self.runtime_settings = runtime_settings or CliRuntimeSettings()
 
     async def run(self, request: WorkerRequest) -> WorkerResult:
@@ -330,10 +337,25 @@ class GeminiCliWorker(Worker):
         session: ShellSessionProtocol | None = None
 
         try:
-            container = self.container_manager.start(
-                DockerSandboxContainerRequest(workspace=workspace)
+            # Scope secrets: only inject those required by the tools available for this run.
+            tool_names = request.tools
+            if tool_names is None:
+                tool_names = [tool.name for tool in self.tool_registry.list_tools()]
+
+            scoped_secrets = self.tool_registry.get_scoped_secrets(
+                tool_names=tool_names,
+                available_secrets=request.secrets,
             )
-            session = self._session_factory(container)
+
+            container = self.container_manager.start(
+                DockerSandboxContainerRequest(
+                    workspace=workspace,
+                    environment=scoped_secrets,
+                )
+            )
+            # Redact ALL secrets: the session redactor should know about every secret
+            # provided by the user, even if they weren't injected into the environment.
+            session = self._session_factory(container, secrets=request.secrets)
             runtime_settings = settings_from_budget(
                 request.budget,
                 defaults=self.runtime_settings,

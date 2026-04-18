@@ -24,6 +24,7 @@ class WorkerRequest(WorkerModel):
     task_text: str = Field(min_length=1)
     memory_context: dict[str, Any] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
+    tools: list[str] | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
 

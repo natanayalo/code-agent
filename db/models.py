@@ -1,10 +1,13 @@
-"""Initial ORM models for the persistence layer."""
-
 from __future__ import annotations
 
+import json
+import logging
+import os
+import threading
 from datetime import datetime
 from typing import Any
 
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -15,6 +18,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    TypeDecorator,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
@@ -30,12 +34,114 @@ from db.enums import (
     build_sql_enum,
 )
 
+logger = logging.getLogger(__name__)
+
 SESSION_STATUS_ENUM = build_sql_enum(SessionStatus, name="session_status")
 TASK_STATUS_ENUM = build_sql_enum(TaskStatus, name="task_status")
 WORKER_TYPE_ENUM = build_sql_enum(WorkerType, name="worker_type")
 WORKER_RUN_STATUS_ENUM = build_sql_enum(WorkerRunStatus, name="worker_run_status")
 ARTIFACT_TYPE_ENUM = build_sql_enum(ArtifactType, name="artifact_type")
 TIMELINE_EVENT_TYPE_ENUM = build_sql_enum(TimelineEventType, name="timeline_event_type")
+
+
+class EncryptedJSON(TypeDecorator):
+    """
+    Encrypts/decrypts JSON data at rest using cryptography.fernet.
+    Expects CODE_AGENT_ENCRYPTION_KEY environment variable.
+    """
+
+    impl = Text
+    cache_ok = True
+    _cached_fernet: Fernet | None = None
+    _last_key: str | None = None
+    _lock = threading.Lock()
+
+    def is_active(self) -> bool:
+        """Return True if encryption is correctly configured."""
+        try:
+            return self.fernet is not None
+        except RuntimeError:
+            return False
+
+    @property
+    def fernet(self) -> Fernet | None:
+        """Lazily initialize and cache Fernet from environment in a thread-safe manner."""
+        key = os.environ.get("CODE_AGENT_ENCRYPTION_KEY")
+
+        # Fast path for already initialized cache (including the "no key" disabled state)
+        if key == EncryptedJSON._last_key:
+            return EncryptedJSON._cached_fernet
+
+        with EncryptedJSON._lock:
+            # Re-read inside the lock to handle rapid env changes atomically
+            key = os.environ.get("CODE_AGENT_ENCRYPTION_KEY")
+            # Double-check inside the lock
+            if key == EncryptedJSON._last_key:
+                return EncryptedJSON._cached_fernet
+
+            if not key:
+                EncryptedJSON._last_key = None
+                EncryptedJSON._cached_fernet = None
+                return None
+
+            try:
+                new_fernet = Fernet(key.encode())
+                EncryptedJSON._cached_fernet = new_fernet
+                EncryptedJSON._last_key = key
+                return new_fernet
+            except Exception as e:
+                logger.error("Invalid CODE_AGENT_ENCRYPTION_KEY provided")
+                raise RuntimeError("Encryption is configured but the key is invalid.") from e
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Fail fast if a key is already present in the environment but invalid.
+        try:
+            _ = self.fernet
+        except RuntimeError:
+            raise
+
+    def process_bind_param(self, value: Any, dialect: Any) -> Any:
+        if value is None:
+            return None
+        json_str = json.dumps(value)
+        if self.fernet:
+            return self.fernet.encrypt(json_str.encode()).decode()
+        return json_str
+
+    def process_result_value(self, value: Any, dialect: Any) -> Any:
+        if value is None:
+            return None
+        if self.fernet:
+            # If it looks like a Fernet token, we MUST be able to decrypt it.
+            if isinstance(value, str) and value.startswith("gAAAA"):
+                try:
+                    decrypted = self.fernet.decrypt(value.encode()).decode()
+                    return json.loads(decrypted)
+                except InvalidToken:
+                    logger.critical(
+                        "SECURITY CRITICAL: Failed to decrypt secret with active Fernet key. "
+                        "This indicates a key mismatch (wrong CODE_AGENT_ENCRYPTION_KEY) "
+                        "or data corruption for an already encrypted field."
+                    )
+                    raise
+
+            # Not a Fernet token — legacy plain JSON (migration compatibility).
+            # Return directly; do not fall through to the outer fallback block.
+            try:
+                return json.loads(value)
+            except (ValueError, json.JSONDecodeError):
+                logger.warning(
+                    "Encryption is active but value is not a Fernet token and not valid JSON; "
+                    "returning raw value."
+                )
+                return value
+
+        # Encryption inactive — parse plain JSON or return raw.
+        try:
+            return json.loads(value)
+        except (ValueError, json.JSONDecodeError, TypeError):
+            return value
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -92,6 +198,14 @@ class Session(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A requested unit of work within a session."""
 
+    @classmethod
+    def is_secret_encryption_active(cls) -> bool:
+        """Return True if the secrets column is configured for encryption."""
+        column_type = cls.__table__.c.secrets.type
+        if isinstance(column_type, EncryptedJSON):
+            return column_type.is_active()
+        return False
+
     __tablename__ = "tasks"
     __table_args__ = (Index("ix_tasks_created_at", "created_at"),)
 
@@ -107,6 +221,8 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     worker_override: Mapped[WorkerType | None] = mapped_column(WORKER_TYPE_ENUM, nullable=True)
     constraints: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     budget: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    secrets: Mapped[dict[str, str]] = mapped_column(EncryptedJSON, nullable=False, default=dict)
+    secrets_encrypted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[TaskStatus] = mapped_column(
         TASK_STATUS_ENUM,
         nullable=False,

@@ -343,8 +343,7 @@ class DockerShellSession:
                 if isinstance(first_error, DockerShellSessionError):
                     raise first_error
                 raise DockerShellSessionError(
-                    f"Persistent shell session failed while reading command output: "
-                    f"{first_error}"
+                    f"Persistent shell session failed while reading command output: {first_error}"
                 ) from first_error
 
             output = decode_bounded(output_buf, self.output_limit_bytes)

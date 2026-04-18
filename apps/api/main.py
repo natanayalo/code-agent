@@ -58,6 +58,20 @@ def create_app(
                         "Task service bootstrap requires "
                         f"{API_SHARED_SECRET_ENV_VAR} to protect /tasks and /webhook."
                     )
+
+                # Verify secret encryption is active (Phase 4 security hardening)
+                if (
+                    app.state.task_service is not None
+                    and not app.state.task_service.is_secret_encryption_active()
+                ):
+                    logger.critical(
+                        "SECURITY WARNING: CODE_AGENT_ENCRYPTION_KEY is not set. "
+                        "Task secrets will be stored in PLAIN TEXT. "
+                        "To enable encryption, set CODE_AGENT_ENCRYPTION_KEY to a "
+                        "Base64-encoded 32-byte key (e.g., via "
+                        "'cryptography.fernet.Fernet.generate_key()')."
+                    )
+
                 if app.state.task_service is not None:
                     async with app.state.task_service:
                         yield
