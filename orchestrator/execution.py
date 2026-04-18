@@ -123,7 +123,8 @@ def _resolve_execution_mode(
     budget: Mapping[str, Any],
 ) -> str:
     """Resolve execution mode with explicit overrides before channel defaults."""
-    candidates = (budget.get("execution_mode"), constraints.get("execution_mode"))
+    # Constraints are policy/operator inputs and should win over user budget hints.
+    candidates = (constraints.get("execution_mode"), budget.get("execution_mode"))
     for candidate in candidates:
         if isinstance(candidate, str):
             normalized = candidate.strip().lower()

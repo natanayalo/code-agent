@@ -190,7 +190,7 @@ class ShellSessionProtocol(Protocol):
 
 
 def _coerce_non_negative_int(value: object) -> int | None:
-    """Compatibility wrapper used by tests around shared numeric coercion."""
+    """Compatibility wrapper around shared non-negative coercion helper."""
     return coerce_non_negative_int_like(value)
 
 

@@ -281,6 +281,30 @@ def test_apply_execution_budget_policy_respects_explicit_execution_mode_override
     assert budget["worker_timeout_seconds"] == 180
 
 
+def test_apply_execution_budget_policy_prefers_constraints_over_budget_execution_mode() -> None:
+    """Constraints execution_mode should override a conflicting budget execution_mode."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="telegram",
+        constraints={"execution_mode": "unattended"},
+        budget={"execution_mode": "interactive"},
+    )
+
+    assert budget["execution_mode"] == "unattended"
+
+
+def test_apply_execution_budget_policy_invalid_execution_mode_falls_back_to_channel_default() -> (
+    None
+):
+    """Invalid execution_mode values should be ignored and channel defaults should apply."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="telegram",
+        constraints={"execution_mode": "daemon"},
+        budget={"execution_mode": "batch"},
+    )
+
+    assert budget["execution_mode"] == "interactive"
+
+
 def test_apply_execution_budget_policy_preserves_max_minutes_as_timeout_alternative() -> None:
     """Valid max_minutes should prevent worker-timeout defaults from overriding it."""
     budget = execution_module._apply_execution_budget_policy(
