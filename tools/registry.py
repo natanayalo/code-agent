@@ -137,6 +137,13 @@ class ToolRegistry(ToolModel):
         }
         return {k: v for k, v in available_secrets.items() if k in required_keys}
 
+    def scope_secrets(self, available_secrets: dict[str, str]) -> dict[str, str]:
+        """Filter available secrets to only those required by all tools in this registry."""
+        return self.get_scoped_secrets(
+            tool_names=[tool.name for tool in self.list_tools()],
+            available_secrets=available_secrets,
+        )
+
 
 EXECUTE_BASH_TOOL_NAME = "execute_bash"
 EXECUTE_GIT_TOOL_NAME = "execute_git"

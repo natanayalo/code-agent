@@ -338,10 +338,7 @@ class CodexCliWorker(Worker):
 
         try:
             # Scope secrets: only inject those required by the tools available to this worker.
-            scoped_secrets = self.tool_registry.get_scoped_secrets(
-                tool_names=[tool.name for tool in self.tool_registry.list_tools()],
-                available_secrets=request.secrets,
-            )
+            scoped_secrets = self.tool_registry.scope_secrets(request.secrets)
 
             container = self.container_manager.start(
                 DockerSandboxContainerRequest(

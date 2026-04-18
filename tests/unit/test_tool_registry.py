@@ -163,4 +163,18 @@ def test_tool_registry_scoping() -> None:
     assert "GITHUB_TOKEN" in scoped
     assert scoped["GITHUB_TOKEN"] == "secret_gh"
     assert "AWS_SECRET_ACCESS_KEY" not in scoped
+
+
+def test_tool_registry_scope_all_secrets() -> None:
+    """The scope_secrets helper should use all registered tools automatically."""
+    available = {
+        "GITHUB_TOKEN": "secret_gh",
+        "OTHER_SECRET": "other",
+    }
+    # DEFAULT_TOOL_REGISTRY includes execute_github which requires GITHUB_TOKEN.
+    scoped = DEFAULT_TOOL_REGISTRY.scope_secrets(available)
+
+    assert "GITHUB_TOKEN" in scoped
+    assert scoped["GITHUB_TOKEN"] == "secret_gh"
+    assert "OTHER_SECRET" not in scoped
     assert "OTHER_SECRET" not in scoped
