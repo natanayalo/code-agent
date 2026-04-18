@@ -51,24 +51,43 @@ class EncryptedJSON(TypeDecorator):
 
     impl = Text
     cache_ok = True
-    fernet: Fernet | None = None
+    _cached_fernet: Fernet | None = None
+    _last_key: str | None = None
 
     def is_active(self) -> bool:
         """Return True if encryption is correctly configured."""
-        return self.fernet is not None
+        try:
+            return self.fernet is not None
+        except RuntimeError:
+            return False
+
+    @property
+    def fernet(self) -> Fernet | None:
+        """Lazily initialize and cache Fernet from environment."""
+        key = os.environ.get("CODE_AGENT_ENCRYPTION_KEY")
+        if key == self._last_key and self._cached_fernet is not None:
+            return self._cached_fernet
+
+        if not key:
+            self._last_key = None
+            self._cached_fernet = None
+            return None
+
+        try:
+            self._cached_fernet = Fernet(key.encode())
+            self._last_key = key
+            return self._cached_fernet
+        except Exception as e:
+            logger.error("Invalid CODE_AGENT_ENCRYPTION_KEY provided")
+            raise RuntimeError("Encryption is configured but the key is invalid.") from e
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        key = os.environ.get("CODE_AGENT_ENCRYPTION_KEY")
-        if key:
-            try:
-                self.fernet = Fernet(key.encode())
-            except Exception as e:
-                logger.error("Invalid CODE_AGENT_ENCRYPTION_KEY provided")
-                raise RuntimeError("Encryption is configured but the key is invalid.") from e
-        else:
-            self.fernet = None
-            logger.warning("CODE_AGENT_ENCRYPTION_KEY not set. Storing secrets in plain text JSON.")
+        # Fail fast if a key is already present in the environment but invalid.
+        try:
+            _ = self.fernet
+        except RuntimeError:
+            raise
 
     def process_bind_param(self, value: Any, dialect: Any) -> Any:
         if value is None:
@@ -150,10 +169,10 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     @classmethod
     def is_secret_encryption_active(cls) -> bool:
-        """Return True if secret encryption is correctly configured for the Task model."""
-        column = cls.secrets.property.columns[0]
-        if hasattr(column.type, "is_active"):
-            return column.type.is_active()
+        """Return True if the secrets column is configured for encryption."""
+        column_type = cls.__table__.c.secrets.type
+        if isinstance(column_type, EncryptedJSON):
+            return column_type.is_active()
         return False
 
     __tablename__ = "tasks"
