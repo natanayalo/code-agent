@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from sqlalchemy import DateTime
 from sqlalchemy import Enum as SQLAlchemyEnum
 
 import db.models  # noqa: F401
@@ -54,3 +55,9 @@ def test_model_metadata_uses_canonical_enums_for_constrained_columns() -> None:
         assert list(column_type.enums) == [member.value for member in enum_class]
         assert not column_type.native_enum
         assert column_type.create_constraint
+
+
+def test_model_metadata_defines_retention_expiry_column_type() -> None:
+    """Retention cleanup needs an explicit timestamp on worker runs."""
+    column_type = Base.metadata.tables["worker_runs"].c["retention_expires_at"].type
+    assert isinstance(column_type, DateTime)

@@ -302,6 +302,9 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
     finished_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    retention_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     status: Mapped[WorkerRunStatus] = mapped_column(WORKER_RUN_STATUS_ENUM, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     requested_permission: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -109,6 +109,7 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
         "verifier_outcome",
         "commands_run",
         "artifact_index",
+        "retention_expires_at",
         "files_changed_count",
     } <= {column["name"] for column in inspector.get_columns("worker_runs")}
     worker_run_foreign_keys = {

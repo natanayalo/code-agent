@@ -7,6 +7,7 @@ import logging
 import socket
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -26,11 +27,13 @@ from orchestrator import (
 )
 from orchestrator import execution as execution_module
 from repositories import (
+    ArtifactRepository,
     InboundDeliveryRepository,
     SessionRepository,
     SessionStateRepository,
     TaskRepository,
     UserRepository,
+    WorkerRunRepository,
     create_engine_from_url,
     create_session_factory,
     session_scope,
@@ -1354,6 +1357,95 @@ def test_persist_execution_outcome_creates_error_worker_run_without_result() -> 
     assert task_snapshot.latest_run.verifier_outcome is None
     assert task_snapshot.latest_run.artifact_index == []
     assert task_snapshot.latest_run.files_changed_count == 0
+
+
+def test_retention_cleanup_clears_workspace_files_and_persisted_artifacts(
+    tmp_path: Path,
+) -> None:
+    """Expired retained runs should remove both DB artifacts and the workspace on disk."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    workspace_root = tmp_path / "workspaces"
+    workspace_path = workspace_root / "workspace-retained"
+    artifact_path = workspace_path / "artifacts" / "command-123"
+    artifact_path.mkdir(parents=True)
+    (artifact_path / "stdout.log").write_text("old stdout\n", encoding="utf-8")
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+        workspace_root=workspace_root,
+        retention_seconds=60,
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Retain then prune",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+    _, persisted = service.create_task(submission)
+
+    with session_scope(session_factory) as session:
+        task_repo = TaskRepository(session)
+        worker_run_repo = WorkerRunRepository(session)
+        artifact_repo = ArtifactRepository(session)
+
+        task = task_repo.get(persisted.task_id)
+        assert task is not None
+
+        worker_run = worker_run_repo.create(
+            task_id=task.id,
+            session_id=persisted.session_id,
+            worker_type=WorkerType.CODEX,
+            workspace_id=workspace_path.name,
+            started_at=utc_now() - timedelta(minutes=5),
+            finished_at=utc_now() - timedelta(minutes=4),
+            retention_expires_at=utc_now() - timedelta(minutes=1),
+            status=WorkerRunStatus.SUCCESS,
+            summary="completed",
+            commands_run=[],
+            files_changed_count=0,
+            artifact_index=[
+                {
+                    "name": "workspace",
+                    "uri": str(workspace_path),
+                    "artifact_type": "workspace",
+                }
+            ],
+        )
+        artifact_repo.create(
+            run_id=worker_run.id,
+            artifact_type="workspace",
+            name="workspace",
+            uri=str(workspace_path),
+        )
+
+    assert workspace_path.exists()
+
+    pruned = service._prune_retained_runs(now=utc_now())
+
+    assert pruned == 1
+    assert not workspace_path.exists()
+
+    task_snapshot = service.get_task(persisted.task_id)
+    assert task_snapshot is not None
+    assert task_snapshot.latest_run is not None
+    assert task_snapshot.latest_run.artifacts == []
+    assert task_snapshot.latest_run.artifact_index == []
+
+    with session_scope(session_factory) as session:
+        worker_run_repo = WorkerRunRepository(session)
+        artifact_repo = ArtifactRepository(session)
+
+        worker_runs = worker_run_repo.list_by_task(task_snapshot.task_id)
+        assert len(worker_runs) == 1
+        assert worker_runs[0].artifact_index == []
+        assert worker_runs[0].retention_expires_at is None
+        assert artifact_repo.list_by_run(worker_runs[0].id) == []
 
 
 def test_persist_execution_outcome_falls_back_to_route_worker_when_dispatch_missing() -> None:

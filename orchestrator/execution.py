@@ -6,6 +6,7 @@ import asyncio
 import copy
 import ipaddress
 import logging
+import shutil
 import socket
 from collections.abc import Callable, Mapping
 from concurrent.futures import CancelledError as FutureCancelledError
@@ -63,6 +64,7 @@ _callback_dns_executor_lock = Lock()
 _INTERACTIVE_EXECUTION_MODE = "interactive"
 _UNATTENDED_EXECUTION_MODE = "unattended"
 _VALID_EXECUTION_MODES = frozenset({_INTERACTIVE_EXECUTION_MODE, _UNATTENDED_EXECUTION_MODE})
+
 
 # T-102: global defaults and hard caps for runtime budgets.
 _DEFAULT_EXECUTION_BUDGETS: dict[str, dict[str, int]] = {
@@ -809,6 +811,8 @@ class TaskExecutionService:
         gemini_worker: Worker | None = None,
         progress_notifier: ProgressNotifier | None = None,
         default_task_max_attempts: int = 3,
+        workspace_root: str | Path | None = None,
+        retention_seconds: int | None = 7 * 24 * 60 * 60,
         checkpoint_path: str | Path | None = None,
     ) -> None:
         self.session_factory = session_factory
@@ -816,6 +820,12 @@ class TaskExecutionService:
         self.gemini_worker = gemini_worker
         self.progress_notifier = progress_notifier
         self.default_task_max_attempts = max(1, int(default_task_max_attempts))
+        self.workspace_root = None
+        if workspace_root is not None:
+            self.workspace_root = Path(workspace_root).expanduser().resolve()
+        self.retention_seconds = (
+            None if retention_seconds is None else max(0, int(retention_seconds))
+        )
         self.checkpoint_path = checkpoint_path
         self._checkpointer: BaseCheckpointSaver | None = None
         self._checkpointer_cm: AbstractAsyncContextManager[BaseCheckpointSaver] | None = None
@@ -854,6 +864,70 @@ class TaskExecutionService:
             self._checkpointer_cm = None
             # Invalidate graph to revert to memory-only
             self._graph = None
+
+    def _workspace_path_for_run(self, workspace_id: str | None) -> Path | None:
+        """Resolve the on-disk workspace path for a retained run, if configured."""
+        if workspace_id is None or self.workspace_root is None:
+            return None
+
+        workspace_path = (self.workspace_root / workspace_id).resolve()
+        try:
+            if not workspace_path.is_relative_to(self.workspace_root):
+                logger.warning(
+                    "Skipping retention cleanup outside the configured workspace root.",
+                    extra={
+                        "workspace_root": str(self.workspace_root),
+                        "workspace_path": str(workspace_path),
+                    },
+                )
+                return None
+        except ValueError:
+            return None
+        return workspace_path
+
+    def _delete_retained_workspace_path(self, workspace_id: str | None) -> bool:
+        """Delete a retained workspace directory from disk, if configured."""
+        workspace_path = self._workspace_path_for_run(workspace_id)
+        if workspace_path is None or not workspace_path.exists():
+            return False
+
+        shutil.rmtree(workspace_path)
+        return True
+
+    def _prune_retained_runs(self, *, now: datetime) -> int:
+        """Delete retained artifact rows and workspace directories for expired runs."""
+        if self.retention_seconds is None:
+            return 0
+
+        deleted_runs = 0
+        with session_scope(self.session_factory) as session:
+            worker_run_repo = WorkerRunRepository(session)
+            artifact_repo = ArtifactRepository(session)
+
+            for worker_run in worker_run_repo.list_retained_before(now):
+                artifact_repo.delete_by_run(worker_run.id)
+                worker_run_repo.clear_artifact_index(worker_run.id)
+                worker_run.retention_expires_at = None
+                if self._delete_retained_workspace_path(worker_run.workspace_id):
+                    logger.info(
+                        "Deleted retained sandbox workspace",
+                        extra={
+                            "workspace_id": worker_run.workspace_id,
+                            "run_id": worker_run.id,
+                        },
+                    )
+                deleted_runs += 1
+
+        if deleted_runs:
+            logger.info(
+                "Pruned retained execution artifacts",
+                extra={
+                    "deleted_runs": deleted_runs,
+                    "workspace_root": str(self.workspace_root) if self.workspace_root else None,
+                    "retention_seconds": self.retention_seconds,
+                },
+            )
+        return deleted_runs
 
     def create_task(self, submission: TaskSubmission) -> tuple[TaskSnapshot, _PersistedTaskContext]:
         """Persist a new task request and return the initial pollable snapshot."""
@@ -1824,6 +1898,11 @@ class TaskExecutionService:
         force_task_status: TaskStatus | None = None,
     ) -> None:
         """Persist route, task status, worker-run metadata, and artifacts."""
+        retention_expires_at = (
+            finished_at + timedelta(seconds=self.retention_seconds)
+            if self.retention_seconds is not None
+            else None
+        )
         with session_scope(self.session_factory) as session:
             task_repo = TaskRepository(session)
             worker_run_repo = WorkerRunRepository(session)
@@ -1893,6 +1972,7 @@ class TaskExecutionService:
                 files_changed_count=len(result.files_changed) if result is not None else 0,
                 files_changed=result.files_changed if result is not None else [],
                 artifact_index=artifact_index,
+                retention_expires_at=retention_expires_at,
             )
 
             # Use the state-side marker of already-persisted events to avoid redundant DB queries
@@ -1934,6 +2014,8 @@ class TaskExecutionService:
                     name=artifact.name,
                     uri=artifact.uri,
                 )
+
+        self._prune_retained_runs(now=finished_at)
 
     def _log_task_outcome(self, task_snapshot: TaskSnapshot) -> None:
         """Emit the structured task-run log required for execution-path tracing."""

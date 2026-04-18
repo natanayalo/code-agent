@@ -20,6 +20,7 @@ The repo currently contains:
 - sandbox command artifact capture and shared audit integration
 - a production-class `CodexCliWorker` that provisions a persistent sandbox container, manages shell sessions, and uses a real provider CLI adapter
 - an explicit typed tool registry with policy-aware bash tools and budget enforcement
+- sandbox retention that uses explicit run expiry metadata to prune stale retained workspaces and clear captured artifact records
 - **Skeptical Memory (Milestone 7)**: structured memory entries with provenance, confidence, and verification metadata
 - **Compact Session State (Milestone 7)**: persistent context (goals, decisions, risks) across multiple task iterations
 

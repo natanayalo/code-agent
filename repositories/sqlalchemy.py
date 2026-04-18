@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any, Final, cast
 from uuid import uuid4
 
-from sqlalchemy import and_, case, func, insert, or_, select, update
+from sqlalchemy import and_, case, delete, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -584,6 +584,7 @@ class WorkerRunRepository:
         files_changed_count: int = 0,
         files_changed: list[str] | None = None,
         artifact_index: list[dict[str, Any]] | None = None,
+        retention_expires_at: datetime | None = None,
     ) -> WorkerRun:
         worker_run = WorkerRun(
             task_id=task_id,
@@ -601,6 +602,7 @@ class WorkerRunRepository:
             files_changed_count=files_changed_count,
             files_changed=files_changed,
             artifact_index=artifact_index,
+            retention_expires_at=retention_expires_at,
         )
         self.session.add(worker_run)
         self.session.flush()
@@ -616,6 +618,26 @@ class WorkerRunRepository:
             .order_by(WorkerRun.started_at.asc())
         )
         return list(self.session.scalars(statement))
+
+    def list_retained_before(self, retention_expires_before: datetime) -> list[WorkerRun]:
+        statement = (
+            select(WorkerRun)
+            .where(
+                WorkerRun.retention_expires_at.is_not(None),
+                WorkerRun.retention_expires_at <= retention_expires_before,
+            )
+            .order_by(WorkerRun.retention_expires_at.asc(), WorkerRun.started_at.asc())
+        )
+        return list(self.session.scalars(statement))
+
+    def clear_artifact_index(self, run_id: str) -> WorkerRun | None:
+        worker_run = self.get(run_id)
+        if worker_run is None:
+            return None
+
+        worker_run.artifact_index = []
+        self.session.flush()
+        return worker_run
 
     def complete(
         self,
@@ -724,6 +746,12 @@ class ArtifactRepository:
             select(Artifact).where(Artifact.run_id == run_id).order_by(Artifact.created_at.asc())
         )
         return list(self.session.scalars(statement))
+
+    def delete_by_run(self, run_id: str) -> int:
+        statement = delete(Artifact).where(Artifact.run_id == run_id)
+        result = self.session.execute(statement)
+        self.session.flush()
+        return int(getattr(result, "rowcount", 0) or 0)
 
 
 class PersonalMemoryRepository:
