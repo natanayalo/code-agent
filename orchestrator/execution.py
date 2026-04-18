@@ -59,6 +59,39 @@ _CALLBACK_RESOLUTION_TIMEOUT_SECONDS = 2.0
 _CALLBACK_DNS_EXECUTOR_MAX_WORKERS = 4
 _callback_dns_executor: ThreadPoolExecutor | None = None
 _callback_dns_executor_lock = Lock()
+_INTERACTIVE_EXECUTION_MODE = "interactive"
+_UNATTENDED_EXECUTION_MODE = "unattended"
+_VALID_EXECUTION_MODES = frozenset({_INTERACTIVE_EXECUTION_MODE, _UNATTENDED_EXECUTION_MODE})
+
+# T-102: global defaults and hard caps for runtime budgets.
+_DEFAULT_EXECUTION_BUDGETS: dict[str, dict[str, int]] = {
+    _INTERACTIVE_EXECUTION_MODE: {
+        "max_iterations": 8,
+        "worker_timeout_seconds": 300,
+        "max_tool_calls": 24,
+        "max_shell_commands": 24,
+        "max_retries": 2,
+    },
+    _UNATTENDED_EXECUTION_MODE: {
+        "max_iterations": 5,
+        "worker_timeout_seconds": 180,
+        "max_tool_calls": 12,
+        "max_shell_commands": 12,
+        "max_retries": 1,
+    },
+}
+_GLOBAL_BUDGET_CAPS: dict[str, int] = {
+    "max_iterations": 20,
+    "worker_timeout_seconds": 900,
+    "max_minutes": 15,
+    "orchestrator_timeout_seconds": 930,
+    "command_timeout_seconds": 300,
+    "max_tool_calls": 100,
+    "max_shell_commands": 100,
+    "max_retries": 10,
+    "max_verifier_passes": 5,
+    "max_observation_characters": 12000,
+}
 
 
 class ExecutionModel(BaseModel):
@@ -74,6 +107,75 @@ class SubmissionSession(ExecutionModel):
     external_user_id: str = Field(default="http:anonymous", min_length=1)
     external_thread_id: str = Field(default="http-default", min_length=1)
     display_name: str | None = None
+
+
+def _coerce_int_like(value: object) -> int | None:
+    """Parse integer-like values while rejecting booleans and invalid numerics."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        try:
+            return int(value)
+        except (OverflowError, ValueError):
+            return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(float(stripped))
+        except (OverflowError, ValueError):
+            return None
+    return None
+
+
+def _coerce_positive_int_like(value: object) -> int | None:
+    """Return a positive integer when one is provided, else None."""
+    parsed = _coerce_int_like(value)
+    return parsed if parsed is not None and parsed > 0 else None
+
+
+def _resolve_execution_mode(
+    *,
+    channel: str,
+    constraints: Mapping[str, Any],
+    budget: Mapping[str, Any],
+) -> str:
+    """Resolve execution mode with explicit overrides before channel defaults."""
+    candidates = (budget.get("execution_mode"), constraints.get("execution_mode"))
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            normalized = candidate.strip().lower()
+            if normalized in _VALID_EXECUTION_MODES:
+                return normalized
+    return _INTERACTIVE_EXECUTION_MODE if channel == "telegram" else _UNATTENDED_EXECUTION_MODE
+
+
+def _apply_execution_budget_policy(
+    *,
+    channel: str,
+    constraints: Mapping[str, Any],
+    budget: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return an effective runtime budget with mode defaults and global hard caps."""
+    execution_mode = _resolve_execution_mode(
+        channel=channel, constraints=constraints, budget=budget
+    )
+    effective_budget: dict[str, Any] = dict(budget)
+    effective_budget["execution_mode"] = execution_mode
+
+    for key, default_value in _DEFAULT_EXECUTION_BUDGETS[execution_mode].items():
+        if _coerce_positive_int_like(effective_budget.get(key)) is None:
+            effective_budget[key] = default_value
+
+    for key, cap in _GLOBAL_BUDGET_CAPS.items():
+        coerced_value = _coerce_positive_int_like(effective_budget.get(key))
+        if coerced_value is not None:
+            effective_budget[key] = min(coerced_value, cap)
+
+    return effective_budget
 
 
 def _is_unsafe_callback_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -1504,6 +1606,12 @@ class TaskExecutionService:
 
         config = {"configurable": {"thread_id": persisted.task_id}}
 
+        effective_budget = _apply_execution_budget_policy(
+            channel=persisted.channel,
+            constraints=submission.constraints,
+            budget=submission.budget,
+        )
+
         raw_output = await self.graph.ainvoke(
             {
                 "session": SessionRef(
@@ -1526,7 +1634,7 @@ class TaskExecutionService:
                         else None
                     ),
                     "constraints": dict(submission.constraints),
-                    "budget": dict(submission.budget),
+                    "budget": effective_budget,
                     "secrets": dict(submission.secrets),
                     "tools": submission.tools,
                 },
