@@ -50,6 +50,7 @@ from repositories import (
     WorkerRunRepository,
     session_scope,
 )
+from tools import ToolPermissionLevel
 from workers import ArtifactReference, Worker, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -492,7 +493,7 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
     first = payloads[0] if payloads else {}
     approval_type = str(first.get("approval_type") or "").strip()
     reason = str(first.get("reason") or "").strip()
-    requested_permission = str(first.get("requested_permission") or "").strip()
+    requested_permission = _coerce_requested_permission(first.get("requested_permission"))
 
     if approval_type == "permission_escalation":
         if requested_permission:
@@ -511,6 +512,19 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
     if reason:
         summary = f"{summary} {reason}"
     return summary
+
+
+def _coerce_requested_permission(value: object) -> str | None:
+    """Normalize an interrupt payload permission to explicit policy classes."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    try:
+        return ToolPermissionLevel(normalized).value
+    except ValueError:
+        return None
 
 
 def _normalize_orchestrator_graph_output(raw_output: object) -> object:
@@ -559,13 +573,18 @@ def _normalize_orchestrator_graph_output(raw_output: object) -> object:
 
     if normalized.get("result") is None:
         first_payload = payloads[0] if payloads else {}
-        requested_permission = first_payload.get("requested_permission")
+        requested_permission = _coerce_requested_permission(
+            first_payload.get("requested_permission")
+        )
+        if first_payload.get("requested_permission") is not None and requested_permission is None:
+            logger.warning(
+                "Ignoring unknown permission level from interrupt payload.",
+                extra={"requested_permission": first_payload.get("requested_permission")},
+            )
         normalized["result"] = WorkerResult(
             status="failure",
             summary=_interrupt_summary(payloads),
-            requested_permission=(
-                str(requested_permission).strip() if requested_permission is not None else None
-            ),
+            requested_permission=requested_permission,
             commands_run=[],
             files_changed=[],
             test_results=[],

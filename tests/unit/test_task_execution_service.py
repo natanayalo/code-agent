@@ -414,6 +414,53 @@ def test_normalize_orchestrator_output_converts_interrupts_to_failure_result() -
     assert "orchestrator interrupted awaiting manual approval" in state.errors
 
 
+def test_normalize_orchestrator_output_canonicalizes_requested_permission() -> None:
+    """Interrupt permission payloads should be normalized to explicit permission classes."""
+    raw_output = {
+        "task": {"task_text": "Fetch dependency"},
+        "__interrupt__": [
+            {
+                "value": {
+                    "approval_type": "permission_escalation",
+                    "requested_permission": "  Networked_Write  ",
+                    "reason": "Network install required.",
+                }
+            }
+        ],
+    }
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    state = OrchestratorState.model_validate(normalized)
+
+    assert state.result is not None
+    assert state.result.requested_permission == "networked_write"
+    assert "networked_write" in (state.result.summary or "")
+
+
+def test_normalize_orchestrator_output_drops_unknown_requested_permission() -> None:
+    """Unknown permission values should fail closed and not be persisted as requested permission."""
+    raw_output = {
+        "task": {"task_text": "Fetch dependency"},
+        "__interrupt__": [
+            {
+                "value": {
+                    "approval_type": "permission_escalation",
+                    "requested_permission": "network_write",
+                    "reason": "Network install required.",
+                }
+            }
+        ],
+    }
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    state = OrchestratorState.model_validate(normalized)
+
+    assert state.result is not None
+    assert state.result.requested_permission is None
+    assert "permission escalation approval" in (state.result.summary or "")
+    assert "network_write" not in (state.result.summary or "")
+
+
 def test_normalize_orchestrator_output_formats_manual_approval_summary_without_duplication() -> (
     None
 ):
