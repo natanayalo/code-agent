@@ -79,11 +79,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-103 Retention policy.
 
 ## Next
 
-- T-103 Retention policy.
+- None
 
 ## Blocked
 

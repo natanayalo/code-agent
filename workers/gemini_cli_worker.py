@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
-import tempfile
 import threading
 from collections.abc import Callable
 from functools import partial
@@ -26,7 +24,7 @@ from sandbox import (
     WorkspaceManagerError,
     WorkspaceRequest,
 )
-from sandbox.workspace import _mask_url_credentials
+from sandbox.workspace import _mask_url_credentials, default_workspace_root
 from tools import (
     DEFAULT_TOOL_REGISTRY,
     EXECUTE_BASH_TOOL_NAME,
@@ -50,8 +48,6 @@ from workers.prompt import build_system_prompt
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_WORKSPACE_ROOT_ENV_VAR = "CODE_AGENT_WORKSPACE_ROOT"
-
 
 class ShellSessionFactory(Protocol):
     """Factory for opening a persistent shell session in a running container."""
@@ -69,24 +65,6 @@ def _slugify(value: str) -> str:
     """Create a filesystem-safe slug for sandbox bookkeeping."""
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug[:48] or "task"
-
-
-def _default_workspace_root() -> Path:
-    """Return the default workspace root, honoring an environment override."""
-    configured_root = os.environ.get(DEFAULT_WORKSPACE_ROOT_ENV_VAR)
-    if configured_root:
-        return Path(configured_root).expanduser()
-
-    getuid = getattr(os, "getuid", None)
-    if callable(getuid):
-        workspace_owner = f"uid-{getuid()}"
-    else:
-        username = os.environ.get("USER") or os.environ.get("USERNAME")
-        if username:
-            workspace_owner = f"user-{_slugify(username)}"
-        else:
-            workspace_owner = f"pid-{os.getpid()}"
-    return Path(tempfile.gettempdir()) / f"code-agent-workspaces-{workspace_owner}"
 
 
 def _workspace_task_id(request: WorkerRequest) -> str:
@@ -208,7 +186,7 @@ class GeminiCliWorker(Worker):
             retain_on_failure=True,
         )
         self.workspace_manager = workspace_manager or WorkspaceManager(
-            workspace_root or _default_workspace_root(),
+            workspace_root or default_workspace_root(),
             cleanup_policy=self.cleanup_policy,
         )
         self.container_manager = container_manager or DockerSandboxContainerManager()

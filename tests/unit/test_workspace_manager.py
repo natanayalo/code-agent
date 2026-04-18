@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
+import sandbox.workspace as workspace_module
 from sandbox.workspace import (
+    DEFAULT_WORKSPACE_ROOT_ENV_VAR,
     WorkspaceCleanupPolicy,
     WorkspaceHandle,
     WorkspaceManager,
@@ -17,12 +19,38 @@ from sandbox.workspace import (
     _run_command,
     _should_delete_workspace,
     _slugify_task_id,
+    default_workspace_root,
 )
 
 
 def test_slugify_task_id_normalizes_symbols() -> None:
     """Workspace ids should be filesystem-safe and predictable."""
     assert _slugify_task_id("Task 30 / Sandbox!") == "task-30-sandbox"
+
+
+def test_default_workspace_root_slugifies_username_when_getuid_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The shared default workspace root should slugify non-POSIX usernames."""
+    monkeypatch.delattr(workspace_module.os, "getuid", raising=False)
+    monkeypatch.setenv("USER", "Team Lead!")
+    monkeypatch.setenv("USERNAME", "")
+
+    root = default_workspace_root()
+
+    assert root.name == "code-agent-workspaces-user-team-lead"
+
+
+def test_default_workspace_root_ignores_whitespace_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Whitespace-only env overrides should be treated as unset."""
+    monkeypatch.setenv(DEFAULT_WORKSPACE_ROOT_ENV_VAR, "   ")
+
+    root = default_workspace_root()
+
+    assert root.name.startswith("code-agent-workspaces-")
+    assert root != Path("   ").expanduser()
 
 
 def test_build_clone_command_adds_branch_when_requested() -> None:

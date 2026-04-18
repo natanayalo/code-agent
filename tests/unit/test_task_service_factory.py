@@ -117,6 +117,33 @@ def test_build_task_service_from_env_builds_a_codex_cli_worker(tmp_path: Path) -
         _close_outbound_http_clients(outbound_http_clients)
 
 
+def test_build_task_service_from_env_uses_default_workspace_root_when_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bootstrap should mirror the workers' default workspace root when unset."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    fallback_root = tmp_path / "default-workspaces"
+    monkeypatch.setattr(
+        "apps.api.task_service_factory.default_workspace_root",
+        lambda: fallback_root,
+    )
+
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert service.workspace_root == fallback_root.resolve()
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
 def test_build_task_service_from_env_builds_gemini_worker_when_configured(tmp_path: Path) -> None:
     """When Gemini env vars are set the service should wire a GeminiCliWorker."""
     database_path = tmp_path / "code-agent.db"

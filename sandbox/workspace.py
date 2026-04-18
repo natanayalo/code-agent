@@ -8,6 +8,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
@@ -47,6 +48,9 @@ class WorkspaceCleanupPolicy(SandboxModel):
     retain_on_failure: bool = True
 
 
+DEFAULT_WORKSPACE_ROOT_ENV_VAR = "CODE_AGENT_WORKSPACE_ROOT"
+
+
 class WorkspaceRequest(SandboxModel):
     """Input required to provision a task workspace."""
 
@@ -78,6 +82,12 @@ def _slugify_task_id(task_id: str) -> str:
     return slug or "task"
 
 
+def _slugify_workspace_owner(value: str) -> str:
+    """Normalize a workspace owner component for the default path."""
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug[:48] or "task"
+
+
 def _mask_url_credentials(text: str) -> str:
     """Mask credentials in repository URLs to prevent leaking secrets."""
     return re.sub(r"://[^/ ]+@", "://****@", text)
@@ -86,6 +96,25 @@ def _mask_url_credentials(text: str) -> str:
 def _build_workspace_id(task_id: str) -> str:
     """Generate a readable unique workspace identifier."""
     return f"workspace-{_slugify_task_id(task_id)}-{uuid4().hex[:8]}"
+
+
+def default_workspace_root() -> Path:
+    """Return the default workspace root, honoring an environment override."""
+    configured_root = os.environ.get(DEFAULT_WORKSPACE_ROOT_ENV_VAR)
+    configured_root = configured_root.strip() if configured_root is not None else ""
+    if configured_root:
+        return Path(configured_root).expanduser()
+
+    getuid = getattr(os, "getuid", None)
+    if callable(getuid):
+        workspace_owner = f"uid-{getuid()}"
+    else:
+        username = os.environ.get("USER") or os.environ.get("USERNAME")
+        if username:
+            workspace_owner = f"user-{_slugify_workspace_owner(username)}"
+        else:
+            workspace_owner = f"pid-{os.getpid()}"
+    return Path(tempfile.gettempdir()) / f"code-agent-workspaces-{workspace_owner}"
 
 
 def _build_clone_command(repo_url: str, destination: Path, branch: str | None) -> list[str]:

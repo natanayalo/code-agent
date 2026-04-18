@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Final
 from urllib.parse import quote
 
@@ -16,6 +17,7 @@ from apps.api.progress import (
 from apps.runtime import coerce_positive_int_env as _coerce_positive_int
 from orchestrator.execution import ProgressNotifier, TaskExecutionService
 from repositories import create_engine_from_url, create_session_factory
+from sandbox.workspace import default_workspace_root
 from workers import (
     CodexCliWorker,
     CodexExecCliRuntimeAdapter,
@@ -41,6 +43,7 @@ DEFAULT_DATABASE_DRIVER: Final[str] = "postgresql+psycopg"
 TELEGRAM_BOT_TOKEN_ENV_VAR: Final[str] = "CODE_AGENT_TELEGRAM_BOT_TOKEN"
 TELEGRAM_API_BASE_URL_ENV_VAR: Final[str] = "CODE_AGENT_TELEGRAM_API_BASE_URL"
 CHECKPOINT_DB_PATH_ENV_VAR: Final[str] = "CODE_AGENT_CHECKPOINT_DB_PATH"
+WORKSPACE_ROOT_ENV_VAR: Final[str] = "CODE_AGENT_WORKSPACE_ROOT"
 
 
 def _is_enabled(value: str | None) -> bool:
@@ -130,6 +133,11 @@ def build_task_service_from_env(
                 ),
             )
         )
+    workspace_root = resolved_env.get(WORKSPACE_ROOT_ENV_VAR)
+    if workspace_root is None or not workspace_root.strip():
+        resolved_workspace_root = default_workspace_root().resolve()
+    else:
+        resolved_workspace_root = Path(workspace_root).expanduser().resolve()
     return TaskExecutionService(
         session_factory=session_factory,
         worker=codex_worker,
@@ -139,5 +147,6 @@ def build_task_service_from_env(
             resolved_env.get(DEFAULT_TASK_MAX_ATTEMPTS_ENV_VAR),
             default=3,
         ),
+        workspace_root=resolved_workspace_root,
         checkpoint_path=resolved_env.get(CHECKPOINT_DB_PATH_ENV_VAR),
     )
