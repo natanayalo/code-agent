@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from typing import Any
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -85,7 +85,7 @@ class EncryptedJSON(TypeDecorator):
             try:
                 decrypted = self.fernet.decrypt(value.encode()).decode()
                 return json.loads(decrypted)
-            except Exception:
+            except (InvalidToken, ValueError):
                 logger.warning("Failed to decrypt secret; attempting to load as plain JSON.")
         try:
             return json.loads(value)

@@ -1168,7 +1168,7 @@ class TaskExecutionService:
                 success_rate=run_metrics["success_rate"],
             )
 
-    def _are_secrets_encrypted(self) -> bool:
+    def is_secret_encryption_active(self) -> bool:
         """Return True if secret encryption is active."""
         # We check the model directly to see if the decorator is active.
         return Task.secrets.property.columns[0].type.is_active()
@@ -1328,7 +1328,7 @@ class TaskExecutionService:
                 constraints=dict(submission.constraints),
                 budget=dict(submission.budget),
                 secrets=dict(submission.secrets),
-                secrets_encrypted=self._are_secrets_encrypted(),
+                secrets_encrypted=self.is_secret_encryption_active(),
                 status=status,
                 max_attempts=max(1, max_attempts),
                 next_attempt_at=now,

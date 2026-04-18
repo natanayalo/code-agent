@@ -62,7 +62,7 @@ def create_app(
                 # Verify secret encryption is active (Phase 4 security hardening)
                 if (
                     app.state.task_service is not None
-                    and not app.state.task_service._are_secrets_encrypted()
+                    and not app.state.task_service.is_secret_encryption_active()
                 ):
                     logger.critical(
                         "SECURITY WARNING: CODE_AGENT_ENCRYPTION_KEY is not set. "
