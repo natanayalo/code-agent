@@ -114,20 +114,28 @@ class EncryptedJSON(TypeDecorator):
             return None
         if self.fernet:
             try:
-                decrypted = self.fernet.decrypt(value.encode()).decode()
-                return json.loads(decrypted)
+                # If it looks like a Fernet token, we MUST be able to decrypt it.
+                if isinstance(value, str) and value.startswith("gAAAA"):
+                    decrypted = self.fernet.decrypt(value.encode()).decode()
+                    return json.loads(decrypted)
+
+                # Otherwise, treat as plain JSON (migration compatibility).
+                return json.loads(value)
             except InvalidToken:
                 logger.critical(
                     "SECURITY CRITICAL: Failed to decrypt secret with active Fernet key. "
-                    "This usually indicates a configuration mismatch "
-                    "(wrong CODE_AGENT_ENCRYPTION_KEY) or data corruption. "
-                    "Falling back to plain text for possible migration compatibility."
+                    "This indicates a key mismatch (wrong CODE_AGENT_ENCRYPTION_KEY) "
+                    "or data corruption for an already encrypted field."
                 )
-            except ValueError:
-                logger.warning("Failed to decode secret as UTF-8 or JSON.")
+                raise
+            except (ValueError, json.JSONDecodeError):
+                logger.warning("Value is not a valid Fernet token or JSON; returning raw.")
 
-        # This will raise naturally (JSONDecodeError or TypeError) if it's not valid JSON
-        return json.loads(value)
+        # Fallback for inactive encryption or non-JSON plain text.
+        try:
+            return json.loads(value)
+        except (ValueError, json.JSONDecodeError, TypeError):
+            return value
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):

@@ -78,10 +78,11 @@ def test_encrypted_json_handles_decryption_failure_gracefully() -> None:
     # Try to decrypt with Key B
     with patch.dict(os.environ, {"CODE_AGENT_ENCRYPTION_KEY": key_b}):
         decorator_b = EncryptedJSON()
-        # This will fail decryption, log a CRITICAL error, and then fail json.loads,
-        # raising JSONDecodeError
+        # This will fail decryption and log a SECURITY CRITICAL error.
         with patch("db.models.logger.critical") as mock_critical:
-            with pytest.raises(json.JSONDecodeError):
+            from cryptography.fernet import InvalidToken
+
+            with pytest.raises(InvalidToken):
                 decorator_b.process_result_value(encrypted_val, None)
             mock_critical.assert_called_once()
             assert "SECURITY CRITICAL" in mock_critical.call_args[0][0]
