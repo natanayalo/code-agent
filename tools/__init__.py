@@ -27,6 +27,7 @@ from tools.github import (
 from tools.mcp import DEFAULT_MCP_TOOL_CLIENT, McpToolClient, McpToolDescriptor
 from tools.policy import (
     ToolPermissionDecision,
+    coerce_permission_level,
     granted_permission_from_constraints,
     permission_allows,
     permission_rank,
@@ -118,6 +119,7 @@ __all__ = [
     "ToolRegistry",
     "ToolSideEffectLevel",
     "UnknownToolError",
+    "coerce_permission_level",
     "granted_permission_from_constraints",
     "build_browser_command_from_input",
     "build_search_dir_command_from_input",

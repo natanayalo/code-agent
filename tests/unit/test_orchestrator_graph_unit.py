@@ -476,7 +476,7 @@ def test_await_permission_escalation_approved():
             "result": {
                 "status": "failure",
                 "next_action_hint": "request_higher_permission",
-                "requested_permission": "network_write",
+                "requested_permission": "networked_write",
                 "summary": "needs high permission",
             },
         }
@@ -485,7 +485,7 @@ def test_await_permission_escalation_approved():
         res = await_permission_escalation(state)
     assert res["current_step"] == "await_permission_escalation"
     assert res["result"] is None
-    assert res["task"]["constraints"]["granted_permission"] == "network_write"
+    assert res["task"]["constraints"]["granted_permission"] == "networked_write"
 
 
 def test_await_permission_escalation_rejected():
@@ -495,7 +495,7 @@ def test_await_permission_escalation_rejected():
             "result": {
                 "status": "failure",
                 "next_action_hint": "request_higher_permission",
-                "requested_permission": "network_write",
+                "requested_permission": "networked_write",
                 "summary": "needs high permission",
             },
         }
@@ -505,7 +505,7 @@ def test_await_permission_escalation_rejected():
     assert res["current_step"] == "await_permission_escalation"
     assert (
         res["result"]["summary"]
-        == "Permission escalation to 'network_write' was rejected. Run halted."
+        == "Permission escalation to 'networked_write' was rejected. Run halted."
     )
     assert res["result"]["next_action_hint"] == "await_manual_follow_up"
 
@@ -524,6 +524,28 @@ def test_await_permission_escalation_missing_permission():
     res = await_permission_escalation(state)
     assert res["current_step"] == "await_permission_escalation"
     assert res["result"]["status"] == "error"
+    assert res["result"]["next_action_hint"] == "inspect_worker_configuration"
+
+
+def test_await_permission_escalation_invalid_permission():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "failure",
+                "next_action_hint": "request_higher_permission",
+                "requested_permission": "network_write",
+                "summary": "needs high permission",
+            },
+        }
+    )
+    res = await_permission_escalation(state)
+    assert res["current_step"] == "await_permission_escalation"
+    assert res["result"]["status"] == "error"
+    assert (
+        res["result"]["summary"] == "Worker requested an unknown permission level 'network_write'."
+    )
+    assert res["result"]["requested_permission"] is None
     assert res["result"]["next_action_hint"] == "inspect_worker_configuration"
 
 

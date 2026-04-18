@@ -22,6 +22,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
       - name: Install pre-commit
         run: |
           python -m pip install --upgrade pip

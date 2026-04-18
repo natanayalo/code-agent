@@ -414,6 +414,161 @@ def test_normalize_orchestrator_output_converts_interrupts_to_failure_result() -
     assert "orchestrator interrupted awaiting manual approval" in state.errors
 
 
+def test_normalize_orchestrator_output_canonicalizes_requested_permission() -> None:
+    """Interrupt permission payloads should be normalized to explicit permission classes."""
+    raw_output = {
+        "task": {"task_text": "Fetch dependency"},
+        "__interrupt__": [
+            {
+                "value": {
+                    "approval_type": "permission_escalation",
+                    "requested_permission": "  Networked_Write  ",
+                    "reason": "Network install required.",
+                }
+            }
+        ],
+    }
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    state = OrchestratorState.model_validate(normalized)
+
+    assert state.result is not None
+    assert state.result.requested_permission == "networked_write"
+    assert "networked_write" in (state.result.summary or "")
+
+
+def test_normalize_orchestrator_output_drops_unknown_requested_permission() -> None:
+    """Unknown permission values should fail closed and not be persisted as requested permission."""
+    raw_output = {
+        "task": {"task_text": "Fetch dependency"},
+        "__interrupt__": [
+            {
+                "value": {
+                    "approval_type": "permission_escalation",
+                    "requested_permission": "network_write",
+                    "reason": "Network install required.",
+                }
+            }
+        ],
+    }
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    state = OrchestratorState.model_validate(normalized)
+
+    assert state.result is not None
+    assert state.result.requested_permission is None
+    assert "permission escalation approval" in (state.result.summary or "")
+    assert "network_write" not in (state.result.summary or "")
+
+
+def test_normalize_orchestrator_output_canonicalizes_existing_result_permission() -> None:
+    """Existing result payloads should also normalize requested_permission to canonical classes."""
+    raw_output = {
+        "task": {"task_text": "Fetch dependency"},
+        "result": {
+            "status": "failure",
+            "summary": "permission requested",
+            "requested_permission": "  Networked_Write ",
+            "commands_run": [],
+            "files_changed": [],
+            "test_results": [],
+            "artifacts": [],
+        },
+    }
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    assert isinstance(normalized, dict)
+    assert normalized["result"]["requested_permission"] == "networked_write"
+
+
+def test_normalize_orchestrator_output_drops_unknown_existing_result_permission() -> None:
+    """Non-canonical requested_permission values in existing results should fail closed."""
+    raw_output = {
+        "task": {"task_text": "Fetch dependency"},
+        "result": {
+            "status": "failure",
+            "summary": "permission requested",
+            "requested_permission": "network_write",
+            "commands_run": [],
+            "files_changed": [],
+            "test_results": [],
+            "artifacts": [],
+        },
+    }
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    assert isinstance(normalized, dict)
+    assert normalized["result"]["requested_permission"] is None
+
+
+def test_normalize_orchestrator_output_canonicalizes_existing_result_model_permission() -> None:
+    """Normalization should also run when `result` is provided as a Pydantic model."""
+    raw_output = {
+        "task": {"task_text": "Fetch dependency"},
+        "result": WorkerResult(
+            status="failure",
+            summary="permission requested",
+            requested_permission="  Networked_Write ",
+            commands_run=[],
+            files_changed=[],
+            test_results=[],
+            artifacts=[],
+        ),
+    }
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    assert isinstance(normalized, dict)
+    assert normalized["result"]["requested_permission"] == "networked_write"
+
+
+def test_normalize_orchestrator_output_canonicalizes_when_raw_output_is_base_model() -> None:
+    """Normalization should run when the entire raw output is a Pydantic model."""
+    raw_output = OrchestratorState(
+        task={"task_text": "Fetch dependency"},
+        result=WorkerResult(
+            status="failure",
+            summary="permission requested",
+            requested_permission="  Networked_Write ",
+            commands_run=[],
+            files_changed=[],
+            test_results=[],
+            artifacts=[],
+        ),
+    )
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    assert isinstance(normalized, dict)
+    assert normalized["result"]["requested_permission"] == "networked_write"
+
+
+def test_normalize_orchestrator_output_preserves_interrupts_from_base_model_attributes() -> None:
+    """Interrupt metadata attached to model instances should survive normalization."""
+    raw_output = OrchestratorState(task={"task_text": "Delete files"})
+    object.__setattr__(
+        raw_output,
+        "__interrupt__",
+        [
+            {
+                "value": {
+                    "approval_type": "permission_escalation",
+                    "requested_permission": "  Networked_Write ",
+                }
+            }
+        ],
+    )
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    assert isinstance(normalized, dict)
+    assert "__interrupt__" not in normalized
+
+    state = OrchestratorState.model_validate(normalized)
+    assert state.result is not None
+    assert state.result.status == "failure"
+    assert state.result.requested_permission == "networked_write"
+    assert state.result.next_action_hint == "await_manual_follow_up"
+    assert "orchestrator interrupted awaiting manual approval" in state.errors
+
+
 def test_normalize_orchestrator_output_formats_manual_approval_summary_without_duplication() -> (
     None
 ):

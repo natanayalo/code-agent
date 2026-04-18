@@ -42,10 +42,12 @@ repos:
     hooks:
       - id: gitleaks
         args: [--redact]
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.9.0.6
+  - repo: local
     hooks:
       - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
+        language: system
         types: [shell]
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.4.4

@@ -50,6 +50,7 @@ from repositories import (
     WorkerRunRepository,
     session_scope,
 )
+from tools import coerce_permission_level
 from workers import ArtifactReference, Worker, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -492,7 +493,10 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
     first = payloads[0] if payloads else {}
     approval_type = str(first.get("approval_type") or "").strip()
     reason = str(first.get("reason") or "").strip()
-    requested_permission = str(first.get("requested_permission") or "").strip()
+    requested_permission_level = coerce_permission_level(first.get("requested_permission"))
+    requested_permission = (
+        requested_permission_level.value if requested_permission_level is not None else None
+    )
 
     if approval_type == "permission_escalation":
         if requested_permission:
@@ -515,10 +519,48 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
 
 def _normalize_orchestrator_graph_output(raw_output: object) -> object:
     """Strip transport-only interrupt keys and map unresolved interrupts to failure output."""
-    if not isinstance(raw_output, Mapping):
+
+    def _normalize_requested_permission(
+        raw_permission: object, *, warning_context: str
+    ) -> str | None:
+        requested_permission_level = coerce_permission_level(raw_permission)
+        if raw_permission is not None and requested_permission_level is None:
+            logger.warning(
+                f"Ignoring unknown permission level from {warning_context}.",
+                extra={"requested_permission": raw_permission},
+            )
+        return requested_permission_level.value if requested_permission_level is not None else None
+
+    if isinstance(raw_output, Mapping):
+        normalized = dict(raw_output)
+    elif isinstance(raw_output, BaseModel):
+        normalized = raw_output.model_dump(mode="json")
+        model_extra = raw_output.model_extra
+        if (
+            normalized.get("__interrupt__") is None
+            and isinstance(model_extra, Mapping)
+            and "__interrupt__" in model_extra
+        ):
+            normalized["__interrupt__"] = model_extra["__interrupt__"]
+        if normalized.get("__interrupt__") is None and hasattr(raw_output, "__interrupt__"):
+            normalized["__interrupt__"] = getattr(raw_output, "__interrupt__")
+    else:
         return raw_output
 
-    normalized = dict(raw_output)
+    existing_result = normalized.get("result")
+    normalized_result: dict[str, Any] | None = None
+    if isinstance(existing_result, Mapping):
+        normalized_result = dict(existing_result)
+    elif isinstance(existing_result, BaseModel):
+        normalized_result = existing_result.model_dump(mode="json")
+
+    if normalized_result is not None:
+        normalized_result["requested_permission"] = _normalize_requested_permission(
+            normalized_result.get("requested_permission"),
+            warning_context="result payload",
+        )
+        normalized["result"] = normalized_result
+
     interrupts_raw = normalized.pop("__interrupt__", None)
     if interrupts_raw is None:
         return normalized
@@ -559,13 +601,14 @@ def _normalize_orchestrator_graph_output(raw_output: object) -> object:
 
     if normalized.get("result") is None:
         first_payload = payloads[0] if payloads else {}
-        requested_permission = first_payload.get("requested_permission")
+        requested_permission = _normalize_requested_permission(
+            first_payload.get("requested_permission"),
+            warning_context="interrupt payload",
+        )
         normalized["result"] = WorkerResult(
             status="failure",
             summary=_interrupt_summary(payloads),
-            requested_permission=(
-                str(requested_permission).strip() if requested_permission is not None else None
-            ),
+            requested_permission=requested_permission,
             commands_run=[],
             files_changed=[],
             test_results=[],

@@ -26,6 +26,7 @@ from orchestrator.state import (
     WorkerDispatch,
     WorkerType,
 )
+from tools import coerce_permission_level
 from workers import Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -888,7 +889,44 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
                 message="Worker requested higher permission but did not specify which one.",
             ),
         }
-    reason = state.result.summary or f"Worker requested higher permission: {requested_permission}"
+    requested_permission_level = coerce_permission_level(requested_permission)
+    if requested_permission_level is None:
+        logger.error(
+            "Worker requested an unknown permission level.",
+            extra={
+                "session_id": state.session.session_id if state.session else None,
+                "requested_permission": requested_permission,
+            },
+        )
+        failed_result = state.result.model_copy(
+            update={
+                "status": "error",
+                "summary": (
+                    f"Worker requested an unknown permission level '{requested_permission}'."
+                ),
+                "requested_permission": None,
+                "next_action_hint": "inspect_worker_configuration",
+            }
+        )
+        return {
+            "current_step": "await_permission_escalation",
+            "result": failed_result.model_dump(),
+            "progress_updates": _progress_update(
+                state,
+                f"permission request failed: invalid permission '{requested_permission}'",
+            ),
+            **_timeline_event(
+                state,
+                TimelineEventType.WORKER_ERROR,
+                message=f"Worker requested an unknown permission level '{requested_permission}'.",
+                payload={"requested_permission": requested_permission},
+            ),
+        }
+
+    requested_permission_name = requested_permission_level.value
+    reason = (
+        state.result.summary or f"Worker requested higher permission: {requested_permission_name}"
+    )
 
     approved = _coerce_approval_decision(
         interrupt(
@@ -898,14 +936,14 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
                 "resume_token": f"permission-{state.task.task_id or 'pending'}",
                 "task_text": task_text,
                 "chosen_worker": state.route.chosen_worker,
-                "requested_permission": requested_permission,
+                "requested_permission": requested_permission_name,
             }
         )
     )
 
     if approved:
         new_constraints = dict(state.task.constraints)
-        new_constraints["granted_permission"] = requested_permission
+        new_constraints["granted_permission"] = requested_permission_name
         updated_task = state.task.model_copy(update={"constraints": new_constraints})
 
         return {
@@ -913,20 +951,21 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
             "task": updated_task.model_dump(),
             "result": None,
             "progress_updates": _progress_update(
-                state, f"permission '{requested_permission}' granted"
+                state, f"permission '{requested_permission_name}' granted"
             ),
             **_timeline_event(
                 state,
                 TimelineEventType.APPROVAL_GRANTED,
-                message=f"Permission '{requested_permission}' granted.",
-                payload={"granted_permission": requested_permission},
+                message=f"Permission '{requested_permission_name}' granted.",
+                payload={"granted_permission": requested_permission_name},
             ),
         }
     else:
         failed_result = state.result.model_copy(
             update={
                 "summary": (
-                    f"Permission escalation to '{requested_permission}' was rejected. Run halted."
+                    "Permission escalation to "
+                    f"'{requested_permission_name}' was rejected. Run halted."
                 ),
                 "next_action_hint": "await_manual_follow_up",
             }
@@ -935,13 +974,13 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
             "current_step": "await_permission_escalation",
             "result": failed_result.model_dump(),
             "progress_updates": _progress_update(
-                state, f"permission '{requested_permission}' rejected"
+                state, f"permission '{requested_permission_name}' rejected"
             ),
             **_timeline_event(
                 state,
                 TimelineEventType.APPROVAL_REJECTED,
-                message=f"Permission '{requested_permission}' rejected.",
-                payload={"requested_permission": requested_permission},
+                message=f"Permission '{requested_permission_name}' rejected.",
+                payload={"requested_permission": requested_permission_name},
             ),
         }
 
