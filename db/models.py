@@ -65,18 +65,18 @@ class EncryptedJSON(TypeDecorator):
     def fernet(self) -> Fernet | None:
         """Lazily initialize and cache Fernet from environment."""
         key = os.environ.get("CODE_AGENT_ENCRYPTION_KEY")
-        if key == self._last_key and self._cached_fernet is not None:
-            return self._cached_fernet
+        if key == EncryptedJSON._last_key and EncryptedJSON._cached_fernet is not None:
+            return EncryptedJSON._cached_fernet
 
         if not key:
-            self._last_key = None
-            self._cached_fernet = None
+            EncryptedJSON._last_key = None
+            EncryptedJSON._cached_fernet = None
             return None
 
         try:
-            self._cached_fernet = Fernet(key.encode())
-            self._last_key = key
-            return self._cached_fernet
+            EncryptedJSON._cached_fernet = Fernet(key.encode())
+            EncryptedJSON._last_key = key
+            return EncryptedJSON._cached_fernet
         except Exception as e:
             logger.error("Invalid CODE_AGENT_ENCRYPTION_KEY provided")
             raise RuntimeError("Encryption is configured but the key is invalid.") from e
