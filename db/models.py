@@ -113,25 +113,31 @@ class EncryptedJSON(TypeDecorator):
         if value is None:
             return None
         if self.fernet:
-            try:
-                # If it looks like a Fernet token, we MUST be able to decrypt it.
-                if isinstance(value, str) and value.startswith("gAAAA"):
+            # If it looks like a Fernet token, we MUST be able to decrypt it.
+            if isinstance(value, str) and value.startswith("gAAAA"):
+                try:
                     decrypted = self.fernet.decrypt(value.encode()).decode()
                     return json.loads(decrypted)
+                except InvalidToken:
+                    logger.critical(
+                        "SECURITY CRITICAL: Failed to decrypt secret with active Fernet key. "
+                        "This indicates a key mismatch (wrong CODE_AGENT_ENCRYPTION_KEY) "
+                        "or data corruption for an already encrypted field."
+                    )
+                    raise
 
-                # Otherwise, treat as plain JSON (migration compatibility).
+            # Not a Fernet token — legacy plain JSON (migration compatibility).
+            # Return directly; do not fall through to the outer fallback block.
+            try:
                 return json.loads(value)
-            except InvalidToken:
-                logger.critical(
-                    "SECURITY CRITICAL: Failed to decrypt secret with active Fernet key. "
-                    "This indicates a key mismatch (wrong CODE_AGENT_ENCRYPTION_KEY) "
-                    "or data corruption for an already encrypted field."
-                )
-                raise
             except (ValueError, json.JSONDecodeError):
-                logger.warning("Value is not a valid Fernet token or JSON; returning raw.")
+                logger.warning(
+                    "Encryption is active but value is not a Fernet token and not valid JSON; "
+                    "returning raw value."
+                )
+                return value
 
-        # Fallback for inactive encryption or non-JSON plain text.
+        # Encryption inactive — parse plain JSON or return raw.
         try:
             return json.loads(value)
         except (ValueError, json.JSONDecodeError, TypeError):
