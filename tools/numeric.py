@@ -1,4 +1,4 @@
-"""Shared coercion helpers for budget-like numeric settings."""
+"""Shared numeric coercion helpers for config and budget parsing."""
 
 from __future__ import annotations
 

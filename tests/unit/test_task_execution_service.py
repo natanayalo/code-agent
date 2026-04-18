@@ -259,6 +259,17 @@ def test_apply_execution_budget_policy_defaults_to_interactive_for_telegram() ->
     assert budget["max_retries"] == 2
 
 
+def test_apply_execution_budget_policy_treats_channel_case_insensitively() -> None:
+    """Channel matching for execution mode should be case-insensitive."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="Telegram",
+        constraints={},
+        budget={},
+    )
+
+    assert budget["execution_mode"] == "interactive"
+
+
 def test_apply_execution_budget_policy_respects_explicit_execution_mode_override() -> None:
     """Explicit mode override should take precedence over channel defaults."""
     budget = execution_module._apply_execution_budget_policy(

@@ -15,7 +15,6 @@ from langgraph.types import interrupt
 
 from db.base import utc_now
 from db.enums import TimelineEventType
-from orchestrator.budget_utils import coerce_positive_int_like
 from orchestrator.state import (
     ApprovalCheckpoint,
     OrchestratorState,
@@ -28,6 +27,7 @@ from orchestrator.state import (
     WorkerType,
 )
 from tools import coerce_permission_level
+from tools.numeric import coerce_positive_int_like
 from workers import Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)

@@ -36,10 +36,6 @@ from db.models import (
     Task,
     User,
 )
-from orchestrator.budget_utils import (
-    coerce_non_negative_int_like,
-    coerce_positive_int_like,
-)
 from orchestrator.checkpoints import create_async_sqlite_checkpointer
 from orchestrator.graph import build_orchestrator_graph
 from orchestrator.state import OrchestratorState, SessionRef
@@ -55,6 +51,7 @@ from repositories import (
     session_scope,
 )
 from tools import coerce_permission_level
+from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
 from workers import ArtifactReference, Worker, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -132,7 +129,12 @@ def _resolve_execution_mode(
             normalized = candidate.strip().lower()
             if normalized in _VALID_EXECUTION_MODES:
                 return normalized
-    return _INTERACTIVE_EXECUTION_MODE if channel == "telegram" else _UNATTENDED_EXECUTION_MODE
+    normalized_channel = channel.strip().lower()
+    return (
+        _INTERACTIVE_EXECUTION_MODE
+        if normalized_channel == "telegram"
+        else _UNATTENDED_EXECUTION_MODE
+    )
 
 
 def _apply_execution_budget_policy(
