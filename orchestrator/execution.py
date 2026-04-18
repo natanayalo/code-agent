@@ -519,10 +519,13 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
 
 def _normalize_orchestrator_graph_output(raw_output: object) -> object:
     """Strip transport-only interrupt keys and map unresolved interrupts to failure output."""
-    if not isinstance(raw_output, Mapping):
+    if isinstance(raw_output, Mapping):
+        normalized = dict(raw_output)
+    elif isinstance(raw_output, BaseModel):
+        normalized = raw_output.model_dump(mode="json")
+    else:
         return raw_output
 
-    normalized = dict(raw_output)
     existing_result = normalized.get("result")
     normalized_result: dict[str, Any] | None = None
     if isinstance(existing_result, Mapping):
