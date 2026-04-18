@@ -40,6 +40,7 @@ _BASE_ALLOWED_ENV_KEYS = frozenset(
         "XDG_CACHE_HOME",
         "XDG_DATA_HOME",
         "XDG_STATE_HOME",
+        "XDG_RUNTIME_DIR",
     }
 )
 _BASE_ALLOWED_ENV_PREFIXES = ("LC_",)
@@ -67,7 +68,8 @@ def _build_scoped_env(
     """Filter a process env mapping to explicitly allowed keys/prefixes."""
     allowlist = _BASE_ALLOWED_ENV_KEYS.union(allowed_keys)
     scoped: dict[str, str] = {}
-    for key, value in environ.items():
+    # Snapshot items to avoid RuntimeError if os.environ mutates concurrently.
+    for key, value in list(environ.items()):
         if key in allowlist or key.startswith(_BASE_ALLOWED_ENV_PREFIXES):
             scoped[key] = value
     return scoped
