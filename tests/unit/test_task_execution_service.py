@@ -541,6 +541,34 @@ def test_normalize_orchestrator_output_canonicalizes_when_raw_output_is_base_mod
     assert normalized["result"]["requested_permission"] == "networked_write"
 
 
+def test_normalize_orchestrator_output_preserves_interrupts_from_base_model_attributes() -> None:
+    """Interrupt metadata attached to model instances should survive normalization."""
+    raw_output = OrchestratorState(task={"task_text": "Delete files"})
+    object.__setattr__(
+        raw_output,
+        "__interrupt__",
+        [
+            {
+                "value": {
+                    "approval_type": "permission_escalation",
+                    "requested_permission": "  Networked_Write ",
+                }
+            }
+        ],
+    )
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    assert isinstance(normalized, dict)
+    assert "__interrupt__" not in normalized
+
+    state = OrchestratorState.model_validate(normalized)
+    assert state.result is not None
+    assert state.result.status == "failure"
+    assert state.result.requested_permission == "networked_write"
+    assert state.result.next_action_hint == "await_manual_follow_up"
+    assert "orchestrator interrupted awaiting manual approval" in state.errors
+
+
 def test_normalize_orchestrator_output_formats_manual_approval_summary_without_duplication() -> (
     None
 ):

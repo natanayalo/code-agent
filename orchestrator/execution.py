@@ -535,6 +535,15 @@ def _normalize_orchestrator_graph_output(raw_output: object) -> object:
         normalized = dict(raw_output)
     elif isinstance(raw_output, BaseModel):
         normalized = raw_output.model_dump(mode="json")
+        model_extra = raw_output.model_extra
+        if (
+            normalized.get("__interrupt__") is None
+            and isinstance(model_extra, Mapping)
+            and "__interrupt__" in model_extra
+        ):
+            normalized["__interrupt__"] = model_extra["__interrupt__"]
+        if normalized.get("__interrupt__") is None and hasattr(raw_output, "__interrupt__"):
+            normalized["__interrupt__"] = getattr(raw_output, "__interrupt__")
     else:
         return raw_output
 
