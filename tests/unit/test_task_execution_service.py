@@ -299,6 +299,36 @@ def test_apply_execution_budget_policy_caps_oversized_runtime_limits() -> None:
     assert budget["max_observation_characters"] == 12000
 
 
+def test_apply_execution_budget_policy_keeps_zero_for_non_negative_limits() -> None:
+    """Non-negative budget knobs should preserve explicit zero values."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="webhook:ci",
+        constraints={},
+        budget={
+            "max_retries": 0,
+            "max_verifier_passes": 0,
+        },
+    )
+
+    assert budget["max_retries"] == 0
+    assert budget["max_verifier_passes"] == 0
+
+
+def test_apply_execution_budget_policy_drops_invalid_capped_values() -> None:
+    """Invalid values for capped budget keys should be removed from effective runtime budget."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="webhook:ci",
+        constraints={},
+        budget={
+            "max_minutes": "abc",
+            "max_observation_characters": "NaN",
+        },
+    )
+
+    assert "max_minutes" not in budget
+    assert "max_observation_characters" not in budget
+
+
 def test_task_execution_service_reuses_one_compiled_graph(
     monkeypatch,
 ) -> None:

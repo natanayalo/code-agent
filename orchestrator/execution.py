@@ -36,6 +36,10 @@ from db.models import (
     Task,
     User,
 )
+from orchestrator.budget_utils import (
+    coerce_non_negative_int_like,
+    coerce_positive_int_like,
+)
 from orchestrator.checkpoints import create_async_sqlite_checkpointer
 from orchestrator.graph import build_orchestrator_graph
 from orchestrator.state import OrchestratorState, SessionRef
@@ -92,6 +96,8 @@ _GLOBAL_BUDGET_CAPS: dict[str, int] = {
     "max_verifier_passes": 5,
     "max_observation_characters": 12000,
 }
+_NON_NEGATIVE_BUDGET_KEYS = frozenset({"max_retries", "max_verifier_passes"})
+_NON_NEGATIVE_DEFAULT_BUDGET_KEYS = frozenset({"max_retries"})
 
 
 class ExecutionModel(BaseModel):
@@ -107,34 +113,6 @@ class SubmissionSession(ExecutionModel):
     external_user_id: str = Field(default="http:anonymous", min_length=1)
     external_thread_id: str = Field(default="http-default", min_length=1)
     display_name: str | None = None
-
-
-def _coerce_int_like(value: object) -> int | None:
-    """Parse integer-like values while rejecting booleans and invalid numerics."""
-    if isinstance(value, bool) or value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        try:
-            return int(value)
-        except (OverflowError, ValueError):
-            return None
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        try:
-            return int(float(stripped))
-        except (OverflowError, ValueError):
-            return None
-    return None
-
-
-def _coerce_positive_int_like(value: object) -> int | None:
-    """Return a positive integer when one is provided, else None."""
-    parsed = _coerce_int_like(value)
-    return parsed if parsed is not None and parsed > 0 else None
 
 
 def _resolve_execution_mode(
@@ -167,13 +145,25 @@ def _apply_execution_budget_policy(
     effective_budget["execution_mode"] = execution_mode
 
     for key, default_value in _DEFAULT_EXECUTION_BUDGETS[execution_mode].items():
-        if _coerce_positive_int_like(effective_budget.get(key)) is None:
+        coercer = (
+            coerce_non_negative_int_like
+            if key in _NON_NEGATIVE_DEFAULT_BUDGET_KEYS
+            else coerce_positive_int_like
+        )
+        if coercer(effective_budget.get(key)) is None:
             effective_budget[key] = default_value
 
     for key, cap in _GLOBAL_BUDGET_CAPS.items():
-        coerced_value = _coerce_positive_int_like(effective_budget.get(key))
+        coercer = (
+            coerce_non_negative_int_like
+            if key in _NON_NEGATIVE_BUDGET_KEYS
+            else coerce_positive_int_like
+        )
+        coerced_value = coercer(effective_budget.get(key))
         if coerced_value is not None:
             effective_budget[key] = min(coerced_value, cap)
+        elif key in effective_budget:
+            effective_budget.pop(key, None)
 
     return effective_budget
 

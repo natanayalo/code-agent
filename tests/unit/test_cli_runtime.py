@@ -112,6 +112,20 @@ def test_settings_from_budget_accepts_fractional_numeric_strings_like_float_inpu
     assert settings.command_timeout_seconds == 9
 
 
+def test_settings_from_budget_accepts_zero_for_tool_and_shell_limits() -> None:
+    """Zero should be a valid explicit limit for tool/shell execution budgets."""
+    settings = settings_from_budget(
+        {
+            "max_tool_calls": 0,
+            "max_shell_commands": "0",
+        },
+        defaults=CliRuntimeSettings(max_tool_calls=None, max_shell_commands=None),
+    )
+
+    assert settings.max_tool_calls == 0
+    assert settings.max_shell_commands == 0
+
+
 def test_coerce_non_negative_int_rejects_non_finite_floats() -> None:
     """NaN and infinity should be ignored instead of crashing runtime budget parsing."""
     assert _coerce_non_negative_int(float("nan")) is None
@@ -562,6 +576,33 @@ def test_run_cli_runtime_loop_stops_at_the_tool_call_budget() -> None:
     assert execution.budget_ledger.tool_calls_used == 1
     assert execution.budget_ledger.shell_commands_used == 1
     assert "tool-call budget (1)" in execution.summary
+
+
+def test_run_cli_runtime_loop_honors_zero_tool_call_budget() -> None:
+    """A zero tool-call budget should fail before any command executes."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pwd"),
+        ]
+    )
+    session = _FakeSession({"pwd": _command_result("pwd", output="/workspace/repo\n")})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=2,
+            worker_timeout_seconds=30,
+            max_tool_calls=0,
+        ),
+    )
+
+    assert execution.status == "failure"
+    assert execution.stop_reason == "budget_exceeded"
+    assert execution.budget_ledger.tool_calls_used == 0
+    assert session.calls == []
+    assert "tool-call budget (0)" in execution.summary
 
 
 def test_run_cli_runtime_loop_stops_at_the_retry_budget() -> None:

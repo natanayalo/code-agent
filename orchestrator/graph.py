@@ -15,6 +15,7 @@ from langgraph.types import interrupt
 
 from db.base import utc_now
 from db.enums import TimelineEventType
+from orchestrator.budget_utils import coerce_positive_int_like
 from orchestrator.state import (
     ApprovalCheckpoint,
     OrchestratorState,
@@ -62,41 +63,17 @@ DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = 330
 ORCHESTRATOR_TIMEOUT_GRACE_SECONDS = 30
 
 
-def _coerce_positive_int(value: Any) -> int | None:
-    """Parse positive integer-like values for timeout-budget overrides."""
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value > 0 else None
-    if isinstance(value, float):
-        try:
-            coerced = int(value)
-        except (OverflowError, ValueError):
-            return None
-        return coerced if coerced > 0 else None
-    if isinstance(value, str):
-        normalized = value.strip()
-        if not normalized:
-            return None
-        try:
-            coerced = int(float(normalized))
-        except (OverflowError, ValueError):
-            return None
-        return coerced if coerced > 0 else None
-    return None
-
-
 def _resolve_orchestrator_timeout_seconds(state: OrchestratorState) -> int:
     """Resolve the outer worker timeout envelope from the task budget."""
     budget = state.task.budget
 
-    explicit_timeout = _coerce_positive_int(budget.get("orchestrator_timeout_seconds"))
+    explicit_timeout = coerce_positive_int_like(budget.get("orchestrator_timeout_seconds"))
     if explicit_timeout is not None:
         return explicit_timeout
 
-    worker_timeout_seconds = _coerce_positive_int(budget.get("worker_timeout_seconds"))
+    worker_timeout_seconds = coerce_positive_int_like(budget.get("worker_timeout_seconds"))
     if worker_timeout_seconds is None:
-        max_minutes = _coerce_positive_int(budget.get("max_minutes"))
+        max_minutes = coerce_positive_int_like(budget.get("max_minutes"))
         if max_minutes is not None:
             worker_timeout_seconds = max_minutes * 60
 

@@ -116,8 +116,8 @@ class CliRuntimeSettings(CliRuntimeModel):
     max_iterations: int = Field(default=DEFAULT_MAX_ITERATIONS, ge=1)
     worker_timeout_seconds: int = Field(default=DEFAULT_WORKER_TIMEOUT_SECONDS, ge=1)
     command_timeout_seconds: int = Field(default=DEFAULT_COMMAND_TIMEOUT_SECONDS, ge=1)
-    max_tool_calls: int | None = Field(default=None, ge=1)
-    max_shell_commands: int | None = Field(default=None, ge=1)
+    max_tool_calls: int | None = Field(default=None, ge=0)
+    max_shell_commands: int | None = Field(default=None, ge=0)
     max_retries: int | None = Field(default=None, ge=0)
     max_verifier_passes: int | None = Field(default=None, ge=0)
     max_observation_characters: int = Field(
@@ -130,8 +130,8 @@ class CliRuntimeBudgetLedger(CliRuntimeModel):
     """Best-effort runtime budget usage and limit tracking."""
 
     max_iterations: int = Field(ge=1)
-    max_tool_calls: int | None = Field(default=None, ge=1)
-    max_shell_commands: int | None = Field(default=None, ge=1)
+    max_tool_calls: int | None = Field(default=None, ge=0)
+    max_shell_commands: int | None = Field(default=None, ge=0)
     max_retries: int | None = Field(default=None, ge=0)
     max_verifier_passes: int | None = Field(default=None, ge=0)
     iterations_used: int = Field(default=0, ge=0)
@@ -243,11 +243,11 @@ def settings_from_budget(
     if command_timeout is not None:
         resolved["command_timeout_seconds"] = command_timeout
 
-    max_tool_calls = _coerce_positive_int(budget.get("max_tool_calls"))
+    max_tool_calls = _coerce_non_negative_int(budget.get("max_tool_calls"))
     if max_tool_calls is not None:
         resolved["max_tool_calls"] = max_tool_calls
 
-    max_shell_commands = _coerce_positive_int(budget.get("max_shell_commands"))
+    max_shell_commands = _coerce_non_negative_int(budget.get("max_shell_commands"))
     if max_shell_commands is not None:
         resolved["max_shell_commands"] = max_shell_commands
 
