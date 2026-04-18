@@ -303,6 +303,68 @@ def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path
     assert session.calls[-1] == (_git_status_command(container.working_dir), 17)
 
 
+def test_codex_cli_worker_runs_post_run_lint_and_appends_command_artifacts(
+    tmp_path: Path,
+) -> None:
+    """Post-run lint/format should run after worker completion and report metadata."""
+    workspace = _workspace_handle(tmp_path)
+    (workspace.repo_path / "pyproject.toml").write_text(
+        "[tool.ruff]\nline-length = 100\n",
+        encoding="utf-8",
+    )
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-47",
+        image="python:3.12-slim",
+    )
+    git_status_command = _git_status_command(container.working_dir)
+    lint_format_command = "cd /workspace/repo && ruff format -- workers/codex_cli_worker.py"
+    lint_check_command = "cd /workspace/repo && ruff check --fix -- workers/codex_cli_worker.py"
+    session = _FakeSession(
+        {
+            git_status_command: _command_result(
+                git_status_command,
+                output=" M workers/codex_cli_worker.py\0",
+            ),
+            lint_format_command: _command_result(lint_format_command, output="formatted"),
+            lint_check_command: _command_result(lint_check_command, output="checked"),
+        }
+    )
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="Done.")])
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda started_container, **_: session,
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-47-post-run-lint",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Run post lint step",
+            )
+        )
+    )
+
+    assert result.status == "success"
+    assert [command.command for command in result.commands_run] == [
+        "ruff format -- workers/codex_cli_worker.py",
+        "ruff check --fix -- workers/codex_cli_worker.py",
+    ]
+    assert result.budget_usage is not None
+    assert result.budget_usage["post_run_lint_format"]["ran"] is True
+    assert result.budget_usage["post_run_lint_format"]["errors"] == []
+    assert session.calls == [
+        (git_status_command, 60),
+        (lint_format_command, 60),
+        (lint_check_command, 60),
+        (git_status_command, 60),
+    ]
+
+
 def test_codex_cli_worker_requests_higher_permission_for_blocked_commands(tmp_path: Path) -> None:
     """Permission-required runtime failures should map to a clear worker follow-up hint."""
     workspace = _workspace_handle(tmp_path)

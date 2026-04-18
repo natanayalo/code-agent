@@ -653,3 +653,57 @@ def test_verify_result_failed_with_changes():
     file_changes = next(i for i in res["verification"]["items"] if i["label"] == "file_changes")
     assert file_changes["status"] == "warning"
     assert "but changed 1 files" in file_changes["message"]
+
+
+def test_verify_result_surfaces_post_run_lint_warnings() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "success",
+                "files_changed": ["workers/codex_cli_worker.py"],
+                "test_results": [{"name": "test1", "status": "passed"}],
+                "commands_run": [],
+                "budget_usage": {
+                    "post_run_lint_format": {
+                        "ran": True,
+                        "errors": [
+                            "`ruff check --fix -- workers/codex_cli_worker.py` exited with status 1"
+                        ],
+                    }
+                },
+            },
+        }
+    )
+
+    res = verify_result(state)
+
+    lint_check = next(
+        item for item in res["verification"]["items"] if item["label"] == "post_run_lint_format"
+    )
+    assert lint_check["status"] == "warning"
+    assert "reported 1 issue" in lint_check["message"]
+    assert res["verification"]["status"] == "warning"
+
+
+def test_verify_result_marks_post_run_lint_skip_as_passed() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "success",
+                "files_changed": ["README.md"],
+                "test_results": [{"name": "test1", "status": "passed"}],
+                "commands_run": [],
+                "budget_usage": {"post_run_lint_format": {"ran": False, "status": "skipped"}},
+            },
+        }
+    )
+
+    res = verify_result(state)
+
+    lint_check = next(
+        item for item in res["verification"]["items"] if item["label"] == "post_run_lint_format"
+    )
+    assert lint_check["status"] == "passed"
+    assert "skipped" in lint_check["message"]

@@ -1,0 +1,183 @@
+"""Unit tests for post-run lint/format helpers."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from sandbox import DockerShellCommandResult
+from sandbox.workspace import SandboxArtifact
+from workers.post_run_lint import detect_post_run_lint_commands, run_post_run_lint
+
+
+class _FakeSession:
+    def __init__(self, responses: dict[str, DockerShellCommandResult]) -> None:
+        self._responses = responses
+        self.calls: list[tuple[str, int]] = []
+
+    def execute(self, command: str, *, timeout_seconds: int = 300) -> DockerShellCommandResult:
+        self.calls.append((command, timeout_seconds))
+        return self._responses[command]
+
+    def close(self) -> None:
+        return None
+
+
+def test_detect_post_run_lint_commands_prefers_ruff_with_python_changes(tmp_path: Path) -> None:
+    """Ruff lint/format should be selected when pyproject config is present."""
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\nline-length = 100\n", encoding="utf-8")
+
+    commands = detect_post_run_lint_commands(
+        repo_path=tmp_path,
+        files_changed=["workers/codex_cli_worker.py", "README.md"],
+    )
+
+    assert commands == [
+        "ruff format -- workers/codex_cli_worker.py",
+        "ruff check --fix -- workers/codex_cli_worker.py",
+    ]
+
+
+def test_detect_post_run_lint_commands_uses_fallback_template(tmp_path: Path) -> None:
+    """Fallback templates should expand the {files} placeholder."""
+    commands = detect_post_run_lint_commands(
+        repo_path=tmp_path,
+        files_changed=["a.py", "b.py"],
+        fallback_command_template="custom-fmt {files}",
+    )
+
+    assert commands == ["custom-fmt a.py b.py"]
+
+
+def test_detect_post_run_lint_commands_uses_package_json_scripts(tmp_path: Path) -> None:
+    """Package script detection should prefer format + lint flows with file args."""
+    (tmp_path / "package.json").write_text(
+        (
+            "{"
+            '"scripts":{'
+            '"format":"prettier --write .",'
+            '"lint":"eslint .",'
+            '"test":"vitest run"'
+            "}"
+            "}"
+        ),
+        encoding="utf-8",
+    )
+
+    commands = detect_post_run_lint_commands(
+        repo_path=tmp_path,
+        files_changed=["src/app.ts", "src/app.test.ts"],
+    )
+
+    assert commands == [
+        "npm run format -- src/app.ts src/app.test.ts",
+        "npm run lint -- --fix src/app.ts src/app.test.ts",
+    ]
+
+
+def test_detect_post_run_lint_commands_uses_makefile_targets(tmp_path: Path) -> None:
+    """Makefile target detection should emit file-scoped format + lint commands."""
+    (tmp_path / "Makefile").write_text(
+        "\n".join(
+            [
+                ".PHONY: lint format test",
+                "format:",
+                "\t@echo formatting",
+                "lint:",
+                "\t@echo linting",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    commands = detect_post_run_lint_commands(
+        repo_path=tmp_path,
+        files_changed=["workers/codex_cli_worker.py", "workers/gemini_cli_worker.py"],
+    )
+
+    assert commands == [
+        "make format FILES='workers/codex_cli_worker.py workers/gemini_cli_worker.py'",
+        "make lint FILES='workers/codex_cli_worker.py workers/gemini_cli_worker.py'",
+    ]
+
+
+def test_run_post_run_lint_captures_commands_artifacts_and_errors(tmp_path: Path) -> None:
+    """Execution metadata should include artifacts and non-zero exit warnings."""
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\nline-length = 88\n", encoding="utf-8")
+    repo_dir = Path("/workspace/repo")
+    format_command = "cd /workspace/repo && ruff format -- workers/codex_cli_worker.py"
+    check_command = "cd /workspace/repo && ruff check --fix -- workers/codex_cli_worker.py"
+    session = _FakeSession(
+        {
+            format_command: DockerShellCommandResult(
+                command=format_command,
+                output="formatted",
+                exit_code=0,
+                duration_seconds=0.1,
+                artifacts=[
+                    SandboxArtifact(
+                        name="stdout.log",
+                        uri="artifacts/run-1/stdout.log",
+                        artifact_type="log",
+                        artifact_metadata={"stream": "stdout"},
+                    ),
+                    SandboxArtifact(
+                        name="stderr.log",
+                        uri="artifacts/run-1/stderr.log",
+                        artifact_type="log",
+                        artifact_metadata={"stream": "stderr"},
+                    ),
+                ],
+            ),
+            check_command: DockerShellCommandResult(
+                command=check_command,
+                output="lint errors",
+                exit_code=1,
+                duration_seconds=0.2,
+                artifacts=[],
+            ),
+        }
+    )
+
+    result = run_post_run_lint(
+        session=session,
+        repo_path_for_detection=tmp_path,
+        repo_working_directory=repo_dir,
+        files_changed=["workers/codex_cli_worker.py"],
+        timeout_seconds=12,
+    )
+
+    assert result["ran"] is True
+    assert result["status"] == "warning"
+    assert len(result["commands"]) == 2
+    assert result["commands"][0]["command"] == "ruff format -- workers/codex_cli_worker.py"
+    assert result["commands"][0]["stdout_artifact_uri"] == "artifacts/run-1/stdout.log"
+    assert result["commands"][0]["stderr_artifact_uri"] == "artifacts/run-1/stderr.log"
+    assert result["commands"][1]["exit_code"] == 1
+    assert len(result["artifacts"]) == 2
+    assert result["errors"] == [
+        "`ruff check --fix -- workers/codex_cli_worker.py` exited with status 1"
+    ]
+    assert session.calls == [(format_command, 12), (check_command, 12)]
+
+
+def test_run_post_run_lint_skips_when_no_command_detected(tmp_path: Path) -> None:
+    """Repos without known tooling should skip cleanly."""
+    session = _FakeSession({})
+
+    result = run_post_run_lint(
+        session=session,
+        repo_path_for_detection=tmp_path,
+        repo_working_directory=tmp_path,
+        files_changed=["README.md"],
+        timeout_seconds=3,
+    )
+
+    assert result == {
+        "ran": False,
+        "status": "skipped",
+        "reason": "no_detected_lint_or_format_command",
+        "commands": [],
+        "errors": [],
+        "artifacts": [],
+    }
+    assert session.calls == []

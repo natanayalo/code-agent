@@ -1055,6 +1055,39 @@ def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
             )
         )
 
+    # 5. Post-run lint/format
+    post_run_lint_format: dict[str, Any] = {}
+    if isinstance(state.result.budget_usage, dict):
+        lint_metadata = state.result.budget_usage.get("post_run_lint_format")
+        if isinstance(lint_metadata, dict):
+            post_run_lint_format = lint_metadata
+    if post_run_lint_format.get("ran") is False:
+        items.append(
+            VerificationReportItem(
+                label="post_run_lint_format",
+                status="passed",
+                message="Post-run lint/format step skipped: no detectable command.",
+            )
+        )
+    else:
+        lint_errors = post_run_lint_format.get("errors")
+        if isinstance(lint_errors, list) and lint_errors:
+            items.append(
+                VerificationReportItem(
+                    label="post_run_lint_format",
+                    status="warning",
+                    message=f"Post-run lint/format reported {len(lint_errors)} issue(s).",
+                )
+            )
+        elif post_run_lint_format:
+            items.append(
+                VerificationReportItem(
+                    label="post_run_lint_format",
+                    status="passed",
+                    message="Post-run lint/format completed without reported issues.",
+                )
+            )
+
     # Calculate overall status
     report_status: Literal["passed", "failed", "warning"]
     if any(i.status == "failed" for i in items):

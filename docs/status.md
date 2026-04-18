@@ -76,10 +76,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-100 Secret scoping. PR: [#75](https://github.com/natanayalo/code-agent/pull/75)
 - T-101 Add command safety policy. PR: [#77](https://github.com/natanayalo/code-agent/pull/77)
 - T-102 Add quotas and budgets. PR: [#78](https://github.com/natanayalo/code-agent/pull/78)
+- T-103 Retention policy. PR: [#80](https://github.com/natanayalo/code-agent/pull/80)
 
 ## In Progress
 
-- T-103 Retention policy.
+- T-105 Auto-run repo lint/format after worker completion.
 
 ## Next
 

@@ -44,6 +44,7 @@ from workers.cli_runtime import (
     run_cli_runtime_loop,
     settings_from_budget,
 )
+from workers.post_run_lint import apply_post_run_lint_format
 from workers.prompt import build_system_prompt
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,8 @@ def _worker_result_from_execution(
     execution: CliRuntimeExecutionResult,
     *,
     files_changed: list[str],
+    post_run_lint_format: dict[str, object] | None = None,
+    artifacts: list[ArtifactReference] | None = None,
 ) -> WorkerResult:
     """Map the shared CLI runtime output into the worker contract."""
     requested_permission = (
@@ -126,14 +129,17 @@ def _worker_result_from_execution(
         if execution.permission_decision is not None
         else None
     )
+    budget_usage = execution.budget_ledger.model_dump(mode="json")
+    if post_run_lint_format is not None:
+        budget_usage["post_run_lint_format"] = post_run_lint_format
     return WorkerResult(
         status=execution.status,
         summary=execution.summary,
         requested_permission=requested_permission,
-        budget_usage=execution.budget_ledger.model_dump(mode="json"),
+        budget_usage=budget_usage,
         commands_run=execution.commands_run,
         files_changed=files_changed,
-        artifacts=_workspace_artifacts(workspace),
+        artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
         next_action_hint=_next_action_hint(execution),
     )
 
@@ -368,10 +374,23 @@ class GeminiCliWorker(Worker):
                         workspace.repo_path,
                         timeout_seconds=runtime_settings.command_timeout_seconds,
                     )
+            files_changed, lint_format_result, lint_format_artifacts = apply_post_run_lint_format(
+                session=session,
+                execution=execution,
+                repo_path_for_detection=workspace.repo_path,
+                repo_working_directory=Path(container.working_dir),
+                files_changed=files_changed,
+                timeout_seconds=runtime_settings.command_timeout_seconds,
+                fallback_command_template=request.constraints.get("post_run_lint_format_command")
+                if isinstance(request.constraints.get("post_run_lint_format_command"), str)
+                else None,
+            )
             result = _worker_result_from_execution(
                 workspace,
                 execution,
                 files_changed=files_changed,
+                post_run_lint_format=lint_format_result,
+                artifacts=lint_format_artifacts,
             )
             if cancel_token and cancel_token():
                 result.status = "error"
