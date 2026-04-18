@@ -80,6 +80,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-101 Add command safety policy.
   - Slice 1 (branch `task/t-101-command-safety-policy`): enforce canonical permission escalation classes in orchestrator (`read_only`, `workspace_write`, `dangerous_shell`, `networked_write`, `git_push_or_deploy`) and fail closed on unknown values.
   - Slice 2 (same branch/PR): canonicalize unresolved interrupt `requested_permission` values before persistence and drop unknown permission names from stored run state.
+  - Slice 3 (review follow-up on same branch/PR): centralize permission coercion in `tools.policy.coerce_permission_level` and reuse it across orchestrator + execution paths.
 
 ## Next
 

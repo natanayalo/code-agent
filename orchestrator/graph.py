@@ -26,7 +26,7 @@ from orchestrator.state import (
     WorkerDispatch,
     WorkerType,
 )
-from tools import ToolPermissionLevel
+from tools import coerce_permission_level
 from workers import Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -60,19 +60,6 @@ DESTRUCTIVE_TASK_MARKERS = (
 
 DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = 330
 ORCHESTRATOR_TIMEOUT_GRACE_SECONDS = 30
-
-
-def _coerce_tool_permission_level(value: str | None) -> ToolPermissionLevel | None:
-    """Normalize worker-requested permission strings to explicit policy classes."""
-    if value is None:
-        return None
-    normalized = value.strip().lower()
-    if not normalized:
-        return None
-    try:
-        return ToolPermissionLevel(normalized)
-    except ValueError:
-        return None
 
 
 def _coerce_positive_int(value: Any) -> int | None:
@@ -902,7 +889,7 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
                 message="Worker requested higher permission but did not specify which one.",
             ),
         }
-    requested_permission_level = _coerce_tool_permission_level(requested_permission)
+    requested_permission_level = coerce_permission_level(requested_permission)
     if requested_permission_level is None:
         logger.error(
             "Worker requested an unknown permission level.",

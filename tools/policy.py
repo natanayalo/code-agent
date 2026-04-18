@@ -168,7 +168,7 @@ def permission_allows(
     return permission_rank(granted_permission) >= permission_rank(required_permission)
 
 
-def _coerce_permission_level(value: object) -> ToolPermissionLevel | None:
+def coerce_permission_level(value: object) -> ToolPermissionLevel | None:
     """Parse a permission level from strings or enum values."""
     if isinstance(value, ToolPermissionLevel):
         return value
@@ -207,7 +207,7 @@ def granted_permission_from_constraints(
 ) -> ToolPermissionLevel:
     """Resolve the currently granted permission level from worker constraints."""
     for key in ("granted_permission", "allowed_permission_level", "permission_level"):
-        resolved = _coerce_permission_level(constraints.get(key))
+        resolved = coerce_permission_level(constraints.get(key))
         if resolved is not None:
             return resolved
     return default

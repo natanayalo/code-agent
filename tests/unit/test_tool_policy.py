@@ -5,6 +5,7 @@ from __future__ import annotations
 from tools import (
     DEFAULT_TOOL_REGISTRY,
     ToolPermissionLevel,
+    coerce_permission_level,
     granted_permission_from_constraints,
     permission_allows,
     resolve_bash_command_permission,
@@ -21,6 +22,22 @@ def test_granted_permission_from_constraints_parses_known_strings() -> None:
     resolved = granted_permission_from_constraints({"granted_permission": "dangerous_shell"})
 
     assert resolved == ToolPermissionLevel.DANGEROUS_SHELL
+
+
+def test_coerce_permission_level_parses_known_values() -> None:
+    """Permission coercion should normalize casing/whitespace and accept enum instances."""
+    assert coerce_permission_level("  NetWorked_Write  ") == ToolPermissionLevel.NETWORKED_WRITE
+    assert (
+        coerce_permission_level(ToolPermissionLevel.GIT_PUSH_OR_DEPLOY)
+        == ToolPermissionLevel.GIT_PUSH_OR_DEPLOY
+    )
+
+
+def test_coerce_permission_level_rejects_non_strings_and_unknown_values() -> None:
+    """Unknown or invalid values should fail closed to None."""
+    assert coerce_permission_level(None) is None
+    assert coerce_permission_level(123) is None
+    assert coerce_permission_level("network_write") is None
 
 
 def test_permission_allows_respects_permission_ordering() -> None:

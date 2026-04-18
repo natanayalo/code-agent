@@ -50,7 +50,7 @@ from repositories import (
     WorkerRunRepository,
     session_scope,
 )
-from tools import ToolPermissionLevel
+from tools import coerce_permission_level
 from workers import ArtifactReference, Worker, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -493,7 +493,10 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
     first = payloads[0] if payloads else {}
     approval_type = str(first.get("approval_type") or "").strip()
     reason = str(first.get("reason") or "").strip()
-    requested_permission = _coerce_requested_permission(first.get("requested_permission"))
+    requested_permission_level = coerce_permission_level(first.get("requested_permission"))
+    requested_permission = (
+        requested_permission_level.value if requested_permission_level is not None else None
+    )
 
     if approval_type == "permission_escalation":
         if requested_permission:
@@ -512,19 +515,6 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
     if reason:
         summary = f"{summary} {reason}"
     return summary
-
-
-def _coerce_requested_permission(value: object) -> str | None:
-    """Normalize an interrupt payload permission to explicit policy classes."""
-    if not isinstance(value, str):
-        return None
-    normalized = value.strip().lower()
-    if not normalized:
-        return None
-    try:
-        return ToolPermissionLevel(normalized).value
-    except ValueError:
-        return None
 
 
 def _normalize_orchestrator_graph_output(raw_output: object) -> object:
@@ -573,8 +563,11 @@ def _normalize_orchestrator_graph_output(raw_output: object) -> object:
 
     if normalized.get("result") is None:
         first_payload = payloads[0] if payloads else {}
-        requested_permission = _coerce_requested_permission(
+        requested_permission_level = coerce_permission_level(
             first_payload.get("requested_permission")
+        )
+        requested_permission = (
+            requested_permission_level.value if requested_permission_level is not None else None
         )
         if first_payload.get("requested_permission") is not None and requested_permission is None:
             logger.warning(
