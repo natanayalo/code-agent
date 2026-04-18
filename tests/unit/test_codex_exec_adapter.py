@@ -68,14 +68,7 @@ def test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call(
             CliRuntimeMessage(
                 role="tool",
                 tool_name="execute_bash",
-                content=(
-                    "Tool result: execute_bash\n"
-                    "Exit code: 1\n"
-                    "Output:\n"
-                    "```text\n"
-                    "boom\n"
-                    "```"
-                ),
+                content=("Tool result: execute_bash\nExit code: 1\nOutput:\n```text\nboom\n```"),
             ),
         ]
     )

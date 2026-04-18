@@ -232,8 +232,7 @@ class DockerSandboxContainerManager:
             stdout = completed.stdout.strip()
             message = stderr or stdout or "container is not running"
             raise DockerSandboxContainerError(
-                f"Failed to reconnect to sandbox container "
-                f"{container.container_name}: {message}"
+                f"Failed to reconnect to sandbox container {container.container_name}: {message}"
             )
         return container
 

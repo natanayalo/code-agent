@@ -185,7 +185,7 @@ def _coerce_permission_level(value: object) -> ToolPermissionLevel | None:
 
 def _default_permission_reason(default_permission: ToolPermissionLevel) -> str:
     """Render the fallback reason when a command stays at the tool's default level."""
-    return "Command uses the tool's default permission level " f"({default_permission.value})."
+    return f"Command uses the tool's default permission level ({default_permission.value})."
 
 
 def _unsupported_shell_feature_reason() -> str:
@@ -196,8 +196,7 @@ def _unsupported_shell_feature_reason() -> str:
 def _unparseable_shell_command_reason() -> str:
     """Explain why malformed shell syntax fails closed."""
     return (
-        "Command could not be safely parsed and is treated as requiring elevated "
-        "shell permission."
+        "Command could not be safely parsed and is treated as requiring elevated shell permission."
     )
 
 

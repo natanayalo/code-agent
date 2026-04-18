@@ -116,8 +116,15 @@ class EncryptedJSON(TypeDecorator):
             try:
                 decrypted = self.fernet.decrypt(value.encode()).decode()
                 return json.loads(decrypted)
-            except (InvalidToken, ValueError):
-                logger.warning("Failed to decrypt secret; attempting to load as plain JSON.")
+            except InvalidToken:
+                logger.critical(
+                    "SECURITY CRITICAL: Failed to decrypt secret with active Fernet key. "
+                    "This usually indicates a configuration mismatch "
+                    "(wrong CODE_AGENT_ENCRYPTION_KEY) or data corruption. "
+                    "Falling back to plain text for possible migration compatibility."
+                )
+            except ValueError:
+                logger.warning("Failed to decode secret as UTF-8 or JSON.")
 
         # This will raise naturally (JSONDecodeError or TypeError) if it's not valid JSON
         return json.loads(value)

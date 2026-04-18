@@ -213,6 +213,7 @@ class TaskSubmission(ExecutionModel):
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
+    tools: list[str] | None = None
     callback_url: str | None = Field(default=None, max_length=2048)
     session: SubmissionSession = Field(default_factory=SubmissionSession)
 
@@ -496,8 +497,7 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
     if approval_type == "permission_escalation":
         if requested_permission:
             summary = (
-                "Run paused pending permission escalation approval for "
-                f"'{requested_permission}'."
+                f"Run paused pending permission escalation approval for '{requested_permission}'."
             )
         else:
             summary = "Run paused pending permission escalation approval."
@@ -1123,8 +1123,7 @@ class TaskExecutionService:
                     finished_at=decided_at,
                     status=WorkerRunStatus.FAILURE,
                     summary=(
-                        "Manual approval rejected via API decision endpoint; "
-                        "task remains failed."
+                        "Manual approval rejected via API decision endpoint; task remains failed."
                     ),
                     commands_run=[],
                     files_changed_count=0,
@@ -1325,9 +1324,15 @@ class TaskExecutionService:
                 branch=submission.branch,
                 callback_url=submission.callback_url,
                 worker_override=submission.worker_override,
-                constraints=dict(submission.constraints),
                 budget=dict(submission.budget),
                 secrets=dict(submission.secrets),
+                # Store tools in constraints to avoid a schema migration for now
+                constraints={
+                    **(submission.constraints or {}),
+                    "tools": submission.tools,
+                }
+                if submission.tools is not None
+                else dict(submission.constraints),
                 secrets_encrypted=self.is_secret_encryption_active(),
                 status=status,
                 max_attempts=max(1, max_attempts),
@@ -1480,6 +1485,7 @@ class TaskExecutionService:
                     "constraints": dict(submission.constraints),
                     "budget": dict(submission.budget),
                     "secrets": dict(submission.secrets),
+                    "tools": submission.tools,
                 },
                 "attempt_count": persisted.attempt_count,
                 "timeline_persisted_count": initial_persisted_count,
@@ -1518,6 +1524,9 @@ class TaskExecutionService:
                 budget=dict(task.budget or {}),
                 secrets=dict(task.secrets or {}),
                 callback_url=task.callback_url,
+                tools=(task.constraints or {}).get("tools")
+                if isinstance(task.constraints, dict)
+                else None,
                 priority=task.priority,
                 session=SubmissionSession(
                     channel=conversation_session.channel,
