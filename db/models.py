@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from datetime import datetime
 from typing import Any
 
@@ -53,6 +54,7 @@ class EncryptedJSON(TypeDecorator):
     cache_ok = True
     _cached_fernet: Fernet | None = None
     _last_key: str | None = None
+    _lock = threading.Lock()
 
     def is_active(self) -> bool:
         """Return True if encryption is correctly configured."""
@@ -63,23 +65,31 @@ class EncryptedJSON(TypeDecorator):
 
     @property
     def fernet(self) -> Fernet | None:
-        """Lazily initialize and cache Fernet from environment."""
+        """Lazily initialize and cache Fernet from environment in a thread-safe manner."""
         key = os.environ.get("CODE_AGENT_ENCRYPTION_KEY")
+
+        # Fast path for already initialized cache
         if key == EncryptedJSON._last_key and EncryptedJSON._cached_fernet is not None:
             return EncryptedJSON._cached_fernet
 
-        if not key:
-            EncryptedJSON._last_key = None
-            EncryptedJSON._cached_fernet = None
-            return None
+        with EncryptedJSON._lock:
+            # Double-check inside the lock
+            if key == EncryptedJSON._last_key and EncryptedJSON._cached_fernet is not None:
+                return EncryptedJSON._cached_fernet
 
-        try:
-            EncryptedJSON._cached_fernet = Fernet(key.encode())
-            EncryptedJSON._last_key = key
-            return EncryptedJSON._cached_fernet
-        except Exception as e:
-            logger.error("Invalid CODE_AGENT_ENCRYPTION_KEY provided")
-            raise RuntimeError("Encryption is configured but the key is invalid.") from e
+            if not key:
+                EncryptedJSON._last_key = None
+                EncryptedJSON._cached_fernet = None
+                return None
+
+            try:
+                new_fernet = Fernet(key.encode())
+                EncryptedJSON._cached_fernet = new_fernet
+                EncryptedJSON._last_key = key
+                return new_fernet
+            except Exception as e:
+                logger.error("Invalid CODE_AGENT_ENCRYPTION_KEY provided")
+                raise RuntimeError("Encryption is configured but the key is invalid.") from e
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)

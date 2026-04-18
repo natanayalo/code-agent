@@ -177,4 +177,3 @@ def test_tool_registry_scope_all_secrets() -> None:
     assert "GITHUB_TOKEN" in scoped
     assert scoped["GITHUB_TOKEN"] == "secret_gh"
     assert "OTHER_SECRET" not in scoped
-    assert "OTHER_SECRET" not in scoped
