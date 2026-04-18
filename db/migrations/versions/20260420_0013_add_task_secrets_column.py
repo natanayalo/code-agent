@@ -15,7 +15,7 @@ def upgrade() -> None:
         "tasks",
         sa.Column(
             "secrets",
-            sa.JSON(),
+            sa.Text(),
             nullable=False,
             server_default=sa.text("'{}'"),
         ),

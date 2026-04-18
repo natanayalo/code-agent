@@ -7,6 +7,7 @@ import logging
 import socket
 import time
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy.pool import StaticPool
@@ -1861,3 +1862,53 @@ def test_apply_task_approval_decision_reject_is_terminal_and_conflict_is_reporte
         assert isinstance(approval, dict)
         assert approval.get("status") == "rejected"
         assert approval.get("approved") is False
+
+
+def test_create_task_persists_encryption_metadata() -> None:
+    """Verify that TaskExecutionService correctly tags if secrets were encrypted at creation."""
+    from cryptography.fernet import Fernet
+
+    from db.models import Task
+
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+
+    # 1. Without encryption key
+    with patch.dict("os.environ", {"CODE_AGENT_ENCRYPTION_KEY": ""}, clear=False):
+        submission = execution_module.TaskSubmission(task_text="No encryption", secrets={"K": "V"})
+        _, task_p = service.create_task(submission)
+
+        with session_scope(session_factory) as session:
+            reloaded = session.get(Task, task_p.task_id)
+            assert reloaded is not None
+            assert reloaded.secrets_encrypted is False
+
+    # 2. With encryption key
+    # Use a fresh service or ensure the decorator is re-initialized (since it's a
+    # class/instance property)
+    # Actually, EncryptedJSON reads os.environ in __init__.
+    # A fresh service instantiation will trigger TaskRepository which initializes the model.
+    key = Fernet.generate_key().decode()
+    with patch.dict("os.environ", {"CODE_AGENT_ENCRYPTION_KEY": key}):
+        # Mocking the is_active() call might be cleaner if we want to avoid complex re-init
+        with patch.object(
+            execution_module.Task.secrets.property.columns[0].type, "is_active", return_value=True
+        ):
+            submission = execution_module.TaskSubmission(
+                task_text="With encryption", secrets={"K": "V"}
+            )
+            _, task_p = service.create_task(submission)
+
+            with session_scope(session_factory) as session:
+                reloaded = session.get(Task, task_p.task_id)
+                assert reloaded is not None
+                assert reloaded.secrets_encrypted is True

@@ -6,6 +6,8 @@ import json
 import os
 from unittest.mock import patch
 
+import pytest
+from _pytest.monkeypatch import MonkeyPatch
 from cryptography.fernet import Fernet
 from sqlalchemy import Column, Integer
 from sqlalchemy.orm import declarative_base
@@ -79,3 +81,11 @@ def test_encrypted_json_handles_decryption_failure_gracefully() -> None:
         # This will fail decryption, and then fail json.loads, returning empty dict
         result = decorator_b.process_result_value(encrypted_val, None)
         assert result == {}
+
+
+def test_encrypted_json_fails_fast_on_invalid_key(monkeypatch: MonkeyPatch) -> None:
+    """If a key is provided but invalid, instantiation must fail loudly."""
+    monkeypatch.setenv("CODE_AGENT_ENCRYPTION_KEY", "invalid-key-not-base64-or-wrong-length")
+
+    with pytest.raises(RuntimeError, match="Encryption is configured but the key is invalid"):
+        EncryptedJSON()

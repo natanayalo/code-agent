@@ -53,17 +53,22 @@ class EncryptedJSON(TypeDecorator):
     cache_ok = True
     fernet: Fernet | None = None
 
+    def is_active(self) -> bool:
+        """Return True if encryption is correctly configured."""
+        return self.fernet is not None
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         key = os.environ.get("CODE_AGENT_ENCRYPTION_KEY")
         if key:
             try:
                 self.fernet = Fernet(key.encode())
-            except Exception:
-                logger.error("Invalid CODE_AGENT_ENCRYPTION_KEY provided; encryption disabled.")
-                self.fernet = None
+            except Exception as e:
+                logger.error("Invalid CODE_AGENT_ENCRYPTION_KEY provided")
+                raise RuntimeError("Encryption is configured but the key is invalid.") from e
         else:
             self.fernet = None
+            logger.warning("CODE_AGENT_ENCRYPTION_KEY not set. Storing secrets in plain text JSON.")
 
     def process_bind_param(self, value: Any, dialect: Any) -> Any:
         if value is None:
@@ -159,6 +164,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     constraints: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     budget: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     secrets: Mapped[dict[str, str]] = mapped_column(EncryptedJSON, nullable=False, default=dict)
+    secrets_encrypted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[TaskStatus] = mapped_column(
         TASK_STATUS_ENUM,
         nullable=False,
