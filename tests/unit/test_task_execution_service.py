@@ -281,6 +281,18 @@ def test_apply_execution_budget_policy_respects_explicit_execution_mode_override
     assert budget["worker_timeout_seconds"] == 180
 
 
+def test_apply_execution_budget_policy_preserves_max_minutes_as_timeout_alternative() -> None:
+    """Valid max_minutes should prevent worker-timeout defaults from overriding it."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="webhook:ci",
+        constraints={},
+        budget={"max_minutes": 4},
+    )
+
+    assert budget["max_minutes"] == 4
+    assert "worker_timeout_seconds" not in budget
+
+
 def test_apply_execution_budget_policy_caps_oversized_runtime_limits() -> None:
     """Oversized budget requests should be clamped to global hard caps."""
     budget = execution_module._apply_execution_budget_policy(

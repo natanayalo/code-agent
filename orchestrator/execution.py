@@ -151,6 +151,14 @@ def _apply_execution_budget_policy(
     effective_budget["execution_mode"] = execution_mode
 
     for key, default_value in _DEFAULT_EXECUTION_BUDGETS[execution_mode].items():
+        # Preserve max_minutes as an alternate timeout input when worker_timeout_seconds
+        # is not explicitly set by the caller.
+        if (
+            key == "worker_timeout_seconds"
+            and coerce_positive_int_like(effective_budget.get("worker_timeout_seconds")) is None
+            and coerce_positive_int_like(effective_budget.get("max_minutes")) is not None
+        ):
+            continue
         coercer = (
             coerce_non_negative_int_like
             if key in _NON_NEGATIVE_DEFAULT_BUDGET_KEYS
