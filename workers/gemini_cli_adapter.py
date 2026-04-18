@@ -175,12 +175,13 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         request_timeout_seconds: int = DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS,
         env: Mapping[str, str] | None = None,
     ) -> None:
+        resolved_env = os.environ if env is None else env
         self.executable = executable
         self.model = model.strip() if model is not None and model.strip() else None
         self.request_timeout_seconds = _coerce_positive_int(
             request_timeout_seconds, default=DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS
         )
-        self.env = dict(env) if env is not None else None
+        self.env = build_gemini_subprocess_env(resolved_env)
 
     @classmethod
     def from_env(
@@ -196,7 +197,7 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 resolved_env.get(GEMINI_TIMEOUT_ENV_VAR),
                 default=DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS,
             ),
-            env=build_gemini_subprocess_env(resolved_env),
+            env=resolved_env,
         )
 
     def _build_command(self) -> list[str]:

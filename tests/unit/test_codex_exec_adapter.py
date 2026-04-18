@@ -77,7 +77,7 @@ def test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call(
     assert step.tool_name == "execute_bash"
     assert step.tool_input == "pytest -q"
     assert recorded["timeout"] == 45
-    assert recorded["env"] is None
+    assert isinstance(recorded["env"], dict)
     command = recorded["command"]
     assert isinstance(command, list)
     assert command[0:8] == [
@@ -150,3 +150,16 @@ def test_codex_exec_adapter_from_env_applies_supported_overrides() -> None:
         "PATH": "/usr/local/bin:/usr/bin",
         "OPENAI_API_KEY": "key-123",
     }
+
+
+def test_codex_exec_adapter_scopes_constructor_default_env(monkeypatch, tmp_path: Path) -> None:
+    """Direct construction should still scope subprocess env vars by default."""
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+    monkeypatch.setenv("OPENAI_API_KEY", "key-123")
+    monkeypatch.setenv("UNRELATED_SECRET", "must-not-pass")
+
+    adapter = CodexExecCliRuntimeAdapter(working_directory=tmp_path)
+
+    assert adapter.env["PATH"] == "/usr/local/bin:/usr/bin"
+    assert adapter.env["OPENAI_API_KEY"] == "key-123"
+    assert "UNRELATED_SECRET" not in adapter.env

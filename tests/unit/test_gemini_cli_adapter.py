@@ -171,6 +171,19 @@ def test_gemini_adapter_from_env_uses_defaults_for_missing_vars() -> None:
     assert adapter.request_timeout_seconds == 120
 
 
+def test_gemini_adapter_scopes_constructor_default_env(monkeypatch) -> None:
+    """Direct construction should still scope subprocess env vars by default."""
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+    monkeypatch.setenv("UNRELATED_SECRET", "must-not-pass")
+
+    adapter = GeminiCliRuntimeAdapter()
+
+    assert adapter.env["PATH"] == "/usr/local/bin:/usr/bin"
+    assert adapter.env["GEMINI_API_KEY"] == "gemini-key"
+    assert "UNRELATED_SECRET" not in adapter.env
+
+
 def test_gemini_adapter_command_omits_model_when_not_configured() -> None:
     """The model flag should be absent when no model is set."""
     adapter = GeminiCliRuntimeAdapter(executable="gemini")

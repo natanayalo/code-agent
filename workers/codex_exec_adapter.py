@@ -151,6 +151,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         config_overrides: Sequence[str] = (),
         env: Mapping[str, str] | None = None,
     ) -> None:
+        resolved_env = os.environ if env is None else env
         self.executable = executable
         self.model = model.strip() if model is not None and model.strip() else None
         self.profile = profile.strip() if profile is not None and profile.strip() else None
@@ -164,7 +165,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
             for override in config_overrides
             if isinstance(override, str) and override.strip()
         )
-        self.env = dict(env) if env is not None else None
+        self.env = build_codex_subprocess_env(resolved_env)
 
     @classmethod
     def from_env(
@@ -182,7 +183,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
                 resolved_env.get(CODEX_TIMEOUT_ENV_VAR),
                 default=DEFAULT_CODEX_REQUEST_TIMEOUT_SECONDS,
             ),
-            env=build_codex_subprocess_env(resolved_env),
+            env=resolved_env,
         )
 
     def _build_command(
