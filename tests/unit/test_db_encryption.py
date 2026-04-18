@@ -78,9 +78,9 @@ def test_encrypted_json_handles_decryption_failure_gracefully() -> None:
     # Try to decrypt with Key B
     with patch.dict(os.environ, {"CODE_AGENT_ENCRYPTION_KEY": key_b}):
         decorator_b = EncryptedJSON()
-        # This will fail decryption, and then fail json.loads, returning empty dict
-        result = decorator_b.process_result_value(encrypted_val, None)
-        assert result == {}
+        # This will fail decryption, and then fail json.loads, raising JSONDecodeError
+        with pytest.raises(json.JSONDecodeError):
+            decorator_b.process_result_value(encrypted_val, None)
 
 
 def test_encrypted_json_fails_fast_on_invalid_key(monkeypatch: MonkeyPatch) -> None:

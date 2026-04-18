@@ -106,11 +106,9 @@ class EncryptedJSON(TypeDecorator):
                 return json.loads(decrypted)
             except (InvalidToken, ValueError):
                 logger.warning("Failed to decrypt secret; attempting to load as plain JSON.")
-        try:
-            return json.loads(value)
-        except (json.JSONDecodeError, TypeError):
-            logger.error("Failed to decode secret JSON; returning empty dict.")
-            return {}
+
+        # This will raise naturally (JSONDecodeError or TypeError) if it's not valid JSON
+        return json.loads(value)
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
