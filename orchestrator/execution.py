@@ -519,6 +519,18 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
 
 def _normalize_orchestrator_graph_output(raw_output: object) -> object:
     """Strip transport-only interrupt keys and map unresolved interrupts to failure output."""
+
+    def _normalize_requested_permission(
+        raw_permission: object, *, warning_context: str
+    ) -> str | None:
+        requested_permission_level = coerce_permission_level(raw_permission)
+        if raw_permission is not None and requested_permission_level is None:
+            logger.warning(
+                f"Ignoring unknown permission level from {warning_context}.",
+                extra={"requested_permission": raw_permission},
+            )
+        return requested_permission_level.value if requested_permission_level is not None else None
+
     if isinstance(raw_output, Mapping):
         normalized = dict(raw_output)
     elif isinstance(raw_output, BaseModel):
@@ -534,19 +546,9 @@ def _normalize_orchestrator_graph_output(raw_output: object) -> object:
         normalized_result = existing_result.model_dump(mode="json")
 
     if normalized_result is not None:
-        requested_permission_level = coerce_permission_level(
-            normalized_result.get("requested_permission")
-        )
-        if (
-            normalized_result.get("requested_permission") is not None
-            and requested_permission_level is None
-        ):
-            logger.warning(
-                "Ignoring unknown permission level from result payload.",
-                extra={"requested_permission": normalized_result.get("requested_permission")},
-            )
-        normalized_result["requested_permission"] = (
-            requested_permission_level.value if requested_permission_level is not None else None
+        normalized_result["requested_permission"] = _normalize_requested_permission(
+            normalized_result.get("requested_permission"),
+            warning_context="result payload",
         )
         normalized["result"] = normalized_result
 
@@ -590,17 +592,10 @@ def _normalize_orchestrator_graph_output(raw_output: object) -> object:
 
     if normalized.get("result") is None:
         first_payload = payloads[0] if payloads else {}
-        requested_permission_level = coerce_permission_level(
-            first_payload.get("requested_permission")
+        requested_permission = _normalize_requested_permission(
+            first_payload.get("requested_permission"),
+            warning_context="interrupt payload",
         )
-        requested_permission = (
-            requested_permission_level.value if requested_permission_level is not None else None
-        )
-        if first_payload.get("requested_permission") is not None and requested_permission is None:
-            logger.warning(
-                "Ignoring unknown permission level from interrupt payload.",
-                extra={"requested_permission": first_payload.get("requested_permission")},
-            )
         normalized["result"] = WorkerResult(
             status="failure",
             summary=_interrupt_summary(payloads),
