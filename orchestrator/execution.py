@@ -1222,10 +1222,7 @@ class TaskExecutionService:
                     reserved_keys={"replayed_from"},
                 )
             if replay_request.secrets is not None:
-                updates["secrets"] = _deep_merge(
-                    submission.secrets,
-                    replay_request.secrets,
-                )
+                updates["secrets"] = dict(replay_request.secrets)
 
         # Ensure provenance chain is included in the final set of constraints
         base_constraints = updates.get("constraints", submission.constraints)

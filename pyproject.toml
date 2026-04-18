@@ -14,7 +14,8 @@ dependencies = [
     "httpx>=0.28,<1.0",
     "langgraph>=1.0,<2.0",
     "langgraph-checkpoint-sqlite>=3.0.3,<4.0",
-    "uvicorn>=0.35,<1.0"
+    "uvicorn>=0.35,<1.0",
+    "cryptography>=44.0.0,<45.0"
 ]
 
 [project.optional-dependencies]

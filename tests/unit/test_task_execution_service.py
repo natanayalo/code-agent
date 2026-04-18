@@ -338,6 +338,53 @@ def test_load_submission_for_task_recovers_secrets() -> None:
     assert reloaded_submission.secrets == {"PERSISTED_SECRET": "stored-value"}
 
 
+def test_replay_task_replaces_secrets_instead_of_merging() -> None:
+    """Replaying a task with new secrets must fully replace the old set to prevent leakage."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+
+    # Initial task with secret A
+    submission = execution_module.TaskSubmission(
+        task_text="Original task", secrets={"KEY_A": "VAL_A"}
+    )
+    _, original_persisted = service.create_task(submission)
+
+    # Mark as completed so it's replayable
+    with session_scope(session_factory) as session:
+        TaskRepository(session).update_status(
+            task_id=original_persisted.task_id, status=TaskStatus.COMPLETED
+        )
+
+    # Replay with secret B (should remove A)
+    replay_request = execution_module.TaskReplayRequest(secrets={"KEY_B": "VAL_B"})
+    replay_outcome = service.replay_task(
+        source_task_id=original_persisted.task_id,
+        replay_request=replay_request,
+    )
+
+    assert replay_outcome.status == "created"
+    assert replay_outcome.task_snapshot is not None
+    new_task_id = replay_outcome.task_snapshot.task_id
+
+    # Verify replayed task has only B
+    reloaded_result = service._load_submission_for_task(task_id=new_task_id)
+    assert reloaded_result is not None
+    reloaded_submission, _ = reloaded_result
+
+    assert reloaded_submission.secrets == {"KEY_B": "VAL_B"}
+    assert "KEY_A" not in reloaded_submission.secrets
+
+
 def test_normalize_orchestrator_output_converts_interrupts_to_failure_result() -> None:
     """Unresolved graph interrupts should be converted into a persistable failure shape."""
     raw_output = {

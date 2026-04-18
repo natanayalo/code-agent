@@ -1,10 +1,12 @@
-"""Initial ORM models for the persistence layer."""
-
 from __future__ import annotations
 
+import json
+import logging
+import os
 from datetime import datetime
 from typing import Any
 
+from cryptography.fernet import Fernet
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -15,6 +17,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    TypeDecorator,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
@@ -30,12 +33,60 @@ from db.enums import (
     build_sql_enum,
 )
 
+logger = logging.getLogger(__name__)
+
 SESSION_STATUS_ENUM = build_sql_enum(SessionStatus, name="session_status")
 TASK_STATUS_ENUM = build_sql_enum(TaskStatus, name="task_status")
 WORKER_TYPE_ENUM = build_sql_enum(WorkerType, name="worker_type")
 WORKER_RUN_STATUS_ENUM = build_sql_enum(WorkerRunStatus, name="worker_run_status")
 ARTIFACT_TYPE_ENUM = build_sql_enum(ArtifactType, name="artifact_type")
 TIMELINE_EVENT_TYPE_ENUM = build_sql_enum(TimelineEventType, name="timeline_event_type")
+
+
+class EncryptedJSON(TypeDecorator):
+    """
+    Encrypts/decrypts JSON data at rest using cryptography.fernet.
+    Expects CODE_AGENT_ENCRYPTION_KEY environment variable.
+    """
+
+    impl = Text
+    cache_ok = True
+    fernet: Fernet | None = None
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        key = os.environ.get("CODE_AGENT_ENCRYPTION_KEY")
+        if key:
+            try:
+                self.fernet = Fernet(key.encode())
+            except Exception:
+                logger.error("Invalid CODE_AGENT_ENCRYPTION_KEY provided; encryption disabled.")
+                self.fernet = None
+        else:
+            self.fernet = None
+
+    def process_bind_param(self, value: Any, dialect: Any) -> Any:
+        if value is None:
+            return None
+        json_str = json.dumps(value)
+        if self.fernet:
+            return self.fernet.encrypt(json_str.encode()).decode()
+        return json_str
+
+    def process_result_value(self, value: Any, dialect: Any) -> Any:
+        if value is None:
+            return None
+        if self.fernet:
+            try:
+                decrypted = self.fernet.decrypt(value.encode()).decode()
+                return json.loads(decrypted)
+            except Exception:
+                logger.warning("Failed to decrypt secret; attempting to load as plain JSON.")
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            logger.error("Failed to decode secret JSON; returning empty dict.")
+            return {}
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -107,7 +158,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     worker_override: Mapped[WorkerType | None] = mapped_column(WORKER_TYPE_ENUM, nullable=True)
     constraints: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     budget: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    secrets: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
+    secrets: Mapped[dict[str, str]] = mapped_column(EncryptedJSON, nullable=False, default=dict)
     status: Mapped[TaskStatus] = mapped_column(
         TASK_STATUS_ENUM,
         nullable=False,
