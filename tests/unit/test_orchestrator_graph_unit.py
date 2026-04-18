@@ -545,6 +545,7 @@ def test_await_permission_escalation_invalid_permission():
     assert (
         res["result"]["summary"] == "Worker requested an unknown permission level 'network_write'."
     )
+    assert res["result"]["requested_permission"] is None
     assert res["result"]["next_action_hint"] == "inspect_worker_configuration"
 
 

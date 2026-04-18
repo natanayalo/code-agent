@@ -904,6 +904,7 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
                 "summary": (
                     f"Worker requested an unknown permission level '{requested_permission}'."
                 ),
+                "requested_permission": None,
                 "next_action_hint": "inspect_worker_configuration",
             }
         )
