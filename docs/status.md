@@ -75,7 +75,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-092 Add operational metrics. PR: [#74](https://github.com/natanayalo/code-agent/pull/74)
 - T-100 Secret scoping. PR: [#75](https://github.com/natanayalo/code-agent/pull/75)
 - T-101 Add command safety policy. PR: [#77](https://github.com/natanayalo/code-agent/pull/77)
-- T-102 Add quotas and budgets. PR: (unpublished)
+- T-102 Add quotas and budgets. PR: [#78](https://github.com/natanayalo/code-agent/pull/78)
 
 ## In Progress
 
@@ -91,7 +91,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: Milestone 13 remainder (T-103, T-105), then Milestone 14 (T-106, T-108 to T-112).
+- Current target order from here: Milestone 13 remainder (T-103, T-105), then Milestone 14 (T-106, T-108 to T-112). For the reviewer track, keep the existing task IDs but implement in dependency order: T-114 before T-111, T-112 before T-117, and T-119 as an extension of T-106.
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.
@@ -99,7 +99,9 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-054 (Sandbox Hardening) ensures strict path policies, secret redaction, and complete audit artifact capture for all sandbox executions.
 - Milestone 7 (Memory Integration) adds skepticism metadata (provenance, confidence) to all memory entries and maintains a compact `SessionState` for cross-task goal and risk tracking.
 - Both workers (CodexCliWorker, GeminiCliWorker) are implemented and routable. The worker plan is CLI-first; new worker work should not assume full ownership of low-level raw API payload assembly when a CLI, SDK, hook, or subprocess adapter can provide the runtime.
+- Reviewer direction for Milestone 14: keep T-111 as a worker-local self-review backstop, then add the independent reviewer later as a separate orchestrated advisory stage after deterministic verification. GitHub PR comment rendering is intentionally out of scope for this slice.
 - T-044 DB scope remains intentionally limited to execution-path persistence for task/status lookup, worker run metadata, final result fields, verifier output, and captured artifacts needed for polling by `task_id`.
+- Reviewer rollout should start manual or feature-flagged and only be considered for broader enablement after T-119 provides acceptable precision and false-positive metrics.
 - CI validates every push, including merges to `master`, enforcing a 90% branch-coverage floor in `pytest`.
 - T-021 adds durable LangGraph checkpointing; T-022 adds a destructive-action approval pause/resume path.
 - T-030/T-031/T-032 provide workspace provisioning, Docker-based execution, and artifact capture.

@@ -714,25 +714,29 @@ Acceptance:
 - verifier failures are classified and surfaced with their own typed category
 - unit tests verify classification for common failure scenarios (compile error, test failure, timeout, auth error)
 
-### T-111 Add worker self-review step before declaring completion
-Have the worker review its own `git diff` output against the task objective before declaring "done," catching logical errors that the deterministic verifier cannot detect.
+### T-111 Add bounded worker self-review before declaring completion
+Have the worker inspect its own cumulative diff against the task objective before declaring "done," keeping self-review as a worker-local backstop rather than the full review system.
+
+Dependency note:
+- implement T-114 before or alongside this task so self-review can emit the shared structured review artifact shape
 
 Scope notes:
-- after the worker's agent loop exits with a success indicator, generate the cumulative diff and feed it back to the model with a focused review prompt
-- the review prompt should ask: does this diff satisfy the task? are there unintended changes? are there obvious logical errors?
-- the model's self-review response is captured as a structured artifact (confidence score + issues found)
-- if the self-review identifies issues, the worker can re-enter the agent loop for a bounded number of fix iterations (max 2)
+- after the worker's agent loop exits with a success indicator, generate the cumulative diff and feed it back to the same worker runtime with a focused self-review prompt
+- the prompt should ask: does this diff satisfy the task, are there unintended changes, are there obvious logical errors, and are relevant tests missing?
+- self-review should emit a typed result with explicit empty/no-findings support rather than free-form prose only
+- if the self-review identifies actionable issues, the worker can re-enter the agent loop for a bounded number of fix iterations (max 2)
 - if the self-review passes, the worker returns its result normally
 - self-review runs inside the existing worker budget — it is not a free extra step
+- self-review does not replace the deterministic verifier (T-055) or the later independent reviewer track
 - self-review is skippable via a worker constraint flag for tasks where speed matters more than correctness
 
 Acceptance:
-- worker generates and reviews its own diff before returning a success result
-- self-review output is persisted as a structured artifact with the run
+- worker generates and self-reviews its diff before returning a success result
+- self-review output is persisted as a structured review artifact with explicit empty/no-findings representation
 - identified issues trigger a bounded fix loop (max 2 iterations)
 - self-review respects the existing budget ledger
 - tasks can opt out of self-review via constraint
-- unit tests verify the review-then-fix loop and the opt-out path
+- unit tests verify no-findings, issue-found, review-then-fix, and opt-out paths
 
 ### T-112 Add context window preflight guard
 Check estimated prompt size before sending requests to the provider API so oversized requests fail fast instead of wasting a round-trip and budget.
@@ -751,3 +755,107 @@ Acceptance:
 - a warning is logged when prompt size exceeds 80% of the context window
 - the model→context-window registry covers at least the configured Codex and Gemini models
 - unit tests verify the guard for under-limit, warning-threshold, and over-limit cases
+
+### T-114 Add shared review result schema and persistence
+Promote review output into a typed, reusable artifact so worker self-review and later independent review can emit precise, deduplicable findings instead of only prose summaries.
+
+Scope notes:
+- define a `ReviewResult` / `ReviewFinding` schema with fields such as: `reviewer_kind`, `summary`, `confidence`, `severity`, `category`, `file_path`, `line_start`, `line_end`, `title`, `why_it_matters`, `evidence`, `suggested_fix`
+- explicitly support an empty/no-findings result
+- persist review output as structured run artifacts rather than only embedding it inside human-readable summaries
+- keep review artifacts distinct from verifier output so deterministic checks and model-based review remain separable
+- ensure the persistence path can evolve without requiring GitHub PR comment rendering in this slice
+
+Acceptance:
+- review output is persisted as structured review artifacts, not only free-form text
+- empty review results are represented explicitly
+- findings can be correlated to files/lines and rendered in later summaries
+- unit tests cover schema validation and persistence
+
+### T-115 Add targeted reviewer context packer
+Build a bounded context packet for review from task and run artifacts instead of dumping broad repo context into every review pass.
+
+Scope notes:
+- include: task objective, final diff or bounded diff excerpts, changed-file list, nearby code windows, relevant tests, verifier report, command/test summary, and compact session state when relevant
+- reuse existing prompt-context discovery where possible, but bias toward changed-file neighborhoods and related tests over whole-repo reads
+- keep packet selection deterministic and bounded
+- large diffs should be truncated or summarized safely rather than dumped raw
+- this task prepares local run review only; do not add GitHub PR thread/comment ingestion here
+
+Acceptance:
+- reviewer receives a bounded context packet focused on changed code
+- packet generation is deterministic and test-covered
+- large diffs are truncated or summarized safely rather than dumped raw
+- unrelated repo context is not included by default
+
+### T-116 Add review-specific prompt assembly and repo review guidance
+Add a review-only prompt path that reuses repo guidance but focuses the model on high-confidence, actionable findings.
+
+Scope notes:
+- add `build_review_prompt()` or equivalent alongside existing task-execution prompt assembly
+- reuse `AGENTS.md`, discovered `.agents/` rules/workflows, and build/test context where relevant
+- optionally read a `REVIEW.md` file from the target workspace if present
+- instruct the reviewer to prefer precision over recall, avoid style-only comments, and return structured review output only
+- keep the review prompt separate from edit-oriented worker prompt assembly so tool instructions and coding-loop behavior do not leak into review mode
+
+Acceptance:
+- review prompt assembly is separate from task-execution prompt assembly
+- repo-specific guidance is included in the review prompt when present
+- `REVIEW.md` is optional and skipped gracefully when absent
+- unit tests verify prompt composition and bounded guidance injection
+
+### T-117 Add advisory independent reviewer stage
+Insert an independent LLM reviewer into the execution cycle as a separate critique phase after deterministic verification and before final summarization.
+
+Dependency note:
+- implement T-112 before or alongside this task so bounded reviewer packets fail fast when prompt size grows beyond the model context window
+
+Scope notes:
+- add a `review_result` node after deterministic verifier completion and before `summarize_result`
+- reviewer inputs should include the bounded review packet, the worker result, and the verifier report
+- the reviewer is advisory-only in the first cut: it surfaces structured findings but does not edit files or post GitHub PR comments
+- start behind a manual trigger or feature flag until quality is measured
+- surfaced results should be folded into the final task summary and run artifacts without changing the existing worker contract
+
+Acceptance:
+- orchestrator can run an independent reviewer step as part of the task lifecycle
+- reviewer output is persisted separately from worker and verifier outputs
+- reviewer findings appear in the surfaced task summary when present
+- reviewer can be enabled or disabled without affecting the default task path
+
+### T-118 Add finding suppression, severity gating, and bounded repair handoff
+Reduce reviewer noise before surfacing it, and optionally allow one bounded repair cycle when review findings are strong enough to justify another worker pass.
+
+Scope notes:
+- suppress low-confidence and style-only findings by default
+- support configurable thresholds by severity and confidence
+- keep suppressed findings in artifacts for offline analysis, but not in the surfaced summary
+- if findings exceed configured thresholds, allow one bounded repair handoff back to the worker as a new pass against the retained workspace or equivalent rerun path
+- rerun deterministic verifier after any review-driven repair
+- keep the reviewer advisory-first: it requests repair, but does not directly mutate files
+
+Acceptance:
+- low-value reviewer findings are filtered from surfaced results
+- review-driven repair is bounded to at most one extra repair pass
+- deterministic verifier reruns after review-driven repair
+- runs terminate safely without infinite builder-reviewer ping-pong
+- tests cover suppression, gating, and bounded repair behavior
+
+### T-119 Extend evaluation harness for reviewer quality
+Extend the frozen task suite so reviewer changes can be measured for usefulness before broader rollout.
+
+Dependency note:
+- this task extends the T-106 evaluation harness rather than standing alone
+
+Scope notes:
+- add review-specific scoring dimensions such as: precision, actionable rate, false-positive rate, fix-after-review success, and empty-review correctness
+- support A/B comparison across review prompts and reviewer model profiles
+- store structured benchmark outputs so reviewer changes are regression-testable
+- use this as the gate for default-on rollout, not as a prerequisite for limited manual experimentation
+- keep evaluation focused on local task review quality; GitHub PR comment workflows remain out of scope for this slice
+
+Acceptance:
+- review quality metrics are produced alongside task success metrics
+- prompt or model changes can be compared on the same frozen suite
+- reviewer regressions are visible before enabling stricter triggers
+- evaluation results are persisted as structured artifacts
