@@ -38,6 +38,10 @@ from tools import (
     build_view_file_command_from_input,
     resolve_bash_command_permission,
 )
+from tools.numeric import (
+    coerce_non_negative_int_like,
+    coerce_positive_int_like,
+)
 from workers.base import WorkerCommand
 
 logger = logging.getLogger(__name__)
@@ -116,8 +120,8 @@ class CliRuntimeSettings(CliRuntimeModel):
     max_iterations: int = Field(default=DEFAULT_MAX_ITERATIONS, ge=1)
     worker_timeout_seconds: int = Field(default=DEFAULT_WORKER_TIMEOUT_SECONDS, ge=1)
     command_timeout_seconds: int = Field(default=DEFAULT_COMMAND_TIMEOUT_SECONDS, ge=1)
-    max_tool_calls: int | None = Field(default=None, ge=1)
-    max_shell_commands: int | None = Field(default=None, ge=1)
+    max_tool_calls: int | None = Field(default=None, ge=0)
+    max_shell_commands: int | None = Field(default=None, ge=0)
     max_retries: int | None = Field(default=None, ge=0)
     max_verifier_passes: int | None = Field(default=None, ge=0)
     max_observation_characters: int = Field(
@@ -130,8 +134,8 @@ class CliRuntimeBudgetLedger(CliRuntimeModel):
     """Best-effort runtime budget usage and limit tracking."""
 
     max_iterations: int = Field(ge=1)
-    max_tool_calls: int | None = Field(default=None, ge=1)
-    max_shell_commands: int | None = Field(default=None, ge=1)
+    max_tool_calls: int | None = Field(default=None, ge=0)
+    max_shell_commands: int | None = Field(default=None, ge=0)
     max_retries: int | None = Field(default=None, ge=0)
     max_verifier_passes: int | None = Field(default=None, ge=0)
     iterations_used: int = Field(default=0, ge=0)
@@ -185,38 +189,9 @@ class ShellSessionProtocol(Protocol):
         """Close the shell session and release resources."""
 
 
-def _coerce_positive_int(value: object) -> int | None:
-    """Return a positive integer override when one is present."""
-    parsed = _coerce_int(value)
-    return parsed if parsed is not None and parsed > 0 else None
-
-
-def _coerce_int(value: object) -> int | None:
-    """Parse integer-like inputs with the same truncation rules used by runtime budgets."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        try:
-            return int(value)
-        except (OverflowError, ValueError):
-            return None
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        try:
-            return int(float(stripped))
-        except (OverflowError, ValueError):
-            return None
-    return None
-
-
 def _coerce_non_negative_int(value: object) -> int | None:
-    """Return a non-negative integer override when one is present."""
-    parsed = _coerce_int(value)
-    return parsed if parsed is not None and parsed >= 0 else None
+    """Compatibility wrapper around shared non-negative coercion helper."""
+    return coerce_non_negative_int_like(value)
 
 
 def settings_from_budget(
@@ -227,27 +202,27 @@ def settings_from_budget(
     """Merge supported runtime safety overrides from a worker request budget."""
     resolved = (defaults or CliRuntimeSettings()).model_dump()
 
-    max_iterations = _coerce_positive_int(budget.get("max_iterations"))
+    max_iterations = coerce_positive_int_like(budget.get("max_iterations"))
     if max_iterations is not None:
         resolved["max_iterations"] = max_iterations
 
-    worker_timeout = _coerce_positive_int(budget.get("worker_timeout_seconds"))
+    worker_timeout = coerce_positive_int_like(budget.get("worker_timeout_seconds"))
     if worker_timeout is None:
-        max_minutes = _coerce_positive_int(budget.get("max_minutes"))
+        max_minutes = coerce_positive_int_like(budget.get("max_minutes"))
         if max_minutes is not None:
             worker_timeout = max_minutes * 60
     if worker_timeout is not None:
         resolved["worker_timeout_seconds"] = worker_timeout
 
-    command_timeout = _coerce_positive_int(budget.get("command_timeout_seconds"))
+    command_timeout = coerce_positive_int_like(budget.get("command_timeout_seconds"))
     if command_timeout is not None:
         resolved["command_timeout_seconds"] = command_timeout
 
-    max_tool_calls = _coerce_positive_int(budget.get("max_tool_calls"))
+    max_tool_calls = _coerce_non_negative_int(budget.get("max_tool_calls"))
     if max_tool_calls is not None:
         resolved["max_tool_calls"] = max_tool_calls
 
-    max_shell_commands = _coerce_positive_int(budget.get("max_shell_commands"))
+    max_shell_commands = _coerce_non_negative_int(budget.get("max_shell_commands"))
     if max_shell_commands is not None:
         resolved["max_shell_commands"] = max_shell_commands
 
@@ -259,7 +234,7 @@ def settings_from_budget(
     if max_verifier_passes is not None:
         resolved["max_verifier_passes"] = max_verifier_passes
 
-    max_observation_characters = _coerce_positive_int(budget.get("max_observation_characters"))
+    max_observation_characters = coerce_positive_int_like(budget.get("max_observation_characters"))
     if max_observation_characters is not None:
         resolved["max_observation_characters"] = max_observation_characters
 

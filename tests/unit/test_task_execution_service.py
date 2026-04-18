@@ -227,6 +227,159 @@ def test_is_unsafe_callback_address_rejects_ipv4_mapped_ipv6_loopback() -> None:
     )
 
 
+def test_apply_execution_budget_policy_defaults_to_unattended_for_non_telegram_channels() -> None:
+    """Non-Telegram channels should receive stricter unattended runtime defaults."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="webhook:ci",
+        constraints={},
+        budget={},
+    )
+
+    assert budget["execution_mode"] == "unattended"
+    assert budget["max_iterations"] == 5
+    assert budget["worker_timeout_seconds"] == 180
+    assert budget["max_tool_calls"] == 12
+    assert budget["max_shell_commands"] == 12
+    assert budget["max_retries"] == 1
+
+
+def test_apply_execution_budget_policy_defaults_to_interactive_for_telegram() -> None:
+    """Telegram channels should receive interactive runtime defaults."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="telegram",
+        constraints={},
+        budget={},
+    )
+
+    assert budget["execution_mode"] == "interactive"
+    assert budget["max_iterations"] == 8
+    assert budget["worker_timeout_seconds"] == 300
+    assert budget["max_tool_calls"] == 24
+    assert budget["max_shell_commands"] == 24
+    assert budget["max_retries"] == 2
+
+
+def test_apply_execution_budget_policy_treats_channel_case_insensitively() -> None:
+    """Channel matching for execution mode should be case-insensitive."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="Telegram",
+        constraints={},
+        budget={},
+    )
+
+    assert budget["execution_mode"] == "interactive"
+
+
+def test_apply_execution_budget_policy_respects_explicit_execution_mode_override() -> None:
+    """Explicit mode override should take precedence over channel defaults."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="telegram",
+        constraints={"execution_mode": "unattended"},
+        budget={},
+    )
+    assert budget["execution_mode"] == "unattended"
+    assert budget["worker_timeout_seconds"] == 180
+
+
+def test_apply_execution_budget_policy_prefers_constraints_over_budget_execution_mode() -> None:
+    """Constraints execution_mode should override a conflicting budget execution_mode."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="telegram",
+        constraints={"execution_mode": "unattended"},
+        budget={"execution_mode": "interactive"},
+    )
+
+    assert budget["execution_mode"] == "unattended"
+
+
+def test_apply_execution_budget_policy_invalid_execution_mode_falls_back_to_channel_default() -> (
+    None
+):
+    """Invalid execution_mode values should be ignored and channel defaults should apply."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="telegram",
+        constraints={"execution_mode": "daemon"},
+        budget={"execution_mode": "batch"},
+    )
+
+    assert budget["execution_mode"] == "interactive"
+
+
+def test_apply_execution_budget_policy_preserves_max_minutes_as_timeout_alternative() -> None:
+    """Valid max_minutes should prevent worker-timeout defaults from overriding it."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="webhook:ci",
+        constraints={},
+        budget={"max_minutes": 4},
+    )
+
+    assert budget["max_minutes"] == 4
+    assert "worker_timeout_seconds" not in budget
+
+
+def test_apply_execution_budget_policy_caps_oversized_runtime_limits() -> None:
+    """Oversized budget requests should be clamped to global hard caps."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="webhook:ci",
+        constraints={},
+        budget={
+            "max_iterations": 999,
+            "worker_timeout_seconds": "9999",
+            "max_minutes": 120,
+            "orchestrator_timeout_seconds": 4000,
+            "max_tool_calls": "500",
+            "max_shell_commands": 1000,
+            "max_retries": 50,
+            "max_verifier_passes": 40,
+            "max_observation_characters": 999_999,
+        },
+    )
+
+    assert budget["max_iterations"] == 20
+    assert budget["worker_timeout_seconds"] == 900
+    assert budget["max_minutes"] == 15
+    assert budget["orchestrator_timeout_seconds"] == 930
+    assert budget["max_tool_calls"] == 100
+    assert budget["max_shell_commands"] == 100
+    assert budget["max_retries"] == 10
+    assert budget["max_verifier_passes"] == 5
+    assert budget["max_observation_characters"] == 12000
+
+
+def test_apply_execution_budget_policy_keeps_zero_for_non_negative_limits() -> None:
+    """Non-negative budget knobs should preserve explicit zero values."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="webhook:ci",
+        constraints={},
+        budget={
+            "max_retries": 0,
+            "max_verifier_passes": 0,
+            "max_tool_calls": 0,
+            "max_shell_commands": 0,
+        },
+    )
+
+    assert budget["max_retries"] == 0
+    assert budget["max_verifier_passes"] == 0
+    assert budget["max_tool_calls"] == 0
+    assert budget["max_shell_commands"] == 0
+
+
+def test_apply_execution_budget_policy_drops_invalid_capped_values() -> None:
+    """Invalid values for capped budget keys should be removed from effective runtime budget."""
+    budget = execution_module._apply_execution_budget_policy(
+        channel="webhook:ci",
+        constraints={},
+        budget={
+            "max_minutes": "abc",
+            "max_observation_characters": "NaN",
+        },
+    )
+
+    assert "max_minutes" not in budget
+    assert "max_observation_characters" not in budget
+
+
 def test_task_execution_service_reuses_one_compiled_graph(
     monkeypatch,
 ) -> None:
@@ -309,6 +462,48 @@ def test_run_orchestrator_propagates_submission_secrets(
     assert len(fake_graph.calls) == 1
     task_payload = fake_graph.calls[0]["task"]
     assert task_payload["secrets"] == {"TEST_SECRET": "test-value"}
+
+
+def test_run_orchestrator_applies_effective_budget_policy_to_payload(monkeypatch) -> None:
+    """Orchestrator payload should include mode defaults and global caps."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    fake_graph = _FakeGraph()
+    monkeypatch.setattr(
+        execution_module,
+        "build_orchestrator_graph",
+        lambda *, worker, gemini_worker=None, **kwargs: fake_graph,
+    )
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Run with oversized budget",
+        budget={"max_iterations": 1000, "max_tool_calls": 1000},
+        session=execution_module.SubmissionSession(
+            channel="webhook:ci",
+            external_user_id="webhook:ci:user-1",
+            external_thread_id="thread-1",
+        ),
+    )
+
+    _, persisted = service.create_task(submission)
+    asyncio.run(service._run_orchestrator(submission, persisted))
+
+    assert len(fake_graph.calls) == 1
+    task_payload = fake_graph.calls[0]["task"]
+    assert task_payload["budget"]["execution_mode"] == "unattended"
+    assert task_payload["budget"]["max_iterations"] == 20
+    assert task_payload["budget"]["worker_timeout_seconds"] == 180
+    assert task_payload["budget"]["max_tool_calls"] == 100
 
 
 def test_load_submission_for_task_recovers_secrets() -> None:

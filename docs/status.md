@@ -74,17 +74,16 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-091 Implement task replay mechanism. PR: [#73](https://github.com/natanayalo/code-agent/pull/73)
 - T-092 Add operational metrics. PR: [#74](https://github.com/natanayalo/code-agent/pull/74)
 - T-100 Secret scoping. PR: [#75](https://github.com/natanayalo/code-agent/pull/75)
+- T-101 Add command safety policy. PR: [#77](https://github.com/natanayalo/code-agent/pull/77)
+- T-102 Add quotas and budgets. PR: (unpublished)
 
 ## In Progress
 
-- T-101 Add command safety policy.
-  - Slice 1 (branch `task/t-101-command-safety-policy`): enforce canonical permission escalation classes in orchestrator (`read_only`, `workspace_write`, `dangerous_shell`, `networked_write`, `git_push_or_deploy`) and fail closed on unknown values.
-  - Slice 2 (same branch/PR): canonicalize unresolved interrupt `requested_permission` values before persistence and drop unknown permission names from stored run state.
-  - Slice 3 (review follow-up on same branch/PR): centralize permission coercion in `tools.policy.coerce_permission_level` and reuse it across orchestrator + execution paths.
+- None
 
 ## Next
 
-- T-102 Add quotas and budgets.
+- T-103 Retention policy.
 
 ## Blocked
 
@@ -92,7 +91,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: Milestone 13 remainder (T-101, T-102, T-103, T-105), then Milestone 14 (T-106, T-108 to T-112).
+- Current target order from here: Milestone 13 remainder (T-103, T-105), then Milestone 14 (T-106, T-108 to T-112).
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.
