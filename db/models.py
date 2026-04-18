@@ -148,6 +148,14 @@ class Session(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A requested unit of work within a session."""
 
+    @classmethod
+    def is_secret_encryption_active(cls) -> bool:
+        """Return True if secret encryption is correctly configured for the Task model."""
+        column = cls.secrets.property.columns[0]
+        if hasattr(column.type, "is_active"):
+            return column.type.is_active()
+        return False
+
     __tablename__ = "tasks"
     __table_args__ = (Index("ix_tasks_created_at", "created_at"),)
 

@@ -1171,7 +1171,7 @@ class TaskExecutionService:
     def is_secret_encryption_active(self) -> bool:
         """Return True if secret encryption is active."""
         # We check the model directly to see if the decorator is active.
-        return Task.secrets.property.columns[0].type.is_active()
+        return Task.is_secret_encryption_active()
 
     def replay_task(
         self,
