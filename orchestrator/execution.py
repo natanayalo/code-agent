@@ -1475,6 +1475,7 @@ class TaskExecutionService:
                     ),
                     "constraints": dict(submission.constraints),
                     "budget": dict(submission.budget),
+                    "secrets": dict(submission.secrets),
                 },
                 "attempt_count": persisted.attempt_count,
                 "timeline_persisted_count": initial_persisted_count,
@@ -1511,6 +1512,7 @@ class TaskExecutionService:
                 worker_override=task.worker_override,
                 constraints=dict(task.constraints or {}),
                 budget=dict(task.budget or {}),
+                secrets=dict(task.secrets or {}),
                 callback_url=task.callback_url,
                 priority=task.priority,
                 session=SubmissionSession(

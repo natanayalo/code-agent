@@ -273,6 +273,71 @@ def test_task_execution_service_reuses_one_compiled_graph(
     assert len(fake_graph.calls) == 2
 
 
+def test_run_orchestrator_propagates_submission_secrets(
+    monkeypatch,
+) -> None:
+    """The execution service must include submission secrets in the orchestrator payload."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    fake_graph = _FakeGraph()
+    monkeypatch.setattr(
+        execution_module,
+        "build_orchestrator_graph",
+        lambda *, worker, gemini_worker=None, **kwargs: fake_graph,
+    )
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+
+    submission = execution_module.TaskSubmission(
+        task_text="Run with secrets",
+        secrets={"TEST_SECRET": "test-value"},
+    )
+
+    _, persisted = service.create_task(submission)
+    asyncio.run(service._run_orchestrator(submission, persisted))
+
+    assert len(fake_graph.calls) == 1
+    task_payload = fake_graph.calls[0]["task"]
+    assert task_payload["secrets"] == {"TEST_SECRET": "test-value"}
+
+
+def test_load_submission_for_task_recovers_secrets() -> None:
+    """The submission reconstruction logic must restore secrets from the persisted Task record."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Recoverable secrets",
+        secrets={"PERSISTED_SECRET": "stored-value"},
+    )
+    _, persisted = service.create_task(submission)
+
+    # Reload from database.
+    reloaded_result = service._load_submission_for_task(task_id=persisted.task_id)
+    assert reloaded_result is not None
+    reloaded_submission, _ = reloaded_result
+
+    assert reloaded_submission.secrets == {"PERSISTED_SECRET": "stored-value"}
+
+
 def test_normalize_orchestrator_output_converts_interrupts_to_failure_result() -> None:
     """Unresolved graph interrupts should be converted into a persistable failure shape."""
     raw_output = {

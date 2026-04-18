@@ -129,13 +129,12 @@ class ToolRegistry(ToolModel):
         tool_names: list[str],
         available_secrets: dict[str, str],
     ) -> dict[str, str]:
-        """Filter available secrets to only those required by the specified tools."""
-        required_keys: set[str] = set()
-        for name in tool_names:
-            tool = self.get_tool(name)
-            if tool:
-                required_keys.update(tool.required_secrets)
-
+        required_keys = {
+            secret
+            for name in tool_names
+            if (tool := self.get_tool(name))
+            for secret in tool.required_secrets
+        }
         return {k: v for k, v in available_secrets.items() if k in required_keys}
 
 
