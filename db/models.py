@@ -68,13 +68,15 @@ class EncryptedJSON(TypeDecorator):
         """Lazily initialize and cache Fernet from environment in a thread-safe manner."""
         key = os.environ.get("CODE_AGENT_ENCRYPTION_KEY")
 
-        # Fast path for already initialized cache
-        if key == EncryptedJSON._last_key and EncryptedJSON._cached_fernet is not None:
+        # Fast path for already initialized cache (including the "no key" disabled state)
+        if key == EncryptedJSON._last_key:
             return EncryptedJSON._cached_fernet
 
         with EncryptedJSON._lock:
+            # Re-read inside the lock to handle rapid env changes atomically
+            key = os.environ.get("CODE_AGENT_ENCRYPTION_KEY")
             # Double-check inside the lock
-            if key == EncryptedJSON._last_key and EncryptedJSON._cached_fernet is not None:
+            if key == EncryptedJSON._last_key:
                 return EncryptedJSON._cached_fernet
 
             if not key:
