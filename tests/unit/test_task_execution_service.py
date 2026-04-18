@@ -501,6 +501,26 @@ def test_normalize_orchestrator_output_drops_unknown_existing_result_permission(
     assert normalized["result"]["requested_permission"] is None
 
 
+def test_normalize_orchestrator_output_canonicalizes_existing_result_model_permission() -> None:
+    """Normalization should also run when `result` is provided as a Pydantic model."""
+    raw_output = {
+        "task": {"task_text": "Fetch dependency"},
+        "result": WorkerResult(
+            status="failure",
+            summary="permission requested",
+            requested_permission="  Networked_Write ",
+            commands_run=[],
+            files_changed=[],
+            test_results=[],
+            artifacts=[],
+        ),
+    }
+
+    normalized = execution_module._normalize_orchestrator_graph_output(raw_output)
+    assert isinstance(normalized, dict)
+    assert normalized["result"]["requested_permission"] == "networked_write"
+
+
 def test_normalize_orchestrator_output_formats_manual_approval_summary_without_duplication() -> (
     None
 ):

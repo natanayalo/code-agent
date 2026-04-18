@@ -524,8 +524,13 @@ def _normalize_orchestrator_graph_output(raw_output: object) -> object:
 
     normalized = dict(raw_output)
     existing_result = normalized.get("result")
+    normalized_result: dict[str, Any] | None = None
     if isinstance(existing_result, Mapping):
         normalized_result = dict(existing_result)
+    elif isinstance(existing_result, BaseModel):
+        normalized_result = existing_result.model_dump(mode="json")
+
+    if normalized_result is not None:
         requested_permission_level = coerce_permission_level(
             normalized_result.get("requested_permission")
         )
