@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Set
 
 _BASE_ALLOWED_ENV_KEYS = frozenset(
     {
@@ -58,15 +58,16 @@ _GEMINI_ALLOWED_ENV_KEYS = (
     "GOOGLE_GENAI_USE_VERTEXAI",
     "GOOGLE_APPLICATION_CREDENTIALS",
 )
+_CODEX_FULL_ALLOWLIST = _BASE_ALLOWED_ENV_KEYS.union(_CODEX_ALLOWED_ENV_KEYS)
+_GEMINI_FULL_ALLOWLIST = _BASE_ALLOWED_ENV_KEYS.union(_GEMINI_ALLOWED_ENV_KEYS)
 
 
 def _build_scoped_env(
     environ: Mapping[str, str],
     *,
-    allowed_keys: Sequence[str],
+    allowlist: Set[str],
 ) -> dict[str, str]:
     """Filter a process env mapping to explicitly allowed keys/prefixes."""
-    allowlist = _BASE_ALLOWED_ENV_KEYS.union(allowed_keys)
     scoped: dict[str, str] = {}
     # Snapshot items to avoid RuntimeError if os.environ mutates concurrently.
     for key, value in list(environ.items()):
@@ -77,9 +78,9 @@ def _build_scoped_env(
 
 def build_codex_subprocess_env(environ: Mapping[str, str]) -> dict[str, str]:
     """Build a minimal subprocess environment for Codex CLI invocation."""
-    return _build_scoped_env(environ, allowed_keys=_CODEX_ALLOWED_ENV_KEYS)
+    return _build_scoped_env(environ, allowlist=_CODEX_FULL_ALLOWLIST)
 
 
 def build_gemini_subprocess_env(environ: Mapping[str, str]) -> dict[str, str]:
     """Build a minimal subprocess environment for Gemini CLI invocation."""
-    return _build_scoped_env(environ, allowed_keys=_GEMINI_ALLOWED_ENV_KEYS)
+    return _build_scoped_env(environ, allowlist=_GEMINI_FULL_ALLOWLIST)
