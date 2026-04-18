@@ -147,12 +147,19 @@ def test_gemini_adapter_from_env_maps_env_vars() -> None:
             "CODE_AGENT_GEMINI_CLI_BIN": "/opt/bin/gemini",
             "CODE_AGENT_GEMINI_MODEL": "gemini-2.5-pro",
             "CODE_AGENT_GEMINI_TIMEOUT_SECONDS": "60",
+            "PATH": "/usr/local/bin:/usr/bin",
+            "GEMINI_API_KEY": "gemini-key",
+            "UNRELATED_SECRET": "must-not-pass",
         }
     )
 
     assert adapter.executable == "/opt/bin/gemini"
     assert adapter.model == "gemini-2.5-pro"
     assert adapter.request_timeout_seconds == 60
+    assert adapter.env == {
+        "PATH": "/usr/local/bin:/usr/bin",
+        "GEMINI_API_KEY": "gemini-key",
+    }
 
 
 def test_gemini_adapter_from_env_uses_defaults_for_missing_vars() -> None:
@@ -162,6 +169,19 @@ def test_gemini_adapter_from_env_uses_defaults_for_missing_vars() -> None:
     assert adapter.executable == "gemini"
     assert adapter.model is None
     assert adapter.request_timeout_seconds == 120
+
+
+def test_gemini_adapter_scopes_constructor_default_env(monkeypatch) -> None:
+    """Direct construction should still scope subprocess env vars by default."""
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+    monkeypatch.setenv("UNRELATED_SECRET", "must-not-pass")
+
+    adapter = GeminiCliRuntimeAdapter()
+
+    assert adapter.env["PATH"] == "/usr/local/bin:/usr/bin"
+    assert adapter.env["GEMINI_API_KEY"] == "gemini-key"
+    assert "UNRELATED_SECRET" not in adapter.env
 
 
 def test_gemini_adapter_command_omits_model_when_not_configured() -> None:

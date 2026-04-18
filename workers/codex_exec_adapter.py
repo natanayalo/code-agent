@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Final
 
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
+from workers.subprocess_env import build_codex_subprocess_env
 
 DEFAULT_CODEX_EXECUTABLE: Final[str] = "codex"
 DEFAULT_CODEX_SANDBOX_MODE: Final[str] = "read-only"
@@ -150,6 +151,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         config_overrides: Sequence[str] = (),
         env: Mapping[str, str] | None = None,
     ) -> None:
+        resolved_env = os.environ if env is None else env
         self.executable = executable
         self.model = model.strip() if model is not None and model.strip() else None
         self.profile = profile.strip() if profile is not None and profile.strip() else None
@@ -163,7 +165,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
             for override in config_overrides
             if isinstance(override, str) and override.strip()
         )
-        self.env = dict(env) if env is not None else None
+        self.env = build_codex_subprocess_env(resolved_env)
 
     @classmethod
     def from_env(

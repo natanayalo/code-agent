@@ -67,7 +67,7 @@ Structured run observability and second worker routing (T-043, T-070+)
 Telegram ingress and generic webhook adapters (T-050 to T-053) on top of the existing HTTP path once the core execution path is stable
 
 ## Step 16 — current
-External tool wrappers, MCP compatibility, and remaining hardening
+Remaining hardening and agent-intelligence milestones (Milestone 13 remainder, then Milestone 14)
 
 ## Rule
 
