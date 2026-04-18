@@ -135,6 +135,9 @@ def test_codex_exec_adapter_from_env_applies_supported_overrides() -> None:
             "CODE_AGENT_CODEX_PROFILE": "personal",
             "CODE_AGENT_CODEX_TIMEOUT_SECONDS": "33",
             "CODE_AGENT_CODEX_SANDBOX": "read-only",
+            "PATH": "/usr/local/bin:/usr/bin",
+            "OPENAI_API_KEY": "key-123",
+            "UNRELATED_SECRET": "must-not-pass",
         }
     )
 
@@ -143,3 +146,7 @@ def test_codex_exec_adapter_from_env_applies_supported_overrides() -> None:
     assert adapter.profile == "personal"
     assert adapter.request_timeout_seconds == 33
     assert adapter.sandbox_mode == "read-only"
+    assert adapter.env == {
+        "PATH": "/usr/local/bin:/usr/bin",
+        "OPENAI_API_KEY": "key-123",
+    }

@@ -202,6 +202,5 @@ The repo includes:
 ## Next Steps
 
 The current implementation targets are:
-- **Milestone 8**: Structured run observability and diagnostic logging (T-043)
-- **Milestone 9**: Second worker integration (Gemini CLI) and routing improvements (T-070+)
-- **Milestone 10**: Telegram and webhook adapter ingress (T-050 to T-053)
+- **Milestone 13 (remaining)**: hardening tasks (T-101, T-102, T-103, T-105)
+- **Milestone 14**: agent intelligence tasks (T-106, T-108 to T-112)

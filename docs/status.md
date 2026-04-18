@@ -7,7 +7,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Done
 
-- Initial repo guidance and architecture docs. PR: [#1](https://github.com/natanayalo/code-agent/pull/1)
+- T-001 Initial repo guidance and architecture docs. PR: [#1](https://github.com/natanayalo/code-agent/pull/1)
 - Planning doc refinements and task scaffolding. PR: [#2](https://github.com/natanayalo/code-agent/pull/2)
 - T-003 Add health endpoints. PR: [#3](https://github.com/natanayalo/code-agent/pull/3)
 - Repo quality hooks and CI. PR: [#4](https://github.com/natanayalo/code-agent/pull/4)
@@ -36,10 +36,17 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-042 Baseline worker timeout/cancel envelope slice. PR: [#34](https://github.com/natanayalo/code-agent/pull/34)
 - T-044 / T-047 Wire real provider CLI adapter into the app path. PR: [#36](https://github.com/natanayalo/code-agent/pull/36)
 - T-049 Wire permission-required outcomes into orchestrator pause/resume. PR: [#37](https://github.com/natanayalo/code-agent/pull/37)
-- T-042 Orchestrator Timeout Diagnostics: extract partial execution results and workspace artifacts after worker cancellation. (Local verification complete)
-- T-055 Add the constrained verifier stage. PR: [#38](https://github.com/natanayalo/code-agent/pull/38)
-- Milestone 6: Sandbox hardening (T-054/T-055). Verified with strict path policies, secret redaction, and complete audit capture.
-- Milestone 7: Skeptical memory, compact session state, and stable session scaffold (T-060 to T-065). Verified with schema metadata and SessionState repository.
+- T-042 Orchestrator Timeout Diagnostics: extract partial execution results and workspace artifacts after worker cancellation. PR: [#38](https://github.com/natanayalo/code-agent/pull/38)
+- T-055 Add the constrained verifier stage. PR: [#39](https://github.com/natanayalo/code-agent/pull/39)
+- T-054 Harden sandbox execution boundary and auditability. PR: [#40](https://github.com/natanayalo/code-agent/pull/40)
+- Milestone 6: Sandbox hardening complete. Verified with strict path policies, secret redaction, and complete audit capture.
+- T-060 Add skeptical memory schema and metadata. PR: [#42](https://github.com/natanayalo/code-agent/pull/42)
+- T-061 Add compact session working state store. PR: [#42](https://github.com/natanayalo/code-agent/pull/42)
+- T-062 Add skeptical memory retrieval and verification policy. PR: [#42](https://github.com/natanayalo/code-agent/pull/42)
+- T-063 Add memory admin endpoints. PR: [#42](https://github.com/natanayalo/code-agent/pull/42)
+- T-064 Wire load_memory -> execute -> persist_learnings in orchestrator. PR: [#42](https://github.com/natanayalo/code-agent/pull/42)
+- T-065 Add stable session scaffold persistence. PR: [#42](https://github.com/natanayalo/code-agent/pull/42)
+- Milestone 7: Skeptical memory, compact session state, and stable session scaffold complete.
 - Milestone 8: Structured run observability (T-043). PR: [#45](https://github.com/natanayalo/code-agent/pull/45)
 - T-070 Implement GeminiCliWorker + GeminiCliRuntimeAdapter as second worker. PR: [#46](https://github.com/natanayalo/code-agent/pull/46)
 - T-071 routing heuristics + T-072 manual override. PR: [#47](https://github.com/natanayalo/code-agent/pull/47)
@@ -66,6 +73,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-090 Add task timeline. PR: [#72](https://github.com/natanayalo/code-agent/pull/72)
 - T-091 Implement task replay mechanism. PR: [#73](https://github.com/natanayalo/code-agent/pull/73)
 - T-092 Add operational metrics. PR: [#74](https://github.com/natanayalo/code-agent/pull/74)
+- T-100 Secret scoping. PR: [#75](https://github.com/natanayalo/code-agent/pull/75)
 
 ## In Progress
 
@@ -73,7 +81,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Next
 
-- T-100 Secret scoping.
+- T-101 Add command safety policy.
 
 ## Blocked
 
@@ -81,7 +89,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: Milestone 12 (T-090 to T-092).
+- Current target order from here: Milestone 13 remainder (T-101, T-102, T-103, T-105), then Milestone 14 (T-106, T-108 to T-112).
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Final
 
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
+from workers.subprocess_env import build_codex_subprocess_env
 
 DEFAULT_CODEX_EXECUTABLE: Final[str] = "codex"
 DEFAULT_CODEX_SANDBOX_MODE: Final[str] = "read-only"
@@ -181,7 +182,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
                 resolved_env.get(CODEX_TIMEOUT_ENV_VAR),
                 default=DEFAULT_CODEX_REQUEST_TIMEOUT_SECONDS,
             ),
-            env=resolved_env,
+            env=build_codex_subprocess_env(resolved_env),
         )
 
     def _build_command(

@@ -147,12 +147,19 @@ def test_gemini_adapter_from_env_maps_env_vars() -> None:
             "CODE_AGENT_GEMINI_CLI_BIN": "/opt/bin/gemini",
             "CODE_AGENT_GEMINI_MODEL": "gemini-2.5-pro",
             "CODE_AGENT_GEMINI_TIMEOUT_SECONDS": "60",
+            "PATH": "/usr/local/bin:/usr/bin",
+            "GEMINI_API_KEY": "gemini-key",
+            "UNRELATED_SECRET": "must-not-pass",
         }
     )
 
     assert adapter.executable == "/opt/bin/gemini"
     assert adapter.model == "gemini-2.5-pro"
     assert adapter.request_timeout_seconds == 60
+    assert adapter.env == {
+        "PATH": "/usr/local/bin:/usr/bin",
+        "GEMINI_API_KEY": "gemini-key",
+    }
 
 
 def test_gemini_adapter_from_env_uses_defaults_for_missing_vars() -> None:

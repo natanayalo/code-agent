@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Final
 
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
+from workers.subprocess_env import build_gemini_subprocess_env
 
 DEFAULT_GEMINI_EXECUTABLE: Final[str] = "gemini"
 DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS: Final[int] = 120
@@ -195,7 +196,7 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 resolved_env.get(GEMINI_TIMEOUT_ENV_VAR),
                 default=DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS,
             ),
-            env=resolved_env,
+            env=build_gemini_subprocess_env(resolved_env),
         )
 
     def _build_command(self) -> list[str]:
