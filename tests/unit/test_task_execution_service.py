@@ -307,11 +307,15 @@ def test_apply_execution_budget_policy_keeps_zero_for_non_negative_limits() -> N
         budget={
             "max_retries": 0,
             "max_verifier_passes": 0,
+            "max_tool_calls": 0,
+            "max_shell_commands": 0,
         },
     )
 
     assert budget["max_retries"] == 0
     assert budget["max_verifier_passes"] == 0
+    assert budget["max_tool_calls"] == 0
+    assert budget["max_shell_commands"] == 0
 
 
 def test_apply_execution_budget_policy_drops_invalid_capped_values() -> None:

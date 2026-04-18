@@ -96,8 +96,12 @@ _GLOBAL_BUDGET_CAPS: dict[str, int] = {
     "max_verifier_passes": 5,
     "max_observation_characters": 12000,
 }
-_NON_NEGATIVE_BUDGET_KEYS = frozenset({"max_retries", "max_verifier_passes"})
-_NON_NEGATIVE_DEFAULT_BUDGET_KEYS = frozenset({"max_retries"})
+_NON_NEGATIVE_BUDGET_KEYS = frozenset(
+    {"max_retries", "max_verifier_passes", "max_tool_calls", "max_shell_commands"}
+)
+_NON_NEGATIVE_DEFAULT_BUDGET_KEYS = frozenset(
+    {"max_retries", "max_tool_calls", "max_shell_commands"}
+)
 
 
 class ExecutionModel(BaseModel):
