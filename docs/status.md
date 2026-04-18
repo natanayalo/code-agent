@@ -77,10 +77,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-101 Add command safety policy. PR: [#77](https://github.com/natanayalo/code-agent/pull/77)
 - T-102 Add quotas and budgets. PR: [#78](https://github.com/natanayalo/code-agent/pull/78)
 - T-103 Retention policy. PR: [#80](https://github.com/natanayalo/code-agent/pull/80)
+- T-105 Auto-run repo lint/format after worker completion. PR: [#81](https://github.com/natanayalo/code-agent/pull/81)
 
 ## In Progress
 
-- T-105 Auto-run repo lint/format after worker completion.
+- None
 
 ## Next
 
@@ -92,7 +93,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: Milestone 13 remainder (T-103, T-105), then Milestone 14 (T-106, T-108 to T-112). For the reviewer track, keep the existing task IDs but implement in dependency order: T-114 before T-111, T-112 before T-117, and T-119 as an extension of T-106.
+- Current target order from here: Milestone 14 (T-106, T-108 to T-112). For the reviewer track, keep the existing task IDs but implement in dependency order: T-114 before T-111, T-112 before T-117, and T-119 as an extension of T-106.
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.
