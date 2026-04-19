@@ -2,7 +2,8 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_CERT=/etc/ssl/certs/ca-certificates.crt
+    PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
+    PATH="/opt/poetry-venv/bin:$PATH"
 
 WORKDIR /app
 
@@ -13,7 +14,8 @@ RUN set -eu; \
         cp /app/cert.pem /usr/local/share/ca-certificates/code-agent-local.crt; \
         update-ca-certificates; \
     fi; \
-    python -m pip install --upgrade pip==25.2 && \
+    python -m venv /opt/poetry-venv && \
+    pip install --upgrade pip==25.2 && \
     pip install "poetry>=2.0.1,<3.0" && \
     poetry config virtualenvs.create false && \
     poetry install --only main --no-root --no-interaction --no-ansi

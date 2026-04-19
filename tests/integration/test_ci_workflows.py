@@ -49,7 +49,9 @@ def test_pyproject_dev_dependencies_include_pytest_cov() -> None:
 
     dev_dependencies = config["tool"]["poetry"]["group"]["dev"]["dependencies"]
     assert "pytest-cov" in dev_dependencies
-    assert dev_dependencies["pytest-cov"].startswith(">=")
+    pytest_cov = dev_dependencies["pytest-cov"]
+    version_spec = pytest_cov if isinstance(pytest_cov, str) else pytest_cov.get("version", "")
+    assert isinstance(version_spec, str) and version_spec.startswith(">=")
 
 
 def test_pytest_workflow_runs_on_push_and_enforces_coverage() -> None:
