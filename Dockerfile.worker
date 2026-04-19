@@ -29,11 +29,11 @@ RUN set -eu; \
     python -m pip install --upgrade pip==25.2 && \
     pip install "poetry>=2.0.1,<3.0" && \
     poetry config virtualenvs.create false && \
-    poetry install --only main --no-root --no-interaction --no-ansi
+    poetry install --only main --no-root --no-interaction --no-ansi && \
+    npm install -g @openai/codex @google/gemini-cli
 
 COPY . /app
 
-RUN poetry install --only main --no-interaction --no-ansi && \
-    npm install -g @openai/codex @google/gemini-cli
+RUN poetry install --only main --no-interaction --no-ansi
 
 CMD ["python", "-m", "apps.worker.main"]
