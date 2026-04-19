@@ -103,9 +103,6 @@ def load_frozen_suite(path: Path | None = None) -> FrozenSuite:
             )
         )
 
-    if len(cases) < 5:
-        raise ValueError("Frozen suite must include at least 5 cases.")
-
     return FrozenSuite(suite_name=suite_name, cases=tuple(cases))
 
 

@@ -115,17 +115,18 @@ class EvaluationReport:
 def _score_case(case: FrozenTaskCase, outcome: WorkerOutcome) -> CaseRunResult:
     points = 0
     max_points = (
-        1
+        int(case.expectation.require_success)
         + int(case.expectation.require_tests_passed)
         + len(case.expectation.required_files_changed)
         + len(case.expectation.required_summary_substrings)
     )
     failures: list[str] = []
 
-    if not case.expectation.require_success or outcome.status == "success":
-        points += 1
-    else:
-        failures.append("status was not success")
+    if case.expectation.require_success:
+        if outcome.status == "success":
+            points += 1
+        else:
+            failures.append("status was not success")
 
     if case.expectation.require_tests_passed:
         if outcome.tests_passed is True:

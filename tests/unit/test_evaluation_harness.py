@@ -9,6 +9,7 @@ from evaluation import (
     OrchestratorReplayRunner,
     ReplayRunner,
     TaskExpectation,
+    WorkerOutcome,
     default_replay_outcomes,
     evaluate_suite,
     load_frozen_suite,
@@ -22,6 +23,27 @@ def test_frozen_suite_has_minimum_case_count() -> None:
 
     assert suite.suite_name == "frozen-v1"
     assert len(suite.cases) >= 5
+
+
+def test_loader_accepts_small_targeted_suite_file(tmp_path: Path) -> None:
+    payload = {
+        "suite_name": "targeted",
+        "cases": [
+            {
+                "case_id": "targeted-1",
+                "repo_fixture": "fixtures/one",
+                "task_text": "Do one thing",
+                "expectation": {"require_success": True},
+            }
+        ],
+    }
+    suite_path = tmp_path / "targeted-suite.json"
+    suite_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    suite = load_frozen_suite(path=suite_path)
+
+    assert suite.suite_name == "targeted"
+    assert len(suite.cases) == 1
 
 
 def test_evaluate_suite_is_deterministic_for_same_inputs() -> None:
@@ -59,6 +81,34 @@ def test_missing_replay_outcome_is_scored_as_failure() -> None:
     assert report.failed_cases == 1
     assert report.results[0].outcome.status == "failure"
     assert "missing replay outcome" in report.results[0].outcome.summary.lower()
+
+
+def test_scoring_omits_success_weight_when_success_not_required() -> None:
+    case = FrozenTaskCase(
+        case_id="no-success-weight",
+        repo_fixture="fixtures/empty",
+        task_text="Do a thing",
+        expectation=TaskExpectation(
+            require_success=False,
+            required_summary_substrings=("needle",),
+        ),
+    )
+    report = evaluate_suite(
+        suite_name="weighting",
+        cases=(case,),
+        runner=ReplayRunner(
+            outcomes_by_case_id={
+                "no-success-weight": WorkerOutcome(
+                    status="failure",
+                    summary="contains needle",
+                )
+            }
+        ),
+    )
+
+    assert report.total_score == 1
+    assert report.max_score == 1
+    assert report.results[0].passed is True
 
 
 def test_write_report_persists_structured_json(tmp_path: Path) -> None:
