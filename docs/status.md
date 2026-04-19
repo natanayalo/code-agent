@@ -78,10 +78,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-102 Add quotas and budgets. PR: [#78](https://github.com/natanayalo/code-agent/pull/78)
 - T-103 Retention policy. PR: [#80](https://github.com/natanayalo/code-agent/pull/80)
 - T-105 Auto-run repo lint/format after worker completion. PR: [#81](https://github.com/natanayalo/code-agent/pull/81)
+- T-106 Add evaluation harness with frozen task suite. PR: [#82](https://github.com/natanayalo/code-agent/pull/82)
 
 ## In Progress
 
-- T-106 Add evaluation harness with frozen task suite (expanded slice: orchestrator-path runner + feature-flagged replay fallback, CI/default runner updated, tests added; unpublished)
+- None
 
 ## Next
 
