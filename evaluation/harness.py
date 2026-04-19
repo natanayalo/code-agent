@@ -45,6 +45,18 @@ class EvaluationRunner(Protocol):
         """Execute one case and return the normalized outcome."""
 
 
+def _runner_exception_outcome(case: FrozenTaskCase, exc: Exception) -> WorkerOutcome:
+    """Normalize unexpected runner crashes into deterministic failure outcomes."""
+    detail = str(exc).strip()
+    if detail:
+        summary = (
+            f"evaluation runner raised {type(exc).__name__} for case " f"'{case.case_id}': {detail}"
+        )
+    else:
+        summary = f"evaluation runner raised {type(exc).__name__} for case '{case.case_id}'"
+    return WorkerOutcome(status="failure", summary=summary, tests_passed=False)
+
+
 class ReplayRunner:
     """Deterministic adapter that replays pre-baked outcomes by case id."""
 
@@ -146,7 +158,7 @@ def _score_case(case: FrozenTaskCase, outcome: WorkerOutcome) -> CaseRunResult:
         if required_substring.lower() in summary_text:
             points += 1
         else:
-            failures.append("required summary substring missing: " f"{required_substring}")
+            failures.append(f"required summary substring missing: {required_substring}")
 
     return CaseRunResult(
         case_id=case.case_id,
@@ -165,7 +177,15 @@ def evaluate_suite(
     runner: EvaluationRunner,
 ) -> EvaluationReport:
     """Execute and score all frozen cases through the supplied runner."""
-    results = tuple(_score_case(case, runner.run_case(case)) for case in cases)
+    scored_results: list[CaseRunResult] = []
+    for case in cases:
+        try:
+            outcome = runner.run_case(case)
+        except Exception as exc:  # pragma: no cover - asserted via unit tests
+            outcome = _runner_exception_outcome(case, exc)
+        scored_results.append(_score_case(case, outcome))
+
+    results = tuple(scored_results)
     total_cases = len(results)
     passed_cases = sum(1 for result in results if result.passed)
     failed_cases = total_cases - passed_cases

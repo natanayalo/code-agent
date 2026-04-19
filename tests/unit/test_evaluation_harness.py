@@ -64,6 +64,45 @@ def test_evaluate_suite_is_deterministic_for_same_inputs() -> None:
     assert report_one.to_dict() == report_two.to_dict()
 
 
+def test_evaluate_suite_continues_after_runner_exception() -> None:
+    class CrashyRunner:
+        def __init__(self) -> None:
+            self._seen: set[str] = set()
+
+        def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
+            if case.case_id == "boom" and case.case_id not in self._seen:
+                self._seen.add(case.case_id)
+                raise RuntimeError("transient crash")
+            return WorkerOutcome(status="success", summary="ok")
+
+    cases = (
+        FrozenTaskCase(
+            case_id="boom",
+            repo_fixture="fixtures/a",
+            task_text="task a",
+            expectation=TaskExpectation(require_success=True),
+        ),
+        FrozenTaskCase(
+            case_id="ok",
+            repo_fixture="fixtures/b",
+            task_text="task b",
+            expectation=TaskExpectation(require_success=True),
+        ),
+    )
+
+    report = evaluate_suite(
+        suite_name="crashy",
+        cases=cases,
+        runner=CrashyRunner(),
+    )
+
+    assert report.total_cases == 2
+    assert report.failed_cases == 1
+    assert report.results[0].outcome.status == "failure"
+    assert "evaluation runner raised runtimeerror" in report.results[0].outcome.summary.lower()
+    assert report.results[1].outcome.status == "success"
+
+
 def test_missing_replay_outcome_is_scored_as_failure() -> None:
     case = FrozenTaskCase(
         case_id="missing-case",
