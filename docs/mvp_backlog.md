@@ -661,6 +661,40 @@ Acceptance:
 - two consecutive runs on the same code produce the same scores (deterministic evaluation)
 - results are diffable across code changes
 
+### T-120 Convert frozen evaluation harness to async runner protocol
+Refactor the frozen-suite evaluation harness so runner boundaries are async-first and avoid `asyncio.run()` inside library-facing runner methods.
+
+Scope notes:
+- convert `EvaluationRunner` protocol to async (`async run_case`)
+- convert `ReplayRunner` and `OrchestratorReplayRunner` to implement async runner calls directly
+- convert `evaluate_suite` to async orchestration over async runners while preserving deterministic ordering
+- update `scripts/e2e/run_frozen_eval.py` to execute async main via a single top-level event-loop boundary
+- preserve current deterministic scoring/output contracts and existing CI report format
+- keep parallel case execution out of scope unless determinism guarantees are explicitly retained
+
+Acceptance:
+- no `asyncio.run()` calls remain inside evaluation runner implementations
+- harness can run safely from environments with an existing event loop
+- script entrypoint owns the only `asyncio.run(...)` boundary
+- existing deterministic harness behavior and report structure remain stable
+- tests cover async runner path and script entrypoint behavior
+
+### T-121 Migrate frozen suite payload validation to Pydantic models
+Replace repetitive manual JSON validation in frozen-suite loading with typed Pydantic model validation while preserving current schema constraints and errors.
+
+Scope notes:
+- define Pydantic models for frozen suite payload boundaries (suite root, case payload, expectation payload, replay payload where applicable)
+- keep external JSON schema and semantics unchanged
+- preserve duplicate `case_id` guard and other domain-specific validations not covered by base typing
+- maintain current loader API surface (`load_frozen_suite`, `load_replay_outcomes`)
+- ensure validation errors remain clear and actionable for malformed fixtures
+
+Acceptance:
+- suite and replay loaders validate via Pydantic models instead of ad hoc field checks
+- existing valid fixtures still load without behavior changes
+- malformed fixture coverage remains explicit in tests
+- loader code is smaller and easier to extend without losing strictness
+
 ### T-108 Add planning/decomposition step for complex tasks
 Add an optional planning phase where complex tasks are broken into ordered sub-steps before the worker begins execution.
 
