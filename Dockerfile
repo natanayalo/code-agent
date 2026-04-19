@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY . /app
+COPY pyproject.toml poetry.lock cert.pem* /app/
 
 RUN set -eu; \
     if [ -f /app/cert.pem ]; then \
@@ -16,7 +16,11 @@ RUN set -eu; \
     python -m pip install --upgrade pip==25.2 && \
     pip install "poetry>=2.0.1,<3.0" && \
     poetry config virtualenvs.create false && \
-    poetry install --only main --no-interaction --no-ansi
+    poetry install --only main --no-root --no-interaction --no-ansi
+
+COPY . /app
+
+RUN poetry install --only main --no-interaction --no-ansi
 
 EXPOSE 8000
 
