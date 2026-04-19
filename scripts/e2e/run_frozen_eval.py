@@ -85,7 +85,7 @@ def main() -> int:
         f"score={report.total_score}/{report.max_score}",
         f"output={args.output}",
     )
-    return 0
+    return 0 if report.passed_cases == report.total_cases else 1
 
 
 if __name__ == "__main__":
