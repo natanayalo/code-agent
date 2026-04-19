@@ -99,6 +99,25 @@ def test_pre_commit_workflow_runs_on_push_without_ci_branch_guard_failures() -> 
     assert "--hook-stage manual" in run_step["run"]
 
 
+def test_frozen_eval_workflow_runs_harness_and_uploads_report() -> None:
+    """Frozen evaluation should run on push and upload a deterministic JSON report."""
+    workflow = _load_yaml(".github/workflows/frozen-eval.yml")
+    triggers = _workflow_triggers(workflow)
+    steps = _job_steps(workflow, "frozen-eval")
+    run_step = _step_by_name(steps, "Run frozen evaluation harness")
+    upload_step = _step_by_name(steps, "Upload frozen evaluation report")
+
+    assert "push" in triggers
+    assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["concurrency"]["cancel-in-progress"] is True
+    assert workflow["jobs"]["frozen-eval"]["timeout-minutes"] == 10
+    assert "python scripts/e2e/run_frozen_eval.py" in run_step["run"]
+    assert "--runner orchestrator" in run_step["run"]
+    assert "artifacts/evaluations/frozen-suite-report.json" in run_step["run"]
+    assert upload_step["uses"] == "actions/upload-artifact@v7"
+    assert upload_step["with"]["path"] == "artifacts/evaluations/frozen-suite-report.json"
+
+
 def test_pip_audit_workflow_declares_read_only_token_permissions() -> None:
     """pip-audit workflow should explicitly scope GITHUB_TOKEN permissions."""
     workflow = _load_yaml(".github/workflows/pip-audit.yml")

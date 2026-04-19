@@ -81,7 +81,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-106 Add evaluation harness with frozen task suite (expanded slice: orchestrator-path runner + feature-flagged replay fallback, CI/default runner updated, tests added; unpublished)
 
 ## Next
 

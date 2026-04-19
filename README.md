@@ -170,6 +170,14 @@ Run the bootstrap test and linter:
 .venv/bin/pre-commit run --all-files
 ```
 
+Run the deterministic frozen evaluation harness (Milestone 14, T-106 slice):
+
+```bash
+.venv/bin/python scripts/e2e/run_frozen_eval.py \
+  --runner orchestrator \
+  --output artifacts/evaluations/frozen-suite-report.json
+```
+
 Commit messages are validated with Commitizen, so use Conventional Commits such as:
 
 ```text
