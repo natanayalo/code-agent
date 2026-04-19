@@ -18,15 +18,13 @@ dependencies = [
     "cryptography>=46.0.6,<47.0"
 ]
 
-[project.optional-dependencies]
-dev = [
-    "alembic>=1.18.4,<2.0",
-    "pre-commit>=4.0,<5.0",
-    "psycopg[binary]>=3.3.3,<4.0",
-    "PyYAML>=6.0.3,<7.0",
-    "pytest>=9.0.3,<10.0",
-    "pytest-cov>=7.0,<8.0",
-]
+[tool.poetry.group.dev.dependencies]
+alembic = ">=1.18.4,<2.0"
+pre-commit = ">=4.0,<5.0"
+psycopg = { version = ">=3.3.3,<4.0", extras = ["binary"] }
+PyYAML = ">=6.0.3,<7.0"
+pytest = ">=9.0.3,<10.0"
+pytest-cov = ">=7.0,<8.0"
 
 [tool.poetry]
 packages = [
