@@ -19,8 +19,8 @@ COPY pyproject.toml poetry.lock /app/
 
 RUN set -eu; \
     python -m venv /opt/poetry-venv && \
-    pip install --no-cache-dir --upgrade pip==25.2 && \
-    pip install --no-cache-dir "poetry>=2.0.1,<3.0" && \
+    python -m pip install --no-cache-dir --upgrade pip==25.2 && \
+    python -m pip install --no-cache-dir "poetry>=2.0.1,<3.0" && \
     poetry config virtualenvs.create false && \
     poetry install --only main --no-root --no-interaction --no-ansi
 
