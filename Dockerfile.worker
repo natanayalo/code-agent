@@ -7,13 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock cert.pem* /app/
-
 RUN set -eu; \
-    if [ -f /app/cert.pem ]; then \
-        cp /app/cert.pem /usr/local/share/ca-certificates/code-agent-local.crt; \
-        update-ca-certificates; \
-    fi; \
     apt-get update; \
     apt-get install -y --no-install-recommends nodejs npm ca-certificates git curl tar; \
     arch="$(dpkg --print-architecture)"; \
@@ -26,7 +20,15 @@ RUN set -eu; \
     tar -xzf /tmp/docker.tgz -C /tmp; \
     install -m 0755 /tmp/docker/docker /usr/local/bin/docker; \
     rm -rf /tmp/docker /tmp/docker.tgz; \
-    rm -rf /var/lib/apt/lists/*; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml poetry.lock cert.pem* /app/
+
+RUN set -eu; \
+    if [ -f /app/cert.pem ]; then \
+        cp /app/cert.pem /usr/local/share/ca-certificates/code-agent-local.crt; \
+        update-ca-certificates; \
+    fi; \
     python -m venv /opt/poetry-venv && \
     pip install --upgrade pip==25.2 && \
     pip install "poetry>=2.0.1,<3.0" && \
