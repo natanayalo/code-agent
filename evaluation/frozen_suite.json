@@ -1,0 +1,88 @@
+{
+  "suite_name": "frozen-v1",
+  "cases": [
+    {
+      "case_id": "frozen-001",
+      "repo_fixture": "fixtures/python-service",
+      "task_text": "Fix the zero-division guard in calculate_ratio and add regression tests.",
+      "expectation": {
+        "require_success": true,
+        "require_tests_passed": true,
+        "required_files_changed": [
+          "src/math_utils.py",
+          "tests/test_math_utils.py"
+        ],
+        "required_summary_substrings": [
+          "zero division",
+          "regression test"
+        ]
+      }
+    },
+    {
+      "case_id": "frozen-002",
+      "repo_fixture": "fixtures/fastapi-app",
+      "task_text": "Add API-key authentication middleware and enforce it on task routes.",
+      "expectation": {
+        "require_success": true,
+        "require_tests_passed": true,
+        "required_files_changed": [
+          "apps/api/auth.py",
+          "apps/api/routes/tasks.py"
+        ],
+        "required_summary_substrings": [
+          "authentication",
+          "task routes"
+        ]
+      }
+    },
+    {
+      "case_id": "frozen-003",
+      "repo_fixture": "fixtures/worker-runtime",
+      "task_text": "Classify timeout and provider auth errors into typed failure kinds.",
+      "expectation": {
+        "require_success": true,
+        "require_tests_passed": true,
+        "required_files_changed": [
+          "workers/base.py",
+          "tests/unit/test_worker_interface.py"
+        ],
+        "required_summary_substrings": [
+          "failure kind",
+          "timeout"
+        ]
+      }
+    },
+    {
+      "case_id": "frozen-004",
+      "repo_fixture": "fixtures/frontend-dashboard",
+      "task_text": "Fix flaky status polling by debouncing repeated refresh requests.",
+      "expectation": {
+        "require_success": true,
+        "require_tests_passed": false,
+        "required_files_changed": [
+          "frontend/src/hooks/useTaskStatus.ts"
+        ],
+        "required_summary_substrings": [
+          "debounce",
+          "status polling"
+        ]
+      }
+    },
+    {
+      "case_id": "frozen-005",
+      "repo_fixture": "fixtures/ops-scripts",
+      "task_text": "Harden deployment helper script to fail fast on missing required env vars.",
+      "expectation": {
+        "require_success": true,
+        "require_tests_passed": false,
+        "required_files_changed": [
+          "scripts/deploy.sh"
+        ],
+        "required_summary_substrings": [
+          "fail fast",
+          "environment variable"
+        ]
+      }
+    }
+  ]
+}
