@@ -41,7 +41,7 @@ class _FrozenOutcomeWorker(Worker):
             ]
 
         return WorkerResult(
-            status="success" if outcome.status == "success" else "failure",
+            status=outcome.status,
             summary=outcome.summary,
             commands_run=[],
             files_changed=list(outcome.files_changed),
@@ -110,7 +110,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
             )
 
         return WorkerOutcome(
-            status="success" if result.status == "success" else "failure",
+            status=result.status,
             summary=result.summary or "",
             files_changed=tuple(result.files_changed),
             tests_passed=tests_passed,

@@ -125,7 +125,7 @@ def load_replay_outcomes(path: Path) -> dict[str, WorkerOutcome]:
             raw_outcome.get("files_changed"), field_name="files_changed", case_id=case_id
         )
         tests_passed = raw_outcome.get("tests_passed")
-        if status not in {"success", "failure"}:
+        if status not in {"success", "failure", "error"}:
             raise ValueError(f"Replay outcome for '{case_id}' has invalid status: {status}")
         if not isinstance(summary, str):
             raise ValueError(f"Replay outcome for '{case_id}' must include summary text.")

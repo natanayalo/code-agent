@@ -32,7 +32,7 @@ class FrozenTaskCase:
 class WorkerOutcome:
     """Normalized execution output used by the local evaluation harness."""
 
-    status: Literal["success", "failure"]
+    status: Literal["success", "failure", "error"]
     summary: str
     files_changed: tuple[str, ...] = ()
     tests_passed: bool | None = None
@@ -54,7 +54,7 @@ def _runner_exception_outcome(case: FrozenTaskCase, exc: Exception) -> WorkerOut
         )
     else:
         summary = f"evaluation runner raised {type(exc).__name__} for case '{case.case_id}'"
-    return WorkerOutcome(status="failure", summary=summary, tests_passed=False)
+    return WorkerOutcome(status="error", summary=summary, tests_passed=False)
 
 
 class ReplayRunner:

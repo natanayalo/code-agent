@@ -13,6 +13,7 @@ from evaluation import (
     default_replay_outcomes,
     evaluate_suite,
     load_frozen_suite,
+    load_replay_outcomes,
     write_report,
 )
 from evaluation.harness import FrozenTaskCase
@@ -98,7 +99,7 @@ def test_evaluate_suite_continues_after_runner_exception() -> None:
 
     assert report.total_cases == 2
     assert report.failed_cases == 1
-    assert report.results[0].outcome.status == "failure"
+    assert report.results[0].outcome.status == "error"
     assert "evaluation runner raised runtimeerror" in report.results[0].outcome.summary.lower()
     assert report.results[1].outcome.status == "success"
 
@@ -219,3 +220,43 @@ def test_orchestrator_runner_supports_gemini_override() -> None:
 
     assert outcome.status == "success"
     assert "gemini path ok" in outcome.summary
+
+
+def test_orchestrator_runner_preserves_error_status() -> None:
+    case = FrozenTaskCase(
+        case_id="error-case",
+        repo_fixture="fixtures/empty",
+        task_text="Do a thing",
+        expectation=TaskExpectation(require_success=True),
+    )
+    runner = OrchestratorReplayRunner(
+        outcomes_by_case_id={"error-case": WorkerOutcome(status="error", summary="worker crashed")},
+        worker_override="codex",
+    )
+
+    outcome = runner.run_case(case)
+
+    assert outcome.status == "error"
+    assert "worker crashed" in outcome.summary
+
+
+def test_load_replay_outcomes_accepts_error_status(tmp_path: Path) -> None:
+    replay_path = tmp_path / "replay.json"
+    replay_path.write_text(
+        json.dumps(
+            {
+                "case-1": {
+                    "status": "error",
+                    "summary": "system-level failure",
+                    "files_changed": [],
+                    "tests_passed": False,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    outcomes = load_replay_outcomes(replay_path)
+
+    assert outcomes["case-1"].status == "error"
+    assert outcomes["case-1"].summary == "system-level failure"
