@@ -240,6 +240,26 @@ def test_orchestrator_runner_preserves_error_status() -> None:
     assert "worker crashed" in outcome.summary
 
 
+def test_orchestrator_runner_handles_approval_interrupt_as_failure() -> None:
+    case = FrozenTaskCase(
+        case_id="destructive-case",
+        repo_fixture="fixtures/empty",
+        task_text="Please rm -rf temporary files",
+        expectation=TaskExpectation(require_success=False),
+    )
+    runner = OrchestratorReplayRunner(
+        outcomes_by_case_id={
+            "destructive-case": WorkerOutcome(status="success", summary="would not run")
+        },
+        worker_override="codex",
+    )
+
+    outcome = runner.run_case(case)
+
+    assert outcome.status == "failure"
+    assert "interrupted awaiting approval" in outcome.summary.lower()
+
+
 def test_load_replay_outcomes_accepts_error_status(tmp_path: Path) -> None:
     replay_path = tmp_path / "replay.json"
     replay_path.write_text(

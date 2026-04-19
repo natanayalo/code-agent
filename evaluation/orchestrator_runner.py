@@ -6,6 +6,7 @@ import asyncio
 
 from evaluation.harness import EvaluationRunner, FrozenTaskCase, WorkerOutcome
 from orchestrator import OrchestratorState, build_orchestrator_graph
+from orchestrator.checkpoints import create_in_memory_checkpointer
 from workers import TestResult, Worker, WorkerRequest, WorkerResult
 
 
@@ -65,6 +66,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
         self._graph = build_orchestrator_graph(
             worker=self._worker,
             gemini_worker=self._worker,
+            checkpointer=create_in_memory_checkpointer(),
         )
 
     def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
@@ -90,8 +92,19 @@ class OrchestratorReplayRunner(EvaluationRunner):
                         "orchestrator_timeout_seconds": 35,
                     },
                 }
-            }
+            },
+            config={"configurable": {"thread_id": f"frozen-eval-{case.case_id}"}},
         )
+        if "__interrupt__" in raw_state:
+            return WorkerOutcome(
+                status="failure",
+                summary=(
+                    "Orchestrator execution was interrupted awaiting approval in "
+                    "unattended evaluation mode."
+                ),
+                files_changed=(),
+                tests_passed=False,
+            )
         state = OrchestratorState.model_validate(raw_state)
         result = state.result
         if result is None:
