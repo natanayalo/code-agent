@@ -151,6 +151,35 @@ def test_scoring_omits_success_weight_when_success_not_required() -> None:
     assert report.results[0].passed is True
 
 
+def test_scoring_normalizes_required_and_changed_paths() -> None:
+    case = FrozenTaskCase(
+        case_id="path-normalization",
+        repo_fixture="fixtures/empty",
+        task_text="Do a thing",
+        expectation=TaskExpectation(
+            require_success=False,
+            required_files_changed=("src/app.py",),
+        ),
+    )
+    report = evaluate_suite(
+        suite_name="path-normalization",
+        cases=(case,),
+        runner=ReplayRunner(
+            outcomes_by_case_id={
+                "path-normalization": WorkerOutcome(
+                    status="success",
+                    summary="ok",
+                    files_changed=("./src\\app.py",),
+                )
+            }
+        ),
+    )
+
+    assert report.total_score == 1
+    assert report.max_score == 1
+    assert report.results[0].passed is True
+
+
 def test_write_report_persists_structured_json(tmp_path: Path) -> None:
     suite = load_frozen_suite()
     report = evaluate_suite(

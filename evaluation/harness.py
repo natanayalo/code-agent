@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Protocol
 
 
@@ -43,6 +43,14 @@ class EvaluationRunner(Protocol):
 
     def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
         """Execute one case and return the normalized outcome."""
+
+
+def _normalize_path_for_scoring(raw_path: str) -> str:
+    """Normalize file paths for robust cross-environment comparison."""
+    normalized = PurePosixPath(raw_path.replace("\\", "/")).as_posix()
+    if normalized.startswith("./"):
+        return normalized[2:]
+    return normalized
 
 
 def _runner_exception_outcome(case: FrozenTaskCase, exc: Exception) -> WorkerOutcome:
@@ -146,9 +154,9 @@ def _score_case(case: FrozenTaskCase, outcome: WorkerOutcome) -> CaseRunResult:
         else:
             failures.append("tests were expected to pass")
 
-    changed_files = set(outcome.files_changed)
+    changed_files = {_normalize_path_for_scoring(path) for path in outcome.files_changed}
     for required_file in case.expectation.required_files_changed:
-        if required_file in changed_files:
+        if _normalize_path_for_scoring(required_file) in changed_files:
             points += 1
         else:
             failures.append(f"required file was not changed: {required_file}")
