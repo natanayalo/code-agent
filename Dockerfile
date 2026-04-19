@@ -15,8 +15,8 @@ RUN set -eu; \
         update-ca-certificates; \
     fi; \
     python -m venv /opt/poetry-venv && \
-    pip install --upgrade pip==25.2 && \
-    pip install "poetry>=2.0.1,<3.0" && \
+    pip install --no-cache-dir --upgrade pip==25.2 && \
+    pip install --no-cache-dir "poetry>=2.0.1,<3.0" && \
     poetry config virtualenvs.create false && \
     poetry install --only main --no-root --no-interaction --no-ansi
 
