@@ -81,8 +81,9 @@ For each task:
 
 ## Python tooling environment
 
+- Use **Poetry** for dependency management (`poetry install`).
 - Use the repository virtualenv explicitly for Python tooling and checks.
-- Prefer `.venv/bin/...` invocations (for example: `.venv/bin/pytest`, `.venv/bin/pre-commit`, `.venv/bin/ruff`, `.venv/bin/mypy`).
+- Prefer `.venv/bin/...` invocations (for example: `.venv/bin/poetry`, `.venv/bin/pytest`, `.venv/bin/pre-commit`, `.venv/bin/ruff`, `.venv/bin/mypy`).
 - Do not rely on globally installed `python`, `pytest`, or `pre-commit` binaries.
 
 ## Definition of done

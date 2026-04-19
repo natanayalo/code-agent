@@ -14,8 +14,9 @@ RUN set -eu; \
         update-ca-certificates; \
     fi; \
     python -m pip install --upgrade pip==25.2 && \
-    pip install . && \
-    pip install "alembic>=1.16,<2.0" "psycopg[binary]>=3.2,<4.0"
+    pip install "poetry>=2.0.1,<3.0" && \
+    poetry config virtualenvs.create false && \
+    poetry install --only main --no-interaction --no-ansi
 
 EXPOSE 8000
 
