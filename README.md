@@ -44,12 +44,15 @@ This slice intentionally does not include:
 
 ## Local Bootstrap
 
-Create and activate a virtual environment, then install the project with dev dependencies:
+Create and activate a virtual environment, then install the project with dev dependencies using Poetry:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+# Install Poetry if you haven't already
+# curl -sSL https://install.python-poetry.org | python3 -
+
+# Initialize the environment and install dependencies
+poetry install
+poetry shell  # Optional: enters the virtualenv
 pre-commit install --hook-type pre-commit --hook-type commit-msg
 ```
 

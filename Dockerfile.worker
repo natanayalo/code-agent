@@ -2,17 +2,20 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_CERT=/etc/ssl/certs/ca-certificates.crt
+    PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
+    PATH="/opt/poetry-venv/bin:$PATH"
 
 WORKDIR /app
 
-COPY . /app
+COPY cert.pem* /app/
 
 RUN set -eu; \
     if [ -f /app/cert.pem ]; then \
         cp /app/cert.pem /usr/local/share/ca-certificates/code-agent-local.crt; \
         update-ca-certificates; \
-    fi; \
+    fi
+
+RUN set -eu; \
     apt-get update; \
     apt-get install -y --no-install-recommends nodejs npm ca-certificates git curl tar; \
     arch="$(dpkg --print-architecture)"; \
@@ -25,9 +28,21 @@ RUN set -eu; \
     tar -xzf /tmp/docker.tgz -C /tmp; \
     install -m 0755 /tmp/docker/docker /usr/local/bin/docker; \
     rm -rf /tmp/docker /tmp/docker.tgz; \
-    rm -rf /var/lib/apt/lists/*; \
-    python -m pip install --upgrade pip==25.2; \
-    pip install . "psycopg[binary]>=3.2,<4.0"; \
-    npm install -g @openai/codex @google/gemini-cli
+    npm install -g @openai/codex @google/gemini-cli && \
+    npm cache clean --force && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml poetry.lock /app/
+
+RUN set -eu; \
+    python -m venv /opt/poetry-venv && \
+    python -m pip install --no-cache-dir --upgrade pip==25.2 && \
+    python -m pip install --no-cache-dir "poetry>=2.0.1,<3.0" && \
+    poetry config virtualenvs.create false && \
+    poetry install --only main --no-root --no-interaction --no-ansi
+
+COPY . /app
+
+RUN poetry install --only main --no-interaction --no-ansi
 
 CMD ["python", "-m", "apps.worker.main"]
