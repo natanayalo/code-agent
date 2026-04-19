@@ -199,3 +199,23 @@ def test_orchestrator_runner_reports_failure_for_missing_case_outcome() -> None:
 
     assert outcome.status == "failure"
     assert "missing replay outcome" in outcome.summary.lower()
+
+
+def test_orchestrator_runner_supports_gemini_override() -> None:
+    case = FrozenTaskCase(
+        case_id="gemini-case",
+        repo_fixture="fixtures/empty",
+        task_text="Do a thing",
+        expectation=TaskExpectation(require_success=True),
+    )
+    runner = OrchestratorReplayRunner(
+        outcomes_by_case_id={
+            "gemini-case": WorkerOutcome(status="success", summary="gemini path ok")
+        },
+        worker_override="gemini",
+    )
+
+    outcome = runner.run_case(case)
+
+    assert outcome.status == "success"
+    assert "gemini path ok" in outcome.summary

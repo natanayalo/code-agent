@@ -62,7 +62,10 @@ class OrchestratorReplayRunner(EvaluationRunner):
     ) -> None:
         self._worker = _FrozenOutcomeWorker(outcomes_by_case_id=outcomes_by_case_id)
         self._worker_override = worker_override
-        self._graph = build_orchestrator_graph(worker=self._worker)
+        self._graph = build_orchestrator_graph(
+            worker=self._worker,
+            gemini_worker=self._worker,
+        )
 
     def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
         return asyncio.run(self._run_case_async(case))
