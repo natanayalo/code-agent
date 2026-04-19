@@ -7,13 +7,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock cert.pem* /app/
+COPY cert.pem* /app/
 
 RUN set -eu; \
     if [ -f /app/cert.pem ]; then \
         cp /app/cert.pem /usr/local/share/ca-certificates/code-agent-local.crt; \
         update-ca-certificates; \
-    fi; \
+    fi
+
+COPY pyproject.toml poetry.lock /app/
+
+RUN set -eu; \
     python -m venv /opt/poetry-venv && \
     pip install --no-cache-dir --upgrade pip==25.2 && \
     pip install --no-cache-dir "poetry>=2.0.1,<3.0" && \
