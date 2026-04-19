@@ -47,9 +47,9 @@ def test_pyproject_dev_dependencies_include_pytest_cov() -> None:
     with Path("pyproject.toml").open("rb") as file:
         config = tomllib.load(file)
 
-    dev_dependencies = config["project"]["optional-dependencies"]["dev"]
-
-    assert any(dependency.startswith("pytest-cov>=") for dependency in dev_dependencies)
+    dev_dependencies = config["tool"]["poetry"]["group"]["dev"]["dependencies"]
+    assert "pytest-cov" in dev_dependencies
+    assert dev_dependencies["pytest-cov"].startswith(">=")
 
 
 def test_pytest_workflow_runs_on_push_and_enforces_coverage() -> None:
