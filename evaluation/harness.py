@@ -181,7 +181,7 @@ def evaluate_suite(
     for case in cases:
         try:
             outcome = runner.run_case(case)
-        except Exception as exc:  # pragma: no cover - asserted via unit tests
+        except Exception as exc:
             outcome = _runner_exception_outcome(case, exc)
         scored_results.append(_score_case(case, outcome))
 
