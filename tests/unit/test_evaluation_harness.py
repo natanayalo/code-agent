@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
-
-import pytest
 
 from evaluation import (
     OrchestratorReplayRunner,
@@ -49,27 +48,29 @@ def test_loader_accepts_small_targeted_suite_file(tmp_path: Path) -> None:
     assert len(suite.cases) == 1
 
 
-@pytest.mark.asyncio
-async def test_evaluate_suite_is_deterministic_for_same_inputs() -> None:
+def test_evaluate_suite_is_deterministic_for_same_inputs() -> None:
     suite = load_frozen_suite()
     replay_runner = ReplayRunner(default_replay_outcomes(suite.cases))
 
-    report_one = await evaluate_suite(
-        suite_name=suite.suite_name,
-        cases=suite.cases,
-        runner=replay_runner,
+    report_one = asyncio.run(
+        evaluate_suite(
+            suite_name=suite.suite_name,
+            cases=suite.cases,
+            runner=replay_runner,
+        )
     )
-    report_two = await evaluate_suite(
-        suite_name=suite.suite_name,
-        cases=suite.cases,
-        runner=ReplayRunner(default_replay_outcomes(suite.cases)),
+    report_two = asyncio.run(
+        evaluate_suite(
+            suite_name=suite.suite_name,
+            cases=suite.cases,
+            runner=ReplayRunner(default_replay_outcomes(suite.cases)),
+        )
     )
 
     assert report_one.to_dict() == report_two.to_dict()
 
 
-@pytest.mark.asyncio
-async def test_evaluate_suite_continues_after_runner_exception() -> None:
+def test_evaluate_suite_continues_after_runner_exception() -> None:
     class CrashyRunner:
         def __init__(self) -> None:
             self._seen: set[str] = set()
@@ -95,10 +96,12 @@ async def test_evaluate_suite_continues_after_runner_exception() -> None:
         ),
     )
 
-    report = await evaluate_suite(
-        suite_name="crashy",
-        cases=cases,
-        runner=CrashyRunner(),
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="crashy",
+            cases=cases,
+            runner=CrashyRunner(),
+        )
     )
 
     assert report.total_cases == 2
@@ -108,18 +111,19 @@ async def test_evaluate_suite_continues_after_runner_exception() -> None:
     assert report.results[1].outcome.status == "success"
 
 
-@pytest.mark.asyncio
-async def test_missing_replay_outcome_is_scored_as_failure() -> None:
+def test_missing_replay_outcome_is_scored_as_failure() -> None:
     case = FrozenTaskCase(
         case_id="missing-case",
         repo_fixture="fixtures/empty",
         task_text="Do a thing",
         expectation=TaskExpectation(require_success=True),
     )
-    report = await evaluate_suite(
-        suite_name="one-case-suite",
-        cases=(case,),
-        runner=ReplayRunner(outcomes_by_case_id={}),
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="one-case-suite",
+            cases=(case,),
+            runner=ReplayRunner(outcomes_by_case_id={}),
+        )
     )
 
     assert report.total_cases == 1
@@ -128,8 +132,7 @@ async def test_missing_replay_outcome_is_scored_as_failure() -> None:
     assert "missing replay outcome" in report.results[0].outcome.summary.lower()
 
 
-@pytest.mark.asyncio
-async def test_scoring_omits_success_weight_when_success_not_required() -> None:
+def test_scoring_omits_success_weight_when_success_not_required() -> None:
     case = FrozenTaskCase(
         case_id="no-success-weight",
         repo_fixture="fixtures/empty",
@@ -139,17 +142,19 @@ async def test_scoring_omits_success_weight_when_success_not_required() -> None:
             required_summary_substrings=("needle",),
         ),
     )
-    report = await evaluate_suite(
-        suite_name="weighting",
-        cases=(case,),
-        runner=ReplayRunner(
-            outcomes_by_case_id={
-                "no-success-weight": WorkerOutcome(
-                    status="failure",
-                    summary="contains needle",
-                )
-            }
-        ),
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="weighting",
+            cases=(case,),
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "no-success-weight": WorkerOutcome(
+                        status="failure",
+                        summary="contains needle",
+                    )
+                }
+            ),
+        )
     )
 
     assert report.total_score == 1
@@ -157,8 +162,7 @@ async def test_scoring_omits_success_weight_when_success_not_required() -> None:
     assert report.results[0].passed is True
 
 
-@pytest.mark.asyncio
-async def test_scoring_normalizes_required_and_changed_paths() -> None:
+def test_scoring_normalizes_required_and_changed_paths() -> None:
     case = FrozenTaskCase(
         case_id="path-normalization",
         repo_fixture="fixtures/empty",
@@ -168,18 +172,20 @@ async def test_scoring_normalizes_required_and_changed_paths() -> None:
             required_files_changed=("src/app.py",),
         ),
     )
-    report = await evaluate_suite(
-        suite_name="path-normalization",
-        cases=(case,),
-        runner=ReplayRunner(
-            outcomes_by_case_id={
-                "path-normalization": WorkerOutcome(
-                    status="success",
-                    summary="ok",
-                    files_changed=("./src\\app.py",),
-                )
-            }
-        ),
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="path-normalization",
+            cases=(case,),
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "path-normalization": WorkerOutcome(
+                        status="success",
+                        summary="ok",
+                        files_changed=("./src\\app.py",),
+                    )
+                }
+            ),
+        )
     )
 
     assert report.total_score == 1
@@ -187,13 +193,14 @@ async def test_scoring_normalizes_required_and_changed_paths() -> None:
     assert report.results[0].passed is True
 
 
-@pytest.mark.asyncio
-async def test_write_report_persists_structured_json(tmp_path: Path) -> None:
+def test_write_report_persists_structured_json(tmp_path: Path) -> None:
     suite = load_frozen_suite()
-    report = await evaluate_suite(
-        suite_name=suite.suite_name,
-        cases=suite.cases,
-        runner=ReplayRunner(default_replay_outcomes(suite.cases)),
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name=suite.suite_name,
+            cases=suite.cases,
+            runner=ReplayRunner(default_replay_outcomes(suite.cases)),
+        )
     )
     output_path = tmp_path / "eval-report.json"
 
@@ -208,8 +215,7 @@ async def test_write_report_persists_structured_json(tmp_path: Path) -> None:
     assert payload["results"][0]["case_id"] == suite.cases[0].case_id
 
 
-@pytest.mark.asyncio
-async def test_orchestrator_runner_executes_case_through_graph_path() -> None:
+def test_orchestrator_runner_executes_case_through_graph_path() -> None:
     suite = load_frozen_suite()
     case = suite.cases[0]
     runner = OrchestratorReplayRunner(
@@ -217,7 +223,7 @@ async def test_orchestrator_runner_executes_case_through_graph_path() -> None:
         worker_override="codex",
     )
 
-    outcome = await runner.run_case(case)
+    outcome = asyncio.run(runner.run_case(case))
 
     assert outcome.status == "success"
     assert "zero division" in outcome.summary
@@ -225,8 +231,7 @@ async def test_orchestrator_runner_executes_case_through_graph_path() -> None:
     assert outcome.tests_passed is True
 
 
-@pytest.mark.asyncio
-async def test_orchestrator_runner_reports_failure_for_missing_case_outcome() -> None:
+def test_orchestrator_runner_reports_failure_for_missing_case_outcome() -> None:
     case = FrozenTaskCase(
         case_id="missing-case",
         repo_fixture="fixtures/empty",
@@ -235,14 +240,13 @@ async def test_orchestrator_runner_reports_failure_for_missing_case_outcome() ->
     )
     runner = OrchestratorReplayRunner(outcomes_by_case_id={}, worker_override="codex")
 
-    outcome = await runner.run_case(case)
+    outcome = asyncio.run(runner.run_case(case))
 
     assert outcome.status == "failure"
     assert "missing replay outcome" in outcome.summary.lower()
 
 
-@pytest.mark.asyncio
-async def test_orchestrator_runner_supports_gemini_override() -> None:
+def test_orchestrator_runner_supports_gemini_override() -> None:
     case = FrozenTaskCase(
         case_id="gemini-case",
         repo_fixture="fixtures/empty",
@@ -256,14 +260,13 @@ async def test_orchestrator_runner_supports_gemini_override() -> None:
         worker_override="gemini",
     )
 
-    outcome = await runner.run_case(case)
+    outcome = asyncio.run(runner.run_case(case))
 
     assert outcome.status == "success"
     assert "gemini path ok" in outcome.summary
 
 
-@pytest.mark.asyncio
-async def test_orchestrator_runner_preserves_error_status() -> None:
+def test_orchestrator_runner_preserves_error_status() -> None:
     case = FrozenTaskCase(
         case_id="error-case",
         repo_fixture="fixtures/empty",
@@ -275,14 +278,13 @@ async def test_orchestrator_runner_preserves_error_status() -> None:
         worker_override="codex",
     )
 
-    outcome = await runner.run_case(case)
+    outcome = asyncio.run(runner.run_case(case))
 
     assert outcome.status == "error"
     assert "worker crashed" in outcome.summary
 
 
-@pytest.mark.asyncio
-async def test_orchestrator_runner_handles_approval_interrupt_as_failure() -> None:
+def test_orchestrator_runner_handles_approval_interrupt_as_failure() -> None:
     case = FrozenTaskCase(
         case_id="destructive-case",
         repo_fixture="fixtures/empty",
@@ -296,7 +298,7 @@ async def test_orchestrator_runner_handles_approval_interrupt_as_failure() -> No
         worker_override="codex",
     )
 
-    outcome = await runner.run_case(case)
+    outcome = asyncio.run(runner.run_case(case))
 
     assert outcome.status == "failure"
     assert "interrupted awaiting approval" in outcome.summary.lower()
