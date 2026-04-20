@@ -6,6 +6,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from evaluation import (
     OrchestratorReplayRunner,
     ReplayRunner,
@@ -324,3 +326,91 @@ def test_load_replay_outcomes_accepts_error_status(tmp_path: Path) -> None:
 
     assert outcomes["case-1"].status == "error"
     assert outcomes["case-1"].summary == "system-level failure"
+
+
+def test_load_frozen_suite_rejects_non_object_payload(tmp_path: Path) -> None:
+    suite_path = tmp_path / "bad-suite.json"
+    suite_path.write_text("[]", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Frozen suite payload validation failed"):
+        load_frozen_suite(path=suite_path)
+
+
+def test_load_frozen_suite_rejects_non_string_required_files_changed(tmp_path: Path) -> None:
+    suite_path = tmp_path / "bad-suite.json"
+    suite_path.write_text(
+        json.dumps(
+            {
+                "suite_name": "bad-suite",
+                "cases": [
+                    {
+                        "case_id": "case-1",
+                        "repo_fixture": "fixtures/one",
+                        "task_text": "Do one thing",
+                        "expectation": {"required_files_changed": ["ok.py", 1]},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="required_files_changed"):
+        load_frozen_suite(path=suite_path)
+
+
+def test_load_frozen_suite_rejects_duplicate_case_ids_with_explicit_error(tmp_path: Path) -> None:
+    suite_path = tmp_path / "bad-suite.json"
+    suite_path.write_text(
+        json.dumps(
+            {
+                "suite_name": "bad-suite",
+                "cases": [
+                    {
+                        "case_id": "case-1",
+                        "repo_fixture": "fixtures/one",
+                        "task_text": "Do one thing",
+                        "expectation": {"require_success": True},
+                    },
+                    {
+                        "case_id": "case-1",
+                        "repo_fixture": "fixtures/two",
+                        "task_text": "Do another thing",
+                        "expectation": {"require_success": True},
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Duplicate case_id found in frozen suite: case-1"):
+        load_frozen_suite(path=suite_path)
+
+
+def test_load_replay_outcomes_rejects_non_object_payload(tmp_path: Path) -> None:
+    replay_path = tmp_path / "bad-replay.json"
+    replay_path.write_text("[]", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Replay payload validation failed"):
+        load_replay_outcomes(replay_path)
+
+
+def test_load_replay_outcomes_rejects_invalid_status(tmp_path: Path) -> None:
+    replay_path = tmp_path / "bad-replay.json"
+    replay_path.write_text(
+        json.dumps(
+            {
+                "case-1": {
+                    "status": "skipped",
+                    "summary": "not allowed",
+                    "files_changed": [],
+                    "tests_passed": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="status"):
+        load_replay_outcomes(replay_path)

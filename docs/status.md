@@ -79,16 +79,15 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-103 Retention policy. PR: [#80](https://github.com/natanayalo/code-agent/pull/80)
 - T-105 Auto-run repo lint/format after worker completion. PR: [#81](https://github.com/natanayalo/code-agent/pull/81)
 - T-106 Add evaluation harness with frozen task suite. PR: [#82](https://github.com/natanayalo/code-agent/pull/82)
+- T-120 Convert frozen evaluation harness to async runner protocol. PR: [#88](https://github.com/natanayalo/code-agent/pull/88)
 
 ## In Progress
 
-- T-120 Convert frozen evaluation harness to async runner protocol (follow-up from PR #82 review threads:
-  `#discussion_r3106579325`, `#discussion_r3106583670`, `#discussion_r3106593095`, `#discussion_r3106593107`)
+- T-121 Migrate frozen suite payload validation to Pydantic models (follow-up from PR #82 review thread:
+  `#discussion_r3106602263`)
 
 ## Next
 
-- T-121 Migrate frozen suite payload validation to Pydantic models (follow-up from PR #82 review thread:
-  `#discussion_r3106602263`)
 - T-122 Parallelize frozen-suite case execution with deterministic guarantees (follow-up from PR #88 review threads:
   `#discussion_r3107756403`, `#discussion_r3113655875`, `#discussion_r3113681873`)
 
@@ -98,8 +97,8 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Notes
 
-- Current target order from here: Milestone 14 (T-106, then T-120/T-121 follow-ups, then T-108 to T-112). For the reviewer track, keep the existing task IDs but implement in dependency order: T-114 before T-111, T-112 before T-117, and T-119 as an extension of T-106.
-- Deferred review suggestions are explicitly tracked as follow-ups: T-120 (async eval harness protocol), T-121 (Pydantic suite validation), and T-122 (parallel eval execution with determinism guarantees).
+- Current target order from here: Milestone 14 (T-106, then T-121/T-122 follow-ups, then T-108 to T-112). For the reviewer track, keep the existing task IDs but implement in dependency order: T-114 before T-111, T-112 before T-117, and T-119 as an extension of T-106.
+- Deferred review suggestions are explicitly tracked as follow-ups: T-121 (Pydantic suite validation) and T-122 (parallel eval execution with determinism guarantees).
 - The core execution path handles iterative agent loops (T-047), persistent shell sessions (T-045), and structured system prompts (T-046) using the real `CodexCliWorker` and `codex exec` adapter.
 - The vertical slice (T-044) is wired: the app can bootstrap the `TaskExecutionService` and execute multi-turn tasks in a provisioned sandbox workspace.
 - Safety layering is intentional: T-047/T-049 carry the inner-loop brakes and permission-aware tool execution; T-042 adds the outer orchestrator-level timeout/cancel layer that preserves workspace artifacts and surfaces diagnostics.
