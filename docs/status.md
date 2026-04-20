@@ -82,12 +82,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-120 Convert frozen evaluation harness to async runner protocol (follow-up from PR #82 review threads:
+  `#discussion_r3106579325`, `#discussion_r3106583670`, `#discussion_r3106593095`, `#discussion_r3106593107`)
 
 ## Next
 
-- T-120 Convert frozen evaluation harness to async runner protocol (follow-up from PR #82 review threads:
-  `#discussion_r3106579325`, `#discussion_r3106583670`, `#discussion_r3106593095`, `#discussion_r3106593107`)
 - T-121 Migrate frozen suite payload validation to Pydantic models (follow-up from PR #82 review thread:
   `#discussion_r3106602263`)
 

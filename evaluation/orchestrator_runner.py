@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from evaluation.harness import EvaluationRunner, FrozenTaskCase, WorkerOutcome
 from orchestrator import OrchestratorState, build_orchestrator_graph
 from orchestrator.checkpoints import create_in_memory_checkpointer
@@ -69,10 +67,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
             checkpointer=create_in_memory_checkpointer(),
         )
 
-    def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
-        return asyncio.run(self._run_case_async(case))
-
-    async def _run_case_async(self, case: FrozenTaskCase) -> WorkerOutcome:
+    async def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
         raw_state = await self._graph.ainvoke(
             {
                 "task": {
