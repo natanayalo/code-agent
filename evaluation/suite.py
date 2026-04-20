@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError, field_validator
 
 from evaluation.harness import FrozenTaskCase, TaskExpectation, WorkerOutcome
 
@@ -70,10 +70,7 @@ class _ReplayOutcomePayload(BaseModel):
     tests_passed: bool | None = None
 
 
-class _ReplayPayload(BaseModel):
-    model_config = ConfigDict(strict=True)
-
-    outcomes: dict[str, _ReplayOutcomePayload]
+_REPLAY_OUTCOMES_ADAPTER = TypeAdapter(dict[str, _ReplayOutcomePayload])
 
 
 def _summarize_validation_error(exc: ValidationError) -> str:
@@ -141,14 +138,14 @@ def load_replay_outcomes(path: Path) -> dict[str, WorkerOutcome]:
         payload = json.load(file)
 
     try:
-        parsed = _ReplayPayload.model_validate({"outcomes": payload})
+        parsed = _REPLAY_OUTCOMES_ADAPTER.validate_python(payload)
     except ValidationError as exc:
         raise ValueError(
             "Replay payload validation failed: " f"{_summarize_validation_error(exc)}"
         ) from exc
 
     outcomes: dict[str, WorkerOutcome] = {}
-    for case_id, raw_outcome in parsed.outcomes.items():
+    for case_id, raw_outcome in parsed.items():
         outcomes[case_id] = WorkerOutcome(
             status=raw_outcome.status,
             summary=raw_outcome.summary,
