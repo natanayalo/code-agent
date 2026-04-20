@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from evaluation.harness import FrozenTaskCase, TaskExpectation, WorkerOutcome
 
@@ -23,6 +23,8 @@ class FrozenSuite:
 
 
 class _ExpectationPayload(BaseModel):
+    model_config = ConfigDict(strict=True)
+
     require_success: bool = True
     require_tests_passed: bool = False
     required_files_changed: list[str] | None = None
@@ -30,6 +32,8 @@ class _ExpectationPayload(BaseModel):
 
 
 class _CasePayload(BaseModel):
+    model_config = ConfigDict(strict=True)
+
     case_id: str
     repo_fixture: str
     task_text: str
@@ -44,6 +48,8 @@ class _CasePayload(BaseModel):
 
 
 class _FrozenSuitePayload(BaseModel):
+    model_config = ConfigDict(strict=True)
+
     suite_name: str
     cases: list[_CasePayload]
 
@@ -56,6 +62,8 @@ class _FrozenSuitePayload(BaseModel):
 
 
 class _ReplayOutcomePayload(BaseModel):
+    model_config = ConfigDict(strict=True)
+
     status: Literal["success", "failure", "error"]
     summary: str
     files_changed: list[str] | None = None
@@ -63,6 +71,8 @@ class _ReplayOutcomePayload(BaseModel):
 
 
 class _ReplayPayload(BaseModel):
+    model_config = ConfigDict(strict=True)
+
     outcomes: dict[str, _ReplayOutcomePayload]
 
 

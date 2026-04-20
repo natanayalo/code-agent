@@ -414,3 +414,46 @@ def test_load_replay_outcomes_rejects_invalid_status(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="status"):
         load_replay_outcomes(replay_path)
+
+
+def test_load_frozen_suite_rejects_non_boolean_expectation_flags(tmp_path: Path) -> None:
+    suite_path = tmp_path / "bad-suite.json"
+    suite_path.write_text(
+        json.dumps(
+            {
+                "suite_name": "bad-suite",
+                "cases": [
+                    {
+                        "case_id": "case-1",
+                        "repo_fixture": "fixtures/one",
+                        "task_text": "Do one thing",
+                        "expectation": {"require_success": 1},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="require_success"):
+        load_frozen_suite(path=suite_path)
+
+
+def test_load_replay_outcomes_rejects_non_boolean_tests_passed(tmp_path: Path) -> None:
+    replay_path = tmp_path / "bad-replay.json"
+    replay_path.write_text(
+        json.dumps(
+            {
+                "case-1": {
+                    "status": "success",
+                    "summary": "done",
+                    "files_changed": [],
+                    "tests_passed": 1,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="tests_passed"):
+        load_replay_outcomes(replay_path)
