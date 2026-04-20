@@ -84,12 +84,12 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-122 Parallelize frozen-suite case execution with deterministic guarantees (follow-up from PR #88 review threads:
+  `#discussion_r3107756403`, `#discussion_r3113655875`, `#discussion_r3113681873`)
 
 ## Next
 
-- T-122 Parallelize frozen-suite case execution with deterministic guarantees (follow-up from PR #88 review threads:
-  `#discussion_r3107756403`, `#discussion_r3113655875`, `#discussion_r3113681873`)
+- None
 
 ## Blocked
 
