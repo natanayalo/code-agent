@@ -80,11 +80,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-105 Auto-run repo lint/format after worker completion. PR: [#81](https://github.com/natanayalo/code-agent/pull/81)
 - T-106 Add evaluation harness with frozen task suite. PR: [#82](https://github.com/natanayalo/code-agent/pull/82)
 - T-120 Convert frozen evaluation harness to async runner protocol. PR: [#88](https://github.com/natanayalo/code-agent/pull/88)
+- T-121 Migrate frozen suite payload validation to Pydantic models. PR: [#89](https://github.com/natanayalo/code-agent/pull/89)
 
 ## In Progress
 
-- T-121 Migrate frozen suite payload validation to Pydantic models (follow-up from PR #82 review thread:
-  `#discussion_r3106602263`)
+- None
 
 ## Next
 
