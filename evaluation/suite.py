@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError, field_validator
 
 from evaluation.harness import FrozenTaskCase, TaskExpectation, WorkerOutcome
 
@@ -20,12 +22,67 @@ class FrozenSuite:
     cases: tuple[FrozenTaskCase, ...]
 
 
-def _coerce_string_sequence(raw: Any, *, field_name: str, case_id: str) -> tuple[str, ...]:
-    if raw is None:
-        return ()
-    if not isinstance(raw, list) or any(not isinstance(item, str) for item in raw):
-        raise ValueError(f"Case '{case_id}' field '{field_name}' must be a list[str].")
-    return tuple(raw)
+class _ExpectationPayload(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    require_success: bool = True
+    require_tests_passed: bool = False
+    required_files_changed: list[str] | None = None
+    required_summary_substrings: list[str] | None = None
+
+
+class _CasePayload(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    case_id: str
+    repo_fixture: str
+    task_text: str
+    expectation: _ExpectationPayload
+
+    @field_validator("case_id", "repo_fixture", "task_text")
+    @classmethod
+    def _require_non_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must be a non-empty string.")
+        return value
+
+
+class _FrozenSuitePayload(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    suite_name: str
+    cases: list[_CasePayload]
+
+    @field_validator("suite_name")
+    @classmethod
+    def _require_non_empty_suite_name(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must be a non-empty string.")
+        return value
+
+
+class _ReplayOutcomePayload(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    status: Literal["success", "failure", "error"]
+    summary: str
+    files_changed: list[str] | None = None
+    tests_passed: bool | None = None
+
+
+_REPLAY_OUTCOMES_ADAPTER = TypeAdapter(dict[str, _ReplayOutcomePayload])
+
+
+def _summarize_validation_error(exc: ValidationError) -> str:
+    errors = exc.errors(include_url=False, include_input=False)
+    details: list[str] = []
+    for error in errors:
+        location = ".".join(str(part) for part in error.get("loc", ()))
+        message = str(error.get("msg", "invalid value"))
+        if message.startswith("Value error, "):
+            message = message.removeprefix("Value error, ")
+        details.append(f"{location}: {message}" if location else message)
+    return "; ".join(details) if details else "invalid payload"
 
 
 def load_frozen_suite(path: Path | None = None) -> FrozenSuite:
@@ -34,63 +91,32 @@ def load_frozen_suite(path: Path | None = None) -> FrozenSuite:
     with suite_path.open("r", encoding="utf-8") as file:
         payload = json.load(file)
 
-    if not isinstance(payload, dict):
-        raise ValueError("Frozen suite payload must be a JSON object.")
-
-    suite_name = payload.get("suite_name")
-    if not isinstance(suite_name, str) or not suite_name.strip():
-        raise ValueError("Frozen suite must define a non-empty suite_name.")
-
-    raw_cases = payload.get("cases")
-    if not isinstance(raw_cases, list):
-        raise ValueError("Frozen suite must define a list of cases.")
+    try:
+        parsed = _FrozenSuitePayload.model_validate(payload)
+    except ValidationError as exc:
+        raise ValueError(
+            "Frozen suite payload validation failed: " f"{_summarize_validation_error(exc)}"
+        ) from exc
 
     cases: list[FrozenTaskCase] = []
     seen_case_ids: set[str] = set()
-    for raw_case in raw_cases:
-        if not isinstance(raw_case, dict):
-            raise ValueError("Each frozen suite case must be a JSON object.")
-
-        case_id = raw_case.get("case_id")
-        repo_fixture = raw_case.get("repo_fixture")
-        task_text = raw_case.get("task_text")
-        if (
-            not isinstance(case_id, str)
-            or not case_id.strip()
-            or not isinstance(repo_fixture, str)
-            or not repo_fixture.strip()
-            or not isinstance(task_text, str)
-            or not task_text.strip()
-        ):
-            raise ValueError(
-                "Each case must define non-empty case_id, repo_fixture, and task_text."
-            )
+    for raw_case in parsed.cases:
+        case_id = raw_case.case_id
+        repo_fixture = raw_case.repo_fixture
+        task_text = raw_case.task_text
 
         if case_id in seen_case_ids:
             raise ValueError(f"Duplicate case_id found in frozen suite: {case_id}")
         seen_case_ids.add(case_id)
 
-        expectation_payload = raw_case.get("expectation")
-        if not isinstance(expectation_payload, dict):
-            raise ValueError(f"Case '{case_id}' must define an expectation object.")
-
-        require_success = expectation_payload.get("require_success", True)
-        require_tests_passed = expectation_payload.get("require_tests_passed", False)
-        if not isinstance(require_success, bool) or not isinstance(require_tests_passed, bool):
-            raise ValueError(f"Case '{case_id}' expectation booleans must be true/false values.")
+        expectation_payload = raw_case.expectation
 
         expectation = TaskExpectation(
-            require_success=require_success,
-            require_tests_passed=require_tests_passed,
-            required_files_changed=_coerce_string_sequence(
-                expectation_payload.get("required_files_changed"),
-                field_name="required_files_changed",
-                case_id=case_id,
-            ),
-            required_summary_substrings=_coerce_string_sequence(
-                expectation_payload.get("required_summary_substrings"),
-                field_name="required_summary_substrings",
-                case_id=case_id,
+            require_success=expectation_payload.require_success,
+            require_tests_passed=expectation_payload.require_tests_passed,
+            required_files_changed=tuple(expectation_payload.required_files_changed or ()),
+            required_summary_substrings=tuple(
+                expectation_payload.required_summary_substrings or ()
             ),
         )
 
@@ -103,7 +129,7 @@ def load_frozen_suite(path: Path | None = None) -> FrozenSuite:
             )
         )
 
-    return FrozenSuite(suite_name=suite_name, cases=tuple(cases))
+    return FrozenSuite(suite_name=parsed.suite_name, cases=tuple(cases))
 
 
 def load_replay_outcomes(path: Path) -> dict[str, WorkerOutcome]:
@@ -111,32 +137,20 @@ def load_replay_outcomes(path: Path) -> dict[str, WorkerOutcome]:
     with path.open("r", encoding="utf-8") as file:
         payload = json.load(file)
 
-    if not isinstance(payload, dict):
-        raise ValueError("Replay payload must be a JSON object keyed by case id.")
+    try:
+        parsed = _REPLAY_OUTCOMES_ADAPTER.validate_python(payload)
+    except ValidationError as exc:
+        raise ValueError(
+            "Replay payload validation failed: " f"{_summarize_validation_error(exc)}"
+        ) from exc
 
     outcomes: dict[str, WorkerOutcome] = {}
-    for case_id, raw_outcome in payload.items():
-        if not isinstance(case_id, str) or not isinstance(raw_outcome, dict):
-            raise ValueError("Replay payload must map case_id strings to outcome objects.")
-
-        status = raw_outcome.get("status")
-        summary = raw_outcome.get("summary")
-        files_changed = _coerce_string_sequence(
-            raw_outcome.get("files_changed"), field_name="files_changed", case_id=case_id
-        )
-        tests_passed = raw_outcome.get("tests_passed")
-        if status not in {"success", "failure", "error"}:
-            raise ValueError(f"Replay outcome for '{case_id}' has invalid status: {status}")
-        if not isinstance(summary, str):
-            raise ValueError(f"Replay outcome for '{case_id}' must include summary text.")
-        if tests_passed is not None and not isinstance(tests_passed, bool):
-            raise ValueError(f"Replay outcome for '{case_id}' tests_passed must be bool or null.")
-
+    for case_id, raw_outcome in parsed.items():
         outcomes[case_id] = WorkerOutcome(
-            status=status,
-            summary=summary,
-            files_changed=files_changed,
-            tests_passed=tests_passed,
+            status=raw_outcome.status,
+            summary=raw_outcome.summary,
+            files_changed=tuple(raw_outcome.files_changed or ()),
+            tests_passed=raw_outcome.tests_passed,
         )
 
     return outcomes
