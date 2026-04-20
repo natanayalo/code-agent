@@ -81,11 +81,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-106 Add evaluation harness with frozen task suite. PR: [#82](https://github.com/natanayalo/code-agent/pull/82)
 - T-120 Convert frozen evaluation harness to async runner protocol. PR: [#88](https://github.com/natanayalo/code-agent/pull/88)
 - T-121 Migrate frozen suite payload validation to Pydantic models. PR: [#89](https://github.com/natanayalo/code-agent/pull/89)
+- T-122 Parallelize frozen-suite case execution with deterministic guarantees. PR: [#90](https://github.com/natanayalo/code-agent/pull/90)
 
 ## In Progress
 
-- T-122 Parallelize frozen-suite case execution with deterministic guarantees (follow-up from PR #88 review threads:
-  `#discussion_r3107756403`, `#discussion_r3113655875`, `#discussion_r3113681873`)
+- None
 
 ## Next
 
