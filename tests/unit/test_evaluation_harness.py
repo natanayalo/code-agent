@@ -457,3 +457,47 @@ def test_load_replay_outcomes_rejects_non_boolean_tests_passed(tmp_path: Path) -
 
     with pytest.raises(ValueError, match="tests_passed"):
         load_replay_outcomes(replay_path)
+
+
+def test_load_frozen_suite_rejects_unexpected_fields(tmp_path: Path) -> None:
+    suite_path = tmp_path / "bad-suite.json"
+    suite_path.write_text(
+        json.dumps(
+            {
+                "suite_name": "bad-suite",
+                "unexpected": "field",
+                "cases": [
+                    {
+                        "case_id": "case-1",
+                        "repo_fixture": "fixtures/one",
+                        "task_text": "Do one thing",
+                        "expectation": {"require_success": True},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="unexpected"):
+        load_frozen_suite(path=suite_path)
+
+
+def test_load_replay_outcomes_rejects_unexpected_fields(tmp_path: Path) -> None:
+    replay_path = tmp_path / "bad-replay.json"
+    replay_path.write_text(
+        json.dumps(
+            {
+                "case-1": {
+                    "status": "success",
+                    "summary": "ok",
+                    "files_changed": [],
+                    "unexpected": "field",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="unexpected"):
+        load_replay_outcomes(replay_path)

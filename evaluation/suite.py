@@ -23,7 +23,7 @@ class FrozenSuite:
 
 
 class _ExpectationPayload(BaseModel):
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, extra="forbid")
 
     require_success: bool = True
     require_tests_passed: bool = False
@@ -32,7 +32,7 @@ class _ExpectationPayload(BaseModel):
 
 
 class _CasePayload(BaseModel):
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, extra="forbid")
 
     case_id: str
     repo_fixture: str
@@ -48,7 +48,7 @@ class _CasePayload(BaseModel):
 
 
 class _FrozenSuitePayload(BaseModel):
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, extra="forbid")
 
     suite_name: str
     cases: list[_CasePayload]
@@ -62,7 +62,7 @@ class _FrozenSuitePayload(BaseModel):
 
 
 class _ReplayOutcomePayload(BaseModel):
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, extra="forbid")
 
     status: Literal["success", "failure", "error"]
     summary: str
