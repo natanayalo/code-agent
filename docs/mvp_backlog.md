@@ -695,6 +695,24 @@ Acceptance:
 - malformed fixture coverage remains explicit in tests
 - loader code is smaller and easier to extend without losing strictness
 
+### T-122 Parallelize frozen-suite case execution with deterministic guarantees
+Add an optional concurrent execution mode for the frozen evaluation harness while preserving deterministic scoring, report stability, and failure semantics.
+
+Scope notes:
+- parallelize case execution in `evaluate_suite` with `asyncio.gather` (or equivalent) while preserving result ordering
+- keep scoring and report schema unchanged
+- preserve deterministic pass/fail and score outcomes across repeated runs on the same code
+- define and test failure-shape behavior under concurrency (for example: one or more case-level runner exceptions)
+- keep runner interfaces unchanged from T-120 async protocol work
+- do not expand this slice into multi-host/distributed execution
+
+Acceptance:
+- harness executes cases concurrently in-process
+- report ordering remains deterministic and stable
+- exception normalization remains deterministic under concurrent execution
+- existing frozen-suite report contract remains unchanged
+- unit tests cover concurrency path plus deterministic ordering and exception behavior
+
 ### T-108 Add planning/decomposition step for complex tasks
 Add an optional planning phase where complex tasks are broken into ordered sub-steps before the worker begins execution.
 
