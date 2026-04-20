@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from pathlib import Path
 
 from evaluation import (
@@ -56,7 +57,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
+async def _async_main() -> int:
     args = _build_argument_parser().parse_args()
     suite = load_frozen_suite(path=args.suite)
     outcomes = (
@@ -71,7 +72,7 @@ def main() -> int:
         )
     else:
         runner = ReplayRunner(outcomes)
-    report = evaluate_suite(
+    report = await evaluate_suite(
         suite_name=suite.suite_name,
         cases=suite.cases,
         runner=runner,
@@ -86,6 +87,10 @@ def main() -> int:
         f"output={args.output}",
     )
     return 0 if report.passed_cases == report.total_cases else 1
+
+
+def main() -> int:
+    return asyncio.run(_async_main())
 
 
 if __name__ == "__main__":

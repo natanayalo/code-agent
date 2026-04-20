@@ -41,7 +41,7 @@ class WorkerOutcome:
 class EvaluationRunner(Protocol):
     """Runner boundary for orchestrator/replay adapters used by the harness."""
 
-    def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
+    async def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
         """Execute one case and return the normalized outcome."""
 
 
@@ -71,7 +71,7 @@ class ReplayRunner:
     def __init__(self, outcomes_by_case_id: dict[str, WorkerOutcome]) -> None:
         self._outcomes_by_case_id = dict(outcomes_by_case_id)
 
-    def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
+    async def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
         outcome = self._outcomes_by_case_id.get(case.case_id)
         if outcome is not None:
             return outcome
@@ -178,7 +178,7 @@ def _score_case(case: FrozenTaskCase, outcome: WorkerOutcome) -> CaseRunResult:
     )
 
 
-def evaluate_suite(
+async def evaluate_suite(
     *,
     suite_name: str,
     cases: tuple[FrozenTaskCase, ...],
@@ -188,7 +188,7 @@ def evaluate_suite(
     scored_results: list[CaseRunResult] = []
     for case in cases:
         try:
-            outcome = runner.run_case(case)
+            outcome = await runner.run_case(case)
         except Exception as exc:
             outcome = _runner_exception_outcome(case, exc)
         scored_results.append(_score_case(case, outcome))
