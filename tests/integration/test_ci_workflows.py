@@ -54,11 +54,26 @@ def test_pyproject_dev_dependencies_include_pytest_cov() -> None:
     assert isinstance(version_spec, str) and version_spec.startswith(">=")
 
 
+def test_pyproject_dev_dependencies_include_pytest_asyncio() -> None:
+    """Async test support should be explicit in the dev dependency set."""
+    with Path("pyproject.toml").open("rb") as file:
+        config = tomllib.load(file)
+
+    dev_dependencies = config["tool"]["poetry"]["group"]["dev"]["dependencies"]
+    assert "pytest-asyncio" in dev_dependencies
+    pytest_asyncio = dev_dependencies["pytest-asyncio"]
+    version_spec = (
+        pytest_asyncio if isinstance(pytest_asyncio, str) else pytest_asyncio.get("version", "")
+    )
+    assert isinstance(version_spec, str) and version_spec.startswith(">=")
+
+
 def test_pytest_workflow_runs_on_push_and_enforces_coverage() -> None:
     """The pytest workflow should validate each push with a coverage gate."""
     workflow = _load_yaml(".github/workflows/pytest.yml")
     triggers = _workflow_triggers(workflow)
     steps = _job_steps(workflow, "pytest")
+    plugin_step = _step_by_name(steps, "Verify async pytest plugin availability")
     run_step = _step_by_name(steps, "Run pytest with coverage gate")
     upload_step = _step_by_name(steps, "Upload coverage artifact")
 
@@ -66,6 +81,7 @@ def test_pytest_workflow_runs_on_push_and_enforces_coverage() -> None:
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] is True
     assert workflow["jobs"]["pytest"]["timeout-minutes"] == 15
+    assert "import pytest_asyncio" in plugin_step["run"]
     assert run_step["run"]
     for expected_flag in (
         "--cov=apps",
