@@ -537,7 +537,10 @@ def _task_complexity_reason(state: OrchestratorState) -> str | None:
 def _build_task_plan(state: OrchestratorState, complexity_reason: str) -> TaskPlan:
     """Create an ordered, structured decomposition for complex tasks."""
     task_text = state.normalized_task_text or state.task.task_text
-    task_text_preview = task_text[:100] + ("..." if len(task_text) > 100 else "")
+    normalized_task_text = " ".join(task_text.split())
+    task_text_preview = normalized_task_text[:100] + (
+        "..." if len(normalized_task_text) > 100 else ""
+    )
     # TODO(T-108 follow-up): replace this static scaffold with dynamic task-specific
     # decomposition once planner heuristics (or a planner model call) are introduced.
     step_one_title = "Inspect Relevant Code Paths"
