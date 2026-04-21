@@ -72,6 +72,9 @@ COMPLEX_TASK_MARKERS = (
     "multi module",
     "several modules",
 )
+_COMPLEX_TASK_PATTERN = re.compile(
+    rf"(?<![\w-])(?:{'|'.join(re.escape(marker) for marker in COMPLEX_TASK_MARKERS)})(?![\w-])"
+)
 
 DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = 330
 ORCHESTRATOR_TIMEOUT_GRACE_SECONDS = 30
@@ -527,10 +530,7 @@ def _task_complexity_reason(state: OrchestratorState) -> str | None:
     if task_kind == "ambiguous":
         return "ambiguous_task"
     task_text = (state.normalized_task_text or state.task.task_text).lower()
-    if any(
-        re.search(rf"(?<![\w-]){re.escape(marker)}(?![\w-])", task_text)
-        for marker in COMPLEX_TASK_MARKERS
-    ):
+    if _COMPLEX_TASK_PATTERN.search(task_text):
         return "multi_file_task"
     return None
 
