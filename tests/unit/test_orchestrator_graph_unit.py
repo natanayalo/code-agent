@@ -19,6 +19,7 @@ from orchestrator.graph import (
     await_permission_escalation,
     build_choose_worker_node,
     choose_worker,
+    plan_task,
     summarize_result,
     verify_result,
 )
@@ -83,6 +84,17 @@ def test_build_worker_request_from_state():
                 "constraints": {"requires_approval": False},
                 "budget": {"max_minutes": 15},
             },
+            "task_plan": {
+                "triggered": True,
+                "complexity_reason": "architecture",
+                "steps": [
+                    {
+                        "step_id": "1",
+                        "title": "Inspect",
+                        "expected_outcome": "Find target files",
+                    }
+                ],
+            },
         }
     )
     request = _build_worker_request(state)
@@ -90,8 +102,95 @@ def test_build_worker_request_from_state():
     assert request.repo_url == "https://github.com/natanayalo/code-agent"
     assert request.branch == "task/t-040-worker-interface"
     assert request.task_text == "Add worker interface"
+    assert request.task_plan is not None
+    assert request.task_plan["complexity_reason"] == "architecture"
     assert request.constraints == {"requires_approval": False}
     assert request.budget == {"max_minutes": 15}
+
+
+def test_plan_task_skips_simple_tasks():
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "Add a helper"}, "task_kind": "implementation"}
+    )
+
+    res = plan_task(state)
+
+    assert res["current_step"] == "plan_task"
+    assert res["task_plan"] is None
+    assert res["progress_updates"][-1] == "planning skipped: task is straightforward"
+
+
+def test_plan_task_generates_plan_for_complex_tasks():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Refactor architecture across files"},
+            "task_kind": "architecture",
+            "normalized_task_text": "Refactor architecture across files",
+        }
+    )
+
+    res = plan_task(state)
+
+    assert res["current_step"] == "plan_task"
+    assert res["task_plan"]["triggered"] is True
+    assert res["task_plan"]["complexity_reason"] == "architectural_task"
+    assert len(res["task_plan"]["steps"]) == 3
+    assert res["progress_updates"][-1] == "structured plan generated (architectural_task)"
+
+
+def test_plan_task_parameterizes_steps_for_ambiguous_tasks():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Investigate flaky behavior in worker runs"},
+            "task_kind": "ambiguous",
+        }
+    )
+
+    res = plan_task(state)
+
+    assert res["task_plan"]["complexity_reason"] == "ambiguous_task"
+    assert res["task_plan"]["steps"][0]["title"] == "Investigate Root Cause and Scope"
+
+
+def test_plan_task_parameterizes_multi_file_execution_step():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Implement change across files in orchestrator"},
+            "task_kind": "implementation",
+        }
+    )
+
+    res = plan_task(state)
+
+    assert res["task_plan"]["complexity_reason"] == "multi_file_task"
+    assert res["task_plan"]["steps"][1]["title"] == "Sequence Multi-file Changes Safely"
+
+
+def test_plan_task_detects_multifile_compound_marker():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Apply multifile change across orchestrator modules"},
+            "task_kind": "implementation",
+        }
+    )
+
+    res = plan_task(state)
+
+    assert res["task_plan"]["complexity_reason"] == "multi_file_task"
+
+
+def test_plan_task_complexity_marker_uses_word_boundaries():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Rename the multi-file-uploader module"},
+            "task_kind": "implementation",
+        }
+    )
+
+    res = plan_task(state)
+
+    assert res["task_plan"] is None
+    assert res["progress_updates"][-1] == "planning skipped: task is straightforward"
 
 
 def test_resolve_orchestrator_timeout_seconds_prefers_explicit_override() -> None:
@@ -432,6 +531,41 @@ def test_summarize_result_uses_normalized_task_text_for_active_goal():
 
     assert res["session_state_update"]["active_goal"] == "demo"
     assert res["session_state_update"]["files_touched"] == ["demo.txt"]
+
+
+def test_summarize_result_attaches_task_plan_artifact_when_present():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "dispatch": {"worker_type": "codex"},
+            "task_plan": {
+                "triggered": True,
+                "complexity_reason": "ambiguous_task",
+                "steps": [
+                    {
+                        "step_id": "1",
+                        "title": "Inspect",
+                        "expected_outcome": "Find root cause",
+                    }
+                ],
+            },
+            "result": {
+                "status": "success",
+                "summary": "done",
+                "commands_run": [],
+                "files_changed": ["demo.txt"],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+
+    res = summarize_result(state)
+
+    artifact = res["result"]["artifacts"][0]
+    assert artifact["name"] == "task_plan"
+    assert artifact["artifact_type"] == "result_summary"
+    assert artifact["uri"].startswith("data:application/json;base64,")
 
 
 def test_create_in_memory_checkpointer():

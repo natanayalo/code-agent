@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -20,6 +21,8 @@ from orchestrator.state import (
     OrchestratorState,
     RouteDecision,
     SessionStateUpdate,
+    TaskPlan,
+    TaskPlanStep,
     TaskTimelineEventState,
     VerificationReport,
     VerificationReportItem,
@@ -28,13 +31,14 @@ from orchestrator.state import (
 )
 from tools import coerce_permission_level
 from tools.numeric import coerce_positive_int_like
-from workers import Worker, WorkerRequest, WorkerResult
+from workers import ArtifactReference, Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
 
 ORCHESTRATOR_NODE_SEQUENCE = (
     "ingest_task",
     "classify_task",
+    "plan_task",
     "load_memory",
     "choose_worker",
     "check_approval",
@@ -57,6 +61,19 @@ DESTRUCTIVE_TASK_MARKERS = (
     "purge data",
     "rm -rf",
     "wipe data",
+)
+COMPLEX_TASK_MARKERS = (
+    "across files",
+    "multiple files",
+    "multi-file",
+    "multi file",
+    "multifile",
+    "multi-module",
+    "multi module",
+    "several modules",
+)
+_COMPLEX_TASK_PATTERN = re.compile(
+    rf"(?<![\w-])(?:{'|'.join(re.escape(marker) for marker in COMPLEX_TASK_MARKERS)})(?![\w-])"
 )
 
 DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = 330
@@ -414,6 +431,7 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         branch=state.task.branch,
         task_text=state.normalized_task_text or state.task.task_text,
         memory_context=state.memory.model_dump(),
+        task_plan=state.task_plan.model_dump(mode="json") if state.task_plan is not None else None,
         constraints=dict(state.task.constraints),
         budget=dict(state.task.budget),
         secrets=dict(state.task.secrets),
@@ -500,6 +518,109 @@ def classify_task(state_input: OrchestratorState) -> dict[str, Any]:
             TimelineEventType.TASK_CLASSIFIED,
             message=f"Task classified as {task_kind}.",
             payload={"task_kind": task_kind},
+        ),
+    }
+
+
+def _task_complexity_reason(state: OrchestratorState) -> str | None:
+    """Return a reason when the task should receive a structured plan."""
+    task_kind = state.task_kind
+    if task_kind == "architecture":
+        return "architectural_task"
+    if task_kind == "ambiguous":
+        return "ambiguous_task"
+    task_text = (state.normalized_task_text or state.task.task_text).lower()
+    if _COMPLEX_TASK_PATTERN.search(task_text):
+        return "multi_file_task"
+    return None
+
+
+def _build_task_plan(state: OrchestratorState, complexity_reason: str) -> TaskPlan:
+    """Create an ordered, structured decomposition for complex tasks."""
+    task_text = state.normalized_task_text or state.task.task_text
+    normalized_task_text = " ".join(task_text.split())
+    task_text_preview = normalized_task_text[:100] + (
+        "..." if len(normalized_task_text) > 100 else ""
+    )
+    # TODO(T-108 follow-up): replace this static scaffold with dynamic task-specific
+    # decomposition once planner heuristics (or a planner model call) are introduced.
+    step_one_title = "Inspect Relevant Code Paths"
+    step_one_outcome = "Identify the exact files, interfaces, and tests to touch."
+    step_two_title = "Implement the Smallest Safe Slice"
+    step_two_outcome = (
+        "Apply the minimal change set that satisfies the task without widening scope."
+    )
+
+    if complexity_reason == "architectural_task":
+        step_one_title = "Inspect Architectural Boundaries"
+        step_one_outcome = "Identify impacted modules, interfaces, and coupling constraints."
+    elif complexity_reason == "ambiguous_task":
+        step_one_title = "Investigate Root Cause and Scope"
+        step_one_outcome = "Narrow ambiguity into a concrete file-level implementation target."
+    elif complexity_reason == "multi_file_task":
+        step_two_title = "Sequence Multi-file Changes Safely"
+        step_two_outcome = (
+            "Apply coherent edits across files while preserving interface consistency."
+        )
+
+    return TaskPlan(
+        triggered=True,
+        complexity_reason=complexity_reason,
+        steps=[
+            TaskPlanStep(
+                step_id="1",
+                title=step_one_title,
+                expected_outcome=step_one_outcome,
+            ),
+            TaskPlanStep(
+                step_id="2",
+                title=step_two_title,
+                expected_outcome=step_two_outcome,
+            ),
+            TaskPlanStep(
+                step_id="3",
+                title="Verify and Summarize",
+                expected_outcome=(
+                    "Run focused checks proving "
+                    f"'{task_text_preview}' is satisfied and summarize outcomes."
+                ),
+            ),
+        ],
+    )
+
+
+def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
+    """Generate a structured plan only for tasks classified as complex."""
+    state = _ensure_state(state_input)
+    complexity_reason = _task_complexity_reason(state)
+    if complexity_reason is None:
+        return {
+            "current_step": "plan_task",
+            "task_plan": None,
+            "progress_updates": _progress_update(
+                state, "planning skipped: task is straightforward"
+            ),
+            **_timeline_event(
+                state,
+                TimelineEventType.TASK_PLANNED,
+                message="Planning skipped for straightforward task.",
+                payload={"planning": "skipped"},
+            ),
+        }
+
+    task_plan = _build_task_plan(state, complexity_reason)
+    return {
+        "current_step": "plan_task",
+        "task_plan": task_plan.model_dump(),
+        "progress_updates": _progress_update(
+            state,
+            f"structured plan generated ({complexity_reason})",
+        ),
+        **_timeline_event(
+            state,
+            TimelineEventType.TASK_PLANNED,
+            message="Structured plan generated for complex task.",
+            payload={"planning": "generated", "complexity_reason": complexity_reason},
         ),
     }
 
@@ -1140,6 +1261,22 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
     else:
         result = state.result
 
+    if state.task_plan is not None and state.task_plan.triggered:
+        plan_json = state.task_plan.model_dump_json()
+        plan_payload = base64.b64encode(plan_json.encode("utf-8")).decode("utf-8")
+        result = result.model_copy(
+            update={
+                "artifacts": [
+                    *result.artifacts,
+                    ArtifactReference(
+                        name="task_plan",
+                        uri=f"data:application/json;base64,{plan_payload}",
+                        artifact_type="result_summary",
+                    ),
+                ]
+            }
+        )
+
     # Extract session state update (T-062)
     session_state_update = SessionStateUpdate(
         active_goal=state.normalized_task_text or state.task.task_text,
@@ -1186,6 +1323,7 @@ def build_orchestrator_graph(
     builder = StateGraph(OrchestratorState)
     builder.add_node("ingest_task", RunnableLambda(ingest_task))
     builder.add_node("classify_task", RunnableLambda(classify_task))
+    builder.add_node("plan_task", RunnableLambda(plan_task))
     builder.add_node("load_memory", RunnableLambda(load_memory))
     available_workers: frozenset[str] = frozenset(_configured_workers(worker, gemini_worker).keys())
     builder.add_node("choose_worker", RunnableLambda(build_choose_worker_node(available_workers)))
@@ -1202,7 +1340,8 @@ def build_orchestrator_graph(
     builder.add_node("persist_memory", RunnableLambda(persist_memory))
     builder.add_edge(START, "ingest_task")
     builder.add_edge("ingest_task", "classify_task")
-    builder.add_edge("classify_task", "load_memory")
+    builder.add_edge("classify_task", "plan_task")
+    builder.add_edge("plan_task", "load_memory")
     builder.add_edge("load_memory", "choose_worker")
     builder.add_edge("choose_worker", "check_approval")
     builder.add_conditional_edges(
