@@ -59,6 +59,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Remove task_planned from allowed persisted task timeline event types."""
+    op.execute("DELETE FROM task_timeline_events WHERE event_type = 'task_planned'")
     with op.batch_alter_table("task_timeline_events") as batch_op:
         batch_op.drop_constraint(op.f("ck_task_timeline_events_event_type"), type_="check")
         batch_op.create_check_constraint(
