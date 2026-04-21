@@ -355,19 +355,24 @@ def _extract_file_hints_from_command(command: str) -> list[str]:
         tokens = shlex.split(command, posix=True)
     except ValueError:
         tokens = command.split()
-    primary_command = tokens[0] if tokens else ""
-    for index, token in enumerate(tokens):
+    primary_command = ""
+    for token in tokens:
         candidate = token.strip("\"'")
-        if not candidate or candidate.startswith("-"):
+        if not candidate:
             continue
-        if candidate in {"&&", "||", ";", "|", ">", ">>", "2>", "2>>"}:
+        if candidate in {"&&", "||", ";", "|"}:
+            primary_command = ""
+            continue
+        if not primary_command:
+            primary_command = candidate
+            continue
+        if candidate.startswith("-") or candidate in {">", ">>", "2>", "2>>"}:
             continue
         if "/" in candidate or "." in Path(candidate).name:
             hints.append(candidate)
             continue
         if (
-            index > 0
-            and primary_command in _FILE_ARGUMENT_COMMANDS
+            primary_command in _FILE_ARGUMENT_COMMANDS
             and "=" not in candidate
             and candidate != primary_command
         ):
@@ -379,7 +384,8 @@ def _inline_code(value: str) -> str:
     """Render inline code while safely handling content that contains backticks."""
     max_tick_run = max((len(match.group(0)) for match in re.finditer(r"`+", value)), default=0)
     fence = "`" * (max_tick_run + 1)
-    return f"{fence}{value}{fence}"
+    space = " " if value.startswith("`") or value.endswith("`") else ""
+    return f"{fence}{space}{value}{space}{fence}"
 
 
 def _build_condensed_context_summary(
@@ -414,9 +420,9 @@ def _build_condensed_context_summary(
         output_excerpt = _extract_output_excerpt(message.content) or "<see tool output>"
         errors.append(f"exit {exit_code} ({output_excerpt})")
 
-    deduped_decisions = list(dict.fromkeys(decisions))
-    deduped_files = list(dict.fromkeys(files_touched))
-    deduped_errors = list(dict.fromkeys(errors))
+    deduped_decisions = list(dict.fromkeys(reversed(decisions)))[::-1]
+    deduped_files = list(dict.fromkeys(reversed(files_touched)))[::-1]
+    deduped_errors = list(dict.fromkeys(reversed(errors)))[::-1]
 
     current_state = "no tool state available from condensed history"
     for message in reversed(older_messages):

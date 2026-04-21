@@ -374,6 +374,17 @@ def test_extract_file_hints_includes_extensionless_root_file_arguments() -> None
     assert "manage.py" in _extract_file_hints_from_command("python manage.py")
 
 
+def test_extract_file_hints_handles_compound_shell_commands() -> None:
+    """Heuristics should reset command context across shell separators."""
+    hints = _extract_file_hints_from_command("cat file1 && ls file2 | grep needle file3")
+
+    assert "file1" in hints
+    assert "file2" in hints
+    assert "file3" in hints
+    assert "ls" not in hints
+    assert "grep" not in hints
+
+
 def test_build_condensed_context_summary_truncation_stays_within_budget() -> None:
     """Truncation notice should fit inside the configured summary character budget."""
     older_messages = [
@@ -452,6 +463,27 @@ def test_build_condensed_context_summary_escapes_backticks_in_inline_code() -> N
     )
 
     assert "``echo `date` > out.txt``" in summary
+
+
+def test_build_condensed_context_summary_escapes_edge_backticks_in_inline_code() -> None:
+    """Inline-code rendering should stay valid when text starts/ends with backticks."""
+    older_messages = [
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                "`date`\n```"
+            ),
+        )
+    ]
+
+    summary = _build_condensed_context_summary(
+        older_messages,
+        max_characters=2000,
+    )
+
+    assert "`` `date` ``" in summary
 
 
 def test_build_condensed_context_summary_escapes_backticks_in_current_state() -> None:
@@ -586,6 +618,27 @@ def test_messages_for_adapter_turn_rebuilds_compact_summary_with_truncation_noti
     assert condensed[1].role == "assistant"
     assert "Condensed context summary" in condensed[1].content
     assert condensed[1].content.endswith("characters]")
+
+
+def test_build_condensed_context_summary_prefers_latest_unique_file_occurrences() -> None:
+    """Deduping should preserve latest unique file mentions before applying the tail window."""
+    older_messages = [
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                "touch f1 f2 f3 f4 f5 f6 f7 f8 f9 f1\n```"
+            ),
+        )
+    ]
+
+    summary = _build_condensed_context_summary(
+        older_messages,
+        max_characters=5000,
+    )
+
+    assert "- Files touched hints: `f3`, `f4`, `f5`, `f6`, `f7`, `f8`, `f9`, `f1`" in summary
 
 
 def test_run_cli_runtime_loop_executes_git_helper_requests() -> None:
