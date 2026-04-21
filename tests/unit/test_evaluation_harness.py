@@ -113,6 +113,153 @@ def test_evaluate_suite_continues_after_runner_exception() -> None:
     assert report.results[1].outcome.status == "success"
 
 
+def test_evaluate_suite_parallel_mode_preserves_input_order() -> None:
+    class StaggeredRunner:
+        async def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
+            delays = {"first": 0.03, "second": 0.0, "third": 0.01}
+            await asyncio.sleep(delays[case.case_id])
+            return WorkerOutcome(status="success", summary=f"done {case.case_id}")
+
+    cases = (
+        FrozenTaskCase(
+            case_id="first",
+            repo_fixture="fixtures/a",
+            task_text="task first",
+            expectation=TaskExpectation(require_success=True),
+        ),
+        FrozenTaskCase(
+            case_id="second",
+            repo_fixture="fixtures/b",
+            task_text="task second",
+            expectation=TaskExpectation(require_success=True),
+        ),
+        FrozenTaskCase(
+            case_id="third",
+            repo_fixture="fixtures/c",
+            task_text="task third",
+            expectation=TaskExpectation(require_success=True),
+        ),
+    )
+
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="parallel-order",
+            cases=cases,
+            runner=StaggeredRunner(),
+            parallel=True,
+        )
+    )
+
+    assert tuple(result.case_id for result in report.results) == ("first", "second", "third")
+    assert all(result.passed for result in report.results)
+
+
+def test_evaluate_suite_parallel_mode_normalizes_exceptions_deterministically() -> None:
+    class CrashyParallelRunner:
+        async def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
+            if case.case_id == "boom":
+                await asyncio.sleep(0.0)
+                raise RuntimeError("parallel crash")
+            await asyncio.sleep(0.01)
+            return WorkerOutcome(status="success", summary=f"ok {case.case_id}")
+
+    cases = (
+        FrozenTaskCase(
+            case_id="boom",
+            repo_fixture="fixtures/a",
+            task_text="task a",
+            expectation=TaskExpectation(require_success=True),
+        ),
+        FrozenTaskCase(
+            case_id="ok",
+            repo_fixture="fixtures/b",
+            task_text="task b",
+            expectation=TaskExpectation(require_success=True),
+        ),
+    )
+
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="parallel-crashy",
+            cases=cases,
+            runner=CrashyParallelRunner(),
+            parallel=True,
+        )
+    )
+
+    assert report.total_cases == 2
+    assert report.failed_cases == 1
+    assert report.results[0].case_id == "boom"
+    assert report.results[0].outcome.status == "error"
+    assert "evaluation runner raised runtimeerror" in report.results[0].outcome.summary.lower()
+    assert report.results[1].case_id == "ok"
+    assert report.results[1].outcome.status == "success"
+
+
+def test_evaluate_suite_parallel_mode_respects_concurrency_limit() -> None:
+    class ConcurrencyTrackingRunner:
+        def __init__(self) -> None:
+            self._active = 0
+            self.max_active = 0
+            self._lock = asyncio.Lock()
+
+        async def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
+            async with self._lock:
+                self._active += 1
+                if self._active > self.max_active:
+                    self.max_active = self._active
+            await asyncio.sleep(0.01)
+            async with self._lock:
+                self._active -= 1
+            return WorkerOutcome(status="success", summary=f"ok {case.case_id}")
+
+    runner = ConcurrencyTrackingRunner()
+    cases = tuple(
+        FrozenTaskCase(
+            case_id=f"case-{index}",
+            repo_fixture="fixtures/empty",
+            task_text="Do a thing",
+            expectation=TaskExpectation(require_success=True),
+        )
+        for index in range(5)
+    )
+
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="parallel-limit",
+            cases=cases,
+            runner=runner,
+            parallel=True,
+            max_parallel_cases=2,
+        )
+    )
+
+    assert report.passed_cases == 5
+    assert runner.max_active == 2
+
+
+def test_evaluate_suite_rejects_non_positive_parallel_limit() -> None:
+    case = FrozenTaskCase(
+        case_id="one",
+        repo_fixture="fixtures/empty",
+        task_text="Do a thing",
+        expectation=TaskExpectation(require_success=True),
+    )
+
+    with pytest.raises(ValueError, match="max_parallel_cases must be at least 1"):
+        asyncio.run(
+            evaluate_suite(
+                suite_name="bad-limit",
+                cases=(case,),
+                runner=ReplayRunner(
+                    outcomes_by_case_id={"one": WorkerOutcome(status="success", summary="ok")}
+                ),
+                parallel=True,
+                max_parallel_cases=0,
+            )
+        )
+
+
 def test_missing_replay_outcome_is_scored_as_failure() -> None:
     case = FrozenTaskCase(
         case_id="missing-case",

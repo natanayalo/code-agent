@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -183,15 +184,37 @@ async def evaluate_suite(
     suite_name: str,
     cases: tuple[FrozenTaskCase, ...],
     runner: EvaluationRunner,
+    parallel: bool = False,
+    max_parallel_cases: int | None = None,
 ) -> EvaluationReport:
     """Execute and score all frozen cases through the supplied runner."""
-    scored_results: list[CaseRunResult] = []
-    for case in cases:
+
+    async def _execute_case(case: FrozenTaskCase) -> CaseRunResult:
         try:
             outcome = await runner.run_case(case)
         except Exception as exc:
             outcome = _runner_exception_outcome(case, exc)
-        scored_results.append(_score_case(case, outcome))
+        return _score_case(case, outcome)
+
+    if parallel:
+        if max_parallel_cases is not None:
+            if max_parallel_cases < 1:
+                raise ValueError("max_parallel_cases must be at least 1 when provided")
+            semaphore = asyncio.Semaphore(max_parallel_cases)
+
+            async def _execute_case_with_limit(case: FrozenTaskCase) -> CaseRunResult:
+                async with semaphore:
+                    return await _execute_case(case)
+
+            scored_results = await asyncio.gather(
+                *(_execute_case_with_limit(case) for case in cases)
+            )
+        else:
+            scored_results = await asyncio.gather(*(_execute_case(case) for case in cases))
+    else:
+        scored_results: list[CaseRunResult] = []
+        for case in cases:
+            scored_results.append(await _execute_case(case))
 
     results = tuple(scored_results)
     total_cases = len(results)

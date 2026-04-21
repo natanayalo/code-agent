@@ -54,6 +54,17 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         default=Path("artifacts/evaluations/frozen-suite-report.json"),
         help="Path to write the structured report JSON.",
     )
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Run frozen-suite cases concurrently while preserving deterministic report ordering.",
+    )
+    parser.add_argument(
+        "--max-parallel-cases",
+        type=int,
+        default=None,
+        help=("Optional concurrency cap when --parallel is enabled. " "Defaults to no cap."),
+    )
     return parser
 
 
@@ -76,6 +87,8 @@ async def _async_main() -> int:
         suite_name=suite.suite_name,
         cases=suite.cases,
         runner=runner,
+        parallel=args.parallel,
+        max_parallel_cases=args.max_parallel_cases,
     )
     write_report(report, args.output)
     print(
