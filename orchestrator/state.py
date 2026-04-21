@@ -15,6 +15,7 @@ MemoryCategory = Literal["personal", "project"]
 WorkflowStep = Literal[
     "ingest_task",
     "classify_task",
+    "plan_task",
     "load_memory",
     "choose_worker",
     "check_approval",
@@ -81,6 +82,22 @@ class RouteDecision(OrchestratorModel):
     chosen_worker: WorkerType | None = None
     route_reason: str | None = None
     override_applied: bool = False
+
+
+class TaskPlanStep(OrchestratorModel):
+    """A single ordered planning step for complex tasks."""
+
+    step_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    expected_outcome: str = Field(min_length=1)
+
+
+class TaskPlan(OrchestratorModel):
+    """Structured decomposition emitted for complex tasks."""
+
+    triggered: bool = False
+    complexity_reason: str | None = None
+    steps: list[TaskPlanStep] = Field(default_factory=list)
 
 
 class ApprovalCheckpoint(OrchestratorModel):
@@ -159,6 +176,7 @@ class OrchestratorState(OrchestratorModel):
     task: TaskRequest
     normalized_task_text: str | None = None
     task_kind: str | None = None
+    task_plan: TaskPlan | None = None
     memory: MemoryContext = Field(default_factory=MemoryContext)
     route: RouteDecision = Field(default_factory=RouteDecision)
     approval: ApprovalCheckpoint = Field(default_factory=ApprovalCheckpoint)

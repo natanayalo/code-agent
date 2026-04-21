@@ -85,7 +85,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-108 Add planning/decomposition step for complex tasks.
 
 ## Next
 

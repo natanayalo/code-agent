@@ -23,6 +23,7 @@ class WorkerRequest(WorkerModel):
     branch: str | None = None
     task_text: str = Field(min_length=1)
     memory_context: dict[str, Any] = Field(default_factory=dict)
+    task_plan: dict[str, Any] | None = None
     secrets: dict[str, str] = Field(default_factory=dict)
     tools: list[str] | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)

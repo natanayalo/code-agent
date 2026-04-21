@@ -331,6 +331,30 @@ def test_build_task_context_section_masks_repo_url_credentials() -> None:
     assert "token@github.com" not in section
 
 
+def test_build_task_context_section_includes_task_plan_when_present() -> None:
+    """Task plans should be rendered in task context when provided by orchestrator."""
+    section = build_task_context_section(
+        WorkerRequest(
+            task_text="Inspect and update architecture",
+            task_plan={
+                "triggered": True,
+                "complexity_reason": "architectural_task",
+                "steps": [
+                    {
+                        "step_id": "1",
+                        "title": "Inspect",
+                        "expected_outcome": "Find impacted modules",
+                    }
+                ],
+            },
+        )
+    )
+
+    assert "Task plan:" in section
+    assert '"complexity_reason": "architectural_task"' in section
+    assert '"step_id": "1"' in section
+
+
 def test_build_task_context_section_handles_mixed_type_sets() -> None:
     """Mixed-type sets should be normalized without raising during JSON rendering."""
     section = build_task_context_section(
