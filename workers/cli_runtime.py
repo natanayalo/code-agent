@@ -319,7 +319,7 @@ def _estimate_messages_characters(messages: Sequence[CliRuntimeMessage]) -> int:
 
 def _extract_command_from_code_fence(content: str) -> str | None:
     """Extract a command from the runtime's bash fenced tool-call transcript."""
-    match = re.search(r"```bash\n(?P<command>.*?)\n```", content, flags=re.DOTALL)
+    match = re.search(r"```bash[ \t]*\n(?P<command>.*?)\n```", content, flags=re.DOTALL)
     if match is None:
         return None
     command = match.group("command").strip()
@@ -338,7 +338,7 @@ def _extract_prefixed_line(content: str, *, prefix: str) -> str | None:
 
 def _extract_output_excerpt(content: str) -> str | None:
     """Extract the first non-empty output line from a tool observation."""
-    match = re.search(r"```text\n(?P<output>.*?)\n```", content, flags=re.DOTALL)
+    match = re.search(r"```text[ \t]*\n(?P<output>.*?)\n```", content, flags=re.DOTALL)
     if match is None:
         return None
     for line in match.group("output").splitlines():

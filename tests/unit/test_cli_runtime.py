@@ -507,6 +507,49 @@ def test_build_condensed_context_summary_escapes_backticks_in_current_state() ->
     assert "last command ``echo `date` > out.txt`` exited with code 0" in summary
 
 
+def test_build_condensed_context_summary_parses_bash_fence_with_trailing_tag_spaces() -> None:
+    """Command extraction should tolerate optional spaces after the bash language tag."""
+    older_messages = [
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash   \n"
+                "touch spaced_tag.txt\n```"
+            ),
+        )
+    ]
+
+    summary = _build_condensed_context_summary(
+        older_messages,
+        max_characters=2000,
+    )
+
+    assert "`touch spaced_tag.txt`" in summary
+
+
+def test_build_condensed_context_summary_parses_text_fence_with_trailing_tag_spaces() -> None:
+    """Output excerpt extraction should tolerate optional spaces after the text tag."""
+    older_messages = [
+        CliRuntimeMessage(
+            role="tool",
+            tool_name="execute_bash",
+            content=(
+                "Tool result: execute_bash\nCommand: pytest -q\n"
+                "Exit code: 1\nDuration seconds: 0.250\nOutput:\n```text \n"
+                "F tests/test_flow.py::test_case\n```\n"
+            ),
+        )
+    ]
+
+    summary = _build_condensed_context_summary(
+        older_messages,
+        max_characters=2000,
+    )
+
+    assert "exit 1 (F tests/test_flow.py::test_case)" in summary
+
+
 def test_messages_for_adapter_turn_preserves_history_when_trimming_recent_tail() -> None:
     """Messages dropped from recent tail should be merged into summary, not lost."""
     messages = [
