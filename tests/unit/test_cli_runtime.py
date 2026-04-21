@@ -385,6 +385,17 @@ def test_extract_file_hints_handles_compound_shell_commands() -> None:
     assert "grep" not in hints
 
 
+def test_extract_file_hints_skips_redirection_tokens() -> None:
+    """Shell redirection operators should not be classified as file hints."""
+    hints = _extract_file_hints_from_command("cat input.txt < src.txt > out.txt 2>&1")
+
+    assert "input.txt" in hints
+    assert "src.txt" in hints
+    assert "out.txt" in hints
+    assert "<" not in hints
+    assert "2>&1" not in hints
+
+
 def test_build_condensed_context_summary_truncation_stays_within_budget() -> None:
     """Truncation notice should fit inside the configured summary character budget."""
     older_messages = [

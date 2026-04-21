@@ -366,7 +366,7 @@ def _extract_file_hints_from_command(command: str) -> list[str]:
         if not primary_command:
             primary_command = candidate
             continue
-        if candidate.startswith("-") or candidate in {">", ">>", "2>", "2>>"}:
+        if candidate.startswith("-") or candidate in {"<", ">", ">>", "2>", "2>>", "2>&1"}:
             continue
         if "/" in candidate or "." in Path(candidate).name:
             hints.append(candidate)
