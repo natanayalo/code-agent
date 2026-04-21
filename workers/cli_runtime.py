@@ -55,6 +55,24 @@ DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS = 10
 DEFAULT_CONTEXT_CONDENSER_THRESHOLD_CHARACTERS = 12000
 DEFAULT_CONTEXT_CONDENSER_RECENT_MESSAGES = 6
 DEFAULT_CONTEXT_CONDENSER_SUMMARY_MAX_CHARACTERS = 1500
+_FILE_ARGUMENT_COMMANDS = frozenset(
+    {
+        "cat",
+        "cp",
+        "head",
+        "less",
+        "ln",
+        "ls",
+        "more",
+        "mv",
+        "rm",
+        "sed",
+        "tail",
+        "tee",
+        "touch",
+        "wc",
+    }
+)
 
 
 def _git_status_unavailable(output: str) -> bool:
@@ -332,13 +350,22 @@ def _extract_file_hints_from_command(command: str) -> list[str]:
         tokens = shlex.split(command, posix=True)
     except ValueError:
         tokens = command.split()
-    for token in tokens:
+    primary_command = tokens[0] if tokens else ""
+    for index, token in enumerate(tokens):
         candidate = token.strip("\"'")
         if not candidate or candidate.startswith("-"):
             continue
         if candidate in {"&&", "||", ";", "|", ">", ">>", "2>", "2>>"}:
             continue
         if "/" in candidate or "." in Path(candidate).name:
+            hints.append(candidate)
+            continue
+        if (
+            index > 0
+            and primary_command in _FILE_ARGUMENT_COMMANDS
+            and "=" not in candidate
+            and candidate != primary_command
+        ):
             hints.append(candidate)
     return hints
 
@@ -380,8 +407,8 @@ def _build_condensed_context_summary(
     deduped_files = sorted(dict.fromkeys(files_touched))
     deduped_errors = list(dict.fromkeys(errors))
 
-    current_state = "no recent tool state available"
-    for message in reversed(recent_messages):
+    current_state = "no tool state available from condensed history"
+    for message in reversed(older_messages):
         if message.role != "tool":
             continue
         observed_command = _extract_prefixed_line(message.content, prefix="Command: ")
@@ -417,12 +444,16 @@ def _build_condensed_context_summary(
             "Recent raw messages follow unchanged.",
         ]
     )
-    bounded_summary, truncated = _truncate_text(summary, max_characters=max_characters)
-    if truncated:
-        bounded_summary = (
-            f"{bounded_summary}\n[condensed summary truncated to {max_characters} characters]"
-        )
-    return bounded_summary
+    if len(summary) <= max_characters:
+        return summary
+
+    suffix = f"\n[condensed summary truncated to {max_characters} characters]"
+    available_for_summary = max_characters - len(suffix)
+    if available_for_summary <= 0:
+        suffix_only, _ = _truncate_text(suffix, max_characters=max_characters)
+        return suffix_only
+    bounded_summary, _ = _truncate_text(summary, max_characters=available_for_summary)
+    return f"{bounded_summary}{suffix}"
 
 
 def _messages_for_adapter_turn(

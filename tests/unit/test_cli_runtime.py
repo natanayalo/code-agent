@@ -20,8 +20,10 @@ from workers.cli_runtime import (
     CliRuntimeMessage,
     CliRuntimeSettings,
     CliRuntimeStep,
+    _build_condensed_context_summary,
     _coerce_non_negative_int,
     _estimate_messages_characters,
+    _extract_file_hints_from_command,
     collect_changed_files,
     collect_changed_files_from_repo_path,
     format_bash_observation,
@@ -310,6 +312,9 @@ def test_run_cli_runtime_loop_condenses_older_messages_for_long_histories() -> N
     assert "Condensed context summary" in condensed_call[1].content
     assert "Key decisions made" in condensed_call[1].content
     assert "src/app.py" in condensed_call[1].content
+    assert (
+        "last command `printf 'hello' > src/app.py` exited with code 0" in condensed_call[1].content
+    )
     assert any(
         message.role == "tool" and "Command: pytest -q" in message.content
         for message in condensed_call
@@ -357,6 +362,51 @@ def test_run_cli_runtime_loop_keeps_condensed_prompt_within_threshold_when_possi
 
     assert len(adapter.calls) == 3
     assert _estimate_messages_characters(adapter.calls[2]) <= threshold
+
+
+def test_extract_file_hints_includes_extensionless_root_file_arguments() -> None:
+    """Heuristics should include common extensionless root-path file arguments."""
+    assert "VERSION" in _extract_file_hints_from_command("cat VERSION")
+    assert "LICENSE" in _extract_file_hints_from_command("rm LICENSE")
+    assert "install" not in _extract_file_hints_from_command("pip install pytest")
+
+
+def test_build_condensed_context_summary_truncation_stays_within_budget() -> None:
+    """Truncation notice should fit inside the configured summary character budget."""
+    older_messages = [
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                "printf 'hello world' > src/long_name.py\n```"
+            ),
+        ),
+        CliRuntimeMessage(
+            role="tool",
+            tool_name="execute_bash",
+            content=(
+                "Tool result: execute_bash\nCommand: printf 'hello world' > src/long_name.py\n"
+                "Exit code: 0\nDuration seconds: 0.250\nOutput:\n```text\n" + ("x" * 300) + "\n```"
+            ),
+        ),
+    ]
+    recent_messages = [
+        CliRuntimeMessage(
+            role="assistant",
+            content="Tool call: execute_bash\n```bash\npytest -q\n```",
+        )
+    ]
+
+    max_characters = 120
+    summary = _build_condensed_context_summary(
+        older_messages,
+        recent_messages,
+        max_characters=max_characters,
+    )
+
+    assert len(summary) <= max_characters
+    assert summary.endswith("characters]")
 
 
 def test_run_cli_runtime_loop_executes_git_helper_requests() -> None:
