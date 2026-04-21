@@ -409,6 +409,38 @@ def test_build_condensed_context_summary_truncation_stays_within_budget() -> Non
     assert summary.endswith("characters]")
 
 
+def test_build_condensed_context_summary_prefers_most_recent_file_hints() -> None:
+    """File hints should keep chronological order and show the most recent entries."""
+    older_messages = [
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                "touch f1 f2 f3 f4 f5 f6 f7 f8 f9 f10\n```"
+            ),
+        ),
+        CliRuntimeMessage(
+            role="tool",
+            tool_name="execute_bash",
+            content=(
+                "Tool result: execute_bash\nCommand: touch f1 f2 f3 f4 f5 f6 f7 f8 f9 f10\n"
+                "Exit code: 0\nDuration seconds: 0.250\nOutput:\n```text\nok\n```"
+            ),
+        ),
+    ]
+    recent_messages = [CliRuntimeMessage(role="assistant", content="continue")]
+
+    summary = _build_condensed_context_summary(
+        older_messages,
+        recent_messages,
+        max_characters=5000,
+    )
+
+    assert "- Files touched hints: `f3`, `f4`, `f5`, `f6`, `f7`, `f8`, `f9`, `f10`" in summary
+    assert "`f1`" not in summary
+
+
 def test_run_cli_runtime_loop_executes_git_helper_requests() -> None:
     """Git helper tool calls should be normalized into safe git shell commands."""
     adapter = _ScriptedAdapter(

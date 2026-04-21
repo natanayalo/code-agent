@@ -404,7 +404,7 @@ def _build_condensed_context_summary(
         errors.append(f"exit {exit_code} ({output_excerpt})")
 
     deduped_decisions = list(dict.fromkeys(decisions))
-    deduped_files = sorted(dict.fromkeys(files_touched))
+    deduped_files = list(dict.fromkeys(files_touched))
     deduped_errors = list(dict.fromkeys(errors))
 
     current_state = "no tool state available from condensed history"
@@ -431,7 +431,7 @@ def _build_condensed_context_summary(
             (
                 "- Files touched hints: "
                 + (
-                    ", ".join(f"`{path}`" for path in deduped_files[:8])
+                    ", ".join(f"`{path}`" for path in deduped_files[-8:])
                     if deduped_files
                     else "none"
                 )
