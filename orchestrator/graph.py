@@ -540,21 +540,38 @@ def _build_task_plan(state: OrchestratorState, complexity_reason: str) -> TaskPl
     task_text = state.normalized_task_text or state.task.task_text
     # TODO(T-108 follow-up): replace this static scaffold with dynamic task-specific
     # decomposition once planner heuristics (or a planner model call) are introduced.
+    step_one_title = "Inspect Relevant Code Paths"
+    step_one_outcome = "Identify the exact files, interfaces, and tests to touch."
+    step_two_title = "Implement the Smallest Safe Slice"
+    step_two_outcome = (
+        "Apply the minimal change set that satisfies the task without widening scope."
+    )
+
+    if complexity_reason == "architectural_task":
+        step_one_title = "Inspect Architectural Boundaries"
+        step_one_outcome = "Identify impacted modules, interfaces, and coupling constraints."
+    elif complexity_reason == "ambiguous_task":
+        step_one_title = "Investigate Root Cause and Scope"
+        step_one_outcome = "Narrow ambiguity into a concrete file-level implementation target."
+    elif complexity_reason == "multi_file_task":
+        step_two_title = "Sequence Multi-file Changes Safely"
+        step_two_outcome = (
+            "Apply coherent edits across files while preserving interface consistency."
+        )
+
     return TaskPlan(
         triggered=True,
         complexity_reason=complexity_reason,
         steps=[
             TaskPlanStep(
                 step_id="1",
-                title="Inspect Relevant Code Paths",
-                expected_outcome="Identify the exact files, interfaces, and tests to touch.",
+                title=step_one_title,
+                expected_outcome=step_one_outcome,
             ),
             TaskPlanStep(
                 step_id="2",
-                title="Implement the Smallest Safe Slice",
-                expected_outcome=(
-                    "Apply the minimal change set that satisfies the task without widening scope."
-                ),
+                title=step_two_title,
+                expected_outcome=step_two_outcome,
             ),
             TaskPlanStep(
                 step_id="3",

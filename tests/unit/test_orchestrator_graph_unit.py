@@ -138,6 +138,34 @@ def test_plan_task_generates_plan_for_complex_tasks():
     assert res["progress_updates"][-1] == "structured plan generated (architectural_task)"
 
 
+def test_plan_task_parameterizes_steps_for_ambiguous_tasks():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Investigate flaky behavior in worker runs"},
+            "task_kind": "ambiguous",
+        }
+    )
+
+    res = plan_task(state)
+
+    assert res["task_plan"]["complexity_reason"] == "ambiguous_task"
+    assert res["task_plan"]["steps"][0]["title"] == "Investigate Root Cause and Scope"
+
+
+def test_plan_task_parameterizes_multi_file_execution_step():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Implement change across files in orchestrator"},
+            "task_kind": "implementation",
+        }
+    )
+
+    res = plan_task(state)
+
+    assert res["task_plan"]["complexity_reason"] == "multi_file_task"
+    assert res["task_plan"]["steps"][1]["title"] == "Sequence Multi-file Changes Safely"
+
+
 def test_plan_task_complexity_marker_uses_word_boundaries():
     state = OrchestratorState.model_validate(
         {
