@@ -340,15 +340,12 @@ def _extract_prefixed_line(content: str, *, prefix: str) -> str | None:
 
 
 def _extract_output_excerpt(content: str) -> str | None:
-    """Extract the first non-empty output line from a tool observation."""
+    """Extract the last non-empty output line from a tool observation."""
     match = re.search(r"```text[ \t]*\n(?P<output>.*?)\n```", content, flags=re.DOTALL)
     if match is None:
         return None
-    for line in match.group("output").splitlines():
-        excerpt = line.strip()
-        if excerpt:
-            return excerpt
-    return None
+    lines = [line.strip() for line in match.group("output").splitlines() if line.strip()]
+    return lines[-1] if lines else None
 
 
 def _extract_file_hints_from_command(command: str) -> list[str]:

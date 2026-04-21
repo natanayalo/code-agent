@@ -564,6 +564,31 @@ def test_build_condensed_context_summary_parses_text_fence_with_trailing_tag_spa
     assert "exit 1 (F tests/test_flow.py::test_case)" in summary
 
 
+def test_build_condensed_context_summary_uses_last_non_empty_output_line() -> None:
+    """Error excerpt should prefer the final non-empty output line."""
+    older_messages = [
+        CliRuntimeMessage(
+            role="tool",
+            tool_name="execute_bash",
+            content=(
+                "Tool result: execute_bash\nCommand: pytest -q\n"
+                "Exit code: 1\nDuration seconds: 0.250\nOutput:\n```text\n"
+                "header line\n"
+                "\n"
+                "final failure detail\n"
+                "```\n"
+            ),
+        )
+    ]
+
+    summary = _build_condensed_context_summary(
+        older_messages,
+        max_characters=2000,
+    )
+
+    assert "exit 1 (final failure detail)" in summary
+
+
 def test_messages_for_adapter_turn_preserves_history_when_trimming_recent_tail() -> None:
     """Messages dropped from recent tail should be merged into summary, not lost."""
     messages = [
