@@ -166,6 +166,19 @@ def test_plan_task_parameterizes_multi_file_execution_step():
     assert res["task_plan"]["steps"][1]["title"] == "Sequence Multi-file Changes Safely"
 
 
+def test_plan_task_detects_multifile_compound_marker():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Apply multifile change across orchestrator modules"},
+            "task_kind": "implementation",
+        }
+    )
+
+    res = plan_task(state)
+
+    assert res["task_plan"]["complexity_reason"] == "multi_file_task"
+
+
 def test_plan_task_complexity_marker_uses_word_boundaries():
     state = OrchestratorState.model_validate(
         {

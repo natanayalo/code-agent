@@ -67,6 +67,7 @@ COMPLEX_TASK_MARKERS = (
     "multiple files",
     "multi-file",
     "multi file",
+    "multifile",
     "multi-module",
     "multi module",
     "several modules",
