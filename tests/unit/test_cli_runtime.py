@@ -21,6 +21,7 @@ from workers.cli_runtime import (
     CliRuntimeSettings,
     CliRuntimeStep,
     _coerce_non_negative_int,
+    _estimate_messages_characters,
     collect_changed_files,
     collect_changed_files_from_repo_path,
     format_bash_observation,
@@ -234,6 +235,128 @@ def test_run_cli_runtime_loop_completes_a_multi_turn_sequence() -> None:
     assert any(message.role == "tool" for message in execution.messages)
     assert "Tool call: execute_bash" in execution.messages[1].content
     assert "Exit code: 0" in execution.messages[2].content
+
+
+def test_run_cli_runtime_loop_skips_condensation_when_history_is_within_threshold() -> None:
+    """Short histories should be passed to the adapter unchanged."""
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")])
+    session = _FakeSession({})
+
+    run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=1,
+            worker_timeout_seconds=30,
+            context_condenser_threshold_characters=4096,
+            context_condenser_recent_messages=2,
+        ),
+    )
+
+    assert len(adapter.calls) == 1
+    assert [message.role for message in adapter.calls[0]] == ["system"]
+    assert "Condensed context summary" not in adapter.calls[0][0].content
+
+
+def test_run_cli_runtime_loop_condenses_older_messages_for_long_histories() -> None:
+    """Long transcripts should condense older turns while keeping recent raw detail."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="execute_bash",
+                tool_input="printf 'hello' > src/app.py",
+            ),
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="execute_bash",
+                tool_input="pytest -q",
+            ),
+            CliRuntimeStep(kind="final", final_output="completed"),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "printf 'hello' > src/app.py": _command_result(
+                "printf 'hello' > src/app.py",
+                output="created\n" + ("A" * 1500),
+            ),
+            "pytest -q": _command_result(
+                "pytest -q",
+                output="F tests/test_app.py::test_flow\n",
+                exit_code=1,
+            ),
+        }
+    )
+
+    run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=4,
+            worker_timeout_seconds=30,
+            context_condenser_threshold_characters=1200,
+            context_condenser_recent_messages=2,
+            context_condenser_summary_max_characters=420,
+            max_observation_characters=1600,
+        ),
+    )
+
+    assert len(adapter.calls) == 3
+    condensed_call = adapter.calls[2]
+    assert condensed_call[1].role == "assistant"
+    assert "Condensed context summary" in condensed_call[1].content
+    assert "Key decisions made" in condensed_call[1].content
+    assert "src/app.py" in condensed_call[1].content
+    assert any(
+        message.role == "tool" and "Command: pytest -q" in message.content
+        for message in condensed_call
+    )
+
+
+def test_run_cli_runtime_loop_keeps_condensed_prompt_within_threshold_when_possible() -> None:
+    """Condensed adapter messages should stay within the configured threshold."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="tool_call", tool_name="execute_bash", tool_input="touch src/new.py"
+            ),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="ls src"),
+            CliRuntimeStep(kind="final", final_output="done"),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "touch src/new.py": _command_result(
+                "touch src/new.py",
+                output=("x" * 1500),
+            ),
+            "ls src": _command_result(
+                "ls src",
+                output="new.py\n",
+            ),
+        }
+    )
+    threshold = 1200
+
+    run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=4,
+            worker_timeout_seconds=30,
+            context_condenser_threshold_characters=threshold,
+            context_condenser_recent_messages=2,
+            context_condenser_summary_max_characters=300,
+            max_observation_characters=1700,
+        ),
+    )
+
+    assert len(adapter.calls) == 3
+    assert _estimate_messages_characters(adapter.calls[2]) <= threshold
 
 
 def test_run_cli_runtime_loop_executes_git_helper_requests() -> None:

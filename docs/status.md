@@ -86,7 +86,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-109 Add context condenser for long-running agent loops. PR: (unpublished)
 
 ## Next
 
