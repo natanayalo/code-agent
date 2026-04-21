@@ -60,6 +60,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
         "ck_task_timeline_events_event_type": {
             "task_ingested",
             "task_classified",
+            "task_planned",
             "memory_loaded",
             "worker_selected",
             "approval_requested",

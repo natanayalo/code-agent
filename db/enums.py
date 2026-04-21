@@ -57,6 +57,7 @@ class TimelineEventType(StrEnum):
 
     TASK_INGESTED = "task_ingested"
     TASK_CLASSIFIED = "task_classified"
+    TASK_PLANNED = "task_planned"
     MEMORY_LOADED = "memory_loaded"
     WORKER_SELECTED = "worker_selected"
     APPROVAL_REQUESTED = "approval_requested"

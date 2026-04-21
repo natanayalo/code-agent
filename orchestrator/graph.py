@@ -578,7 +578,7 @@ def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
             ),
             **_timeline_event(
                 state,
-                TimelineEventType.TASK_CLASSIFIED,
+                TimelineEventType.TASK_PLANNED,
                 message="Planning skipped for straightforward task.",
                 payload={"planning": "skipped"},
             ),
@@ -594,7 +594,7 @@ def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
         ),
         **_timeline_event(
             state,
-            TimelineEventType.TASK_CLASSIFIED,
+            TimelineEventType.TASK_PLANNED,
             message="Structured plan generated for complex task.",
             payload={"planning": "generated", "complexity_reason": complexity_reason},
         ),

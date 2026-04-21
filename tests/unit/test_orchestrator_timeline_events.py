@@ -48,7 +48,7 @@ def test_plan_task_emits_event_when_generated():
     )
     res = plan_task(state)
     assert len(res["timeline_events"]) == 1
-    assert res["timeline_events"][0].event_type == TimelineEventType.TASK_CLASSIFIED
+    assert res["timeline_events"][0].event_type == TimelineEventType.TASK_PLANNED
     assert res["timeline_events"][0].payload["planning"] == "generated"
 
 
