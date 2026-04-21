@@ -138,6 +138,20 @@ def test_plan_task_generates_plan_for_complex_tasks():
     assert res["progress_updates"][-1] == "structured plan generated (architectural_task)"
 
 
+def test_plan_task_complexity_marker_uses_word_boundaries():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Rename the multi-file-uploader module"},
+            "task_kind": "implementation",
+        }
+    )
+
+    res = plan_task(state)
+
+    assert res["task_plan"] is None
+    assert res["progress_updates"][-1] == "planning skipped: task is straightforward"
+
+
 def test_resolve_orchestrator_timeout_seconds_prefers_explicit_override() -> None:
     state = OrchestratorState.model_validate(
         {

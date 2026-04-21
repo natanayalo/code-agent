@@ -527,7 +527,10 @@ def _task_complexity_reason(state: OrchestratorState) -> str | None:
     if task_kind == "ambiguous":
         return "ambiguous_task"
     task_text = (state.normalized_task_text or state.task.task_text).lower()
-    if any(marker in task_text for marker in COMPLEX_TASK_MARKERS):
+    if any(
+        re.search(rf"(?<![\w-]){re.escape(marker)}(?![\w-])", task_text)
+        for marker in COMPLEX_TASK_MARKERS
+    ):
         return "multi_file_task"
     return None
 
