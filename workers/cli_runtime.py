@@ -57,16 +57,21 @@ DEFAULT_CONTEXT_CONDENSER_RECENT_MESSAGES = 6
 DEFAULT_CONTEXT_CONDENSER_SUMMARY_MAX_CHARACTERS = 1500
 _FILE_ARGUMENT_COMMANDS = frozenset(
     {
+        "bash",
         "cat",
         "cp",
+        "grep",
         "head",
         "less",
         "ln",
         "ls",
         "more",
         "mv",
+        "python",
+        "python3",
         "rm",
         "sed",
+        "sh",
         "tail",
         "tee",
         "touch",
@@ -370,9 +375,15 @@ def _extract_file_hints_from_command(command: str) -> list[str]:
     return hints
 
 
+def _inline_code(value: str) -> str:
+    """Render inline code while safely handling content that contains backticks."""
+    max_tick_run = max((len(match.group(0)) for match in re.finditer(r"`+", value)), default=0)
+    fence = "`" * (max_tick_run + 1)
+    return f"{fence}{value}{fence}"
+
+
 def _build_condensed_context_summary(
     older_messages: Sequence[CliRuntimeMessage],
-    recent_messages: Sequence[CliRuntimeMessage],
     *,
     max_characters: int,
 ) -> str:
@@ -423,7 +434,7 @@ def _build_condensed_context_summary(
             (
                 "- Key decisions made: "
                 + (
-                    ", ".join(f"`{command}`" for command in deduped_decisions[-5:])
+                    ", ".join(_inline_code(command) for command in deduped_decisions[-5:])
                     if deduped_decisions
                     else "none"
                 )
@@ -431,7 +442,7 @@ def _build_condensed_context_summary(
             (
                 "- Files touched hints: "
                 + (
-                    ", ".join(f"`{path}`" for path in deduped_files[-8:])
+                    ", ".join(_inline_code(path) for path in deduped_files[-8:])
                     if deduped_files
                     else "none"
                 )
@@ -485,7 +496,6 @@ def _messages_for_adapter_turn(
         role="assistant",
         content=_build_condensed_context_summary(
             older_messages,
-            recent_messages,
             max_characters=settings.context_condenser_summary_max_characters,
         ),
     )
@@ -499,7 +509,15 @@ def _messages_for_adapter_turn(
     while (
         _estimate_messages_characters(condensed_messages) > threshold and len(recent_messages) > 1
     ):
+        older_messages = [*older_messages, recent_messages[0]]
         recent_messages = recent_messages[1:]
+        summary_message = CliRuntimeMessage(
+            role="assistant",
+            content=_build_condensed_context_summary(
+                older_messages,
+                max_characters=settings.context_condenser_summary_max_characters,
+            ),
+        )
         condensed_messages = []
         if system_message is not None:
             condensed_messages.append(system_message)

@@ -24,6 +24,7 @@ from workers.cli_runtime import (
     _coerce_non_negative_int,
     _estimate_messages_characters,
     _extract_file_hints_from_command,
+    _messages_for_adapter_turn,
     collect_changed_files,
     collect_changed_files_from_repo_path,
     format_bash_observation,
@@ -369,6 +370,8 @@ def test_extract_file_hints_includes_extensionless_root_file_arguments() -> None
     assert "VERSION" in _extract_file_hints_from_command("cat VERSION")
     assert "LICENSE" in _extract_file_hints_from_command("rm LICENSE")
     assert "install" not in _extract_file_hints_from_command("pip install pytest")
+    assert "LICENSE" in _extract_file_hints_from_command("grep TODO LICENSE")
+    assert "manage.py" in _extract_file_hints_from_command("python manage.py")
 
 
 def test_build_condensed_context_summary_truncation_stays_within_budget() -> None:
@@ -391,17 +394,9 @@ def test_build_condensed_context_summary_truncation_stays_within_budget() -> Non
             ),
         ),
     ]
-    recent_messages = [
-        CliRuntimeMessage(
-            role="assistant",
-            content="Tool call: execute_bash\n```bash\npytest -q\n```",
-        )
-    ]
-
     max_characters = 120
     summary = _build_condensed_context_summary(
         older_messages,
-        recent_messages,
         max_characters=max_characters,
     )
 
@@ -429,16 +424,89 @@ def test_build_condensed_context_summary_prefers_most_recent_file_hints() -> Non
             ),
         ),
     ]
-    recent_messages = [CliRuntimeMessage(role="assistant", content="continue")]
-
     summary = _build_condensed_context_summary(
         older_messages,
-        recent_messages,
         max_characters=5000,
     )
 
     assert "- Files touched hints: `f3`, `f4`, `f5`, `f6`, `f7`, `f8`, `f9`, `f10`" in summary
     assert "`f1`" not in summary
+
+
+def test_build_condensed_context_summary_escapes_backticks_in_inline_code() -> None:
+    """Commands containing backticks should remain valid inline markdown/code text."""
+    older_messages = [
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                "echo `date` > out.txt\n```"
+            ),
+        )
+    ]
+
+    summary = _build_condensed_context_summary(
+        older_messages,
+        max_characters=2000,
+    )
+
+    assert "``echo `date` > out.txt``" in summary
+
+
+def test_messages_for_adapter_turn_preserves_history_when_trimming_recent_tail() -> None:
+    """Messages dropped from recent tail should be merged into summary, not lost."""
+    messages = [
+        CliRuntimeMessage(role="system", content="System prompt"),
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                "touch very_old.txt\n```\n" + ("w" * 900)
+            ),
+        ),
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                "touch older.txt\n```\n" + ("x" * 900)
+            ),
+        ),
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                "touch moved_to_summary.txt\n```\n" + ("y" * 900)
+            ),
+        ),
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                "touch stays_recent.txt\n```\n" + ("z" * 900)
+            ),
+        ),
+    ]
+
+    condensed = _messages_for_adapter_turn(
+        messages,
+        settings=CliRuntimeSettings(
+            context_condenser_threshold_characters=1200,
+            context_condenser_recent_messages=3,
+            context_condenser_summary_max_characters=800,
+            max_iterations=2,
+            worker_timeout_seconds=30,
+        ),
+    )
+
+    assert condensed[1].role == "assistant"
+    assert "moved_to_summary.txt" in condensed[1].content
+    assert all("moved_to_summary.txt" not in message.content for message in condensed[2:])
+    assert any("touch stays_recent.txt" in message.content for message in condensed[2:])
 
 
 def test_run_cli_runtime_loop_executes_git_helper_requests() -> None:
