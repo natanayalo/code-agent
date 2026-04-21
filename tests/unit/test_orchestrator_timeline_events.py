@@ -10,6 +10,7 @@ from orchestrator.graph import (
     dispatch_job,
     ingest_task,
     load_memory,
+    plan_task,
     summarize_result,
     verify_result,
 )
@@ -36,6 +37,19 @@ def test_load_memory_emits_event():
     res = load_memory(state)
     assert len(res["timeline_events"]) == 1
     assert res["timeline_events"][0].event_type == TimelineEventType.MEMORY_LOADED
+
+
+def test_plan_task_emits_event_when_generated():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Refactor architecture across files"},
+            "task_kind": "architecture",
+        }
+    )
+    res = plan_task(state)
+    assert len(res["timeline_events"]) == 1
+    assert res["timeline_events"][0].event_type == TimelineEventType.TASK_CLASSIFIED
+    assert res["timeline_events"][0].payload["planning"] == "generated"
 
 
 def test_choose_worker_emits_event():

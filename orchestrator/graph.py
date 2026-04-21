@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
-from urllib.parse import quote
 
 from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -573,6 +573,12 @@ def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
             "progress_updates": _progress_update(
                 state, "planning skipped: task is straightforward"
             ),
+            **_timeline_event(
+                state,
+                TimelineEventType.TASK_CLASSIFIED,
+                message="Planning skipped for straightforward task.",
+                payload={"planning": "skipped"},
+            ),
         }
 
     task_plan = _build_task_plan(state, complexity_reason)
@@ -582,6 +588,12 @@ def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
         "progress_updates": _progress_update(
             state,
             f"structured plan generated ({complexity_reason})",
+        ),
+        **_timeline_event(
+            state,
+            TimelineEventType.TASK_CLASSIFIED,
+            message="Structured plan generated for complex task.",
+            payload={"planning": "generated", "complexity_reason": complexity_reason},
         ),
     }
 
@@ -1223,16 +1235,15 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
         result = state.result
 
     if state.task_plan is not None and state.task_plan.triggered:
-        plan_payload = quote(
-            json.dumps(state.task_plan.model_dump(mode="json"), separators=(",", ":"))
-        )
+        plan_json = json.dumps(state.task_plan.model_dump(mode="json"), separators=(",", ":"))
+        plan_payload = base64.b64encode(plan_json.encode("utf-8")).decode("utf-8")
         result = result.model_copy(
             update={
                 "artifacts": [
                     *result.artifacts,
                     ArtifactReference(
                         name="task_plan",
-                        uri=f"data:application/json,{plan_payload}",
+                        uri=f"data:application/json;base64,{plan_payload}",
                         artifact_type="result_summary",
                     ),
                 ]

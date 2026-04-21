@@ -510,7 +510,7 @@ def test_summarize_result_attaches_task_plan_artifact_when_present():
     artifact = res["result"]["artifacts"][0]
     assert artifact["name"] == "task_plan"
     assert artifact["artifact_type"] == "result_summary"
-    assert artifact["uri"].startswith("data:application/json,")
+    assert artifact["uri"].startswith("data:application/json;base64,")
 
 
 def test_create_in_memory_checkpointer():
