@@ -59,6 +59,12 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run frozen-suite cases concurrently while preserving deterministic report ordering.",
     )
+    parser.add_argument(
+        "--max-parallel-cases",
+        type=int,
+        default=None,
+        help=("Optional concurrency cap when --parallel is enabled. " "Defaults to no cap."),
+    )
     return parser
 
 
@@ -82,6 +88,7 @@ async def _async_main() -> int:
         cases=suite.cases,
         runner=runner,
         parallel=args.parallel,
+        max_parallel_cases=args.max_parallel_cases,
     )
     write_report(report, args.output)
     print(

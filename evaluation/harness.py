@@ -185,6 +185,7 @@ async def evaluate_suite(
     cases: tuple[FrozenTaskCase, ...],
     runner: EvaluationRunner,
     parallel: bool = False,
+    max_parallel_cases: int | None = None,
 ) -> EvaluationReport:
     """Execute and score all frozen cases through the supplied runner."""
 
@@ -196,7 +197,20 @@ async def evaluate_suite(
         return _score_case(case, outcome)
 
     if parallel:
-        scored_results = list(await asyncio.gather(*(_execute_case(case) for case in cases)))
+        if max_parallel_cases is not None:
+            if max_parallel_cases < 1:
+                raise ValueError("max_parallel_cases must be at least 1 when provided")
+            semaphore = asyncio.Semaphore(max_parallel_cases)
+
+            async def _execute_case_with_limit(case: FrozenTaskCase) -> CaseRunResult:
+                async with semaphore:
+                    return await _execute_case(case)
+
+            scored_results = await asyncio.gather(
+                *(_execute_case_with_limit(case) for case in cases)
+            )
+        else:
+            scored_results = await asyncio.gather(*(_execute_case(case) for case in cases))
     else:
         scored_results: list[CaseRunResult] = []
         for case in cases:

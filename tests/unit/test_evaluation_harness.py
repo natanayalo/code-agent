@@ -196,6 +196,70 @@ def test_evaluate_suite_parallel_mode_normalizes_exceptions_deterministically() 
     assert report.results[1].outcome.status == "success"
 
 
+def test_evaluate_suite_parallel_mode_respects_concurrency_limit() -> None:
+    class ConcurrencyTrackingRunner:
+        def __init__(self) -> None:
+            self._active = 0
+            self.max_active = 0
+            self._lock = asyncio.Lock()
+
+        async def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
+            async with self._lock:
+                self._active += 1
+                if self._active > self.max_active:
+                    self.max_active = self._active
+            await asyncio.sleep(0.01)
+            async with self._lock:
+                self._active -= 1
+            return WorkerOutcome(status="success", summary=f"ok {case.case_id}")
+
+    runner = ConcurrencyTrackingRunner()
+    cases = tuple(
+        FrozenTaskCase(
+            case_id=f"case-{index}",
+            repo_fixture="fixtures/empty",
+            task_text="Do a thing",
+            expectation=TaskExpectation(require_success=True),
+        )
+        for index in range(5)
+    )
+
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="parallel-limit",
+            cases=cases,
+            runner=runner,
+            parallel=True,
+            max_parallel_cases=2,
+        )
+    )
+
+    assert report.passed_cases == 5
+    assert runner.max_active == 2
+
+
+def test_evaluate_suite_rejects_non_positive_parallel_limit() -> None:
+    case = FrozenTaskCase(
+        case_id="one",
+        repo_fixture="fixtures/empty",
+        task_text="Do a thing",
+        expectation=TaskExpectation(require_success=True),
+    )
+
+    with pytest.raises(ValueError, match="max_parallel_cases must be at least 1"):
+        asyncio.run(
+            evaluate_suite(
+                suite_name="bad-limit",
+                cases=(case,),
+                runner=ReplayRunner(
+                    outcomes_by_case_id={"one": WorkerOutcome(status="success", summary="ok")}
+                ),
+                parallel=True,
+                max_parallel_cases=0,
+            )
+        )
+
+
 def test_missing_replay_outcome_is_scored_as_failure() -> None:
     case = FrozenTaskCase(
         case_id="missing-case",
