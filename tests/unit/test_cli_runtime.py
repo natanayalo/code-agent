@@ -376,11 +376,14 @@ def test_extract_file_hints_includes_extensionless_root_file_arguments() -> None
 
 def test_extract_file_hints_handles_compound_shell_commands() -> None:
     """Heuristics should reset command context across shell separators."""
-    hints = _extract_file_hints_from_command("cat file1 && ls file2 | grep needle file3")
+    hints = _extract_file_hints_from_command(
+        "cat file1 && ls file2 | grep needle file3 & cat file4"
+    )
 
     assert "file1" in hints
     assert "file2" in hints
     assert "file3" in hints
+    assert "file4" in hints
     assert "ls" not in hints
     assert "grep" not in hints
 

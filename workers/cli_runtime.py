@@ -55,6 +55,9 @@ DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS = 10
 DEFAULT_CONTEXT_CONDENSER_THRESHOLD_CHARACTERS = 12000
 DEFAULT_CONTEXT_CONDENSER_RECENT_MESSAGES = 6
 DEFAULT_CONTEXT_CONDENSER_SUMMARY_MAX_CHARACTERS = 1500
+DEFAULT_CONDENSED_SUMMARY_MAX_DECISIONS = 5
+DEFAULT_CONDENSED_SUMMARY_MAX_FILE_HINTS = 8
+DEFAULT_CONDENSED_SUMMARY_MAX_ERRORS = 3
 _FILE_ARGUMENT_COMMANDS = frozenset(
     {
         "bash",
@@ -360,7 +363,7 @@ def _extract_file_hints_from_command(command: str) -> list[str]:
         candidate = token.strip("\"'")
         if not candidate:
             continue
-        if candidate in {"&&", "||", ";", "|"}:
+        if candidate in {"&&", "||", ";", "|", "&"}:
             primary_command = ""
             continue
         if not primary_command:
@@ -442,7 +445,10 @@ def _build_condensed_context_summary(
             (
                 "- Key decisions made: "
                 + (
-                    ", ".join(_inline_code(command) for command in deduped_decisions[-5:])
+                    ", ".join(
+                        _inline_code(command)
+                        for command in deduped_decisions[-DEFAULT_CONDENSED_SUMMARY_MAX_DECISIONS:]
+                    )
                     if deduped_decisions
                     else "none"
                 )
@@ -450,14 +456,21 @@ def _build_condensed_context_summary(
             (
                 "- Files touched hints: "
                 + (
-                    ", ".join(_inline_code(path) for path in deduped_files[-8:])
+                    ", ".join(
+                        _inline_code(path)
+                        for path in deduped_files[-DEFAULT_CONDENSED_SUMMARY_MAX_FILE_HINTS:]
+                    )
                     if deduped_files
                     else "none"
                 )
             ),
             (
                 "- Errors encountered: "
-                + (", ".join(deduped_errors[-3:]) if deduped_errors else "none")
+                + (
+                    ", ".join(deduped_errors[-DEFAULT_CONDENSED_SUMMARY_MAX_ERRORS:])
+                    if deduped_errors
+                    else "none"
+                )
             ),
             f"- Current working state: {current_state}",
             "Recent raw messages follow unchanged.",
