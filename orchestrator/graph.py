@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
@@ -1257,7 +1256,7 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
         result = state.result
 
     if state.task_plan is not None and state.task_plan.triggered:
-        plan_json = json.dumps(state.task_plan.model_dump(mode="json"), separators=(",", ":"))
+        plan_json = state.task_plan.model_dump_json()
         plan_payload = base64.b64encode(plan_json.encode("utf-8")).decode("utf-8")
         result = result.model_copy(
             update={
