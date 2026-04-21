@@ -425,7 +425,9 @@ def _build_condensed_context_summary(
         observed_command = _extract_prefixed_line(message.content, prefix="Command: ")
         raw_exit_code = _extract_prefixed_line(message.content, prefix="Exit code: ")
         if observed_command and raw_exit_code:
-            current_state = f"last command `{observed_command}` exited with code {raw_exit_code}"
+            current_state = (
+                f"last command {_inline_code(observed_command)} exited with code {raw_exit_code}"
+            )
             break
 
     summary = "\n".join(
@@ -525,8 +527,8 @@ def _messages_for_adapter_turn(
         condensed_messages.extend(recent_messages)
 
     if _estimate_messages_characters(condensed_messages) > threshold:
-        compact_summary, _ = _truncate_text(
-            summary_message.content,
+        compact_summary = _build_condensed_context_summary(
+            older_messages,
             max_characters=max(settings.context_condenser_summary_max_characters // 2, 256),
         )
         condensed_messages = []

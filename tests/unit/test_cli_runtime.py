@@ -454,6 +454,27 @@ def test_build_condensed_context_summary_escapes_backticks_in_inline_code() -> N
     assert "``echo `date` > out.txt``" in summary
 
 
+def test_build_condensed_context_summary_escapes_backticks_in_current_state() -> None:
+    """Current-state command formatting should remain valid when commands contain backticks."""
+    older_messages = [
+        CliRuntimeMessage(
+            role="tool",
+            tool_name="execute_bash",
+            content=(
+                "Tool result: execute_bash\nCommand: echo `date` > out.txt\n"
+                "Exit code: 0\nDuration seconds: 0.250\nOutput:\n```text\nok\n```"
+            ),
+        )
+    ]
+
+    summary = _build_condensed_context_summary(
+        older_messages,
+        max_characters=2000,
+    )
+
+    assert "last command ``echo `date` > out.txt`` exited with code 0" in summary
+
+
 def test_messages_for_adapter_turn_preserves_history_when_trimming_recent_tail() -> None:
     """Messages dropped from recent tail should be merged into summary, not lost."""
     messages = [
@@ -507,6 +528,64 @@ def test_messages_for_adapter_turn_preserves_history_when_trimming_recent_tail()
     assert "moved_to_summary.txt" in condensed[1].content
     assert all("moved_to_summary.txt" not in message.content for message in condensed[2:])
     assert any("touch stays_recent.txt" in message.content for message in condensed[2:])
+
+
+def test_messages_for_adapter_turn_rebuilds_compact_summary_with_truncation_notice() -> None:
+    """Final compact summary should be rebuilt and retain structured truncation metadata."""
+    long_name_1 = "very_old_" + ("a" * 220) + ".txt"
+    long_name_2 = "older_" + ("b" * 220) + ".txt"
+    long_name_3 = "keep_recent_1_" + ("c" * 220) + ".txt"
+    long_name_4 = "keep_recent_2_" + ("d" * 220) + ".txt"
+    messages = [
+        CliRuntimeMessage(role="system", content="System prompt\n" + ("s" * 500)),
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                f"touch {long_name_1}\n```\n" + ("w" * 900)
+            ),
+        ),
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                f"touch {long_name_2}\n```\n" + ("x" * 900)
+            ),
+        ),
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                f"touch {long_name_3}\n```\n" + ("y" * 600)
+            ),
+        ),
+        CliRuntimeMessage(
+            role="assistant",
+            content=(
+                "Tool call: execute_bash\nRequired permission: workspace_write\n"
+                "Default timeout seconds: 30\nExpected artifacts: stdout\n```bash\n"
+                f"touch {long_name_4}\n```\n" + ("z" * 600)
+            ),
+        ),
+    ]
+
+    condensed = _messages_for_adapter_turn(
+        messages,
+        settings=CliRuntimeSettings(
+            context_condenser_threshold_characters=1024,
+            context_condenser_recent_messages=2,
+            context_condenser_summary_max_characters=800,
+            max_iterations=2,
+            worker_timeout_seconds=30,
+        ),
+    )
+
+    assert condensed[1].role == "assistant"
+    assert "Condensed context summary" in condensed[1].content
+    assert condensed[1].content.endswith("characters]")
 
 
 def test_run_cli_runtime_loop_executes_git_helper_requests() -> None:
