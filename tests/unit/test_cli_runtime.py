@@ -367,16 +367,20 @@ def test_run_cli_runtime_loop_keeps_condensed_prompt_within_threshold_when_possi
 
 def test_extract_file_hints_includes_extensionless_root_file_arguments() -> None:
     """Heuristics should include common extensionless root-path file arguments."""
+    assert "main.py" in _extract_file_hints_from_command("awk '{print $1}' main.py")
     assert "VERSION" in _extract_file_hints_from_command("cat VERSION")
     assert "LICENSE" in _extract_file_hints_from_command("rm LICENSE")
     assert "install" not in _extract_file_hints_from_command("pip install pytest")
     assert "LICENSE" in _extract_file_hints_from_command("grep TODO LICENSE")
+    assert "TODO" not in _extract_file_hints_from_command("grep TODO LICENSE")
     assert "manage.py" in _extract_file_hints_from_command("python manage.py")
     assert "build" in _extract_file_hints_from_command("mkdir build")
     assert "build" in _extract_file_hints_from_command("rmdir build")
     assert "LICENSE" in _extract_file_hints_from_command("chmod 644 LICENSE")
     assert "root" not in _extract_file_hints_from_command("chown root LICENSE")
     assert "LICENSE" in _extract_file_hints_from_command("chown root LICENSE")
+    assert "s/foo/bar/" not in _extract_file_hints_from_command("sed s/foo/bar/ LICENSE")
+    assert "LICENSE" in _extract_file_hints_from_command("sed s/foo/bar/ LICENSE")
     assert "LICENSE" in _extract_file_hints_from_command("git add LICENSE")
     assert "status" not in _extract_file_hints_from_command("git status")
     assert "main" not in _extract_file_hints_from_command("git checkout main")
@@ -385,15 +389,17 @@ def test_extract_file_hints_includes_extensionless_root_file_arguments() -> None
 def test_extract_file_hints_handles_compound_shell_commands() -> None:
     """Heuristics should reset command context across shell separators."""
     hints = _extract_file_hints_from_command(
-        "cat file1 && ls file2 | grep needle file3 & cat file4"
+        "cat file1 && ls file2 | grep needle file3 |& cat file4 & cat file5"
     )
 
     assert "file1" in hints
     assert "file2" in hints
     assert "file3" in hints
     assert "file4" in hints
+    assert "file5" in hints
     assert "ls" not in hints
     assert "grep" not in hints
+    assert "needle" not in hints
 
 
 def test_extract_file_hints_skips_redirection_tokens() -> None:

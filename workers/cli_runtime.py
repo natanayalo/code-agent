@@ -60,6 +60,7 @@ DEFAULT_CONDENSED_SUMMARY_MAX_FILE_HINTS = 8
 DEFAULT_CONDENSED_SUMMARY_MAX_ERRORS = 3
 _FILE_ARGUMENT_COMMANDS = frozenset(
     {
+        "awk",
         "bash",
         "cat",
         "chmod",
@@ -86,7 +87,7 @@ _FILE_ARGUMENT_COMMANDS = frozenset(
         "wc",
     }
 )
-_COMMANDS_WITH_LEADING_NON_PATH_ARGUMENT = frozenset({"chmod", "chown"})
+_COMMANDS_WITH_LEADING_NON_PATH_ARGUMENT = frozenset({"awk", "chmod", "chown", "grep", "sed"})
 _GIT_FILE_ARGUMENT_SUBCOMMANDS = frozenset({"add", "mv", "restore", "rm"})
 
 
@@ -369,7 +370,7 @@ def _extract_file_hints_from_command(command: str) -> list[str]:
         candidate = token.strip("\"'")
         if not candidate:
             continue
-        if candidate in {"&&", "||", ";", "|", "&"}:
+        if candidate in {"&&", "||", ";", "|", "|&", "&"}:
             primary_command = ""
             command_argument_index = 0
             git_subcommand = None
@@ -400,6 +401,12 @@ def _extract_file_hints_from_command(command: str) -> list[str]:
             git_subcommand = candidate
             command_argument_index += 1
             continue
+        if (
+            primary_command in _COMMANDS_WITH_LEADING_NON_PATH_ARGUMENT
+            and command_argument_index == 0
+        ):
+            command_argument_index += 1
+            continue
         if "/" in candidate or "." in Path(candidate).name:
             hints.append(candidate)
             command_argument_index += 1
@@ -409,12 +416,6 @@ def _extract_file_hints_from_command(command: str) -> list[str]:
             and "=" not in candidate
             and candidate != primary_command
         ):
-            if (
-                primary_command in _COMMANDS_WITH_LEADING_NON_PATH_ARGUMENT
-                and command_argument_index == 0
-            ):
-                command_argument_index += 1
-                continue
             if primary_command == "git" and git_subcommand not in _GIT_FILE_ARGUMENT_SUBCOMMANDS:
                 command_argument_index += 1
                 continue
