@@ -56,7 +56,7 @@ def _truncate_detail(text: str, *, max_characters: int = _DETAIL_PREVIEW_CHARACT
         return "<empty>"
     if len(stripped) <= max_characters:
         return stripped
-    return f"[truncated]...{stripped[-max_characters:].lstrip()}"
+    return f"{stripped[:max_characters]}...[truncated]"
 
 
 def _message_heading(message: CliRuntimeMessage, *, index: int) -> str:

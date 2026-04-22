@@ -747,13 +747,8 @@ def _compute_route_decision(
             )
 
         if escalation_reason is not None:
-            alternates: tuple[WorkerType, ...]
-            if prior_worker == "codex":
-                alternates = ("gemini", "openrouter")
-            elif prior_worker == "gemini":
-                alternates = ("openrouter", "codex")
-            else:
-                alternates = ("gemini", "codex")
+            all_workers: tuple[WorkerType, ...] = ("gemini", "openrouter", "codex")
+            alternates = tuple(worker for worker in all_workers if worker != prior_worker)
 
             for alternate in alternates:
                 if alternate not in available_workers:
