@@ -143,13 +143,14 @@ def _unwrap_markdown_json_fence(text: str) -> str:
     stripped = text.strip()
     if not stripped:
         return stripped
-    fenced_match = re.search(
+    fenced_matches = re.findall(
         r"```(?:json)?\s*(.*?)```",
         stripped,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    if fenced_match is not None:
-        return fenced_match.group(1).strip()
+    if fenced_matches:
+        # Prefer the final fenced block since models may emit examples first.
+        return fenced_matches[-1].strip()
     return stripped
 
 
@@ -239,10 +240,13 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         except Exception as exc:  # pragma: no cover - exercised via unit tests with stubs
             raise RuntimeError(f"OpenRouter adapter request failed: {exc}") from exc
 
-        try:
-            first_choice = response.choices[0]
-        except Exception as exc:
-            raise RuntimeError("OpenRouter adapter returned no choices.") from exc
+        choices = getattr(response, "choices", None)
+        if not choices:
+            raise RuntimeError("OpenRouter adapter returned no choices.")
+
+        first_choice = choices[0]
+        if getattr(first_choice, "finish_reason", None) == "length":
+            raise RuntimeError("OpenRouter response truncated due to token limit.")
 
         raw_json = _message_content_to_text(getattr(first_choice.message, "content", "")).strip()
         raw_json = _unwrap_markdown_json_fence(raw_json)

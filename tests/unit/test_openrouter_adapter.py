@@ -188,6 +188,86 @@ def test_openrouter_adapter_next_step_accepts_preamble_before_fenced_json(
     assert step.final_output == "done"
 
 
+def test_openrouter_adapter_next_step_prefers_last_fenced_json_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When multiple fenced blocks exist, adapter should parse the final one."""
+
+    class _MultipleFencedResponseOpenAI(_FakeOpenAI):
+        def _create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=(
+                                'Example:\n```json\n{"kind":"final","final_output":"wrong",'
+                                '"tool_name":null,"tool_input":null}\n```\n'
+                                'Actual:\n```json\n{"kind":"final","final_output":"done",'
+                                '"tool_name":null,"tool_input":null}\n```'
+                            )
+                        )
+                    )
+                ]
+            )
+
+    def _fake_openai(**kwargs):
+        return _MultipleFencedResponseOpenAI(**kwargs)
+
+    monkeypatch.setattr("workers.openrouter_adapter.OpenAI", _fake_openai)
+    adapter = OpenRouterCliRuntimeAdapter(api_key="test-key")
+    step = adapter.next_step([CliRuntimeMessage(role="system", content="Proceed")])
+    assert step.kind == "final"
+    assert step.final_output == "done"
+
+
+def test_openrouter_adapter_next_step_rejects_missing_choices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adapter should fail clearly when response has no choices."""
+
+    class _NoChoicesOpenAI(_FakeOpenAI):
+        def _create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(choices=[])
+
+    def _fake_openai(**kwargs):
+        return _NoChoicesOpenAI(**kwargs)
+
+    monkeypatch.setattr("workers.openrouter_adapter.OpenAI", _fake_openai)
+    adapter = OpenRouterCliRuntimeAdapter(api_key="test-key")
+    with pytest.raises(RuntimeError, match="no choices"):
+        adapter.next_step([CliRuntimeMessage(role="system", content="Proceed")])
+
+
+def test_openrouter_adapter_next_step_rejects_truncated_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adapter should surface token-truncation before JSON validation."""
+
+    class _TruncatedResponseOpenAI(_FakeOpenAI):
+        def _create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        finish_reason="length",
+                        message=SimpleNamespace(
+                            content='{"kind":"final","tool_name":null,"tool_input":null'
+                        ),
+                    )
+                ]
+            )
+
+    def _fake_openai(**kwargs):
+        return _TruncatedResponseOpenAI(**kwargs)
+
+    monkeypatch.setattr("workers.openrouter_adapter.OpenAI", _fake_openai)
+    adapter = OpenRouterCliRuntimeAdapter(api_key="test-key")
+    with pytest.raises(RuntimeError, match="truncated due to token limit"):
+        adapter.next_step([CliRuntimeMessage(role="system", content="Proceed")])
+
+
 def test_message_content_to_text_joins_text_blocks() -> None:
     """Adapter content normalization should join text blocks from list content."""
     content = [
