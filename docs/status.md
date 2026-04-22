@@ -90,7 +90,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-112 Add context window preflight guard (local branch: `task/t-112-context-window-preflight`, unpublished)
 
 ## Next
 

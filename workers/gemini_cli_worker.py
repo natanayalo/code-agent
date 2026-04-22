@@ -124,6 +124,8 @@ def _next_action_hint(execution: CliRuntimeExecutionResult) -> str:
         return "request_higher_permission"
     if execution.stop_reason in {"max_iterations", "worker_timeout", "budget_exceeded"}:
         return "increase_budget_or_reduce_scope"
+    if execution.stop_reason == "context_window":
+        return "reduce_context_or_scope"
     if execution.stop_reason == "adapter_error":
         return "inspect_worker_configuration"
     return "inspect_workspace_artifacts"
@@ -385,6 +387,7 @@ class GeminiCliWorker(Worker):
                 granted_permission=granted_permission,
                 working_directory=workspace.repo_path,
                 cancel_token=cancel_token,
+                model_name=getattr(self.runtime_adapter, "model", None),
             )
 
             files_changed: list[str] = []
@@ -485,6 +488,7 @@ class GeminiCliWorker(Worker):
                         granted_permission=granted_permission,
                         working_directory=workspace.repo_path,
                         cancel_token=cancel_token,
+                        model_name=getattr(self.runtime_adapter, "model", None),
                     )
                     merge_budget_ledgers(execution.budget_ledger, follow_up_execution.budget_ledger)
                     execution.commands_run.extend(follow_up_execution.commands_run)

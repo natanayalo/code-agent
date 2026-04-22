@@ -85,6 +85,8 @@ def classify_failure_kind(
         return "timeout"
     if stop_reason == "budget_exceeded":
         return "budget_exceeded"
+    if stop_reason == "context_window":
+        return "context_window"
     if stop_reason == "shell_error":
         return "sandbox_infra"
 

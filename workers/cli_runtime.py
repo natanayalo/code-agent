@@ -55,9 +55,15 @@ DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS = 10
 DEFAULT_CONTEXT_CONDENSER_THRESHOLD_CHARACTERS = 12000
 DEFAULT_CONTEXT_CONDENSER_RECENT_MESSAGES = 6
 DEFAULT_CONTEXT_CONDENSER_SUMMARY_MAX_CHARACTERS = 1500
+DEFAULT_CONTEXT_WINDOW_WARNING_RATIO = 0.8
+DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN = 4
 DEFAULT_CONDENSED_SUMMARY_MAX_DECISIONS = 5
 DEFAULT_CONDENSED_SUMMARY_MAX_FILE_HINTS = 8
 DEFAULT_CONDENSED_SUMMARY_MAX_ERRORS = 3
+MODEL_CONTEXT_WINDOW_TOKENS: dict[str, int] = {
+    "gpt-5.4": 272000,
+    "gemini-2.5-pro": 1048576,
+}
 _FILE_ARGUMENT_COMMANDS = frozenset(
     {
         "awk",
@@ -178,6 +184,10 @@ class CliRuntimeSettings(CliRuntimeModel):
         default=DEFAULT_CONTEXT_CONDENSER_SUMMARY_MAX_CHARACTERS,
         ge=256,
     )
+    context_window_limit_tokens: int | None = Field(
+        default=None,
+        ge=1,
+    )
 
 
 class CliRuntimeBudgetLedger(CliRuntimeModel):
@@ -207,6 +217,7 @@ class CliRuntimeExecutionResult(CliRuntimeModel):
         "max_iterations",
         "worker_timeout",
         "budget_exceeded",
+        "context_window",
         "permission_required",
         "shell_error",
         "adapter_error",
@@ -308,6 +319,12 @@ def settings_from_budget(
             context_condenser_summary_max_characters
         )
 
+    context_window_limit_tokens = coerce_positive_int_like(
+        budget.get("context_window_limit_tokens")
+    )
+    if context_window_limit_tokens is not None:
+        resolved["context_window_limit_tokens"] = context_window_limit_tokens
+
     return CliRuntimeSettings.model_validate(resolved)
 
 
@@ -325,6 +342,114 @@ def _estimate_messages_characters(messages: Sequence[CliRuntimeMessage]) -> int:
         + len(message.content)
         + (len(message.tool_name) if message.tool_name is not None else 0)
         for message in messages
+    )
+
+
+def _estimate_messages_tokens(
+    messages: Sequence[CliRuntimeMessage],
+    *,
+    characters_per_token: int = DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN,
+) -> int:
+    """Approximate transcript token count from character length."""
+    if not messages:
+        return 0
+    total_characters = _estimate_messages_characters(messages)
+    return max((total_characters + characters_per_token - 1) // characters_per_token, 1)
+
+
+def _resolve_context_window_limit_tokens(
+    *,
+    settings: CliRuntimeSettings,
+    model_name: str | None,
+) -> int | None:
+    """Resolve model context limit from explicit settings or the model registry."""
+    if settings.context_window_limit_tokens is not None:
+        return settings.context_window_limit_tokens
+    if model_name is None:
+        return None
+    normalized_model = model_name.strip().lower()
+    if not normalized_model:
+        return None
+    return MODEL_CONTEXT_WINDOW_TOKENS.get(normalized_model)
+
+
+def _log_context_window_warning(
+    *,
+    iteration: int,
+    estimated_tokens: int,
+    limit_tokens: int,
+    model_name: str | None,
+) -> None:
+    """Emit an early warning when prompt usage approaches the context limit."""
+    logger.warning(
+        "CLI runtime prompt size crossed context-window warning threshold",
+        extra={
+            "iteration": iteration,
+            "estimated_prompt_tokens": estimated_tokens,
+            "context_window_limit_tokens": limit_tokens,
+            "model_name": model_name,
+        },
+    )
+
+
+def _preflight_messages_for_adapter(
+    messages: list[CliRuntimeMessage],
+    *,
+    settings: CliRuntimeSettings,
+    model_name: str | None,
+    iteration: int,
+) -> tuple[list[CliRuntimeMessage], str | None]:
+    """Prepare messages for an adapter turn with model-context preflight checks."""
+    messages_for_adapter = _messages_for_adapter_turn(messages, settings=settings)
+    limit_tokens = _resolve_context_window_limit_tokens(settings=settings, model_name=model_name)
+    if limit_tokens is None:
+        return messages_for_adapter, None
+
+    warning_threshold_tokens = max(int(limit_tokens * DEFAULT_CONTEXT_WINDOW_WARNING_RATIO), 1)
+    estimated_tokens = _estimate_messages_tokens(messages_for_adapter)
+    if estimated_tokens >= warning_threshold_tokens:
+        _log_context_window_warning(
+            iteration=iteration,
+            estimated_tokens=estimated_tokens,
+            limit_tokens=limit_tokens,
+            model_name=model_name,
+        )
+    if estimated_tokens <= limit_tokens:
+        return messages_for_adapter, None
+
+    preflight_threshold_characters = max(
+        limit_tokens * DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN,
+        1024,
+    )
+    condensed_settings = settings.model_copy(
+        update={
+            "context_condenser_threshold_characters": preflight_threshold_characters,
+            "context_condenser_summary_max_characters": min(
+                settings.context_condenser_summary_max_characters,
+                max(preflight_threshold_characters // 4, 256),
+            ),
+        }
+    )
+    messages_for_adapter = _messages_for_adapter_turn(messages, settings=condensed_settings)
+    estimated_tokens = _estimate_messages_tokens(messages_for_adapter)
+    if estimated_tokens >= warning_threshold_tokens:
+        _log_context_window_warning(
+            iteration=iteration,
+            estimated_tokens=estimated_tokens,
+            limit_tokens=limit_tokens,
+            model_name=model_name,
+        )
+    if estimated_tokens <= limit_tokens:
+        return messages_for_adapter, None
+
+    model_hint = model_name or "unknown-model"
+    return (
+        messages_for_adapter,
+        (
+            "CLI runtime prompt exceeded the model context window before dispatch "
+            f"(estimated {estimated_tokens} tokens; limit {limit_tokens} tokens for "
+            f"{model_hint})."
+        ),
     )
 
 
@@ -770,6 +895,7 @@ def run_cli_runtime_loop(
     clock: Callable[[], float] = perf_counter,
     working_directory: Path | None = None,
     cancel_token: Callable[[], bool] | None = None,
+    model_name: str | None = None,
 ) -> CliRuntimeExecutionResult:
     """Drive the provider adapter through a bounded multi-turn shell loop."""
     started_at = clock()
@@ -812,7 +938,27 @@ def run_cli_runtime_loop(
             )
 
         try:
-            messages_for_adapter = _messages_for_adapter_turn(messages, settings=settings)
+            messages_for_adapter, preflight_error = _preflight_messages_for_adapter(
+                messages,
+                settings=settings,
+                model_name=model_name,
+                iteration=iteration,
+            )
+            if preflight_error is not None:
+                _update_budget_ledger(
+                    budget_ledger,
+                    started_at=started_at,
+                    clock=clock,
+                    iterations_used=iteration,
+                )
+                return CliRuntimeExecutionResult(
+                    status="failure",
+                    summary=preflight_error,
+                    stop_reason="context_window",
+                    commands_run=commands_run,
+                    messages=messages,
+                    budget_ledger=budget_ledger,
+                )
             step = adapter.next_step(
                 tuple(messages_for_adapter),
                 working_directory=working_directory,

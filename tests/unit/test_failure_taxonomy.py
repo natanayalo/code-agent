@@ -31,6 +31,15 @@ def test_classify_failure_kind_timeout() -> None:
     assert failure_kind == "timeout"
 
 
+def test_classify_failure_kind_context_window_stop_reason() -> None:
+    failure_kind = classify_failure_kind(
+        status="failure",
+        stop_reason="context_window",
+        summary="prompt exceeded model context window",
+    )
+    assert failure_kind == "context_window"
+
+
 def test_classify_failure_kind_auth_error() -> None:
     failure_kind = classify_failure_kind(
         status="error",
