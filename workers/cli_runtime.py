@@ -62,17 +62,22 @@ _FILE_ARGUMENT_COMMANDS = frozenset(
     {
         "bash",
         "cat",
+        "chmod",
+        "chown",
         "cp",
+        "git",
         "grep",
         "head",
         "less",
         "ln",
         "ls",
+        "mkdir",
         "more",
         "mv",
         "python",
         "python3",
         "rm",
+        "rmdir",
         "sed",
         "sh",
         "tail",
@@ -81,6 +86,8 @@ _FILE_ARGUMENT_COMMANDS = frozenset(
         "wc",
     }
 )
+_COMMANDS_WITH_LEADING_NON_PATH_ARGUMENT = frozenset({"chmod", "chown"})
+_GIT_FILE_ARGUMENT_SUBCOMMANDS = frozenset({"add", "mv", "restore", "rm"})
 
 
 def _git_status_unavailable(output: str) -> bool:
@@ -356,15 +363,21 @@ def _extract_file_hints_from_command(command: str) -> list[str]:
     except ValueError:
         tokens = command.split()
     primary_command = ""
+    command_argument_index = 0
+    git_subcommand: str | None = None
     for token in tokens:
         candidate = token.strip("\"'")
         if not candidate:
             continue
         if candidate in {"&&", "||", ";", "|", "&"}:
             primary_command = ""
+            command_argument_index = 0
+            git_subcommand = None
             continue
         if not primary_command:
             primary_command = candidate
+            command_argument_index = 0
+            git_subcommand = None
             continue
         if candidate.startswith("-") or candidate in {
             "<",
@@ -383,15 +396,30 @@ def _extract_file_hints_from_command(command: str) -> list[str]:
             continue
         if candidate in {".", ".."}:
             continue
+        if primary_command == "git" and git_subcommand is None:
+            git_subcommand = candidate
+            command_argument_index += 1
+            continue
         if "/" in candidate or "." in Path(candidate).name:
             hints.append(candidate)
+            command_argument_index += 1
             continue
         if (
             primary_command in _FILE_ARGUMENT_COMMANDS
             and "=" not in candidate
             and candidate != primary_command
         ):
+            if (
+                primary_command in _COMMANDS_WITH_LEADING_NON_PATH_ARGUMENT
+                and command_argument_index == 0
+            ):
+                command_argument_index += 1
+                continue
+            if primary_command == "git" and git_subcommand not in _GIT_FILE_ARGUMENT_SUBCOMMANDS:
+                command_argument_index += 1
+                continue
             hints.append(candidate)
+        command_argument_index += 1
     return hints
 
 

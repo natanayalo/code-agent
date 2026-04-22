@@ -372,6 +372,14 @@ def test_extract_file_hints_includes_extensionless_root_file_arguments() -> None
     assert "install" not in _extract_file_hints_from_command("pip install pytest")
     assert "LICENSE" in _extract_file_hints_from_command("grep TODO LICENSE")
     assert "manage.py" in _extract_file_hints_from_command("python manage.py")
+    assert "build" in _extract_file_hints_from_command("mkdir build")
+    assert "build" in _extract_file_hints_from_command("rmdir build")
+    assert "LICENSE" in _extract_file_hints_from_command("chmod 644 LICENSE")
+    assert "root" not in _extract_file_hints_from_command("chown root LICENSE")
+    assert "LICENSE" in _extract_file_hints_from_command("chown root LICENSE")
+    assert "LICENSE" in _extract_file_hints_from_command("git add LICENSE")
+    assert "status" not in _extract_file_hints_from_command("git status")
+    assert "main" not in _extract_file_hints_from_command("git checkout main")
 
 
 def test_extract_file_hints_handles_compound_shell_commands() -> None:
