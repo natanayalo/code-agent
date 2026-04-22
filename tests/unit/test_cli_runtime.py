@@ -88,6 +88,7 @@ def test_settings_from_budget_applies_supported_runtime_overrides() -> None:
             "max_retries": 0,
             "max_verifier_passes": "1",
             "max_observation_characters": 512,
+            "context_window_limit_tokens": "64000",
         },
         defaults=CliRuntimeSettings(max_iterations=4, worker_timeout_seconds=30),
     )
@@ -100,6 +101,7 @@ def test_settings_from_budget_applies_supported_runtime_overrides() -> None:
     assert settings.max_retries == 0
     assert settings.max_verifier_passes == 1
     assert settings.max_observation_characters == 512
+    assert settings.context_window_limit_tokens == 64000
 
 
 def test_settings_from_budget_accepts_fractional_numeric_strings_like_float_inputs() -> None:
@@ -1266,6 +1268,49 @@ def test_run_cli_runtime_loop_stops_at_the_worker_timeout() -> None:
     assert execution.status == "failure"
     assert execution.stop_reason == "worker_timeout"
     assert "worker timeout (1s)" in execution.summary
+
+
+def test_run_cli_runtime_loop_logs_warning_near_context_window_limit(caplog) -> None:
+    """Prompt-size preflight should warn once usage crosses 80% of the model limit."""
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")])
+    session = _FakeSession({})
+
+    with caplog.at_level("WARNING"):
+        execution = run_cli_runtime_loop(
+            adapter,
+            session,
+            system_prompt=("x" * 33),
+            settings=CliRuntimeSettings(
+                max_iterations=1,
+                worker_timeout_seconds=30,
+                context_window_limit_tokens=12,
+            ),
+        )
+
+    assert execution.status == "success"
+    assert "context-window warning threshold" in caplog.text
+
+
+def test_run_cli_runtime_loop_fails_fast_when_prompt_exceeds_context_window() -> None:
+    """Oversized prompts should stop before adapter dispatch with a typed context-window reason."""
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")])
+    session = _FakeSession({})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt=("x" * 220),
+        settings=CliRuntimeSettings(
+            max_iterations=1,
+            worker_timeout_seconds=30,
+            context_window_limit_tokens=20,
+        ),
+    )
+
+    assert execution.status == "failure"
+    assert execution.stop_reason == "context_window"
+    assert "context window" in execution.summary.lower()
+    assert adapter.calls == []
 
 
 def test_run_cli_runtime_loop_returns_shell_errors_without_raising() -> None:
