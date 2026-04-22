@@ -416,6 +416,31 @@ def test_build_targeted_review_context_packet_uses_dynamic_markdown_fences(tmp_p
     assert "`````text" in packet
 
 
+def test_build_targeted_review_context_packet_preserves_diff_fence_when_diff_is_truncated(tmp_path):
+    source = tmp_path / "long.md"
+    source.write_text("line\n")
+    diff_text = "\n".join(
+        [
+            "diff --git a/long.md b/long.md",
+            "+++ b/long.md",
+            "@@ -1,1 +1,1 @@",
+            *["+" + ("`" * 5) + " payload line" for _ in range(40)],
+        ]
+    )
+
+    packet = build_targeted_review_context_packet(
+        task_text="large diff",
+        worker_summary="summary",
+        files_changed=["long.md"],
+        diff_text=diff_text,
+        repo_path=tmp_path,
+        max_characters=220,
+    )
+
+    assert "``````diff" in packet
+    assert packet.count("``````") >= 2
+
+
 def test_build_targeted_review_context_packet_skips_oversized_files(tmp_path, monkeypatch):
     monkeypatch.setattr(self_review, "DEFAULT_REVIEW_PACKET_MAX_FILE_BYTES", 10)
     source = tmp_path / "big_payload.txt"
@@ -439,3 +464,15 @@ def test_build_targeted_review_context_packet_skips_oversized_files(tmp_path, mo
     )
 
     assert "exceeds 10-byte limit" in packet
+
+
+def test_extract_diff_line_hints_unescapes_quoted_paths():
+    diff_text = "\n".join(
+        [
+            '+++ "b/folder\\\\name \\"quoted\\".py"',
+            "@@ -2,1 +2,1 @@",
+        ]
+    )
+    hints = _extract_diff_line_hints(diff_text)
+    assert 'folder\\name "quoted".py' in hints
+    assert hints['folder\\name "quoted".py'] == [(2, 2)]

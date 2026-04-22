@@ -281,10 +281,8 @@ def build_targeted_review_context_packet(
     changed_files_block = "\n".join(f"- {path}" for path in normalized_files) or "- <none>"
     command_summary_block = _summarize_commands(commands_run)
     diff_fence = _markdown_fence_for_content(diff_text)
-    diff_block = _truncate_block(
-        f"{diff_fence}diff\n{diff_text}\n{diff_fence}",
-        max_characters // 2,
-    )
+    truncated_diff_text = _truncate_block(diff_text, max_characters // 2)
+    diff_block = f"{diff_fence}diff\n{truncated_diff_text}\n{diff_fence}"
     code_windows_block = _build_changed_file_windows(
         repo_path=repo_path,
         changed_files=normalized_files[:DEFAULT_REVIEW_PACKET_MAX_FILES],
@@ -338,7 +336,7 @@ def build_targeted_review_context_packet(
         ]
     )
     packet = "\n".join(sections).strip()
-    return _truncate_block(packet, max_characters)
+    return _truncate_review_packet(packet, max_characters, diff_fence=diff_fence)
 
 
 def _extract_json_object(text: str) -> str | None:
@@ -390,6 +388,25 @@ def _truncate_block(text: str, limit: int) -> str:
         return text
     truncated = text[:limit].rstrip()
     return f"{truncated}\n[truncated to {limit} characters]"
+
+
+def _truncate_review_packet(packet: str, limit: int, *, diff_fence: str) -> str:
+    """Truncate packet while keeping diff markdown fences balanced when possible."""
+    if len(packet) <= limit:
+        return packet
+
+    marker = f"\n[truncated to {limit} characters]"
+    truncated = packet[:limit].rstrip()
+    if "### Diff Excerpt" not in truncated or truncated.count(diff_fence) % 2 == 0:
+        return f"{truncated}{marker}"
+
+    closing_fence = f"\n{diff_fence}"
+    if limit <= len(marker) + len(closing_fence):
+        return _truncate_block(packet, limit)
+
+    budget = limit - len(marker) - len(closing_fence)
+    balanced = packet[:budget].rstrip()
+    return f"{balanced}{closing_fence}{marker}"
 
 
 def _summarize_commands(commands_run: Sequence[WorkerCommand]) -> str:
@@ -578,6 +595,7 @@ def _normalize_diff_new_path(raw_path: str) -> str | None:
     candidate = raw_path
     if candidate.startswith('"') and candidate.endswith('"') and len(candidate) >= 2:
         candidate = candidate[1:-1]
+        candidate = candidate.replace("\\\\", "\\").replace('\\"', '"')
     if candidate.startswith("b/"):
         candidate = candidate[2:]
     return candidate.strip() or None
