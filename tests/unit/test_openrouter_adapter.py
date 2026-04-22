@@ -96,3 +96,24 @@ def test_openrouter_adapter_next_step_requests_chat_completion(
     assert len(fake_client.calls) == 1
     assert fake_client.calls[0]["model"] == "anthropic/claude-3.5-sonnet"
     assert fake_client.calls[0]["response_format"] == {"type": "json_object"}
+
+
+def test_openrouter_adapter_next_step_rejects_empty_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adapter should raise a clear error when OpenRouter returns no content."""
+
+    class _EmptyResponseOpenAI(_FakeOpenAI):
+        def _create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=""))])
+
+    def _fake_openai(**kwargs):
+        return _EmptyResponseOpenAI(**kwargs)
+
+    monkeypatch.setattr("workers.openrouter_adapter.OpenAI", _fake_openai)
+
+    adapter = OpenRouterCliRuntimeAdapter(api_key="test-key")
+
+    with pytest.raises(RuntimeError, match="empty response body"):
+        adapter.next_step([CliRuntimeMessage(role="system", content="Proceed")])

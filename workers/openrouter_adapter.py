@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -117,48 +116,6 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
     return "\n".join(lines).rstrip()
 
 
-def _extract_json(text: str) -> str:
-    """Extract the first valid JSON object from a response payload."""
-    stripped = text.strip()
-    search_from = 0
-    while True:
-        start = stripped.find("{", search_from)
-        if start == -1:
-            break
-        depth = 0
-        in_string = False
-        escape_next = False
-        end = -1
-        for i, ch in enumerate(stripped[start:], start=start):
-            if escape_next:
-                escape_next = False
-                continue
-            if in_string:
-                if ch == "\\":
-                    escape_next = True
-                elif ch == '"':
-                    in_string = False
-                continue
-            if ch == '"':
-                in_string = True
-            elif ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    end = i
-                    break
-        if end == -1:
-            break
-        candidate = stripped[start : end + 1]
-        try:
-            json.loads(candidate)
-            return candidate
-        except ValueError:
-            search_from = end + 1
-    raise RuntimeError(f"No JSON object found in OpenRouter response: {_truncate_detail(stripped)}")
-
-
 def _message_content_to_text(content: object) -> str:
     """Normalize chat completion message content into plain text."""
     if isinstance(content, str):
@@ -265,8 +222,9 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         except Exception as exc:
             raise RuntimeError("OpenRouter adapter returned no choices.") from exc
 
-        raw_text = _message_content_to_text(getattr(first_choice.message, "content", ""))
-        raw_json = _extract_json(raw_text)
+        raw_json = _message_content_to_text(getattr(first_choice.message, "content", "")).strip()
+        if not raw_json:
+            raise RuntimeError("OpenRouter adapter returned an empty response body.")
         try:
             return CliRuntimeStep.model_validate_json(raw_json)
         except Exception as exc:
