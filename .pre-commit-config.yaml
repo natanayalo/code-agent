@@ -64,6 +64,7 @@ repos:
           - alembic>=1.16,<2.0
           - fastapi>=0.116,<1.0
           - langgraph>=1.0,<2.0
+          - openai>=2.0,<3.0
           - SQLAlchemy>=2.0,<3.0
           - uvicorn>=0.35,<1.0
           - cryptography>=44.0.0,<45.0

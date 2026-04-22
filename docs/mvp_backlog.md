@@ -385,6 +385,22 @@ Allow caller to pin a worker for a task.
 Acceptance:
 - override bypasses default routing when runtime availability and policy still allow the selected worker
 
+### T-073 Add OpenRouter API client adapter
+Add a third worker adapter for OpenRouter to access a wider range of models (e.g., Claude, Llama) through their OpenAI-compatible endpoint. This is prioritized to follow immediately after manual worker overrides are supported, to allow users to opt-in to experimental open-weights or alternative models easily.
+
+Scope notes:
+- implement `OpenRouterCliWorker` through the shared CLI-runtime abstractions
+- use the official `openai` Python client configured with `base_url="https://openrouter.ai/api/v1"`
+- ensure the API key is read from a dedicated `OPENROUTER_API_KEY` environment variable
+- configure the `HTTP-Referer` and `X-Title` headers in the client initialization as per OpenRouter best practices for tracking and ranking
+- ensure model selection is flexible and supports OpenRouter's naming convention (e.g. `anthropic/claude-3.5-sonnet`)
+- incorporate the OpenRouter worker into the routing heuristics (T-071) and manual override (T-072)
+
+Acceptance:
+- `OpenRouterCliWorker` is runnable via the orchestrator path
+- tasks can be routed to OpenRouter models
+- uses the standard OpenAI SDK to minimize custom client code maintenance
+
 ---
 
 ## Milestone 10 - Telegram ingress (minimal real flow)
@@ -911,3 +927,93 @@ Acceptance:
 - prompt or model changes can be compared on the same frozen suite
 - reviewer regressions are visible before enabling stricter triggers
 - evaluation results are persisted as structured artifacts
+
+### T-123 Add shared adapter prompt override for review-mode calls
+Allow runtime adapters to bypass tool-loop prompt wrapping for targeted modes such as self-review, while keeping one consistent cross-provider interface.
+
+Scope notes:
+- extend the shared runtime adapter contract with an explicit prompt override (for example `system_prompt` or equivalent)
+- implement the same contract behavior across OpenRouter, Gemini, and Codex adapters
+- update worker self-review call sites to use the override instead of embedding review prompts as regular runtime transcript messages
+- keep backwards compatibility for existing runtime loop callers
+
+Acceptance:
+- all runtime adapters support the same prompt-override interface
+- self-review paths use the override instead of default tool-loop prompt shaping
+- existing runtime-loop behavior remains unchanged for non-review calls
+- unit tests cover adapter override behavior and worker call-site integration
+
+### T-124 Extract shared changed-files + post-run lint/format helper
+Remove duplicated artifact/lint handling in worker execution paths by introducing one shared helper used in both initial and follow-up loops.
+
+Scope notes:
+- extract changed-file collection and post-run lint/format orchestration into a reusable helper
+- apply the helper in OpenRouter, Gemini, and Codex CLI workers
+- preserve existing `ToolExpectedArtifact.CHANGED_FILES` gating semantics
+- preserve existing fallback behavior for repo-path based changed-file detection
+
+Acceptance:
+- duplicated changed-file/lint blocks are replaced by a shared helper
+- initial run and fix-loop paths produce equivalent artifacts to current behavior
+- behavior stays aligned across all three workers
+- unit tests cover expected-artifact gating and lint-format result propagation
+
+### T-125 Extract shared self-review + fix-loop coordinator
+Promote repeated self-review/fix-loop control flow into shared worker utilities to reduce drift and simplify maintenance.
+
+Scope notes:
+- extract common review loop phases: prompt build, adapter review call, review parse/fallback, optional fix pass, and budget-ledger merge
+- keep provider-specific execution hooks injectable (adapter, session, tool registry, prompts)
+- preserve bounded behavior (`max_fix_iterations`, budget exhaustion handling, cancel checks)
+- keep output contract unchanged (`review_result`, commands/artifacts merged into final worker result)
+
+Acceptance:
+- shared coordinator is used by OpenRouter, Gemini, and Codex workers
+- per-worker code no longer duplicates full self-review loop logic
+- cancellation and budget bounds remain enforced
+- integration tests verify no regression in review/fix-loop outcomes
+
+### T-126 Decompose CLI worker `_run_sync` into focused phases
+Refactor long monolithic worker execution methods into smaller private methods that isolate responsibilities and improve testability.
+
+Scope notes:
+- split `_run_sync` into explicit phases (for example: setup, main runtime execution, review/fix phase, post-processing, teardown)
+- apply consistently across OpenRouter, Gemini, and Codex workers
+- preserve error mapping and cleanup guarantees (`_close_session`, `_stop_container`, workspace cleanup)
+- avoid functional behavior changes beyond decomposition
+
+Acceptance:
+- each CLI worker `_run_sync` is materially shorter and phase-structured
+- extracted methods have focused responsibilities and direct tests where practical
+- no behavior regressions in runtime success/failure/cancellation paths
+- cleanup and artifact behavior remain unchanged
+
+### T-127 Move tool-use guidance to shared prompt source-of-truth
+Reduce adapter/tool coupling by centralizing tool instruction text and examples in shared prompt assembly logic.
+
+Scope notes:
+- remove hardcoded tool-specific instruction strings from provider adapters
+- generate tool guidance from shared prompt builder and/or tool registry metadata
+- ensure adapter prompts still include only currently supported tools
+- keep prompt content deterministic and bounded
+
+Acceptance:
+- provider adapters no longer embed independent tool-instruction copies
+- tool-use instructions are produced from one shared source
+- adding or changing tool metadata updates prompt guidance without per-adapter edits
+- tests verify prompt content reflects tool registry metadata
+
+### T-128 Evaluate and migrate toward role-native adapter messaging
+Investigate and implement a safe migration path from flattened transcript prompts to role-native message arrays where provider/runtime support allows.
+
+Scope notes:
+- define a shared message-shape strategy for `system`/`user`/`assistant`/`tool` roles
+- prototype role-native message assembly for compatible adapters
+- compare quality, reliability, and token impact against current flattened format
+- roll out behind a feature flag or staged config to prevent regressions
+
+Acceptance:
+- a documented migration strategy exists for role-native messaging across adapters
+- at least one adapter supports role-native mode behind a controlled flag
+- evaluation artifacts compare role-native vs flattened behavior on representative tasks
+- rollout can be disabled safely if regressions are detected

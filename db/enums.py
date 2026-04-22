@@ -29,6 +29,7 @@ class WorkerType(StrEnum):
 
     GEMINI = "gemini"
     CODEX = "codex"
+    OPENROUTER = "openrouter"
 
 
 class WorkerRunStatus(StrEnum):

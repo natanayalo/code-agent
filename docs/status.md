@@ -88,6 +88,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-114 Add shared review result schema and persistence. PR: [#94](https://github.com/natanayalo/code-agent/pull/94)
 - T-111 Add bounded worker self-review before declaring completion. PR: [#95](https://github.com/natanayalo/code-agent/pull/95)
 - T-112 Add context window preflight guard. PR: [#96](https://github.com/natanayalo/code-agent/pull/96)
+- T-073 Add OpenRouter API client adapter. PR: [#97](https://github.com/natanayalo/code-agent/pull/97)
 
 ## In Progress
 

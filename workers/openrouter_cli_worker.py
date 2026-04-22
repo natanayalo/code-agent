@@ -1,4 +1,4 @@
-"""Gemini CLI worker backed by the shared CLI runtime."""
+"""OpenRouter CLI worker backed by the shared CLI runtime."""
 
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ def _slugify(value: str) -> str:
 def _workspace_task_id(request: WorkerRequest) -> str:
     """Build a readable workspace task identifier from the worker request."""
     source = request.session_id or request.task_text
-    return f"gemini-cli-{_slugify(source)}"
+    return f"openrouter-cli-{_slugify(source)}"
 
 
 def _workspace_artifacts(workspace: WorkspaceHandle) -> list[ArtifactReference]:
@@ -107,7 +107,7 @@ def _apply_cleanup_outcome(result: WorkerResult, *, workspace_deleted: bool) -> 
     summary = (
         f"{result.summary.rstrip('.')} Workspace cleaned up per policy."
         if result.summary
-        else "GeminiCliWorker cleaned up the workspace per policy."
+        else "OpenRouterCliWorker cleaned up the workspace per policy."
     )
     return result.model_copy(
         update={
@@ -179,7 +179,7 @@ def _workspace_error_result(
 ) -> WorkerResult:
     """Log a workspace-scoped failure and map it into the worker contract."""
     logger.exception(
-        "Gemini CLI worker failed inside a provisioned workspace",
+        "OpenRouter CLI worker failed inside a provisioned workspace",
         extra={
             "session_id": request.session_id,
             "workspace_id": workspace.workspace_id,
@@ -195,7 +195,7 @@ def _workspace_error_result(
     )
 
 
-class GeminiCliWorker(Worker):
+class OpenRouterCliWorker(Worker):
     """Execute a bounded multi-turn CLI runtime inside a persistent sandbox."""
 
     def __init__(
@@ -258,7 +258,7 @@ class GeminiCliWorker(Worker):
             )
         except WorkspaceManagerError:
             logger.exception(
-                "Gemini CLI worker failed to clean up workspace",
+                "OpenRouter CLI worker failed to clean up workspace",
                 extra={
                     "session_id": request.session_id,
                     "workspace_id": workspace.workspace_id,
@@ -276,7 +276,7 @@ class GeminiCliWorker(Worker):
             self.container_manager.stop(container)
         except DockerSandboxContainerError:
             logger.exception(
-                "Gemini CLI worker failed to stop the persistent container",
+                "OpenRouter CLI worker failed to stop the persistent container",
                 extra={
                     "workspace_id": container.workspace.workspace_id,
                     "task_id": container.workspace.task_id,
@@ -291,7 +291,7 @@ class GeminiCliWorker(Worker):
         try:
             session.close()
         except OSError:
-            logger.exception("Gemini CLI worker failed to close the persistent shell session")
+            logger.exception("OpenRouter CLI worker failed to close the persistent shell session")
 
     def _run_sync(
         self,
@@ -303,7 +303,7 @@ class GeminiCliWorker(Worker):
             return WorkerResult(
                 status="error",
                 summary=(
-                    "GeminiCliWorker requires a non-empty repo_url "
+                    "OpenRouterCliWorker requires a non-empty repo_url "
                     "to provision a sandbox workspace."
                 ),
                 failure_kind="unknown",
@@ -312,7 +312,7 @@ class GeminiCliWorker(Worker):
 
         workspace_task_id = _workspace_task_id(request)
         logger.info(
-            "Starting Gemini CLI worker run",
+            "Starting OpenRouter CLI worker run",
             extra={
                 "session_id": request.session_id,
                 "repo_url": _mask_url_credentials(request.repo_url),
@@ -332,12 +332,12 @@ class GeminiCliWorker(Worker):
             )
         except (WorkspaceManagerError, OSError) as exc:
             logger.exception(
-                "Gemini CLI worker failed to provision workspace",
+                "OpenRouter CLI worker failed to provision workspace",
                 extra={"session_id": request.session_id, "workspace_task_id": workspace_task_id},
             )
             return WorkerResult(
                 status="error",
-                summary=f"GeminiCliWorker failed to provision a workspace: {exc}",
+                summary=f"OpenRouterCliWorker failed to provision a workspace: {exc}",
                 failure_kind="sandbox_infra",
                 next_action_hint="inspect_worker_configuration",
             )
@@ -417,6 +417,8 @@ class GeminiCliWorker(Worker):
             if execution.status == "success" and not should_skip_self_review(request.constraints):
                 max_fix_iterations = resolve_self_review_max_fix_iterations(request.constraints)
                 for review_attempt in range(max_fix_iterations + 1):
+                    if cancel_token and cancel_token():
+                        break
                     diff_text = collect_diff_for_review(
                         workspace.repo_path,
                         timeout_seconds=runtime_settings.command_timeout_seconds,
@@ -435,7 +437,7 @@ class GeminiCliWorker(Worker):
                         )
                     except Exception as exc:
                         logger.warning(
-                            "Gemini CLI worker self-review adapter failed; recording explicit "
+                            "OpenRouter CLI worker self-review adapter failed; recording explicit "
                             "no-findings fallback.",
                             exc_info=exc,
                         )
@@ -500,16 +502,17 @@ class GeminiCliWorker(Worker):
                     if execution.status != "success":
                         break
 
-                    files_changed = collect_changed_files(
-                        session,
-                        working_directory=Path(container.working_dir),
-                        timeout_seconds=runtime_settings.command_timeout_seconds,
-                    )
-                    if not files_changed:
-                        files_changed = collect_changed_files_from_repo_path(
-                            workspace.repo_path,
+                    if ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts:
+                        files_changed = collect_changed_files(
+                            session,
+                            working_directory=Path(container.working_dir),
                             timeout_seconds=runtime_settings.command_timeout_seconds,
                         )
+                        if not files_changed:
+                            files_changed = collect_changed_files_from_repo_path(
+                                workspace.repo_path,
+                                timeout_seconds=runtime_settings.command_timeout_seconds,
+                            )
                     (
                         files_changed,
                         lint_format_result,
@@ -554,7 +557,7 @@ class GeminiCliWorker(Worker):
                 workspace=workspace,
                 workspace_task_id=workspace_task_id,
                 exc=exc,
-                summary_prefix="GeminiCliWorker runtime setup failed",
+                summary_prefix="OpenRouterCliWorker runtime setup failed",
                 next_action_hint="inspect_worker_configuration",
             )
         finally:
@@ -568,6 +571,6 @@ class GeminiCliWorker(Worker):
             )
 
         if result is None:
-            raise RuntimeError("Gemini CLI worker execution completed without a result.")
+            raise RuntimeError("OpenRouter CLI worker execution completed without a result.")
 
         return _apply_cleanup_outcome(result, workspace_deleted=workspace_deleted)
