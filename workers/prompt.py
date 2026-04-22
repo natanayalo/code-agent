@@ -17,6 +17,7 @@ DEFAULT_REPO_LISTING_MAX_ENTRIES = 40
 DEFAULT_AGENTS_MAX_CHARACTERS = 6000
 DEFAULT_AGENTS_ASSET_READ_MAX_CHARACTERS = 8192
 DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS = 3000
+_SECTION_SEPARATOR_OVERHEAD_BUFFER = 32
 _TRUNCATED_MARKER = "\n... (truncated)"
 _AGENTS_ASSET_DIRECTORIES = ("skills", "workflows", "rules")
 _BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS = 1048576
@@ -1016,7 +1017,9 @@ def build_review_prompt(
 ) -> str:
     """Assemble a review-only prompt separated from execution/tool-loop prompts."""
     # Reserve a small budget buffer for \n\n separators between prompt sections
-    total_guidance_budget = DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS - 32
+    total_guidance_budget = (
+        DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS - _SECTION_SEPARATOR_OVERHEAD_BUFFER
+    )
     agents_guidance, agents_assets_guidance = read_workspace_repo_guidance(
         workspace_path,
         max_characters=total_guidance_budget,
@@ -1047,6 +1050,7 @@ def build_review_prompt(
         guidance_block_count += 1
 
     if guidance_lines:
+        # Account for "## Review Guidance" header and the newline after it
         consumed_guidance_characters += len("## Review Guidance") + 1
         if guidance_block_count > 1:
             # Account for newlines between multiple blocks joined by "\n"
@@ -1129,7 +1133,8 @@ def build_review_prompt(
     output_section = "\n".join(
         [
             "## Output Contract",
-            "Return exactly one JSON object with no markdown fences and no extra prose.",
+            "Return exactly one JSON object. Your response MUST NOT contain any markdown ",
+            "fences or extra prose outside of the JSON payload.",
             "Schema:",
             "```json",
             json.dumps(_json_safe(schema_payload), indent=2, ensure_ascii=True),

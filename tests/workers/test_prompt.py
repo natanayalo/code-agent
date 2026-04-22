@@ -166,9 +166,10 @@ def test_build_review_prompt_accurately_counts_budget_overhead(
 ) -> None:
     """Review prompt should account for header and block separators in budget tracking."""
     # Set a tight budget that leaves exactly enough for one guidance block + header
-    # plus the 32-character section separator buffer.
+    # plus the section separator buffer.
     # Header (19) + Block (39) + Buffer (32) = 90
-    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 90)
+    buffer = prompt._SECTION_SEPARATOR_OVERHEAD_BUFFER
+    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 58 + buffer)
 
     (tmp_path / "REVIEW.md").write_text("CONTENT", encoding="utf-8")
     (tmp_path / "package.json").write_text('{"scripts":{"test":"pytest"}}', encoding="utf-8")
@@ -183,7 +184,7 @@ def test_build_review_prompt_accurately_counts_budget_overhead(
     assert "## Build & Test" not in rendered_prompt
 
     # Now test with a budget that allows exactly one char of build context
-    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 91)
+    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 59 + buffer)
     rendered_prompt = build_review_prompt(
         workspace_path=tmp_path,
         review_context_packet="Packet payload",
