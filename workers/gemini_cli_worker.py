@@ -414,20 +414,6 @@ class GeminiCliWorker(Worker):
             if execution.status == "success" and not should_skip_self_review(request.constraints):
                 max_fix_iterations = resolve_self_review_max_fix_iterations(request.constraints)
                 for review_attempt in range(max_fix_iterations + 1):
-                    max_verifier_passes = execution.budget_ledger.max_verifier_passes
-                    if (
-                        max_verifier_passes is not None
-                        and execution.budget_ledger.verifier_passes_used >= max_verifier_passes
-                    ):
-                        execution.status = "failure"
-                        execution.summary = (
-                            "CLI runtime exceeded its verifier-pass budget before "
-                            "worker self-review could complete."
-                        )
-                        execution.stop_reason = "budget_exceeded"
-                        break
-
-                    execution.budget_ledger.verifier_passes_used += 1
                     diff_text = collect_diff_for_review(
                         workspace.repo_path,
                         timeout_seconds=runtime_settings.command_timeout_seconds,

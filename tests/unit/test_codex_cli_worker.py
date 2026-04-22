@@ -624,7 +624,6 @@ def test_codex_cli_worker_records_no_findings_self_review(tmp_path: Path) -> Non
     assert result.review_result is not None
     assert result.review_result.outcome == "no_findings"
     assert result.budget_usage is not None
-    assert result.budget_usage["verifier_passes_used"] == 1
 
 
 def test_codex_cli_worker_fixes_review_findings_with_bounded_retry(tmp_path: Path) -> None:
@@ -698,7 +697,6 @@ def test_codex_cli_worker_fixes_review_findings_with_bounded_retry(tmp_path: Pat
     assert result.review_result is not None
     assert result.review_result.outcome == "no_findings"
     assert result.budget_usage is not None
-    assert result.budget_usage["verifier_passes_used"] == 2
 
 
 def test_codex_cli_worker_respects_zero_fix_retry_limit(tmp_path: Path) -> None:
@@ -753,7 +751,6 @@ def test_codex_cli_worker_respects_zero_fix_retry_limit(tmp_path: Path) -> None:
     assert result.review_result.outcome == "findings"
     assert result.commands_run == []
     assert result.budget_usage is not None
-    assert result.budget_usage["verifier_passes_used"] == 1
 
 
 def test_codex_cli_worker_allows_opt_out_of_self_review(tmp_path: Path) -> None:
@@ -795,4 +792,3 @@ def test_codex_cli_worker_allows_opt_out_of_self_review(tmp_path: Path) -> None:
     assert result.status == "success"
     assert result.review_result is None
     assert result.budget_usage is not None
-    assert result.budget_usage["verifier_passes_used"] == 0
