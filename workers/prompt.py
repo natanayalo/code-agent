@@ -40,10 +40,10 @@ _SKIPPED_PATH_NAMES = {
 }
 
 
-def _fenced_text_block_lines(label: str, content: str) -> list[str]:
+def _fenced_text_block_lines(label: str, content: str, *, fence: str | None = None) -> list[str]:
     """Render a text block with a collision-safe markdown fence."""
-    fence = markdown_fence_for_content(content)
-    return [label, f"{fence}text", content, fence]
+    actual_fence = fence if fence is not None else markdown_fence_for_content(content)
+    return [label, f"{actual_fence}text", content, actual_fence]
 
 
 def _fenced_text_block_overhead(label: str, content: str, *, fence: str | None = None) -> int:
@@ -1015,7 +1015,8 @@ def build_review_prompt(
     task_text: str | None = None,
 ) -> str:
     """Assemble a review-only prompt separated from execution/tool-loop prompts."""
-    total_guidance_budget = DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS
+    # Reserve a small budget buffer for \n\n separators between prompt sections
+    total_guidance_budget = DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS - 32
     agents_guidance, agents_assets_guidance = read_workspace_repo_guidance(
         workspace_path,
         max_characters=total_guidance_budget,
@@ -1023,37 +1024,52 @@ def build_review_prompt(
 
     guidance_lines: list[str] = []
     consumed_guidance_characters = 0
+    guidance_block_count = 0
 
     if agents_guidance is not None:
-        guidance_lines.extend(_fenced_text_block_lines("AGENTS.md guidance:", agents_guidance))
-        consumed_guidance_characters += len(agents_guidance) + _fenced_text_block_overhead(
-            "AGENTS.md guidance:", agents_guidance
+        fence = markdown_fence_for_content(agents_guidance)
+        guidance_lines.extend(
+            _fenced_text_block_lines("AGENTS.md guidance:", agents_guidance, fence=fence)
         )
+        consumed_guidance_characters += len(agents_guidance) + _fenced_text_block_overhead(
+            "AGENTS.md guidance:", agents_guidance, fence=fence
+        )
+        guidance_block_count += 1
 
     if agents_assets_guidance is not None:
-        guidance_lines.extend(_fenced_text_block_lines(".agents guidance:", agents_assets_guidance))
-        consumed_guidance_characters += len(agents_assets_guidance) + _fenced_text_block_overhead(
-            ".agents guidance:", agents_assets_guidance
+        fence = markdown_fence_for_content(agents_assets_guidance)
+        guidance_lines.extend(
+            _fenced_text_block_lines(".agents guidance:", agents_assets_guidance, fence=fence)
         )
+        consumed_guidance_characters += len(agents_assets_guidance) + _fenced_text_block_overhead(
+            ".agents guidance:", agents_assets_guidance, fence=fence
+        )
+        guidance_block_count += 1
 
     if guidance_lines:
         consumed_guidance_characters += len("## Review Guidance") + 1
-        # Account for newlines between multiple blocks joined by "\n"
-        consumed_guidance_characters += len(guidance_lines) // 4 - 1
+        if guidance_block_count > 1:
+            # Account for newlines between multiple blocks joined by "\n"
+            consumed_guidance_characters += guidance_block_count - 1
 
     review_guidance = read_workspace_review_guidance(
         workspace_path,
         max_characters=max(total_guidance_budget - consumed_guidance_characters, 0),
     )
     if review_guidance is not None:
-        if not guidance_lines:
+        if guidance_block_count == 0:
             consumed_guidance_characters += len("## Review Guidance") + 1
         else:
             consumed_guidance_characters += 1  # separator between blocks
-        guidance_lines.extend(_fenced_text_block_lines("REVIEW.md guidance:", review_guidance))
-        consumed_guidance_characters += len(review_guidance) + _fenced_text_block_overhead(
-            "REVIEW.md guidance:", review_guidance
+
+        fence = markdown_fence_for_content(review_guidance)
+        guidance_lines.extend(
+            _fenced_text_block_lines("REVIEW.md guidance:", review_guidance, fence=fence)
         )
+        consumed_guidance_characters += len(review_guidance) + _fenced_text_block_overhead(
+            "REVIEW.md guidance:", review_guidance, fence=fence
+        )
+        guidance_block_count += 1
 
     build_test_context = build_build_test_section(
         workspace_path,
