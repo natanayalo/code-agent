@@ -782,7 +782,7 @@ def _serialize_verification_report(report: object | None) -> dict[str, Any] | No
 def _to_json_compatible(value: object) -> Any:
     """Recursively convert nested model/mapping payloads into JSON-compatible values."""
     if hasattr(value, "model_dump"):
-        return _to_json_compatible(value.model_dump(mode="json"))
+        return value.model_dump(mode="json")
     if isinstance(value, Mapping):
         return {str(key): _to_json_compatible(item) for key, item in value.items()}
     if isinstance(value, list | tuple):

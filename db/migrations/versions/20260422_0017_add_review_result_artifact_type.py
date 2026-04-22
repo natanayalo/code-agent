@@ -17,7 +17,7 @@ NEW_ARTIFACT_TYPE_VALUES = (*OLD_ARTIFACT_TYPE_VALUES, "review_result")
 
 def _check_condition(column_name: str, values: Iterable[str]) -> str:
     """Render a SQL IN check for a constrained string column."""
-    rendered_values = ", ".join(f"'{value}'" for value in values)
+    rendered_values = ", ".join("'" + value.replace("'", "''") + "'" for value in values)
     return f"{column_name} IN ({rendered_values})"
 
 
