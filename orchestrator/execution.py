@@ -779,6 +779,41 @@ def _serialize_verification_report(report: object | None) -> dict[str, Any] | No
     raise TypeError(f"Unsupported verification report type: {type(report).__name__}")
 
 
+def _to_json_compatible(value: object) -> Any:
+    """Recursively convert nested model/mapping payloads into JSON-compatible values."""
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if isinstance(value, Mapping):
+        return {str(key): _to_json_compatible(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_to_json_compatible(item) for item in value]
+    return value
+
+
+def _serialize_review_result(review_result: object | None) -> dict[str, Any] | None:
+    """Normalize review output from either a Pydantic model or a raw mapping."""
+    if review_result is None:
+        return None
+    if hasattr(review_result, "model_dump"):
+        return review_result.model_dump(mode="json")
+    if isinstance(review_result, Mapping):
+        return _to_json_compatible(review_result)
+    raise TypeError(f"Unsupported review result type: {type(review_result).__name__}")
+
+
+def _review_result_artifact_entry(review_result: object | None) -> dict[str, Any] | None:
+    """Build a structured artifact index entry for a review payload when present."""
+    serialized = _serialize_review_result(review_result)
+    if serialized is None:
+        return None
+    return {
+        "name": "review_result",
+        "uri": "inline://review_result",
+        "artifact_type": ArtifactType.REVIEW_RESULT.value,
+        "artifact_metadata": {"review_result": serialized},
+    }
+
+
 def _approval_constraints_payload(
     *,
     status: str,
@@ -1955,6 +1990,11 @@ class TaskExecutionService:
             result = state.result
             artifacts = result.artifacts if result is not None else []
             artifact_index = [artifact.model_dump(mode="json") for artifact in artifacts]
+            review_result_entry = _review_result_artifact_entry(
+                result.review_result if result is not None else None
+            )
+            if review_result_entry is not None:
+                artifact_index.append(review_result_entry)
             worker_type = _worker_type_for_persistence(state)
             worker_run = worker_run_repo.create(
                 task_id=task_id,
@@ -2016,6 +2056,14 @@ class TaskExecutionService:
                     artifact_type=artifact_type,
                     name=artifact.name,
                     uri=artifact.uri,
+                )
+            if review_result_entry is not None:
+                artifact_repo.create(
+                    run_id=worker_run.id,
+                    artifact_type=ArtifactType.REVIEW_RESULT.value,
+                    name=review_result_entry["name"],
+                    uri=review_result_entry["uri"],
+                    artifact_metadata=review_result_entry["artifact_metadata"],
                 )
 
         self._prune_retained_runs(now=finished_at)

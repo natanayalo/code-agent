@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from workers.review import ReviewResult
+
 
 class WorkerModel(BaseModel):
     """Base model for worker interface boundaries."""
@@ -83,6 +85,7 @@ class WorkerResult(WorkerModel):
     files_changed: list[str] = Field(default_factory=list)
     test_results: list[TestResult] = Field(default_factory=list)
     artifacts: list[ArtifactReference] = Field(default_factory=list)
+    review_result: ReviewResult | None = None
     next_action_hint: str | None = None
 
     @model_validator(mode="after")

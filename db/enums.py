@@ -50,6 +50,7 @@ class ArtifactType(StrEnum):
     TEST_REPORT = "test_report"
     RESULT_SUMMARY = "result_summary"
     WORKSPACE = "workspace"
+    REVIEW_RESULT = "review_result"
 
 
 class TimelineEventType(StrEnum):
