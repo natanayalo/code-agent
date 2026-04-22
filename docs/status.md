@@ -89,10 +89,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-111 Add bounded worker self-review before declaring completion. PR: [#95](https://github.com/natanayalo/code-agent/pull/95)
 - T-112 Add context window preflight guard. PR: [#96](https://github.com/natanayalo/code-agent/pull/96)
 - T-073 Add OpenRouter API client adapter. PR: [#97](https://github.com/natanayalo/code-agent/pull/97)
+- T-115 Add targeted reviewer context packer. PR: [#98](https://github.com/natanayalo/code-agent/pull/98)
 
 ## In Progress
 
-- T-115 Add targeted reviewer context packer. (local branch: `task/t-115-targeted-reviewer-context-packer`)
+- None
 
 ## Next
 
