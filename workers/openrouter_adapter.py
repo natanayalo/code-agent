@@ -112,7 +112,13 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
         "## Runtime Transcript",
     ]
     for index, message in enumerate(messages, start=1):
-        lines.extend((_message_heading(message, index=index), message.content, ""))
+        lines.extend(
+            (
+                _message_heading(message, index=index),
+                _message_content_to_text(message.content),
+                "",
+            )
+        )
     return "\n".join(lines).rstrip()
 
 

@@ -17,6 +17,7 @@ from langgraph.types import interrupt
 from db.base import utc_now
 from db.enums import TimelineEventType
 from orchestrator.state import (
+    SUPPORTED_WORKER_TYPES,
     ApprovalCheckpoint,
     OrchestratorState,
     RouteDecision,
@@ -747,8 +748,9 @@ def _compute_route_decision(
             )
 
         if escalation_reason is not None:
-            all_workers: tuple[WorkerType, ...] = ("gemini", "openrouter", "codex")
-            alternates = tuple(worker for worker in all_workers if worker != prior_worker)
+            alternates = tuple(
+                worker for worker in SUPPORTED_WORKER_TYPES if worker != prior_worker
+            )
 
             for alternate in alternates:
                 if alternate not in available_workers:
@@ -851,7 +853,7 @@ def choose_worker(state_input: OrchestratorState) -> dict[str, Any]:
     Use build_choose_worker_node() when the graph knows which workers are wired in.
     """
     state = _ensure_state(state_input)
-    route = _compute_route_decision(state, frozenset({"codex", "gemini", "openrouter"}))
+    route = _compute_route_decision(state, frozenset(SUPPORTED_WORKER_TYPES))
     return {
         "current_step": "choose_worker",
         "route": route.model_dump(),

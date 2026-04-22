@@ -7,7 +7,11 @@ from types import SimpleNamespace
 import pytest
 
 from workers.cli_runtime import CliRuntimeMessage
-from workers.openrouter_adapter import OpenRouterCliRuntimeAdapter
+from workers.openrouter_adapter import (
+    OpenRouterCliRuntimeAdapter,
+    _build_adapter_prompt,
+    _message_content_to_text,
+)
 
 
 class _FakeOpenAI:
@@ -117,3 +121,24 @@ def test_openrouter_adapter_next_step_rejects_empty_response(
 
     with pytest.raises(RuntimeError, match="empty response body"):
         adapter.next_step([CliRuntimeMessage(role="system", content="Proceed")])
+
+
+def test_message_content_to_text_joins_text_blocks() -> None:
+    """Adapter content normalization should join text blocks from list content."""
+    content = [
+        {"type": "text", "text": "alpha"},
+        {"type": "input_text", "text": "beta"},
+        {"type": "image_url", "url": "https://example.com/img.png"},
+    ]
+    assert _message_content_to_text(content) == "alpha\nbeta"
+
+
+def test_build_adapter_prompt_normalizes_non_string_content() -> None:
+    """Prompt builder should normalize non-string content before joining lines."""
+    message = CliRuntimeMessage.model_construct(
+        role="system",
+        content=[{"type": "text", "text": "structured"}],
+        tool_name=None,
+    )
+    prompt = _build_adapter_prompt((message,))
+    assert "structured" in prompt

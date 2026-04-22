@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from workers import WorkerResult
 
 WorkerType = Literal["gemini", "codex", "openrouter"]
+SUPPORTED_WORKER_TYPES: tuple[WorkerType, ...] = ("gemini", "openrouter", "codex")
 MemoryCategory = Literal["personal", "project"]
 VerificationFailureKind = Literal[
     "test_regression",
