@@ -13,10 +13,12 @@ from workers.prompt import (
     DEFAULT_AGENTS_MAX_CHARACTERS,
     build_build_test_section,
     build_repo_context_section,
+    build_review_prompt,
     build_system_prompt,
     build_task_context_section,
     build_workspace_directory_listing,
     read_workspace_agents_guidance,
+    read_workspace_review_guidance,
 )
 
 
@@ -61,6 +63,64 @@ def test_build_system_prompt_includes_all_expected_sections(tmp_path: Path) -> N
     assert "If a command fails" in prompt
     assert "narrow long or truncated results" in prompt
     assert "Base the next step on command exit codes" in prompt
+
+
+def test_build_review_prompt_includes_repo_and_review_guidance(tmp_path: Path) -> None:
+    """Review-mode prompt should include repo guidance and optional REVIEW.md context."""
+    (tmp_path / "AGENTS.md").write_text("Keep changes small.\n", encoding="utf-8")
+    (tmp_path / "REVIEW.md").write_text("Flag only concrete regressions.\n", encoding="utf-8")
+    skills_dir = tmp_path / ".agents" / "skills" / "review"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "name: review-skill",
+                "description: Focus on actionable findings.",
+                "---",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "package.json").write_text(
+        '{"scripts":{"test":"pytest -q"}}',
+        encoding="utf-8",
+    )
+
+    rendered_prompt = build_review_prompt(
+        workspace_path=tmp_path,
+        review_context_packet="Packet payload",
+        reviewer_kind="independent_reviewer",
+        task_text="Review updated auth validation",
+    )
+
+    assert "## Review Role" in rendered_prompt
+    assert "## Review Guidance" in rendered_prompt
+    assert "AGENTS.md guidance:" in rendered_prompt
+    assert ".agents guidance:" in rendered_prompt
+    assert "REVIEW.md guidance:" in rendered_prompt
+    assert "## Build & Test" in rendered_prompt
+    assert "## Review Task" in rendered_prompt
+    assert "## Output Contract" in rendered_prompt
+    assert "## Review Context Packet" in rendered_prompt
+    assert "Reviewer kind: independent_reviewer" in rendered_prompt
+    assert "Task objective: Review updated auth validation" in rendered_prompt
+    assert '"reviewer_kind":"independent_reviewer"' in rendered_prompt
+
+
+def test_build_review_prompt_skips_missing_review_file_and_execution_sections(
+    tmp_path: Path,
+) -> None:
+    """Review prompt should not include execution-mode tool-loop instructions."""
+    rendered_prompt = build_review_prompt(
+        workspace_path=tmp_path,
+        review_context_packet="Packet payload",
+    )
+
+    assert "REVIEW.md guidance:" not in rendered_prompt
+    assert "## Available Tools" not in rendered_prompt
+    assert "## Workflow Instructions" not in rendered_prompt
+    assert "Use the available tools with focused commands" not in rendered_prompt
 
 
 def test_build_system_prompt_includes_build_test_section_from_repo_config(tmp_path: Path) -> None:
@@ -211,6 +271,18 @@ def test_read_workspace_agents_guidance_truncates_long_agents_file(tmp_path: Pat
     guidance = read_workspace_agents_guidance(tmp_path, max_characters=10)
 
     assert guidance == "0123456789\n... (truncated)"
+
+
+def test_read_workspace_review_guidance_truncates_and_handles_missing(tmp_path: Path) -> None:
+    """REVIEW.md guidance should be optional and bounded when present."""
+    assert read_workspace_review_guidance(tmp_path) is None
+    (tmp_path / "REVIEW.md").write_text("0123456789ABCDEFGHIJ", encoding="utf-8")
+
+    guidance = read_workspace_review_guidance(tmp_path, max_characters=10)
+
+    assert guidance is not None
+    assert len(guidance) <= 10
+    assert guidance.startswith("\n... (trun")
 
 
 def test_build_repo_context_section_includes_agents_asset_summaries(tmp_path: Path) -> None:

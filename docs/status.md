@@ -93,7 +93,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-116 Add review-specific prompt assembly and repo review guidance. (local branch: `task/t-116-review-prompt`, unpublished)
 
 ## Next
 

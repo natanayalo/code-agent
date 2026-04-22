@@ -12,6 +12,7 @@ from typing import Any
 from tools.numeric import coerce_non_negative_int_like
 from workers.base import WorkerCommand
 from workers.cli_runtime import CliRuntimeBudgetLedger, CliRuntimeSettings
+from workers.prompt import build_review_prompt
 from workers.review import ReviewResult
 
 DEFAULT_SELF_REVIEW_MAX_FIX_ITERATIONS = 2
@@ -120,44 +121,12 @@ def build_self_review_prompt(
         verifier_report=verifier_report,
         session_state=session_state,
     )
-    return "\n".join(
-        [
-            "You are running a bounded worker self-review before final completion.",
-            "Review the delivered task outcome and code diff.",
-            "Evaluate:",
-            "1. Does the diff satisfy the task objective?",
-            "2. Are there unintended changes?",
-            "3. Are there obvious logical errors?",
-            "4. Are relevant tests missing?",
-            "Return exactly one JSON object with no markdown fences and no prose.",
-            "Schema:",
-            "{"
-            '"reviewer_kind":"worker_self_review",'
-            '"summary":"string",'
-            '"confidence":0.0,'
-            '"outcome":"no_findings|findings",'
-            '"findings":[{'
-            '"severity":"low|medium|high|critical",'
-            '"category":"string",'
-            '"confidence":0.0,'
-            '"file_path":"string",'
-            '"line_start":1,'
-            '"line_end":1,'
-            '"title":"string",'
-            '"why_it_matters":"string",'
-            '"evidence":"string|null",'
-            '"suggested_fix":"string|null"'
-            "}]"
-            "}",
-            "Rules:",
-            "- Use outcome `no_findings` with an empty `findings` list when nothing "
-            "actionable exists.",
-            "- Use outcome `findings` only when at least one concrete actionable finding exists.",
-            "- Keep findings bounded and specific to the supplied review context packet.",
-            "",
-            "## Review Context Packet",
-            review_context_packet,
-        ]
+    resolved_repo_path = repo_path or Path(".")
+    return build_review_prompt(
+        workspace_path=resolved_repo_path,
+        review_context_packet=review_context_packet,
+        reviewer_kind="worker_self_review",
+        task_text=task_text,
     )
 
 

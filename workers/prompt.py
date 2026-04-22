@@ -15,6 +15,7 @@ DEFAULT_REPO_LISTING_MAX_DEPTH = 2
 DEFAULT_REPO_LISTING_MAX_ENTRIES = 40
 DEFAULT_AGENTS_MAX_CHARACTERS = 6000
 DEFAULT_AGENTS_ASSET_READ_MAX_CHARACTERS = 8192
+DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS = 3000
 _TRUNCATED_MARKER = "\n... (truncated)"
 _AGENTS_ASSET_DIRECTORIES = ("skills", "workflows", "rules")
 _BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS = 1048576
@@ -972,6 +973,117 @@ def build_workflow_instructions_section() -> str:
             "- End with a concise summary of changes, verification, and any follow-up needed.",
         ]
     )
+
+
+def read_workspace_review_guidance(
+    workspace_path: Path,
+    *,
+    max_characters: int = DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS,
+) -> str | None:
+    """Return bounded REVIEW.md guidance from the workspace root when present."""
+    review_path = workspace_path / "REVIEW.md"
+    if not review_path.is_file() or max_characters <= 0:
+        return None
+    try:
+        contents = _read_text_prefix(review_path, max_characters=max_characters + 1).strip()
+    except OSError:
+        return None
+    if not contents:
+        return None
+    return _truncate_to_budget(contents, max_characters=max_characters)
+
+
+def build_review_prompt(
+    *,
+    workspace_path: Path,
+    review_context_packet: str,
+    reviewer_kind: str = "worker_self_review",
+    task_text: str | None = None,
+) -> str:
+    """Assemble a review-only prompt separated from execution/tool-loop prompts."""
+    agents_guidance, agents_assets_guidance = read_workspace_repo_guidance(workspace_path)
+    review_guidance = read_workspace_review_guidance(workspace_path)
+    build_test_context = build_build_test_section(
+        workspace_path,
+        max_characters=DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS,
+    )
+
+    guidance_lines = ["## Review Guidance"]
+    if agents_guidance is not None:
+        guidance_lines.extend(["AGENTS.md guidance:", "```text", agents_guidance, "```"])
+    if agents_assets_guidance is not None:
+        guidance_lines.extend([".agents guidance:", "```text", agents_assets_guidance, "```"])
+    if review_guidance is not None:
+        guidance_lines.extend(["REVIEW.md guidance:", "```text", review_guidance, "```"])
+    if build_test_context is not None:
+        guidance_lines.append(build_test_context)
+
+    role_section = "\n".join(
+        [
+            "## Review Role",
+            "You are the review worker for code-agent.",
+            "Focus on high-confidence, actionable findings grounded in the supplied context.",
+            "Prefer precision over recall and skip style-only or speculative comments.",
+            "Do not propose broad rewrites when a focused finding is sufficient.",
+        ]
+    )
+
+    task_lines = [
+        "## Review Task",
+        f"Reviewer kind: {reviewer_kind}",
+    ]
+    if task_text:
+        task_lines.append(f"Task objective: {task_text}")
+    task_lines.extend(
+        [
+            "Evaluate:",
+            "1. Does the delivered diff satisfy the task objective?",
+            "2. Are there unintended behavioral changes?",
+            "3. Are there obvious logical issues?",
+            "4. Are relevant tests or checks missing for changed behavior?",
+        ]
+    )
+
+    output_section = "\n".join(
+        [
+            "## Output Contract",
+            "Return exactly one JSON object with no markdown fences and no extra prose.",
+            "Schema:",
+            "{"
+            f'"reviewer_kind":"{reviewer_kind}",'
+            '"summary":"string",'
+            '"confidence":0.0,'
+            '"outcome":"no_findings|findings",'
+            '"findings":[{'
+            '"severity":"low|medium|high|critical",'
+            '"category":"string",'
+            '"confidence":0.0,'
+            '"file_path":"string",'
+            '"line_start":1,'
+            '"line_end":1,'
+            '"title":"string",'
+            '"why_it_matters":"string",'
+            '"evidence":"string|null",'
+            '"suggested_fix":"string|null"'
+            "}]"
+            "}",
+            "Rules:",
+            "- Use outcome `no_findings` with an empty `findings` list when nothing "
+            "actionable exists.",
+            "- Use outcome `findings` only when at least one concrete actionable finding exists.",
+            "- Keep findings bounded to the supplied review context packet.",
+        ]
+    )
+
+    sections = [
+        role_section,
+        "\n".join(guidance_lines),
+        "\n".join(task_lines),
+        output_section,
+        "## Review Context Packet",
+        review_context_packet,
+    ]
+    return "\n\n".join(section for section in sections if section.strip())
 
 
 def build_system_prompt(
