@@ -413,6 +413,15 @@ def test_extract_file_hints_skips_redirection_tokens() -> None:
     assert "|&" not in hints
 
 
+def test_extract_file_hints_skips_current_and_parent_directory_tokens() -> None:
+    """Directory shorthand tokens should not be treated as touched file hints."""
+    hints = _extract_file_hints_from_command("ls . && cat ../notes.txt && cat ..")
+
+    assert "../notes.txt" in hints
+    assert "." not in hints
+    assert ".." not in hints
+
+
 def test_build_condensed_context_summary_truncation_stays_within_budget() -> None:
     """Truncation notice should fit inside the configured summary character budget."""
     older_messages = [

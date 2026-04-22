@@ -381,6 +381,8 @@ def _extract_file_hints_from_command(command: str) -> list[str]:
             ">|",
         }:
             continue
+        if candidate in {".", ".."}:
+            continue
         if "/" in candidate or "." in Path(candidate).name:
             hints.append(candidate)
             continue
