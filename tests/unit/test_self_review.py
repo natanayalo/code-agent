@@ -441,6 +441,29 @@ def test_build_targeted_review_context_packet_preserves_diff_fence_when_diff_is_
     assert packet.count("``````") >= 2
 
 
+def test_truncate_review_packet_ignores_non_diff_fences_for_balance():
+    packet = "\n".join(
+        [
+            "### Task Objective",
+            "Contains ``` marker in task section.",
+            "",
+            "### Diff Excerpt",
+            "```diff",
+            "@@ -1,1 +1,1 @@",
+            "-old",
+            "+new",
+            "```",
+            "",
+            "### Changed-File Code Windows",
+            "extra content",
+        ]
+    )
+
+    cutoff = packet.index("### Changed-File Code Windows") + 5
+    truncated = self_review._truncate_review_packet(packet, cutoff, diff_fence="```")
+    assert truncated.count("```") == 3
+
+
 def test_build_targeted_review_context_packet_skips_oversized_files(tmp_path, monkeypatch):
     monkeypatch.setattr(self_review, "DEFAULT_REVIEW_PACKET_MAX_FILE_BYTES", 10)
     source = tmp_path / "big_payload.txt"

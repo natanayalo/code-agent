@@ -397,7 +397,13 @@ def _truncate_review_packet(packet: str, limit: int, *, diff_fence: str) -> str:
 
     marker = f"\n[truncated to {limit} characters]"
     truncated = packet[:limit].rstrip()
-    if "### Diff Excerpt" not in truncated or truncated.count(diff_fence) % 2 == 0:
+    diff_header = "### Diff Excerpt"
+    diff_start = truncated.find(diff_header)
+    if diff_start == -1:
+        return f"{truncated}{marker}"
+
+    diff_section = truncated[diff_start:]
+    if diff_section.count(diff_fence) % 2 == 0:
         return f"{truncated}{marker}"
 
     closing_fence = f"\n{diff_fence}"
