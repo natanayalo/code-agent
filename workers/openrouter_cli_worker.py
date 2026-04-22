@@ -417,6 +417,8 @@ class OpenRouterCliWorker(Worker):
             if execution.status == "success" and not should_skip_self_review(request.constraints):
                 max_fix_iterations = resolve_self_review_max_fix_iterations(request.constraints)
                 for review_attempt in range(max_fix_iterations + 1):
+                    if cancel_token and cancel_token():
+                        break
                     diff_text = collect_diff_for_review(
                         workspace.repo_path,
                         timeout_seconds=runtime_settings.command_timeout_seconds,
@@ -500,16 +502,17 @@ class OpenRouterCliWorker(Worker):
                     if execution.status != "success":
                         break
 
-                    files_changed = collect_changed_files(
-                        session,
-                        working_directory=Path(container.working_dir),
-                        timeout_seconds=runtime_settings.command_timeout_seconds,
-                    )
-                    if not files_changed:
-                        files_changed = collect_changed_files_from_repo_path(
-                            workspace.repo_path,
+                    if ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts:
+                        files_changed = collect_changed_files(
+                            session,
+                            working_directory=Path(container.working_dir),
                             timeout_seconds=runtime_settings.command_timeout_seconds,
                         )
+                        if not files_changed:
+                            files_changed = collect_changed_files_from_repo_path(
+                                workspace.repo_path,
+                                timeout_seconds=runtime_settings.command_timeout_seconds,
+                            )
                     (
                         files_changed,
                         lint_format_result,
