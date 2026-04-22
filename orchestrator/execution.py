@@ -847,6 +847,7 @@ class TaskExecutionService:
         session_factory: sessionmaker[Session],
         worker: Worker,
         gemini_worker: Worker | None = None,
+        openrouter_worker: Worker | None = None,
         progress_notifier: ProgressNotifier | None = None,
         default_task_max_attempts: int = 3,
         workspace_root: str | Path | None = None,
@@ -856,6 +857,7 @@ class TaskExecutionService:
         self.session_factory = session_factory
         self.worker = worker
         self.gemini_worker = gemini_worker
+        self.openrouter_worker = openrouter_worker
         self.progress_notifier = progress_notifier
         self.default_task_max_attempts = max(1, int(default_task_max_attempts))
         self.workspace_root = None
@@ -876,6 +878,7 @@ class TaskExecutionService:
             self._graph = build_orchestrator_graph(
                 worker=self.worker,
                 gemini_worker=self.gemini_worker,
+                openrouter_worker=self.openrouter_worker,
                 checkpointer=self._checkpointer,
             )
         return self._graph

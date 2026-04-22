@@ -477,23 +477,30 @@ class _DefaultFakeWorker(Worker):
 def _configured_workers(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
+    openrouter_worker: Worker | None = None,
 ) -> dict[str, Worker]:
     """Return the workers that are actually wired into the graph."""
     result: dict[str, Worker] = {"codex": worker or _DefaultFakeWorker()}
     if gemini_worker is not None:
         result["gemini"] = gemini_worker
+    if openrouter_worker is not None:
+        result["openrouter"] = openrouter_worker
     return result
 
 
-def _unconfigured_worker_result(worker_type: str | None) -> WorkerResult:
+def _unconfigured_worker_result(
+    worker_type: str | None,
+    *,
+    configured_workers: frozenset[str],
+) -> WorkerResult:
     """Return a structured error when routing selects an unavailable worker."""
-    configured_workers = ", ".join(sorted(_configured_workers()))
+    configured_workers_text = ", ".join(sorted(configured_workers))
     selected_worker = worker_type or "unknown"
     return WorkerResult(
         status="error",
         summary=(
             f"No worker is configured for route '{selected_worker}'. "
-            f"Configured workers: {configured_workers}."
+            f"Configured workers: {configured_workers_text}."
         ),
         failure_kind="provider_error",
         commands_run=[],
@@ -661,11 +668,11 @@ def load_memory(state_input: OrchestratorState) -> dict[str, Any]:
 
 def _route_by_preference(
     preferred: WorkerType,
-    fallback: WorkerType,
+    fallbacks: tuple[WorkerType, ...],
     reason: str,
     available_workers: frozenset[str],
 ) -> RouteDecision:
-    """Pick the preferred worker when available, or the fallback with an explicit reason.
+    """Pick the preferred worker when available, or the first available fallback.
 
     - preferred available  → reason (e.g. 'high_stakes_refactor')
     - fallback available   → 'preferred_unavailable'  (task runs on the fallback)
@@ -677,12 +684,13 @@ def _route_by_preference(
             route_reason=reason,
             override_applied=False,
         )
-    if fallback in available_workers:
-        return RouteDecision(
-            chosen_worker=fallback,
-            route_reason="preferred_unavailable",
-            override_applied=False,
-        )
+    for fallback in fallbacks:
+        if fallback in available_workers:
+            return RouteDecision(
+                chosen_worker=fallback,
+                route_reason="preferred_unavailable",
+                override_applied=False,
+            )
     # Neither available - keep the preferred intent; dispatch will fail explicitly.
     return RouteDecision(
         chosen_worker=preferred,
@@ -739,9 +747,17 @@ def _compute_route_decision(
             )
 
         if escalation_reason is not None:
-            # TODO: generalise alternate selection when the worker pool grows beyond two.
-            alternate: WorkerType = "gemini" if prior_worker != "gemini" else "codex"
-            if alternate in available_workers:
+            alternates: tuple[WorkerType, ...]
+            if prior_worker == "codex":
+                alternates = ("gemini", "openrouter")
+            elif prior_worker == "gemini":
+                alternates = ("openrouter", "codex")
+            else:
+                alternates = ("gemini", "codex")
+
+            for alternate in alternates:
+                if alternate not in available_workers:
+                    continue
                 logger.info(
                     "Routing to alternate worker due to prior failure",
                     extra={
@@ -755,13 +771,14 @@ def _compute_route_decision(
                     route_reason=escalation_reason,
                     override_applied=False,
                 )
+            desired_alternate = alternates[0]
             # Alternate unavailable — fail explicitly rather than blind retry of the failed worker.
             logger.warning(
                 "Escalation requires alternate worker but it is unavailable; failing explicitly",
-                extra={"prior_worker": prior_worker, "alternate_worker": alternate},
+                extra={"prior_worker": prior_worker, "alternate_worker": desired_alternate},
             )
             return RouteDecision(
-                chosen_worker=alternate,
+                chosen_worker=desired_alternate,
                 route_reason="runtime_unavailable",
                 override_applied=False,
             )
@@ -769,17 +786,42 @@ def _compute_route_decision(
     # T-071: heuristic 2 — explicit budget preference.
     budget = state.task.budget
     if budget.get("prefer_high_quality"):
-        return _route_by_preference("gemini", "codex", "budget_preference", available_workers)
+        return _route_by_preference(
+            "gemini",
+            ("openrouter", "codex"),
+            "budget_preference",
+            available_workers,
+        )
     if budget.get("prefer_low_cost"):
-        return _route_by_preference("codex", "gemini", "budget_preference", available_workers)
+        return _route_by_preference(
+            "codex",
+            ("openrouter", "gemini"),
+            "budget_preference",
+            available_workers,
+        )
 
     # T-071: heuristic 3 — task shape.
     task_kind = state.task_kind
     if task_kind == "architecture":
-        return _route_by_preference("gemini", "codex", "high_stakes_refactor", available_workers)
+        return _route_by_preference(
+            "gemini",
+            ("openrouter", "codex"),
+            "high_stakes_refactor",
+            available_workers,
+        )
     if task_kind == "ambiguous":
-        return _route_by_preference("gemini", "codex", "ambiguous_task", available_workers)
-    return _route_by_preference("codex", "gemini", "cheap_mechanical_change", available_workers)
+        return _route_by_preference(
+            "gemini",
+            ("openrouter", "codex"),
+            "ambiguous_task",
+            available_workers,
+        )
+    return _route_by_preference(
+        "codex",
+        ("openrouter", "gemini"),
+        "cheap_mechanical_change",
+        available_workers,
+    )
 
 
 def build_choose_worker_node(
@@ -814,7 +856,7 @@ def choose_worker(state_input: OrchestratorState) -> dict[str, Any]:
     Use build_choose_worker_node() when the graph knows which workers are wired in.
     """
     state = _ensure_state(state_input)
-    route = _compute_route_decision(state, frozenset({"codex", "gemini"}))
+    route = _compute_route_decision(state, frozenset({"codex", "gemini", "openrouter"}))
     return {
         "current_step": "choose_worker",
         "route": route.model_dump(),
@@ -930,16 +972,20 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
 def build_await_result_node(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
+    openrouter_worker: Worker | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around the workers wired into the graph."""
-    configured_workers = _configured_workers(worker, gemini_worker)
+    configured_workers = _configured_workers(worker, gemini_worker, openrouter_worker)
 
     async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
         worker_type = state.dispatch.worker_type or state.route.chosen_worker
         bound_worker = configured_workers.get(worker_type or "")
         if bound_worker is None:
-            result = _unconfigured_worker_result(worker_type)
+            result = _unconfigured_worker_result(
+                worker_type,
+                configured_workers=frozenset(configured_workers.keys()),
+            )
             progress_updates = _progress_update(
                 state,
                 f"worker unavailable: {worker_type or 'unknown'}",
@@ -1359,6 +1405,7 @@ def build_orchestrator_graph(
     *,
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
+    openrouter_worker: Worker | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
     interrupt_before: Literal["*"] | list[str] | None = None,
     interrupt_after: Literal["*"] | list[str] | None = None,
@@ -1369,14 +1416,16 @@ def build_orchestrator_graph(
     builder.add_node("classify_task", RunnableLambda(classify_task))
     builder.add_node("plan_task", RunnableLambda(plan_task))
     builder.add_node("load_memory", RunnableLambda(load_memory))
-    available_workers: frozenset[str] = frozenset(_configured_workers(worker, gemini_worker).keys())
+    available_workers: frozenset[str] = frozenset(
+        _configured_workers(worker, gemini_worker, openrouter_worker).keys()
+    )
     builder.add_node("choose_worker", RunnableLambda(build_choose_worker_node(available_workers)))
     builder.add_node("check_approval", RunnableLambda(check_approval))
     builder.add_node("await_approval", RunnableLambda(await_approval))
     builder.add_node("dispatch_job", RunnableLambda(dispatch_job))
     builder.add_node(
         "await_result",
-        RunnableLambda(build_await_result_node(worker, gemini_worker)),
+        RunnableLambda(build_await_result_node(worker, gemini_worker, openrouter_worker)),
     )
     builder.add_node("await_permission_escalation", RunnableLambda(await_permission_escalation))
     builder.add_node("verify_result", RunnableLambda(verify_result))

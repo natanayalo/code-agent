@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from workers import WorkerResult
 
-WorkerType = Literal["gemini", "codex"]
+WorkerType = Literal["gemini", "codex", "openrouter"]
 MemoryCategory = Literal["personal", "project"]
 VerificationFailureKind = Literal[
     "test_regression",

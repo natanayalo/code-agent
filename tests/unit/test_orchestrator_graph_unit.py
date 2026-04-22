@@ -272,9 +272,10 @@ def test_choose_worker_architecture_default():
 # _compute_route_decision unit tests (T-071 / T-072)
 # ---------------------------------------------------------------------------
 
-_ALL_WORKERS: frozenset[str] = frozenset({"codex", "gemini"})
+_ALL_WORKERS: frozenset[str] = frozenset({"codex", "gemini", "openrouter"})
 _CODEX_ONLY: frozenset[str] = frozenset({"codex"})
 _GEMINI_ONLY: frozenset[str] = frozenset({"gemini"})
+_OPENROUTER_ONLY: frozenset[str] = frozenset({"openrouter"})
 
 
 def test_compute_route_override_available():
@@ -330,12 +331,12 @@ def test_compute_route_budget_prefer_low_cost():
 
 
 def test_compute_route_budget_prefer_high_quality_fallback_when_gemini_unavailable():
-    """T-071: falls back to codex with preferred_unavailable when gemini isn't configured."""
+    """T-071: falls back to openrouter with preferred_unavailable when gemini isn't configured."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "demo", "budget": {"prefer_high_quality": True}}}
     )
-    route = _compute_route_decision(state, _CODEX_ONLY)
-    assert route.chosen_worker == "codex"
+    route = _compute_route_decision(state, _OPENROUTER_ONLY)
+    assert route.chosen_worker == "openrouter"
     assert route.route_reason == "preferred_unavailable"
 
 
@@ -370,12 +371,12 @@ def test_compute_route_task_kind_implementation():
 
 
 def test_compute_route_task_kind_implementation_fallback_when_codex_unavailable():
-    """T-071: falls back to gemini with preferred_unavailable when codex is unavailable."""
+    """T-071: falls back to openrouter with preferred_unavailable when codex is unavailable."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "add a helper"}, "task_kind": "implementation"}
     )
-    route = _compute_route_decision(state, _GEMINI_ONLY)
-    assert route.chosen_worker == "gemini"
+    route = _compute_route_decision(state, _OPENROUTER_ONLY)
+    assert route.chosen_worker == "openrouter"
     assert route.route_reason == "preferred_unavailable"
 
 
@@ -502,6 +503,17 @@ def test_compute_route_escalation_fails_explicitly_when_alternate_unavailable():
     route = _compute_route_decision(state, _CODEX_ONLY)
     assert route.chosen_worker == "gemini"  # desired alternate
     assert route.route_reason == "runtime_unavailable"
+
+
+def test_compute_route_openrouter_override_available() -> None:
+    """T-072: openrouter manual override is honoured when available."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "demo", "worker_override": "openrouter"}}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "openrouter"
+    assert route.route_reason == "manual_override"
+    assert route.override_applied is True
 
 
 def test_build_choose_worker_node_binds_available_workers():

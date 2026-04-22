@@ -18,7 +18,12 @@ from apps.api.task_service_factory import (
     _database_url_from_env,
     build_task_service_from_env,
 )
-from workers import CodexCliWorker, CodexExecCliRuntimeAdapter, GeminiCliWorker
+from workers import (
+    CodexCliWorker,
+    CodexExecCliRuntimeAdapter,
+    GeminiCliWorker,
+    OpenRouterCliWorker,
+)
 
 
 def _close_outbound_http_clients(outbound_http_clients) -> None:
@@ -160,6 +165,34 @@ def test_build_task_service_from_env_builds_gemini_worker_when_configured(tmp_pa
     try:
         assert service is not None
         assert isinstance(service.gemini_worker, GeminiCliWorker)
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
+def test_build_task_service_from_env_builds_openrouter_worker_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When OpenRouter API key is set the service should wire an OpenRouterCliWorker."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    monkeypatch.setattr(
+        "workers.openrouter_adapter.OpenAI",
+        lambda **_: SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **__: None))
+        ),
+    )
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+            "OPENROUTER_API_KEY": "test-openrouter-key",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert isinstance(service.openrouter_worker, OpenRouterCliWorker)
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 

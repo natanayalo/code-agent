@@ -34,10 +34,11 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "failed",
             "cancelled",
         },
-        "ck_tasks_worker_type": {"gemini", "codex"},
+        "ck_tasks_worker_type": {"gemini", "codex", "openrouter"},
+        "ck_tasks_worker_override_type": {"gemini", "codex", "openrouter"},
     },
     "worker_runs": {
-        "ck_worker_runs_worker_type": {"gemini", "codex"},
+        "ck_worker_runs_worker_type": {"gemini", "codex", "openrouter"},
         "ck_worker_runs_worker_run_status": {
             "queued",
             "running",

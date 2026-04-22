@@ -23,12 +23,15 @@ from workers import (
     CodexExecCliRuntimeAdapter,
     GeminiCliRuntimeAdapter,
     GeminiCliWorker,
+    OpenRouterCliRuntimeAdapter,
+    OpenRouterCliWorker,
 )
 from workers.gemini_cli_adapter import (
     GEMINI_EXECUTABLE_ENV_VAR,
     GEMINI_MODEL_ENV_VAR,
     GEMINI_TIMEOUT_ENV_VAR,
 )
+from workers.openrouter_adapter import OPENROUTER_API_KEY_ENV_VAR
 
 ENABLE_TASK_SERVICE_ENV_VAR: Final[str] = "CODE_AGENT_ENABLE_TASK_SERVICE"
 DEFAULT_TASK_MAX_ATTEMPTS_ENV_VAR: Final[str] = "CODE_AGENT_QUEUE_MAX_ATTEMPTS"
@@ -107,12 +110,17 @@ def build_task_service_from_env(
     session_factory = create_session_factory(engine)
     codex_worker = CodexCliWorker(runtime_adapter=CodexExecCliRuntimeAdapter.from_env(resolved_env))
     gemini_worker: GeminiCliWorker | None = None
+    openrouter_worker: OpenRouterCliWorker | None = None
     if any(
         resolved_env.get(k)
         for k in (GEMINI_EXECUTABLE_ENV_VAR, GEMINI_MODEL_ENV_VAR, GEMINI_TIMEOUT_ENV_VAR)
     ):
         gemini_worker = GeminiCliWorker(
             runtime_adapter=GeminiCliRuntimeAdapter.from_env(resolved_env)
+        )
+    if resolved_env.get(OPENROUTER_API_KEY_ENV_VAR):
+        openrouter_worker = OpenRouterCliWorker(
+            runtime_adapter=OpenRouterCliRuntimeAdapter.from_env(resolved_env)
         )
     if outbound_http_clients is None:
         raise RuntimeError(
@@ -142,6 +150,7 @@ def build_task_service_from_env(
         session_factory=session_factory,
         worker=codex_worker,
         gemini_worker=gemini_worker,
+        openrouter_worker=openrouter_worker,
         progress_notifier=CompositeProgressNotifier(progress_notifiers),
         default_task_max_attempts=_coerce_positive_int(
             resolved_env.get(DEFAULT_TASK_MAX_ATTEMPTS_ENV_VAR),
