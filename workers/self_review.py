@@ -562,8 +562,8 @@ def _normalize_diff_new_path(raw_path: str) -> str | None:
         return None
 
     candidate = raw_path
-    if candidate.startswith("b/"):
-        candidate = candidate[2:]
     if candidate.startswith('"') and candidate.endswith('"') and len(candidate) >= 2:
         candidate = candidate[1:-1]
+    if candidate.startswith("b/"):
+        candidate = candidate[2:]
     return candidate.strip() or None

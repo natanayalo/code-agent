@@ -353,7 +353,7 @@ def test_build_targeted_review_context_packet_enforces_code_line_budget(tmp_path
 def test_extract_diff_line_hints_normalizes_prefixed_and_quoted_paths():
     diff_text = "\n".join(
         [
-            '+++ b/"folder/file name.py"',
+            '+++ "b/folder/file name.py"',
             "@@ -4,1 +4,2 @@",
             "+++ plain/path.py",
             "@@ -9,2 +9,0 @@",
