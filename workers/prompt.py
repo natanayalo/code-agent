@@ -1008,15 +1008,16 @@ def build_review_prompt(
         max_characters=DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS,
     )
 
-    guidance_lines = ["## Review Guidance"]
+    guidance_lines: list[str] = []
     if agents_guidance is not None:
         guidance_lines.extend(["AGENTS.md guidance:", "```text", agents_guidance, "```"])
     if agents_assets_guidance is not None:
         guidance_lines.extend([".agents guidance:", "```text", agents_assets_guidance, "```"])
     if review_guidance is not None:
         guidance_lines.extend(["REVIEW.md guidance:", "```text", review_guidance, "```"])
-    if build_test_context is not None:
-        guidance_lines.append(build_test_context)
+    guidance_section = ""
+    if guidance_lines:
+        guidance_section = "\n".join(["## Review Guidance", *guidance_lines])
 
     role_section = "\n".join(
         [
@@ -1077,7 +1078,8 @@ def build_review_prompt(
 
     sections = [
         role_section,
-        "\n".join(guidance_lines),
+        guidance_section,
+        build_test_context or "",
         "\n".join(task_lines),
         output_section,
         "## Review Context Packet",
