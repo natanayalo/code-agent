@@ -425,6 +425,8 @@ class CodexCliWorker(Worker):
                         worker_summary=execution.summary,
                         files_changed=files_changed,
                         diff_text=diff_text,
+                        repo_path=workspace.repo_path,
+                        commands_run=execution.commands_run,
                     )
 
                     try:

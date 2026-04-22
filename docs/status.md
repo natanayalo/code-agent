@@ -92,7 +92,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-115 Add targeted reviewer context packer. (local branch: `task/t-115-targeted-reviewer-context-packer`)
 
 ## Next
 

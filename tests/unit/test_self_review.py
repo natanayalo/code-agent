@@ -2,9 +2,12 @@ import json
 import subprocess
 from unittest.mock import MagicMock, patch
 
+from workers.base import WorkerCommand
 from workers.cli_runtime import CliRuntimeBudgetLedger, CliRuntimeSettings
 from workers.self_review import (
     _extract_json_object,
+    build_self_review_prompt,
+    build_targeted_review_context_packet,
     collect_diff_for_review,
     merge_budget_ledgers,
     parse_review_result,
@@ -146,3 +149,102 @@ def test_extract_json_object():
     assert _extract_json_object("{") is None
     # Valid json mixed with invalid json
     assert _extract_json_object('{invalid} {"a": 1}') == '{"a": 1}'
+
+
+def test_build_targeted_review_context_packet_focuses_on_changed_code(tmp_path):
+    source = tmp_path / "module.py"
+    source.write_text(
+        "\n".join(
+            [
+                "def alpha():",
+                "    return 1",
+                "",
+                "def beta():",
+                "    value = alpha()",
+                "    return value + 1",
+            ]
+        )
+    )
+    diff_text = "\n".join(
+        [
+            "diff --git a/module.py b/module.py",
+            "index 1111111..2222222 100644",
+            "--- a/module.py",
+            "+++ b/module.py",
+            "@@ -3,2 +3,3 @@",
+            " def beta():",
+            "+    print('x')",
+            "     value = alpha()",
+            "     return value + 1",
+        ]
+    )
+
+    packet = build_targeted_review_context_packet(
+        task_text="Update beta behavior",
+        worker_summary="Added logging for debugging.",
+        files_changed=["module.py"],
+        diff_text=diff_text,
+        repo_path=tmp_path,
+        commands_run=[WorkerCommand(command="pytest -q", exit_code=0)],
+        verifier_report={"outcome": "ok"},
+        session_state={"active_goal": "Finish module.py"},
+    )
+
+    assert "### Task Objective" in packet
+    assert "### Changed Files" in packet
+    assert "- module.py" in packet
+    assert "### Command Summary" in packet
+    assert "pytest -q" in packet
+    assert "### Changed-File Code Windows" in packet
+    assert "0004: def beta():" in packet
+    assert "0005:     value = alpha()" in packet
+
+
+def test_build_targeted_review_context_packet_respects_character_budget(tmp_path):
+    source = tmp_path / "big.py"
+    source.write_text("\n".join([f"line_{index}" for index in range(1, 200)]))
+    diff_text = "\n".join(
+        [
+            "diff --git a/big.py b/big.py",
+            "index 1111111..2222222 100644",
+            "--- a/big.py",
+            "+++ b/big.py",
+            "@@ -1,1 +1,20 @@",
+            *[f"+line_{index}" for index in range(1, 50)],
+        ]
+    )
+    packet = build_targeted_review_context_packet(
+        task_text="x" * 600,
+        worker_summary="y" * 600,
+        files_changed=["big.py"],
+        diff_text=diff_text,
+        repo_path=tmp_path,
+        max_characters=350,
+    )
+
+    assert len(packet) <= 420
+    assert "truncated" in packet
+
+
+def test_build_self_review_prompt_includes_review_context_packet(tmp_path):
+    source = tmp_path / "main.py"
+    source.write_text("def run():\n    return 1\n")
+    prompt = build_self_review_prompt(
+        task_text="Update run() behavior",
+        worker_summary="Updated return value.",
+        files_changed=["main.py"],
+        diff_text=(
+            "diff --git a/main.py b/main.py\n"
+            "--- a/main.py\n"
+            "+++ b/main.py\n"
+            "@@ -1,2 +1,2 @@\n"
+            "-def run():\n"
+            "+def run():\n"
+        ),
+        repo_path=tmp_path,
+        commands_run=[WorkerCommand(command="pytest tests/unit", exit_code=1)],
+    )
+
+    assert "## Review Context Packet" in prompt
+    assert "### Diff Excerpt" in prompt
+    assert "pytest tests/unit" in prompt
