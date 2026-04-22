@@ -13,6 +13,7 @@ _TEST_COMMAND_MARKERS = (
     "pnpm test",
     "pytest",
     "python -m unittest",
+    "python3 -m unittest",
     "tox",
     "yarn test",
 )
@@ -23,7 +24,9 @@ _COMPILE_COMMAND_MARKERS = (
     "npm run build",
     "pnpm build",
     "python -m py_compile",
+    "python3 -m py_compile",
     "python -m compileall",
+    "python3 -m compileall",
     "ruff check",
     "tsc",
     "yarn build",
@@ -41,6 +44,7 @@ _COMPILE_SUMMARY_MARKERS = (
     "compilation failed",
     "nameerror",
     "syntaxerror",
+    "typeerror",
     "type error",
 )
 _AUTH_SUMMARY_MARKERS = (
