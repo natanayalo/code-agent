@@ -12,6 +12,7 @@ from typing import Any
 from tools.numeric import coerce_non_negative_int_like
 from workers.base import WorkerCommand
 from workers.cli_runtime import CliRuntimeBudgetLedger, CliRuntimeSettings
+from workers.markdown import markdown_fence_for_content
 from workers.prompt import build_review_prompt
 from workers.review import ReviewResult
 
@@ -25,7 +26,6 @@ DEFAULT_REVIEW_PACKET_CODE_WINDOW_RADIUS = 3
 DEFAULT_REVIEW_PACKET_MAX_CODE_LINES = 120
 DEFAULT_REVIEW_PACKET_MAX_WINDOWS_PER_FILE = 8
 DEFAULT_REVIEW_PACKET_MAX_FILE_BYTES = 2 * 1024 * 1024
-DEFAULT_MARKDOWN_FENCE = "````"
 
 
 def should_skip_self_review(constraints: Mapping[str, Any]) -> bool:
@@ -249,7 +249,7 @@ def build_targeted_review_context_packet(
     normalized_files = sorted({path.strip() for path in files_changed if path.strip()})
     changed_files_block = "\n".join(f"- {path}" for path in normalized_files) or "- <none>"
     command_summary_block = _summarize_commands(commands_run)
-    diff_fence = _markdown_fence_for_content(diff_text)
+    diff_fence = markdown_fence_for_content(diff_text)
     truncated_diff_text = _truncate_block(diff_text, max_characters // 2)
     diff_block = f"{diff_fence}diff\n{truncated_diff_text}\n{diff_fence}"
     code_windows_block = _build_changed_file_windows(
@@ -522,7 +522,7 @@ def _build_changed_file_windows(
                 f"{line_number:04d}: {line_text}"
                 for line_number, line_text in enumerate(section_lines, start=first_line)
             )
-            code_fence = _markdown_fence_for_content(numbered_lines)
+            code_fence = markdown_fence_for_content(numbered_lines)
             windows.append(
                 "\n".join(
                     [
@@ -574,11 +574,3 @@ def _normalize_diff_new_path(raw_path: str) -> str | None:
     if candidate.startswith("b/"):
         candidate = candidate[2:]
     return candidate.strip() or None
-
-
-def _markdown_fence_for_content(content: str, *, minimum: int = len(DEFAULT_MARKDOWN_FENCE)) -> str:
-    """Return a backtick fence that cannot collide with backtick runs in content."""
-    max_run = 0
-    for match in re.finditer(r"`+", content):
-        max_run = max(max_run, len(match.group(0)))
-    return "`" * max(minimum, max_run + 1)

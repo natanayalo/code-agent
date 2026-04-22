@@ -10,6 +10,7 @@ from typing import Any
 
 from tools import DEFAULT_MCP_TOOL_CLIENT, McpToolClient, ToolDefinition, ToolRegistry
 from workers.base import WorkerRequest
+from workers.markdown import markdown_fence_for_content
 
 DEFAULT_REPO_LISTING_MAX_DEPTH = 2
 DEFAULT_REPO_LISTING_MAX_ENTRIES = 40
@@ -39,17 +40,9 @@ _SKIPPED_PATH_NAMES = {
 }
 
 
-def _markdown_fence_for_content(content: str, *, minimum: int = 4) -> str:
-    """Return a backtick fence that cannot collide with backtick runs in content."""
-    max_run = 0
-    for match in re.finditer(r"`+", content):
-        max_run = max(max_run, len(match.group(0)))
-    return "`" * max(minimum, max_run + 1)
-
-
 def _fenced_text_block_lines(label: str, content: str) -> list[str]:
     """Render a text block with a collision-safe markdown fence."""
-    fence = _markdown_fence_for_content(content)
+    fence = markdown_fence_for_content(content)
     return [label, f"{fence}text", content, fence]
 
 
@@ -1101,9 +1094,9 @@ def build_review_prompt(
         guidance_section,
         build_test_context or "",
         "\n".join(task_lines),
-        output_section,
         "## Review Context Packet",
         review_context_packet,
+        output_section,
     ]
     return "\n\n".join(section for section in sections if section.strip())
 
