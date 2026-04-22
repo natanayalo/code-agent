@@ -140,6 +140,26 @@ def test_build_review_prompt_uses_collision_safe_guidance_fences(tmp_path: Path)
     assert "\n````text\n" in rendered_prompt
 
 
+def test_build_review_prompt_enforces_shared_guidance_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review prompt should share one budget across repo/review guidance and build context."""
+    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 120)
+    (tmp_path / "AGENTS.md").write_text("A" * 300, encoding="utf-8")
+    (tmp_path / "REVIEW.md").write_text("B" * 200, encoding="utf-8")
+    (tmp_path / "package.json").write_text('{"scripts":{"test":"pytest -q"}}', encoding="utf-8")
+
+    rendered_prompt = build_review_prompt(
+        workspace_path=tmp_path,
+        review_context_packet="Packet payload",
+    )
+
+    assert "AGENTS.md guidance:" in rendered_prompt
+    assert "## Build & Test" not in rendered_prompt
+    assert "REVIEW.md guidance:" not in rendered_prompt
+
+
 def test_build_system_prompt_includes_build_test_section_from_repo_config(tmp_path: Path) -> None:
     """Build/test context should be injected when common config files are present."""
     (tmp_path / "package.json").write_text(
