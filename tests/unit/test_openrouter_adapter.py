@@ -155,6 +155,39 @@ def test_openrouter_adapter_next_step_accepts_markdown_fenced_json(
     assert step.final_output == "done"
 
 
+def test_openrouter_adapter_next_step_accepts_preamble_before_fenced_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adapter should extract fenced JSON even when preamble text is present."""
+
+    class _PreambleFencedResponseOpenAI(_FakeOpenAI):
+        def _create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=(
+                                "Here is the JSON response:\n\n"
+                                "```json\n"
+                                '{"kind":"final","tool_name":null,"tool_input":null,"final_output":"done"}\n'
+                                "```"
+                            )
+                        )
+                    )
+                ]
+            )
+
+    def _fake_openai(**kwargs):
+        return _PreambleFencedResponseOpenAI(**kwargs)
+
+    monkeypatch.setattr("workers.openrouter_adapter.OpenAI", _fake_openai)
+    adapter = OpenRouterCliRuntimeAdapter(api_key="test-key")
+    step = adapter.next_step([CliRuntimeMessage(role="system", content="Proceed")])
+    assert step.kind == "final"
+    assert step.final_output == "done"
+
+
 def test_message_content_to_text_joins_text_blocks() -> None:
     """Adapter content normalization should join text blocks from list content."""
     content = [

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final
@@ -140,19 +141,16 @@ def _message_content_to_text(content: object) -> str:
 def _unwrap_markdown_json_fence(text: str) -> str:
     """Extract JSON payload from a fenced markdown block when present."""
     stripped = text.strip()
-    if not stripped.startswith("```"):
+    if not stripped:
         return stripped
-
-    lines = stripped.splitlines()
-    if not lines:
-        return stripped
-    if lines[0].startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    if lines and lines[0].strip().lower() == "json":
-        lines = lines[1:]
-    return "\n".join(lines).strip()
+    fenced_match = re.search(
+        r"```(?:json)?\s*(.*?)```",
+        stripped,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if fenced_match is not None:
+        return fenced_match.group(1).strip()
+    return stripped
 
 
 class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
