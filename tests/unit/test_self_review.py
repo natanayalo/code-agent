@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -248,3 +249,101 @@ def test_build_self_review_prompt_includes_review_context_packet(tmp_path):
     assert "## Review Context Packet" in prompt
     assert "### Diff Excerpt" in prompt
     assert "pytest tests/unit" in prompt
+
+
+def test_build_targeted_review_context_packet_includes_deletion_anchor_window(tmp_path):
+    source = tmp_path / "delete_case.py"
+    source.write_text(
+        "\n".join(
+            [
+                "def before():",
+                "    return 1",
+                "",
+                "def removed():",
+                "    return 2",
+                "",
+                "def after():",
+                "    return 3",
+            ]
+        )
+    )
+    diff_text = "\n".join(
+        [
+            "diff --git a/delete_case.py b/delete_case.py",
+            "index 1111111..2222222 100644",
+            "--- a/delete_case.py",
+            "+++ b/delete_case.py",
+            "@@ -4,2 +4,0 @@",
+            "-def removed():",
+            "-    return 2",
+        ]
+    )
+
+    packet = build_targeted_review_context_packet(
+        task_text="Remove dead code",
+        worker_summary="Removed the obsolete helper.",
+        files_changed=["delete_case.py"],
+        diff_text=diff_text,
+        repo_path=tmp_path,
+    )
+
+    assert "delete_case.py (1-20)" not in packet
+    assert "delete_case.py (" in packet
+    assert "0004: def removed():" in packet
+
+
+def test_build_targeted_review_context_packet_uses_disjoint_windows(tmp_path):
+    source = tmp_path / "disjoint.py"
+    source.write_text("\n".join([f"line_{index}" for index in range(1, 61)]))
+    diff_text = "\n".join(
+        [
+            "diff --git a/disjoint.py b/disjoint.py",
+            "index 1111111..2222222 100644",
+            "--- a/disjoint.py",
+            "+++ b/disjoint.py",
+            "@@ -5,1 +5,1 @@",
+            "-line_5",
+            "+line_5_changed",
+            "@@ -50,1 +50,1 @@",
+            "-line_50",
+            "+line_50_changed",
+        ]
+    )
+
+    packet = build_targeted_review_context_packet(
+        task_text="Update two distant lines",
+        worker_summary="Applied two focused edits.",
+        files_changed=["disjoint.py"],
+        diff_text=diff_text,
+        repo_path=tmp_path,
+    )
+
+    assert "disjoint.py (2-8)" in packet
+    assert "disjoint.py (47-53)" in packet
+
+
+def test_build_targeted_review_context_packet_enforces_code_line_budget(tmp_path):
+    source = tmp_path / "budget.py"
+    source.write_text("\n".join([f"line_{index}" for index in range(1, 401)]))
+    diff_text = "\n".join(
+        [
+            "diff --git a/budget.py b/budget.py",
+            "index 1111111..2222222 100644",
+            "--- a/budget.py",
+            "+++ b/budget.py",
+            "@@ -1,1 +1,200 @@",
+            *[f"+line_{index}" for index in range(1, 201)],
+        ]
+    )
+
+    packet = build_targeted_review_context_packet(
+        task_text="Large insert",
+        worker_summary="Added many lines.",
+        files_changed=["budget.py"],
+        diff_text=diff_text,
+        repo_path=tmp_path,
+    )
+
+    code_lines = [line for line in packet.splitlines() if re.match(r"^\d{4}:", line)]
+    assert len(code_lines) <= 120
+    assert "window truncated to respect 120-line packet budget" in packet

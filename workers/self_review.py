@@ -22,6 +22,7 @@ DEFAULT_REVIEW_PACKET_MAX_FILES = 8
 DEFAULT_REVIEW_PACKET_MAX_COMMANDS = 12
 DEFAULT_REVIEW_PACKET_CODE_WINDOW_RADIUS = 3
 DEFAULT_REVIEW_PACKET_MAX_CODE_LINES = 120
+DEFAULT_REVIEW_PACKET_MAX_WINDOWS_PER_FILE = 8
 
 
 def should_skip_self_review(constraints: Mapping[str, Any]) -> bool:
@@ -402,11 +403,11 @@ def _summarize_commands(commands_run: Sequence[WorkerCommand]) -> str:
     return "\n".join(lines)
 
 
-def _extract_diff_line_hints(diff_text: str) -> dict[str, list[int]]:
-    """Parse git diff hunks into per-file line-number hints on the new-file side."""
-    line_hints: dict[str, set[int]] = {}
+def _extract_diff_line_hints(diff_text: str) -> dict[str, list[tuple[int, int]]]:
+    """Parse git diff hunks into per-file changed ranges on the new-file side."""
     active_path: str | None = None
-    hunk_pattern = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+    line_hints: dict[str, list[tuple[int, int]]] = {}
+    hunk_pattern = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
     for line in diff_text.splitlines():
         if line.startswith("+++ /dev/null"):
@@ -414,21 +415,27 @@ def _extract_diff_line_hints(diff_text: str) -> dict[str, list[int]]:
             continue
         if line.startswith("+++ b/"):
             active_path = line[6:].strip()
-            line_hints.setdefault(active_path, set())
+            line_hints.setdefault(active_path, [])
             continue
         if not active_path or not line.startswith("@@"):
             continue
         match = hunk_pattern.search(line)
         if match is None:
             continue
-        start = int(match.group(1))
-        count = int(match.group(2) or "1")
-        if count <= 0:
-            continue
-        end = min(start + count, start + 40)
-        line_hints[active_path].update(range(start, end))
+        old_start = int(match.group(1))
+        new_start = int(match.group(3))
+        new_count = int(match.group(4) or "1")
+        if new_count > 0:
+            range_start = max(1, new_start)
+            range_end = max(range_start, new_start + new_count - 1)
+        else:
+            # Pure deletions have no new-file span; anchor at the deletion point.
+            anchor = max(1, new_start if new_start > 0 else old_start)
+            range_start = anchor
+            range_end = anchor
+        line_hints.setdefault(active_path, []).append((range_start, range_end))
 
-    return {path: sorted(numbers) for path, numbers in line_hints.items() if numbers}
+    return {path: _merge_line_ranges(ranges) for path, ranges in line_hints.items() if ranges}
 
 
 def _build_changed_file_windows(
@@ -465,35 +472,81 @@ def _build_changed_file_windows(
             windows.append(f"- {file_path}: [read failed: {exc}]")
             continue
 
-        hint_lines = line_hints_by_file.get(file_path)
-        if hint_lines:
-            first_line = max(1, hint_lines[0] - DEFAULT_REVIEW_PACKET_CODE_WINDOW_RADIUS)
-            last_line = min(
-                len(file_lines),
-                hint_lines[-1] + DEFAULT_REVIEW_PACKET_CODE_WINDOW_RADIUS,
-            )
+        hint_ranges = line_hints_by_file.get(file_path, [])
+        if hint_ranges:
+            window_ranges = [
+                (
+                    max(1, start - DEFAULT_REVIEW_PACKET_CODE_WINDOW_RADIUS),
+                    min(len(file_lines), end + DEFAULT_REVIEW_PACKET_CODE_WINDOW_RADIUS),
+                )
+                for start, end in hint_ranges
+            ]
+            window_ranges = _merge_line_ranges(window_ranges)
         else:
-            first_line = 1
-            last_line = min(len(file_lines), 20)
-        if last_line < first_line:
+            window_ranges = [(1, min(len(file_lines), 20))]
+
+        if not window_ranges:
             windows.append(f"- {file_path}: [empty]")
             continue
 
-        section_lines = file_lines[first_line - 1 : last_line]
-        numbered_lines = "\n".join(
-            f"{line_number:04d}: {line_text}"
-            for line_number, line_text in enumerate(section_lines, start=first_line)
-        )
-        windows.append(
-            "\n".join(
-                [
-                    f"- {file_path}",
-                    "```text",
-                    numbered_lines or "<empty>",
-                    "```",
-                ]
+        file_window_count = 0
+        for first_line, last_line in window_ranges:
+            if total_lines >= DEFAULT_REVIEW_PACKET_MAX_CODE_LINES:
+                break
+            if file_window_count >= DEFAULT_REVIEW_PACKET_MAX_WINDOWS_PER_FILE:
+                windows.append(
+                    f"- {file_path}: [additional windows omitted after "
+                    f"{DEFAULT_REVIEW_PACKET_MAX_WINDOWS_PER_FILE}]"
+                )
+                break
+            if last_line < first_line:
+                continue
+            remaining_lines = DEFAULT_REVIEW_PACKET_MAX_CODE_LINES - total_lines
+            if remaining_lines <= 0:
+                break
+            clipped_last_line = min(last_line, first_line + remaining_lines - 1)
+            if clipped_last_line < first_line:
+                break
+
+            section_lines = file_lines[first_line - 1 : clipped_last_line]
+            numbered_lines = "\n".join(
+                f"{line_number:04d}: {line_text}"
+                for line_number, line_text in enumerate(section_lines, start=first_line)
             )
-        )
-        total_lines += len(section_lines)
+            windows.append(
+                "\n".join(
+                    [
+                        f"- {file_path} ({first_line}-{clipped_last_line})",
+                        "```text",
+                        numbered_lines or "<empty>",
+                        "```",
+                    ]
+                )
+            )
+            total_lines += len(section_lines)
+            file_window_count += 1
+            if clipped_last_line < last_line:
+                windows.append(
+                    f"- {file_path}: [window truncated to respect "
+                    f"{DEFAULT_REVIEW_PACKET_MAX_CODE_LINES}-line packet budget]"
+                )
+                break
 
     return "\n".join(windows) if windows else "<none>"
+
+
+def _merge_line_ranges(
+    ranges: Sequence[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Merge overlapping or adjacent inclusive line ranges."""
+    if not ranges:
+        return []
+    normalized = sorted((min(start, end), max(start, end)) for start, end in ranges)
+    merged: list[tuple[int, int]] = [normalized[0]]
+    for start, end in normalized[1:]:
+        current_start, current_end = merged[-1]
+        if start <= current_end + 1:
+            merged[-1] = (current_start, max(current_end, end))
+            continue
+        merged.append((start, end))
+    return merged
