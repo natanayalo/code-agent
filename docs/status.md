@@ -85,10 +85,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-108 Add planning/decomposition step for complex tasks. PR: [#91](https://github.com/natanayalo/code-agent/pull/91)
 - T-109 Add context condenser for long-running agent loops. PR: [#92](https://github.com/natanayalo/code-agent/pull/92)
 - T-110 Add structured failure taxonomy for routing and recovery. PR: [#93](https://github.com/natanayalo/code-agent/pull/93)
+- T-114 Add shared review result schema and persistence. PR: [#94](https://github.com/natanayalo/code-agent/pull/94)
 
 ## In Progress
 
-- T-114 Add shared review result schema and persistence. Status: in progress on local branch `task/t-114-shared-review-schema`.
+- None
 
 ## Next
 
