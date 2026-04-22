@@ -86,6 +86,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-109 Add context condenser for long-running agent loops. PR: [#92](https://github.com/natanayalo/code-agent/pull/92)
 - T-110 Add structured failure taxonomy for routing and recovery. PR: [#93](https://github.com/natanayalo/code-agent/pull/93)
 - T-114 Add shared review result schema and persistence. PR: [#94](https://github.com/natanayalo/code-agent/pull/94)
+- T-111 Add bounded worker self-review before declaring completion. PR: [#95](https://github.com/natanayalo/code-agent/pull/95)
 
 ## In Progress
 

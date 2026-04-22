@@ -258,3 +258,147 @@ def test_gemini_cli_worker_cleanup_applied_on_success(tmp_path: Path) -> None:
 
     assert result.artifacts == []
     assert "cleaned up" in (result.summary or "").lower()
+
+
+def test_gemini_cli_worker_self_review_with_findings(tmp_path: Path) -> None:
+    """Worker should do a fix pass when self-review has findings."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): DockerShellCommandResult(
+                command=_git_status_command(container.working_dir),
+                exit_code=0,
+                output="",
+                duration_seconds=0.0,
+            )
+        }
+    )
+    import json
+
+    findings_json = json.dumps(
+        {
+            "summary": "found issues",
+            "confidence": 1.0,
+            "outcome": "findings",
+            "findings": [
+                {
+                    "severity": "low",
+                    "category": "style",
+                    "confidence": 1.0,
+                    "file_path": "a.py",
+                    "line_start": 1,
+                    "line_end": 1,
+                    "title": "t",
+                    "why_it_matters": "w",
+                    "evidence": "e",
+                    "suggested_fix": "f",
+                }
+            ],
+        }
+    )
+
+    adapter = _ScriptedAdapter(
+        [
+            # main loop completes
+            CliRuntimeStep(kind="final", final_output="Done initial."),
+            # self review returns findings
+            CliRuntimeStep(kind="final", final_output=findings_json),
+            # fix loop completes
+            CliRuntimeStep(kind="final", final_output="Done fix."),
+            # second self review returns no findings
+            CliRuntimeStep(
+                kind="final",
+                final_output=json.dumps(
+                    {
+                        "summary": "all fixed",
+                        "confidence": 1.0,
+                        "outcome": "no_findings",
+                        "findings": [],
+                    }
+                ),
+            ),
+        ]
+    )
+    worker = GeminiCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: session,
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+    )
+
+    result = asyncio.run(
+        worker.run(WorkerRequest(task_text="task", repo_url="https://example.com/repo"))
+    )
+
+    assert result.status == "success"
+    assert "Done fix." in (result.summary or "")
+    assert result.review_result is not None
+    assert result.review_result.outcome == "no_findings"
+
+
+def test_gemini_cli_worker_self_review_exhausts_budget(tmp_path: Path) -> None:
+    """Worker should mark as failure if budget is exceeded during fix loop."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): DockerShellCommandResult(
+                command=_git_status_command(container.working_dir),
+                exit_code=0,
+                output="",
+                duration_seconds=0.0,
+            )
+        }
+    )
+    import json
+
+    findings_json = json.dumps(
+        {
+            "summary": "found issues",
+            "confidence": 1.0,
+            "outcome": "findings",
+            "findings": [
+                {
+                    "severity": "low",
+                    "category": "style",
+                    "confidence": 1.0,
+                    "file_path": "a.py",
+                    "line_start": 1,
+                    "line_end": 1,
+                    "title": "t",
+                    "why_it_matters": "w",
+                    "evidence": "e",
+                    "suggested_fix": "f",
+                }
+            ],
+        }
+    )
+
+    adapter = _ScriptedAdapter(
+        [
+            # main loop completes
+            CliRuntimeStep(kind="final", final_output="Done initial."),
+            # self review returns findings
+            CliRuntimeStep(kind="final", final_output=findings_json),
+            # but budget is 0 so it won't even call the adapter for fix loop!
+        ]
+    )
+    from workers.cli_runtime import CliRuntimeSettings
+
+    worker = GeminiCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: session,
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+        runtime_settings=CliRuntimeSettings(max_iterations=1),  # exactly enough for initial run
+    )
+
+    result = asyncio.run(
+        worker.run(WorkerRequest(task_text="task", repo_url="https://example.com/repo"))
+    )
+
+    assert result.status == "failure"
+    assert "exhausted its remaining budget" in (result.summary or "")
