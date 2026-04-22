@@ -720,20 +720,23 @@ def _compute_route_decision(
     # T-071: heuristic 1 — escalate to an alternate worker after prior failure.
     if state.attempt_count > 0 and state.dispatch.worker_type is not None:
         prior_worker: WorkerType = state.dispatch.worker_type
+        escalation_reason: str | None = None
         if state.verification is not None and state.verification.status == "failed":
             verification_failure_kind = state.verification.failure_kind or "unknown"
-            escalation_reason: str | None = (
+            escalation_reason = (
                 "verifier_failed_previous_run"
                 if verification_failure_kind in _VERIFICATION_FAILURE_REROUTE_KINDS
                 else None
             )
-        elif state.result is not None and state.result.status != "success":
+        if (
+            escalation_reason is None
+            and state.result is not None
+            and state.result.status != "success"
+        ):
             failure_kind = state.result.failure_kind or "unknown"
             escalation_reason = (
                 "previous_worker_failed" if failure_kind in _WORKER_FAILURE_REROUTE_KINDS else None
             )
-        else:
-            escalation_reason = None
 
         if escalation_reason is not None:
             # TODO: generalise alternate selection when the worker pool grows beyond two.
