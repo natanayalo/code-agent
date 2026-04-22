@@ -39,7 +39,7 @@ _SKIPPED_PATH_NAMES = {
 }
 
 
-def _markdown_fence_for_content(content: str, *, minimum: int = 3) -> str:
+def _markdown_fence_for_content(content: str, *, minimum: int = 4) -> str:
     """Return a backtick fence that cannot collide with backtick runs in content."""
     max_run = 0
     for match in re.finditer(r"`+", content):
