@@ -137,6 +137,24 @@ def _message_content_to_text(content: object) -> str:
     return ""
 
 
+def _unwrap_markdown_json_fence(text: str) -> str:
+    """Extract JSON payload from a fenced markdown block when present."""
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+
+    lines = stripped.splitlines()
+    if not lines:
+        return stripped
+    if lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    if lines and lines[0].strip().lower() == "json":
+        lines = lines[1:]
+    return "\n".join(lines).strip()
+
+
 class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
     """Resolve runtime turns via OpenRouter's OpenAI-compatible chat API."""
 
@@ -229,6 +247,7 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
             raise RuntimeError("OpenRouter adapter returned no choices.") from exc
 
         raw_json = _message_content_to_text(getattr(first_choice.message, "content", "")).strip()
+        raw_json = _unwrap_markdown_json_fence(raw_json)
         if not raw_json:
             raise RuntimeError("OpenRouter adapter returned an empty response body.")
         try:
