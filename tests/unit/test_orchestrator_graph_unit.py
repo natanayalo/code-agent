@@ -426,6 +426,56 @@ def test_compute_route_previous_worker_failed_escalation():
     assert route.route_reason == "previous_worker_failed"
 
 
+def test_compute_route_uses_worker_failure_kind_when_verifier_failure_kind_does_not_reroute():
+    """Rerouteable worker failures must still escalate after non-rerouteable verifier failures."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "fix the code"},
+            "attempt_count": 1,
+            "dispatch": {"worker_type": "codex"},
+            "verification": {
+                "status": "failed",
+                "failure_kind": "worker_failure",
+                "summary": "worker status failed",
+                "items": [{"label": "worker_status", "status": "failed"}],
+            },
+            "result": {
+                "status": "failure",
+                "failure_kind": "test",
+                "commands_run": [],
+                "files_changed": [],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "previous_worker_failed"
+
+
+def test_compute_route_keeps_worker_for_non_rerouteable_failure_kind():
+    """Environment/auth failures should not trigger automatic cross-worker reroute."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "fix the code"},
+            "attempt_count": 1,
+            "dispatch": {"worker_type": "codex"},
+            "result": {
+                "status": "error",
+                "failure_kind": "provider_auth",
+                "commands_run": [],
+                "files_changed": [],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "codex"
+    assert route.route_reason == "cheap_mechanical_change"
+
+
 def test_compute_route_escalation_fails_explicitly_when_alternate_unavailable():
     """T-071: escalation needed but alternate unavailable → explicit failure, not blind retry."""
     state = OrchestratorState.model_validate(
@@ -748,6 +798,7 @@ def test_verify_result_failed_tests():
     )
     res = verify_result(state)
     assert res["verification"]["status"] == "failed"
+    assert res["verification"]["failure_kind"] == "test_regression"
     assert res["verification"]["items"][1]["label"] == "test_results"
     assert res["verification"]["items"][1]["status"] == "failed"
 

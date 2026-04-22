@@ -6,13 +6,28 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class WorkerModel(BaseModel):
     """Base model for worker interface boundaries."""
 
     model_config = ConfigDict(extra="forbid")
+
+
+FailureKind = Literal[
+    "compile",
+    "test",
+    "tool_runtime",
+    "sandbox_infra",
+    "timeout",
+    "budget_exceeded",
+    "permission_denied",
+    "context_window",
+    "provider_error",
+    "provider_auth",
+    "unknown",
+]
 
 
 class WorkerRequest(WorkerModel):
@@ -61,6 +76,7 @@ class WorkerResult(WorkerModel):
 
     status: Literal["success", "failure", "error"]
     summary: str | None = None
+    failure_kind: FailureKind | None = None
     requested_permission: str | None = None
     budget_usage: dict[str, Any] | None = None
     commands_run: list[WorkerCommand] = Field(default_factory=list)
@@ -68,6 +84,15 @@ class WorkerResult(WorkerModel):
     test_results: list[TestResult] = Field(default_factory=list)
     artifacts: list[ArtifactReference] = Field(default_factory=list)
     next_action_hint: str | None = None
+
+    @model_validator(mode="after")
+    def _normalize_failure_kind(self) -> WorkerResult:
+        """Ensure non-success outcomes always carry a typed failure kind."""
+        if self.status == "success":
+            self.failure_kind = None
+        elif self.failure_kind is None:
+            self.failure_kind = "unknown"
+        return self
 
 
 class Worker(ABC):

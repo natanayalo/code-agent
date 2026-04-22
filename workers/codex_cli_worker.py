@@ -44,6 +44,7 @@ from workers.cli_runtime import (
     run_cli_runtime_loop,
     settings_from_budget,
 )
+from workers.failure_taxonomy import classify_failure_kind
 from workers.post_run_lint import apply_post_run_lint_format
 from workers.prompt import build_system_prompt
 
@@ -135,6 +136,12 @@ def _worker_result_from_execution(
     return WorkerResult(
         status=execution.status,
         summary=execution.summary,
+        failure_kind=classify_failure_kind(
+            status=execution.status,
+            stop_reason=execution.stop_reason,
+            summary=execution.summary,
+            commands_run=execution.commands_run,
+        ),
         requested_permission=requested_permission,
         budget_usage=budget_usage,
         commands_run=execution.commands_run,
@@ -165,6 +172,7 @@ def _workspace_error_result(
     return WorkerResult(
         status="error",
         summary=f"{summary_prefix}: {exc}",
+        failure_kind="sandbox_infra",
         artifacts=_workspace_artifacts(workspace),
         next_action_hint=next_action_hint,
     )
@@ -280,6 +288,7 @@ class CodexCliWorker(Worker):
                 summary=(
                     "CodexCliWorker requires a non-empty repo_url to provision a sandbox workspace."
                 ),
+                failure_kind="unknown",
                 next_action_hint="provide_repo_url",
             )
 
@@ -311,6 +320,7 @@ class CodexCliWorker(Worker):
             return WorkerResult(
                 status="error",
                 summary=f"CodexCliWorker failed to provision a workspace: {exc}",
+                failure_kind="sandbox_infra",
                 next_action_hint="inspect_worker_configuration",
             )
 
@@ -394,6 +404,7 @@ class CodexCliWorker(Worker):
             if cancel_token and cancel_token():
                 result.status = "error"
                 result.summary = "CLI runtime loop was cancelled by the orchestrator timeout."
+                result.failure_kind = "timeout"
                 result.next_action_hint = "inspect_workspace_artifacts"
             run_succeeded = result.status == "success"
         except (

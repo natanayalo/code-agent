@@ -770,7 +770,10 @@ def _serialize_verification_report(report: object | None) -> dict[str, Any] | No
     if report is None:
         return None
     if hasattr(report, "model_dump"):
-        return report.model_dump(mode="json")
+        serialized = report.model_dump(mode="json")
+        if serialized.get("failure_kind") is None:
+            serialized.pop("failure_kind", None)
+        return serialized
     if isinstance(report, Mapping):
         return dict(report)
     raise TypeError(f"Unsupported verification report type: {type(report).__name__}")

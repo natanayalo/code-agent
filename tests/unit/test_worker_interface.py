@@ -35,3 +35,9 @@ def test_worker_result_requires_known_status_values() -> None:
     """Worker result models reject unsupported status strings."""
     with pytest.raises(ValidationError, match="Input should be"):
         WorkerResult(status="unknown")
+
+
+def test_worker_result_non_success_defaults_failure_kind() -> None:
+    """Failure outcomes should always carry an explicit failure taxonomy value."""
+    result = WorkerResult(status="failure", summary="something failed")
+    assert result.failure_kind == "unknown"

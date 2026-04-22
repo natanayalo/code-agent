@@ -53,6 +53,9 @@ If first worker fails:
 4. if failure is environment-related, retry same worker after environment fix
 5. never retry blindly more than configured limit
 
+The orchestrator should branch on typed `failure_kind` / verifier `failure_kind` values
+instead of parsing free-form summaries.
+
 ## Route reason
 
 Every route decision must save:
