@@ -238,7 +238,7 @@ class OpenRouterCliWorker(Worker):
         except asyncio.CancelledError:
             cancel_event.set()
             try:
-                return await asyncio.wait_for(asyncio.shield(future), timeout=2.0)
+                return await asyncio.wait_for(asyncio.shield(future), timeout=10.0)
             except TimeoutError as exc:
                 raise asyncio.CancelledError("Graceful shutdown of sync worker timed out.") from exc
 
