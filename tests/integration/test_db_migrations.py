@@ -54,6 +54,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "test_report",
             "result_summary",
             "workspace",
+            "review_result",
         },
     },
     "task_timeline_events": {

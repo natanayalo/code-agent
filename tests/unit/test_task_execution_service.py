@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base, utc_now
-from db.enums import TaskStatus, WorkerRunStatus, WorkerType
+from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
 from orchestrator import (
     ApprovalCheckpoint,
     MemoryContext,
@@ -38,7 +38,7 @@ from repositories import (
     create_session_factory,
     session_scope,
 )
-from workers import ArtifactReference, Worker, WorkerRequest
+from workers import ArtifactReference, ReviewFinding, ReviewResult, Worker, WorkerRequest
 
 
 class _StaticWorker(Worker):
@@ -1629,6 +1629,112 @@ def test_persist_execution_outcome_persists_session_state_update() -> None:
         assert session_state.decisions_made == {"worker": "codex"}
         assert session_state.identified_risks == {"network": "restricted"}
         assert session_state.files_touched == ["orchestrator/execution.py"]
+
+
+def test_persist_execution_outcome_persists_structured_review_result_artifact() -> None:
+    """Structured review output should be persisted as a dedicated run artifact."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Persist review artifact",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+    _, persisted = service.create_task(submission)
+
+    state = OrchestratorState(
+        current_step="persist_memory",
+        session=SessionRef(
+            session_id=persisted.session_id,
+            user_id=persisted.user_id,
+            channel=persisted.channel,
+            external_thread_id=persisted.external_thread_id,
+            active_task_id=persisted.task_id,
+            status="active",
+        ),
+        task=TaskRequest(
+            task_id=persisted.task_id,
+            task_text=submission.task_text,
+            repo_url=submission.repo_url,
+            branch=submission.branch,
+            priority=submission.priority,
+            worker_override=submission.worker_override,
+            constraints=dict(submission.constraints),
+            budget=dict(submission.budget),
+        ),
+        normalized_task_text=submission.task_text,
+        task_kind="implementation",
+        memory=MemoryContext(),
+        route=RouteDecision(
+            chosen_worker="codex",
+            route_reason="cheap_mechanical_change",
+            override_applied=False,
+        ),
+        approval=ApprovalCheckpoint(),
+        dispatch=WorkerDispatch(worker_type="codex"),
+        result=WorkerResult(
+            status="success",
+            summary="done",
+            review_result=ReviewResult(
+                reviewer_kind="worker_self_review",
+                summary="One issue found in changed logic.",
+                confidence=0.82,
+                outcome="findings",
+                findings=[
+                    ReviewFinding(
+                        severity="medium",
+                        category="logic",
+                        confidence=0.82,
+                        file_path="workers/codex_cli_worker.py",
+                        line_start=120,
+                        line_end=121,
+                        title="Missing empty-result guard",
+                        why_it_matters="A missing guard can raise unexpectedly for empty outputs.",
+                        evidence="Code path assumes non-empty command output before indexing.",
+                        suggested_fix="Guard against empty output before indexing.",
+                    )
+                ],
+            ),
+        ),
+    )
+
+    service._persist_execution_outcome(
+        task_id=persisted.task_id,
+        state=state,
+        started_at=datetime.now(),
+        finished_at=datetime.now(),
+    )
+
+    task_snapshot = service.get_task(persisted.task_id)
+    assert task_snapshot is not None
+    assert task_snapshot.latest_run is not None
+    review_entries = [
+        artifact
+        for artifact in task_snapshot.latest_run.artifact_index
+        if artifact.get("artifact_type") == ArtifactType.REVIEW_RESULT.value
+    ]
+    assert len(review_entries) == 1
+    review_payload = review_entries[0]["artifact_metadata"]["review_result"]
+    assert review_payload["outcome"] == "findings"
+    assert review_payload["findings"][0]["file_path"] == "workers/codex_cli_worker.py"
+    assert review_payload["findings"][0]["line_start"] == 120
+
+    persisted_artifacts = [
+        artifact
+        for artifact in task_snapshot.latest_run.artifacts
+        if artifact.artifact_type == ArtifactType.REVIEW_RESULT.value
+    ]
+    assert len(persisted_artifacts) == 1
+    assert persisted_artifacts[0].artifact_metadata == {"review_result": review_payload}
 
 
 def test_persist_execution_outcome_accepts_raw_verification_mapping() -> None:

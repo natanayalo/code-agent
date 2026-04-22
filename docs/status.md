@@ -88,7 +88,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-114 Add shared review result schema and persistence. Status: in progress on local branch `task/t-114-shared-review-schema`.
 
 ## Next
 

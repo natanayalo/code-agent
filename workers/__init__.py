@@ -13,6 +13,7 @@ from workers.codex_cli_worker import CodexCliWorker
 from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter
 from workers.gemini_cli_adapter import GeminiCliRuntimeAdapter
 from workers.gemini_cli_worker import GeminiCliWorker
+from workers.review import ReviewFinding, ReviewResult
 
 __all__ = [
     "ArtifactReference",
@@ -21,6 +22,8 @@ __all__ = [
     "FailureKind",
     "GeminiCliRuntimeAdapter",
     "GeminiCliWorker",
+    "ReviewFinding",
+    "ReviewResult",
     "TestResult",
     "Worker",
     "WorkerCommand",
