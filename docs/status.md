@@ -89,7 +89,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-111 Add bounded worker self-review before declaring completion (current local slice, unpublished)
 
 ## Next
 

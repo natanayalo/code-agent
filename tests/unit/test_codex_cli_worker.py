@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,7 @@ from sandbox import (
     WorkspaceHandle,
 )
 from tools import DEFAULT_TOOL_REGISTRY, ToolRegistry
-from workers import CodexCliWorker, WorkerRequest
+from workers import CodexCliWorker, ReviewResult, WorkerRequest
 from workers.cli_runtime import CliRuntimeMessage, CliRuntimeStep
 
 
@@ -107,6 +108,45 @@ def _command_result(command: str, *, output: str, exit_code: int = 0) -> DockerS
 
 def _git_status_command(container_workdir: str = "/workspace/repo") -> str:
     return f"git -C {container_workdir} status --porcelain=v1 -z --untracked-files=all"
+
+
+def _review_result_json(
+    *,
+    outcome: str,
+    summary: str,
+) -> str:
+    if outcome == "no_findings":
+        payload = ReviewResult(
+            reviewer_kind="worker_self_review",
+            summary=summary,
+            confidence=0.92,
+            outcome="no_findings",
+            findings=[],
+        )
+    else:
+        payload = ReviewResult.model_validate(
+            {
+                "reviewer_kind": "worker_self_review",
+                "summary": summary,
+                "confidence": 0.88,
+                "outcome": "findings",
+                "findings": [
+                    {
+                        "severity": "medium",
+                        "category": "missing-test",
+                        "confidence": 0.8,
+                        "file_path": "note.txt",
+                        "line_start": 1,
+                        "line_end": 1,
+                        "title": "Missing follow-up assertion",
+                        "why_it_matters": "Behavior can regress without a focused test.",
+                        "evidence": "No test command appears in the run transcript.",
+                        "suggested_fix": "Add and execute a focused unit test.",
+                    }
+                ],
+            }
+        )
+    return json.dumps(payload.model_dump(mode="json"))
 
 
 def test_codex_cli_worker_requires_repo_url(tmp_path: Path) -> None:
@@ -532,3 +572,227 @@ def test_codex_cli_worker_scopes_and_injects_secrets(tmp_path: Path) -> None:
 
     # verify session secrets (all)
     assert captured_session_secrets == request.secrets
+
+
+def test_codex_cli_worker_records_no_findings_self_review(tmp_path: Path) -> None:
+    """Successful runs should persist an explicit no-findings self-review payload."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-self-review",
+        image="python:3.12-slim",
+    )
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="final", final_output="Initial implementation complete."),
+            CliRuntimeStep(
+                kind="final",
+                final_output=_review_result_json(
+                    outcome="no_findings",
+                    summary="Diff satisfies the task and no issues were found.",
+                ),
+            ),
+        ]
+    )
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
+                output="",
+            )
+        }
+    )
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda started_container, **_: session,
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-self-review-ok",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Implement a tiny change and validate it",
+            )
+        )
+    )
+
+    assert result.status == "success"
+    assert result.review_result is not None
+    assert result.review_result.outcome == "no_findings"
+    assert result.budget_usage is not None
+    assert result.budget_usage["verifier_passes_used"] == 1
+
+
+def test_codex_cli_worker_fixes_review_findings_with_bounded_retry(tmp_path: Path) -> None:
+    """Actionable self-review findings should trigger a bounded follow-up fix loop."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-self-review-fix",
+        image="python:3.12-slim",
+    )
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="final", final_output="Implemented the initial change."),
+            CliRuntimeStep(
+                kind="final",
+                final_output=_review_result_json(
+                    outcome="findings",
+                    summary="A focused test is missing for the new behavior.",
+                ),
+            ),
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="execute_bash",
+                tool_input="printf 'assert True\\n' > tests/test_note.py",
+            ),
+            CliRuntimeStep(kind="final", final_output="Added the missing focused test."),
+            CliRuntimeStep(
+                kind="final",
+                final_output=_review_result_json(
+                    outcome="no_findings",
+                    summary="Findings were addressed.",
+                ),
+            ),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "printf 'assert True\\n' > tests/test_note.py": _command_result(
+                "printf 'assert True\\n' > tests/test_note.py",
+                output="",
+            ),
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
+                output="?? tests/test_note.py\0",
+            ),
+        }
+    )
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda started_container, **_: session,
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-self-review-fix",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Add a minimal behavior and ensure it is covered by tests",
+                budget={"max_iterations": 6},
+            )
+        )
+    )
+
+    assert result.status == "success"
+    assert [command.command for command in result.commands_run] == [
+        "printf 'assert True\\n' > tests/test_note.py"
+    ]
+    assert result.review_result is not None
+    assert result.review_result.outcome == "no_findings"
+    assert result.budget_usage is not None
+    assert result.budget_usage["verifier_passes_used"] == 2
+
+
+def test_codex_cli_worker_respects_zero_fix_retry_limit(tmp_path: Path) -> None:
+    """When fix retries are disabled, findings should be reported without re-entry."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-self-review-zero-fix",
+        image="python:3.12-slim",
+    )
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="final", final_output="Implemented initial change."),
+            CliRuntimeStep(
+                kind="final",
+                final_output=_review_result_json(
+                    outcome="findings",
+                    summary="A follow-up assertion is still missing.",
+                ),
+            ),
+        ]
+    )
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
+                output=" M note.txt\0",
+            ),
+        }
+    )
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda started_container, **_: session,
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-self-review-no-fix",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Perform a quick change",
+                constraints={"self_review_max_fix_iterations": 0},
+            )
+        )
+    )
+
+    assert result.status == "success"
+    assert result.review_result is not None
+    assert result.review_result.outcome == "findings"
+    assert result.commands_run == []
+    assert result.budget_usage is not None
+    assert result.budget_usage["verifier_passes_used"] == 1
+
+
+def test_codex_cli_worker_allows_opt_out_of_self_review(tmp_path: Path) -> None:
+    """Self-review should be skipped when explicitly disabled via constraints."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-self-review-skip",
+        image="python:3.12-slim",
+    )
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="Done quickly.")])
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
+                output="",
+            ),
+        }
+    )
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda started_container, **_: session,
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-self-review-skip",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Do a quick read-only check",
+                constraints={"skip_self_review": True},
+            )
+        )
+    )
+
+    assert result.status == "success"
+    assert result.review_result is None
+    assert result.budget_usage is not None
+    assert result.budget_usage["verifier_passes_used"] == 0

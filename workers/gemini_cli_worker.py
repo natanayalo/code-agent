@@ -37,6 +37,7 @@ from workers.base import ArtifactReference, Worker, WorkerRequest, WorkerResult
 from workers.cli_runtime import (
     CliRuntimeAdapter,
     CliRuntimeExecutionResult,
+    CliRuntimeMessage,
     CliRuntimeSettings,
     ShellSessionProtocol,
     collect_changed_files,
@@ -47,6 +48,18 @@ from workers.cli_runtime import (
 from workers.failure_taxonomy import classify_failure_kind
 from workers.post_run_lint import apply_post_run_lint_format
 from workers.prompt import build_system_prompt
+from workers.review import ReviewResult
+from workers.self_review import (
+    build_fix_loop_prompt,
+    build_self_review_prompt,
+    collect_diff_for_review,
+    fallback_no_findings_review,
+    merge_budget_ledgers,
+    parse_review_result,
+    remaining_runtime_settings,
+    resolve_self_review_max_fix_iterations,
+    should_skip_self_review,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +135,7 @@ def _worker_result_from_execution(
     *,
     files_changed: list[str],
     post_run_lint_format: dict[str, object] | None = None,
+    review_result: ReviewResult | None = None,
     artifacts: list[ArtifactReference] | None = None,
 ) -> WorkerResult:
     """Map the shared CLI runtime output into the worker contract."""
@@ -147,6 +161,7 @@ def _worker_result_from_execution(
         commands_run=execution.commands_run,
         files_changed=files_changed,
         artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
+        review_result=review_result,
         next_action_hint=_next_action_hint(execution),
     )
 
@@ -395,11 +410,140 @@ class GeminiCliWorker(Worker):
                 if isinstance(request.constraints.get("post_run_lint_format_command"), str)
                 else None,
             )
+            review_result: ReviewResult | None = None
+            if execution.status == "success" and not should_skip_self_review(request.constraints):
+                max_fix_iterations = resolve_self_review_max_fix_iterations(request.constraints)
+                for review_attempt in range(max_fix_iterations + 1):
+                    max_verifier_passes = execution.budget_ledger.max_verifier_passes
+                    if (
+                        max_verifier_passes is not None
+                        and execution.budget_ledger.verifier_passes_used >= max_verifier_passes
+                    ):
+                        execution.status = "failure"
+                        execution.summary = (
+                            "CLI runtime exceeded its verifier-pass budget before "
+                            "worker self-review could complete."
+                        )
+                        execution.stop_reason = "budget_exceeded"
+                        break
+
+                    execution.budget_ledger.verifier_passes_used += 1
+                    diff_text = collect_diff_for_review(
+                        workspace.repo_path,
+                        timeout_seconds=runtime_settings.command_timeout_seconds,
+                    )
+                    review_prompt = build_self_review_prompt(
+                        task_text=request.task_text,
+                        worker_summary=execution.summary,
+                        files_changed=files_changed,
+                        diff_text=diff_text,
+                    )
+
+                    try:
+                        review_step = self.runtime_adapter.next_step(
+                            (CliRuntimeMessage(role="system", content=review_prompt),),
+                            working_directory=workspace.repo_path,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Gemini CLI worker self-review adapter failed; recording explicit "
+                            "no-findings fallback.",
+                            exc_info=exc,
+                        )
+                        review_result = fallback_no_findings_review(
+                            "Worker self-review failed to return a structured payload."
+                        )
+                        break
+
+                    if review_step.kind != "final" or review_step.final_output is None:
+                        review_result = fallback_no_findings_review(
+                            "Worker self-review returned a non-final response."
+                        )
+                        break
+
+                    parsed_review_result = parse_review_result(review_step.final_output)
+                    if parsed_review_result is None:
+                        review_result = fallback_no_findings_review(
+                            "Worker self-review returned an invalid structured payload."
+                        )
+                        break
+
+                    review_result = parsed_review_result
+                    if review_result.outcome == "no_findings":
+                        break
+                    if review_attempt >= max_fix_iterations:
+                        break
+
+                    follow_up_settings = remaining_runtime_settings(
+                        runtime_settings,
+                        budget_ledger=execution.budget_ledger,
+                    )
+                    if follow_up_settings is None:
+                        execution.status = "failure"
+                        execution.summary = (
+                            "CLI runtime exhausted its remaining budget before applying "
+                            "self-review fixes."
+                        )
+                        execution.stop_reason = "budget_exceeded"
+                        break
+
+                    follow_up_execution = run_cli_runtime_loop(
+                        self.runtime_adapter,
+                        session,
+                        system_prompt=build_fix_loop_prompt(
+                            base_system_prompt=system_prompt,
+                            review_result=review_result,
+                        ),
+                        settings=follow_up_settings,
+                        tool_registry=self.tool_registry,
+                        granted_permission=granted_permission,
+                        working_directory=workspace.repo_path,
+                        cancel_token=cancel_token,
+                    )
+                    merge_budget_ledgers(execution.budget_ledger, follow_up_execution.budget_ledger)
+                    execution.commands_run.extend(follow_up_execution.commands_run)
+                    execution.messages.extend(follow_up_execution.messages)
+                    execution.status = follow_up_execution.status
+                    execution.summary = follow_up_execution.summary
+                    execution.stop_reason = follow_up_execution.stop_reason
+                    execution.permission_decision = follow_up_execution.permission_decision
+                    if execution.status != "success":
+                        break
+
+                    files_changed = collect_changed_files(
+                        session,
+                        working_directory=Path(container.working_dir),
+                        timeout_seconds=runtime_settings.command_timeout_seconds,
+                    )
+                    if not files_changed:
+                        files_changed = collect_changed_files_from_repo_path(
+                            workspace.repo_path,
+                            timeout_seconds=runtime_settings.command_timeout_seconds,
+                        )
+                    (
+                        files_changed,
+                        lint_format_result,
+                        lint_format_artifacts,
+                    ) = apply_post_run_lint_format(
+                        session=session,
+                        execution=execution,
+                        repo_path_for_detection=workspace.repo_path,
+                        repo_working_directory=Path(container.working_dir),
+                        files_changed=files_changed,
+                        timeout_seconds=runtime_settings.command_timeout_seconds,
+                        fallback_command_template=request.constraints.get(
+                            "post_run_lint_format_command"
+                        )
+                        if isinstance(request.constraints.get("post_run_lint_format_command"), str)
+                        else None,
+                    )
+
             result = _worker_result_from_execution(
                 workspace,
                 execution,
                 files_changed=files_changed,
                 post_run_lint_format=lint_format_result,
+                review_result=review_result,
                 artifacts=lint_format_artifacts,
             )
             if cancel_token and cancel_token():
