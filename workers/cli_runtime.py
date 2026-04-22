@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import shlex
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
@@ -51,6 +52,43 @@ DEFAULT_WORKER_TIMEOUT_SECONDS = 300
 DEFAULT_COMMAND_TIMEOUT_SECONDS = DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS
 DEFAULT_MAX_OBSERVATION_CHARACTERS = 4000
 DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS = 10
+DEFAULT_CONTEXT_CONDENSER_THRESHOLD_CHARACTERS = 12000
+DEFAULT_CONTEXT_CONDENSER_RECENT_MESSAGES = 6
+DEFAULT_CONTEXT_CONDENSER_SUMMARY_MAX_CHARACTERS = 1500
+DEFAULT_CONDENSED_SUMMARY_MAX_DECISIONS = 5
+DEFAULT_CONDENSED_SUMMARY_MAX_FILE_HINTS = 8
+DEFAULT_CONDENSED_SUMMARY_MAX_ERRORS = 3
+_FILE_ARGUMENT_COMMANDS = frozenset(
+    {
+        "awk",
+        "bash",
+        "cat",
+        "chmod",
+        "chown",
+        "cp",
+        "git",
+        "grep",
+        "head",
+        "less",
+        "ln",
+        "ls",
+        "mkdir",
+        "more",
+        "mv",
+        "python",
+        "python3",
+        "rm",
+        "rmdir",
+        "sed",
+        "sh",
+        "tail",
+        "tee",
+        "touch",
+        "wc",
+    }
+)
+_COMMANDS_WITH_LEADING_NON_PATH_ARGUMENT = frozenset({"awk", "chmod", "chown", "grep", "sed"})
+_GIT_FILE_ARGUMENT_SUBCOMMANDS = frozenset({"add", "mv", "restore", "rm"})
 
 
 def _git_status_unavailable(output: str) -> bool:
@@ -126,6 +164,18 @@ class CliRuntimeSettings(CliRuntimeModel):
     max_verifier_passes: int | None = Field(default=None, ge=0)
     max_observation_characters: int = Field(
         default=DEFAULT_MAX_OBSERVATION_CHARACTERS,
+        ge=256,
+    )
+    context_condenser_threshold_characters: int | None = Field(
+        default=DEFAULT_CONTEXT_CONDENSER_THRESHOLD_CHARACTERS,
+        ge=1024,
+    )
+    context_condenser_recent_messages: int = Field(
+        default=DEFAULT_CONTEXT_CONDENSER_RECENT_MESSAGES,
+        ge=2,
+    )
+    context_condenser_summary_max_characters: int = Field(
+        default=DEFAULT_CONTEXT_CONDENSER_SUMMARY_MAX_CHARACTERS,
         ge=256,
     )
 
@@ -238,6 +288,26 @@ def settings_from_budget(
     if max_observation_characters is not None:
         resolved["max_observation_characters"] = max_observation_characters
 
+    context_condenser_threshold = coerce_positive_int_like(
+        budget.get("context_condenser_threshold_characters")
+    )
+    if context_condenser_threshold is not None:
+        resolved["context_condenser_threshold_characters"] = context_condenser_threshold
+
+    context_condenser_recent_messages = coerce_positive_int_like(
+        budget.get("context_condenser_recent_messages")
+    )
+    if context_condenser_recent_messages is not None:
+        resolved["context_condenser_recent_messages"] = context_condenser_recent_messages
+
+    context_condenser_summary_max_characters = coerce_positive_int_like(
+        budget.get("context_condenser_summary_max_characters")
+    )
+    if context_condenser_summary_max_characters is not None:
+        resolved["context_condenser_summary_max_characters"] = (
+            context_condenser_summary_max_characters
+        )
+
     return CliRuntimeSettings.model_validate(resolved)
 
 
@@ -246,6 +316,288 @@ def _truncate_text(text: str, *, max_characters: int) -> tuple[str, bool]:
     if len(text) <= max_characters:
         return text, False
     return text[:max_characters].rstrip(), True
+
+
+def _estimate_messages_characters(messages: Sequence[CliRuntimeMessage]) -> int:
+    """Approximate transcript size used for context-condensation checks."""
+    return sum(
+        len(message.role)
+        + len(message.content)
+        + (len(message.tool_name) if message.tool_name is not None else 0)
+        for message in messages
+    )
+
+
+def _extract_command_from_code_fence(content: str) -> str | None:
+    """Extract a command from the runtime's bash fenced tool-call transcript."""
+    match = re.search(r"```bash[ \t]*\n(?P<command>.*?)\n```", content, flags=re.DOTALL)
+    if match is None:
+        return None
+    command = match.group("command").strip()
+    return command or None
+
+
+def _extract_prefixed_line(content: str, *, prefix: str) -> str | None:
+    """Find a line in `content` that starts with `prefix`."""
+    for line in content.splitlines():
+        if line.startswith(prefix):
+            value = line.removeprefix(prefix).strip()
+            if value:
+                return value
+    return None
+
+
+def _extract_output_excerpt(content: str) -> str | None:
+    """Extract the last non-empty output line from a tool observation."""
+    match = re.search(r"```text[ \t]*\n(?P<output>.*?)\n```", content, flags=re.DOTALL)
+    if match is None:
+        return None
+    lines = [line.strip() for line in match.group("output").splitlines() if line.strip()]
+    return lines[-1] if lines else None
+
+
+def _extract_file_hints_from_command(command: str) -> list[str]:
+    """Infer likely file paths touched by a command without shell execution."""
+    hints: list[str] = []
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        tokens = command.split()
+    primary_command = ""
+    command_argument_index = 0
+    git_subcommand: str | None = None
+    for token in tokens:
+        candidate = token.strip("\"'")
+        if not candidate:
+            continue
+        if candidate in {"&&", "||", ";", "|", "|&", "&"}:
+            primary_command = ""
+            command_argument_index = 0
+            git_subcommand = None
+            continue
+        if not primary_command:
+            primary_command = candidate
+            command_argument_index = 0
+            git_subcommand = None
+            continue
+        if candidate.startswith("-") or candidate in {
+            "<",
+            ">",
+            ">>",
+            "2>",
+            "2>>",
+            "2>&1",
+            "&>",
+            "&>>",
+            "1>",
+            "1>>",
+            "|&",
+            ">|",
+        }:
+            continue
+        if candidate in {".", ".."}:
+            continue
+        if primary_command == "git" and git_subcommand is None:
+            git_subcommand = candidate
+            command_argument_index += 1
+            continue
+        if (
+            primary_command in _COMMANDS_WITH_LEADING_NON_PATH_ARGUMENT
+            and command_argument_index == 0
+        ):
+            command_argument_index += 1
+            continue
+        if "/" in candidate or "." in Path(candidate).name:
+            hints.append(candidate)
+            command_argument_index += 1
+            continue
+        if (
+            primary_command in _FILE_ARGUMENT_COMMANDS
+            and "=" not in candidate
+            and candidate != primary_command
+        ):
+            if primary_command == "git" and git_subcommand not in _GIT_FILE_ARGUMENT_SUBCOMMANDS:
+                command_argument_index += 1
+                continue
+            hints.append(candidate)
+        command_argument_index += 1
+    return hints
+
+
+def _inline_code(value: str) -> str:
+    """Render inline code while safely handling content that contains backticks."""
+    max_tick_run = max((len(match.group(0)) for match in re.finditer(r"`+", value)), default=0)
+    fence = "`" * (max_tick_run + 1)
+    space = " " if value.startswith("`") or value.endswith("`") else ""
+    return f"{fence}{space}{value}{space}{fence}"
+
+
+def _build_condensed_context_summary(
+    older_messages: Sequence[CliRuntimeMessage],
+    *,
+    max_characters: int,
+) -> str:
+    """Build deterministic condensed context for older loop iterations."""
+    decisions: list[str] = []
+    files_touched: list[str] = []
+    errors: list[str] = []
+
+    for message in older_messages:
+        command = _extract_command_from_code_fence(message.content)
+        if command is not None:
+            decisions.append(command)
+            files_touched.extend(_extract_file_hints_from_command(command))
+        if message.role != "tool":
+            continue
+        observed_command = _extract_prefixed_line(message.content, prefix="Command: ")
+        if observed_command is not None:
+            files_touched.extend(_extract_file_hints_from_command(observed_command))
+        raw_exit_code = _extract_prefixed_line(message.content, prefix="Exit code: ")
+        if raw_exit_code is None:
+            continue
+        try:
+            exit_code = int(raw_exit_code)
+        except ValueError:
+            continue
+        if exit_code == 0:
+            continue
+        output_excerpt = _extract_output_excerpt(message.content) or "<see tool output>"
+        errors.append(f"exit {exit_code} ({output_excerpt})")
+
+    deduped_decisions = list(dict.fromkeys(reversed(decisions)))[::-1]
+    deduped_files = list(dict.fromkeys(reversed(files_touched)))[::-1]
+    deduped_errors = list(dict.fromkeys(reversed(errors)))[::-1]
+
+    current_state = "no tool state available from condensed history"
+    for message in reversed(older_messages):
+        if message.role != "tool":
+            continue
+        observed_command = _extract_prefixed_line(message.content, prefix="Command: ")
+        raw_exit_code = _extract_prefixed_line(message.content, prefix="Exit code: ")
+        if observed_command and raw_exit_code:
+            current_state = (
+                f"last command {_inline_code(observed_command)} exited with code {raw_exit_code}"
+            )
+            break
+
+    summary = "\n".join(
+        [
+            "Condensed context summary (older iterations):",
+            (
+                "- Key decisions made: "
+                + (
+                    ", ".join(
+                        _inline_code(command)
+                        for command in deduped_decisions[-DEFAULT_CONDENSED_SUMMARY_MAX_DECISIONS:]
+                    )
+                    if deduped_decisions
+                    else "none"
+                )
+            ),
+            (
+                "- Files touched hints: "
+                + (
+                    ", ".join(
+                        _inline_code(path)
+                        for path in deduped_files[-DEFAULT_CONDENSED_SUMMARY_MAX_FILE_HINTS:]
+                    )
+                    if deduped_files
+                    else "none"
+                )
+            ),
+            (
+                "- Errors encountered: "
+                + (
+                    ", ".join(deduped_errors[-DEFAULT_CONDENSED_SUMMARY_MAX_ERRORS:])
+                    if deduped_errors
+                    else "none"
+                )
+            ),
+            f"- Current working state: {current_state}",
+            "Recent raw messages follow unchanged.",
+        ]
+    )
+    if len(summary) <= max_characters:
+        return summary
+
+    suffix = f"\n[condensed summary truncated to {max_characters} characters]"
+    available_for_summary = max_characters - len(suffix)
+    if available_for_summary <= 0:
+        suffix_only, _ = _truncate_text(suffix, max_characters=max_characters)
+        return suffix_only
+    bounded_summary, _ = _truncate_text(summary, max_characters=available_for_summary)
+    return f"{bounded_summary}{suffix}"
+
+
+def _messages_for_adapter_turn(
+    messages: list[CliRuntimeMessage],
+    *,
+    settings: CliRuntimeSettings,
+) -> list[CliRuntimeMessage]:
+    """Condense older history near budget while preserving a recent raw-message tail."""
+    threshold = settings.context_condenser_threshold_characters
+    if threshold is None:
+        return messages
+    if _estimate_messages_characters(messages) <= threshold:
+        return messages
+    if len(messages) <= 2:
+        return messages
+
+    system_message = messages[0] if messages[0].role == "system" else None
+    non_system_messages = messages[1:] if system_message is not None else messages
+    if len(non_system_messages) <= settings.context_condenser_recent_messages:
+        return messages
+
+    recent_count = min(settings.context_condenser_recent_messages, len(non_system_messages))
+    older_messages = non_system_messages[:-recent_count]
+    recent_messages = list(non_system_messages[-recent_count:])
+    if not older_messages:
+        return messages
+
+    summary_message = CliRuntimeMessage(
+        role="assistant",
+        content=_build_condensed_context_summary(
+            older_messages,
+            max_characters=settings.context_condenser_summary_max_characters,
+        ),
+    )
+
+    condensed_messages: list[CliRuntimeMessage] = []
+    if system_message is not None:
+        condensed_messages.append(system_message)
+    condensed_messages.append(summary_message)
+    condensed_messages.extend(recent_messages)
+
+    while (
+        _estimate_messages_characters(condensed_messages) > threshold and len(recent_messages) > 1
+    ):
+        older_messages = [*older_messages, recent_messages[0]]
+        recent_messages = recent_messages[1:]
+        summary_message = CliRuntimeMessage(
+            role="assistant",
+            content=_build_condensed_context_summary(
+                older_messages,
+                max_characters=settings.context_condenser_summary_max_characters,
+            ),
+        )
+        condensed_messages = []
+        if system_message is not None:
+            condensed_messages.append(system_message)
+        condensed_messages.append(summary_message)
+        condensed_messages.extend(recent_messages)
+
+    if _estimate_messages_characters(condensed_messages) > threshold:
+        compact_summary = _build_condensed_context_summary(
+            older_messages,
+            max_characters=max(settings.context_condenser_summary_max_characters // 2, 256),
+        )
+        condensed_messages = []
+        if system_message is not None:
+            condensed_messages.append(system_message)
+        condensed_messages.append(CliRuntimeMessage(role="assistant", content=compact_summary))
+        condensed_messages.extend(recent_messages)
+
+    return condensed_messages
 
 
 def _format_expected_artifacts(tool: ToolDefinition) -> str:
@@ -460,8 +812,9 @@ def run_cli_runtime_loop(
             )
 
         try:
+            messages_for_adapter = _messages_for_adapter_turn(messages, settings=settings)
             step = adapter.next_step(
-                tuple(messages),
+                tuple(messages_for_adapter),
                 working_directory=working_directory,
             )
         except Exception as exc:

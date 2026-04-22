@@ -732,7 +732,7 @@ Acceptance:
 - worker system prompt includes the plan when present
 - unit tests verify plan generation and bypass logic
 
-### T-109 Add context condenser for long-running agent loops
+### T-109 Add context condenser for long-running agent loops ✅
 Add an explicit strategy for managing the context window within a single worker run so that long-running tasks don't degrade as the observation history grows.
 
 Scope notes:
