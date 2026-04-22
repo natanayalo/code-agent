@@ -33,6 +33,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Restore the pre-review artifact type constraint."""
+    # Ensure the downgraded constraint is re-applicable on existing databases.
+    op.execute("DELETE FROM artifacts WHERE artifact_type = 'review_result'")
     with op.batch_alter_table("artifacts") as batch_op:
         batch_op.drop_constraint(op.f("ck_artifacts_artifact_type"), type_="check")
         batch_op.create_check_constraint(

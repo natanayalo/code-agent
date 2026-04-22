@@ -1737,6 +1737,34 @@ def test_persist_execution_outcome_persists_structured_review_result_artifact() 
     assert persisted_artifacts[0].artifact_metadata == {"review_result": review_payload}
 
 
+def test_serialize_review_result_mapping_recursively_normalizes_nested_models() -> None:
+    """Raw mapping payloads with nested models should be JSON-serializable."""
+    serialized = execution_module._serialize_review_result(
+        {
+            "reviewer_kind": "worker_self_review",
+            "summary": "Issue found.",
+            "confidence": 0.7,
+            "outcome": "findings",
+            "findings": [
+                ReviewFinding(
+                    severity="low",
+                    category="tests",
+                    confidence=0.7,
+                    file_path="tests/unit/test_task_execution_service.py",
+                    line_start=1,
+                    line_end=1,
+                    title="Example finding",
+                    why_it_matters="Ensures nested model serialization is robust.",
+                )
+            ],
+        }
+    )
+
+    assert serialized is not None
+    assert serialized["findings"][0]["title"] == "Example finding"
+    assert serialized["findings"][0]["line_start"] == 1
+
+
 def test_persist_execution_outcome_accepts_raw_verification_mapping() -> None:
     """Execution persistence should tolerate verification payloads that are plain dicts."""
     engine = create_engine_from_url(

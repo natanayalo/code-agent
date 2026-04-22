@@ -779,6 +779,17 @@ def _serialize_verification_report(report: object | None) -> dict[str, Any] | No
     raise TypeError(f"Unsupported verification report type: {type(report).__name__}")
 
 
+def _to_json_compatible(value: object) -> Any:
+    """Recursively convert nested model/mapping payloads into JSON-compatible values."""
+    if hasattr(value, "model_dump"):
+        return _to_json_compatible(value.model_dump(mode="json"))
+    if isinstance(value, Mapping):
+        return {str(key): _to_json_compatible(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_to_json_compatible(item) for item in value]
+    return value
+
+
 def _serialize_review_result(review_result: object | None) -> dict[str, Any] | None:
     """Normalize review output from either a Pydantic model or a raw mapping."""
     if review_result is None:
@@ -786,7 +797,7 @@ def _serialize_review_result(review_result: object | None) -> dict[str, Any] | N
     if hasattr(review_result, "model_dump"):
         return review_result.model_dump(mode="json")
     if isinstance(review_result, Mapping):
-        return dict(review_result)
+        return _to_json_compatible(review_result)
     raise TypeError(f"Unsupported review result type: {type(review_result).__name__}")
 
 
