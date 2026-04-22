@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from workers.base import WorkerCommand
 from workers.cli_runtime import CliRuntimeBudgetLedger, CliRuntimeSettings
 from workers.self_review import (
+    _extract_diff_line_hints,
     _extract_json_object,
     build_self_review_prompt,
     build_targeted_review_context_packet,
@@ -347,3 +348,43 @@ def test_build_targeted_review_context_packet_enforces_code_line_budget(tmp_path
     code_lines = [line for line in packet.splitlines() if re.match(r"^\d{4}:", line)]
     assert len(code_lines) <= 120
     assert "window truncated to respect 120-line packet budget" in packet
+
+
+def test_extract_diff_line_hints_normalizes_prefixed_and_quoted_paths():
+    diff_text = "\n".join(
+        [
+            '+++ b/"folder/file name.py"',
+            "@@ -4,1 +4,2 @@",
+            "+++ plain/path.py",
+            "@@ -9,2 +9,0 @@",
+            "+++ /dev/null",
+            "@@ -1,1 +1,1 @@",
+        ]
+    )
+    hints = _extract_diff_line_hints(diff_text)
+    assert hints["folder/file name.py"] == [(4, 5)]
+    assert hints["plain/path.py"] == [(9, 9)]
+    assert "/dev/null" not in hints
+
+
+def test_build_targeted_review_context_packet_uses_robust_markdown_fences(tmp_path):
+    source = tmp_path / "fence.md"
+    source.write_text("```inside```\nline2\nline3\n")
+    diff_text = "\n".join(
+        [
+            "diff --git a/fence.md b/fence.md",
+            "+++ b/fence.md",
+            "@@ -1,1 +1,1 @@",
+            "-```inside```",
+            "+```inside``` updated",
+        ]
+    )
+    packet = build_targeted_review_context_packet(
+        task_text="Update fenced content",
+        worker_summary="Changed markdown fence content.",
+        files_changed=["fence.md"],
+        diff_text=diff_text,
+        repo_path=tmp_path,
+    )
+    assert "````diff" in packet
+    assert "````text" in packet

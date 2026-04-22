@@ -23,6 +23,7 @@ DEFAULT_REVIEW_PACKET_MAX_COMMANDS = 12
 DEFAULT_REVIEW_PACKET_CODE_WINDOW_RADIUS = 3
 DEFAULT_REVIEW_PACKET_MAX_CODE_LINES = 120
 DEFAULT_REVIEW_PACKET_MAX_WINDOWS_PER_FILE = 8
+DEFAULT_MARKDOWN_FENCE = "````"
 
 
 def should_skip_self_review(constraints: Mapping[str, Any]) -> bool:
@@ -278,7 +279,10 @@ def build_targeted_review_context_packet(
     normalized_files = sorted({path.strip() for path in files_changed if path.strip()})
     changed_files_block = "\n".join(f"- {path}" for path in normalized_files) or "- <none>"
     command_summary_block = _summarize_commands(commands_run)
-    diff_block = _truncate_block("```diff\n" + diff_text + "\n```", max_characters // 2)
+    diff_block = _truncate_block(
+        f"{DEFAULT_MARKDOWN_FENCE}diff\n{diff_text}\n{DEFAULT_MARKDOWN_FENCE}",
+        max_characters // 2,
+    )
     code_windows_block = _build_changed_file_windows(
         repo_path=repo_path,
         changed_files=normalized_files[:DEFAULT_REVIEW_PACKET_MAX_FILES],
@@ -410,11 +414,11 @@ def _extract_diff_line_hints(diff_text: str) -> dict[str, list[tuple[int, int]]]
     hunk_pattern = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
     for line in diff_text.splitlines():
-        if line.startswith("+++ /dev/null"):
-            active_path = None
-            continue
-        if line.startswith("+++ b/"):
-            active_path = line[6:].strip()
+        if line.startswith("+++ "):
+            active_path = _normalize_diff_new_path(line[4:].strip())
+            if active_path is None:
+                active_path = None
+                continue
             line_hints.setdefault(active_path, [])
             continue
         if not active_path or not line.startswith("@@"):
@@ -517,9 +521,9 @@ def _build_changed_file_windows(
                 "\n".join(
                     [
                         f"- {file_path} ({first_line}-{clipped_last_line})",
-                        "```text",
+                        f"{DEFAULT_MARKDOWN_FENCE}text",
                         numbered_lines or "<empty>",
-                        "```",
+                        DEFAULT_MARKDOWN_FENCE,
                     ]
                 )
             )
@@ -550,3 +554,16 @@ def _merge_line_ranges(
             continue
         merged.append((start, end))
     return merged
+
+
+def _normalize_diff_new_path(raw_path: str) -> str | None:
+    """Normalize a diff `+++` path token across prefixed, noprefix, and quoted forms."""
+    if raw_path == "/dev/null":
+        return None
+
+    candidate = raw_path
+    if candidate.startswith("b/"):
+        candidate = candidate[2:]
+    if candidate.startswith('"') and candidate.endswith('"') and len(candidate) >= 2:
+        candidate = candidate[1:-1]
+    return candidate.strip() or None
