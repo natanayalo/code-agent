@@ -160,6 +160,42 @@ def test_build_review_prompt_enforces_shared_guidance_budget(
     assert "REVIEW.md guidance:" not in rendered_prompt
 
 
+def test_build_review_prompt_accurately_counts_budget_overhead(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review prompt should account for header and block separators in budget tracking."""
+    # Set a tight budget that leaves exactly enough for one guidance block + header
+    # "## Review Guidance" (18 chars) + "\n" (1) = 19
+    # "REVIEW.md guidance:\n```text\nCONTENT\n```"
+    # label (19) + \n (1) + fence (7) + \n (1) + CONTENT (7) + \n (1) + fence (3) = 39
+    # Total = 19 + 39 = 58
+    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 58)
+
+    (tmp_path / "REVIEW.md").write_text("CONTENT", encoding="utf-8")
+    (tmp_path / "package.json").write_text('{"scripts":{"test":"pytest"}}', encoding="utf-8")
+
+    rendered_prompt = build_review_prompt(
+        workspace_path=tmp_path,
+        review_context_packet="Packet payload",
+    )
+
+    assert "REVIEW.md guidance:" in rendered_prompt
+    # Build & Test should be suppressed because budget is exhausted
+    assert "## Build & Test" not in rendered_prompt
+
+    # Now test with a budget that allows exactly one char of build context
+    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 59)
+    rendered_prompt = build_review_prompt(
+        workspace_path=tmp_path,
+        review_context_packet="Packet payload",
+    )
+    # This might still be None because build_build_test_section needs some
+    # minimal chars for header "## Build & Test"
+    # Let's check if it's suppressed.
+    assert "## Build & Test" not in rendered_prompt
+
+
 def test_build_system_prompt_includes_build_test_section_from_repo_config(tmp_path: Path) -> None:
     """Build/test context should be injected when common config files are present."""
     (tmp_path / "package.json").write_text(

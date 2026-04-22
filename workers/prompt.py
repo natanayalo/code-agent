@@ -46,11 +46,11 @@ def _fenced_text_block_lines(label: str, content: str) -> list[str]:
     return [label, f"{fence}text", content, fence]
 
 
-def _fenced_text_block_overhead(label: str, content: str) -> int:
+def _fenced_text_block_overhead(label: str, content: str, *, fence: str | None = None) -> int:
     """Return wrapper-character overhead for one fenced guidance block."""
-    fence = markdown_fence_for_content(content)
+    actual_fence = fence if fence is not None else markdown_fence_for_content(content)
     # label + opening fence + closing fence + three line separators
-    return len(label) + len(f"{fence}text") + len(fence) + 3
+    return len(label) + len(f"{actual_fence}text") + len(actual_fence) + 3
 
 
 def build_role_description_section() -> str:
@@ -1022,27 +1022,34 @@ def build_review_prompt(
     )
 
     guidance_lines: list[str] = []
+    consumed_guidance_characters = 0
+
     if agents_guidance is not None:
         guidance_lines.extend(_fenced_text_block_lines("AGENTS.md guidance:", agents_guidance))
-    if agents_assets_guidance is not None:
-        guidance_lines.extend(_fenced_text_block_lines(".agents guidance:", agents_assets_guidance))
-    consumed_guidance_characters = 0
-    if guidance_lines:
-        consumed_guidance_characters += len("## Review Guidance") + 1
-    if agents_guidance is not None:
         consumed_guidance_characters += len(agents_guidance) + _fenced_text_block_overhead(
             "AGENTS.md guidance:", agents_guidance
         )
+
     if agents_assets_guidance is not None:
+        guidance_lines.extend(_fenced_text_block_lines(".agents guidance:", agents_assets_guidance))
         consumed_guidance_characters += len(agents_assets_guidance) + _fenced_text_block_overhead(
             ".agents guidance:", agents_assets_guidance
         )
+
+    if guidance_lines:
+        consumed_guidance_characters += len("## Review Guidance") + 1
+        # Account for newlines between multiple blocks joined by "\n"
+        consumed_guidance_characters += len(guidance_lines) // 4 - 1
 
     review_guidance = read_workspace_review_guidance(
         workspace_path,
         max_characters=max(total_guidance_budget - consumed_guidance_characters, 0),
     )
     if review_guidance is not None:
+        if not guidance_lines:
+            consumed_guidance_characters += len("## Review Guidance") + 1
+        else:
+            consumed_guidance_characters += 1  # separator between blocks
         guidance_lines.extend(_fenced_text_block_lines("REVIEW.md guidance:", review_guidance))
         consumed_guidance_characters += len(review_guidance) + _fenced_text_block_overhead(
             "REVIEW.md guidance:", review_guidance
