@@ -87,7 +87,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-110 Add structured failure taxonomy for routing and recovery (typed `failure_kind` wiring in progress; local branch `task/t-110-failure-taxonomy`, unpublished).
 
 ## Next
 

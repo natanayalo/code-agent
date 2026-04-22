@@ -12,6 +12,13 @@ from workers import WorkerResult
 
 WorkerType = Literal["gemini", "codex"]
 MemoryCategory = Literal["personal", "project"]
+VerificationFailureKind = Literal[
+    "test_regression",
+    "scope_mismatch",
+    "risky_command",
+    "worker_failure",
+    "unknown",
+]
 WorkflowStep = Literal[
     "ingest_task",
     "classify_task",
@@ -154,6 +161,7 @@ class VerificationReport(OrchestratorModel):
 
     status: Literal["passed", "failed", "warning"]
     summary: str | None = None
+    failure_kind: VerificationFailureKind | None = None
     items: list[VerificationReportItem] = Field(default_factory=list)
 
 

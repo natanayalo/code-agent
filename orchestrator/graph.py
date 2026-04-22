@@ -24,6 +24,7 @@ from orchestrator.state import (
     TaskPlan,
     TaskPlanStep,
     TaskTimelineEventState,
+    VerificationFailureKind,
     VerificationReport,
     VerificationReportItem,
     WorkerDispatch,
@@ -78,6 +79,17 @@ _COMPLEX_TASK_PATTERN = re.compile(
 
 DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = 330
 ORCHESTRATOR_TIMEOUT_GRACE_SECONDS = 30
+_WORKER_FAILURE_REROUTE_KINDS = frozenset(
+    {
+        "compile",
+        "test",
+        "tool_runtime",
+        "context_window",
+        "provider_error",
+        "unknown",
+    }
+)
+_VERIFICATION_FAILURE_REROUTE_KINDS = frozenset({"test_regression", "scope_mismatch", "unknown"})
 
 
 def _resolve_orchestrator_timeout_seconds(state: OrchestratorState) -> int:
@@ -108,6 +120,7 @@ def _timed_out_worker_result(timeout_seconds: int) -> WorkerResult:
             "Worker execution exceeded the orchestrator timeout envelope "
             f"({timeout_seconds}s) and was cancelled."
         ),
+        failure_kind="timeout",
         commands_run=[],
         files_changed=[],
         test_results=[],
@@ -121,6 +134,7 @@ def _cancelled_worker_result() -> WorkerResult:
     return WorkerResult(
         status="failure",
         summary="Worker execution was cancelled before it returned a result.",
+        failure_kind="timeout",
         commands_run=[],
         files_changed=[],
         test_results=[],
@@ -140,6 +154,7 @@ def _unexpected_worker_error_result(exc: Exception) -> WorkerResult:
     return WorkerResult(
         status="error",
         summary=summary,
+        failure_kind="unknown",
         commands_run=[],
         files_changed=[],
         test_results=[],
@@ -480,6 +495,7 @@ def _unconfigured_worker_result(worker_type: str | None) -> WorkerResult:
             f"No worker is configured for route '{selected_worker}'. "
             f"Configured workers: {configured_workers}."
         ),
+        failure_kind="provider_error",
         commands_run=[],
         files_changed=[],
         test_results=[],
@@ -705,9 +721,17 @@ def _compute_route_decision(
     if state.attempt_count > 0 and state.dispatch.worker_type is not None:
         prior_worker: WorkerType = state.dispatch.worker_type
         if state.verification is not None and state.verification.status == "failed":
-            escalation_reason: str | None = "verifier_failed_previous_run"
+            verification_failure_kind = state.verification.failure_kind or "unknown"
+            escalation_reason: str | None = (
+                "verifier_failed_previous_run"
+                if verification_failure_kind in _VERIFICATION_FAILURE_REROUTE_KINDS
+                else None
+            )
         elif state.result is not None and state.result.status != "success":
-            escalation_reason = "previous_worker_failed"
+            failure_kind = state.result.failure_kind or "unknown"
+            escalation_reason = (
+                "previous_worker_failed" if failure_kind in _WORKER_FAILURE_REROUTE_KINDS else None
+            )
         else:
             escalation_reason = None
 
@@ -854,6 +878,7 @@ def await_approval(state_input: OrchestratorState) -> dict[str, Any]:
         response["result"] = WorkerResult(
             status="failure",
             summary="Task halted because the requested destructive action was not approved.",
+            failure_kind="permission_denied",
             commands_run=[],
             files_changed=[],
             test_results=[],
@@ -1218,9 +1243,24 @@ def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
     else:
         report_status = "passed"
 
+    report_failure_kind: VerificationFailureKind | None = None
+    if report_status == "failed":
+        failed_labels = {item.label for item in items if item.status == "failed"}
+        if "test_results" in failed_labels:
+            report_failure_kind = "test_regression"
+        elif "file_changes" in failed_labels:
+            report_failure_kind = "scope_mismatch"
+        elif "command_audit" in failed_labels:
+            report_failure_kind = "risky_command"
+        elif "worker_status" in failed_labels:
+            report_failure_kind = "worker_failure"
+        else:
+            report_failure_kind = "unknown"
+
     report = VerificationReport(
         status=report_status,
         summary=f"Verification {report_status}: {len(items)} checks run.",
+        failure_kind=report_failure_kind,
         items=items,
     )
 
@@ -1247,6 +1287,7 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
         result = WorkerResult(
             status="error",
             summary="Worker did not return a result.",
+            failure_kind="unknown",
             commands_run=[],
             files_changed=[],
             test_results=[],

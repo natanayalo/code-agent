@@ -2,6 +2,7 @@
 
 from workers.base import (
     ArtifactReference,
+    FailureKind,
     TestResult,
     Worker,
     WorkerCommand,
@@ -17,6 +18,7 @@ __all__ = [
     "ArtifactReference",
     "CodexCliWorker",
     "CodexExecCliRuntimeAdapter",
+    "FailureKind",
     "GeminiCliRuntimeAdapter",
     "GeminiCliWorker",
     "TestResult",
