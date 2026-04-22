@@ -268,6 +268,38 @@ def test_openrouter_adapter_next_step_rejects_truncated_response(
         adapter.next_step([CliRuntimeMessage(role="system", content="Proceed")])
 
 
+def test_openrouter_adapter_next_step_wraps_non_runtime_json_as_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adapter should preserve valid non-step JSON by wrapping it as final output."""
+
+    class _ReviewJsonResponseOpenAI(_FakeOpenAI):
+        def _create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=(
+                                '{"reviewer_kind":"worker_self_review","summary":"ok",'
+                                '"confidence":0.8,"outcome":"no_findings","findings":[]}'
+                            )
+                        )
+                    )
+                ]
+            )
+
+    def _fake_openai(**kwargs):
+        return _ReviewJsonResponseOpenAI(**kwargs)
+
+    monkeypatch.setattr("workers.openrouter_adapter.OpenAI", _fake_openai)
+    adapter = OpenRouterCliRuntimeAdapter(api_key="test-key")
+    step = adapter.next_step([CliRuntimeMessage(role="system", content="Proceed")])
+    assert step.kind == "final"
+    assert step.final_output is not None
+    assert '"reviewer_kind":"worker_self_review"' in step.final_output
+
+
 def test_message_content_to_text_joins_text_blocks() -> None:
     """Adapter content normalization should join text blocks from list content."""
     content = [

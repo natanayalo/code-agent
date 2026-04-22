@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Mapping, Sequence
@@ -255,6 +256,19 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         try:
             return CliRuntimeStep.model_validate_json(raw_json)
         except Exception as exc:
+            # Self-review prompts may return a different JSON schema (ReviewResult).
+            # When that happens, preserve the payload by wrapping it as a final step.
+            try:
+                parsed_payload = json.loads(raw_json)
+            except Exception:
+                parsed_payload = None
+            if isinstance(parsed_payload, dict):
+                return CliRuntimeStep(
+                    kind="final",
+                    final_output=raw_json,
+                    tool_name=None,
+                    tool_input=None,
+                )
             raise RuntimeError(
                 "OpenRouter adapter returned a response that did not match "
                 f"CliRuntimeStep: {_truncate_detail(raw_json)}"
