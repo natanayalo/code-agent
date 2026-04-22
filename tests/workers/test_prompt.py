@@ -105,7 +105,8 @@ def test_build_review_prompt_includes_repo_and_review_guidance(tmp_path: Path) -
     assert "## Review Context Packet" in rendered_prompt
     assert "Reviewer kind: independent_reviewer" in rendered_prompt
     assert "Task objective: Review updated auth validation" in rendered_prompt
-    assert '"reviewer_kind":"independent_reviewer"' in rendered_prompt
+    assert '"reviewer_kind": "independent_reviewer"' in rendered_prompt
+    assert "```json" in rendered_prompt
 
 
 def test_build_review_prompt_skips_missing_review_file_and_execution_sections(
@@ -121,6 +122,22 @@ def test_build_review_prompt_skips_missing_review_file_and_execution_sections(
     assert "## Available Tools" not in rendered_prompt
     assert "## Workflow Instructions" not in rendered_prompt
     assert "Use the available tools with focused commands" not in rendered_prompt
+
+
+def test_build_review_prompt_uses_collision_safe_guidance_fences(tmp_path: Path) -> None:
+    """Guidance blocks should use fences longer than embedded backtick runs."""
+    (tmp_path / "AGENTS.md").write_text(
+        "Use examples:\n```python\nprint('hi')\n```\n",
+        encoding="utf-8",
+    )
+
+    rendered_prompt = build_review_prompt(
+        workspace_path=tmp_path,
+        review_context_packet="Packet payload",
+    )
+
+    assert "\n```text\n" not in rendered_prompt
+    assert "\n````text\n" in rendered_prompt
 
 
 def test_build_system_prompt_includes_build_test_section_from_repo_config(tmp_path: Path) -> None:

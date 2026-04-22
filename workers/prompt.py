@@ -39,6 +39,20 @@ _SKIPPED_PATH_NAMES = {
 }
 
 
+def _markdown_fence_for_content(content: str, *, minimum: int = 3) -> str:
+    """Return a backtick fence that cannot collide with backtick runs in content."""
+    max_run = 0
+    for match in re.finditer(r"`+", content):
+        max_run = max(max_run, len(match.group(0)))
+    return "`" * max(minimum, max_run + 1)
+
+
+def _fenced_text_block_lines(label: str, content: str) -> list[str]:
+    """Render a text block with a collision-safe markdown fence."""
+    fence = _markdown_fence_for_content(content)
+    return [label, f"{fence}text", content, fence]
+
+
 def build_role_description_section() -> str:
     """Describe the worker's job and guardrails."""
     return "\n".join(
@@ -1010,11 +1024,11 @@ def build_review_prompt(
 
     guidance_lines: list[str] = []
     if agents_guidance is not None:
-        guidance_lines.extend(["AGENTS.md guidance:", "```text", agents_guidance, "```"])
+        guidance_lines.extend(_fenced_text_block_lines("AGENTS.md guidance:", agents_guidance))
     if agents_assets_guidance is not None:
-        guidance_lines.extend([".agents guidance:", "```text", agents_assets_guidance, "```"])
+        guidance_lines.extend(_fenced_text_block_lines(".agents guidance:", agents_assets_guidance))
     if review_guidance is not None:
-        guidance_lines.extend(["REVIEW.md guidance:", "```text", review_guidance, "```"])
+        guidance_lines.extend(_fenced_text_block_lines("REVIEW.md guidance:", review_guidance))
     guidance_section = ""
     if guidance_lines:
         guidance_section = "\n".join(["## Review Guidance", *guidance_lines])
@@ -1045,29 +1059,35 @@ def build_review_prompt(
         ]
     )
 
+    schema_payload = {
+        "reviewer_kind": reviewer_kind,
+        "summary": "string",
+        "confidence": 0.0,
+        "outcome": "no_findings|findings",
+        "findings": [
+            {
+                "severity": "low|medium|high|critical",
+                "category": "string",
+                "confidence": 0.0,
+                "file_path": "string",
+                "line_start": 1,
+                "line_end": 1,
+                "title": "string",
+                "why_it_matters": "string",
+                "evidence": "string|null",
+                "suggested_fix": "string|null",
+            }
+        ],
+    }
+
     output_section = "\n".join(
         [
             "## Output Contract",
             "Return exactly one JSON object with no markdown fences and no extra prose.",
             "Schema:",
-            "{"
-            f'"reviewer_kind":"{reviewer_kind}",'
-            '"summary":"string",'
-            '"confidence":0.0,'
-            '"outcome":"no_findings|findings",'
-            '"findings":[{'
-            '"severity":"low|medium|high|critical",'
-            '"category":"string",'
-            '"confidence":0.0,'
-            '"file_path":"string",'
-            '"line_start":1,'
-            '"line_end":1,'
-            '"title":"string",'
-            '"why_it_matters":"string",'
-            '"evidence":"string|null",'
-            '"suggested_fix":"string|null"'
-            "}]"
-            "}",
+            "```json",
+            json.dumps(_json_safe(schema_payload), indent=2, ensure_ascii=True),
+            "```",
             "Rules:",
             "- Use outcome `no_findings` with an empty `findings` list when nothing "
             "actionable exists.",
