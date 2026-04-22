@@ -3,6 +3,7 @@ import re
 import subprocess
 from unittest.mock import MagicMock, patch
 
+import workers.self_review as self_review
 from workers.base import WorkerCommand
 from workers.cli_runtime import CliRuntimeBudgetLedger, CliRuntimeSettings
 from workers.self_review import (
@@ -388,3 +389,53 @@ def test_build_targeted_review_context_packet_uses_robust_markdown_fences(tmp_pa
     )
     assert "````diff" in packet
     assert "````text" in packet
+
+
+def test_build_targeted_review_context_packet_uses_dynamic_markdown_fences(tmp_path):
+    source = tmp_path / "fence5.md"
+    source.write_text("````inside````\nline2\n")
+    diff_text = "\n".join(
+        [
+            "diff --git a/fence5.md b/fence5.md",
+            "+++ b/fence5.md",
+            "@@ -1,1 +1,1 @@",
+            "-````inside````",
+            "+````inside```` updated",
+        ]
+    )
+
+    packet = build_targeted_review_context_packet(
+        task_text="Update fenced content with four-backtick literal",
+        worker_summary="Changed markdown fence content.",
+        files_changed=["fence5.md"],
+        diff_text=diff_text,
+        repo_path=tmp_path,
+    )
+
+    assert "`````diff" in packet
+    assert "`````text" in packet
+
+
+def test_build_targeted_review_context_packet_skips_oversized_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(self_review, "DEFAULT_REVIEW_PACKET_MAX_FILE_BYTES", 10)
+    source = tmp_path / "big_payload.txt"
+    source.write_text("x" * 128)
+    diff_text = "\n".join(
+        [
+            "diff --git a/big_payload.txt b/big_payload.txt",
+            "+++ b/big_payload.txt",
+            "@@ -1,1 +1,1 @@",
+            "-x",
+            "+y",
+        ]
+    )
+
+    packet = build_targeted_review_context_packet(
+        task_text="Tiny change but huge file",
+        worker_summary="Updated one line.",
+        files_changed=["big_payload.txt"],
+        diff_text=diff_text,
+        repo_path=tmp_path,
+    )
+
+    assert "exceeds 10-byte limit" in packet
