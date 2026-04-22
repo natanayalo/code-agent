@@ -255,6 +255,7 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
                         "content": prompt,
                     }
                 ],
+                response_format={"type": "json_object"},
             )
         except Exception as exc:  # pragma: no cover - exercised via unit tests with stubs
             raise RuntimeError(f"OpenRouter adapter request failed: {exc}") from exc

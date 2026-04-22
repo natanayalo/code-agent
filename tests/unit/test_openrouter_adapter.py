@@ -95,3 +95,4 @@ def test_openrouter_adapter_next_step_requests_chat_completion(
     assert fake_client is not None
     assert len(fake_client.calls) == 1
     assert fake_client.calls[0]["model"] == "anthropic/claude-3.5-sonnet"
+    assert fake_client.calls[0]["response_format"] == {"type": "json_object"}
