@@ -245,3 +245,58 @@ async def test_review_result_logs_warnings_for_non_success_and_unparseable_outpu
     assert res["current_step"] == "review_result"
     assert "Independent review worker returned non-success status: error" in caplog.text
     assert "Independent review output could not be parsed into ReviewResult." in caplog.text
+
+
+@pytest.mark.anyio
+async def test_review_result_includes_fallback_session_state_in_review_context(monkeypatch):
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo task"},
+            "normalized_task_text": "normalized demo task",
+            "verification": {"status": "passed", "items": []},
+            "result": {
+                "status": "success",
+                "summary": "done",
+                "files_changed": ["a.py", "b.py"],
+                "diff_text": "+++ a.py\n+print('x')",
+            },
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+
+    captured_session_state: dict[str, object] = {}
+
+    def fake_pack_reviewer_context(
+        *,
+        task_text: str,  # noqa: ARG001
+        worker_summary: str,  # noqa: ARG001
+        files_changed: list[str],  # noqa: ARG001
+        diff_text: str,  # noqa: ARG001
+        commands_run: list[object],  # noqa: ARG001
+        verifier_report: dict[str, object] | None,  # noqa: ARG001
+        session_state: dict[str, object] | None,
+        max_characters: int = 12000,  # noqa: ARG001
+    ) -> str:
+        captured_session_state["value"] = session_state
+        return "ctx"
+
+    monkeypatch.setattr(review_module, "pack_reviewer_context", fake_pack_reviewer_context)
+    monkeypatch.setattr(
+        review_module,
+        "build_review_prompt",
+        lambda **kwargs: "prompt",  # noqa: ARG005
+    )
+
+    mock_reviewer = AsyncMock()
+    mock_reviewer.run.return_value = WorkerResult(
+        status="success",
+        summary='{"reviewer_kind":"independent_reviewer","summary":"ok","confidence":1.0,"outcome":"no_findings","findings":[]}',
+    )
+
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert captured_session_state["value"] == {
+        "active_goal": "normalized demo task",
+        "files_touched": ["a.py", "b.py"],
+    }

@@ -41,6 +41,19 @@ def _workspace_path_from_result_artifacts(state: OrchestratorState) -> Path | No
     return None
 
 
+def _session_state_for_review_context(state: OrchestratorState) -> Mapping[str, Any] | None:
+    """Provide compact session context for review, even before summarize_result."""
+    if state.session_state_update is not None:
+        return state.session_state_update.model_dump()
+    if state.result is None:
+        return None
+    active_goal = state.normalized_task_text or state.task.task_text
+    return {
+        "active_goal": active_goal,
+        "files_touched": list(state.result.files_changed),
+    }
+
+
 async def review_result(
     state: OrchestratorState,
     *,
@@ -72,9 +85,7 @@ async def review_result(
         diff_text=state.result.diff_text or "",
         commands_run=state.result.commands_run,
         verifier_report=state.verification.model_dump() if state.verification else None,
-        session_state=state.session_state_update.model_dump()
-        if state.session_state_update
-        else None,
+        session_state=_session_state_for_review_context(state),
     )
 
     review_prompt = build_review_prompt(
