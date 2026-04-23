@@ -10,11 +10,60 @@ from typing import Any
 
 from tools import DEFAULT_MCP_TOOL_CLIENT, McpToolClient, ToolDefinition, ToolRegistry
 from workers.base import WorkerRequest
+from workers.markdown import markdown_fence_for_content
 
 DEFAULT_REPO_LISTING_MAX_DEPTH = 2
 DEFAULT_REPO_LISTING_MAX_ENTRIES = 40
 DEFAULT_AGENTS_MAX_CHARACTERS = 6000
 DEFAULT_AGENTS_ASSET_READ_MAX_CHARACTERS = 8192
+DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS = 3000
+_SECTION_SEPARATOR_OVERHEAD_BUFFER = 32
+_GUIDANCE_OVERHEAD_BUFFER = 100
+_REVIEW_ROLE_SECTION = "\n".join(
+    [
+        "## Review Role",
+        "You are the review worker for code-agent.",
+        "Focus on high-confidence, actionable findings grounded in the supplied context.",
+        "Prefer precision over recall and skip style-only or speculative comments.",
+        "Do not propose broad rewrites when a focused finding is sufficient.",
+    ]
+)
+_REVIEW_SCHEMA_PAYLOAD = {
+    "reviewer_kind": "string",
+    "summary": "string",
+    "confidence": 0.0,
+    "outcome": "no_findings|findings",
+    "findings": [
+        {
+            "severity": "low|medium|high|critical",
+            "category": "string",
+            "confidence": 0.0,
+            "file_path": "string",
+            "line_start": 1,
+            "line_end": 1,
+            "title": "string",
+            "why_it_matters": "string",
+            "evidence": "string|null",
+            "suggested_fix": "string|null",
+        }
+    ],
+}
+_REVIEW_OUTPUT_CONTRACT_TEMPLATE = "\n".join(
+    [
+        "## Output Contract",
+        "Return exactly one JSON object. Your response MUST NOT contain any markdown ",
+        "fences or extra prose outside of the JSON payload.",
+        "Schema:",
+        "```json",
+        "{schema_json}",
+        "```",
+        "Rules:",
+        "- Use outcome `no_findings` with an empty `findings` list when nothing "
+        "actionable exists.",
+        "- Use outcome `findings` only when at least one concrete actionable finding exists.",
+        "- Keep findings bounded to the supplied review context packet.",
+    ]
+)
 _TRUNCATED_MARKER = "\n... (truncated)"
 _AGENTS_ASSET_DIRECTORIES = ("skills", "workflows", "rules")
 _BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS = 1048576
@@ -36,6 +85,19 @@ _SKIPPED_PATH_NAMES = {
     ".venv",
     "__pycache__",
 }
+
+
+def _fenced_text_block_lines(label: str, content: str, *, fence: str | None = None) -> list[str]:
+    """Render a text block with a collision-safe markdown fence."""
+    actual_fence = fence if fence is not None else markdown_fence_for_content(content)
+    return [label, f"{actual_fence}text", content, actual_fence]
+
+
+def _fenced_text_block_overhead(label: str, content: str, *, fence: str | None = None) -> int:
+    """Return wrapper-character overhead for one fenced guidance block."""
+    actual_fence = fence if fence is not None else markdown_fence_for_content(content)
+    # label + opening fence + closing fence + three line separators
+    return len(label) + len(f"{actual_fence}text") + len(actual_fence) + 3
 
 
 def build_role_description_section() -> str:
@@ -351,23 +413,9 @@ def _build_repo_context_section_with_guidance(
         "```",
     ]
     if agents_guidance is not None:
-        lines.extend(
-            [
-                "AGENTS.md guidance:",
-                "```text",
-                agents_guidance,
-                "```",
-            ]
-        )
+        lines.extend(_fenced_text_block_lines("AGENTS.md guidance:", agents_guidance))
     if agents_assets_guidance is not None:
-        lines.extend(
-            [
-                ".agents guidance:",
-                "```text",
-                agents_assets_guidance,
-                "```",
-            ]
-        )
+        lines.extend(_fenced_text_block_lines(".agents guidance:", agents_assets_guidance))
     return "\n".join(lines)
 
 
@@ -974,6 +1022,153 @@ def build_workflow_instructions_section() -> str:
     )
 
 
+def read_workspace_review_guidance(
+    workspace_path: Path,
+    *,
+    max_characters: int = DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS,
+) -> str | None:
+    """Return bounded REVIEW.md guidance from the workspace root when present."""
+    review_path = workspace_path / "REVIEW.md"
+    if not review_path.is_file() or max_characters <= 0:
+        return None
+    try:
+        contents = _read_text_prefix(review_path, max_characters=max_characters + 1).strip()
+    except OSError:
+        return None
+    if not contents:
+        return None
+    return _truncate_to_budget(contents, max_characters=max_characters)
+
+
+def build_review_prompt(
+    *,
+    workspace_path: Path,
+    review_context_packet: str,
+    reviewer_kind: str = "worker_self_review",
+    task_text: str | None = None,
+) -> str:
+    """Assemble a review-only prompt separated from execution/tool-loop prompts."""
+    # Reserve a small budget buffer for \n\n separators between prompt sections
+    # and a buffer for block labels/fences added after reading guidance.
+    total_guidance_budget = (
+        DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS
+        - _SECTION_SEPARATOR_OVERHEAD_BUFFER
+        - _GUIDANCE_OVERHEAD_BUFFER
+    )
+    agents_guidance, agents_assets_guidance = read_workspace_repo_guidance(
+        workspace_path,
+        max_characters=total_guidance_budget,
+    )
+
+    guidance_lines: list[str] = []
+    consumed_guidance_characters = 0
+    guidance_block_count = 0
+
+    if agents_guidance is not None:
+        if guidance_block_count == 0:
+            consumed_guidance_characters += len("## Review Guidance") + 1
+        else:
+            consumed_guidance_characters += 1  # separator between blocks
+
+        fence = markdown_fence_for_content(agents_guidance)
+        guidance_lines.extend(
+            _fenced_text_block_lines("AGENTS.md guidance:", agents_guidance, fence=fence)
+        )
+        consumed_guidance_characters += len(agents_guidance) + _fenced_text_block_overhead(
+            "AGENTS.md guidance:", agents_guidance, fence=fence
+        )
+        guidance_block_count += 1
+
+    if agents_assets_guidance is not None:
+        if guidance_block_count == 0:
+            consumed_guidance_characters += len("## Review Guidance") + 1
+        else:
+            consumed_guidance_characters += 1  # separator between blocks
+
+        fence = markdown_fence_for_content(agents_assets_guidance)
+        guidance_lines.extend(
+            _fenced_text_block_lines(".agents guidance:", agents_assets_guidance, fence=fence)
+        )
+        consumed_guidance_characters += len(agents_assets_guidance) + _fenced_text_block_overhead(
+            ".agents guidance:", agents_assets_guidance, fence=fence
+        )
+        guidance_block_count += 1
+
+    if guidance_lines:
+        # Account for "## Review Guidance" header and the newline after it
+        consumed_guidance_characters += len("## Review Guidance") + 1
+        if guidance_block_count > 1:
+            # Account for newlines between multiple blocks joined by "\n"
+            consumed_guidance_characters += guidance_block_count - 1
+
+    review_guidance = read_workspace_review_guidance(
+        workspace_path,
+        max_characters=max(total_guidance_budget - consumed_guidance_characters, 0),
+    )
+    if review_guidance is not None:
+        if guidance_block_count == 0:
+            consumed_guidance_characters += len("## Review Guidance") + 1
+        else:
+            consumed_guidance_characters += 1  # separator between blocks
+
+        # Budget math for N guidance blocks:
+        # - Header separator: 1 \n (accounted for in consumed_guidance_characters += 1 above)
+        # - Internal separators: 3 \n per block (accounted for in _fenced_text_block_overhead)
+        # - Inter-block separators: 1 \n between blocks (accounted for in
+        #   consumed_guidance_characters += 1 above)
+        # Total newlines = 1 (header) + 3N (internal) + (N-1) (inter-block) = 4N.
+        # This exactly matches the N*4 strings joined by \n in the final assembly.
+
+        fence = markdown_fence_for_content(review_guidance)
+        guidance_lines.extend(
+            _fenced_text_block_lines("REVIEW.md guidance:", review_guidance, fence=fence)
+        )
+        consumed_guidance_characters += len(review_guidance) + _fenced_text_block_overhead(
+            "REVIEW.md guidance:", review_guidance, fence=fence
+        )
+        guidance_block_count += 1
+
+    build_test_context = build_build_test_section(
+        workspace_path,
+        max_characters=max(total_guidance_budget - consumed_guidance_characters, 0),
+    )
+    guidance_section = ""
+    if guidance_lines:
+        guidance_section = "\n".join(["## Review Guidance", *guidance_lines])
+
+    task_lines = [
+        "## Review Task",
+        f"Reviewer kind: {reviewer_kind}",
+    ]
+    if task_text:
+        task_lines.append(f"Task objective: {task_text}")
+    task_lines.extend(
+        [
+            "Evaluate:",
+            "1. Does the delivered diff satisfy the task objective?",
+            "2. Are there unintended behavioral changes?",
+            "3. Are there obvious logical issues?",
+            "4. Are relevant tests or checks missing for changed behavior?",
+        ]
+    )
+
+    schema_payload = {**_REVIEW_SCHEMA_PAYLOAD, "reviewer_kind": reviewer_kind}
+    schema_json = json.dumps(schema_payload, indent=2)
+    output_section = _REVIEW_OUTPUT_CONTRACT_TEMPLATE.format(schema_json=schema_json)
+
+    sections = [
+        _REVIEW_ROLE_SECTION,
+        guidance_section,
+        build_test_context or "",
+        "\n".join(task_lines),
+        f"## Review Context Packet\n{review_context_packet}"
+        if review_context_packet.strip()
+        else "",
+        output_section,
+    ]
+    return "\n\n".join(section for section in sections if section.strip())
+
+
 def build_system_prompt(
     request: WorkerRequest,
     workspace_path: Path,
@@ -989,9 +1184,13 @@ def build_system_prompt(
     )
     guidance_wrapper_overhead = 0
     if agents_guidance is not None:
-        guidance_wrapper_overhead += len("AGENTS.md guidance:\n```text\n\n```")
+        guidance_wrapper_overhead += _fenced_text_block_overhead(
+            "AGENTS.md guidance:", agents_guidance
+        )
     if agents_assets_guidance is not None:
-        guidance_wrapper_overhead += len(".agents guidance:\n```text\n\n```")
+        guidance_wrapper_overhead += _fenced_text_block_overhead(
+            ".agents guidance:", agents_assets_guidance
+        )
     consumed_guidance_characters = (
         len(agents_guidance or "") + len(agents_assets_guidance or "") + guidance_wrapper_overhead
     )

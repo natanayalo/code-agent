@@ -12,6 +12,8 @@ from typing import Any
 from tools.numeric import coerce_non_negative_int_like
 from workers.base import WorkerCommand
 from workers.cli_runtime import CliRuntimeBudgetLedger, CliRuntimeSettings
+from workers.markdown import markdown_fence_for_content
+from workers.prompt import build_review_prompt
 from workers.review import ReviewResult
 
 DEFAULT_SELF_REVIEW_MAX_FIX_ITERATIONS = 2
@@ -24,7 +26,6 @@ DEFAULT_REVIEW_PACKET_CODE_WINDOW_RADIUS = 3
 DEFAULT_REVIEW_PACKET_MAX_CODE_LINES = 120
 DEFAULT_REVIEW_PACKET_MAX_WINDOWS_PER_FILE = 8
 DEFAULT_REVIEW_PACKET_MAX_FILE_BYTES = 2 * 1024 * 1024
-DEFAULT_MARKDOWN_FENCE = "````"
 
 
 def should_skip_self_review(constraints: Mapping[str, Any]) -> bool:
@@ -120,44 +121,12 @@ def build_self_review_prompt(
         verifier_report=verifier_report,
         session_state=session_state,
     )
-    return "\n".join(
-        [
-            "You are running a bounded worker self-review before final completion.",
-            "Review the delivered task outcome and code diff.",
-            "Evaluate:",
-            "1. Does the diff satisfy the task objective?",
-            "2. Are there unintended changes?",
-            "3. Are there obvious logical errors?",
-            "4. Are relevant tests missing?",
-            "Return exactly one JSON object with no markdown fences and no prose.",
-            "Schema:",
-            "{"
-            '"reviewer_kind":"worker_self_review",'
-            '"summary":"string",'
-            '"confidence":0.0,'
-            '"outcome":"no_findings|findings",'
-            '"findings":[{'
-            '"severity":"low|medium|high|critical",'
-            '"category":"string",'
-            '"confidence":0.0,'
-            '"file_path":"string",'
-            '"line_start":1,'
-            '"line_end":1,'
-            '"title":"string",'
-            '"why_it_matters":"string",'
-            '"evidence":"string|null",'
-            '"suggested_fix":"string|null"'
-            "}]"
-            "}",
-            "Rules:",
-            "- Use outcome `no_findings` with an empty `findings` list when nothing "
-            "actionable exists.",
-            "- Use outcome `findings` only when at least one concrete actionable finding exists.",
-            "- Keep findings bounded and specific to the supplied review context packet.",
-            "",
-            "## Review Context Packet",
-            review_context_packet,
-        ]
+    resolved_repo_path = repo_path or Path(".")
+    return build_review_prompt(
+        workspace_path=resolved_repo_path,
+        review_context_packet=review_context_packet,
+        reviewer_kind="worker_self_review",
+        task_text=task_text,
     )
 
 
@@ -280,7 +249,7 @@ def build_targeted_review_context_packet(
     normalized_files = sorted({path.strip() for path in files_changed if path.strip()})
     changed_files_block = "\n".join(f"- {path}" for path in normalized_files) or "- <none>"
     command_summary_block = _summarize_commands(commands_run)
-    diff_fence = _markdown_fence_for_content(diff_text)
+    diff_fence = markdown_fence_for_content(diff_text)
     truncated_diff_text = _truncate_block(diff_text, max_characters // 2)
     diff_block = f"{diff_fence}diff\n{truncated_diff_text}\n{diff_fence}"
     code_windows_block = _build_changed_file_windows(
@@ -553,7 +522,7 @@ def _build_changed_file_windows(
                 f"{line_number:04d}: {line_text}"
                 for line_number, line_text in enumerate(section_lines, start=first_line)
             )
-            code_fence = _markdown_fence_for_content(numbered_lines)
+            code_fence = markdown_fence_for_content(numbered_lines)
             windows.append(
                 "\n".join(
                     [
@@ -605,11 +574,3 @@ def _normalize_diff_new_path(raw_path: str) -> str | None:
     if candidate.startswith("b/"):
         candidate = candidate[2:]
     return candidate.strip() or None
-
-
-def _markdown_fence_for_content(content: str, *, minimum: int = len(DEFAULT_MARKDOWN_FENCE)) -> str:
-    """Return a backtick fence that cannot collide with backtick runs in content."""
-    max_run = 0
-    for match in re.finditer(r"`+", content):
-        max_run = max(max_run, len(match.group(0)))
-    return "`" * max(minimum, max_run + 1)

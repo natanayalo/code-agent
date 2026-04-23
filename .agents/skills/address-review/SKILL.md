@@ -36,9 +36,13 @@ Use this skill for repo-specific triage after pull request review feedback is co
    - test or verification gap
    - maintainability cleanup
    - scope-expanding design suggestion
-3. Fix blocking correctness or safety issues in the current PR.
-4. Take small local maintainability fixes only when they stay tightly scoped.
-5. Defer broader design changes into an explicit follow-up task when needed.
+3. For fixes in scope:
+   - Replicate the reported issue locally.
+   - Add or update a unit test to verify the fix and prevent regression.
+   - Apply the fix, commit, push, and resolve the thread.
+4. For out-of-scope or design suggestions:
+   - Reply to the comment with reasoning or a deferral plan.
+   - Resolve the thread.
 
 ## Patch guardrails
 
@@ -51,6 +55,12 @@ Use this skill for repo-specific triage after pull request review feedback is co
 - Run `pytest` on the affected unit/integration tests after each fix — this is always safe in this repo per AGENTS.md.
 - Run `pre-commit run --files <changed files>` when the change touches linted code.
 - Do not run deploy commands or destructive operations without approval.
+
+## Finalizing the Session
+
+After all review threads have been addressed, committed, pushed, and resolved:
+- Add a new top-level comment to the PR to trigger a fresh review:
+  `GH_PAGER=cat gh pr comment {PR_NUMBER} --body "@gemini-code-assist review"`
 
 ## Summary expectations
 
