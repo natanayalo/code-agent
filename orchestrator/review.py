@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from orchestrator.state import OrchestratorState
 from workers import WorkerRequest
@@ -14,6 +15,29 @@ from workers.review_context import pack_reviewer_context
 from workers.self_review import parse_review_result
 
 logger = logging.getLogger(__name__)
+
+
+def _workspace_path_from_result_artifacts(state: OrchestratorState) -> Path | None:
+    """Resolve workspace artifact URI to a local path for review prompt context."""
+    if not state.result or not state.result.artifacts:
+        return None
+
+    for art in state.result.artifacts:
+        if art.name != "workspace" or not art.uri.startswith("file://"):
+            continue
+        parsed = urlparse(art.uri)
+        decoded_path = unquote(parsed.path)
+        path_text = url2pathname(decoded_path)
+        # Handle file:///C:/... style URIs robustly across host OSes.
+        if (
+            len(path_text) >= 3
+            and path_text[0] == "/"
+            and path_text[1].isalpha()
+            and path_text[2] == ":"
+        ):
+            path_text = path_text[1:]
+        return Path(path_text)
+    return None
 
 
 async def review_result(state: OrchestratorState, *, worker_factory: Any = None) -> dict[str, Any]:
@@ -30,13 +54,7 @@ async def review_result(state: OrchestratorState, *, worker_factory: Any = None)
         return {"current_step": "review_result"}
 
     # 2. Build the review prompt
-    # Use the local repo path if available from the last worker run
-    repo_path = None
-    if state.result.artifacts:
-        for art in state.result.artifacts:
-            if art.name == "workspace" and art.uri.startswith("file://"):
-                repo_path = Path(unquote(urlparse(art.uri).path))
-                break
+    repo_path = _workspace_path_from_result_artifacts(state)
 
     review_context = pack_reviewer_context(
         task_text=state.normalized_task_text or state.task.task_text,

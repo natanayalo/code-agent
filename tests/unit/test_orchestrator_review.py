@@ -1,9 +1,12 @@
 """Unit tests for the orchestrator review stage."""
 
+import json
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
+import orchestrator.review as review_module
 from orchestrator.review import review_result
 from orchestrator.state import OrchestratorState
 from workers import WorkerResult
@@ -74,8 +77,6 @@ async def test_review_result_runs_and_parses_findings():
         ],
     }
 
-    import json
-
     mock_reviewer.run.return_value = WorkerResult(
         status="success", summary=f"Here is the review:\n```json\n{json.dumps(review_payload)}\n```"
     )
@@ -116,3 +117,58 @@ async def test_review_result_handles_worker_failure_gracefully():
 
     assert res["current_step"] == "review_result"
     assert "review" not in res
+
+
+@pytest.mark.anyio
+async def test_review_result_resolves_windows_style_workspace_uri_for_prompt(monkeypatch):
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "add a feature"},
+            "verification": {"status": "passed", "items": []},
+            "result": {
+                "status": "success",
+                "summary": "added feature",
+                "files_changed": ["feature.py"],
+                "diff_text": "+++ feature.py\n+new line",
+                "artifacts": [
+                    {
+                        "name": "workspace",
+                        "uri": "file:///C:/repo/code-agent",
+                        "artifact_type": "workspace_archive",
+                    }
+                ],
+            },
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+
+    captured_workspace_path: dict[str, Path] = {}
+
+    def fake_build_review_prompt(
+        *,
+        workspace_path: Path,
+        review_context_packet: str,  # noqa: ARG001
+        reviewer_kind: str,  # noqa: ARG001
+        task_text: str,  # noqa: ARG001
+    ) -> str:
+        captured_workspace_path["path"] = workspace_path
+        return "prompt"
+
+    monkeypatch.setattr(review_module, "build_review_prompt", fake_build_review_prompt)
+
+    mock_reviewer = AsyncMock()
+    review_payload = {
+        "summary": "ok",
+        "confidence": 1.0,
+        "outcome": "no_findings",
+        "findings": [],
+    }
+    mock_reviewer.run.return_value = WorkerResult(
+        status="success",
+        summary=("```json\n" f"{json.dumps(review_payload)}\n" "```"),
+    )
+
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert captured_workspace_path["path"] == Path("C:/repo/code-agent")
