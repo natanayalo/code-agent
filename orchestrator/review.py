@@ -170,18 +170,17 @@ def _apply_independent_review_suppression(
 
     for finding in parsed_review.findings:
         reasons: list[str] = []
-        severity = finding.severity.lower()
+        severity = finding.severity
         category = finding.category.strip().lower()
 
         if category in suppressed_style_categories:
             reasons.append(f"style category suppressed by policy ({category})")
 
         minimum_for_severity = confidence_by_severity.get(severity, global_min_confidence)
-        effective_min_confidence = minimum_for_severity
         if finding.confidence < minimum_for_severity:
             reasons.append(
                 "confidence below effective threshold "
-                f"for {severity} ({finding.confidence:.2f} < {effective_min_confidence:.2f})"
+                f"for {severity} ({finding.confidence:.2f} < {minimum_for_severity:.2f})"
             )
 
         if min_severity is not None and SEVERITY_RANK[severity] < SEVERITY_RANK[min_severity]:
