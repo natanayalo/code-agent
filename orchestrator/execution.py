@@ -814,7 +814,7 @@ def _review_result_artifact_entry(
         "name": artifact_type,
         "uri": f"inline://{artifact_type}",
         "artifact_type": artifact_type,
-        "artifact_metadata": {"review_result": serialized},
+        "artifact_metadata": {artifact_type: serialized},
     }
 
 

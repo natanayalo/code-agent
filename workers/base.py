@@ -103,5 +103,10 @@ class Worker(ABC):
     """Shared interface every coding worker must implement."""
 
     @abstractmethod
-    def run(self, request: WorkerRequest) -> Awaitable[WorkerResult]:
+    def run(
+        self,
+        request: WorkerRequest,
+        *,
+        system_prompt: str | None = None,
+    ) -> Awaitable[WorkerResult]:
         """Execute a task request and return a structured result."""

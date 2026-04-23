@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from orchestrator.state import OrchestratorState
 from workers import WorkerRequest
@@ -34,8 +35,6 @@ async def review_result(state: OrchestratorState, *, worker_factory: Any = None)
     if state.result.artifacts:
         for art in state.result.artifacts:
             if art.name == "workspace" and art.uri.startswith("file://"):
-                from urllib.parse import unquote, urlparse
-
                 repo_path = Path(unquote(urlparse(art.uri).path))
                 break
 

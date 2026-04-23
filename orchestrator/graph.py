@@ -473,7 +473,12 @@ def _default_worker_result_provider(request: WorkerRequest) -> WorkerResult:
 class _DefaultFakeWorker(Worker):
     """Fallback worker used until a real provider-specific adapter exists."""
 
-    async def run(self, request: WorkerRequest) -> WorkerResult:
+    async def run(
+        self,
+        request: WorkerRequest,
+        *,
+        system_prompt: str | None = None,
+    ) -> WorkerResult:
         return _default_worker_result_provider(request)
 
 

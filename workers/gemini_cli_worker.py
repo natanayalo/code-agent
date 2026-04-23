@@ -228,12 +228,20 @@ class GeminiCliWorker(Worker):
         )
         self.runtime_settings = runtime_settings or CliRuntimeSettings()
 
-    async def run(self, request: WorkerRequest) -> WorkerResult:
+    async def run(
+        self, request: WorkerRequest, *, system_prompt: str | None = None
+    ) -> WorkerResult:
         """Provision a workspace, run the CLI loop, and return a typed result."""
         cancel_event = threading.Event()
         loop = asyncio.get_running_loop()
         future = loop.run_in_executor(
-            None, partial(self._run_sync, request, cancel_token=cancel_event.is_set)
+            None,
+            partial(
+                self._run_sync,
+                request,
+                cancel_token=cancel_event.is_set,
+                system_prompt_override=system_prompt,
+            ),
         )
         try:
             return await asyncio.shield(future)
@@ -299,6 +307,7 @@ class GeminiCliWorker(Worker):
         self,
         request: WorkerRequest,
         cancel_token: Callable[[], bool] | None = None,
+        system_prompt_override: str | None = None,
     ) -> WorkerResult:
         """Provision a workspace, run the CLI runtime, and return a typed result."""
         if request.repo_url is None or not request.repo_url.strip():
@@ -375,10 +384,14 @@ class GeminiCliWorker(Worker):
             )
             granted_permission = granted_permission_from_constraints(request.constraints)
             bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
-            system_prompt = build_system_prompt(
-                request,
-                workspace.repo_path,
-                tool_registry=self.tool_registry,
+            system_prompt = (
+                system_prompt_override
+                if system_prompt_override is not None
+                else build_system_prompt(
+                    request,
+                    workspace.repo_path,
+                    tool_registry=self.tool_registry,
+                )
             )
             execution = run_cli_runtime_loop(
                 self.runtime_adapter,
