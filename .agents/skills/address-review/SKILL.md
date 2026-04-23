@@ -52,6 +52,12 @@ Use this skill for repo-specific triage after pull request review feedback is co
 - Run `pre-commit run --files <changed files>` when the change touches linted code.
 - Do not run deploy commands or destructive operations without approval.
 
+## Finalizing the Session
+
+After all review threads have been addressed, committed, pushed, and resolved:
+- Add a new top-level comment to the PR to trigger a fresh review:
+  `GH_PAGER=cat gh pr comment {PR_NUMBER} --body "@gemini-code-assist review"`
+
 ## Summary expectations
 
 Report:
