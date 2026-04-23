@@ -1144,9 +1144,8 @@ def build_review_prompt(
         ]
     )
 
-    schema_payload = json.loads(json.dumps(_REVIEW_SCHEMA_PAYLOAD))
-    schema_payload["reviewer_kind"] = reviewer_kind
-    schema_json = json.dumps(_json_safe(schema_payload), indent=2, ensure_ascii=True)
+    schema_payload = {**_REVIEW_SCHEMA_PAYLOAD, "reviewer_kind": reviewer_kind}
+    schema_json = json.dumps(schema_payload, indent=2)
     output_section = _REVIEW_OUTPUT_CONTRACT_TEMPLATE.format(schema_json=schema_json)
 
     sections = [
