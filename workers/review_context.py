@@ -13,6 +13,7 @@ DEFAULT_REVIEW_PACKET_MAX_CHARACTERS = 12000
 DEFAULT_REVIEW_PACKET_MAX_FILES = 12
 DEFAULT_REVIEW_PACKET_MAX_COMMANDS = 24
 DEFAULT_REVIEW_PACKET_MIN_DIFF_BUDGET = 1200
+DEFAULT_REVIEW_PACKET_MIN_BASE_BUDGET = 256
 
 
 def _truncate_at_line_boundary(
@@ -107,11 +108,14 @@ def pack_reviewer_context(
     diff_open = f"{diff_fence}diff\n"
     diff_close = f"\n{diff_fence}"
     diff_overhead = len(diff_header) + len(diff_open) + len(diff_close)
+    content_budget = max(max_characters - diff_overhead, 0)
+    min_base_budget = min(DEFAULT_REVIEW_PACKET_MIN_BASE_BUDGET, content_budget)
+    max_diff_budget = max(content_budget - min_base_budget, 0)
     diff_reserved_budget = min(
         max(DEFAULT_REVIEW_PACKET_MIN_DIFF_BUDGET, max_characters // 3),
-        max_characters,
+        max_diff_budget,
     )
-    base_budget = max(max_characters - diff_overhead - diff_reserved_budget, 0)
+    base_budget = max(content_budget - diff_reserved_budget, 0)
     base_packet = _truncate_at_line_boundary(
         base_packet,
         max_characters=base_budget,

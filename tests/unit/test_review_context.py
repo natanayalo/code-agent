@@ -39,3 +39,18 @@ def test_pack_reviewer_context_truncation_keeps_closed_diff_fence() -> None:
     assert "... (truncated)" in packet
     last_non_empty_line = [line for line in packet.splitlines() if line][-1]
     assert last_non_empty_line.startswith("```")
+
+
+def test_pack_reviewer_context_preserves_base_sections_under_low_budget() -> None:
+    packet = pack_reviewer_context(
+        task_text="Objective text",
+        worker_summary="Worker summary",
+        files_changed=["a.py"],
+        diff_text="\n".join(f"+line_{index}" for index in range(800)),
+        max_characters=700,
+    )
+
+    assert "### Task Objective" in packet
+    assert "Objective text" in packet
+    assert "### Worker Summary" in packet
+    assert "### Diff Excerpt" in packet

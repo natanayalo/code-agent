@@ -804,7 +804,7 @@ def _serialize_review_result(review_result: object | None) -> dict[str, Any] | N
 def _review_result_artifact_entry(
     review_result: object | None,
     *,
-    artifact_type: str = "review_result",
+    artifact_type: str = ArtifactType.REVIEW_RESULT.value,
 ) -> dict[str, Any] | None:
     """Build a structured artifact index entry for a review payload when present."""
     serialized = _serialize_review_result(review_result)
