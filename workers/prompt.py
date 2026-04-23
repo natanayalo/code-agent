@@ -18,6 +18,51 @@ DEFAULT_AGENTS_MAX_CHARACTERS = 6000
 DEFAULT_AGENTS_ASSET_READ_MAX_CHARACTERS = 8192
 DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS = 3000
 _SECTION_SEPARATOR_OVERHEAD_BUFFER = 32
+_REVIEW_ROLE_SECTION = "\n".join(
+    [
+        "## Review Role",
+        "You are the review worker for code-agent.",
+        "Focus on high-confidence, actionable findings grounded in the supplied context.",
+        "Prefer precision over recall and skip style-only or speculative comments.",
+        "Do not propose broad rewrites when a focused finding is sufficient.",
+    ]
+)
+_REVIEW_SCHEMA_PAYLOAD = {
+    "reviewer_kind": "string",
+    "summary": "string",
+    "confidence": 0.0,
+    "outcome": "no_findings|findings",
+    "findings": [
+        {
+            "severity": "low|medium|high|critical",
+            "category": "string",
+            "confidence": 0.0,
+            "file_path": "string",
+            "line_start": 1,
+            "line_end": 1,
+            "title": "string",
+            "why_it_matters": "string",
+            "evidence": "string|null",
+            "suggested_fix": "string|null",
+        }
+    ],
+}
+_REVIEW_OUTPUT_CONTRACT_TEMPLATE = "\n".join(
+    [
+        "## Output Contract",
+        "Return exactly one JSON object. Your response MUST NOT contain any markdown ",
+        "fences or extra prose outside of the JSON payload.",
+        "Schema:",
+        "```json",
+        "{schema_json}",
+        "```",
+        "Rules:",
+        "- Use outcome `no_findings` with an empty `findings` list when nothing "
+        "actionable exists.",
+        "- Use outcome `findings` only when at least one concrete actionable finding exists.",
+        "- Keep findings bounded to the supplied review context packet.",
+    ]
+)
 _TRUNCATED_MARKER = "\n... (truncated)"
 _AGENTS_ASSET_DIRECTORIES = ("skills", "workflows", "rules")
 _BUILD_CONTEXT_FILE_READ_MAX_CHARACTERS = 1048576
@@ -1083,16 +1128,6 @@ def build_review_prompt(
     if guidance_lines:
         guidance_section = "\n".join(["## Review Guidance", *guidance_lines])
 
-    role_section = "\n".join(
-        [
-            "## Review Role",
-            "You are the review worker for code-agent.",
-            "Focus on high-confidence, actionable findings grounded in the supplied context.",
-            "Prefer precision over recall and skip style-only or speculative comments.",
-            "Do not propose broad rewrites when a focused finding is sufficient.",
-        ]
-    )
-
     task_lines = [
         "## Review Task",
         f"Reviewer kind: {reviewer_kind}",
@@ -1109,46 +1144,13 @@ def build_review_prompt(
         ]
     )
 
-    schema_payload = {
-        "reviewer_kind": reviewer_kind,
-        "summary": "string",
-        "confidence": 0.0,
-        "outcome": "no_findings|findings",
-        "findings": [
-            {
-                "severity": "low|medium|high|critical",
-                "category": "string",
-                "confidence": 0.0,
-                "file_path": "string",
-                "line_start": 1,
-                "line_end": 1,
-                "title": "string",
-                "why_it_matters": "string",
-                "evidence": "string|null",
-                "suggested_fix": "string|null",
-            }
-        ],
-    }
-
-    output_section = "\n".join(
-        [
-            "## Output Contract",
-            "Return exactly one JSON object. Your response MUST NOT contain any markdown ",
-            "fences or extra prose outside of the JSON payload.",
-            "Schema:",
-            "```json",
-            json.dumps(_json_safe(schema_payload), indent=2, ensure_ascii=True),
-            "```",
-            "Rules:",
-            "- Use outcome `no_findings` with an empty `findings` list when nothing "
-            "actionable exists.",
-            "- Use outcome `findings` only when at least one concrete actionable finding exists.",
-            "- Keep findings bounded to the supplied review context packet.",
-        ]
-    )
+    schema_payload = _REVIEW_SCHEMA_PAYLOAD.copy()
+    schema_payload["reviewer_kind"] = reviewer_kind
+    schema_json = json.dumps(_json_safe(schema_payload), indent=2, ensure_ascii=True)
+    output_section = _REVIEW_OUTPUT_CONTRACT_TEMPLATE.format(schema_json=schema_json)
 
     sections = [
-        role_section,
+        _REVIEW_ROLE_SECTION,
         guidance_section,
         build_test_context or "",
         "\n".join(task_lines),
