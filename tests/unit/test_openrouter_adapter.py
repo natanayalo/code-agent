@@ -319,3 +319,13 @@ def test_build_adapter_prompt_normalizes_non_string_content() -> None:
     )
     prompt = _build_adapter_prompt((message,))
     assert "structured" in prompt
+
+
+def test_build_adapter_prompt_preserves_rules_with_worker_system_prompt() -> None:
+    """Worker system prompt should augment, not replace, adapter protocol rules."""
+    message = CliRuntimeMessage(role="system", content="Proceed")
+    prompt = _build_adapter_prompt((message,), system_prompt="Reviewer instructions")
+
+    assert "## Worker System Prompt" in prompt
+    assert "Reviewer instructions" in prompt
+    assert "Choose one of two actions:" in prompt

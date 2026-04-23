@@ -62,7 +62,11 @@ def _message_heading(message: CliRuntimeMessage, *, index: int) -> str:
     return f"### Message {index} ({message.role})"
 
 
-def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
+def _build_adapter_prompt(
+    messages: Sequence[CliRuntimeMessage],
+    *,
+    system_prompt: str | None = None,
+) -> str:
     """Build the prompt sent to the Gemini CLI for one runtime turn."""
     lines = [
         "You are the Gemini runtime adapter for a bounded coding worker.",
@@ -102,11 +106,24 @@ def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
             '{"operation":"search","query":"langgraph","limit":3}.'
         ),
         "- If the transcript already contains enough information to finish, return `final`.",
-        "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
+        "- If the latest tool result failed, adapt to that failure instead of "
+        "repeating blindly.",
         "- Return ONLY a raw JSON object. No markdown fences, no extra explanation.",
-        "",
-        "## Runtime Transcript",
     ]
+    if system_prompt is not None and system_prompt.strip():
+        lines.extend(
+            [
+                "",
+                "## Worker System Prompt",
+                system_prompt.strip(),
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Runtime Transcript",
+        ]
+    )
     for index, message in enumerate(messages, start=1):
         lines.extend((_message_heading(message, index=index), message.content, ""))
     return "\n".join(lines).rstrip()
@@ -215,10 +232,11 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         self,
         messages: Sequence[CliRuntimeMessage],
         *,
+        system_prompt: str | None = None,
         working_directory: Path | None = None,  # noqa: ARG002 — context only, not used by CLI
     ) -> CliRuntimeStep:
         """Ask the Gemini CLI for the next runtime step."""
-        prompt = _build_adapter_prompt(messages)
+        prompt = _build_adapter_prompt(messages, system_prompt=system_prompt)
         command = self._build_command()
 
         try:

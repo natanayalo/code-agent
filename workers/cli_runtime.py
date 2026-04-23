@@ -235,6 +235,7 @@ class CliRuntimeAdapter(Protocol):
         self,
         messages: Sequence[CliRuntimeMessage],
         *,
+        system_prompt: str | None = None,
         working_directory: Path | None = None,
     ) -> CliRuntimeStep:
         """Return the next tool call or final answer."""
@@ -961,6 +962,7 @@ def run_cli_runtime_loop(
                 )
             step = adapter.next_step(
                 tuple(messages_for_adapter),
+                system_prompt=system_prompt,
                 working_directory=working_directory,
             )
         except Exception as exc:

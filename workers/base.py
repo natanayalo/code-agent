@@ -86,6 +86,7 @@ class WorkerResult(WorkerModel):
     test_results: list[TestResult] = Field(default_factory=list)
     artifacts: list[ArtifactReference] = Field(default_factory=list)
     review_result: ReviewResult | None = None
+    diff_text: str | None = None
     next_action_hint: str | None = None
 
     @model_validator(mode="after")
@@ -102,5 +103,10 @@ class Worker(ABC):
     """Shared interface every coding worker must implement."""
 
     @abstractmethod
-    def run(self, request: WorkerRequest) -> Awaitable[WorkerResult]:
+    def run(
+        self,
+        request: WorkerRequest,
+        *,
+        system_prompt: str | None = None,
+    ) -> Awaitable[WorkerResult]:
         """Execute a task request and return a structured result."""

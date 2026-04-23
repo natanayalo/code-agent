@@ -58,6 +58,7 @@ class _ScriptedAdapter:
         self,
         messages: list[CliRuntimeMessage],
         *,
+        system_prompt: str | None = None,
         working_directory: Path | None = None,
     ) -> CliRuntimeStep:
         self.calls.append(list(messages))

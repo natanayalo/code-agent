@@ -801,16 +801,20 @@ def _serialize_review_result(review_result: object | None) -> dict[str, Any] | N
     raise TypeError(f"Unsupported review result type: {type(review_result).__name__}")
 
 
-def _review_result_artifact_entry(review_result: object | None) -> dict[str, Any] | None:
+def _review_result_artifact_entry(
+    review_result: object | None,
+    *,
+    artifact_type: str = ArtifactType.REVIEW_RESULT.value,
+) -> dict[str, Any] | None:
     """Build a structured artifact index entry for a review payload when present."""
     serialized = _serialize_review_result(review_result)
     if serialized is None:
         return None
     return {
-        "name": "review_result",
-        "uri": "inline://review_result",
-        "artifact_type": ArtifactType.REVIEW_RESULT.value,
-        "artifact_metadata": {"review_result": serialized},
+        "name": artifact_type,
+        "uri": f"inline://{artifact_type}",
+        "artifact_type": artifact_type,
+        "artifact_metadata": {artifact_type: serialized},
     }
 
 
@@ -1993,11 +1997,23 @@ class TaskExecutionService:
             result = state.result
             artifacts = result.artifacts if result is not None else []
             artifact_index = [artifact.model_dump(mode="json") for artifact in artifacts]
-            review_result_entry = _review_result_artifact_entry(
-                result.review_result if result is not None else None
+            review_sources = (
+                (
+                    result.review_result if result is not None else None,
+                    ArtifactType.REVIEW_RESULT.value,
+                ),
+                (state.review, ArtifactType.INDEPENDENT_REVIEW_RESULT.value),
             )
-            if review_result_entry is not None:
-                artifact_index.append(review_result_entry)
+            review_artifact_entries: list[tuple[str, dict[str, Any]]] = []
+            for review_payload, review_artifact_type in review_sources:
+                review_entry = _review_result_artifact_entry(
+                    review_payload,
+                    artifact_type=review_artifact_type,
+                )
+                if review_entry is None:
+                    continue
+                artifact_index.append(review_entry)
+                review_artifact_entries.append((review_artifact_type, review_entry))
             worker_type = _worker_type_for_persistence(state)
             worker_run = worker_run_repo.create(
                 task_id=task_id,
@@ -2060,13 +2076,13 @@ class TaskExecutionService:
                     name=artifact.name,
                     uri=artifact.uri,
                 )
-            if review_result_entry is not None:
+            for review_artifact_type, review_entry in review_artifact_entries:
                 artifact_repo.create(
                     run_id=worker_run.id,
-                    artifact_type=ArtifactType.REVIEW_RESULT.value,
-                    name=review_result_entry["name"],
-                    uri=review_result_entry["uri"],
-                    artifact_metadata=review_result_entry["artifact_metadata"],
+                    artifact_type=review_artifact_type,
+                    name=review_entry["name"],
+                    uri=review_entry["uri"],
+                    artifact_metadata=review_entry["artifact_metadata"],
                 )
 
         self._prune_retained_runs(now=finished_at)

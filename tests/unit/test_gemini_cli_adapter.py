@@ -288,6 +288,13 @@ class TestBuildAdapterPrompt:
         prompt = _build_adapter_prompt(messages)
         assert "No markdown fences" in prompt or "no markdown fences" in prompt.lower()
 
+    def test_prompt_preserves_adapter_rules_with_worker_system_prompt(self) -> None:
+        messages = [CliRuntimeMessage(role="system", content="Go.")]
+        prompt = _build_adapter_prompt(messages, system_prompt="Reviewer instructions")
+        assert "## Worker System Prompt" in prompt
+        assert "Reviewer instructions" in prompt
+        assert "Choose one of two actions:" in prompt
+
 
 class TestCoercePositiveInt:
     def test_bool_returns_default(self) -> None:

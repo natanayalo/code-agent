@@ -138,6 +138,7 @@ def _worker_result_from_execution(
     files_changed: list[str],
     post_run_lint_format: dict[str, object] | None = None,
     review_result: ReviewResult | None = None,
+    diff_text: str | None = None,
     artifacts: list[ArtifactReference] | None = None,
 ) -> WorkerResult:
     """Map the shared CLI runtime output into the worker contract."""
@@ -164,6 +165,7 @@ def _worker_result_from_execution(
         files_changed=files_changed,
         artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
         review_result=review_result,
+        diff_text=diff_text,
         next_action_hint=_next_action_hint(execution),
     )
 
@@ -226,12 +228,20 @@ class CodexCliWorker(Worker):
         )
         self.runtime_settings = runtime_settings or CliRuntimeSettings()
 
-    async def run(self, request: WorkerRequest) -> WorkerResult:
+    async def run(
+        self, request: WorkerRequest, *, system_prompt: str | None = None
+    ) -> WorkerResult:
         """Provision a workspace, run the CLI loop, and return a typed result."""
         cancel_event = threading.Event()
         loop = asyncio.get_running_loop()
         future = loop.run_in_executor(
-            None, partial(self._run_sync, request, cancel_token=cancel_event.is_set)
+            None,
+            partial(
+                self._run_sync,
+                request,
+                cancel_token=cancel_event.is_set,
+                system_prompt_override=system_prompt,
+            ),
         )
         try:
             return await asyncio.shield(future)
@@ -297,6 +307,7 @@ class CodexCliWorker(Worker):
         self,
         request: WorkerRequest,
         cancel_token: Callable[[], bool] | None = None,
+        system_prompt_override: str | None = None,
     ) -> WorkerResult:
         """Provision a workspace, run the CLI runtime, and return a typed result."""
         if request.repo_url is None or not request.repo_url.strip():
@@ -372,10 +383,14 @@ class CodexCliWorker(Worker):
             )
             granted_permission = granted_permission_from_constraints(request.constraints)
             bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
-            system_prompt = build_system_prompt(
-                request,
-                workspace.repo_path,
-                tool_registry=self.tool_registry,
+            system_prompt = (
+                system_prompt_override
+                if system_prompt_override is not None
+                else build_system_prompt(
+                    request,
+                    workspace.repo_path,
+                    tool_registry=self.tool_registry,
+                )
             )
             execution = run_cli_runtime_loop(
                 self.runtime_adapter,
@@ -535,6 +550,12 @@ class CodexCliWorker(Worker):
                 files_changed=files_changed,
                 post_run_lint_format=lint_format_result,
                 review_result=review_result,
+                diff_text=collect_diff_for_review(
+                    workspace.repo_path,
+                    timeout_seconds=runtime_settings.command_timeout_seconds,
+                )
+                if execution.status == "success"
+                else None,
                 artifacts=lint_format_artifacts,
             )
             if cancel_token and cancel_token():

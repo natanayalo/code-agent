@@ -16,6 +16,7 @@ from langgraph.types import interrupt
 
 from db.base import utc_now
 from db.enums import TimelineEventType
+from orchestrator.review import review_result
 from orchestrator.state import (
     SUPPORTED_WORKER_TYPES,
     ApprovalCheckpoint,
@@ -48,6 +49,7 @@ ORCHESTRATOR_NODE_SEQUENCE = (
     "dispatch_job",
     "await_result",
     "verify_result",
+    "review_result",
     "summarize_result",
     "persist_memory",
 )
@@ -471,7 +473,12 @@ def _default_worker_result_provider(request: WorkerRequest) -> WorkerResult:
 class _DefaultFakeWorker(Worker):
     """Fallback worker used until a real provider-specific adapter exists."""
 
-    async def run(self, request: WorkerRequest) -> WorkerResult:
+    async def run(
+        self,
+        request: WorkerRequest,
+        *,
+        system_prompt: str | None = None,
+    ) -> WorkerResult:
         return _default_worker_result_provider(request)
 
 
@@ -1348,6 +1355,26 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
     else:
         result = state.result
 
+    # T-117: Append independent reviewer findings to the final summary
+    if state.review is not None and state.review.outcome == "findings":
+        current_summary = result.summary or ""
+        review_lines = [
+            "---",
+            "### Reviewer Findings",
+            state.review.summary,
+            "",
+        ]
+        for finding in state.review.findings:
+            review_lines.append(
+                f"- **{finding.severity.upper()}**: {finding.title} ({finding.file_path})"
+            )
+            review_lines.append(f"  {finding.why_it_matters}")
+
+        summary_prefix = f"{current_summary}\n" if current_summary else ""
+        result = result.model_copy(
+            update={"summary": summary_prefix + "\n".join(review_lines)},
+        )
+
     if state.task_plan is not None and state.task_plan.triggered:
         plan_json = state.task_plan.model_dump_json()
         plan_payload = base64.b64encode(plan_json.encode("utf-8")).decode("utf-8")
@@ -1398,6 +1425,21 @@ def persist_memory(state_input: OrchestratorState) -> dict[str, Any]:
     }
 
 
+def build_review_result_node(
+    worker: Worker | None = None,
+    gemini_worker: Worker | None = None,
+    openrouter_worker: Worker | None = None,
+) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
+    """Create the review-result node around the workers wired into the graph."""
+    configured_workers = _configured_workers(worker, gemini_worker, openrouter_worker)
+
+    async def review_result_node(state_input: OrchestratorState) -> dict[str, Any]:
+        state = _ensure_state(state_input)
+        return await review_result(state, worker_factory=configured_workers)
+
+    return review_result_node
+
+
 def build_orchestrator_graph(
     *,
     worker: Worker | None = None,
@@ -1426,6 +1468,10 @@ def build_orchestrator_graph(
     )
     builder.add_node("await_permission_escalation", RunnableLambda(await_permission_escalation))
     builder.add_node("verify_result", RunnableLambda(verify_result))
+    builder.add_node(
+        "review_result",
+        RunnableLambda(build_review_result_node(worker, gemini_worker, openrouter_worker)),
+    )
     builder.add_node("summarize_result", RunnableLambda(summarize_result))
     builder.add_node("persist_memory", RunnableLambda(persist_memory))
     builder.add_edge(START, "ingest_task")
@@ -1467,7 +1513,8 @@ def build_orchestrator_graph(
             "verify_result": "verify_result",
         },
     )
-    builder.add_edge("verify_result", "summarize_result")
+    builder.add_edge("verify_result", "review_result")
+    builder.add_edge("review_result", "summarize_result")
     builder.add_edge("summarize_result", "persist_memory")
     builder.add_edge("persist_memory", END)
     return builder.compile(
