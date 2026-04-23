@@ -18,6 +18,7 @@ DEFAULT_AGENTS_MAX_CHARACTERS = 6000
 DEFAULT_AGENTS_ASSET_READ_MAX_CHARACTERS = 8192
 DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS = 3000
 _SECTION_SEPARATOR_OVERHEAD_BUFFER = 32
+_GUIDANCE_OVERHEAD_BUFFER = 100
 _REVIEW_ROLE_SECTION = "\n".join(
     [
         "## Review Role",
@@ -1062,12 +1063,11 @@ def build_review_prompt(
 ) -> str:
     """Assemble a review-only prompt separated from execution/tool-loop prompts."""
     # Reserve a small budget buffer for \n\n separators between prompt sections
-    # and a 100-character estimate for block labels/fences added after reading.
-    guidance_overhead_estimate = 100
+    # and a buffer for block labels/fences added after reading guidance.
     total_guidance_budget = (
         DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS
         - _SECTION_SEPARATOR_OVERHEAD_BUFFER
-        - guidance_overhead_estimate
+        - _GUIDANCE_OVERHEAD_BUFFER
     )
     agents_guidance, agents_assets_guidance = read_workspace_repo_guidance(
         workspace_path,

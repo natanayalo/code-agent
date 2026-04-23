@@ -169,7 +169,7 @@ def test_build_review_prompt_accurately_counts_budget_overhead(
     # plus the section separator buffer and guidance overhead buffer.
     # Header (19) + Block (39) + Buffer (32) + Overhead (100) = 190
     buffer = prompt._SECTION_SEPARATOR_OVERHEAD_BUFFER
-    overhead = 100
+    overhead = prompt._GUIDANCE_OVERHEAD_BUFFER
     monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 58 + buffer + overhead)
 
     (tmp_path / "REVIEW.md").write_text("CONTENT", encoding="utf-8")
