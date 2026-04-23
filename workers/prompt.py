@@ -413,23 +413,9 @@ def _build_repo_context_section_with_guidance(
         "```",
     ]
     if agents_guidance is not None:
-        lines.extend(
-            [
-                "AGENTS.md guidance:",
-                "```text",
-                agents_guidance,
-                "```",
-            ]
-        )
+        lines.extend(_fenced_text_block_lines("AGENTS.md guidance:", agents_guidance))
     if agents_assets_guidance is not None:
-        lines.extend(
-            [
-                ".agents guidance:",
-                "```text",
-                agents_assets_guidance,
-                "```",
-            ]
-        )
+        lines.extend(_fenced_text_block_lines(".agents guidance:", agents_assets_guidance))
     return "\n".join(lines)
 
 
@@ -1079,6 +1065,11 @@ def build_review_prompt(
     guidance_block_count = 0
 
     if agents_guidance is not None:
+        if guidance_block_count == 0:
+            consumed_guidance_characters += len("## Review Guidance") + 1
+        else:
+            consumed_guidance_characters += 1  # separator between blocks
+
         fence = markdown_fence_for_content(agents_guidance)
         guidance_lines.extend(
             _fenced_text_block_lines("AGENTS.md guidance:", agents_guidance, fence=fence)
@@ -1089,6 +1080,11 @@ def build_review_prompt(
         guidance_block_count += 1
 
     if agents_assets_guidance is not None:
+        if guidance_block_count == 0:
+            consumed_guidance_characters += len("## Review Guidance") + 1
+        else:
+            consumed_guidance_characters += 1  # separator between blocks
+
         fence = markdown_fence_for_content(agents_assets_guidance)
         guidance_lines.extend(
             _fenced_text_block_lines(".agents guidance:", agents_assets_guidance, fence=fence)
@@ -1110,17 +1106,18 @@ def build_review_prompt(
         max_characters=max(total_guidance_budget - consumed_guidance_characters, 0),
     )
     if review_guidance is not None:
-        # Budget math for N guidance blocks:
-        # - Header separator: 1 \n (accounted for in consumed_guidance_characters += 1 below)
-        # - Internal separators: 3 \n per block (accounted for in _fenced_text_block_overhead)
-        # - Inter-block separators: 1 \n between blocks (accounted for in
-        #   consumed_guidance_characters += 1 below)
-        # Total newlines = 1 (header) + 3N (internal) + (N-1) (inter-block) = 4N.
-        # This exactly matches the N*4 strings joined by \n in the final assembly.
         if guidance_block_count == 0:
             consumed_guidance_characters += len("## Review Guidance") + 1
         else:
             consumed_guidance_characters += 1  # separator between blocks
+
+        # Budget math for N guidance blocks:
+        # - Header separator: 1 \n (accounted for in consumed_guidance_characters += 1 above)
+        # - Internal separators: 3 \n per block (accounted for in _fenced_text_block_overhead)
+        # - Inter-block separators: 1 \n between blocks (accounted for in
+        #   consumed_guidance_characters += 1 above)
+        # Total newlines = 1 (header) + 3N (internal) + (N-1) (inter-block) = 4N.
+        # This exactly matches the N*4 strings joined by \n in the final assembly.
 
         fence = markdown_fence_for_content(review_guidance)
         guidance_lines.extend(
@@ -1187,9 +1184,13 @@ def build_system_prompt(
     )
     guidance_wrapper_overhead = 0
     if agents_guidance is not None:
-        guidance_wrapper_overhead += len("AGENTS.md guidance:\n```text\n\n```")
+        guidance_wrapper_overhead += _fenced_text_block_overhead(
+            "AGENTS.md guidance:", agents_guidance
+        )
     if agents_assets_guidance is not None:
-        guidance_wrapper_overhead += len(".agents guidance:\n```text\n\n```")
+        guidance_wrapper_overhead += _fenced_text_block_overhead(
+            ".agents guidance:", agents_assets_guidance
+        )
     consumed_guidance_characters = (
         len(agents_guidance or "") + len(agents_assets_guidance or "") + guidance_wrapper_overhead
     )
