@@ -177,15 +177,11 @@ def _apply_independent_review_suppression(
             reasons.append(f"style category suppressed by policy ({category})")
 
         minimum_for_severity = confidence_by_severity.get(severity, global_min_confidence)
-        if finding.confidence < global_min_confidence:
-            reasons.append(
-                "confidence below global threshold "
-                f"({finding.confidence:.2f} < {global_min_confidence:.2f})"
-            )
+        effective_min_confidence = minimum_for_severity
         if finding.confidence < minimum_for_severity:
             reasons.append(
-                "confidence below severity threshold "
-                f"for {severity} ({finding.confidence:.2f} < {minimum_for_severity:.2f})"
+                "confidence below effective threshold "
+                f"for {severity} ({finding.confidence:.2f} < {effective_min_confidence:.2f})"
             )
 
         if min_severity is not None and SEVERITY_RANK[severity] < SEVERITY_RANK[min_severity]:

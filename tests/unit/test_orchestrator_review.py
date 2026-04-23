@@ -465,3 +465,44 @@ async def test_review_result_respects_configured_severity_and_style_overrides():
     assert res["review"]["outcome"] == "findings"
     assert [finding["title"] for finding in res["review"]["findings"]] == ["High severity bug"]
     assert len(res["review"]["suppressed_findings"]) == 2
+
+
+@pytest.mark.anyio
+async def test_review_result_uses_severity_threshold_over_global_by_default():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "done"},
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+    mock_reviewer = AsyncMock()
+    review_payload = {
+        "summary": "Found issues",
+        "confidence": 0.9,
+        "outcome": "findings",
+        "findings": [
+            {
+                "title": "High severity finding under global threshold",
+                "category": "logic",
+                "confidence": 0.62,
+                "file_path": "main.py",
+                "severity": "high",
+                "why_it_matters": "Behavioral correctness risk",
+            }
+        ],
+    }
+    mock_reviewer.run.return_value = WorkerResult(
+        status="success",
+        summary=f"```json\n{json.dumps(review_payload)}\n```",
+    )
+
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert res["review"]["outcome"] == "findings"
+    assert [finding["title"] for finding in res["review"]["findings"]] == [
+        "High severity finding under global threshold"
+    ]
+    assert res["review"]["suppressed_findings"] == []
