@@ -13,11 +13,24 @@ from urllib.request import url2pathname
 from orchestrator.state import OrchestratorState
 from workers import Worker, WorkerRequest
 from workers.prompt import build_review_prompt
+from workers.review import ReviewFinding, ReviewResult, SuppressedReviewFinding
 from workers.review_context import pack_reviewer_context
 from workers.self_review import parse_review_result
 
 logger = logging.getLogger(__name__)
 DEFAULT_INDEPENDENT_REVIEW_TIMEOUT_SECONDS = 120
+DEFAULT_REVIEW_MIN_CONFIDENCE = 0.65
+DEFAULT_REVIEW_MIN_CONFIDENCE_BY_SEVERITY: dict[str, float] = {
+    "low": 0.8,
+    "medium": 0.7,
+    "high": 0.6,
+    "critical": 0.5,
+}
+SEVERITY_RANK: dict[str, int] = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+DEFAULT_SUPPRESSED_STYLE_CATEGORIES: frozenset[str] = frozenset(
+    {"style", "formatting", "naming", "whitespace"}
+)
+SUPPRESSED_FINDINGS_SUMMARY_PREFIX = "All findings were suppressed by policy thresholds."
 
 
 def _coerce_positive_int_like(value: object) -> int | None:
@@ -54,6 +67,145 @@ def _resolve_review_timeout_seconds(state: OrchestratorState) -> int:
     if orchestrator_timeout is not None:
         return orchestrator_timeout
     return DEFAULT_INDEPENDENT_REVIEW_TIMEOUT_SECONDS
+
+
+def _coerce_probability(value: object) -> float | None:
+    """Parse numeric confidence threshold values in the closed interval [0, 1]."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        try:
+            parsed = float(value)
+        except OverflowError:
+            return None
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            parsed = float(stripped)
+        except (OverflowError, ValueError):
+            return None
+    else:
+        return None
+
+    if 0.0 <= parsed <= 1.0:
+        return parsed
+    return None
+
+
+def _coerce_string_set(value: object) -> set[str]:
+    """Normalize list-like or comma-delimited category strings into a lowercase set."""
+    if isinstance(value, str):
+        raw_values = value.split(",")
+    elif isinstance(value, list | tuple | set):
+        raw_values = list(value)
+    else:
+        return set()
+
+    normalized: set[str] = set()
+    for raw in raw_values:
+        if not isinstance(raw, str):
+            continue
+        cleaned = raw.strip().lower()
+        if cleaned:
+            normalized.add(cleaned)
+    return normalized
+
+
+def _review_min_confidence_by_severity(constraints: Mapping[str, Any]) -> dict[str, float]:
+    """Resolve severity-specific review confidence thresholds with safe defaults."""
+    resolved = dict(DEFAULT_REVIEW_MIN_CONFIDENCE_BY_SEVERITY)
+    has_explicit_global = "independent_review_min_confidence" in constraints
+    explicit_global = _coerce_probability(constraints.get("independent_review_min_confidence"))
+    if has_explicit_global and explicit_global is not None:
+        resolved = {severity: explicit_global for severity in SEVERITY_RANK}
+    raw_thresholds = constraints.get("independent_review_min_confidence_by_severity")
+    if not isinstance(raw_thresholds, Mapping):
+        return resolved
+
+    for severity, raw_value in raw_thresholds.items():
+        if not isinstance(severity, str):
+            continue
+        severity_key = severity.strip().lower()
+        if severity_key not in SEVERITY_RANK:
+            continue
+        parsed = _coerce_probability(raw_value)
+        if parsed is not None:
+            resolved[severity_key] = parsed
+    return resolved
+
+
+def _resolve_review_min_severity(constraints: Mapping[str, Any]) -> str | None:
+    """Resolve the minimum surfaced severity level, when configured."""
+    raw = constraints.get("independent_review_min_severity")
+    if not isinstance(raw, str):
+        return None
+    normalized = raw.strip().lower()
+    if normalized in SEVERITY_RANK:
+        return normalized
+    return None
+
+
+def _resolve_style_categories(constraints: Mapping[str, Any]) -> set[str]:
+    """Resolve which finding categories should be treated as style-only by default."""
+    if constraints.get("independent_review_include_style_findings") is True:
+        return set()
+
+    configured = _coerce_string_set(constraints.get("independent_review_style_categories"))
+    if configured:
+        return configured
+    return set(DEFAULT_SUPPRESSED_STYLE_CATEGORIES)
+
+
+def _apply_independent_review_suppression(
+    parsed_review: ReviewResult,
+    *,
+    constraints: Mapping[str, Any],
+) -> ReviewResult:
+    """Suppress low-value findings before surfacing independent review results."""
+    confidence_by_severity = _review_min_confidence_by_severity(constraints)
+    min_severity = _resolve_review_min_severity(constraints)
+    suppressed_style_categories = _resolve_style_categories(constraints)
+
+    filtered_findings: list[ReviewFinding] = []
+    suppressed_findings: list[SuppressedReviewFinding] = list(parsed_review.suppressed_findings)
+
+    for finding in parsed_review.findings:
+        reasons: list[str] = []
+        severity = finding.severity
+        category = finding.category.strip().lower()
+
+        if category in suppressed_style_categories:
+            reasons.append(f"style category suppressed by policy ({category})")
+
+        minimum_for_severity = confidence_by_severity.get(severity, DEFAULT_REVIEW_MIN_CONFIDENCE)
+        if finding.confidence < minimum_for_severity:
+            reasons.append(
+                "confidence below effective threshold "
+                f"for {severity} ({finding.confidence:.2f} < {minimum_for_severity:.2f})"
+            )
+
+        if min_severity is not None and SEVERITY_RANK[severity] < SEVERITY_RANK[min_severity]:
+            reasons.append(f"severity below threshold ({severity} < {min_severity})")
+
+        if reasons:
+            suppressed_findings.append(SuppressedReviewFinding(finding=finding, reasons=reasons))
+            continue
+        filtered_findings.append(finding)
+
+    filtered_outcome = "findings" if filtered_findings else "no_findings"
+    summary = parsed_review.summary
+    if parsed_review.outcome == "findings" and filtered_outcome == "no_findings":
+        summary = f"{SUPPRESSED_FINDINGS_SUMMARY_PREFIX} Original reviewer summary: {summary}"
+    return parsed_review.model_copy(
+        update={
+            "summary": summary,
+            "outcome": filtered_outcome,
+            "findings": filtered_findings,
+            "suppressed_findings": suppressed_findings,
+        }
+    )
 
 
 def _workspace_path_from_result_artifacts(state: OrchestratorState) -> Path | None:
@@ -183,6 +335,10 @@ async def review_result(
                 parsed_review = parsed_review.model_copy(
                     update={"reviewer_kind": "independent_reviewer"}
                 )
+            parsed_review = _apply_independent_review_suppression(
+                parsed_review,
+                constraints=state.task.constraints,
+            )
 
             return {
                 "current_step": "review_result",

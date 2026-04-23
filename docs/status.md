@@ -92,6 +92,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-115 Add targeted reviewer context packer. PR: [#98](https://github.com/natanayalo/code-agent/pull/98)
 - T-116 Add review-specific prompt assembly and repo review guidance. PR: [#99](https://github.com/natanayalo/code-agent/pull/99)
 - T-117 Add advisory independent reviewer stage to orchestrator. PR: [#100](https://github.com/natanayalo/code-agent/pull/100)
+- T-118 (slice 1): reviewer finding suppression + severity/confidence gating with suppressed-findings artifact retention. PR: [#101](https://github.com/natanayalo/code-agent/pull/101)
 
 ## In Progress
 
@@ -99,7 +100,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Next
 
-- None
+- T-118 (slice 2): bounded repair handoff loop + verifier rerun after review-driven repair.
 
 ## Blocked
 
