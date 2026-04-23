@@ -145,7 +145,7 @@ def test_build_review_prompt_enforces_shared_guidance_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Review prompt should share one budget across repo/review guidance and build context."""
-    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 120)
+    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 220)
     (tmp_path / "AGENTS.md").write_text("A" * 300, encoding="utf-8")
     (tmp_path / "REVIEW.md").write_text("B" * 200, encoding="utf-8")
     (tmp_path / "package.json").write_text('{"scripts":{"test":"pytest -q"}}', encoding="utf-8")
@@ -166,10 +166,11 @@ def test_build_review_prompt_accurately_counts_budget_overhead(
 ) -> None:
     """Review prompt should account for header and block separators in budget tracking."""
     # Set a tight budget that leaves exactly enough for one guidance block + header
-    # plus the section separator buffer.
-    # Header (19) + Block (39) + Buffer (32) = 90
+    # plus the section separator buffer and guidance overhead buffer.
+    # Header (19) + Block (39) + Buffer (32) + Overhead (100) = 190
     buffer = prompt._SECTION_SEPARATOR_OVERHEAD_BUFFER
-    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 58 + buffer)
+    overhead = 100
+    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 58 + buffer + overhead)
 
     (tmp_path / "REVIEW.md").write_text("CONTENT", encoding="utf-8")
     (tmp_path / "package.json").write_text('{"scripts":{"test":"pytest"}}', encoding="utf-8")
@@ -184,7 +185,7 @@ def test_build_review_prompt_accurately_counts_budget_overhead(
     assert "## Build & Test" not in rendered_prompt
 
     # Now test with a budget that allows exactly one char of build context
-    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 59 + buffer)
+    monkeypatch.setattr(prompt, "DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS", 59 + buffer + overhead)
     rendered_prompt = build_review_prompt(
         workspace_path=tmp_path,
         review_context_packet="Packet payload",

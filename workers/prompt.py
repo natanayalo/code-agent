@@ -1062,8 +1062,12 @@ def build_review_prompt(
 ) -> str:
     """Assemble a review-only prompt separated from execution/tool-loop prompts."""
     # Reserve a small budget buffer for \n\n separators between prompt sections
+    # and a 100-character estimate for block labels/fences added after reading.
+    guidance_overhead_estimate = 100
     total_guidance_budget = (
-        DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS - _SECTION_SEPARATOR_OVERHEAD_BUFFER
+        DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS
+        - _SECTION_SEPARATOR_OVERHEAD_BUFFER
+        - guidance_overhead_estimate
     )
     agents_guidance, agents_assets_guidance = read_workspace_repo_guidance(
         workspace_path,
@@ -1106,6 +1110,13 @@ def build_review_prompt(
         max_characters=max(total_guidance_budget - consumed_guidance_characters, 0),
     )
     if review_guidance is not None:
+        # Budget math for N guidance blocks:
+        # - Header separator: 1 \n (accounted for in consumed_guidance_characters += 1 below)
+        # - Internal separators: 3 \n per block (accounted for in _fenced_text_block_overhead)
+        # - Inter-block separators: 1 \n between blocks (accounted for in
+        #   consumed_guidance_characters += 1 below)
+        # Total newlines = 1 (header) + 3N (internal) + (N-1) (inter-block) = 4N.
+        # This exactly matches the N*4 strings joined by \n in the final assembly.
         if guidance_block_count == 0:
             consumed_guidance_characters += len("## Review Guidance") + 1
         else:
@@ -1153,8 +1164,9 @@ def build_review_prompt(
         guidance_section,
         build_test_context or "",
         "\n".join(task_lines),
-        "## Review Context Packet",
-        review_context_packet,
+        f"## Review Context Packet\n{review_context_packet}"
+        if review_context_packet.strip()
+        else "",
         output_section,
     ]
     return "\n\n".join(section for section in sections if section.strip())
