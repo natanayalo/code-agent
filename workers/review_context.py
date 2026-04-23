@@ -111,10 +111,10 @@ def pack_reviewer_context(
         max(DEFAULT_REVIEW_PACKET_MIN_DIFF_BUDGET, max_characters // 3),
         max_characters,
     )
-    base_budget = max_characters - diff_overhead - diff_reserved_budget
+    base_budget = max(max_characters - diff_overhead - diff_reserved_budget, 0)
     base_packet = _truncate_at_line_boundary(
         base_packet,
-        max_characters=max(base_budget, 0),
+        max_characters=base_budget,
         marker=truncation_marker,
     )
 

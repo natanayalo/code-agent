@@ -1997,17 +1997,23 @@ class TaskExecutionService:
             result = state.result
             artifacts = result.artifacts if result is not None else []
             artifact_index = [artifact.model_dump(mode="json") for artifact in artifacts]
-            review_result_entry = _review_result_artifact_entry(
-                result.review_result if result is not None else None
+            review_sources = (
+                (
+                    result.review_result if result is not None else None,
+                    ArtifactType.REVIEW_RESULT.value,
+                ),
+                (state.review, ArtifactType.INDEPENDENT_REVIEW_RESULT.value),
             )
-            if review_result_entry is not None:
-                artifact_index.append(review_result_entry)
-
-            independent_review_entry = _review_result_artifact_entry(
-                state.review, artifact_type="independent_review_result"
-            )
-            if independent_review_entry is not None:
-                artifact_index.append(independent_review_entry)
+            review_artifact_entries: list[tuple[str, dict[str, Any]]] = []
+            for review_payload, review_artifact_type in review_sources:
+                review_entry = _review_result_artifact_entry(
+                    review_payload,
+                    artifact_type=review_artifact_type,
+                )
+                if review_entry is None:
+                    continue
+                artifact_index.append(review_entry)
+                review_artifact_entries.append((review_artifact_type, review_entry))
             worker_type = _worker_type_for_persistence(state)
             worker_run = worker_run_repo.create(
                 task_id=task_id,
@@ -2070,21 +2076,13 @@ class TaskExecutionService:
                     name=artifact.name,
                     uri=artifact.uri,
                 )
-            if review_result_entry is not None:
+            for review_artifact_type, review_entry in review_artifact_entries:
                 artifact_repo.create(
                     run_id=worker_run.id,
-                    artifact_type=ArtifactType.REVIEW_RESULT.value,
-                    name=review_result_entry["name"],
-                    uri=review_result_entry["uri"],
-                    artifact_metadata=review_result_entry["artifact_metadata"],
-                )
-            if independent_review_entry is not None:
-                artifact_repo.create(
-                    run_id=worker_run.id,
-                    artifact_type=ArtifactType.INDEPENDENT_REVIEW_RESULT.value,
-                    name=independent_review_entry["name"],
-                    uri=independent_review_entry["uri"],
-                    artifact_metadata=independent_review_entry["artifact_metadata"],
+                    artifact_type=review_artifact_type,
+                    name=review_entry["name"],
+                    uri=review_entry["uri"],
+                    artifact_metadata=review_entry["artifact_metadata"],
                 )
 
         self._prune_retained_runs(now=finished_at)

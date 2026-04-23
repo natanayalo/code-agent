@@ -630,6 +630,46 @@ def test_summarize_result_attaches_task_plan_artifact_when_present():
     assert artifact["uri"].startswith("data:application/json;base64,")
 
 
+def test_summarize_result_reviewer_findings_without_leading_newline_when_summary_empty():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "success",
+                "summary": "",
+                "commands_run": [],
+                "files_changed": [],
+                "test_results": [],
+                "artifacts": [],
+            },
+            "review": {
+                "reviewer_kind": "independent_reviewer",
+                "summary": "Advisory findings detected.",
+                "confidence": 0.8,
+                "outcome": "findings",
+                "findings": [
+                    {
+                        "severity": "medium",
+                        "category": "correctness",
+                        "confidence": 0.7,
+                        "file_path": "orchestrator/review.py",
+                        "line_start": 1,
+                        "line_end": 1,
+                        "title": "Example finding",
+                        "why_it_matters": "Example impact.",
+                    }
+                ],
+            },
+        }
+    )
+
+    res = summarize_result(state)
+    summary = res["result"]["summary"]
+
+    assert summary.startswith("---\n### Reviewer Findings")
+    assert not summary.startswith("\n")
+
+
 def test_create_in_memory_checkpointer():
     cp = create_in_memory_checkpointer()
     assert cp is not None

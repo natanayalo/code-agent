@@ -1737,6 +1737,119 @@ def test_persist_execution_outcome_persists_structured_review_result_artifact() 
     assert persisted_artifacts[0].artifact_metadata == {"review_result": review_payload}
 
 
+def test_persist_execution_outcome_persists_worker_and_independent_review_artifacts() -> None:
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Persist review artifacts",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+    _, persisted = service.create_task(submission)
+    assert persisted is not None
+
+    state = OrchestratorState(
+        session=SessionRef(
+            session_id=persisted.session_id,
+            user_id=persisted.user_id,
+            channel=persisted.channel,
+            external_thread_id=persisted.external_thread_id,
+            active_task_id=persisted.task_id,
+            status="active",
+        ),
+        task=TaskRequest(
+            task_id=persisted.task_id,
+            task_text=submission.task_text,
+            repo_url=submission.repo_url,
+            branch=submission.branch,
+            priority=submission.priority,
+            worker_override=submission.worker_override,
+            constraints=dict(submission.constraints),
+            budget=dict(submission.budget),
+        ),
+        normalized_task_text=submission.task_text,
+        task_kind="implementation",
+        memory=MemoryContext(),
+        route=RouteDecision(
+            chosen_worker="codex",
+            route_reason="cheap_mechanical_change",
+            override_applied=False,
+        ),
+        approval=ApprovalCheckpoint(),
+        dispatch=WorkerDispatch(worker_type="codex"),
+        result=WorkerResult(
+            status="success",
+            summary="done",
+            review_result=ReviewResult(
+                reviewer_kind="worker_self_review",
+                summary="self review",
+                confidence=0.8,
+                outcome="findings",
+                findings=[
+                    ReviewFinding(
+                        severity="low",
+                        category="tests",
+                        confidence=0.8,
+                        file_path="tests/unit/test_task_execution_service.py",
+                        line_start=1,
+                        line_end=1,
+                        title="Self review finding",
+                        why_it_matters="Ensures review artifacts are persisted.",
+                    )
+                ],
+            ),
+        ),
+        review=ReviewResult(
+            reviewer_kind="independent_reviewer",
+            summary="independent review",
+            confidence=0.9,
+            outcome="findings",
+            findings=[
+                ReviewFinding(
+                    severity="medium",
+                    category="correctness",
+                    confidence=0.9,
+                    file_path="orchestrator/review.py",
+                    line_start=1,
+                    line_end=1,
+                    title="Independent review finding",
+                    why_it_matters="Ensures independent review artifacts are persisted.",
+                )
+            ],
+        ),
+    )
+
+    service._persist_execution_outcome(
+        task_id=persisted.task_id,
+        state=state,
+        started_at=datetime.now(),
+        finished_at=datetime.now(),
+    )
+
+    task_snapshot = service.get_task(persisted.task_id)
+    assert task_snapshot is not None
+    assert task_snapshot.latest_run is not None
+
+    artifact_types = {
+        artifact["artifact_type"] for artifact in task_snapshot.latest_run.artifact_index
+    }
+    assert ArtifactType.REVIEW_RESULT.value in artifact_types
+    assert ArtifactType.INDEPENDENT_REVIEW_RESULT.value in artifact_types
+
+    persisted_types = {artifact.artifact_type for artifact in task_snapshot.latest_run.artifacts}
+    assert ArtifactType.REVIEW_RESULT.value in persisted_types
+    assert ArtifactType.INDEPENDENT_REVIEW_RESULT.value in persisted_types
+
+
 def test_serialize_review_result_mapping_recursively_normalizes_nested_models() -> None:
     """Raw mapping payloads with nested models should be JSON-serializable."""
     serialized = execution_module._serialize_review_result(

@@ -1359,7 +1359,6 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
     if state.review is not None and state.review.outcome == "findings":
         current_summary = result.summary or ""
         review_lines = [
-            "",
             "---",
             "### Reviewer Findings",
             state.review.summary,
@@ -1371,8 +1370,9 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
             )
             review_lines.append(f"  {finding.why_it_matters}")
 
+        summary_prefix = f"{current_summary}\n" if current_summary else ""
         result = result.model_copy(
-            update={"summary": current_summary + "\n".join(review_lines)},
+            update={"summary": summary_prefix + "\n".join(review_lines)},
         )
 
     if state.task_plan is not None and state.task_plan.triggered:
