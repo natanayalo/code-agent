@@ -72,53 +72,58 @@ def _build_adapter_prompt(
     system_prompt: str | None = None,
 ) -> str:
     """Build the single-shot prompt sent to `codex exec` for one runtime turn."""
-    if system_prompt is not None:
-        lines = [
-            system_prompt,
+    lines = [
+        "You are the Codex runtime adapter for a bounded coding worker.",
+        (
+            "Read the transcript below and return exactly one JSON object "
+            "matching the provided schema."
+        ),
+        "Choose one of two actions:",
+        (
+            '- {"kind":"tool_call","tool_name":"<registered tool name>",'
+            '"tool_input":"<tool input string>","final_output":null}'
+        ),
+        (
+            '- {"kind":"final","final_output":"<final summary for the user>",'
+            '"tool_name":null,"tool_input":null}'
+        ),
+        "Rules:",
+        "- Use only tool names listed in the system prompt's Available Tools section.",
+        "- For `execute_bash`, return one focused shell command as the tool_input string.",
+        (
+            "- For `execute_git`, return the tool_input as a compact JSON object encoded "
+            'as a string, for example {"operation":"status","porcelain":true}.'
+        ),
+        (
+            "- For `execute_github`, return the tool_input as a compact JSON object encoded "
+            "as a string, for example "
+            '{"operation":"pr_comment","repository_full_name":"owner/repo",'
+            '"pr_number":1,"comment_body":"Looks good."}.'
+        ),
+        (
+            "- For `execute_browser`, return the tool_input as a compact JSON object encoded "
+            "as a string, for example "
+            '{"operation":"search","query":"langgraph","limit":3}.'
+        ),
+        "- If the transcript already contains enough information to finish, return `final`.",
+        "- If the latest tool result failed, adapt to that failure instead of "
+        "repeating blindly.",
+        "- Do not wrap the JSON in Markdown or add any extra prose.",
+    ]
+    if system_prompt is not None and system_prompt.strip():
+        lines.extend(
+            [
+                "",
+                "## Worker System Prompt",
+                system_prompt.strip(),
+            ]
+        )
+    lines.extend(
+        [
             "",
             "## Runtime Transcript",
         ]
-    else:
-        lines = [
-            "You are the Codex runtime adapter for a bounded coding worker.",
-            (
-                "Read the transcript below and return exactly one JSON object "
-                "matching the provided schema."
-            ),
-            "Choose one of two actions:",
-            (
-                '- {"kind":"tool_call","tool_name":"<registered tool name>",'
-                '"tool_input":"<tool input string>","final_output":null}'
-            ),
-            (
-                '- {"kind":"final","final_output":"<final summary for the user>",'
-                '"tool_name":null,"tool_input":null}'
-            ),
-            "Rules:",
-            "- Use only tool names listed in the system prompt's Available Tools section.",
-            "- For `execute_bash`, return one focused shell command as the tool_input string.",
-            (
-                "- For `execute_git`, return the tool_input as a compact JSON object encoded "
-                'as a string, for example {"operation":"status","porcelain":true}.'
-            ),
-            (
-                "- For `execute_github`, return the tool_input as a compact JSON object encoded "
-                "as a string, for example "
-                '{"operation":"pr_comment","repository_full_name":"owner/repo",'
-                '"pr_number":1,"comment_body":"Looks good."}.'
-            ),
-            (
-                "- For `execute_browser`, return the tool_input as a compact JSON object encoded "
-                "as a string, for example "
-                '{"operation":"search","query":"langgraph","limit":3}.'
-            ),
-            "- If the transcript already contains enough information to finish, return `final`.",
-            "- If the latest tool result failed, adapt to that failure instead of "
-            "repeating blindly.",
-            "- Do not wrap the JSON in Markdown or add any extra prose.",
-            "",
-            "## Runtime Transcript",
-        ]
+    )
     for index, message in enumerate(messages, start=1):
         lines.extend((_message_heading(message, index=index), message.content, ""))
     return "\n".join(lines).rstrip()

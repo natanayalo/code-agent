@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 from workers.base import WorkerCommand
@@ -13,6 +12,31 @@ from workers.markdown import markdown_fence_for_content
 DEFAULT_REVIEW_PACKET_MAX_CHARACTERS = 12000
 DEFAULT_REVIEW_PACKET_MAX_FILES = 12
 DEFAULT_REVIEW_PACKET_MAX_COMMANDS = 24
+DEFAULT_REVIEW_PACKET_MIN_DIFF_BUDGET = 1200
+
+
+def _truncate_at_line_boundary(
+    text: str,
+    *,
+    max_characters: int,
+    marker: str = "\n... (truncated)",
+) -> str:
+    """Trim text to a bounded size while preferring whole-line boundaries."""
+    if max_characters <= 0:
+        return ""
+    if len(text) <= max_characters:
+        return text
+    marker_length = len(marker)
+    if max_characters <= marker_length:
+        return marker[:max_characters]
+    keep_budget = max_characters - marker_length
+    prefix = text[:keep_budget]
+    if "\n" in prefix:
+        prefix = prefix.rsplit("\n", 1)[0]
+    prefix = prefix.rstrip()
+    if not prefix:
+        prefix = text[:keep_budget].rstrip()
+    return f"{prefix}{marker}"
 
 
 def pack_reviewer_context(
@@ -21,7 +45,6 @@ def pack_reviewer_context(
     worker_summary: str,
     files_changed: Sequence[str],
     diff_text: str,
-    repo_path: Path | None = None,
     commands_run: Sequence[WorkerCommand] = (),
     verifier_report: Mapping[str, Any] | None = None,
     session_state: Mapping[str, Any] | None = None,
@@ -32,7 +55,14 @@ def pack_reviewer_context(
     # that can be used by both the orchestrator and internal worker loops.
 
     normalized_files = sorted({path.strip() for path in files_changed if path.strip()})
-    changed_files_block = "\n".join(f"- {path}" for path in normalized_files) or "- <none>"
+    if len(normalized_files) > DEFAULT_REVIEW_PACKET_MAX_FILES:
+        visible_files = normalized_files[:DEFAULT_REVIEW_PACKET_MAX_FILES]
+        omitted_count = len(normalized_files) - DEFAULT_REVIEW_PACKET_MAX_FILES
+        changed_files_lines = [*(f"- {path}" for path in visible_files)]
+        changed_files_lines.append(f"- ... {omitted_count} more files omitted")
+        changed_files_block = "\n".join(changed_files_lines)
+    else:
+        changed_files_block = "\n".join(f"- {path}" for path in normalized_files) or "- <none>"
 
     # Simple command summary
     command_lines = []
@@ -69,19 +99,44 @@ def pack_reviewer_context(
         state_json = json.dumps(dict(session_state), indent=2, sort_keys=True)
         sections.extend(["", "### Compact Session State", state_json])
 
-    sections.extend(
-        [
-            "",
-            "### Diff Excerpt",
-            f"{diff_fence}diff\n{diff_text}\n{diff_fence}",
-        ]
+    base_packet = "\n".join(sections).strip()
+
+    diff_header = "\n\n### Diff Excerpt\n"
+
+    truncation_marker = "\n... (truncated)"
+    diff_open = f"{diff_fence}diff\n"
+    diff_close = f"\n{diff_fence}"
+    diff_overhead = len(diff_header) + len(diff_open) + len(diff_close)
+    diff_reserved_budget = min(
+        max(DEFAULT_REVIEW_PACKET_MIN_DIFF_BUDGET, max_characters // 3),
+        max_characters,
+    )
+    base_budget = max_characters - diff_overhead - diff_reserved_budget
+    base_packet = _truncate_at_line_boundary(
+        base_packet,
+        max_characters=max(base_budget, 0),
+        marker=truncation_marker,
     )
 
-    packet = "\n".join(sections).strip()
+    full_diff_block = f"{diff_open}{diff_text}{diff_close}"
+    if len(base_packet) + len(diff_header) + len(full_diff_block) <= max_characters:
+        return base_packet + diff_header + full_diff_block
 
-    if len(packet) <= max_characters:
-        return packet
+    remaining_diff_budget = (
+        max_characters
+        - len(base_packet)
+        - len(diff_header)
+        - len(diff_open)
+        - len(diff_close)
+        - len(truncation_marker)
+    )
+    if remaining_diff_budget <= 0:
+        return base_packet + diff_header + diff_open + truncation_marker + diff_close
 
-    # Naive truncation for now, T-115/T-116 might have more sophisticated logic
-    # but we need to proceed with T-117.
-    return packet[:max_characters].rstrip() + "\n... (truncated)"
+    truncated_diff = _truncate_at_line_boundary(
+        diff_text,
+        max_characters=remaining_diff_budget,
+        marker=truncation_marker,
+    )
+
+    return base_packet + diff_header + diff_open + truncated_diff + diff_close

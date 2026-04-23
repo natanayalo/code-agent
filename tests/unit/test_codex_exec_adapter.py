@@ -10,7 +10,11 @@ from pathlib import Path
 import pytest
 
 from workers.cli_runtime import CliRuntimeMessage
-from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter, _codex_output_schema
+from workers.codex_exec_adapter import (
+    CodexExecCliRuntimeAdapter,
+    _build_adapter_prompt,
+    _codex_output_schema,
+)
 
 
 def test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call(
@@ -163,3 +167,16 @@ def test_codex_exec_adapter_scopes_constructor_default_env(monkeypatch, tmp_path
     assert adapter.env["PATH"] == "/usr/local/bin:/usr/bin"
     assert adapter.env["OPENAI_API_KEY"] == "key-123"
     assert "UNRELATED_SECRET" not in adapter.env
+
+
+def test_codex_prompt_keeps_adapter_rules_when_worker_system_prompt_is_provided() -> None:
+    """Providing a worker system prompt must not remove adapter JSON/tool rules."""
+    prompt = _build_adapter_prompt(
+        [CliRuntimeMessage(role="system", content="System message.")],
+        system_prompt="Reviewer instructions",
+    )
+
+    assert "## Worker System Prompt" in prompt
+    assert "Reviewer instructions" in prompt
+    assert "Choose one of two actions:" in prompt
+    assert "Use only tool names listed in the system prompt's Available Tools section." in prompt
