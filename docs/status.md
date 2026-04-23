@@ -95,11 +95,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-118 (slice 1): reviewer finding suppression + severity/confidence gating with suppressed-findings artifact retention (repair handoff pending).
 
 ## Next
 
-- None
+- T-118 (slice 2): bounded repair handoff loop + verifier rerun after review-driven repair.
 
 ## Blocked
 

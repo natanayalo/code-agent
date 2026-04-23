@@ -352,3 +352,116 @@ async def test_review_result_propagates_cancellation():
 
     with pytest.raises(asyncio.CancelledError):
         await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+
+@pytest.mark.anyio
+async def test_review_result_suppresses_style_and_low_confidence_findings_by_default():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "done"},
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+    mock_reviewer = AsyncMock()
+    review_payload = {
+        "summary": "Found issues",
+        "confidence": 0.9,
+        "outcome": "findings",
+        "findings": [
+            {
+                "title": "Use clearer variable name",
+                "category": "style",
+                "confidence": 0.95,
+                "file_path": "main.py",
+                "severity": "low",
+                "why_it_matters": "Readability",
+            },
+            {
+                "title": "Potential branch bug",
+                "category": "logic",
+                "confidence": 0.4,
+                "file_path": "main.py",
+                "severity": "high",
+                "why_it_matters": "Can break behavior",
+            },
+        ],
+    }
+    mock_reviewer.run.return_value = WorkerResult(
+        status="success",
+        summary=f"```json\n{json.dumps(review_payload)}\n```",
+    )
+
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert res["review"]["outcome"] == "no_findings"
+    assert res["review"]["findings"] == []
+    assert len(res["review"]["suppressed_findings"]) == 2
+
+
+@pytest.mark.anyio
+async def test_review_result_respects_configured_severity_and_style_overrides():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "constraints": {
+                    "independent_review_min_severity": "high",
+                    "independent_review_include_style_findings": True,
+                    "independent_review_min_confidence": 0.55,
+                    "independent_review_min_confidence_by_severity": {
+                        "critical": 0.9,
+                        "high": 0.5,
+                    },
+                },
+            },
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "done"},
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+    mock_reviewer = AsyncMock()
+    review_payload = {
+        "summary": "Found issues",
+        "confidence": 0.9,
+        "outcome": "findings",
+        "findings": [
+            {
+                "title": "Style note",
+                "category": "style",
+                "confidence": 0.95,
+                "file_path": "main.py",
+                "severity": "low",
+                "why_it_matters": "Readability",
+            },
+            {
+                "title": "High severity bug",
+                "category": "logic",
+                "confidence": 0.7,
+                "file_path": "main.py",
+                "severity": "high",
+                "why_it_matters": "Behavioral failure",
+            },
+            {
+                "title": "Critical issue but low confidence",
+                "category": "logic",
+                "confidence": 0.7,
+                "file_path": "main.py",
+                "severity": "critical",
+                "why_it_matters": "Potential outage",
+            },
+        ],
+    }
+    mock_reviewer.run.return_value = WorkerResult(
+        status="success",
+        summary=f"```json\n{json.dumps(review_payload)}\n```",
+    )
+
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert res["review"]["outcome"] == "findings"
+    assert [finding["title"] for finding in res["review"]["findings"]] == ["High severity bug"]
+    assert len(res["review"]["suppressed_findings"]) == 2

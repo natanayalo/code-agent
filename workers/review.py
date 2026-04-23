@@ -45,6 +45,13 @@ class ReviewFinding(ReviewModel):
         return self
 
 
+class SuppressedReviewFinding(ReviewModel):
+    """A review finding that was intentionally suppressed from surfaced output."""
+
+    finding: ReviewFinding
+    reasons: list[str] = Field(min_length=1)
+
+
 class ReviewResult(ReviewModel):
     """Shared structured review payload used across review stages."""
 
@@ -53,6 +60,7 @@ class ReviewResult(ReviewModel):
     confidence: float = Field(ge=0.0, le=1.0)
     outcome: Literal["no_findings", "findings"]
     findings: list[ReviewFinding] = Field(default_factory=list)
+    suppressed_findings: list[SuppressedReviewFinding] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_outcome_consistency(self) -> ReviewResult:
