@@ -36,9 +36,13 @@ Use this skill for repo-specific triage after pull request review feedback is co
    - test or verification gap
    - maintainability cleanup
    - scope-expanding design suggestion
-3. Fix blocking correctness or safety issues in the current PR.
-4. Take small local maintainability fixes only when they stay tightly scoped.
-5. Defer broader design changes into an explicit follow-up task when needed.
+3. For fixes in scope:
+   - Replicate the reported issue locally.
+   - Add or update a unit test to verify the fix and prevent regression.
+   - Apply the fix, commit, push, and resolve the thread.
+4. For out-of-scope or design suggestions:
+   - Reply to the comment with reasoning or a deferral plan.
+   - Resolve the thread.
 
 ## Patch guardrails
 
