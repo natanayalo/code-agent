@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from pathlib import Path
@@ -16,6 +17,43 @@ from workers.review_context import pack_reviewer_context
 from workers.self_review import parse_review_result
 
 logger = logging.getLogger(__name__)
+DEFAULT_INDEPENDENT_REVIEW_TIMEOUT_SECONDS = 120
+
+
+def _coerce_positive_int_like(value: object) -> int | None:
+    """Parse a positive integer-like input, otherwise return None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float):
+        try:
+            parsed = int(value)
+        except (OverflowError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            parsed = int(float(stripped))
+        except (OverflowError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _resolve_review_timeout_seconds(state: OrchestratorState) -> int:
+    """Resolve timeout for independent review calls."""
+    budget = state.task.budget if isinstance(state.task.budget, dict) else {}
+    explicit_timeout = _coerce_positive_int_like(budget.get("independent_review_timeout_seconds"))
+    if explicit_timeout is not None:
+        return explicit_timeout
+    orchestrator_timeout = _coerce_positive_int_like(budget.get("orchestrator_timeout_seconds"))
+    if orchestrator_timeout is not None:
+        return orchestrator_timeout
+    return DEFAULT_INDEPENDENT_REVIEW_TIMEOUT_SECONDS
 
 
 def _workspace_path_from_result_artifacts(state: OrchestratorState) -> Path | None:
@@ -125,7 +163,10 @@ async def review_result(
 
     try:
         # We use the system_prompt override to perform a single-shot review
-        review_run_result = await worker.run(review_request, system_prompt=review_prompt)
+        review_run_result = await asyncio.wait_for(
+            asyncio.shield(worker.run(review_request, system_prompt=review_prompt)),
+            timeout=_resolve_review_timeout_seconds(state),
+        )
         if review_run_result.status != "success":
             logger.warning(
                 "Independent review worker returned non-success status: %s",
@@ -148,6 +189,10 @@ async def review_result(
                 "review": parsed_review.model_dump(),
                 "progress_updates": [*state.progress_updates, "independent review completed"],
             }
+    except TimeoutError:
+        logger.warning("Independent review pass timed out and was skipped.")
+    except asyncio.CancelledError:
+        raise
     except Exception:
         logger.exception("Independent review pass failed unexpectedly.")
 

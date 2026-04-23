@@ -1,5 +1,6 @@
 """Unit tests for the orchestrator review stage."""
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -300,3 +301,48 @@ async def test_review_result_includes_fallback_session_state_in_review_context(m
         "active_goal": "normalized demo task",
         "files_touched": ["a.py", "b.py"],
     }
+
+
+@pytest.mark.anyio
+async def test_review_result_times_out_worker_run(monkeypatch, caplog):
+    caplog.set_level("WARNING", logger="orchestrator.review")
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo task"},
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "done"},
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+
+    monkeypatch.setattr(review_module, "_resolve_review_timeout_seconds", lambda _state: 1)
+
+    async def slow_run(*args, **kwargs):  # noqa: ANN002, ANN003
+        await asyncio.sleep(2)
+        return WorkerResult(status="success", summary="{}")
+
+    mock_reviewer = AsyncMock()
+    mock_reviewer.run.side_effect = slow_run
+
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert "Independent review pass timed out and was skipped." in caplog.text
+
+
+@pytest.mark.anyio
+async def test_review_result_propagates_cancellation():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo task"},
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "done"},
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+
+    mock_reviewer = AsyncMock()
+    mock_reviewer.run.side_effect = asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await review_result(state, worker_factory={"gemini": mock_reviewer})
