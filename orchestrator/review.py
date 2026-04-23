@@ -43,7 +43,6 @@ async def review_result(state: OrchestratorState, *, worker_factory: Any = None)
         worker_summary=state.result.summary or "",
         files_changed=state.result.files_changed,
         diff_text=state.result.diff_text or "",
-        repo_path=repo_path,
         commands_run=state.result.commands_run,
         verifier_report=state.verification.model_dump() if state.verification else None,
         session_state=state.session_state_update.model_dump()
@@ -60,12 +59,13 @@ async def review_result(state: OrchestratorState, *, worker_factory: Any = None)
 
     # 3. Choose reviewer worker
     # Prefer gemini for review if available, otherwise use the chosen worker
-    reviewer_type = "gemini" if "gemini" in (worker_factory or {}) else state.dispatch.worker_type
-    if not reviewer_type or reviewer_type not in (worker_factory or {}):
+    workers = worker_factory or {}
+    reviewer_type = "gemini" if "gemini" in workers else state.dispatch.worker_type
+    if not reviewer_type or reviewer_type not in workers:
         logger.warning("No suitable reviewer worker found, skipping independent review.")
         return {"current_step": "review_result"}
 
-    worker = worker_factory[reviewer_type]
+    worker = workers[reviewer_type]
 
     # 4. Run the review pass
     review_request = WorkerRequest(
