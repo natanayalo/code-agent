@@ -96,11 +96,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-118 (slice 2): bounded repair handoff loop + verifier rerun after review-driven repair.
 
 ## Next
 
-- T-118 (slice 2): bounded repair handoff loop + verifier rerun after review-driven repair.
+- None
 
 ## Blocked
 

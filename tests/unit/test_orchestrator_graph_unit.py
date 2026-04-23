@@ -15,6 +15,7 @@ from orchestrator.graph import (
     _ensure_state,
     _is_destructive_task,
     _resolve_orchestrator_timeout_seconds,
+    _route_after_review_result,
     await_approval,
     await_permission_escalation,
     build_choose_worker_node,
@@ -106,6 +107,22 @@ def test_build_worker_request_from_state():
     assert request.task_plan["complexity_reason"] == "architecture"
     assert request.constraints == {"requires_approval": False}
     assert request.budget == {"max_minutes": 15}
+
+
+def test_build_worker_request_prefers_review_repair_handoff_text():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Original task",
+                "constraints": {"independent_review_repair_request": "Repair follow-up task"},
+            },
+            "normalized_task_text": "Normalized original task",
+        }
+    )
+
+    request = _build_worker_request(state)
+
+    assert request.task_text == "Repair follow-up task"
 
 
 def test_plan_task_skips_simple_tasks():
@@ -688,6 +705,7 @@ def test_dispatch_job_preserves_attempt_count():
     )
     result = dispatch_job(state)
     assert result["current_step"] == "dispatch_job"
+    assert result["repair_handoff_requested"] is False
 
 
 def test_dispatch_job_preserves_attempt_count_on_retry():
@@ -703,6 +721,21 @@ def test_dispatch_job_preserves_attempt_count_on_retry():
     )
     result = dispatch_job(state)
     assert result["current_step"] == "dispatch_job"
+    assert result["repair_handoff_requested"] is False
+
+
+def test_route_after_review_result_dispatches_on_repair_handoff():
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "demo"}, "repair_handoff_requested": True}
+    )
+
+    assert _route_after_review_result(state) == "dispatch_job"
+
+
+def test_route_after_review_result_summarizes_without_repair_handoff():
+    state = OrchestratorState.model_validate({"task": {"task_text": "demo"}})
+
+    assert _route_after_review_result(state) == "summarize_result"
 
 
 def test_await_permission_escalation_approved():
