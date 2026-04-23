@@ -138,6 +138,7 @@ def _worker_result_from_execution(
     files_changed: list[str],
     post_run_lint_format: dict[str, object] | None = None,
     review_result: ReviewResult | None = None,
+    diff_text: str | None = None,
     artifacts: list[ArtifactReference] | None = None,
 ) -> WorkerResult:
     """Map the shared CLI runtime output into the worker contract."""
@@ -164,6 +165,7 @@ def _worker_result_from_execution(
         files_changed=files_changed,
         artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
         review_result=review_result,
+        diff_text=diff_text,
         next_action_hint=_next_action_hint(execution),
     )
 
@@ -535,6 +537,12 @@ class CodexCliWorker(Worker):
                 files_changed=files_changed,
                 post_run_lint_format=lint_format_result,
                 review_result=review_result,
+                diff_text=collect_diff_for_review(
+                    workspace.repo_path,
+                    timeout_seconds=runtime_settings.command_timeout_seconds,
+                )
+                if execution.status == "success"
+                else None,
                 artifacts=lint_format_artifacts,
             )
             if cancel_token and cancel_token():

@@ -62,51 +62,63 @@ def _message_heading(message: CliRuntimeMessage, *, index: int) -> str:
     return f"### Message {index} ({message.role})"
 
 
-def _build_adapter_prompt(messages: Sequence[CliRuntimeMessage]) -> str:
+def _build_adapter_prompt(
+    messages: Sequence[CliRuntimeMessage],
+    *,
+    system_prompt: str | None = None,
+) -> str:
     """Build the prompt sent to the Gemini CLI for one runtime turn."""
-    lines = [
-        "You are the Gemini runtime adapter for a bounded coding worker.",
-        (
-            "Read the transcript below and return exactly one JSON object "
-            "with no surrounding text, no markdown fences, and no explanation."
-        ),
-        "Choose one of two actions:",
-        CliRuntimeStep(
-            kind="tool_call",
-            tool_name="<registered tool name>",
-            tool_input="<tool input string>",
-            final_output=None,
-        ).model_dump_json(),
-        CliRuntimeStep(
-            kind="final",
-            final_output="<final summary for the user>",
-            tool_name=None,
-            tool_input=None,
-        ).model_dump_json(),
-        "Rules:",
-        "- Use only tool names listed in the system prompt's Available Tools section.",
-        "- For `execute_bash`, return one focused shell command as the tool_input string.",
-        (
-            "- For `execute_git`, return the tool_input as a compact JSON object encoded "
-            'as a string, for example {"operation":"status","porcelain":true}.'
-        ),
-        (
-            "- For `execute_github`, return the tool_input as a compact JSON object encoded "
-            "as a string, for example "
-            '{"operation":"pr_comment","repository_full_name":"owner/repo",'
-            '"pr_number":1,"comment_body":"Looks good."}.'
-        ),
-        (
-            "- For `execute_browser`, return the tool_input as a compact JSON object encoded "
-            "as a string, for example "
-            '{"operation":"search","query":"langgraph","limit":3}.'
-        ),
-        "- If the transcript already contains enough information to finish, return `final`.",
-        "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
-        "- Return ONLY a raw JSON object. No markdown fences, no extra explanation.",
-        "",
-        "## Runtime Transcript",
-    ]
+    if system_prompt is not None:
+        lines = [
+            system_prompt,
+            "",
+            "## Runtime Transcript",
+        ]
+    else:
+        lines = [
+            "You are the Gemini runtime adapter for a bounded coding worker.",
+            (
+                "Read the transcript below and return exactly one JSON object "
+                "with no surrounding text, no markdown fences, and no explanation."
+            ),
+            "Choose one of two actions:",
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="<registered tool name>",
+                tool_input="<tool input string>",
+                final_output=None,
+            ).model_dump_json(),
+            CliRuntimeStep(
+                kind="final",
+                final_output="<final summary for the user>",
+                tool_name=None,
+                tool_input=None,
+            ).model_dump_json(),
+            "Rules:",
+            "- Use only tool names listed in the system prompt's Available Tools section.",
+            "- For `execute_bash`, return one focused shell command as the tool_input string.",
+            (
+                "- For `execute_git`, return the tool_input as a compact JSON object encoded "
+                'as a string, for example {"operation":"status","porcelain":true}.'
+            ),
+            (
+                "- For `execute_github`, return the tool_input as a compact JSON object encoded "
+                "as a string, for example "
+                '{"operation":"pr_comment","repository_full_name":"owner/repo",'
+                '"pr_number":1,"comment_body":"Looks good."}.'
+            ),
+            (
+                "- For `execute_browser`, return the tool_input as a compact JSON object encoded "
+                "as a string, for example "
+                '{"operation":"search","query":"langgraph","limit":3}.'
+            ),
+            "- If the transcript already contains enough information to finish, return `final`.",
+            "- If the latest tool result failed, adapt to that failure instead of "
+            "repeating blindly.",
+            "- Return ONLY a raw JSON object. No markdown fences, no extra explanation.",
+            "",
+            "## Runtime Transcript",
+        ]
     for index, message in enumerate(messages, start=1):
         lines.extend((_message_heading(message, index=index), message.content, ""))
     return "\n".join(lines).rstrip()
@@ -215,10 +227,11 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         self,
         messages: Sequence[CliRuntimeMessage],
         *,
+        system_prompt: str | None = None,
         working_directory: Path | None = None,  # noqa: ARG002 — context only, not used by CLI
     ) -> CliRuntimeStep:
         """Ask the Gemini CLI for the next runtime step."""
-        prompt = _build_adapter_prompt(messages)
+        prompt = _build_adapter_prompt(messages, system_prompt=system_prompt)
         command = self._build_command()
 
         try:

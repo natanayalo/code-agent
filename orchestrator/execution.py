@@ -801,15 +801,19 @@ def _serialize_review_result(review_result: object | None) -> dict[str, Any] | N
     raise TypeError(f"Unsupported review result type: {type(review_result).__name__}")
 
 
-def _review_result_artifact_entry(review_result: object | None) -> dict[str, Any] | None:
+def _review_result_artifact_entry(
+    review_result: object | None,
+    *,
+    artifact_type: str = "review_result",
+) -> dict[str, Any] | None:
     """Build a structured artifact index entry for a review payload when present."""
     serialized = _serialize_review_result(review_result)
     if serialized is None:
         return None
     return {
-        "name": "review_result",
-        "uri": "inline://review_result",
-        "artifact_type": ArtifactType.REVIEW_RESULT.value,
+        "name": artifact_type,
+        "uri": f"inline://{artifact_type}",
+        "artifact_type": artifact_type,
         "artifact_metadata": {"review_result": serialized},
     }
 
@@ -1998,6 +2002,12 @@ class TaskExecutionService:
             )
             if review_result_entry is not None:
                 artifact_index.append(review_result_entry)
+
+            independent_review_entry = _review_result_artifact_entry(
+                state.review, artifact_type="independent_review_result"
+            )
+            if independent_review_entry is not None:
+                artifact_index.append(independent_review_entry)
             worker_type = _worker_type_for_persistence(state)
             worker_run = worker_run_repo.create(
                 task_id=task_id,
@@ -2067,6 +2077,14 @@ class TaskExecutionService:
                     name=review_result_entry["name"],
                     uri=review_result_entry["uri"],
                     artifact_metadata=review_result_entry["artifact_metadata"],
+                )
+            if independent_review_entry is not None:
+                artifact_repo.create(
+                    run_id=worker_run.id,
+                    artifact_type=ArtifactType.INDEPENDENT_REVIEW_RESULT.value,
+                    name=independent_review_entry["name"],
+                    uri=independent_review_entry["uri"],
+                    artifact_metadata=independent_review_entry["artifact_metadata"],
                 )
 
         self._prune_retained_runs(now=finished_at)

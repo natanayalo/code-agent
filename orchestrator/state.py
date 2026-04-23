@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from workers import WorkerResult
+from workers.review import ReviewResult
 
 WorkerType = Literal["gemini", "codex", "openrouter"]
 # Ordered by escalation preference in routing fallbacks:
@@ -34,6 +35,7 @@ WorkflowStep = Literal[
     "await_result",
     "await_permission_escalation",
     "verify_result",
+    "review_result",
     "summarize_result",
     "persist_memory",
 ]
@@ -194,6 +196,7 @@ class OrchestratorState(OrchestratorModel):
     dispatch: WorkerDispatch = Field(default_factory=WorkerDispatch)
     result: WorkerResult | None = None
     verification: VerificationReport | None = None
+    review: ReviewResult | None = None
     memory_to_persist: list[PersistMemoryEntry] = Field(default_factory=list)
     progress_updates: list[str] = Field(default_factory=list)
     timeline_events: Annotated[list[TaskTimelineEventState], add] = Field(default_factory=list)

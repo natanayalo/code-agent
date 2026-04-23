@@ -86,6 +86,7 @@ class WorkerResult(WorkerModel):
     test_results: list[TestResult] = Field(default_factory=list)
     artifacts: list[ArtifactReference] = Field(default_factory=list)
     review_result: ReviewResult | None = None
+    diff_text: str | None = None
     next_action_hint: str | None = None
 
     @model_validator(mode="after")

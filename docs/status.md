@@ -91,6 +91,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-073 Add OpenRouter API client adapter. PR: [#97](https://github.com/natanayalo/code-agent/pull/97)
 - T-115 Add targeted reviewer context packer. PR: [#98](https://github.com/natanayalo/code-agent/pull/98)
 - T-116 Add review-specific prompt assembly and repo review guidance. PR: [#99](https://github.com/natanayalo/code-agent/pull/99)
+- T-117 Add advisory independent reviewer stage to orchestrator. PR: [#100](https://github.com/natanayalo/code-agent/pull/100)
 
 ## In Progress
 
