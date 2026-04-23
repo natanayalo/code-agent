@@ -55,6 +55,10 @@ async def review_result(state: OrchestratorState, *, worker_factory: Any = None)
 
     # 2. Build the review prompt
     repo_path = _workspace_path_from_result_artifacts(state)
+    if repo_path is None:
+        logger.warning(
+            "Independent review workspace path unavailable; falling back to current directory."
+        )
 
     review_context = pack_reviewer_context(
         task_text=state.normalized_task_text or state.task.task_text,
@@ -82,6 +86,11 @@ async def review_result(state: OrchestratorState, *, worker_factory: Any = None)
     if not reviewer_type or reviewer_type not in workers:
         logger.warning("No suitable reviewer worker found, skipping independent review.")
         return {"current_step": "review_result"}
+    if reviewer_type == state.dispatch.worker_type:
+        logger.warning(
+            "Independent review is using the same worker type as execution (%s).",
+            reviewer_type,
+        )
 
     worker = workers[reviewer_type]
 
@@ -101,9 +110,16 @@ async def review_result(state: OrchestratorState, *, worker_factory: Any = None)
     try:
         # We use the system_prompt override to perform a single-shot review
         review_run_result = await worker.run(review_request, system_prompt=review_prompt)
+        if review_run_result.status != "success":
+            logger.warning(
+                "Independent review worker returned non-success status: %s",
+                review_run_result.status,
+            )
 
         # 5. Parse findings
         parsed_review = parse_review_result(review_run_result.summary or "")
+        if parsed_review is None:
+            logger.warning("Independent review output could not be parsed into ReviewResult.")
         if parsed_review:
             # Inject the correct reviewer kind if parser missed it
             if parsed_review.reviewer_kind != "independent_reviewer":

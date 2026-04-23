@@ -172,3 +172,76 @@ async def test_review_result_resolves_windows_style_workspace_uri_for_prompt(mon
 
     assert res["current_step"] == "review_result"
     assert captured_workspace_path["path"] == Path("C:/repo/code-agent")
+
+
+@pytest.mark.anyio
+async def test_review_result_logs_warning_when_workspace_path_missing(caplog):
+    caplog.set_level("WARNING", logger="orchestrator.review")
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "done", "artifacts": []},
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+
+    mock_reviewer = AsyncMock()
+    mock_reviewer.run.return_value = WorkerResult(
+        status="success",
+        summary='{"reviewer_kind":"independent_reviewer","summary":"ok","confidence":1.0,"outcome":"no_findings","findings":[]}',
+    )
+
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert (
+        "Independent review workspace path unavailable; falling back to current directory."
+        in caplog.text
+    )
+
+
+@pytest.mark.anyio
+async def test_review_result_logs_warning_when_using_same_worker_type(caplog):
+    caplog.set_level("WARNING", logger="orchestrator.review")
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "done"},
+            "dispatch": {"worker_type": "codex"},
+        }
+    )
+
+    mock_reviewer = AsyncMock()
+    mock_reviewer.run.return_value = WorkerResult(
+        status="success",
+        summary='{"reviewer_kind":"independent_reviewer","summary":"ok","confidence":1.0,"outcome":"no_findings","findings":[]}',
+    )
+
+    res = await review_result(state, worker_factory={"codex": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert "Independent review is using the same worker type as execution (codex)." in caplog.text
+
+
+@pytest.mark.anyio
+async def test_review_result_logs_warnings_for_non_success_and_unparseable_output(caplog):
+    caplog.set_level("WARNING", logger="orchestrator.review")
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "done"},
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+
+    mock_reviewer = AsyncMock()
+    mock_reviewer.run.return_value = WorkerResult(status="error", summary="not-json")
+
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert "Independent review worker returned non-success status: error" in caplog.text
+    assert "Independent review output could not be parsed into ReviewResult." in caplog.text
