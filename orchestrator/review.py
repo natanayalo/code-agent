@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
 from orchestrator.state import OrchestratorState
-from workers import WorkerRequest
+from workers import Worker, WorkerRequest
 from workers.prompt import build_review_prompt
 from workers.review_context import pack_reviewer_context
 from workers.self_review import parse_review_result
@@ -40,7 +41,11 @@ def _workspace_path_from_result_artifacts(state: OrchestratorState) -> Path | No
     return None
 
 
-async def review_result(state: OrchestratorState, *, worker_factory: Any = None) -> dict[str, Any]:
+async def review_result(
+    state: OrchestratorState,
+    *,
+    worker_factory: Mapping[str, Worker] | None = None,
+) -> dict[str, Any]:
     """Perform an independent advisory review pass after successful verification."""
     # 1. Check if we should skip
     if state.task.constraints.get("skip_independent_review"):
