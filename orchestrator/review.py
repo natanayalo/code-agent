@@ -164,7 +164,7 @@ async def review_result(
     try:
         # We use the system_prompt override to perform a single-shot review
         review_run_result = await asyncio.wait_for(
-            asyncio.shield(worker.run(review_request, system_prompt=review_prompt)),
+            worker.run(review_request, system_prompt=review_prompt),
             timeout=_resolve_review_timeout_seconds(state),
         )
         if review_run_result.status != "success":

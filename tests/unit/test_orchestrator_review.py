@@ -316,10 +316,15 @@ async def test_review_result_times_out_worker_run(monkeypatch, caplog):
     )
 
     monkeypatch.setattr(review_module, "_resolve_review_timeout_seconds", lambda _state: 1)
+    cancellation_observed: dict[str, bool] = {"value": False}
 
     async def slow_run(*args, **kwargs):  # noqa: ANN002, ANN003
-        await asyncio.sleep(2)
-        return WorkerResult(status="success", summary="{}")
+        try:
+            await asyncio.sleep(2)
+            return WorkerResult(status="success", summary="{}")
+        except asyncio.CancelledError:
+            cancellation_observed["value"] = True
+            raise
 
     mock_reviewer = AsyncMock()
     mock_reviewer.run.side_effect = slow_run
@@ -328,6 +333,7 @@ async def test_review_result_times_out_worker_run(monkeypatch, caplog):
 
     assert res["current_step"] == "review_result"
     assert "Independent review pass timed out and was skipped." in caplog.text
+    assert cancellation_observed["value"] is True
 
 
 @pytest.mark.anyio
