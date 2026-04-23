@@ -30,6 +30,7 @@ SEVERITY_RANK: dict[str, int] = {"low": 1, "medium": 2, "high": 3, "critical": 4
 DEFAULT_SUPPRESSED_STYLE_CATEGORIES: frozenset[str] = frozenset(
     {"style", "formatting", "naming", "whitespace"}
 )
+SUPPRESSED_FINDINGS_SUMMARY_PREFIX = "All findings were suppressed by policy thresholds."
 
 
 def _coerce_positive_int_like(value: object) -> int | None:
@@ -196,8 +197,12 @@ def _apply_independent_review_suppression(
         filtered_findings.append(finding)
 
     filtered_outcome = "findings" if filtered_findings else "no_findings"
+    summary = parsed_review.summary
+    if parsed_review.outcome == "findings" and filtered_outcome == "no_findings":
+        summary = f"{SUPPRESSED_FINDINGS_SUMMARY_PREFIX} Original reviewer summary: {summary}"
     return parsed_review.model_copy(
         update={
+            "summary": summary,
             "outcome": filtered_outcome,
             "findings": filtered_findings,
             "suppressed_findings": suppressed_findings,

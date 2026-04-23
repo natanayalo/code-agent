@@ -399,6 +399,7 @@ async def test_review_result_suppresses_style_and_low_confidence_findings_by_def
     assert res["review"]["outcome"] == "no_findings"
     assert res["review"]["findings"] == []
     assert len(res["review"]["suppressed_findings"]) == 2
+    assert res["review"]["summary"].startswith(review_module.SUPPRESSED_FINDINGS_SUMMARY_PREFIX)
 
 
 @pytest.mark.anyio
