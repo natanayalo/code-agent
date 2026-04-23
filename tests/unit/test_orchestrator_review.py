@@ -506,3 +506,61 @@ async def test_review_result_uses_severity_threshold_over_global_by_default():
         "High severity finding under global threshold"
     ]
     assert res["review"]["suppressed_findings"] == []
+
+
+@pytest.mark.anyio
+async def test_review_result_uses_explicit_global_confidence_as_baseline():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "constraints": {
+                    "independent_review_min_confidence": 0.85,
+                    "independent_review_min_confidence_by_severity": {"high": 0.75},
+                },
+            },
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "done"},
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+    mock_reviewer = AsyncMock()
+    review_payload = {
+        "summary": "Found issues",
+        "confidence": 0.9,
+        "outcome": "findings",
+        "findings": [
+            {
+                "title": "Medium below explicit global baseline",
+                "category": "logic",
+                "confidence": 0.8,
+                "file_path": "main.py",
+                "severity": "medium",
+                "why_it_matters": "Could be risky",
+            },
+            {
+                "title": "High allowed by explicit severity override",
+                "category": "logic",
+                "confidence": 0.8,
+                "file_path": "main.py",
+                "severity": "high",
+                "why_it_matters": "Likely bug",
+            },
+        ],
+    }
+    mock_reviewer.run.return_value = WorkerResult(
+        status="success",
+        summary=f"```json\n{json.dumps(review_payload)}\n```",
+    )
+
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert res["review"]["outcome"] == "findings"
+    assert [finding["title"] for finding in res["review"]["findings"]] == [
+        "High allowed by explicit severity override"
+    ]
+    assert len(res["review"]["suppressed_findings"]) == 1
+    assert res["review"]["suppressed_findings"][0]["finding"]["title"] == (
+        "Medium below explicit global baseline"
+    )

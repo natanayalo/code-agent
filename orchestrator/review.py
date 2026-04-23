@@ -112,6 +112,10 @@ def _coerce_string_set(value: object) -> set[str]:
 def _review_min_confidence_by_severity(constraints: Mapping[str, Any]) -> dict[str, float]:
     """Resolve severity-specific review confidence thresholds with safe defaults."""
     resolved = dict(DEFAULT_REVIEW_MIN_CONFIDENCE_BY_SEVERITY)
+    has_explicit_global = "independent_review_min_confidence" in constraints
+    explicit_global = _coerce_probability(constraints.get("independent_review_min_confidence"))
+    if has_explicit_global and explicit_global is not None:
+        resolved = {severity: explicit_global for severity in SEVERITY_RANK}
     raw_thresholds = constraints.get("independent_review_min_confidence_by_severity")
     if not isinstance(raw_thresholds, Mapping):
         return resolved
