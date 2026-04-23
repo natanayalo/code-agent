@@ -74,7 +74,10 @@ def _coerce_probability(value: object) -> float | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, int | float):
-        parsed = float(value)
+        try:
+            parsed = float(value)
+        except OverflowError:
+            return None
     elif isinstance(value, str):
         stripped = value.strip()
         if not stripped:

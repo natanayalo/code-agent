@@ -565,3 +565,7 @@ async def test_review_result_uses_explicit_global_confidence_as_baseline():
     assert res["review"]["suppressed_findings"][0]["finding"]["title"] == (
         "Medium below explicit global baseline"
     )
+
+
+def test_coerce_probability_returns_none_for_overflowing_numeric_input() -> None:
+    assert review_module._coerce_probability(10**400) is None
