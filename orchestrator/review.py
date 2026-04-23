@@ -161,11 +161,6 @@ def _apply_independent_review_suppression(
     constraints: Mapping[str, Any],
 ) -> ReviewResult:
     """Suppress low-value findings before surfacing independent review results."""
-    global_min_confidence = _coerce_probability(
-        constraints.get("independent_review_min_confidence")
-    )
-    if global_min_confidence is None:
-        global_min_confidence = DEFAULT_REVIEW_MIN_CONFIDENCE
     confidence_by_severity = _review_min_confidence_by_severity(constraints)
     min_severity = _resolve_review_min_severity(constraints)
     suppressed_style_categories = _resolve_style_categories(constraints)
@@ -181,7 +176,7 @@ def _apply_independent_review_suppression(
         if category in suppressed_style_categories:
             reasons.append(f"style category suppressed by policy ({category})")
 
-        minimum_for_severity = confidence_by_severity.get(severity, global_min_confidence)
+        minimum_for_severity = confidence_by_severity.get(severity, DEFAULT_REVIEW_MIN_CONFIDENCE)
         if finding.confidence < minimum_for_severity:
             reasons.append(
                 "confidence below effective threshold "
