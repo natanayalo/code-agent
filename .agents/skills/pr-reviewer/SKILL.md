@@ -158,6 +158,27 @@ Use this comment body pattern for posted findings:
 
 Avoid wording like "consider refactor", "could be cleaner", or "might be brittle" unless you also provide a concrete failing path and impact.
 
+Severity tag format for posted comments:
+
+- Prefix each inline comment title/body with: `[severity:<critical|high|medium|low>]`
+- Example: `[severity:medium] Missing guard for null failures payload`
+
+Recommended review event by outcome:
+
+- `COMMENT`: default when findings are advisory or non-blocking.
+- `REQUEST_CHANGES`: use when at least one posted finding is blocking (typically critical/high with clear failure path).
+- `APPROVE`: use only when no actionable findings were posted and the review is explicitly approval-oriented.
+
+Suggested inline comment structure:
+
+```text
+[severity:medium] <short finding title>
+Problem: <what is wrong>
+Trigger: <concrete failing condition/input>
+Impact: <user/operator consequence>
+Minimal fix: <smallest safe change>
+```
+
 Inline comment (preferred when a stable file/line exists):
 
 ```bash
@@ -186,6 +207,17 @@ GH_PAGER=cat gh api \
   -f body="High-confidence actionable findings from reviewer pass." \
   -f event="COMMENT" \
   -f comments='[{"path":"orchestrator/handlers/webhook.py","line":142,"side":"RIGHT","body":"Missing idempotency guard before side effects."}]'
+```
+
+Batched review with explicit event selection:
+
+```bash
+GH_PAGER=cat gh api \
+  -X POST \
+  repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews \
+  -f body="Reviewer pass completed. See inline findings." \
+  -f event="REQUEST_CHANGES" \
+  -f comments='[{"path":"evaluation/harness.py","line":482,"side":"RIGHT","body":"[severity:medium] Incomplete delta reporting for repair and empty-review metrics\nProblem: treat_missing_as_zero excludes two metrics.\nTrigger: baseline has None and candidate has real value.\nImpact: Improvement is hidden in comparison output.\nMinimal fix: include fix_after_review_success and empty_review_correctness in the inclusion set."}]'
 ```
 
 ## Example Finding Shape
