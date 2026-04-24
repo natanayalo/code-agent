@@ -310,6 +310,14 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
                     f"stderr: {_truncate_detail(completed.stderr)}"
                 )
 
+            try:
+                parsed = json.loads(raw_output)
+                if isinstance(parsed, dict) and isinstance(parsed.get("tool_input"), dict):
+                    parsed["tool_input"] = json.dumps(parsed["tool_input"])
+                    raw_output = json.dumps(parsed)
+            except json.JSONDecodeError:
+                pass
+
             if override_prompt is not None:
                 try:
                     return CliRuntimeStep.model_validate_json(raw_output)
@@ -323,11 +331,12 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
 
             try:
                 return CliRuntimeStep.model_validate_json(raw_output)
-            except (
-                Exception
-            ) as exc:  # pragma: no cover - exercised via tests with specific payloads.
-                raise RuntimeError(
-                    "Codex CLI adapter returned a final message that did not match "
-                    f"CliRuntimeStep: "
-                    f"{_truncate_detail(raw_output)}"
-                ) from exc
+            except Exception:
+                # Fall back to a 'final' step if the message is valid but not a CliRuntimeStep.
+                # This allows parsing one-shot review results or mis-shaped outputs gracefully.
+                return CliRuntimeStep(
+                    kind="final",
+                    final_output=raw_output,
+                    tool_name=None,
+                    tool_input=None,
+                )

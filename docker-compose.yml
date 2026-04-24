@@ -43,7 +43,9 @@ services:
       CODE_AGENT_RUN_WORKER: 0
       CODE_AGENT_ENABLE_TASK_SERVICE: 1
       CODE_AGENT_API_SHARED_SECRET: ${CODE_AGENT_API_SHARED_SECRET?Please set CODE_AGENT_API_SHARED_SECRET in .env}
+      CODE_AGENT_TELEGRAM_BOT_TOKEN: ${CODE_AGENT_TELEGRAM_BOT_TOKEN:-}
       CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN: ${CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN:-}
+      CODE_AGENT_TELEGRAM_DEFAULT_REPO_URL: ${CODE_AGENT_TELEGRAM_DEFAULT_REPO_URL:-}
       DATABASE_HOST: ${DATABASE_HOST:-postgres}
       DATABASE_PORT: ${DATABASE_PORT:-5432}
       POSTGRES_DB: ${POSTGRES_DB?Please set POSTGRES_DB in .env}
@@ -78,11 +80,14 @@ services:
       POSTGRES_USER: ${POSTGRES_USER?Please set POSTGRES_USER in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DATABASE_HOST:-postgres}:${DATABASE_PORT:-5432}/${POSTGRES_DB}
+      CODE_AGENT_TELEGRAM_BOT_TOKEN: ${CODE_AGENT_TELEGRAM_BOT_TOKEN:-}
+      CODE_AGENT_TELEGRAM_DEFAULT_REPO_URL: ${CODE_AGENT_TELEGRAM_DEFAULT_REPO_URL:-}
       CODE_AGENT_CODEX_CLI_BIN: ${CODE_AGENT_CODEX_CLI_BIN:-codex}
       CODE_AGENT_CODEX_MODEL: ${CODE_AGENT_CODEX_MODEL:-gpt-5.4}
       CODE_AGENT_CODEX_SANDBOX: ${CODE_AGENT_CODEX_SANDBOX:-workspace-write}
       CODE_AGENT_GEMINI_CLI_BIN: ${CODE_AGENT_GEMINI_CLI_BIN:-gemini}
       CODE_AGENT_GEMINI_MODEL: ${CODE_AGENT_GEMINI_MODEL:-gemini-2.5-pro}
+      GEMINI_HOME: /root/.gemini
       CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS: ${CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS:-2}
       CODE_AGENT_QUEUE_LEASE_SECONDS: ${CODE_AGENT_QUEUE_LEASE_SECONDS:-60}
       CODE_AGENT_QUEUE_MAX_ATTEMPTS: ${CODE_AGENT_QUEUE_MAX_ATTEMPTS:-3}
@@ -97,5 +102,46 @@ services:
       - ${CODE_AGENT_CODEX_AUTH_DIR?Please set CODE_AGENT_CODEX_AUTH_DIR in env}:/root/.codex
       - ${CODE_AGENT_GEMINI_AUTH_DIR?Please set CODE_AGENT_GEMINI_AUTH_DIR in env}:/root/.gemini
       - ${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}:${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}
+  ngrok:
+    image: ngrok/ngrok:latest
+    restart: unless-stopped
+    # Exposes api:8000 publicly over HTTPS.
+    # Requires NGROK_AUTHTOKEN in .env (free at dashboard.ngrok.com → Your Authtoken).
+    # Set NGROK_DOMAIN for a stable URL that never changes (free static domain
+    # from dashboard.ngrok.com → Domains → New Domain).
+    #
+    # Query the current URL at any time:
+    #   curl -s http://localhost:4040/api/tunnels
+    #
+    # Start: docker compose --profile tunnel up -d
+    command: >
+      http api:8000 --authtoken=${NGROK_AUTHTOKEN} ${NGROK_DOMAIN:+--url=${NGROK_DOMAIN}}
+
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN?Please set NGROK_AUTHTOKEN in .env}
+      NGROK_DOMAIN: ${NGROK_DOMAIN:-}
+    ports:
+      - "4040:4040"
+    depends_on:
+      api:
+        condition: service_healthy
+    profiles:
+      - tunnel
+  init-webhook:
+    image: alpine:latest
+    restart: "no"
+    depends_on:
+      api:
+        condition: service_healthy
+      ngrok:
+        condition: service_started
+    profiles:
+      - tunnel
+    environment:
+      CODE_AGENT_TELEGRAM_BOT_TOKEN: ${CODE_AGENT_TELEGRAM_BOT_TOKEN:-}
+      CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN: ${CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN:-}
+    volumes:
+      - ./scripts/init_webhook.sh:/init_webhook.sh:ro
+    command: ["sh", "/init_webhook.sh"]
 volumes:
   postgres_data:

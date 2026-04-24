@@ -93,7 +93,7 @@ def _workspace_artifacts(workspace: WorkspaceHandle) -> list[ArtifactReference]:
     return [
         ArtifactReference(
             name="workspace",
-            uri=str(workspace.workspace_path),
+            uri=workspace.workspace_path.as_uri(),
             artifact_type="workspace",
         )
     ]

@@ -27,9 +27,10 @@ def test_gemini_adapter_parses_bare_json_tool_call(monkeypatch) -> None:
         input: str,
         text: bool,
         capture_output: bool,
-        check: bool,
+        check: bool = False,
         timeout: int,
         env: dict[str, str] | None,
+        **kwargs: object,
     ) -> subprocess.CompletedProcess[str]:
         recorded["command"] = list(command)
         recorded["input"] = input
@@ -56,7 +57,16 @@ def test_gemini_adapter_parses_bare_json_tool_call(monkeypatch) -> None:
     assert step.kind == "tool_call"
     assert step.tool_name == "execute_bash"
     assert step.tool_input == "ls -la"
-    assert recorded["command"] == ["/usr/local/bin/gemini", "--model", "gemini-2.0-flash"]
+    assert recorded["command"] == [
+        "/usr/local/bin/gemini",
+        "chat",
+        "--model",
+        "gemini-2.0-flash",
+        "-o",
+        "json",
+        "--accept-raw-output-risk",
+        "--raw-output",
+    ]
     assert recorded["timeout"] == 30
     assert "## Runtime Transcript" in str(recorded["input"])
 
@@ -64,7 +74,7 @@ def test_gemini_adapter_parses_bare_json_tool_call(monkeypatch) -> None:
 def test_gemini_adapter_parses_json_in_markdown_fence(monkeypatch) -> None:
     """A JSON object wrapped in a markdown code fence should still be accepted."""
 
-    def fake_run(command, *, input, text, capture_output, check, timeout, env):
+    def fake_run(command, *, input, text, capture_output, timeout, env, check=False, **kwargs):
         return subprocess.CompletedProcess(
             command,
             0,
@@ -89,7 +99,7 @@ def test_gemini_adapter_parses_json_in_markdown_fence(monkeypatch) -> None:
 def test_gemini_adapter_surfaces_cli_failures(monkeypatch) -> None:
     """Non-zero exit codes should raise RuntimeError with stderr details."""
 
-    def fake_run(command, *, input, text, capture_output, check, timeout, env):
+    def fake_run(command, *, input, text, capture_output, timeout, env, check=False, **kwargs):
         return subprocess.CompletedProcess(command, 1, stdout="", stderr="API key missing")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -102,7 +112,7 @@ def test_gemini_adapter_surfaces_cli_failures(monkeypatch) -> None:
 def test_gemini_adapter_raises_on_timeout(monkeypatch) -> None:
     """TimeoutExpired from subprocess should be re-raised as RuntimeError."""
 
-    def fake_run(command, *, input, text, capture_output, check, timeout, env):
+    def fake_run(command, *, input, text, capture_output, timeout, env, check=False, **kwargs):
         raise subprocess.TimeoutExpired(command, timeout)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -115,7 +125,7 @@ def test_gemini_adapter_raises_on_timeout(monkeypatch) -> None:
 def test_gemini_adapter_raises_on_os_error(monkeypatch) -> None:
     """OSError (e.g. binary not found) should be re-raised as RuntimeError."""
 
-    def fake_run(command, *, input, text, capture_output, check, timeout, env):
+    def fake_run(command, *, input, text, capture_output, timeout, env, check=False, **kwargs):
         raise OSError("No such file or directory")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -125,10 +135,10 @@ def test_gemini_adapter_raises_on_os_error(monkeypatch) -> None:
         adapter.next_step([CliRuntimeMessage(role="system", content="Go.")])
 
 
-def test_gemini_adapter_raises_when_no_json_in_response(monkeypatch) -> None:
-    """A response with no JSON object should raise RuntimeError."""
+def test_gemini_adapter_falls_back_to_final_step_on_no_json(monkeypatch) -> None:
+    """A response with no JSON object should fall back to a 'final' step with raw text."""
 
-    def fake_run(command, *, input, text, capture_output, check, timeout, env):
+    def fake_run(command, *, input, text, capture_output, timeout, env, check=False, **kwargs):
         return subprocess.CompletedProcess(
             command, 0, stdout="I cannot help with that.\n", stderr=""
         )
@@ -136,8 +146,10 @@ def test_gemini_adapter_raises_when_no_json_in_response(monkeypatch) -> None:
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     adapter = GeminiCliRuntimeAdapter()
-    with pytest.raises(RuntimeError, match="No JSON object found"):
-        adapter.next_step([CliRuntimeMessage(role="system", content="Go.")])
+    step = adapter.next_step([CliRuntimeMessage(role="system", content="Go.")])
+
+    assert step.kind == "final"
+    assert step.final_output == "I cannot help with that."
 
 
 def test_gemini_adapter_prompt_override_bypasses_runtime_prompt_shaping(monkeypatch) -> None:
@@ -150,9 +162,10 @@ def test_gemini_adapter_prompt_override_bypasses_runtime_prompt_shaping(monkeypa
         input: str,
         text: bool,
         capture_output: bool,
-        check: bool,
+        check: bool = False,
         timeout: int,
         env: dict[str, str] | None,
+        **kwargs: object,
     ) -> subprocess.CompletedProcess[str]:
         recorded["input"] = input
         return subprocess.CompletedProcess(
@@ -225,13 +238,29 @@ def test_gemini_adapter_scopes_constructor_default_env(monkeypatch) -> None:
 def test_gemini_adapter_command_omits_model_when_not_configured() -> None:
     """The model flag should be absent when no model is set."""
     adapter = GeminiCliRuntimeAdapter(executable="gemini")
-    assert adapter._build_command() == ["gemini"]
+    assert adapter._build_command() == [
+        "gemini",
+        "chat",
+        "-o",
+        "json",
+        "--accept-raw-output-risk",
+        "--raw-output",
+    ]
 
 
 def test_gemini_adapter_command_includes_model_when_configured() -> None:
     """The model flag should appear in the command when a model is set."""
     adapter = GeminiCliRuntimeAdapter(executable="gemini", model="gemini-2.0-flash")
-    assert adapter._build_command() == ["gemini", "--model", "gemini-2.0-flash"]
+    assert adapter._build_command() == [
+        "gemini",
+        "chat",
+        "--model",
+        "gemini-2.0-flash",
+        "-o",
+        "json",
+        "--accept-raw-output-risk",
+        "--raw-output",
+    ]
 
 
 class TestExtractJson:
@@ -389,3 +418,71 @@ class TestTruncateDetail:
         long_text = "x" * 2000
         result = _truncate_detail(long_text)
         assert result.startswith("[truncated]")
+
+
+def test_gemini_adapter_extracts_response_field_from_json(monkeypatch) -> None:
+    """When the CLI returns JSON, the 'response' field should be used if present."""
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args[0], 0, stdout='{"response": "Extracted text"}', stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    adapter = GeminiCliRuntimeAdapter()
+    # next_step will then try to parse "Extracted text" as CliRuntimeStep JSON
+    # so we expect a fallback to 'final' with "Extracted text"
+    step = adapter.next_step([CliRuntimeMessage(role="system", content="Go.")])
+    assert step.kind == "final"
+    assert step.final_output == "Extracted text"
+
+
+def test_gemini_adapter_parses_object_response_field(monkeypatch) -> None:
+    """Object-valued 'response' fields should be serialized as valid JSON."""
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args[0],
+            0,
+            stdout=(
+                '{"response":{"kind":"final","final_output":"ok","tool_name":null,'
+                '"tool_input":null}}'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    adapter = GeminiCliRuntimeAdapter()
+    step = adapter.next_step([CliRuntimeMessage(role="system", content="Go.")])
+    assert step.kind == "final"
+    assert step.final_output == "ok"
+
+
+def test_gemini_adapter_raises_on_empty_response(monkeypatch) -> None:
+    """An empty response from the CLI should raise RuntimeError."""
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args[0], 0, stdout="  ", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    adapter = GeminiCliRuntimeAdapter()
+    with pytest.raises(RuntimeError, match="empty response body"):
+        adapter.next_step([CliRuntimeMessage(role="system", content="Go.")])
+
+
+def test_gemini_adapter_handles_complex_tool_input_json(monkeypatch) -> None:
+    """When tool_input is a JSON object in the response, it should be stringified."""
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args[0],
+            0,
+            stdout='{"kind":"tool_call","tool_name":"test","tool_input":{"key":"val"}}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    adapter = GeminiCliRuntimeAdapter()
+    step = adapter.next_step([CliRuntimeMessage(role="system", content="Go.")])
+    assert step.kind == "tool_call"
+    assert step.tool_input == '{"key": "val"}'
