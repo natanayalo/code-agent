@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
+from dataclasses import fields as dataclass_fields
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Protocol
 
@@ -386,6 +387,49 @@ def _delta_metric(candidate: float | None, baseline: float | None) -> float | No
     return candidate - baseline
 
 
+_REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD: dict[str, str] = {
+    "precision": "delta_precision",
+    "actionable_rate": "delta_actionable_rate",
+    "false_positive_rate": "delta_false_positive_rate",
+    "fix_after_review_success": "delta_fix_after_review_success",
+    "empty_review_correctness": "delta_empty_review_correctness",
+}
+
+
+def _metric_delta_payload(
+    *,
+    baseline_metrics: ReviewMetrics | None,
+    candidate_metrics: ReviewMetrics | None,
+) -> dict[str, float | None]:
+    review_metric_field_names = {
+        field_info.name
+        for field_info in dataclass_fields(ReviewMetrics)
+        if field_info.name != "reviewed_cases"
+    }
+    mapped_field_names = set(_REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD)
+    if review_metric_field_names != mapped_field_names:
+        missing = sorted(review_metric_field_names - mapped_field_names)
+        extra = sorted(mapped_field_names - review_metric_field_names)
+        details: list[str] = []
+        if missing:
+            details.append(f"missing mappings for {', '.join(missing)}")
+        if extra:
+            details.append(f"unexpected mappings for {', '.join(extra)}")
+        detail_text = "; ".join(details) if details else "unknown mapping mismatch"
+        raise ValueError(f"Review metric delta mapping is out of sync: {detail_text}")
+
+    payload: dict[str, float | None] = {}
+    for metric_field_name, delta_field_name in _REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD.items():
+        baseline_value = (
+            getattr(baseline_metrics, metric_field_name) if baseline_metrics is not None else None
+        )
+        candidate_value = (
+            getattr(candidate_metrics, metric_field_name) if candidate_metrics is not None else None
+        )
+        payload[delta_field_name] = _delta_metric(candidate_value, baseline_value)
+    return payload
+
+
 def compare_reports(
     *,
     baseline: EvaluationReport,
@@ -394,6 +438,10 @@ def compare_reports(
     """Compute structured A/B deltas between two evaluation reports."""
     baseline_metrics = baseline.review_metrics
     candidate_metrics = candidate.review_metrics
+    delta_payload = _metric_delta_payload(
+        baseline_metrics=baseline_metrics,
+        candidate_metrics=candidate_metrics,
+    )
     return EvaluationComparison(
         baseline_variant_label=(
             baseline.profile.variant_label if baseline.profile is not None else None
@@ -403,26 +451,11 @@ def compare_reports(
         ),
         delta_passed_cases=candidate.passed_cases - baseline.passed_cases,
         delta_total_score=candidate.total_score - baseline.total_score,
-        delta_precision=_delta_metric(
-            candidate_metrics.precision if candidate_metrics is not None else None,
-            baseline_metrics.precision if baseline_metrics is not None else None,
-        ),
-        delta_actionable_rate=_delta_metric(
-            candidate_metrics.actionable_rate if candidate_metrics is not None else None,
-            baseline_metrics.actionable_rate if baseline_metrics is not None else None,
-        ),
-        delta_false_positive_rate=_delta_metric(
-            candidate_metrics.false_positive_rate if candidate_metrics is not None else None,
-            baseline_metrics.false_positive_rate if baseline_metrics is not None else None,
-        ),
-        delta_fix_after_review_success=_delta_metric(
-            candidate_metrics.fix_after_review_success if candidate_metrics is not None else None,
-            baseline_metrics.fix_after_review_success if baseline_metrics is not None else None,
-        ),
-        delta_empty_review_correctness=_delta_metric(
-            candidate_metrics.empty_review_correctness if candidate_metrics is not None else None,
-            baseline_metrics.empty_review_correctness if baseline_metrics is not None else None,
-        ),
+        delta_precision=delta_payload["delta_precision"],
+        delta_actionable_rate=delta_payload["delta_actionable_rate"],
+        delta_false_positive_rate=delta_payload["delta_false_positive_rate"],
+        delta_fix_after_review_success=delta_payload["delta_fix_after_review_success"],
+        delta_empty_review_correctness=delta_payload["delta_empty_review_correctness"],
     )
 
 

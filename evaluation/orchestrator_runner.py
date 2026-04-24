@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from evaluation.harness import EvaluationRunner, FrozenTaskCase, ReviewOutcome, WorkerOutcome
 from orchestrator import OrchestratorState, build_orchestrator_graph
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from workers import TestResult, Worker, WorkerRequest, WorkerResult
+
+logger = logging.getLogger(__name__)
 
 
 class _FrozenOutcomeWorker(Worker):
@@ -121,6 +125,29 @@ class OrchestratorReplayRunner(EvaluationRunner):
             actionable_findings_count = len(state.review.findings)
             # Suppressed findings are a pragmatic proxy for low-value/noisy findings in this path.
             false_positive_findings_count = len(state.review.suppressed_findings)
+            actionable_fingerprint_set = {
+                (
+                    finding.file_path,
+                    finding.title,
+                    finding.line_start,
+                    finding.line_end,
+                )
+                for finding in state.review.findings
+            }
+            suppressed_fingerprint_set = {
+                (
+                    suppressed.finding.file_path,
+                    suppressed.finding.title,
+                    suppressed.finding.line_start,
+                    suppressed.finding.line_end,
+                )
+                for suppressed in state.review.suppressed_findings
+            }
+            if actionable_fingerprint_set & suppressed_fingerprint_set:
+                logger.warning(
+                    "Independent review output contained overlapping actionable and suppressed "
+                    "findings; review metrics may be double-counted for this case."
+                )
             # "Actionable" in this runner currently means "not suppressed by policy filtering".
             total_findings_count = actionable_findings_count + false_positive_findings_count
             repair_attempted = state.repair_handoff_requested

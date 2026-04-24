@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal, cast
 
@@ -135,18 +136,7 @@ async def _async_main() -> int:
             baseline_payload = json.load(file)
         baseline_report = _report_from_payload(baseline_payload)
         comparison = compare_reports(baseline=baseline_report, candidate=report)
-        report = EvaluationReport(
-            suite_name=report.suite_name,
-            total_cases=report.total_cases,
-            passed_cases=report.passed_cases,
-            failed_cases=report.failed_cases,
-            total_score=report.total_score,
-            max_score=report.max_score,
-            results=report.results,
-            review_metrics=report.review_metrics,
-            profile=report.profile,
-            comparison=comparison,
-        )
+        report = replace(report, comparison=comparison)
     write_report(report, args.output)
     print(
         "frozen-eval:",
@@ -301,9 +291,16 @@ def _report_from_payload(payload: dict[str, object]) -> EvaluationReport:
             )
         )
 
+    reported_total_cases = int(payload.get("total_cases", len(parsed_results)))
+    if len(parsed_results) != reported_total_cases:
+        raise ValueError(
+            "Baseline report total_cases does not match results length: "
+            f"total_cases={reported_total_cases}, results={len(parsed_results)}"
+        )
+
     return EvaluationReport(
         suite_name=str(payload.get("suite_name", "baseline")),
-        total_cases=int(payload.get("total_cases", 0)),
+        total_cases=reported_total_cases,
         passed_cases=int(payload.get("passed_cases", 0)),
         failed_cases=int(payload.get("failed_cases", 0)),
         total_score=int(payload.get("total_score", 0)),

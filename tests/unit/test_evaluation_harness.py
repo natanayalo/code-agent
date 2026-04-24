@@ -22,7 +22,12 @@ from evaluation import (
     load_replay_outcomes,
     write_report,
 )
-from evaluation.harness import FrozenTaskCase
+from evaluation.harness import (
+    _REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD,
+    EvaluationComparison,
+    FrozenTaskCase,
+    ReviewMetrics,
+)
 
 
 def test_frozen_suite_has_minimum_case_count() -> None:
@@ -990,3 +995,22 @@ def test_compare_reports_includes_review_metric_deltas() -> None:
     assert comparison.delta_total_score == 0
     assert comparison.delta_precision == pytest.approx(0.5)
     assert comparison.delta_false_positive_rate == pytest.approx(-0.5)
+
+
+def test_compare_reports_delta_mapping_covers_all_review_metrics() -> None:
+    review_metric_fields = {
+        field_name
+        for field_name in ReviewMetrics.__dataclass_fields__
+        if field_name != "reviewed_cases"
+    }
+    mapped_metric_fields = set(_REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD)
+    comparison_delta_fields = {
+        field_name
+        for field_name in EvaluationComparison.__dataclass_fields__
+        if field_name.startswith("delta_")
+        and field_name not in {"delta_passed_cases", "delta_total_score"}
+    }
+    mapped_comparison_delta_fields = set(_REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD.values())
+
+    assert mapped_metric_fields == review_metric_fields
+    assert mapped_comparison_delta_fields == comparison_delta_fields

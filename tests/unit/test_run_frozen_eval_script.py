@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _load_run_frozen_eval_module():
     repo_root = Path(__file__).resolve().parents[2]
@@ -312,3 +314,33 @@ def test_report_parser_handles_null_review_count_fields() -> None:
     assert review.findings_count == 0
     assert review.actionable_findings_count == 0
     assert review.false_positive_findings_count == 0
+
+
+def test_report_parser_rejects_total_case_count_mismatch() -> None:
+    module = _load_run_frozen_eval_module()
+    payload = {
+        "suite_name": "baseline",
+        "total_cases": 2,
+        "passed_cases": 1,
+        "failed_cases": 0,
+        "total_score": 1,
+        "max_score": 1,
+        "results": [
+            {
+                "case_id": "case-1",
+                "passed": True,
+                "score": 1,
+                "max_score": 1,
+                "failures": [],
+                "outcome": {
+                    "status": "success",
+                    "summary": "ok",
+                    "files_changed": [],
+                    "tests_passed": True,
+                },
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match="total_cases does not match results length"):
+        module._report_from_payload(payload)
