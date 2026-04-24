@@ -21,7 +21,17 @@ For each review comment:
 
 ## Modes
 
-Default mode is local-fix mode:
+Default mode is end-to-end mode:
+
+- Triage comments.
+- Apply the smallest safe fixes.
+- Run targeted verification.
+- Commit and push review-fix commits once checks pass.
+- Reply to each addressed thread with concrete fix/verification details.
+- Resolve threads when the concern is fully addressed.
+- Post a final `@gemini-code-assist review` PR comment after pushing updates.
+
+Local-fix mode is opt-in only when the user explicitly asks for local-only work. In local-fix mode:
 
 - Triage comments.
 - Apply local changes.
@@ -29,8 +39,6 @@ Default mode is local-fix mode:
 - Report suggested replies.
 - Do not commit, push, reply, resolve, or trigger re-review.
 - Never call GitHub mutation APIs in this mode. Produce proposed reply text in the final summary instead.
-
-End-to-end mode is active only when the user explicitly asks to address comments fully, push fixes, reply/resolve threads, or otherwise complete the PR review cycle.
 
 ## Read First
 
@@ -102,10 +110,10 @@ For fixes in scope:
 2. Add/update the smallest useful regression test when practical.
 3. Apply the smallest safe code change.
 4. Run targeted verification.
-5. Commit the fix only when end-to-end mode is requested.
-6. Push only after verification passes and only in end-to-end mode.
-7. Reply to thread with what changed only in end-to-end mode.
-8. Resolve thread only after fix/reply addresses concern and only in end-to-end mode unless explicitly requested otherwise.
+5. Commit the fix in end-to-end mode (default).
+6. Push only after verification passes in end-to-end mode (default).
+7. Reply to thread with what changed in end-to-end mode (default).
+8. Resolve thread only after the fix/reply fully addresses the concern; otherwise leave unresolved with rationale.
 
 For out-of-scope or design suggestions:
 
@@ -225,7 +233,7 @@ mutation($id: ID!) {
 
 ## Final Review Trigger
 
-Post automated re-review trigger only when requested by user or documented by repo instructions.
+Post automated re-review trigger by default at the end of end-to-end runs.
 
 Example:
 
@@ -233,7 +241,7 @@ Example:
 GH_PAGER=cat gh pr comment {PR_NUMBER} --body "@gemini-code-assist review"
 ```
 
-Do not post bot triggers by default in unknown repositories.
+Skip this trigger only when the user explicitly asks not to post it.
 
 ## Final Summary
 
