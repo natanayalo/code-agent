@@ -242,7 +242,7 @@ def test_codex_cli_worker_runs_the_shared_runtime_and_retains_the_workspace(
     assert result.files_changed == ["note.txt"]
     assert result.next_action_hint == "inspect_workspace_artifacts"
     assert result.artifacts[0].name == "workspace"
-    assert result.artifacts[0].uri == str(workspace.workspace_path)
+    assert result.artifacts[0].uri == workspace.workspace_path.as_uri()
     assert workspace_manager.cleanup_requests == [(workspace, True)]
     assert container_manager.start_requests[0].workspace == workspace
     assert container_manager.stop_requests == [container]
