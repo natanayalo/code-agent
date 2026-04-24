@@ -118,13 +118,15 @@ class OrchestratorReplayRunner(EvaluationRunner):
             )
         review_outcome: ReviewOutcome | None = None
         if state.review is not None:
-            findings_count = len(state.review.findings)
+            actionable_findings_count = len(state.review.findings)
             # Suppressed findings are a pragmatic proxy for low-value/noisy findings in this path.
             false_positive_findings_count = len(state.review.suppressed_findings)
+            # "Actionable" in this runner currently means "not suppressed by policy filtering".
+            total_findings_count = actionable_findings_count + false_positive_findings_count
             repair_attempted = state.repair_handoff_requested
             review_outcome = ReviewOutcome(
-                findings_count=findings_count,
-                actionable_findings_count=findings_count,
+                findings_count=total_findings_count,
+                actionable_findings_count=actionable_findings_count,
                 false_positive_findings_count=false_positive_findings_count,
                 fix_after_review_attempted=repair_attempted if repair_attempted else None,
                 fix_after_review_succeeded=(

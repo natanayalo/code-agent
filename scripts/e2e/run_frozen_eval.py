@@ -235,7 +235,7 @@ def _coerce_optional_bool(value: object) -> bool | None:
     return None
 
 
-def _coerce_non_negative_int(value: object) -> int:
+def _coerce_optional_non_negative_int(value: object) -> int:
     if value is None:
         return 0
     try:
@@ -250,11 +250,11 @@ def _parse_optional_review_outcome(raw_outcome: dict[str, object]) -> ReviewOutc
     if not isinstance(raw_review, dict):
         return None
     return ReviewOutcome(
-        findings_count=_coerce_non_negative_int(raw_review.get("findings_count")),
-        actionable_findings_count=_coerce_non_negative_int(
+        findings_count=_coerce_optional_non_negative_int(raw_review.get("findings_count")),
+        actionable_findings_count=_coerce_optional_non_negative_int(
             raw_review.get("actionable_findings_count")
         ),
-        false_positive_findings_count=_coerce_non_negative_int(
+        false_positive_findings_count=_coerce_optional_non_negative_int(
             raw_review.get("false_positive_findings_count")
         ),
         fix_after_review_attempted=_coerce_optional_bool(
