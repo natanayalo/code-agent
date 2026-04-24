@@ -112,7 +112,7 @@ Rules for this mode:
 - Use top-level PR comments only when no stable inline location exists.
 - Post high-confidence actionable findings by default:
   - always post critical/high that pass the publishing gate
-  - post medium when they pass the publishing gate with strong evidence
+  - always post medium that pass the publishing gate
   - keep low in chat unless the user explicitly asks to post them
 - Make comment bodies directly actionable from thread context alone.
 - Include minimal safe fix guidance in each posted comment.
@@ -130,7 +130,7 @@ Publishing gate (must pass all before posting to GitHub):
 - Concrete fix: propose the smallest safe code/test change.
 - Confidence threshold:
   - critical/high: do not post below 0.85
-  - medium: do not post below 0.90
+  - medium: do not post below 0.85
   - low: do not post by default
 - Scope threshold: do not post broad refactor or architecture-preference comments.
 - Verdict rule: if final verdict is effectively LGTM, avoid posting inline nits; keep non-blocking ideas in chat.
