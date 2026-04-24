@@ -17,6 +17,7 @@ from evaluation import (
     OrchestratorReplayRunner,
     ReplayRunner,
     ReviewMetrics,
+    ReviewOutcome,
     WorkerOutcome,
     compare_reports,
     default_replay_outcomes,
@@ -228,6 +229,29 @@ def _coerce_optional_float(value: object) -> float | None:
     return float(value)
 
 
+def _coerce_optional_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _parse_optional_review_outcome(raw_outcome: dict[str, object]) -> ReviewOutcome | None:
+    raw_review = raw_outcome.get("review")
+    if not isinstance(raw_review, dict):
+        return None
+    return ReviewOutcome(
+        findings_count=int(raw_review.get("findings_count", 0)),
+        actionable_findings_count=int(raw_review.get("actionable_findings_count", 0)),
+        false_positive_findings_count=int(raw_review.get("false_positive_findings_count", 0)),
+        fix_after_review_attempted=_coerce_optional_bool(
+            raw_review.get("fix_after_review_attempted")
+        ),
+        fix_after_review_succeeded=_coerce_optional_bool(
+            raw_review.get("fix_after_review_succeeded")
+        ),
+    )
+
+
 def _report_from_payload(payload: dict[str, object]) -> EvaluationReport:
     """Best-effort parser for baseline report inputs written by this script."""
     raw_results = payload.get("results")
@@ -258,6 +282,7 @@ def _report_from_payload(payload: dict[str, object]) -> EvaluationReport:
                         if isinstance(raw_outcome.get("tests_passed"), bool)
                         else None
                     ),
+                    review=_parse_optional_review_outcome(raw_outcome),
                 ),
             )
         )

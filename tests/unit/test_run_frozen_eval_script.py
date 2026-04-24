@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
 from pathlib import Path
+
+
+def _load_run_frozen_eval_module():
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "e2e" / "run_frozen_eval.py"
+    spec = importlib.util.spec_from_file_location("run_frozen_eval", script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Failed to load run_frozen_eval module.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _write_suite(path: Path) -> None:
@@ -216,3 +228,47 @@ def test_run_frozen_eval_supports_compare_to_report(tmp_path: Path) -> None:
     assert candidate_result.returncode == 0
     assert payload["comparison"]["baseline_variant_label"] == "baseline"
     assert payload["comparison"]["candidate_variant_label"] == "candidate"
+
+
+def test_report_parser_preserves_outcome_review_payload() -> None:
+    module = _load_run_frozen_eval_module()
+    payload = {
+        "suite_name": "baseline",
+        "total_cases": 1,
+        "passed_cases": 1,
+        "failed_cases": 0,
+        "total_score": 1,
+        "max_score": 1,
+        "results": [
+            {
+                "case_id": "case-1",
+                "passed": True,
+                "score": 1,
+                "max_score": 1,
+                "failures": [],
+                "outcome": {
+                    "status": "success",
+                    "summary": "ok",
+                    "files_changed": [],
+                    "tests_passed": True,
+                    "review": {
+                        "findings_count": 2,
+                        "actionable_findings_count": 1,
+                        "false_positive_findings_count": 1,
+                        "fix_after_review_attempted": True,
+                        "fix_after_review_succeeded": False,
+                    },
+                },
+            }
+        ],
+    }
+
+    report = module._report_from_payload(payload)
+
+    review = report.results[0].outcome.review
+    assert review is not None
+    assert review.findings_count == 2
+    assert review.actionable_findings_count == 1
+    assert review.false_positive_findings_count == 1
+    assert review.fix_after_review_attempted is True
+    assert review.fix_after_review_succeeded is False
