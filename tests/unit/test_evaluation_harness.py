@@ -384,6 +384,80 @@ def test_orchestrator_runner_executes_case_through_graph_path() -> None:
     assert outcome.tests_passed is True
 
 
+def test_orchestrator_runner_propagates_review_outcome_fields() -> None:
+    case = FrozenTaskCase(
+        case_id="reviewed-case",
+        repo_fixture="fixtures/empty",
+        task_text="Do a thing",
+        expectation=TaskExpectation(require_success=True),
+    )
+    runner = OrchestratorReplayRunner(
+        outcomes_by_case_id={"reviewed-case": WorkerOutcome(status="success", summary="ok")},
+        worker_override="codex",
+    )
+
+    class _FakeGraph:
+        async def ainvoke(self, _inputs: object, config: dict[str, object]) -> dict[str, object]:
+            assert config["configurable"] == {"thread_id": "frozen-eval-reviewed-case"}
+            return {
+                "task": {"task_text": "Do a thing"},
+                "dispatch": {"worker_type": "codex"},
+                "verification": {"status": "passed", "items": []},
+                "repair_handoff_requested": True,
+                "result": {
+                    "status": "success",
+                    "summary": "completed",
+                    "commands_run": [],
+                    "files_changed": ["src/app.py"],
+                    "test_results": [{"name": "suite", "status": "passed", "details": "ok"}],
+                    "artifacts": [],
+                },
+                "review": {
+                    "reviewer_kind": "independent_reviewer",
+                    "summary": "one issue surfaced",
+                    "confidence": 0.8,
+                    "outcome": "findings",
+                    "findings": [
+                        {
+                            "severity": "high",
+                            "category": "logic",
+                            "confidence": 0.9,
+                            "file_path": "src/app.py",
+                            "line_start": 12,
+                            "line_end": 13,
+                            "title": "Missing guard",
+                            "why_it_matters": "Can crash on empty input.",
+                        }
+                    ],
+                    "suppressed_findings": [
+                        {
+                            "finding": {
+                                "severity": "low",
+                                "category": "style",
+                                "confidence": 0.6,
+                                "file_path": "src/app.py",
+                                "line_start": 2,
+                                "title": "Minor formatting",
+                                "why_it_matters": "Consistency",
+                            },
+                            "reasons": ["style category suppressed by policy (style)"],
+                        }
+                    ],
+                },
+            }
+
+    runner._graph = _FakeGraph()  # type: ignore[assignment]
+
+    outcome = asyncio.run(runner.run_case(case))
+
+    assert outcome.review is not None
+    assert outcome.review.findings_count == 1
+    assert outcome.review.actionable_findings_count == 1
+    assert outcome.review.false_positive_findings_count == 1
+    assert outcome.review.fix_after_review_attempted is True
+    assert outcome.review.fix_after_review_succeeded is True
+
+
 def test_orchestrator_runner_reports_failure_for_missing_case_outcome() -> None:
     case = FrozenTaskCase(
         case_id="missing-case",

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from evaluation.harness import EvaluationRunner, FrozenTaskCase, WorkerOutcome
+from evaluation.harness import EvaluationRunner, FrozenTaskCase, ReviewOutcome, WorkerOutcome
 from orchestrator import OrchestratorState, build_orchestrator_graph
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from workers import TestResult, Worker, WorkerRequest, WorkerResult
@@ -116,10 +116,30 @@ class OrchestratorReplayRunner(EvaluationRunner):
             tests_passed = all(
                 test_result.status == "passed" for test_result in result.test_results
             )
+        review_outcome: ReviewOutcome | None = None
+        if state.review is not None:
+            findings_count = len(state.review.findings)
+            # Suppressed findings are a pragmatic proxy for low-value/noisy findings in this path.
+            false_positive_findings_count = len(state.review.suppressed_findings)
+            repair_attempted = state.repair_handoff_requested
+            review_outcome = ReviewOutcome(
+                findings_count=findings_count,
+                actionable_findings_count=findings_count,
+                false_positive_findings_count=false_positive_findings_count,
+                fix_after_review_attempted=repair_attempted if repair_attempted else None,
+                fix_after_review_succeeded=(
+                    repair_attempted
+                    and state.verification is not None
+                    and state.verification.status != "failed"
+                )
+                if repair_attempted
+                else None,
+            )
 
         return WorkerOutcome(
             status=result.status,
             summary=result.summary or "",
             files_changed=tuple(result.files_changed),
             tests_passed=tests_passed,
+            review=review_outcome,
         )

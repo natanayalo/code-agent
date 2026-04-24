@@ -272,3 +272,43 @@ def test_report_parser_preserves_outcome_review_payload() -> None:
     assert review.false_positive_findings_count == 1
     assert review.fix_after_review_attempted is True
     assert review.fix_after_review_succeeded is False
+
+
+def test_report_parser_handles_null_review_count_fields() -> None:
+    module = _load_run_frozen_eval_module()
+    payload = {
+        "suite_name": "baseline",
+        "total_cases": 1,
+        "passed_cases": 1,
+        "failed_cases": 0,
+        "total_score": 1,
+        "max_score": 1,
+        "results": [
+            {
+                "case_id": "case-1",
+                "passed": True,
+                "score": 1,
+                "max_score": 1,
+                "failures": [],
+                "outcome": {
+                    "status": "success",
+                    "summary": "ok",
+                    "files_changed": [],
+                    "tests_passed": True,
+                    "review": {
+                        "findings_count": None,
+                        "actionable_findings_count": None,
+                        "false_positive_findings_count": None,
+                    },
+                },
+            }
+        ],
+    }
+
+    report = module._report_from_payload(payload)
+
+    review = report.results[0].outcome.review
+    assert review is not None
+    assert review.findings_count == 0
+    assert review.actionable_findings_count == 0
+    assert review.false_positive_findings_count == 0

@@ -235,14 +235,28 @@ def _coerce_optional_bool(value: object) -> bool | None:
     return None
 
 
+def _coerce_non_negative_int(value: object) -> int:
+    if value is None:
+        return 0
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(parsed, 0)
+
+
 def _parse_optional_review_outcome(raw_outcome: dict[str, object]) -> ReviewOutcome | None:
     raw_review = raw_outcome.get("review")
     if not isinstance(raw_review, dict):
         return None
     return ReviewOutcome(
-        findings_count=int(raw_review.get("findings_count", 0)),
-        actionable_findings_count=int(raw_review.get("actionable_findings_count", 0)),
-        false_positive_findings_count=int(raw_review.get("false_positive_findings_count", 0)),
+        findings_count=_coerce_non_negative_int(raw_review.get("findings_count")),
+        actionable_findings_count=_coerce_non_negative_int(
+            raw_review.get("actionable_findings_count")
+        ),
+        false_positive_findings_count=_coerce_non_negative_int(
+            raw_review.get("false_positive_findings_count")
+        ),
         fix_after_review_attempted=_coerce_optional_bool(
             raw_review.get("fix_after_review_attempted")
         ),
