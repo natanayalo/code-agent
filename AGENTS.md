@@ -69,6 +69,17 @@ Do not build these yet:
 - Keep file changes focused.
 - Do not introduce a new infrastructure dependency unless clearly justified.
 
+## Repo-specific agent rules
+
+- Before editing, inspect the relevant files and existing patterns.
+- Prefer surgical changes. Do not refactor adjacent code unless required.
+- For bug fixes, reproduce with a failing test or clear diagnostic first when practical.
+- For PR tasks, keep the diff small and explain why each touched file changed.
+- Run the narrowest relevant verification first, then broader tests if needed.
+- Do not add new dependencies, config systems, abstractions, or feature flags unless explicitly required.
+- If unsure, state the assumption and choose the safest minimal implementation instead of blocking, unless the ambiguity can cause data loss, security risk, or public API breakage.
+- Preserve existing style, naming, logging, metrics, and error-handling conventions.
+
 ## Required development workflow
 
 For each task:

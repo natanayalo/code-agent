@@ -17,10 +17,97 @@ from workers.cli_runtime import (
     CliRuntimeExecutionResult,
     ShellSessionProtocol,
     collect_changed_files,
+    collect_changed_files_from_repo_path,
 )
 
 _DEFAULT_FALLBACK_TEMPLATE_KEY = "{files}"
 _MAKEFILE_CANDIDATES = ("GNUmakefile", "makefile", "Makefile")
+
+
+def _collect_changed_files_with_fallback(
+    *,
+    session: ShellSessionProtocol,
+    repo_working_directory: Path,
+    repo_path_for_detection: Path,
+    timeout_seconds: int,
+) -> list[str]:
+    """Collect changed files from the session, falling back to host-side git status."""
+    changed_files = collect_changed_files(
+        session,
+        working_directory=repo_working_directory,
+        timeout_seconds=timeout_seconds,
+    )
+    if changed_files:
+        return changed_files
+
+    return collect_changed_files_from_repo_path(
+        repo_path_for_detection,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def _merge_changed_files(existing_files: Sequence[str], new_files: Sequence[str]) -> list[str]:
+    """Merge changed-file lists with stable order and de-duplication."""
+    return list(dict.fromkeys([*existing_files, *new_files]))
+
+
+def merge_post_run_lint_results(
+    existing_result: dict[str, Any],
+    new_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge post-run lint metadata from multiple passes into one summary."""
+    if not existing_result:
+        return dict(new_result)
+    if not new_result:
+        return dict(existing_result)
+
+    existing_commands_raw = existing_result.get("commands")
+    new_commands_raw = new_result.get("commands")
+    merged_commands: list[Any] = []
+    if isinstance(existing_commands_raw, list):
+        merged_commands.extend(existing_commands_raw)
+    if isinstance(new_commands_raw, list):
+        merged_commands.extend(new_commands_raw)
+
+    existing_errors_raw = existing_result.get("errors")
+    new_errors_raw = new_result.get("errors")
+    merged_errors: list[Any] = []
+    if isinstance(existing_errors_raw, list):
+        merged_errors.extend(existing_errors_raw)
+    if isinstance(new_errors_raw, list):
+        merged_errors.extend(new_errors_raw)
+
+    existing_artifacts_raw = existing_result.get("artifacts")
+    new_artifacts_raw = new_result.get("artifacts")
+    merged_artifacts: list[Any] = []
+    if isinstance(existing_artifacts_raw, list):
+        merged_artifacts.extend(existing_artifacts_raw)
+    if isinstance(new_artifacts_raw, list):
+        merged_artifacts.extend(new_artifacts_raw)
+
+    statuses = [status for status in (existing_result.get("status"), new_result.get("status"))]
+    if "warning" in statuses:
+        merged_status = "warning"
+    elif "passed" in statuses:
+        merged_status = "passed"
+    elif "skipped" in statuses:
+        merged_status = "skipped"
+    else:
+        merged_status = "skipped"
+
+    merged_ran = bool(existing_result.get("ran") or new_result.get("ran"))
+    merged_reason = new_result.get("reason")
+    if merged_reason in (None, ""):
+        merged_reason = existing_result.get("reason")
+
+    return {
+        "ran": merged_ran,
+        "status": merged_status,
+        "reason": None if merged_ran else merged_reason,
+        "commands": merged_commands,
+        "errors": merged_errors,
+        "artifacts": merged_artifacts,
+    }
 
 
 def _python_files_only(files_changed: Sequence[str]) -> list[str]:
@@ -319,14 +406,52 @@ def apply_post_run_lint_format(
             if isinstance(artifact, dict)
         ]
 
-    updated_files_changed = files_changed
+    updated_files_changed = list(files_changed)
     if lint_format_result.get("ran"):
-        refreshed_files_changed = collect_changed_files(
-            session,
-            working_directory=repo_working_directory,
+        refreshed_files_changed = _collect_changed_files_with_fallback(
+            session=session,
+            repo_working_directory=repo_working_directory,
+            repo_path_for_detection=repo_path_for_detection,
             timeout_seconds=timeout_seconds,
         )
         if refreshed_files_changed:
-            updated_files_changed = refreshed_files_changed
+            updated_files_changed = _merge_changed_files(
+                updated_files_changed,
+                refreshed_files_changed,
+            )
 
     return updated_files_changed, lint_format_result, lint_format_artifacts
+
+
+def collect_changed_files_and_apply_post_run_lint_format(
+    *,
+    session: ShellSessionProtocol,
+    execution: CliRuntimeExecutionResult,
+    expect_changed_files_artifact: bool,
+    repo_path_for_detection: Path,
+    repo_working_directory: Path,
+    timeout_seconds: int,
+    fallback_command_template: str | None = None,
+    existing_files_changed: Sequence[str] | None = None,
+) -> tuple[list[str], dict[str, Any], list[ArtifactReference]]:
+    """Collect changed files (with fallback) and run post-run lint/format."""
+    files_changed = list(existing_files_changed or [])
+    if expect_changed_files_artifact:
+        collected_files = _collect_changed_files_with_fallback(
+            session=session,
+            repo_working_directory=repo_working_directory,
+            repo_path_for_detection=repo_path_for_detection,
+            timeout_seconds=timeout_seconds,
+        )
+        if collected_files:
+            files_changed = _merge_changed_files(files_changed, collected_files)
+
+    return apply_post_run_lint_format(
+        session=session,
+        execution=execution,
+        files_changed=files_changed,
+        repo_path_for_detection=repo_path_for_detection,
+        repo_working_directory=repo_working_directory,
+        timeout_seconds=timeout_seconds,
+        fallback_command_template=fallback_command_template,
+    )

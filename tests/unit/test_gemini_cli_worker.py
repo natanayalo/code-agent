@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from unittest.mock import patch
 
 from sandbox import (
     DockerSandboxContainer,
@@ -15,6 +16,7 @@ from sandbox import (
 )
 from tools import DEFAULT_TOOL_REGISTRY
 from workers import GeminiCliWorker, WorkerRequest
+from workers.base import ArtifactReference
 from workers.cli_runtime import CliRuntimeMessage, CliRuntimeStep
 
 
@@ -340,6 +342,120 @@ def test_gemini_cli_worker_self_review_with_findings(tmp_path: Path) -> None:
     assert "Done fix." in (result.summary or "")
     assert result.review_result is not None
     assert result.review_result.outcome == "no_findings"
+
+
+def test_gemini_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_path: Path) -> None:
+    """Lint artifacts from each lint pass should be preserved on the final worker result."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): DockerShellCommandResult(
+                command=_git_status_command(container.working_dir),
+                exit_code=0,
+                output="",
+                duration_seconds=0.0,
+            )
+        }
+    )
+    import json
+
+    findings_json = json.dumps(
+        {
+            "summary": "found issues",
+            "confidence": 1.0,
+            "outcome": "findings",
+            "findings": [
+                {
+                    "severity": "low",
+                    "category": "style",
+                    "confidence": 1.0,
+                    "file_path": "a.py",
+                    "line_start": 1,
+                    "line_end": 1,
+                    "title": "t",
+                    "why_it_matters": "w",
+                    "evidence": "e",
+                    "suggested_fix": "f",
+                }
+            ],
+        }
+    )
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="final", final_output="Done initial."),
+            CliRuntimeStep(kind="final", final_output=findings_json),
+            CliRuntimeStep(kind="final", final_output="Done fix."),
+            CliRuntimeStep(
+                kind="final",
+                final_output=json.dumps(
+                    {
+                        "summary": "all fixed",
+                        "confidence": 1.0,
+                        "outcome": "no_findings",
+                        "findings": [],
+                    }
+                ),
+            ),
+        ]
+    )
+    worker = GeminiCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: session,
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+    )
+
+    with patch(
+        "workers.gemini_cli_worker.collect_changed_files_and_apply_post_run_lint_format",
+        side_effect=[
+            (
+                ["workers/gemini_cli_worker.py"],
+                {
+                    "ran": True,
+                    "status": "passed",
+                    "errors": [],
+                    "commands": [],
+                    "artifacts": [],
+                },
+                [
+                    ArtifactReference(
+                        name="lint-first",
+                        uri="artifacts/lint-first.log",
+                        artifact_type="log",
+                    )
+                ],
+            ),
+            (
+                ["workers/gemini_cli_worker.py", "workers/openrouter_cli_worker.py"],
+                {
+                    "ran": True,
+                    "status": "warning",
+                    "errors": ["second pass warning"],
+                    "commands": [],
+                    "artifacts": [],
+                },
+                [
+                    ArtifactReference(
+                        name="lint-second",
+                        uri="artifacts/lint-second.log",
+                        artifact_type="log",
+                    )
+                ],
+            ),
+        ],
+    ):
+        result = asyncio.run(
+            worker.run(WorkerRequest(task_text="task", repo_url="https://example.com/repo"))
+        )
+
+    artifact_uris = {artifact.uri for artifact in result.artifacts}
+    assert "artifacts/lint-first.log" in artifact_uris
+    assert "artifacts/lint-second.log" in artifact_uris
+    assert result.budget_usage is not None
+    assert result.budget_usage["post_run_lint_format"]["status"] == "warning"
+    assert result.budget_usage["post_run_lint_format"]["errors"] == ["second pass warning"]
 
 
 def test_gemini_cli_worker_self_review_exhausts_budget(tmp_path: Path) -> None:

@@ -39,13 +39,14 @@ from workers.cli_runtime import (
     CliRuntimeExecutionResult,
     CliRuntimeSettings,
     ShellSessionProtocol,
-    collect_changed_files,
-    collect_changed_files_from_repo_path,
     run_cli_runtime_loop,
     settings_from_budget,
 )
 from workers.failure_taxonomy import classify_failure_kind
-from workers.post_run_lint import apply_post_run_lint_format
+from workers.post_run_lint import (
+    collect_changed_files_and_apply_post_run_lint_format,
+    merge_post_run_lint_results,
+)
 from workers.prompt import build_system_prompt
 from workers.review import ReviewResult
 from workers.self_review import (
@@ -382,6 +383,11 @@ class CodexCliWorker(Worker):
             )
             granted_permission = granted_permission_from_constraints(request.constraints)
             bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
+            fallback_command_template = (
+                request.constraints.get("post_run_lint_format_command")
+                if isinstance(request.constraints.get("post_run_lint_format_command"), str)
+                else None
+            )
             system_prompt = (
                 system_prompt_override
                 if system_prompt_override is not None
@@ -403,28 +409,19 @@ class CodexCliWorker(Worker):
                 model_name=getattr(self.runtime_adapter, "model", None),
             )
 
-            files_changed: list[str] = []
-            if ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts:
-                files_changed = collect_changed_files(
-                    session,
-                    working_directory=Path(container.working_dir),
+            expects_changed_files = (
+                ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts
+            )
+            files_changed, lint_format_result, lint_format_artifacts = (
+                collect_changed_files_and_apply_post_run_lint_format(
+                    session=session,
+                    execution=execution,
+                    expect_changed_files_artifact=expects_changed_files,
+                    repo_path_for_detection=workspace.repo_path,
+                    repo_working_directory=Path(container.working_dir),
                     timeout_seconds=runtime_settings.command_timeout_seconds,
+                    fallback_command_template=fallback_command_template,
                 )
-                if not files_changed:
-                    files_changed = collect_changed_files_from_repo_path(
-                        workspace.repo_path,
-                        timeout_seconds=runtime_settings.command_timeout_seconds,
-                    )
-            files_changed, lint_format_result, lint_format_artifacts = apply_post_run_lint_format(
-                session=session,
-                execution=execution,
-                repo_path_for_detection=workspace.repo_path,
-                repo_working_directory=Path(container.working_dir),
-                files_changed=files_changed,
-                timeout_seconds=runtime_settings.command_timeout_seconds,
-                fallback_command_template=request.constraints.get("post_run_lint_format_command")
-                if isinstance(request.constraints.get("post_run_lint_format_command"), str)
-                else None,
             )
             review_result: ReviewResult | None = None
             if execution.status == "success" and not should_skip_self_review(request.constraints):
@@ -516,33 +513,23 @@ class CodexCliWorker(Worker):
                     if execution.status != "success":
                         break
 
-                    files_changed = collect_changed_files(
-                        session,
-                        working_directory=Path(container.working_dir),
-                        timeout_seconds=runtime_settings.command_timeout_seconds,
-                    )
-                    if not files_changed:
-                        files_changed = collect_changed_files_from_repo_path(
-                            workspace.repo_path,
+                    files_changed, new_lint_format_result, new_lint_format_artifacts = (
+                        collect_changed_files_and_apply_post_run_lint_format(
+                            session=session,
+                            execution=execution,
+                            expect_changed_files_artifact=expects_changed_files,
+                            repo_path_for_detection=workspace.repo_path,
+                            repo_working_directory=Path(container.working_dir),
+                            existing_files_changed=files_changed,
                             timeout_seconds=runtime_settings.command_timeout_seconds,
+                            fallback_command_template=fallback_command_template,
                         )
-                    (
-                        files_changed,
-                        lint_format_result,
-                        lint_format_artifacts,
-                    ) = apply_post_run_lint_format(
-                        session=session,
-                        execution=execution,
-                        repo_path_for_detection=workspace.repo_path,
-                        repo_working_directory=Path(container.working_dir),
-                        files_changed=files_changed,
-                        timeout_seconds=runtime_settings.command_timeout_seconds,
-                        fallback_command_template=request.constraints.get(
-                            "post_run_lint_format_command"
-                        )
-                        if isinstance(request.constraints.get("post_run_lint_format_command"), str)
-                        else None,
                     )
+                    lint_format_result = merge_post_run_lint_results(
+                        lint_format_result,
+                        new_lint_format_result,
+                    )
+                    lint_format_artifacts.extend(new_lint_format_artifacts)
 
             result = _worker_result_from_execution(
                 workspace,

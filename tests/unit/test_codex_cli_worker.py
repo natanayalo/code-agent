@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -17,6 +18,7 @@ from sandbox import (
 )
 from tools import DEFAULT_TOOL_REGISTRY, ToolRegistry
 from workers import CodexCliWorker, ReviewResult, WorkerRequest
+from workers.base import ArtifactReference
 from workers.cli_runtime import CliRuntimeMessage, CliRuntimeStep
 
 
@@ -704,6 +706,109 @@ def test_codex_cli_worker_fixes_review_findings_with_bounded_retry(tmp_path: Pat
     assert result.review_result is not None
     assert result.review_result.outcome == "no_findings"
     assert result.budget_usage is not None
+
+
+def test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_path: Path) -> None:
+    """Lint artifacts from each lint pass should be preserved on the final worker result."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-self-review-lint-artifacts",
+        image="python:3.12-slim",
+    )
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="final", final_output="Implemented initial change."),
+            CliRuntimeStep(
+                kind="final",
+                final_output=_review_result_json(
+                    outcome="findings",
+                    summary="A follow-up fix is needed.",
+                ),
+            ),
+            CliRuntimeStep(kind="final", final_output="Applied follow-up fix."),
+            CliRuntimeStep(
+                kind="final",
+                final_output=_review_result_json(
+                    outcome="no_findings",
+                    summary="All findings are fixed.",
+                ),
+            ),
+        ]
+    )
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
+                output="",
+            )
+        }
+    )
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda started_container, **_: session,
+    )
+
+    with patch(
+        "workers.codex_cli_worker.collect_changed_files_and_apply_post_run_lint_format",
+        side_effect=[
+            (
+                ["workers/codex_cli_worker.py"],
+                {
+                    "ran": True,
+                    "status": "passed",
+                    "errors": [],
+                    "commands": [],
+                    "artifacts": [],
+                },
+                [
+                    ArtifactReference(
+                        name="lint-first",
+                        uri="artifacts/lint-first.log",
+                        artifact_type="log",
+                    )
+                ],
+            ),
+            (
+                ["workers/codex_cli_worker.py", "workers/gemini_cli_worker.py"],
+                {
+                    "ran": True,
+                    "status": "warning",
+                    "errors": ["second pass warning"],
+                    "commands": [],
+                    "artifacts": [],
+                },
+                [
+                    ArtifactReference(
+                        name="lint-second",
+                        uri="artifacts/lint-second.log",
+                        artifact_type="log",
+                    )
+                ],
+            ),
+        ],
+    ):
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-self-review-lint-artifacts",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Apply self-review fixes",
+                )
+            )
+        )
+
+    artifact_uris = {artifact.uri for artifact in result.artifacts}
+    assert "artifacts/lint-first.log" in artifact_uris
+    assert "artifacts/lint-second.log" in artifact_uris
+    assert result.review_result is not None
+    assert result.review_result.outcome == "no_findings"
+    assert result.budget_usage is not None
+    assert result.budget_usage["post_run_lint_format"]["status"] == "warning"
+    assert result.budget_usage["post_run_lint_format"]["errors"] == ["second pass warning"]
 
 
 def test_codex_cli_worker_respects_zero_fix_retry_limit(tmp_path: Path) -> None:
