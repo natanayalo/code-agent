@@ -122,10 +122,8 @@ class OrchestratorReplayRunner(EvaluationRunner):
             )
         review_outcome: ReviewOutcome | None = None
         if state.review is not None:
-            actionable_findings_count = len(state.review.findings)
             # Suppressed findings are a pragmatic proxy for filtered/rejected findings in this path;
             # this is not a strict semantic "incorrect finding" measurement.
-            false_positive_findings_count = len(state.review.suppressed_findings)
             actionable_fingerprint_set = {
                 (
                     finding.file_path,
@@ -144,12 +142,16 @@ class OrchestratorReplayRunner(EvaluationRunner):
                 )
                 for suppressed in state.review.suppressed_findings
             }
-            if actionable_fingerprint_set & suppressed_fingerprint_set:
+            overlapping_fingerprints = actionable_fingerprint_set & suppressed_fingerprint_set
+            if overlapping_fingerprints:
                 logger.warning(
                     "Independent review output contained overlapping actionable and suppressed "
-                    "findings; review metrics may be double-counted for this case."
+                    "findings; deduplicating by fingerprint with suppression precedence."
                 )
             # "Actionable" in this runner currently means "not suppressed by policy filtering".
+            actionable_findings_count = len(actionable_fingerprint_set - suppressed_fingerprint_set)
+            false_positive_findings_count = len(suppressed_fingerprint_set)
+            # Total findings are deduplicated across actionable/suppressed sets.
             total_findings_count = actionable_findings_count + false_positive_findings_count
             repair_attempted = state.repair_handoff_requested
             review_outcome = ReviewOutcome(
