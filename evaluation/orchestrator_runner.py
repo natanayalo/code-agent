@@ -168,7 +168,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
                 fix_after_review_succeeded=(
                     repair_attempted
                     and state.verification is not None
-                    and state.verification.status != "failed"
+                    and state.verification.status == "passed"
                 )
                 if repair_attempted
                 else None,

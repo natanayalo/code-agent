@@ -63,7 +63,11 @@ class ReviewOutcome:
 
 @dataclass(frozen=True, slots=True)
 class ReviewMetrics:
-    """Aggregate reviewer quality metrics for one report."""
+    """Aggregate reviewer quality metrics for one report.
+
+    Note: `false_discovery_rate` and the compatibility alias `false_positive_rate`
+    both use the denominator `total_findings` (reported findings count), not `TN`.
+    """
 
     reviewed_cases: int
     precision: float | None
