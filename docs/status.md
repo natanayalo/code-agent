@@ -95,10 +95,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-118 (slice 1): reviewer finding suppression + severity/confidence gating with suppressed-findings artifact retention. PR: [#101](https://github.com/natanayalo/code-agent/pull/101)
 - T-118 (slice 2): bounded repair handoff loop + verifier rerun after review-driven repair. PR: [#102](https://github.com/natanayalo/code-agent/pull/102)
 - T-119 Extend evaluation harness for reviewer quality. PR: [#103](https://github.com/natanayalo/code-agent/pull/103)
+- T-123 Add shared adapter prompt override for review-mode calls. PR: [#104](https://github.com/natanayalo/code-agent/pull/104)
 
 ## In Progress
 
-- T-123: Add shared adapter prompt override for review-mode calls. (unpublished)
+- None
 
 ## Next
 
