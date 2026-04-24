@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
+
+
+def _load_run_frozen_eval_module():
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "e2e" / "run_frozen_eval.py"
+    spec = importlib.util.spec_from_file_location("run_frozen_eval", script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Failed to load run_frozen_eval module.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _write_suite(path: Path) -> None:
@@ -34,6 +48,10 @@ def _run_script(
     output_path: Path,
     parallel: bool = False,
     max_parallel_cases: int | None = None,
+    variant_label: str | None = None,
+    review_prompt_profile: str | None = None,
+    reviewer_model_profile: str | None = None,
+    compare_to_report: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     repo_root = Path(__file__).resolve().parents[2]
     script_path = repo_root / "scripts" / "e2e" / "run_frozen_eval.py"
@@ -53,6 +71,14 @@ def _run_script(
         command.append("--parallel")
     if max_parallel_cases is not None:
         command.extend(["--max-parallel-cases", str(max_parallel_cases)])
+    if variant_label is not None:
+        command.extend(["--variant-label", variant_label])
+    if review_prompt_profile is not None:
+        command.extend(["--review-prompt-profile", review_prompt_profile])
+    if reviewer_model_profile is not None:
+        command.extend(["--reviewer-model-profile", reviewer_model_profile])
+    if compare_to_report is not None:
+        command.extend(["--compare-to-report", str(compare_to_report)])
     return subprocess.run(
         command,
         cwd=repo_root,
@@ -143,3 +169,188 @@ def test_run_frozen_eval_supports_parallel_limit_flag(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert output_path.exists()
+
+
+def test_run_frozen_eval_persists_variant_profile_metadata(tmp_path: Path) -> None:
+    suite_path = tmp_path / "suite.json"
+    replay_path = tmp_path / "replay.json"
+    output_path = tmp_path / "report.json"
+    _write_suite(suite_path)
+    replay_path.write_text(
+        json.dumps({"case-1": {"status": "success", "summary": "ok"}}),
+        encoding="utf-8",
+    )
+
+    result = _run_script(
+        suite_path=suite_path,
+        replay_path=replay_path,
+        output_path=output_path,
+        variant_label="candidate",
+        review_prompt_profile="review-prompt-v2",
+        reviewer_model_profile="gpt-reviewer",
+    )
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    profile = payload["profile"]
+
+    assert result.returncode == 0
+    assert profile["variant_label"] == "candidate"
+    assert profile["review_prompt_profile"] == "review-prompt-v2"
+    assert profile["reviewer_model_profile"] == "gpt-reviewer"
+
+
+def test_run_frozen_eval_supports_compare_to_report(tmp_path: Path) -> None:
+    suite_path = tmp_path / "suite.json"
+    replay_path = tmp_path / "replay.json"
+    baseline_output_path = tmp_path / "baseline.json"
+    output_path = tmp_path / "candidate.json"
+    _write_suite(suite_path)
+    replay_path.write_text(
+        json.dumps({"case-1": {"status": "success", "summary": "ok"}}),
+        encoding="utf-8",
+    )
+
+    baseline_result = _run_script(
+        suite_path=suite_path,
+        replay_path=replay_path,
+        output_path=baseline_output_path,
+        variant_label="baseline",
+    )
+    candidate_result = _run_script(
+        suite_path=suite_path,
+        replay_path=replay_path,
+        output_path=output_path,
+        variant_label="candidate",
+        compare_to_report=baseline_output_path,
+    )
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert baseline_result.returncode == 0
+    assert candidate_result.returncode == 0
+    assert payload["comparison"]["baseline_variant_label"] == "baseline"
+    assert payload["comparison"]["candidate_variant_label"] == "candidate"
+    assert payload["comparison"]["delta_reviewed_cases"] == 0
+    assert "delta_false_discovery_rate" in payload["comparison"]
+
+
+def test_report_parser_preserves_outcome_review_payload() -> None:
+    module = _load_run_frozen_eval_module()
+    payload = {
+        "suite_name": "baseline",
+        "total_cases": 1,
+        "passed_cases": 1,
+        "failed_cases": 0,
+        "total_score": 1,
+        "max_score": 1,
+        "results": [
+            {
+                "case_id": "case-1",
+                "passed": True,
+                "score": 1,
+                "max_score": 1,
+                "failures": [],
+                "outcome": {
+                    "status": "success",
+                    "summary": "ok",
+                    "files_changed": [],
+                    "tests_passed": True,
+                    "review": {
+                        "findings_count": 2,
+                        "actionable_findings_count": 1,
+                        "false_positive_findings_count": 1,
+                        "fix_after_review_attempted": True,
+                        "fix_after_review_succeeded": False,
+                    },
+                },
+            }
+        ],
+    }
+
+    report = module._report_from_payload(payload)
+
+    review = report.results[0].outcome.review
+    assert review is not None
+    assert review.findings_count == 2
+    assert review.actionable_findings_count == 1
+    assert review.false_positive_findings_count == 1
+    assert review.fix_after_review_attempted is True
+    assert review.fix_after_review_succeeded is False
+
+
+def test_report_parser_handles_null_review_count_fields() -> None:
+    module = _load_run_frozen_eval_module()
+    payload = {
+        "suite_name": "baseline",
+        "total_cases": 1,
+        "passed_cases": 1,
+        "failed_cases": 0,
+        "total_score": 1,
+        "max_score": 1,
+        "results": [
+            {
+                "case_id": "case-1",
+                "passed": True,
+                "score": 1,
+                "max_score": 1,
+                "failures": [],
+                "outcome": {
+                    "status": "success",
+                    "summary": "ok",
+                    "files_changed": [],
+                    "tests_passed": True,
+                    "review": {
+                        "findings_count": None,
+                        "actionable_findings_count": None,
+                        "false_positive_findings_count": None,
+                    },
+                },
+            }
+        ],
+    }
+
+    report = module._report_from_payload(payload)
+
+    review = report.results[0].outcome.review
+    assert review is not None
+    assert review.findings_count == 0
+    assert review.actionable_findings_count == 0
+    assert review.false_positive_findings_count == 0
+
+
+def test_coerce_optional_float_returns_none_for_invalid_values() -> None:
+    module = _load_run_frozen_eval_module()
+
+    assert module._coerce_optional_float("1.25") == pytest.approx(1.25)
+    assert module._coerce_optional_float("not-a-float") is None
+    assert module._coerce_optional_float(object()) is None
+
+
+def test_report_parser_rejects_total_case_count_mismatch() -> None:
+    module = _load_run_frozen_eval_module()
+    payload = {
+        "suite_name": "baseline",
+        "total_cases": 2,
+        "passed_cases": 1,
+        "failed_cases": 0,
+        "total_score": 1,
+        "max_score": 1,
+        "results": [
+            {
+                "case_id": "case-1",
+                "passed": True,
+                "score": 1,
+                "max_score": 1,
+                "failures": [],
+                "outcome": {
+                    "status": "success",
+                    "summary": "ok",
+                    "files_changed": [],
+                    "tests_passed": True,
+                },
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match="total_cases does not match results length"):
+        module._report_from_payload(payload)

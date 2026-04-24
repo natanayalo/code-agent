@@ -5,11 +5,22 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+from dataclasses import replace
 from pathlib import Path
+from typing import Literal, cast
 
 from evaluation import (
+    CaseRunResult,
+    EvaluationComparison,
+    EvaluationProfile,
+    EvaluationReport,
     OrchestratorReplayRunner,
     ReplayRunner,
+    ReviewMetrics,
+    ReviewOutcome,
+    WorkerOutcome,
+    compare_reports,
     default_replay_outcomes,
     evaluate_suite,
     load_frozen_suite,
@@ -65,6 +76,30 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         default=None,
         help=("Optional concurrency cap when --parallel is enabled. " "Defaults to no cap."),
     )
+    parser.add_argument(
+        "--variant-label",
+        type=str,
+        default=None,
+        help="Optional A/B variant label (for example: baseline or candidate).",
+    )
+    parser.add_argument(
+        "--review-prompt-profile",
+        type=str,
+        default=None,
+        help="Optional review prompt profile identifier captured in report metadata.",
+    )
+    parser.add_argument(
+        "--reviewer-model-profile",
+        type=str,
+        default=None,
+        help="Optional reviewer model profile identifier captured in report metadata.",
+    )
+    parser.add_argument(
+        "--compare-to-report",
+        type=Path,
+        default=None,
+        help="Optional baseline report JSON path for structured A/B delta computation.",
+    )
     return parser
 
 
@@ -83,13 +118,25 @@ async def _async_main() -> int:
         )
     else:
         runner = ReplayRunner(outcomes)
+    profile = EvaluationProfile(
+        variant_label=args.variant_label,
+        review_prompt_profile=args.review_prompt_profile,
+        reviewer_model_profile=args.reviewer_model_profile,
+    )
     report = await evaluate_suite(
         suite_name=suite.suite_name,
         cases=suite.cases,
         runner=runner,
         parallel=args.parallel,
         max_parallel_cases=args.max_parallel_cases,
+        profile=profile,
     )
+    if args.compare_to_report is not None:
+        with args.compare_to_report.open("r", encoding="utf-8") as file:
+            baseline_payload = json.load(file)
+        baseline_report = _report_from_payload(baseline_payload)
+        comparison = compare_reports(baseline=baseline_report, candidate=report)
+        report = replace(report, comparison=comparison)
     write_report(report, args.output)
     print(
         "frozen-eval:",
@@ -104,6 +151,189 @@ async def _async_main() -> int:
 
 def main() -> int:
     return asyncio.run(_async_main())
+
+
+def _parse_optional_review_metrics(payload: dict[str, object]) -> ReviewMetrics | None:
+    raw_metrics = payload.get("review_metrics")
+    if not isinstance(raw_metrics, dict):
+        return None
+    return ReviewMetrics(
+        reviewed_cases=int(raw_metrics.get("reviewed_cases", 0)),
+        precision=_coerce_optional_float(raw_metrics.get("precision")),
+        actionable_rate=_coerce_optional_float(raw_metrics.get("actionable_rate")),
+        false_discovery_rate=_coerce_optional_float(
+            raw_metrics.get("false_discovery_rate", raw_metrics.get("false_positive_rate"))
+        ),
+        false_positive_rate=_coerce_optional_float(
+            raw_metrics.get("false_positive_rate", raw_metrics.get("false_discovery_rate"))
+        ),
+        fix_after_review_success=_coerce_optional_float(
+            raw_metrics.get("fix_after_review_success")
+        ),
+        empty_review_correctness=_coerce_optional_float(
+            raw_metrics.get("empty_review_correctness")
+        ),
+    )
+
+
+def _parse_optional_profile(payload: dict[str, object]) -> EvaluationProfile | None:
+    raw_profile = payload.get("profile")
+    if not isinstance(raw_profile, dict):
+        return None
+    return EvaluationProfile(
+        variant_label=_coerce_optional_str(raw_profile.get("variant_label")),
+        review_prompt_profile=_coerce_optional_str(raw_profile.get("review_prompt_profile")),
+        reviewer_model_profile=_coerce_optional_str(raw_profile.get("reviewer_model_profile")),
+    )
+
+
+def _parse_optional_comparison(payload: dict[str, object]) -> EvaluationComparison | None:
+    raw_comparison = payload.get("comparison")
+    if not isinstance(raw_comparison, dict):
+        return None
+    return EvaluationComparison(
+        baseline_variant_label=_coerce_optional_str(raw_comparison.get("baseline_variant_label")),
+        candidate_variant_label=_coerce_optional_str(raw_comparison.get("candidate_variant_label")),
+        delta_passed_cases=int(raw_comparison.get("delta_passed_cases", 0)),
+        delta_total_score=int(raw_comparison.get("delta_total_score", 0)),
+        delta_reviewed_cases=int(raw_comparison.get("delta_reviewed_cases", 0)),
+        delta_precision=_coerce_optional_float(raw_comparison.get("delta_precision")),
+        delta_actionable_rate=_coerce_optional_float(raw_comparison.get("delta_actionable_rate")),
+        delta_false_discovery_rate=_coerce_optional_float(
+            raw_comparison.get(
+                "delta_false_discovery_rate",
+                raw_comparison.get("delta_false_positive_rate"),
+            )
+        ),
+        delta_false_positive_rate=_coerce_optional_float(
+            raw_comparison.get(
+                "delta_false_positive_rate",
+                raw_comparison.get("delta_false_discovery_rate"),
+            )
+        ),
+        delta_fix_after_review_success=_coerce_optional_float(
+            raw_comparison.get("delta_fix_after_review_success")
+        ),
+        delta_empty_review_correctness=_coerce_optional_float(
+            raw_comparison.get("delta_empty_review_correctness")
+        ),
+    )
+
+
+def _coerce_optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _coerce_optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_optional_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _coerce_non_negative_int(value: object) -> int:
+    if value is None:
+        return 0
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(parsed, 0)
+
+
+def _parse_optional_review_outcome(raw_outcome: dict[str, object]) -> ReviewOutcome | None:
+    raw_review = raw_outcome.get("review")
+    if not isinstance(raw_review, dict):
+        return None
+    return ReviewOutcome(
+        findings_count=_coerce_non_negative_int(raw_review.get("findings_count")),
+        actionable_findings_count=_coerce_non_negative_int(
+            raw_review.get("actionable_findings_count")
+        ),
+        false_positive_findings_count=_coerce_non_negative_int(
+            raw_review.get("false_positive_findings_count")
+        ),
+        fix_after_review_attempted=_coerce_optional_bool(
+            raw_review.get("fix_after_review_attempted")
+        ),
+        fix_after_review_succeeded=_coerce_optional_bool(
+            raw_review.get("fix_after_review_succeeded")
+        ),
+    )
+
+
+def _report_from_payload(payload: dict[str, object]) -> EvaluationReport:
+    """Best-effort parser for baseline report inputs written by this script."""
+    raw_results = payload.get("results")
+    if not isinstance(raw_results, list):
+        raise ValueError("Baseline report is missing results[] payload.")
+
+    parsed_results: list[CaseRunResult] = []
+    for raw_result in raw_results:
+        if not isinstance(raw_result, dict):
+            raise ValueError("Baseline report result entry must be an object.")
+        raw_outcome = raw_result.get("outcome")
+        if not isinstance(raw_outcome, dict):
+            raise ValueError("Baseline report result is missing outcome payload.")
+
+        parsed_results.append(
+            CaseRunResult(
+                case_id=str(raw_result.get("case_id", "")),
+                passed=bool(raw_result.get("passed")),
+                score=int(raw_result.get("score", 0)),
+                max_score=int(raw_result.get("max_score", 0)),
+                failures=tuple(raw_result.get("failures", [])),
+                outcome=WorkerOutcome(
+                    status=_coerce_outcome_status(raw_outcome.get("status")),
+                    summary=str(raw_outcome.get("summary", "")),
+                    files_changed=tuple(raw_outcome.get("files_changed", [])),
+                    tests_passed=(
+                        raw_outcome.get("tests_passed")
+                        if isinstance(raw_outcome.get("tests_passed"), bool)
+                        else None
+                    ),
+                    review=_parse_optional_review_outcome(raw_outcome),
+                ),
+            )
+        )
+
+    reported_total_cases = int(payload.get("total_cases", len(parsed_results)))
+    if len(parsed_results) != reported_total_cases:
+        raise ValueError(
+            "Baseline report total_cases does not match results length: "
+            f"total_cases={reported_total_cases}, results={len(parsed_results)}"
+        )
+
+    return EvaluationReport(
+        suite_name=str(payload.get("suite_name", "baseline")),
+        total_cases=reported_total_cases,
+        passed_cases=int(payload.get("passed_cases", 0)),
+        failed_cases=int(payload.get("failed_cases", 0)),
+        total_score=int(payload.get("total_score", 0)),
+        max_score=int(payload.get("max_score", 0)),
+        results=tuple(parsed_results),
+        review_metrics=_parse_optional_review_metrics(payload),
+        profile=_parse_optional_profile(payload),
+        comparison=_parse_optional_comparison(payload),
+    )
+
+
+def _coerce_outcome_status(value: object) -> Literal["success", "failure", "error"]:
+    if value in {"success", "failure", "error"}:
+        return cast(Literal["success", "failure", "error"], value)
+    return "failure"
 
 
 if __name__ == "__main__":

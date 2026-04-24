@@ -11,15 +11,23 @@ import pytest
 from evaluation import (
     OrchestratorReplayRunner,
     ReplayRunner,
+    ReviewExpectation,
+    ReviewOutcome,
     TaskExpectation,
     WorkerOutcome,
+    compare_reports,
     default_replay_outcomes,
     evaluate_suite,
     load_frozen_suite,
     load_replay_outcomes,
     write_report,
 )
-from evaluation.harness import FrozenTaskCase
+from evaluation.harness import (
+    _REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD,
+    EvaluationComparison,
+    FrozenTaskCase,
+    ReviewMetrics,
+)
 
 
 def test_frozen_suite_has_minimum_case_count() -> None:
@@ -362,6 +370,7 @@ def test_write_report_persists_structured_json(tmp_path: Path) -> None:
     assert payload["total_cases"] == len(suite.cases)
     assert payload["passed_cases"] == len(suite.cases)
     assert payload["results"][0]["case_id"] == suite.cases[0].case_id
+    assert payload["review_metrics"]["reviewed_cases"] == 0
 
 
 def test_orchestrator_runner_executes_case_through_graph_path() -> None:
@@ -378,6 +387,237 @@ def test_orchestrator_runner_executes_case_through_graph_path() -> None:
     assert "zero division" in outcome.summary
     assert set(case.expectation.required_files_changed).issubset(set(outcome.files_changed))
     assert outcome.tests_passed is True
+
+
+def test_orchestrator_runner_propagates_review_outcome_fields() -> None:
+    case = FrozenTaskCase(
+        case_id="reviewed-case",
+        repo_fixture="fixtures/empty",
+        task_text="Do a thing",
+        expectation=TaskExpectation(require_success=True),
+    )
+    runner = OrchestratorReplayRunner(
+        outcomes_by_case_id={"reviewed-case": WorkerOutcome(status="success", summary="ok")},
+        worker_override="codex",
+    )
+
+    class _FakeGraph:
+        async def ainvoke(self, _inputs: object, config: dict[str, object]) -> dict[str, object]:
+            assert config["configurable"] == {"thread_id": "frozen-eval-reviewed-case"}
+            return {
+                "task": {"task_text": "Do a thing"},
+                "dispatch": {"worker_type": "codex"},
+                "verification": {"status": "passed", "items": []},
+                "repair_handoff_requested": True,
+                "result": {
+                    "status": "success",
+                    "summary": "completed",
+                    "commands_run": [],
+                    "files_changed": ["src/app.py"],
+                    "test_results": [{"name": "suite", "status": "passed", "details": "ok"}],
+                    "artifacts": [],
+                },
+                "review": {
+                    "reviewer_kind": "independent_reviewer",
+                    "summary": "one issue surfaced",
+                    "confidence": 0.8,
+                    "outcome": "findings",
+                    "findings": [
+                        {
+                            "severity": "high",
+                            "category": "logic",
+                            "confidence": 0.9,
+                            "file_path": "src/app.py",
+                            "line_start": 12,
+                            "line_end": 13,
+                            "title": "Missing guard",
+                            "why_it_matters": "Can crash on empty input.",
+                        }
+                    ],
+                    "suppressed_findings": [
+                        {
+                            "finding": {
+                                "severity": "low",
+                                "category": "style",
+                                "confidence": 0.6,
+                                "file_path": "src/app.py",
+                                "line_start": 2,
+                                "title": "Minor formatting",
+                                "why_it_matters": "Consistency",
+                            },
+                            "reasons": ["style category suppressed by policy (style)"],
+                        }
+                    ],
+                },
+            }
+
+    runner._graph = _FakeGraph()  # type: ignore[assignment]
+
+    outcome = asyncio.run(runner.run_case(case))
+
+    assert outcome.review is not None
+    assert outcome.review.findings_count == 2
+    assert outcome.review.actionable_findings_count == 1
+    assert outcome.review.false_positive_findings_count == 1
+    assert outcome.review.fix_after_review_attempted is True
+    assert outcome.review.fix_after_review_succeeded is True
+
+
+def test_orchestrator_runner_review_metrics_precision_reflects_suppressed_findings() -> None:
+    case = FrozenTaskCase(
+        case_id="review-metrics-case",
+        repo_fixture="fixtures/empty",
+        task_text="Do a thing",
+        expectation=TaskExpectation(require_success=True),
+    )
+    runner = OrchestratorReplayRunner(
+        outcomes_by_case_id={"review-metrics-case": WorkerOutcome(status="success", summary="ok")},
+        worker_override="codex",
+    )
+
+    class _FakeGraph:
+        async def ainvoke(self, _inputs: object, config: dict[str, object]) -> dict[str, object]:
+            assert config["configurable"] == {"thread_id": "frozen-eval-review-metrics-case"}
+            return {
+                "task": {"task_text": "Do a thing"},
+                "dispatch": {"worker_type": "codex"},
+                "verification": {"status": "passed", "items": []},
+                "repair_handoff_requested": False,
+                "result": {
+                    "status": "success",
+                    "summary": "completed",
+                    "commands_run": [],
+                    "files_changed": ["src/app.py"],
+                    "test_results": [{"name": "suite", "status": "passed", "details": "ok"}],
+                    "artifacts": [],
+                },
+                "review": {
+                    "reviewer_kind": "independent_reviewer",
+                    "summary": "reviewed",
+                    "confidence": 0.8,
+                    "outcome": "findings",
+                    "findings": [
+                        {
+                            "severity": "high",
+                            "category": "logic",
+                            "confidence": 0.9,
+                            "file_path": "src/app.py",
+                            "line_start": 12,
+                            "line_end": 13,
+                            "title": "Missing guard",
+                            "why_it_matters": "Can crash on empty input.",
+                        }
+                    ],
+                    "suppressed_findings": [
+                        {
+                            "finding": {
+                                "severity": "low",
+                                "category": "style",
+                                "confidence": 0.6,
+                                "file_path": "src/app.py",
+                                "line_start": 2,
+                                "title": "Minor formatting",
+                                "why_it_matters": "Consistency",
+                            },
+                            "reasons": ["style category suppressed by policy (style)"],
+                        }
+                    ],
+                },
+            }
+
+    runner._graph = _FakeGraph()  # type: ignore[assignment]
+    orchestrator_outcome = asyncio.run(runner.run_case(case))
+    assert orchestrator_outcome.review is not None
+
+    class _SingleOutcomeRunner:
+        async def run_case(self, _case: FrozenTaskCase) -> WorkerOutcome:
+            return orchestrator_outcome
+
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="orchestrator-review-metrics",
+            cases=(case,),
+            runner=_SingleOutcomeRunner(),
+        )
+    )
+
+    assert report.review_metrics is not None
+    assert report.review_metrics.precision == pytest.approx(0.5)
+    assert report.review_metrics.false_discovery_rate == pytest.approx(0.5)
+    assert report.review_metrics.false_positive_rate == pytest.approx(0.5)
+
+
+def test_orchestrator_runner_deduplicates_overlapping_suppressed_findings() -> None:
+    case = FrozenTaskCase(
+        case_id="overlap-case",
+        repo_fixture="fixtures/empty",
+        task_text="Do a thing",
+        expectation=TaskExpectation(require_success=True),
+    )
+    runner = OrchestratorReplayRunner(
+        outcomes_by_case_id={"overlap-case": WorkerOutcome(status="success", summary="ok")},
+        worker_override="codex",
+    )
+
+    class _FakeGraph:
+        async def ainvoke(self, _inputs: object, config: dict[str, object]) -> dict[str, object]:
+            assert config["configurable"] == {"thread_id": "frozen-eval-overlap-case"}
+            return {
+                "task": {"task_text": "Do a thing"},
+                "dispatch": {"worker_type": "codex"},
+                "verification": {"status": "passed", "items": []},
+                "repair_handoff_requested": False,
+                "result": {
+                    "status": "success",
+                    "summary": "completed",
+                    "commands_run": [],
+                    "files_changed": ["src/app.py"],
+                    "test_results": [{"name": "suite", "status": "passed", "details": "ok"}],
+                    "artifacts": [],
+                },
+                "review": {
+                    "reviewer_kind": "independent_reviewer",
+                    "summary": "reviewed",
+                    "confidence": 0.8,
+                    "outcome": "findings",
+                    "findings": [
+                        {
+                            "severity": "high",
+                            "category": "logic",
+                            "confidence": 0.9,
+                            "file_path": "src/app.py",
+                            "line_start": 12,
+                            "line_end": 13,
+                            "title": "Missing guard",
+                            "why_it_matters": "Can crash on empty input.",
+                        }
+                    ],
+                    "suppressed_findings": [
+                        {
+                            "finding": {
+                                "severity": "low",
+                                "category": "style",
+                                "confidence": 0.6,
+                                "file_path": "./src/app.py",
+                                "line_start": 12,
+                                "line_end": 13,
+                                "title": "Missing guard",
+                                "why_it_matters": "Can crash on empty input.",
+                            },
+                            "reasons": ["style category suppressed by policy (style)"],
+                        }
+                    ],
+                },
+            }
+
+    runner._graph = _FakeGraph()  # type: ignore[assignment]
+    outcome = asyncio.run(runner.run_case(case))
+
+    assert outcome.review is not None
+    assert outcome.review.actionable_findings_count == 0
+    assert outcome.review.false_positive_findings_count == 1
+    assert outcome.review.findings_count == 1
+    assert outcome.review.fix_after_review_attempted is False
 
 
 def test_orchestrator_runner_reports_failure_for_missing_case_outcome() -> None:
@@ -473,6 +713,64 @@ def test_load_replay_outcomes_accepts_error_status(tmp_path: Path) -> None:
 
     assert outcomes["case-1"].status == "error"
     assert outcomes["case-1"].summary == "system-level failure"
+
+
+def test_load_frozen_suite_accepts_review_expectation_payload(tmp_path: Path) -> None:
+    suite_path = tmp_path / "review-suite.json"
+    suite_path.write_text(
+        json.dumps(
+            {
+                "suite_name": "review-suite",
+                "cases": [
+                    {
+                        "case_id": "review-case",
+                        "repo_fixture": "fixtures/one",
+                        "task_text": "Run review",
+                        "expectation": {
+                            "require_success": False,
+                            "review": {
+                                "expected_outcome": "no_findings",
+                                "expect_fix_after_review": False,
+                            },
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    suite = load_frozen_suite(path=suite_path)
+
+    assert suite.cases[0].expectation.review is not None
+    assert suite.cases[0].expectation.review.expected_outcome == "no_findings"
+
+
+def test_load_replay_outcomes_accepts_review_payload(tmp_path: Path) -> None:
+    replay_path = tmp_path / "review-replay.json"
+    replay_path.write_text(
+        json.dumps(
+            {
+                "case-1": {
+                    "status": "success",
+                    "summary": "review done",
+                    "review": {
+                        "findings_count": 3,
+                        "actionable_findings_count": 2,
+                        "false_positive_findings_count": 1,
+                        "fix_after_review_attempted": True,
+                        "fix_after_review_succeeded": False,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    outcomes = load_replay_outcomes(replay_path)
+
+    assert outcomes["case-1"].review is not None
+    assert outcomes["case-1"].review.actionable_findings_count == 2
 
 
 def test_load_frozen_suite_rejects_non_object_payload(tmp_path: Path) -> None:
@@ -648,3 +946,273 @@ def test_load_replay_outcomes_rejects_unexpected_fields(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="unexpected"):
         load_replay_outcomes(replay_path)
+
+
+def test_evaluate_suite_computes_review_quality_metrics() -> None:
+    cases = (
+        FrozenTaskCase(
+            case_id="review-findings",
+            repo_fixture="fixtures/a",
+            task_text="review case one",
+            expectation=TaskExpectation(
+                require_success=False,
+                review=ReviewExpectation(
+                    expected_outcome="findings",
+                    expect_fix_after_review=True,
+                ),
+            ),
+        ),
+        FrozenTaskCase(
+            case_id="review-empty",
+            repo_fixture="fixtures/b",
+            task_text="review case two",
+            expectation=TaskExpectation(
+                require_success=False,
+                review=ReviewExpectation(expected_outcome="no_findings"),
+            ),
+        ),
+    )
+
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="review-metrics",
+            cases=cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "review-findings": WorkerOutcome(
+                        status="success",
+                        summary="reviewed",
+                        review=ReviewOutcome(
+                            findings_count=2,
+                            actionable_findings_count=1,
+                            false_positive_findings_count=1,
+                            fix_after_review_attempted=True,
+                            fix_after_review_succeeded=True,
+                        ),
+                    ),
+                    "review-empty": WorkerOutcome(
+                        status="success",
+                        summary="empty",
+                        review=ReviewOutcome(
+                            findings_count=0,
+                            actionable_findings_count=0,
+                            false_positive_findings_count=0,
+                        ),
+                    ),
+                }
+            ),
+        )
+    )
+
+    assert report.review_metrics is not None
+    assert report.review_metrics.reviewed_cases == 2
+    assert report.review_metrics.precision == pytest.approx(0.5)
+    assert report.review_metrics.actionable_rate == pytest.approx(0.5)
+    assert report.review_metrics.false_discovery_rate == pytest.approx(0.5)
+    assert report.review_metrics.false_positive_rate == pytest.approx(0.5)
+    assert report.review_metrics.fix_after_review_success == pytest.approx(1.0)
+    assert report.review_metrics.empty_review_correctness == pytest.approx(1.0)
+
+
+def test_compare_reports_includes_review_metric_deltas() -> None:
+    cases = (
+        FrozenTaskCase(
+            case_id="case-1",
+            repo_fixture="fixtures/a",
+            task_text="review case",
+            expectation=TaskExpectation(
+                require_success=False,
+                review=ReviewExpectation(expected_outcome="findings"),
+            ),
+        ),
+    )
+    report_baseline = asyncio.run(
+        evaluate_suite(
+            suite_name="ab-compare",
+            cases=cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "case-1": WorkerOutcome(
+                        status="success",
+                        summary="baseline",
+                        review=ReviewOutcome(
+                            findings_count=2,
+                            actionable_findings_count=1,
+                            false_positive_findings_count=1,
+                        ),
+                    )
+                }
+            ),
+        )
+    )
+    report_candidate = asyncio.run(
+        evaluate_suite(
+            suite_name="ab-compare",
+            cases=cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "case-1": WorkerOutcome(
+                        status="success",
+                        summary="candidate",
+                        review=ReviewOutcome(
+                            findings_count=2,
+                            actionable_findings_count=2,
+                            false_positive_findings_count=0,
+                        ),
+                    )
+                }
+            ),
+        )
+    )
+
+    comparison = compare_reports(baseline=report_baseline, candidate=report_candidate)
+
+    assert comparison.delta_total_score == 0
+    assert comparison.delta_reviewed_cases == 0
+    assert comparison.delta_precision == pytest.approx(0.5)
+    assert comparison.delta_false_discovery_rate == pytest.approx(-0.5)
+    assert comparison.delta_false_positive_rate == pytest.approx(-0.5)
+
+
+def test_compare_reports_treats_missing_baseline_precision_as_zero() -> None:
+    cases = (
+        FrozenTaskCase(
+            case_id="case-1",
+            repo_fixture="fixtures/a",
+            task_text="review case",
+            expectation=TaskExpectation(require_success=False),
+        ),
+    )
+    report_baseline = asyncio.run(
+        evaluate_suite(
+            suite_name="ab-precision-none",
+            cases=cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "case-1": WorkerOutcome(
+                        status="success",
+                        summary="baseline",
+                        review=ReviewOutcome(
+                            findings_count=0,
+                            actionable_findings_count=0,
+                            false_positive_findings_count=0,
+                        ),
+                    )
+                }
+            ),
+        )
+    )
+    report_candidate = asyncio.run(
+        evaluate_suite(
+            suite_name="ab-precision-none",
+            cases=cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "case-1": WorkerOutcome(
+                        status="success",
+                        summary="candidate",
+                        review=ReviewOutcome(
+                            findings_count=1,
+                            actionable_findings_count=1,
+                            false_positive_findings_count=0,
+                        ),
+                    )
+                }
+            ),
+        )
+    )
+
+    comparison = compare_reports(baseline=report_baseline, candidate=report_candidate)
+
+    assert comparison.delta_precision == pytest.approx(1.0)
+    assert comparison.delta_false_discovery_rate == pytest.approx(0.0)
+    assert comparison.delta_false_positive_rate == pytest.approx(0.0)
+
+
+def test_compare_reports_treats_missing_fix_and_empty_metrics_as_zero() -> None:
+    baseline_cases = (
+        FrozenTaskCase(
+            case_id="case-1",
+            repo_fixture="fixtures/a",
+            task_text="review case",
+            expectation=TaskExpectation(require_success=False),
+        ),
+    )
+    candidate_cases = (
+        FrozenTaskCase(
+            case_id="case-1",
+            repo_fixture="fixtures/a",
+            task_text="review case",
+            expectation=TaskExpectation(
+                require_success=False,
+                review=ReviewExpectation(
+                    expect_fix_after_review=True,
+                    expected_outcome="no_findings",
+                ),
+            ),
+        ),
+    )
+    report_baseline = asyncio.run(
+        evaluate_suite(
+            suite_name="ab-missing-fix-empty",
+            cases=baseline_cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "case-1": WorkerOutcome(
+                        status="success",
+                        summary="baseline",
+                        review=ReviewOutcome(
+                            findings_count=0,
+                            actionable_findings_count=0,
+                            false_positive_findings_count=0,
+                            fix_after_review_succeeded=True,
+                        ),
+                    )
+                }
+            ),
+        )
+    )
+    report_candidate = asyncio.run(
+        evaluate_suite(
+            suite_name="ab-missing-fix-empty",
+            cases=candidate_cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "case-1": WorkerOutcome(
+                        status="success",
+                        summary="candidate",
+                        review=ReviewOutcome(
+                            findings_count=0,
+                            actionable_findings_count=0,
+                            false_positive_findings_count=0,
+                            fix_after_review_succeeded=True,
+                        ),
+                    )
+                }
+            ),
+        )
+    )
+
+    comparison = compare_reports(baseline=report_baseline, candidate=report_candidate)
+
+    assert comparison.delta_fix_after_review_success == pytest.approx(1.0)
+    assert comparison.delta_empty_review_correctness == pytest.approx(1.0)
+
+
+def test_compare_reports_delta_mapping_covers_all_review_metrics() -> None:
+    review_metric_fields = {
+        field_name
+        for field_name in ReviewMetrics.__dataclass_fields__
+        if field_name != "reviewed_cases"
+    }
+    mapped_metric_fields = set(_REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD)
+    comparison_delta_fields = {
+        field_name
+        for field_name in EvaluationComparison.__dataclass_fields__
+        if field_name.startswith("delta_")
+        and field_name not in {"delta_passed_cases", "delta_total_score", "delta_reviewed_cases"}
+    }
+    mapped_comparison_delta_fields = set(_REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD.values())
+
+    assert mapped_metric_fields == review_metric_fields
+    assert mapped_comparison_delta_fields == comparison_delta_fields

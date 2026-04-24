@@ -30,7 +30,7 @@ Use this skill for repo-specific triage after pull request review feedback is co
 
 ## Triage workflow
 
-1. Separate new comments from old thread history.
+1. Collect comments from GitHub review threads and separate new comments from old thread history.
 2. Classify each comment:
    - correctness or safety bug
    - test or verification gap

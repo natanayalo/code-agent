@@ -101,26 +101,123 @@ Default to the native review format of the environment:
 - If inline review directives are supported, emit one `::code-comment` per finding with a tight line range.
 - If no substantial findings are present, state that explicitly and mention any residual risk or testing gap.
 
-If the caller explicitly requests structured JSON, return this schema:
+### GitHub-Native Review Comment Mode
 
-```json
-{
-  "summary": "string",
-  "findings": [
-    {
-      "category": "correctness|security|reliability|performance|maintainability|testing|ops",
-      "severity": "critical|high|medium|low",
-      "confidence": 0.0,
-      "file": "string",
-      "line_start": 0,
-      "line_end": 0,
-      "title": "string",
-      "why_it_matters": "string",
-      "evidence": "string",
-      "minimal_fix": "string"
-    }
-  ]
-}
+When a GitHub PR context is available (PR number/URL/head branch), post findings as real GitHub PR review comments by default.
+Do not stop at chat-only findings unless the user explicitly asks for chat-only review.
+
+Rules for this mode:
+
+- Prefer inline review comments tied to exact file/line when possible.
+- Use top-level PR comments only when no stable inline location exists.
+- Post high-confidence actionable findings by default:
+  - always post critical/high that pass the publishing gate
+  - post medium when they pass the publishing gate with strong evidence
+  - keep low in chat unless the user explicitly asks to post them
+- Make comment bodies directly actionable from thread context alone.
+- Include minimal safe fix guidance in each posted comment.
+- If no substantial findings are present, do not post noise comments.
+- Keep this as the default reporting mode for PR review flows.
+- Do not switch to JSON payload output unless the caller explicitly requires machine-readable output.
+- After posting, report the posted review URL (or comment URLs) in the final response.
+- If posting fails, include the exact failing command and stderr, then provide a retry command.
+
+Publishing gate (must pass all before posting to GitHub):
+
+- Concrete trigger: name the exact condition/input that fails.
+- Concrete impact: explain user/operator-visible downside.
+- Concrete evidence: tie claim to exact changed code path/line.
+- Concrete fix: propose the smallest safe code/test change.
+- Confidence threshold:
+  - critical/high: do not post below 0.85
+  - medium: do not post below 0.90
+  - low: do not post by default
+- Scope threshold: do not post broad refactor or architecture-preference comments.
+- Verdict rule: if final verdict is effectively LGTM, avoid posting inline nits; keep non-blocking ideas in chat.
+
+Execution order for PR reviews:
+
+1. Review code and produce candidate findings.
+2. Apply publishing gate and keep only postable findings.
+3. If at least one postable finding exists, post review comments to the PR.
+4. If no postable findings exist, post nothing and return explicit "no posted findings".
+5. Always include an action report: posted count, skipped count, PR link.
+6. Do not finalize the response until the action report is present and reconciles with executed `gh` commands.
+
+### Posting GitHub Review Comments (Examples)
+
+- Always prefix `gh` calls with `GH_PAGER=cat` in automation.
+- On macOS, if `gh` is not on PATH, use `/opt/homebrew/bin/gh`.
+- Set shared variables before posting:
+  - `OWNER`, `REPO`, `PR_NUMBER`
+  - `HEAD_SHA="$(GH_PAGER=cat gh api repos/$OWNER/$REPO/pulls/$PR_NUMBER --jq .head.sha)"`
+
+Use this comment body pattern for posted findings:
+
+`Problem -> Trigger -> Impact -> Minimal fix`
+
+Avoid wording like "consider refactor", "could be cleaner", or "might be brittle" unless you also provide a concrete failing path and impact.
+
+Severity tag format for posted comments:
+
+- Prefix each inline comment title/body with: `[severity:<critical|high|medium|low>]`
+- Example: `[severity:medium] Missing guard for null failures payload`
+
+Recommended review event by outcome:
+
+- `COMMENT`: default when findings are advisory or non-blocking.
+- `REQUEST_CHANGES`: use when at least one posted finding is blocking (typically critical/high with clear failure path).
+- `APPROVE`: use only when no actionable findings were posted and the review is explicitly approval-oriented.
+
+Suggested inline comment structure:
+
+```text
+[severity:medium] <short finding title>
+Problem: <what is wrong>
+Trigger: <concrete failing condition/input>
+Impact: <user/operator consequence>
+Minimal fix: <smallest safe change>
+```
+
+Inline comment (preferred when a stable file/line exists):
+
+```bash
+GH_PAGER=cat gh api \
+  -X POST \
+  repos/$OWNER/$REPO/pulls/$PR_NUMBER/comments \
+  -f body="Potential retry duplication when event keys are not recorded atomically. Please guard with an idempotency check before side effects." \
+  -f commit_id="$HEAD_SHA" \
+  -f path="orchestrator/handlers/webhook.py" \
+  -F line=142 \
+  -f side="RIGHT"
+```
+
+Top-level PR comment fallback (when no stable inline anchor exists):
+
+```bash
+GH_PAGER=cat gh pr comment $PR_NUMBER --repo $OWNER/$REPO --body "High-confidence review finding: retry path may duplicate side effects under concurrent delivery. Suggested minimal fix: atomic delivery-key check before persistence."
+```
+
+Optional batched review submission (multiple inline comments in one review):
+
+```bash
+GH_PAGER=cat gh api \
+  -X POST \
+  repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews \
+  -f body="High-confidence actionable findings from reviewer pass." \
+  -f event="COMMENT" \
+  -f comments='[{"path":"orchestrator/handlers/webhook.py","line":142,"side":"RIGHT","body":"Missing idempotency guard before side effects."}]'
+```
+
+Batched review with explicit event selection:
+
+```bash
+GH_PAGER=cat gh api \
+  -X POST \
+  repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews \
+  -f body="Reviewer pass completed. See inline findings." \
+  -f event="REQUEST_CHANGES" \
+  -f comments='[{"path":"evaluation/harness.py","line":482,"side":"RIGHT","body":"[severity:medium] Incomplete delta reporting for repair and empty-review metrics\nProblem: treat_missing_as_zero excludes two metrics.\nTrigger: baseline has None and candidate has real value.\nImpact: Improvement is hidden in comparison output.\nMinimal fix: include fix_after_review_success and empty_review_correctness in the inclusion set."}]'
 ```
 
 ## Example Finding Shape
