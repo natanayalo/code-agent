@@ -437,6 +437,27 @@ def test_gemini_adapter_extracts_response_field_from_json(monkeypatch) -> None:
     assert step.final_output == "Extracted text"
 
 
+def test_gemini_adapter_parses_object_response_field(monkeypatch) -> None:
+    """Object-valued 'response' fields should be serialized as valid JSON."""
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args[0],
+            0,
+            stdout=(
+                '{"response":{"kind":"final","final_output":"ok","tool_name":null,'
+                '"tool_input":null}}'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    adapter = GeminiCliRuntimeAdapter()
+    step = adapter.next_step([CliRuntimeMessage(role="system", content="Go.")])
+    assert step.kind == "final"
+    assert step.final_output == "ok"
+
+
 def test_gemini_adapter_raises_on_empty_response(monkeypatch) -> None:
     """An empty response from the CLI should raise RuntimeError."""
 

@@ -10,7 +10,7 @@ echo "Waiting for ngrok URL..."
 PUBLIC_URL=""
 for i in $(seq 1 30); do
   # Fetch public URL from ngrok API
-  PUBLIC_URL=$(curl -s http://ngrok:4040/api/tunnels | jq -r '.tunnels[0].public_url // empty')
+  PUBLIC_URL=$(curl -s http://ngrok:4040/api/tunnels | jq -r '.tunnels[] | select(.proto=="https") | .public_url' | head -n1)
 
   if [ -n "$PUBLIC_URL" ] && [ "$PUBLIC_URL" != "null" ]; then
     break
@@ -33,10 +33,10 @@ fi
 
 echo "Registering Telegram webhook..."
 # Include secret_token if set to secure the endpoint
-WEBHOOK_DATA="{\"url\": \"${PUBLIC_URL}/telegram/webhook\"}"
-if [ -n "$CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN" ]; then
-  WEBHOOK_DATA="{\"url\": \"${PUBLIC_URL}/telegram/webhook\", \"secret_token\": \"$CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN\"}"
-fi
+WEBHOOK_DATA=$(jq -n \
+  --arg url "${PUBLIC_URL}/telegram/webhook" \
+  --arg secret "$CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN" \
+  '{url: $url} + (if $secret != "" then {secret_token: $secret} else {} end)')
 
 RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${CODE_AGENT_TELEGRAM_BOT_TOKEN}/setWebhook" \
   -H "Content-Type: application/json" \

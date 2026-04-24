@@ -294,7 +294,8 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         try:
             structured = json.loads(raw_output)
             if isinstance(structured, dict) and "response" in structured:
-                raw_output = str(structured["response"])
+                val = structured["response"]
+                raw_output = val if isinstance(val, str) else json.dumps(val)
         except json.JSONDecodeError:
             # Fall back to raw output if it wasn't valid JSON (e.g. CLI warnings)
             pass
