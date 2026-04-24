@@ -109,12 +109,23 @@ Rules for this mode:
 
 - Prefer inline review comments tied to exact file/line when possible.
 - Use top-level PR comments only when no stable inline location exists.
-- Post only high-confidence actionable findings (default: critical/high; medium only if strongly evidenced).
+- Post only high-confidence actionable findings (default: critical/high).
+- Keep medium/low suggestions in chat summary unless the user explicitly asks to post them.
 - Make comment bodies directly actionable from thread context alone.
 - Include minimal safe fix guidance in each posted comment.
 - If no substantial findings are present, do not post noise comments.
 - Keep this as the default reporting mode for PR review flows.
 - Do not switch to JSON payload output unless the caller explicitly requires machine-readable output.
+
+Publishing gate (must pass all before posting to GitHub):
+
+- Concrete trigger: name the exact condition/input that fails.
+- Concrete impact: explain user/operator-visible downside.
+- Concrete evidence: tie claim to exact changed code path/line.
+- Concrete fix: propose the smallest safe code/test change.
+- Confidence threshold: do not post if confidence is below 0.85.
+- Scope threshold: do not post broad refactor or architecture-preference comments.
+- Verdict rule: if final verdict is effectively LGTM, avoid posting inline nits; keep non-blocking ideas in chat.
 
 ### Posting GitHub Review Comments (Examples)
 
@@ -123,6 +134,12 @@ Rules for this mode:
 - Set shared variables before posting:
   - `OWNER`, `REPO`, `PR_NUMBER`
   - `HEAD_SHA="$(GH_PAGER=cat gh api repos/$OWNER/$REPO/pulls/$PR_NUMBER --jq .head.sha)"`
+
+Use this comment body pattern for posted findings:
+
+`Problem -> Trigger -> Impact -> Minimal fix`
+
+Avoid wording like "consider refactor", "could be cleaner", or "might be brittle" unless you also provide a concrete failing path and impact.
 
 Inline comment (preferred when a stable file/line exists):
 
