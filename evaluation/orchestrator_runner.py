@@ -123,7 +123,8 @@ class OrchestratorReplayRunner(EvaluationRunner):
         review_outcome: ReviewOutcome | None = None
         if state.review is not None:
             actionable_findings_count = len(state.review.findings)
-            # Suppressed findings are a pragmatic proxy for low-value/noisy findings in this path.
+            # Suppressed findings are a pragmatic proxy for filtered/rejected findings in this path;
+            # this is not a strict semantic "incorrect finding" measurement.
             false_positive_findings_count = len(state.review.suppressed_findings)
             actionable_fingerprint_set = {
                 (

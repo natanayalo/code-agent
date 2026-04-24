@@ -993,6 +993,7 @@ def test_compare_reports_includes_review_metric_deltas() -> None:
     comparison = compare_reports(baseline=report_baseline, candidate=report_candidate)
 
     assert comparison.delta_total_score == 0
+    assert comparison.delta_reviewed_cases == 0
     assert comparison.delta_precision == pytest.approx(0.5)
     assert comparison.delta_false_positive_rate == pytest.approx(-0.5)
 
@@ -1008,7 +1009,7 @@ def test_compare_reports_delta_mapping_covers_all_review_metrics() -> None:
         field_name
         for field_name in EvaluationComparison.__dataclass_fields__
         if field_name.startswith("delta_")
-        and field_name not in {"delta_passed_cases", "delta_total_score"}
+        and field_name not in {"delta_passed_cases", "delta_total_score", "delta_reviewed_cases"}
     }
     mapped_comparison_delta_fields = set(_REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD.values())
 

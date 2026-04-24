@@ -107,6 +107,7 @@ class EvaluationComparison:
     candidate_variant_label: str | None
     delta_passed_cases: int
     delta_total_score: int
+    delta_reviewed_cases: int
     delta_precision: float | None
     delta_actionable_rate: float | None
     delta_false_positive_rate: float | None
@@ -119,6 +120,7 @@ class EvaluationComparison:
             "candidate_variant_label": self.candidate_variant_label,
             "delta_passed_cases": self.delta_passed_cases,
             "delta_total_score": self.delta_total_score,
+            "delta_reviewed_cases": self.delta_reviewed_cases,
             "delta_precision": self.delta_precision,
             "delta_actionable_rate": self.delta_actionable_rate,
             "delta_false_positive_rate": self.delta_false_positive_rate,
@@ -417,6 +419,24 @@ def _metric_delta_payload(
             details.append(f"unexpected mappings for {', '.join(extra)}")
         detail_text = "; ".join(details) if details else "unknown mapping mismatch"
         raise ValueError(f"Review metric delta mapping is out of sync: {detail_text}")
+    comparison_metric_delta_field_names = {
+        field_info.name
+        for field_info in dataclass_fields(EvaluationComparison)
+        if field_info.name.startswith("delta_")
+        and field_info.name
+        not in {"delta_passed_cases", "delta_total_score", "delta_reviewed_cases"}
+    }
+    mapped_delta_field_names = set(_REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD.values())
+    if comparison_metric_delta_field_names != mapped_delta_field_names:
+        missing = sorted(comparison_metric_delta_field_names - mapped_delta_field_names)
+        extra = sorted(mapped_delta_field_names - comparison_metric_delta_field_names)
+        details: list[str] = []
+        if missing:
+            details.append(f"missing mappings for {', '.join(missing)}")
+        if extra:
+            details.append(f"unexpected mappings for {', '.join(extra)}")
+        detail_text = "; ".join(details) if details else "unknown comparison mismatch"
+        raise ValueError("Comparison delta field mapping is out of sync: " f"{detail_text}")
 
     payload: dict[str, float | None] = {}
     for metric_field_name, delta_field_name in _REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD.items():
@@ -442,6 +462,10 @@ def compare_reports(
         baseline_metrics=baseline_metrics,
         candidate_metrics=candidate_metrics,
     )
+    baseline_reviewed_cases = baseline_metrics.reviewed_cases if baseline_metrics is not None else 0
+    candidate_reviewed_cases = (
+        candidate_metrics.reviewed_cases if candidate_metrics is not None else 0
+    )
     return EvaluationComparison(
         baseline_variant_label=(
             baseline.profile.variant_label if baseline.profile is not None else None
@@ -451,6 +475,7 @@ def compare_reports(
         ),
         delta_passed_cases=candidate.passed_cases - baseline.passed_cases,
         delta_total_score=candidate.total_score - baseline.total_score,
+        delta_reviewed_cases=candidate_reviewed_cases - baseline_reviewed_cases,
         delta_precision=delta_payload["delta_precision"],
         delta_actionable_rate=delta_payload["delta_actionable_rate"],
         delta_false_positive_rate=delta_payload["delta_false_positive_rate"],

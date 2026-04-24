@@ -191,6 +191,7 @@ def _parse_optional_comparison(payload: dict[str, object]) -> EvaluationComparis
         candidate_variant_label=_coerce_optional_str(raw_comparison.get("candidate_variant_label")),
         delta_passed_cases=int(raw_comparison.get("delta_passed_cases", 0)),
         delta_total_score=int(raw_comparison.get("delta_total_score", 0)),
+        delta_reviewed_cases=int(raw_comparison.get("delta_reviewed_cases", 0)),
         delta_precision=_coerce_optional_float(raw_comparison.get("delta_precision")),
         delta_actionable_rate=_coerce_optional_float(raw_comparison.get("delta_actionable_rate")),
         delta_false_positive_rate=_coerce_optional_float(

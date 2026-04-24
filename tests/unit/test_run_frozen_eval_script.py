@@ -230,6 +230,7 @@ def test_run_frozen_eval_supports_compare_to_report(tmp_path: Path) -> None:
     assert candidate_result.returncode == 0
     assert payload["comparison"]["baseline_variant_label"] == "baseline"
     assert payload["comparison"]["candidate_variant_label"] == "candidate"
+    assert payload["comparison"]["delta_reviewed_cases"] == 0
 
 
 def test_report_parser_preserves_outcome_review_payload() -> None:
