@@ -101,6 +101,57 @@ Default to the native review format of the environment:
 - If inline review directives are supported, emit one `::code-comment` per finding with a tight line range.
 - If no substantial findings are present, state that explicitly and mention any residual risk or testing gap.
 
+### GitHub-Native Review Comment Mode
+
+When requested to publish findings, post them as real GitHub PR review comments.
+
+Rules for this mode:
+
+- Prefer inline review comments tied to exact file/line when possible.
+- Use top-level PR comments only when no stable inline location exists.
+- Post only high-confidence actionable findings (default: critical/high; medium only if strongly evidenced).
+- Make comment bodies directly actionable from thread context alone.
+- Include minimal safe fix guidance in each posted comment.
+- If no substantial findings are present, do not post noise comments.
+
+### Posting GitHub Review Comments (Examples)
+
+- Always prefix `gh` calls with `GH_PAGER=cat` in automation.
+- On macOS, if `gh` is not on PATH, use `/opt/homebrew/bin/gh`.
+- Set shared variables before posting:
+  - `OWNER`, `REPO`, `PR_NUMBER`
+  - `HEAD_SHA="$(GH_PAGER=cat gh api repos/$OWNER/$REPO/pulls/$PR_NUMBER --jq .head.sha)"`
+
+Inline comment (preferred when a stable file/line exists):
+
+```bash
+GH_PAGER=cat gh api \
+  -X POST \
+  repos/$OWNER/$REPO/pulls/$PR_NUMBER/comments \
+  -f body="Potential retry duplication when event keys are not recorded atomically. Please guard with an idempotency check before side effects." \
+  -f commit_id="$HEAD_SHA" \
+  -f path="orchestrator/handlers/webhook.py" \
+  -F line=142 \
+  -f side="RIGHT"
+```
+
+Top-level PR comment fallback (when no stable inline anchor exists):
+
+```bash
+GH_PAGER=cat gh pr comment $PR_NUMBER --repo $OWNER/$REPO --body "High-confidence review finding: retry path may duplicate side effects under concurrent delivery. Suggested minimal fix: atomic delivery-key check before persistence."
+```
+
+Optional batched review submission (multiple inline comments in one review):
+
+```bash
+GH_PAGER=cat gh api \
+  -X POST \
+  repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews \
+  -f body="High-confidence actionable findings from reviewer pass." \
+  -f event="COMMENT" \
+  -f comments='[{"path":"orchestrator/handlers/webhook.py","line":142,"side":"RIGHT","body":"Missing idempotency guard before side effects."}]'
+```
+
 If the caller explicitly requests structured JSON, return this schema:
 
 ```json
@@ -117,7 +168,8 @@ If the caller explicitly requests structured JSON, return this schema:
       "title": "string",
       "why_it_matters": "string",
       "evidence": "string",
-      "minimal_fix": "string"
+      "minimal_fix": "string",
+      "comment_body": "string"
     }
   ]
 }
