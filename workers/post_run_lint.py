@@ -17,6 +17,7 @@ from workers.cli_runtime import (
     CliRuntimeExecutionResult,
     ShellSessionProtocol,
     collect_changed_files,
+    collect_changed_files_from_repo_path,
 )
 
 _DEFAULT_FALLBACK_TEMPLATE_KEY = "{files}"
@@ -330,3 +331,39 @@ def apply_post_run_lint_format(
             updated_files_changed = refreshed_files_changed
 
     return updated_files_changed, lint_format_result, lint_format_artifacts
+
+
+def collect_changed_files_and_apply_post_run_lint_format(
+    *,
+    session: ShellSessionProtocol,
+    execution: CliRuntimeExecutionResult,
+    expect_changed_files_artifact: bool,
+    repo_path_for_detection: Path,
+    repo_working_directory: Path,
+    timeout_seconds: int,
+    fallback_command_template: str | None = None,
+    existing_files_changed: Sequence[str] | None = None,
+) -> tuple[list[str], dict[str, Any], list[ArtifactReference]]:
+    """Collect changed files (with fallback) and run post-run lint/format."""
+    files_changed = list(existing_files_changed or [])
+    if expect_changed_files_artifact:
+        files_changed = collect_changed_files(
+            session,
+            working_directory=repo_working_directory,
+            timeout_seconds=timeout_seconds,
+        )
+        if not files_changed:
+            files_changed = collect_changed_files_from_repo_path(
+                repo_path_for_detection,
+                timeout_seconds=timeout_seconds,
+            )
+
+    return apply_post_run_lint_format(
+        session=session,
+        execution=execution,
+        files_changed=files_changed,
+        repo_path_for_detection=repo_path_for_detection,
+        repo_working_directory=repo_working_directory,
+        timeout_seconds=timeout_seconds,
+        fallback_command_template=fallback_command_template,
+    )

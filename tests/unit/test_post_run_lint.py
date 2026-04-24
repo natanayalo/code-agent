@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from sandbox import DockerShellCommandResult
 from sandbox.workspace import SandboxArtifact
-from workers.post_run_lint import detect_post_run_lint_commands, run_post_run_lint
+from workers.post_run_lint import (
+    collect_changed_files_and_apply_post_run_lint_format,
+    detect_post_run_lint_commands,
+    run_post_run_lint,
+)
 
 
 class _FakeSession:
@@ -181,3 +188,93 @@ def test_run_post_run_lint_skips_when_no_command_detected(tmp_path: Path) -> Non
         "artifacts": [],
     }
     assert session.calls == []
+
+
+def test_collect_and_lint_skips_collection_when_changed_files_not_expected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Changed-file collection should be skipped when tool metadata does not expect it."""
+    session = _FakeSession({})
+    execution = SimpleNamespace(commands_run=[])
+
+    def _unexpected_collect(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("collect_changed_files should not run")
+
+    def _unexpected_fallback(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("collect_changed_files_from_repo_path should not run")
+
+    monkeypatch.setattr("workers.post_run_lint.collect_changed_files", _unexpected_collect)
+    monkeypatch.setattr(
+        "workers.post_run_lint.collect_changed_files_from_repo_path",
+        _unexpected_fallback,
+    )
+
+    files_changed, lint_result, lint_artifacts = (
+        collect_changed_files_and_apply_post_run_lint_format(
+            session=session,
+            execution=execution,
+            expect_changed_files_artifact=False,
+            repo_path_for_detection=tmp_path,
+            repo_working_directory=tmp_path,
+            timeout_seconds=5,
+            existing_files_changed=["README.md"],
+        )
+    )
+
+    assert files_changed == ["README.md"]
+    assert lint_result["status"] == "skipped"
+    assert lint_artifacts == []
+    assert session.calls == []
+
+
+def test_collect_and_lint_uses_repo_path_fallback_when_session_collect_returns_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Host git fallback should seed post-run lint when session-side collection is empty."""
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\nline-length = 88\n", encoding="utf-8")
+    repo_dir = Path("/workspace/repo")
+    format_command = "cd /workspace/repo && ruff format -- workers/codex_cli_worker.py"
+    check_command = "cd /workspace/repo && ruff check --fix -- workers/codex_cli_worker.py"
+    session = _FakeSession(
+        {
+            format_command: DockerShellCommandResult(
+                command=format_command,
+                output="formatted",
+                exit_code=0,
+                duration_seconds=0.1,
+            ),
+            check_command: DockerShellCommandResult(
+                command=check_command,
+                output="checked",
+                exit_code=0,
+                duration_seconds=0.1,
+            ),
+        }
+    )
+    execution = SimpleNamespace(commands_run=[])
+
+    monkeypatch.setattr("workers.post_run_lint.collect_changed_files", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        "workers.post_run_lint.collect_changed_files_from_repo_path",
+        lambda *args, **kwargs: ["workers/codex_cli_worker.py"],
+    )
+
+    files_changed, lint_result, lint_artifacts = (
+        collect_changed_files_and_apply_post_run_lint_format(
+            session=session,
+            execution=execution,
+            expect_changed_files_artifact=True,
+            repo_path_for_detection=tmp_path,
+            repo_working_directory=repo_dir,
+            timeout_seconds=8,
+        )
+    )
+
+    assert files_changed == ["workers/codex_cli_worker.py"]
+    assert lint_result["ran"] is True
+    assert lint_result["status"] == "passed"
+    assert len(execution.commands_run) == 2
+    assert len(lint_artifacts) == 0
+    assert session.calls == [(format_command, 8), (check_command, 8)]
