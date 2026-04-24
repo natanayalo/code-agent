@@ -161,7 +161,12 @@ def _parse_optional_review_metrics(payload: dict[str, object]) -> ReviewMetrics 
         reviewed_cases=int(raw_metrics.get("reviewed_cases", 0)),
         precision=_coerce_optional_float(raw_metrics.get("precision")),
         actionable_rate=_coerce_optional_float(raw_metrics.get("actionable_rate")),
-        false_positive_rate=_coerce_optional_float(raw_metrics.get("false_positive_rate")),
+        false_discovery_rate=_coerce_optional_float(
+            raw_metrics.get("false_discovery_rate", raw_metrics.get("false_positive_rate"))
+        ),
+        false_positive_rate=_coerce_optional_float(
+            raw_metrics.get("false_positive_rate", raw_metrics.get("false_discovery_rate"))
+        ),
         fix_after_review_success=_coerce_optional_float(
             raw_metrics.get("fix_after_review_success")
         ),
@@ -194,8 +199,17 @@ def _parse_optional_comparison(payload: dict[str, object]) -> EvaluationComparis
         delta_reviewed_cases=int(raw_comparison.get("delta_reviewed_cases", 0)),
         delta_precision=_coerce_optional_float(raw_comparison.get("delta_precision")),
         delta_actionable_rate=_coerce_optional_float(raw_comparison.get("delta_actionable_rate")),
+        delta_false_discovery_rate=_coerce_optional_float(
+            raw_comparison.get(
+                "delta_false_discovery_rate",
+                raw_comparison.get("delta_false_positive_rate"),
+            )
+        ),
         delta_false_positive_rate=_coerce_optional_float(
-            raw_comparison.get("delta_false_positive_rate")
+            raw_comparison.get(
+                "delta_false_positive_rate",
+                raw_comparison.get("delta_false_discovery_rate"),
+            )
         ),
         delta_fix_after_review_success=_coerce_optional_float(
             raw_comparison.get("delta_fix_after_review_success")

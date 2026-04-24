@@ -68,6 +68,7 @@ class ReviewMetrics:
     reviewed_cases: int
     precision: float | None
     actionable_rate: float | None
+    false_discovery_rate: float | None
     false_positive_rate: float | None
     fix_after_review_success: float | None
     empty_review_correctness: float | None
@@ -77,6 +78,8 @@ class ReviewMetrics:
             "reviewed_cases": self.reviewed_cases,
             "precision": self.precision,
             "actionable_rate": self.actionable_rate,
+            "false_discovery_rate": self.false_discovery_rate,
+            # Backward-compatible alias kept for existing dashboards.
             "false_positive_rate": self.false_positive_rate,
             "fix_after_review_success": self.fix_after_review_success,
             "empty_review_correctness": self.empty_review_correctness,
@@ -110,6 +113,7 @@ class EvaluationComparison:
     delta_reviewed_cases: int
     delta_precision: float | None
     delta_actionable_rate: float | None
+    delta_false_discovery_rate: float | None
     delta_false_positive_rate: float | None
     delta_fix_after_review_success: float | None
     delta_empty_review_correctness: float | None
@@ -123,6 +127,7 @@ class EvaluationComparison:
             "delta_reviewed_cases": self.delta_reviewed_cases,
             "delta_precision": self.delta_precision,
             "delta_actionable_rate": self.delta_actionable_rate,
+            "delta_false_discovery_rate": self.delta_false_discovery_rate,
             "delta_false_positive_rate": self.delta_false_positive_rate,
             "delta_fix_after_review_success": self.delta_fix_after_review_success,
             "delta_empty_review_correctness": self.delta_empty_review_correctness,
@@ -322,6 +327,7 @@ def _compute_review_metrics(
             reviewed_cases=0,
             precision=None,
             actionable_rate=None,
+            false_discovery_rate=None,
             false_positive_rate=None,
             fix_after_review_success=None,
             empty_review_correctness=None,
@@ -377,13 +383,24 @@ def _compute_review_metrics(
         reviewed_cases=len(reviewed_results),
         precision=_safe_ratio(actionable_findings, total_findings),
         actionable_rate=_safe_ratio(actionable_cases, len(reviewed_results)),
+        false_discovery_rate=_safe_ratio(false_positive_findings, total_findings),
+        # Backward-compatible alias for existing consumers.
         false_positive_rate=_safe_ratio(false_positive_findings, total_findings),
         fix_after_review_success=_safe_ratio(fix_successes, len(fix_expected_cases)),
         empty_review_correctness=_safe_ratio(empty_correct_cases, len(empty_expected_cases)),
     )
 
 
-def _delta_metric(candidate: float | None, baseline: float | None) -> float | None:
+def _delta_metric(
+    candidate: float | None,
+    baseline: float | None,
+    *,
+    treat_missing_as_zero: bool = False,
+) -> float | None:
+    if treat_missing_as_zero:
+        candidate_value = 0.0 if candidate is None else candidate
+        baseline_value = 0.0 if baseline is None else baseline
+        return candidate_value - baseline_value
     if candidate is None or baseline is None:
         return None
     return candidate - baseline
@@ -392,6 +409,7 @@ def _delta_metric(candidate: float | None, baseline: float | None) -> float | No
 _REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD: dict[str, str] = {
     "precision": "delta_precision",
     "actionable_rate": "delta_actionable_rate",
+    "false_discovery_rate": "delta_false_discovery_rate",
     "false_positive_rate": "delta_false_positive_rate",
     "fix_after_review_success": "delta_fix_after_review_success",
     "empty_review_correctness": "delta_empty_review_correctness",
@@ -446,7 +464,11 @@ def _metric_delta_payload(
         candidate_value = (
             getattr(candidate_metrics, metric_field_name) if candidate_metrics is not None else None
         )
-        payload[delta_field_name] = _delta_metric(candidate_value, baseline_value)
+        payload[delta_field_name] = _delta_metric(
+            candidate_value,
+            baseline_value,
+            treat_missing_as_zero=(metric_field_name in {"precision"}),
+        )
     return payload
 
 
@@ -478,6 +500,7 @@ def compare_reports(
         delta_reviewed_cases=candidate_reviewed_cases - baseline_reviewed_cases,
         delta_precision=delta_payload["delta_precision"],
         delta_actionable_rate=delta_payload["delta_actionable_rate"],
+        delta_false_discovery_rate=delta_payload["delta_false_discovery_rate"],
         delta_false_positive_rate=delta_payload["delta_false_positive_rate"],
         delta_fix_after_review_success=delta_payload["delta_fix_after_review_success"],
         delta_empty_review_correctness=delta_payload["delta_empty_review_correctness"],

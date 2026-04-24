@@ -543,6 +543,7 @@ def test_orchestrator_runner_review_metrics_precision_reflects_suppressed_findin
 
     assert report.review_metrics is not None
     assert report.review_metrics.precision == pytest.approx(0.5)
+    assert report.review_metrics.false_discovery_rate == pytest.approx(0.5)
     assert report.review_metrics.false_positive_rate == pytest.approx(0.5)
 
 
@@ -616,6 +617,7 @@ def test_orchestrator_runner_deduplicates_overlapping_suppressed_findings() -> N
     assert outcome.review.actionable_findings_count == 0
     assert outcome.review.false_positive_findings_count == 1
     assert outcome.review.findings_count == 1
+    assert outcome.review.fix_after_review_attempted is False
 
 
 def test_orchestrator_runner_reports_failure_for_missing_case_outcome() -> None:
@@ -1006,6 +1008,7 @@ def test_evaluate_suite_computes_review_quality_metrics() -> None:
     assert report.review_metrics.reviewed_cases == 2
     assert report.review_metrics.precision == pytest.approx(0.5)
     assert report.review_metrics.actionable_rate == pytest.approx(0.5)
+    assert report.review_metrics.false_discovery_rate == pytest.approx(0.5)
     assert report.review_metrics.false_positive_rate == pytest.approx(0.5)
     assert report.review_metrics.fix_after_review_success == pytest.approx(1.0)
     assert report.review_metrics.empty_review_correctness == pytest.approx(1.0)
@@ -1067,7 +1070,61 @@ def test_compare_reports_includes_review_metric_deltas() -> None:
     assert comparison.delta_total_score == 0
     assert comparison.delta_reviewed_cases == 0
     assert comparison.delta_precision == pytest.approx(0.5)
+    assert comparison.delta_false_discovery_rate == pytest.approx(-0.5)
     assert comparison.delta_false_positive_rate == pytest.approx(-0.5)
+
+
+def test_compare_reports_treats_missing_baseline_precision_as_zero() -> None:
+    cases = (
+        FrozenTaskCase(
+            case_id="case-1",
+            repo_fixture="fixtures/a",
+            task_text="review case",
+            expectation=TaskExpectation(require_success=False),
+        ),
+    )
+    report_baseline = asyncio.run(
+        evaluate_suite(
+            suite_name="ab-precision-none",
+            cases=cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "case-1": WorkerOutcome(
+                        status="success",
+                        summary="baseline",
+                        review=ReviewOutcome(
+                            findings_count=0,
+                            actionable_findings_count=0,
+                            false_positive_findings_count=0,
+                        ),
+                    )
+                }
+            ),
+        )
+    )
+    report_candidate = asyncio.run(
+        evaluate_suite(
+            suite_name="ab-precision-none",
+            cases=cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "case-1": WorkerOutcome(
+                        status="success",
+                        summary="candidate",
+                        review=ReviewOutcome(
+                            findings_count=1,
+                            actionable_findings_count=1,
+                            false_positive_findings_count=0,
+                        ),
+                    )
+                }
+            ),
+        )
+    )
+
+    comparison = compare_reports(baseline=report_baseline, candidate=report_candidate)
+
+    assert comparison.delta_precision == pytest.approx(1.0)
 
 
 def test_compare_reports_delta_mapping_covers_all_review_metrics() -> None:
