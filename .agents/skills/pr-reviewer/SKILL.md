@@ -27,6 +27,8 @@ If you are not confident a finding would survive pushback from the author, drop 
 
 ## Review Workflow
 
+This is the conceptual review checklist. For end-to-end PR execution (discovery, remote-thread awareness, posting), follow the "Execution order for PR reviews" section below.
+
 1. Read the PR title, description, and changed hunks to understand the intended behavior change.
 2. Inspect touched-file context plus directly-related tests, imports, symbols, and nearby callers.
 3. Identify the highest-risk changes in state handling, control flow, data validation, side effects, concurrency, and error handling.
@@ -75,6 +77,7 @@ Use only:
 - touched-file context,
 - relevant tests,
 - directly-related symbols, imports, and callers.
+- existing PR discussion context (inline comments, top-level comments, reviews, and review threads) for duplicate suppression and stale-comment avoidance.
 
 Do not rely on unrelated repository context.
 
@@ -101,10 +104,36 @@ Default to the native review format of the environment:
 - If inline review directives are supported, emit one `::code-comment` per finding with a tight line range.
 - If no substantial findings are present, state that explicitly and mention any residual risk or testing gap.
 
+### Zero-Input Mode (Skill Name Only)
+
+When invoked with only `pr-reviewer` and no explicit PR arguments:
+
+1. Detect current branch: `git branch --show-current`.
+2. Discover PR from branch head:
+   - `GH_PAGER=cat gh pr list --head "<branch>" --state open --limit 20 --json number,url,title,headRefName,baseRefName,state,updatedAt`
+3. If exactly one open PR matches, use it automatically.
+4. If multiple PRs match, sort by `updatedAt` and use the most recently updated open PR.
+5. If no PR is found, fail explicitly with a short actionable message and include the exact discovery command output summary.
+6. Continue review + posting flow using the discovered PR context.
+
+Do not require additional user input when PR auto-discovery succeeds.
+
+In zero-input mode, check repository state before reviewing:
+
+- `git status --short`
+- If the working tree is dirty, do not rely on local uncommitted files as review evidence unless they match PR head. Prefer GitHub PR diff/context and report that local dirty state was ignored.
+
 ### GitHub-Native Review Comment Mode
 
 When a GitHub PR context is available (PR number/URL/head branch), post findings as real GitHub PR review comments by default.
 Do not stop at chat-only findings unless the user explicitly asks for chat-only review.
+
+Only post by default when PR identity is unambiguous:
+
+- the user provided a PR URL/number, or
+- zero-input discovery found one clear PR for the current branch/repo.
+
+If repo, branch, remote, or PR identity is ambiguous, do not post. Return chat findings and state exactly why posting was skipped.
 
 Rules for this mode:
 
@@ -112,7 +141,7 @@ Rules for this mode:
 - Use top-level PR comments only when no stable inline location exists.
 - Post high-confidence actionable findings by default:
   - always post critical/high that pass the publishing gate
-  - post medium when they pass the publishing gate with strong evidence
+  - always post medium that pass the publishing gate
   - keep low in chat unless the user explicitly asks to post them
 - Make comment bodies directly actionable from thread context alone.
 - Include minimal safe fix guidance in each posted comment.
@@ -130,27 +159,88 @@ Publishing gate (must pass all before posting to GitHub):
 - Concrete fix: propose the smallest safe code/test change.
 - Confidence threshold:
   - critical/high: do not post below 0.85
-  - medium: do not post below 0.90
+  - medium: do not post below 0.85
   - low: do not post by default
 - Scope threshold: do not post broad refactor or architecture-preference comments.
-- Verdict rule: if final verdict is effectively LGTM, avoid posting inline nits; keep non-blocking ideas in chat.
+- Verdict rule: if any medium/high/critical finding passes the posting gate, verdict is not LGTM and those findings should be posted. Use LGTM only when no postable medium+ findings remain after suppression.
+
+### Remote PR Comment Awareness
+
+Before posting new findings, inspect existing remote discussion:
+
+1. Inline review comments:
+   - `GH_PAGER=cat gh api --paginate repos/$OWNER/$REPO/pulls/$PR_NUMBER/comments`
+2. Top-level PR comments:
+   - `GH_PAGER=cat gh api --paginate repos/$OWNER/$REPO/issues/$PR_NUMBER/comments`
+3. Submitted reviews:
+   - `GH_PAGER=cat gh api --paginate repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews`
+4. Review threads (including resolved state), preferably via GraphQL.
+
+If GraphQL review-thread fetching is unavailable or fails, continue with REST inline comments, top-level comments, and submitted reviews. Set `Remote thread status` in the action report to `unavailable` or `partially_available`.
+
+Use existing discussion to:
+
+- avoid duplicate comments,
+- skip already-covered findings,
+- account for valid author replies,
+- avoid stale feedback after new commits.
+
+When reading existing comments, distinguish outdated comments from comments on the current head diff. Treat outdated comments as context only unless the same issue still exists at current head.
+
+### Duplicate Suppression
+
+Skip posting if any of these are true:
+
+- equivalent failure mode already exists in an unresolved thread,
+- same path/line already has materially equivalent feedback,
+- prior review already covers the issue with similar evidence/fix,
+- author reply or later commit has already addressed the issue.
+
+When skipped, record the reason in the action report (for example: `skipped_existing_comment`, `skipped_stale`, `skipped_low_confidence`).
+
+If an unresolved thread already covers the same issue but lacks concrete trigger/impact/fix detail, prefer replying to that existing thread over opening a new duplicate comment when stable thread replies are supported.
+
+### Stale-Head Protection
+
+Immediately before posting, refetch PR head SHA:
+
+- `HEAD_SHA="$(GH_PAGER=cat gh api repos/$OWNER/$REPO/pulls/$PR_NUMBER --jq .head.sha)"`
+
+If head SHA changes between review and post, abort posting and report that the PR changed during review.
+
+### Changed-Line Anchoring
+
+Inline comments should anchor to changed lines when possible.
+If evidence is in unchanged context, anchor to the nearest changed line that introduces/exposes the issue.
+If no stable changed-line anchor exists, use a top-level PR comment with explicit file/path references.
 
 Execution order for PR reviews:
 
-1. Review code and produce candidate findings.
-2. Apply publishing gate and keep only postable findings.
-3. If at least one postable finding exists, post review comments to the PR.
-4. If no postable findings exist, post nothing and return explicit "no posted findings".
-5. Always include an action report: posted count, skipped count, PR link.
-6. Do not finalize the response until the action report is present and reconciles with executed `gh` commands.
+1. Discover PR context: branch, base, head SHA, PR number, URL.
+2. Fetch PR metadata, changed files, and diff/touched-file context.
+   - `GH_PAGER=cat gh pr view $PR_NUMBER --repo $OWNER/$REPO --json title,body,baseRefName,headRefName,url,files,commits`
+   - `GH_PAGER=cat gh pr diff $PR_NUMBER --repo $OWNER/$REPO --patch`
+3. Fetch existing remote comments/reviews/threads.
+4. Review code and produce candidate findings.
+5. Remove candidates that are duplicate, stale, out-of-scope, low-confidence, or already fixed.
+6. Apply review budget: prefer at most 5 posted findings unless multiple critical/high issues exist.
+   If additional valid candidates exist, keep only highest-impact findings and record the rest as `skipped_review_budget`.
+7. Apply publishing gate and keep only postable findings.
+8. If at least one postable finding exists, post review comments to the PR.
+9. If no postable findings exist, post nothing and return explicit "no posted findings".
+10. Return an action report: PR link, posted count, skipped count by reason, and comment/review URLs.
+11. In zero-input mode, include discovery report: branch name, PR number, PR URL, base branch, head SHA.
 
 ### Posting GitHub Review Comments (Examples)
 
 - Always prefix `gh` calls with `GH_PAGER=cat` in automation.
 - On macOS, if `gh` is not on PATH, use `/opt/homebrew/bin/gh`.
 - Set shared variables before posting:
-  - `OWNER`, `REPO`, `PR_NUMBER`
-  - `HEAD_SHA="$(GH_PAGER=cat gh api repos/$OWNER/$REPO/pulls/$PR_NUMBER --jq .head.sha)"`
+  - `OWNER_REPO="$(GH_PAGER=cat gh repo view --json nameWithOwner --jq .nameWithOwner)"`
+  - `OWNER="${OWNER_REPO%/*}"`
+  - `REPO="${OWNER_REPO#*/}"`
+  - `PR_NUMBER`
+  - Reuse `HEAD_SHA` from the "Stale-Head Protection" step (refetch immediately before posting).
 
 Use this comment body pattern for posted findings:
 
@@ -167,7 +257,8 @@ Recommended review event by outcome:
 
 - `COMMENT`: default when findings are advisory or non-blocking.
 - `REQUEST_CHANGES`: use when at least one posted finding is blocking (typically critical/high with clear failure path).
-- `APPROVE`: use only when no actionable findings were posted and the review is explicitly approval-oriented.
+- `APPROVE`: use only when no actionable findings were posted and the user explicitly asked for approval behavior.
+- Never approve by default.
 
 Suggested inline comment structure:
 
@@ -198,27 +289,36 @@ Top-level PR comment fallback (when no stable inline anchor exists):
 GH_PAGER=cat gh pr comment $PR_NUMBER --repo $OWNER/$REPO --body "High-confidence review finding: retry path may duplicate side effects under concurrent delivery. Suggested minimal fix: atomic delivery-key check before persistence."
 ```
 
-Optional batched review submission (multiple inline comments in one review):
+Canonical batched submission with JSON stdin:
 
 ```bash
+jq -n \
+  --arg body "Reviewer pass completed. See inline findings." \
+  --arg event "COMMENT" \
+  --argjson comments "$COMMENTS_JSON" \
+  '{body: $body, event: $event, comments: $comments}' | \
 GH_PAGER=cat gh api \
   -X POST \
   repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews \
-  -f body="High-confidence actionable findings from reviewer pass." \
-  -f event="COMMENT" \
-  -f comments='[{"path":"orchestrator/handlers/webhook.py","line":142,"side":"RIGHT","body":"Missing idempotency guard before side effects."}]'
+  --input -
 ```
 
-Batched review with explicit event selection:
+### Final Action Report Format
 
-```bash
-GH_PAGER=cat gh api \
-  -X POST \
-  repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews \
-  -f body="Reviewer pass completed. See inline findings." \
-  -f event="REQUEST_CHANGES" \
-  -f comments='[{"path":"evaluation/harness.py","line":482,"side":"RIGHT","body":"[severity:medium] Incomplete delta reporting for repair and empty-review metrics\nProblem: treat_missing_as_zero excludes two metrics.\nTrigger: baseline has None and candidate has real value.\nImpact: Improvement is hidden in comparison output.\nMinimal fix: include fix_after_review_success and empty_review_correctness in the inclusion set."}]'
-```
+Use this fixed format:
+
+- PR: `<url>`
+- Discovery: `branch=<branch>, base=<base>, head_sha=<sha>`
+- Posted: `<count>`
+- Skipped:
+  - `duplicate_existing_comment: <count>`
+  - `stale_or_already_fixed: <count>`
+  - `low_confidence: <count>`
+  - `out_of_scope: <count>`
+  - `review_budget: <count>`
+- Remote thread status: `available | unavailable | partially_available`
+- Review/comment URLs: `<comma-separated links>` or `none`
+- Posting status: `posted | no posted findings | skipped due to ambiguity | failed`
 
 ## Example Finding Shape
 

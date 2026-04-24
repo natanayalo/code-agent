@@ -240,10 +240,18 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         messages: Sequence[CliRuntimeMessage],
         *,
         system_prompt: str | None = None,
+        prompt_override: str | None = None,
         working_directory: Path | None = None,  # noqa: ARG002 - kept for interface symmetry
     ) -> CliRuntimeStep:
         """Ask OpenRouter for the next runtime step."""
-        prompt = _build_adapter_prompt(messages, system_prompt=system_prompt)
+        override_prompt = (
+            prompt_override.strip() if prompt_override and prompt_override.strip() else None
+        )
+        prompt = (
+            override_prompt
+            if override_prompt is not None
+            else _build_adapter_prompt(messages, system_prompt=system_prompt)
+        )
 
         try:
             response = self.client.chat.completions.create(
@@ -271,6 +279,16 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         raw_json = _unwrap_markdown_json_fence(raw_json)
         if not raw_json:
             raise RuntimeError("OpenRouter adapter returned an empty response body.")
+        if override_prompt is not None:
+            try:
+                return CliRuntimeStep.model_validate_json(raw_json)
+            except Exception:
+                return CliRuntimeStep(
+                    kind="final",
+                    final_output=raw_json,
+                    tool_name=None,
+                    tool_input=None,
+                )
         try:
             return CliRuntimeStep.model_validate_json(raw_json)
         except Exception as exc:

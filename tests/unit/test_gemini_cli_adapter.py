@@ -140,6 +140,44 @@ def test_gemini_adapter_raises_when_no_json_in_response(monkeypatch) -> None:
         adapter.next_step([CliRuntimeMessage(role="system", content="Go.")])
 
 
+def test_gemini_adapter_prompt_override_bypasses_runtime_prompt_shaping(monkeypatch) -> None:
+    """Prompt overrides should send raw prompt text and wrap non-step JSON as final."""
+    recorded: dict[str, object] = {}
+
+    def fake_run(
+        command: Sequence[str],
+        *,
+        input: str,
+        text: bool,
+        capture_output: bool,
+        check: bool,
+        timeout: int,
+        env: dict[str, str] | None,
+    ) -> subprocess.CompletedProcess[str]:
+        recorded["input"] = input
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(
+                '{"reviewer_kind":"worker_self_review","summary":"ok",'
+                '"confidence":0.8,"outcome":"no_findings","findings":[]}'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    adapter = GeminiCliRuntimeAdapter()
+    step = adapter.next_step(
+        [],
+        prompt_override="Review these edits and return ReviewResult JSON only.",
+    )
+
+    assert step.kind == "final"
+    assert step.final_output is not None
+    assert '"reviewer_kind":"worker_self_review"' in step.final_output
+    assert recorded["input"] == "Review these edits and return ReviewResult JSON only."
+
+
 def test_gemini_adapter_from_env_maps_env_vars() -> None:
     """Environment variables should map into the adapter settings."""
     adapter = GeminiCliRuntimeAdapter.from_env(

@@ -206,7 +206,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
     def _build_command(
         self,
         *,
-        output_schema_path: Path,
+        output_schema_path: Path | None,
         output_message_path: Path,
         working_directory: Path | None = None,
     ) -> list[str]:
@@ -219,14 +219,14 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
             self.sandbox_mode,
             "--color",
             "never",
-            "--output-schema",
-            str(output_schema_path),
             "--output-last-message",
             str(output_message_path),
             "--ephemeral",
             "-C",
             str(working_directory or self.working_directory),
         ]
+        if output_schema_path is not None:
+            command.extend(["--output-schema", str(output_schema_path)])
         if self.model is not None:
             command.extend(["--model", self.model])
         if self.profile is not None:
@@ -241,18 +241,28 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         messages: Sequence[CliRuntimeMessage],
         *,
         system_prompt: str | None = None,
+        prompt_override: str | None = None,
         working_directory: Path | None = None,
     ) -> CliRuntimeStep:
         """Ask the Codex CLI for the next runtime step."""
-        prompt = _build_adapter_prompt(messages, system_prompt=system_prompt)
+        override_prompt = (
+            prompt_override.strip() if prompt_override and prompt_override.strip() else None
+        )
+        prompt = (
+            override_prompt
+            if override_prompt is not None
+            else _build_adapter_prompt(messages, system_prompt=system_prompt)
+        )
         with tempfile.TemporaryDirectory(prefix="code-agent-codex-step-") as temp_dir_name:
             temp_dir = Path(temp_dir_name)
-            schema_path = temp_dir / "cli_runtime_step.schema.json"
             output_message_path = temp_dir / "last_message.json"
-            schema_path.write_text(
-                json.dumps(_codex_output_schema(), indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
+            schema_path: Path | None = None
+            if override_prompt is None:
+                schema_path = temp_dir / "cli_runtime_step.schema.json"
+                schema_path.write_text(
+                    json.dumps(_codex_output_schema(), indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
 
             try:
                 completed = subprocess.run(
@@ -299,6 +309,17 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
                     f"stdout: {_truncate_detail(completed.stdout)} "
                     f"stderr: {_truncate_detail(completed.stderr)}"
                 )
+
+            if override_prompt is not None:
+                try:
+                    return CliRuntimeStep.model_validate_json(raw_output)
+                except Exception:
+                    return CliRuntimeStep(
+                        kind="final",
+                        final_output=raw_output,
+                        tool_name=None,
+                        tool_input=None,
+                    )
 
             try:
                 return CliRuntimeStep.model_validate_json(raw_output)

@@ -51,15 +51,18 @@ class _ScriptedAdapter:
     def __init__(self, steps: list[CliRuntimeStep]) -> None:
         self._steps = list(steps)
         self.calls: list[list[CliRuntimeMessage]] = []
+        self.prompt_overrides: list[str | None] = []
 
     def next_step(
         self,
         messages: list[CliRuntimeMessage],
         *,
         system_prompt: str | None = None,
+        prompt_override: str | None = None,
         working_directory: Path | None = None,
     ) -> CliRuntimeStep:
         self.calls.append(list(messages))
+        self.prompt_overrides.append(prompt_override)
         if not self._steps:
             raise AssertionError("Adapter received more turns than expected.")
         return self._steps.pop(0)
