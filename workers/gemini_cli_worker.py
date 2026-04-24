@@ -381,6 +381,11 @@ class GeminiCliWorker(Worker):
             )
             granted_permission = granted_permission_from_constraints(request.constraints)
             bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
+            fallback_command_template = (
+                request.constraints.get("post_run_lint_format_command")
+                if isinstance(request.constraints.get("post_run_lint_format_command"), str)
+                else None
+            )
             system_prompt = (
                 system_prompt_override
                 if system_prompt_override is not None
@@ -413,11 +418,7 @@ class GeminiCliWorker(Worker):
                     repo_path_for_detection=workspace.repo_path,
                     repo_working_directory=Path(container.working_dir),
                     timeout_seconds=runtime_settings.command_timeout_seconds,
-                    fallback_command_template=request.constraints.get(
-                        "post_run_lint_format_command"
-                    )
-                    if isinstance(request.constraints.get("post_run_lint_format_command"), str)
-                    else None,
+                    fallback_command_template=fallback_command_template,
                 )
             )
             review_result: ReviewResult | None = None
@@ -519,13 +520,7 @@ class GeminiCliWorker(Worker):
                             repo_working_directory=Path(container.working_dir),
                             existing_files_changed=files_changed,
                             timeout_seconds=runtime_settings.command_timeout_seconds,
-                            fallback_command_template=request.constraints.get(
-                                "post_run_lint_format_command"
-                            )
-                            if isinstance(
-                                request.constraints.get("post_run_lint_format_command"), str
-                            )
-                            else None,
+                            fallback_command_template=fallback_command_template,
                         )
                     )
 
