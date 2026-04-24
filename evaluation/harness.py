@@ -153,11 +153,6 @@ def normalize_path_for_scoring(raw_path: str) -> str:
     return normalized
 
 
-def _normalize_path_for_scoring(raw_path: str) -> str:
-    """Backward-compatible alias for callers not yet migrated."""
-    return normalize_path_for_scoring(raw_path)
-
-
 def _runner_exception_outcome(case: FrozenTaskCase, exc: Exception) -> WorkerOutcome:
     """Normalize unexpected runner crashes into deterministic failure outcomes."""
     detail = str(exc).strip()
@@ -479,7 +474,14 @@ def _metric_delta_payload(
             # Keep delta signals visible for silent->active reviewer comparisons.
             # Use actionable_rate and delta_reviewed_cases alongside precision to interpret volume.
             treat_missing_as_zero=(
-                metric_field_name in {"precision", "false_discovery_rate", "false_positive_rate"}
+                metric_field_name
+                in {
+                    "precision",
+                    "false_discovery_rate",
+                    "false_positive_rate",
+                    "fix_after_review_success",
+                    "empty_review_correctness",
+                }
             ),
         )
     return payload

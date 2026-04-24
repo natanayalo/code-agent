@@ -1129,6 +1129,76 @@ def test_compare_reports_treats_missing_baseline_precision_as_zero() -> None:
     assert comparison.delta_false_positive_rate == pytest.approx(0.0)
 
 
+def test_compare_reports_treats_missing_fix_and_empty_metrics_as_zero() -> None:
+    baseline_cases = (
+        FrozenTaskCase(
+            case_id="case-1",
+            repo_fixture="fixtures/a",
+            task_text="review case",
+            expectation=TaskExpectation(require_success=False),
+        ),
+    )
+    candidate_cases = (
+        FrozenTaskCase(
+            case_id="case-1",
+            repo_fixture="fixtures/a",
+            task_text="review case",
+            expectation=TaskExpectation(
+                require_success=False,
+                review=ReviewExpectation(
+                    expect_fix_after_review=True,
+                    expected_outcome="no_findings",
+                ),
+            ),
+        ),
+    )
+    report_baseline = asyncio.run(
+        evaluate_suite(
+            suite_name="ab-missing-fix-empty",
+            cases=baseline_cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "case-1": WorkerOutcome(
+                        status="success",
+                        summary="baseline",
+                        review=ReviewOutcome(
+                            findings_count=0,
+                            actionable_findings_count=0,
+                            false_positive_findings_count=0,
+                            fix_after_review_succeeded=True,
+                        ),
+                    )
+                }
+            ),
+        )
+    )
+    report_candidate = asyncio.run(
+        evaluate_suite(
+            suite_name="ab-missing-fix-empty",
+            cases=candidate_cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "case-1": WorkerOutcome(
+                        status="success",
+                        summary="candidate",
+                        review=ReviewOutcome(
+                            findings_count=0,
+                            actionable_findings_count=0,
+                            false_positive_findings_count=0,
+                            fix_after_review_succeeded=True,
+                        ),
+                    )
+                }
+            ),
+        )
+    )
+
+    comparison = compare_reports(baseline=report_baseline, candidate=report_candidate)
+
+    assert comparison.delta_fix_after_review_success == pytest.approx(1.0)
+    assert comparison.delta_empty_review_correctness == pytest.approx(1.0)
+
+
 def test_compare_reports_delta_mapping_covers_all_review_metrics() -> None:
     review_metric_fields = {
         field_name

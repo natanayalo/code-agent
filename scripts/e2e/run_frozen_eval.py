@@ -231,7 +231,10 @@ def _coerce_optional_str(value: object) -> str | None:
 def _coerce_optional_float(value: object) -> float | None:
     if value is None:
         return None
-    return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _coerce_optional_bool(value: object) -> bool | None:

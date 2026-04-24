@@ -318,6 +318,14 @@ def test_report_parser_handles_null_review_count_fields() -> None:
     assert review.false_positive_findings_count == 0
 
 
+def test_coerce_optional_float_returns_none_for_invalid_values() -> None:
+    module = _load_run_frozen_eval_module()
+
+    assert module._coerce_optional_float("1.25") == pytest.approx(1.25)
+    assert module._coerce_optional_float("not-a-float") is None
+    assert module._coerce_optional_float(object()) is None
+
+
 def test_report_parser_rejects_total_case_count_mismatch() -> None:
     module = _load_run_frozen_eval_module()
     payload = {
