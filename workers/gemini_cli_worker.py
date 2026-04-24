@@ -43,7 +43,10 @@ from workers.cli_runtime import (
     settings_from_budget,
 )
 from workers.failure_taxonomy import classify_failure_kind
-from workers.post_run_lint import collect_changed_files_and_apply_post_run_lint_format
+from workers.post_run_lint import (
+    collect_changed_files_and_apply_post_run_lint_format,
+    merge_post_run_lint_results,
+)
 from workers.prompt import build_system_prompt
 from workers.review import ReviewResult
 from workers.self_review import (
@@ -511,7 +514,7 @@ class GeminiCliWorker(Worker):
                     if execution.status != "success":
                         break
 
-                    files_changed, lint_format_result, new_lint_format_artifacts = (
+                    files_changed, new_lint_format_result, new_lint_format_artifacts = (
                         collect_changed_files_and_apply_post_run_lint_format(
                             session=session,
                             execution=execution,
@@ -522,6 +525,10 @@ class GeminiCliWorker(Worker):
                             timeout_seconds=runtime_settings.command_timeout_seconds,
                             fallback_command_template=fallback_command_template,
                         )
+                    )
+                    lint_format_result = merge_post_run_lint_results(
+                        lint_format_result,
+                        new_lint_format_result,
                     )
                     lint_format_artifacts.extend(new_lint_format_artifacts)
 

@@ -13,6 +13,7 @@ from workers.post_run_lint import (
     apply_post_run_lint_format,
     collect_changed_files_and_apply_post_run_lint_format,
     detect_post_run_lint_commands,
+    merge_post_run_lint_results,
     run_post_run_lint,
 )
 
@@ -189,6 +190,37 @@ def test_run_post_run_lint_skips_when_no_command_detected(tmp_path: Path) -> Non
         "artifacts": [],
     }
     assert session.calls == []
+
+
+def test_merge_post_run_lint_results_combines_metadata_across_passes() -> None:
+    """Multiple lint passes should retain a combined metadata trail."""
+    merged = merge_post_run_lint_results(
+        {
+            "ran": True,
+            "status": "passed",
+            "reason": None,
+            "commands": [{"command": "ruff format -- a.py"}],
+            "errors": [],
+            "artifacts": [{"name": "first.log"}],
+        },
+        {
+            "ran": True,
+            "status": "warning",
+            "reason": None,
+            "commands": [{"command": "ruff check --fix -- a.py"}],
+            "errors": ["`ruff check --fix -- a.py` exited with status 1"],
+            "artifacts": [{"name": "second.log"}],
+        },
+    )
+
+    assert merged["ran"] is True
+    assert merged["status"] == "warning"
+    assert merged["commands"] == [
+        {"command": "ruff format -- a.py"},
+        {"command": "ruff check --fix -- a.py"},
+    ]
+    assert merged["errors"] == ["`ruff check --fix -- a.py` exited with status 1"]
+    assert merged["artifacts"] == [{"name": "first.log"}, {"name": "second.log"}]
 
 
 def test_collect_and_lint_skips_collection_when_changed_files_not_expected(

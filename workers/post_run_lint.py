@@ -51,6 +51,64 @@ def _merge_changed_files(existing_files: Sequence[str], new_files: Sequence[str]
     return list(dict.fromkeys([*existing_files, *new_files]))
 
 
+def merge_post_run_lint_results(
+    existing_result: dict[str, Any],
+    new_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge post-run lint metadata from multiple passes into one summary."""
+    if not existing_result:
+        return dict(new_result)
+    if not new_result:
+        return dict(existing_result)
+
+    existing_commands_raw = existing_result.get("commands")
+    new_commands_raw = new_result.get("commands")
+    merged_commands: list[Any] = []
+    if isinstance(existing_commands_raw, list):
+        merged_commands.extend(existing_commands_raw)
+    if isinstance(new_commands_raw, list):
+        merged_commands.extend(new_commands_raw)
+
+    existing_errors_raw = existing_result.get("errors")
+    new_errors_raw = new_result.get("errors")
+    merged_errors: list[Any] = []
+    if isinstance(existing_errors_raw, list):
+        merged_errors.extend(existing_errors_raw)
+    if isinstance(new_errors_raw, list):
+        merged_errors.extend(new_errors_raw)
+
+    existing_artifacts_raw = existing_result.get("artifacts")
+    new_artifacts_raw = new_result.get("artifacts")
+    merged_artifacts: list[Any] = []
+    if isinstance(existing_artifacts_raw, list):
+        merged_artifacts.extend(existing_artifacts_raw)
+    if isinstance(new_artifacts_raw, list):
+        merged_artifacts.extend(new_artifacts_raw)
+
+    statuses = [status for status in (existing_result.get("status"), new_result.get("status"))]
+    if "warning" in statuses:
+        merged_status = "warning"
+    elif "passed" in statuses:
+        merged_status = "passed"
+    elif "skipped" in statuses:
+        merged_status = "skipped"
+    else:
+        merged_status = "skipped"
+
+    merged_reason = new_result.get("reason")
+    if merged_reason in (None, ""):
+        merged_reason = existing_result.get("reason")
+
+    return {
+        "ran": bool(existing_result.get("ran") or new_result.get("ran")),
+        "status": merged_status,
+        "reason": merged_reason,
+        "commands": merged_commands,
+        "errors": merged_errors,
+        "artifacts": merged_artifacts,
+    }
+
+
 def _python_files_only(files_changed: Sequence[str]) -> list[str]:
     """Filter to Python paths for ruff-based lint/format."""
     return [path for path in files_changed if path.endswith((".py", ".pyi"))]

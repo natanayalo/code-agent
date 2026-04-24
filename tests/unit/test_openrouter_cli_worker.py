@@ -407,13 +407,18 @@ def test_openrouter_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_p
         tool_registry=DEFAULT_TOOL_REGISTRY,
     )
 
-    lint_result = {"ran": True, "status": "passed", "errors": [], "commands": [], "artifacts": []}
     with patch(
         "workers.openrouter_cli_worker.collect_changed_files_and_apply_post_run_lint_format",
         side_effect=[
             (
                 ["workers/openrouter_cli_worker.py"],
-                lint_result,
+                {
+                    "ran": True,
+                    "status": "passed",
+                    "errors": [],
+                    "commands": [],
+                    "artifacts": [],
+                },
                 [
                     ArtifactReference(
                         name="lint-first",
@@ -424,7 +429,13 @@ def test_openrouter_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_p
             ),
             (
                 ["workers/openrouter_cli_worker.py", "workers/gemini_cli_worker.py"],
-                lint_result,
+                {
+                    "ran": True,
+                    "status": "warning",
+                    "errors": ["second pass warning"],
+                    "commands": [],
+                    "artifacts": [],
+                },
                 [
                     ArtifactReference(
                         name="lint-second",
@@ -442,6 +453,9 @@ def test_openrouter_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_p
     artifact_uris = {artifact.uri for artifact in result.artifacts}
     assert "artifacts/lint-first.log" in artifact_uris
     assert "artifacts/lint-second.log" in artifact_uris
+    assert result.budget_usage is not None
+    assert result.budget_usage["post_run_lint_format"]["status"] == "warning"
+    assert result.budget_usage["post_run_lint_format"]["errors"] == ["second pass warning"]
 
 
 def test_openrouter_cli_worker_self_review_exhausts_budget(tmp_path: Path) -> None:

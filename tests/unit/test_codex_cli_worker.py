@@ -751,13 +751,18 @@ def test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_path: 
         session_factory=lambda started_container, **_: session,
     )
 
-    lint_result = {"ran": True, "status": "passed", "errors": [], "commands": [], "artifacts": []}
     with patch(
         "workers.codex_cli_worker.collect_changed_files_and_apply_post_run_lint_format",
         side_effect=[
             (
                 ["workers/codex_cli_worker.py"],
-                lint_result,
+                {
+                    "ran": True,
+                    "status": "passed",
+                    "errors": [],
+                    "commands": [],
+                    "artifacts": [],
+                },
                 [
                     ArtifactReference(
                         name="lint-first",
@@ -768,7 +773,13 @@ def test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_path: 
             ),
             (
                 ["workers/codex_cli_worker.py", "workers/gemini_cli_worker.py"],
-                lint_result,
+                {
+                    "ran": True,
+                    "status": "warning",
+                    "errors": ["second pass warning"],
+                    "commands": [],
+                    "artifacts": [],
+                },
                 [
                     ArtifactReference(
                         name="lint-second",
@@ -796,6 +807,8 @@ def test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_path: 
     assert result.review_result is not None
     assert result.review_result.outcome == "no_findings"
     assert result.budget_usage is not None
+    assert result.budget_usage["post_run_lint_format"]["status"] == "warning"
+    assert result.budget_usage["post_run_lint_format"]["errors"] == ["second pass warning"]
 
 
 def test_codex_cli_worker_respects_zero_fix_retry_limit(tmp_path: Path) -> None:
