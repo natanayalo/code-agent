@@ -270,10 +270,11 @@ def test_collect_and_lint_uses_repo_path_fallback_when_session_collect_returns_e
             repo_path_for_detection=tmp_path,
             repo_working_directory=repo_dir,
             timeout_seconds=8,
+            existing_files_changed=["README.md"],
         )
     )
 
-    assert files_changed == ["workers/codex_cli_worker.py"]
+    assert files_changed == ["README.md", "workers/codex_cli_worker.py"]
     assert lint_result["ran"] is True
     assert lint_result["status"] == "passed"
     assert len(execution.commands_run) == 2
@@ -349,13 +350,17 @@ def test_apply_post_run_lint_refresh_uses_fallback_when_session_collect_is_empty
     files_changed, lint_result, lint_artifacts = apply_post_run_lint_format(
         session=session,
         execution=execution,
-        files_changed=["workers/codex_cli_worker.py"],
+        files_changed=["README.md", "workers/codex_cli_worker.py"],
         repo_path_for_detection=tmp_path,
         repo_working_directory=repo_dir,
         timeout_seconds=8,
     )
 
-    assert files_changed == ["workers/codex_cli_worker.py", "workers/gemini_cli_worker.py"]
+    assert files_changed == [
+        "README.md",
+        "workers/codex_cli_worker.py",
+        "workers/gemini_cli_worker.py",
+    ]
     assert lint_result["status"] == "passed"
     assert len(lint_artifacts) == 0
 

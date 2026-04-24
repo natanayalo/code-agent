@@ -46,6 +46,18 @@ def _collect_changed_files_with_fallback(
     )
 
 
+def _merge_changed_files(existing_files: Sequence[str], new_files: Sequence[str]) -> list[str]:
+    """Merge changed-file lists with stable order and de-duplication."""
+    merged: list[str] = []
+    seen: set[str] = set()
+    for path in [*existing_files, *new_files]:
+        if path in seen:
+            continue
+        seen.add(path)
+        merged.append(path)
+    return merged
+
+
 def _python_files_only(files_changed: Sequence[str]) -> list[str]:
     """Filter to Python paths for ruff-based lint/format."""
     return [path for path in files_changed if path.endswith((".py", ".pyi"))]
@@ -342,7 +354,7 @@ def apply_post_run_lint_format(
             if isinstance(artifact, dict)
         ]
 
-    updated_files_changed = files_changed
+    updated_files_changed = list(files_changed)
     if lint_format_result.get("ran"):
         refreshed_files_changed = _collect_changed_files_with_fallback(
             session=session,
@@ -351,7 +363,10 @@ def apply_post_run_lint_format(
             timeout_seconds=timeout_seconds,
         )
         if refreshed_files_changed:
-            updated_files_changed = refreshed_files_changed
+            updated_files_changed = _merge_changed_files(
+                updated_files_changed,
+                refreshed_files_changed,
+            )
 
     return updated_files_changed, lint_format_result, lint_format_artifacts
 
@@ -377,7 +392,7 @@ def collect_changed_files_and_apply_post_run_lint_format(
             timeout_seconds=timeout_seconds,
         )
         if collected_files:
-            files_changed = collected_files
+            files_changed = _merge_changed_files(files_changed, collected_files)
 
     return apply_post_run_lint_format(
         session=session,

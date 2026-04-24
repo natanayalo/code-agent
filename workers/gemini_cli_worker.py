@@ -511,7 +511,7 @@ class GeminiCliWorker(Worker):
                     if execution.status != "success":
                         break
 
-                    files_changed, lint_format_result, lint_format_artifacts = (
+                    files_changed, lint_format_result, new_lint_format_artifacts = (
                         collect_changed_files_and_apply_post_run_lint_format(
                             session=session,
                             execution=execution,
@@ -523,6 +523,7 @@ class GeminiCliWorker(Worker):
                             fallback_command_template=fallback_command_template,
                         )
                     )
+                    lint_format_artifacts.extend(new_lint_format_artifacts)
 
             result = _worker_result_from_execution(
                 workspace,
