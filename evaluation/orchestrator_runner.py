@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import logging
 
-from evaluation.harness import EvaluationRunner, FrozenTaskCase, ReviewOutcome, WorkerOutcome
+from evaluation.harness import (
+    EvaluationRunner,
+    FrozenTaskCase,
+    ReviewOutcome,
+    WorkerOutcome,
+    normalize_path_for_scoring,
+)
 from orchestrator import OrchestratorState, build_orchestrator_graph
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from workers import TestResult, Worker, WorkerRequest, WorkerResult
@@ -126,7 +132,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
             # this is not a strict semantic "incorrect finding" measurement.
             actionable_fingerprint_set = {
                 (
-                    finding.file_path,
+                    normalize_path_for_scoring(finding.file_path),
                     finding.title,
                     finding.line_start,
                     finding.line_end,
@@ -135,7 +141,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
             }
             suppressed_fingerprint_set = {
                 (
-                    suppressed.finding.file_path,
+                    normalize_path_for_scoring(suppressed.finding.file_path),
                     suppressed.finding.title,
                     suppressed.finding.line_start,
                     suppressed.finding.line_end,

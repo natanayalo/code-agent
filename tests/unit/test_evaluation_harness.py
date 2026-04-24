@@ -598,7 +598,7 @@ def test_orchestrator_runner_deduplicates_overlapping_suppressed_findings() -> N
                                 "severity": "low",
                                 "category": "style",
                                 "confidence": 0.6,
-                                "file_path": "src/app.py",
+                                "file_path": "./src/app.py",
                                 "line_start": 12,
                                 "line_end": 13,
                                 "title": "Missing guard",

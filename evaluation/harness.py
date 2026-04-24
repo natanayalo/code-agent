@@ -141,12 +141,17 @@ class EvaluationRunner(Protocol):
         """Execute one case and return the normalized outcome."""
 
 
-def _normalize_path_for_scoring(raw_path: str) -> str:
+def normalize_path_for_scoring(raw_path: str) -> str:
     """Normalize file paths for robust cross-environment comparison."""
     normalized = PurePosixPath(raw_path.replace("\\", "/")).as_posix()
     if normalized.startswith("./"):
         return normalized[2:]
     return normalized
+
+
+def _normalize_path_for_scoring(raw_path: str) -> str:
+    """Backward-compatible alias for callers not yet migrated."""
+    return normalize_path_for_scoring(raw_path)
 
 
 def _runner_exception_outcome(case: FrozenTaskCase, exc: Exception) -> WorkerOutcome:
@@ -277,9 +282,9 @@ def _score_case(case: FrozenTaskCase, outcome: WorkerOutcome) -> CaseRunResult:
         else:
             failures.append("tests were expected to pass")
 
-    changed_files = {_normalize_path_for_scoring(path) for path in outcome.files_changed}
+    changed_files = {normalize_path_for_scoring(path) for path in outcome.files_changed}
     for required_file in case.expectation.required_files_changed:
-        if _normalize_path_for_scoring(required_file) in changed_files:
+        if normalize_path_for_scoring(required_file) in changed_files:
             points += 1
         else:
             failures.append(f"required file was not changed: {required_file}")
@@ -467,6 +472,8 @@ def _metric_delta_payload(
         payload[delta_field_name] = _delta_metric(
             candidate_value,
             baseline_value,
+            # Keep delta signals visible for silent->active reviewer comparisons.
+            # Use actionable_rate and delta_reviewed_cases alongside precision to interpret volume.
             treat_missing_as_zero=(
                 metric_field_name in {"precision", "false_discovery_rate", "false_positive_rate"}
             ),

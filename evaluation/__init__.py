@@ -15,6 +15,7 @@ from evaluation.harness import (
     WorkerOutcome,
     compare_reports,
     evaluate_suite,
+    normalize_path_for_scoring,
     write_report,
 )
 from evaluation.orchestrator_runner import OrchestratorReplayRunner
@@ -45,5 +46,6 @@ __all__ = [
     "evaluate_suite",
     "load_frozen_suite",
     "load_replay_outcomes",
+    "normalize_path_for_scoring",
     "write_report",
 ]
