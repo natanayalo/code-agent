@@ -24,6 +24,28 @@ _DEFAULT_FALLBACK_TEMPLATE_KEY = "{files}"
 _MAKEFILE_CANDIDATES = ("GNUmakefile", "makefile", "Makefile")
 
 
+def _collect_changed_files_with_fallback(
+    *,
+    session: ShellSessionProtocol,
+    repo_working_directory: Path,
+    repo_path_for_detection: Path,
+    timeout_seconds: int,
+) -> list[str]:
+    """Collect changed files from the session, falling back to host-side git status."""
+    changed_files = collect_changed_files(
+        session,
+        working_directory=repo_working_directory,
+        timeout_seconds=timeout_seconds,
+    )
+    if changed_files:
+        return changed_files
+
+    return collect_changed_files_from_repo_path(
+        repo_path_for_detection,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def _python_files_only(files_changed: Sequence[str]) -> list[str]:
     """Filter to Python paths for ruff-based lint/format."""
     return [path for path in files_changed if path.endswith((".py", ".pyi"))]
@@ -322,9 +344,10 @@ def apply_post_run_lint_format(
 
     updated_files_changed = files_changed
     if lint_format_result.get("ran"):
-        refreshed_files_changed = collect_changed_files(
-            session,
-            working_directory=repo_working_directory,
+        refreshed_files_changed = _collect_changed_files_with_fallback(
+            session=session,
+            repo_working_directory=repo_working_directory,
+            repo_path_for_detection=repo_path_for_detection,
             timeout_seconds=timeout_seconds,
         )
         if refreshed_files_changed:
@@ -347,16 +370,12 @@ def collect_changed_files_and_apply_post_run_lint_format(
     """Collect changed files (with fallback) and run post-run lint/format."""
     files_changed = list(existing_files_changed or [])
     if expect_changed_files_artifact:
-        collected_files = collect_changed_files(
-            session,
-            working_directory=repo_working_directory,
+        collected_files = _collect_changed_files_with_fallback(
+            session=session,
+            repo_working_directory=repo_working_directory,
+            repo_path_for_detection=repo_path_for_detection,
             timeout_seconds=timeout_seconds,
         )
-        if not collected_files:
-            collected_files = collect_changed_files_from_repo_path(
-                repo_path_for_detection,
-                timeout_seconds=timeout_seconds,
-            )
         if collected_files:
             files_changed = collected_files
 

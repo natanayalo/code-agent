@@ -10,6 +10,7 @@ import pytest
 from sandbox import DockerShellCommandResult
 from sandbox.workspace import SandboxArtifact
 from workers.post_run_lint import (
+    apply_post_run_lint_format,
     collect_changed_files_and_apply_post_run_lint_format,
     detect_post_run_lint_commands,
     run_post_run_lint,
@@ -310,3 +311,97 @@ def test_collect_and_lint_preserves_existing_files_when_collectors_return_empty(
     assert lint_result["status"] == "skipped"
     assert lint_artifacts == []
     assert session.calls == []
+
+
+def test_apply_post_run_lint_refresh_uses_fallback_when_session_collect_is_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Post-lint refresh should fall back to host git status when session collection is empty."""
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\nline-length = 100\n", encoding="utf-8")
+    repo_dir = Path("/workspace/repo")
+    format_command = "cd /workspace/repo && ruff format -- workers/codex_cli_worker.py"
+    check_command = "cd /workspace/repo && ruff check --fix -- workers/codex_cli_worker.py"
+    session = _FakeSession(
+        {
+            format_command: DockerShellCommandResult(
+                command=format_command,
+                output="formatted",
+                exit_code=0,
+                duration_seconds=0.1,
+            ),
+            check_command: DockerShellCommandResult(
+                command=check_command,
+                output="checked",
+                exit_code=0,
+                duration_seconds=0.1,
+            ),
+        }
+    )
+    execution = SimpleNamespace(commands_run=[])
+
+    monkeypatch.setattr("workers.post_run_lint.collect_changed_files", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        "workers.post_run_lint.collect_changed_files_from_repo_path",
+        lambda *args, **kwargs: ["workers/codex_cli_worker.py", "workers/gemini_cli_worker.py"],
+    )
+
+    files_changed, lint_result, lint_artifacts = apply_post_run_lint_format(
+        session=session,
+        execution=execution,
+        files_changed=["workers/codex_cli_worker.py"],
+        repo_path_for_detection=tmp_path,
+        repo_working_directory=repo_dir,
+        timeout_seconds=8,
+    )
+
+    assert files_changed == ["workers/codex_cli_worker.py", "workers/gemini_cli_worker.py"]
+    assert lint_result["status"] == "passed"
+    assert len(lint_artifacts) == 0
+
+
+def test_apply_post_run_lint_refresh_preserves_existing_files_when_collectors_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Post-lint refresh should keep prior changed files when both collectors return empty."""
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\nline-length = 100\n", encoding="utf-8")
+    repo_dir = Path("/workspace/repo")
+    format_command = "cd /workspace/repo && ruff format -- workers/codex_cli_worker.py"
+    check_command = "cd /workspace/repo && ruff check --fix -- workers/codex_cli_worker.py"
+    session = _FakeSession(
+        {
+            format_command: DockerShellCommandResult(
+                command=format_command,
+                output="formatted",
+                exit_code=0,
+                duration_seconds=0.1,
+            ),
+            check_command: DockerShellCommandResult(
+                command=check_command,
+                output="checked",
+                exit_code=0,
+                duration_seconds=0.1,
+            ),
+        }
+    )
+    execution = SimpleNamespace(commands_run=[])
+
+    monkeypatch.setattr("workers.post_run_lint.collect_changed_files", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        "workers.post_run_lint.collect_changed_files_from_repo_path",
+        lambda *args, **kwargs: [],
+    )
+
+    files_changed, lint_result, lint_artifacts = apply_post_run_lint_format(
+        session=session,
+        execution=execution,
+        files_changed=["workers/codex_cli_worker.py"],
+        repo_path_for_detection=tmp_path,
+        repo_working_directory=repo_dir,
+        timeout_seconds=8,
+    )
+
+    assert files_changed == ["workers/codex_cli_worker.py"]
+    assert lint_result["status"] == "passed"
+    assert len(lint_artifacts) == 0
