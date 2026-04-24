@@ -113,6 +113,8 @@ Rules for this mode:
 - Make comment bodies directly actionable from thread context alone.
 - Include minimal safe fix guidance in each posted comment.
 - If no substantial findings are present, do not post noise comments.
+- Keep this as the default reporting mode for PR review flows.
+- Do not switch to JSON payload output unless the caller explicitly requires machine-readable output.
 
 ### Posting GitHub Review Comments (Examples)
 
@@ -150,29 +152,6 @@ GH_PAGER=cat gh api \
   -f body="High-confidence actionable findings from reviewer pass." \
   -f event="COMMENT" \
   -f comments='[{"path":"orchestrator/handlers/webhook.py","line":142,"side":"RIGHT","body":"Missing idempotency guard before side effects."}]'
-```
-
-If the caller explicitly requests structured JSON, return this schema:
-
-```json
-{
-  "summary": "string",
-  "findings": [
-    {
-      "category": "correctness|security|reliability|performance|maintainability|testing|ops",
-      "severity": "critical|high|medium|low",
-      "confidence": 0.0,
-      "file": "string",
-      "line_start": 0,
-      "line_end": 0,
-      "title": "string",
-      "why_it_matters": "string",
-      "evidence": "string",
-      "minimal_fix": "string",
-      "comment_body": "string"
-    }
-  ]
-}
 ```
 
 ## Example Finding Shape
