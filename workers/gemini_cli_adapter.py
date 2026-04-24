@@ -233,10 +233,18 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         messages: Sequence[CliRuntimeMessage],
         *,
         system_prompt: str | None = None,
+        prompt_override: str | None = None,
         working_directory: Path | None = None,  # noqa: ARG002 — context only, not used by CLI
     ) -> CliRuntimeStep:
         """Ask the Gemini CLI for the next runtime step."""
-        prompt = _build_adapter_prompt(messages, system_prompt=system_prompt)
+        override_prompt = (
+            prompt_override.strip() if prompt_override and prompt_override.strip() else None
+        )
+        prompt = (
+            override_prompt
+            if override_prompt is not None
+            else _build_adapter_prompt(messages, system_prompt=system_prompt)
+        )
         command = self._build_command()
 
         try:
@@ -266,7 +274,31 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 f"stdout: {_truncate_detail(completed.stdout)}"
             )
 
-        raw_json = _extract_json(completed.stdout)
+        raw_output = completed.stdout.strip()
+        if not raw_output:
+            raise RuntimeError("Gemini CLI adapter returned an empty response body.")
+
+        if override_prompt is not None:
+            try:
+                raw_json = _extract_json(raw_output)
+            except RuntimeError:
+                return CliRuntimeStep(
+                    kind="final",
+                    final_output=raw_output,
+                    tool_name=None,
+                    tool_input=None,
+                )
+            try:
+                return CliRuntimeStep.model_validate_json(raw_json)
+            except Exception:
+                return CliRuntimeStep(
+                    kind="final",
+                    final_output=raw_json,
+                    tool_name=None,
+                    tool_input=None,
+                )
+
+        raw_json = _extract_json(raw_output)
         try:
             return CliRuntimeStep.model_validate_json(raw_json)
         except Exception as exc:

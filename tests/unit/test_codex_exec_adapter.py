@@ -84,7 +84,7 @@ def test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call(
     assert isinstance(recorded["env"], dict)
     command = recorded["command"]
     assert isinstance(command, list)
-    assert command[0:8] == [
+    assert command[0:7] == [
         "/opt/codex",
         "exec",
         "--skip-git-repo-check",
@@ -92,8 +92,8 @@ def test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call(
         "read-only",
         "--color",
         "never",
-        "--output-schema",
     ]
+    assert "--output-schema" in command
     assert "--output-last-message" in command
     assert "--ephemeral" in command
     assert command[command.index("-C") + 1] == str(tmp_path)
@@ -180,3 +180,47 @@ def test_codex_prompt_keeps_adapter_rules_when_worker_system_prompt_is_provided(
     assert "Reviewer instructions" in prompt
     assert "Choose one of two actions:" in prompt
     assert "Use only tool names listed in the system prompt's Available Tools section." in prompt
+
+
+def test_codex_exec_adapter_prompt_override_bypasses_schema_wrapping(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Prompt overrides should bypass runtime-loop schema shaping and return final output."""
+    recorded: dict[str, object] = {}
+
+    def fake_run(
+        command: Sequence[str],
+        *,
+        input: str,
+        text: bool,
+        capture_output: bool,
+        check: bool,
+        timeout: int,
+        env: dict[str, str] | None,
+    ) -> subprocess.CompletedProcess[str]:
+        recorded["command"] = list(command)
+        recorded["input"] = input
+        output_path = Path(command[command.index("--output-last-message") + 1])
+        output_path.write_text(
+            '{"reviewer_kind":"worker_self_review","summary":"ok","outcome":"no_findings","confidence":0.7,"findings":[]}',
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    adapter = CodexExecCliRuntimeAdapter(working_directory=tmp_path)
+    step = adapter.next_step(
+        [],
+        prompt_override="Review this diff and return ReviewResult JSON.",
+    )
+
+    assert step.kind == "final"
+    assert step.final_output is not None
+    assert '"reviewer_kind":"worker_self_review"' in step.final_output
+    command = recorded["command"]
+    assert isinstance(command, list)
+    assert "--output-last-message" in command
+    assert "--output-schema" not in command
+    assert recorded["input"] == "Review this diff and return ReviewResult JSON."

@@ -300,6 +300,52 @@ def test_openrouter_adapter_next_step_wraps_non_runtime_json_as_final(
     assert '"reviewer_kind":"worker_self_review"' in step.final_output
 
 
+def test_openrouter_adapter_prompt_override_bypasses_runtime_prompt_shaping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prompt overrides should send raw prompt text and wrap review JSON as final."""
+
+    fake_client: _FakeOpenAI | None = None
+
+    class _ReviewJsonResponseOpenAI(_FakeOpenAI):
+        def _create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=(
+                                '{"reviewer_kind":"worker_self_review","summary":"ok",'
+                                '"confidence":0.8,"outcome":"no_findings","findings":[]}'
+                            )
+                        )
+                    )
+                ]
+            )
+
+    def _fake_openai(**kwargs):
+        nonlocal fake_client
+        fake_client = _ReviewJsonResponseOpenAI(**kwargs)
+        return fake_client
+
+    monkeypatch.setattr("workers.openrouter_adapter.OpenAI", _fake_openai)
+    adapter = OpenRouterCliRuntimeAdapter(api_key="test-key")
+    step = adapter.next_step(
+        [],
+        prompt_override="Review these edits and return ReviewResult JSON only.",
+    )
+
+    assert step.kind == "final"
+    assert step.final_output is not None
+    assert '"reviewer_kind":"worker_self_review"' in step.final_output
+    assert fake_client is not None
+    assert len(fake_client.calls) == 1
+    assert (
+        fake_client.calls[0]["messages"][0]["content"]
+        == "Review these edits and return ReviewResult JSON only."
+    )
+
+
 def test_message_content_to_text_joins_text_blocks() -> None:
     """Adapter content normalization should join text blocks from list content."""
     content = [

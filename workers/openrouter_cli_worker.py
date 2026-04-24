@@ -37,7 +37,6 @@ from workers.base import ArtifactReference, Worker, WorkerRequest, WorkerResult
 from workers.cli_runtime import (
     CliRuntimeAdapter,
     CliRuntimeExecutionResult,
-    CliRuntimeMessage,
     CliRuntimeSettings,
     ShellSessionProtocol,
     collect_changed_files,
@@ -449,7 +448,8 @@ class OpenRouterCliWorker(Worker):
 
                     try:
                         review_step = self.runtime_adapter.next_step(
-                            (CliRuntimeMessage(role="system", content=review_prompt),),
+                            (),
+                            prompt_override=review_prompt,
                             working_directory=workspace.repo_path,
                         )
                     except Exception as exc:

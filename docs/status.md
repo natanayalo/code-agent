@@ -98,11 +98,11 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-123: Add shared adapter prompt override for review-mode calls. (unpublished)
 
 ## Next
 
-- T-123: Add shared adapter prompt override for review-mode calls.
+- None
 
 ## Blocked
 
