@@ -125,8 +125,15 @@ def _to_task_submission(msg: TelegramMessage, text: str) -> TaskSubmission:
         external_thread_id=external_thread_id,
         display_name=_build_display_name(msg.from_),
     )
+
+    # T-044: Allow a default repo URL for Telegram tasks via environment variable.
+    import os
+
+    default_repo = os.environ.get("CODE_AGENT_TELEGRAM_DEFAULT_REPO_URL")
+
     return TaskSubmission(
         task_text=text,
+        repo_url=default_repo,
         session=session,
     )
 

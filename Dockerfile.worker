@@ -45,4 +45,4 @@ COPY . /app
 
 RUN poetry install --only main --no-interaction --no-ansi
 
-CMD ["python", "-m", "apps.worker.main"]
+CMD ["/usr/local/bin/python", "-m", "apps.worker.main"]

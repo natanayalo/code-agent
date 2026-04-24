@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import shlex
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -19,6 +21,8 @@ _DETAIL_PREVIEW_CHARACTERS: Final[int] = 1200
 GEMINI_EXECUTABLE_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_CLI_BIN"
 GEMINI_MODEL_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_MODEL"
 GEMINI_TIMEOUT_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TIMEOUT_SECONDS"
+
+logger = logging.getLogger(__name__)
 
 
 def _coerce_positive_int(value: object, *, default: int) -> int:
@@ -78,7 +82,10 @@ def _build_adapter_prompt(
         CliRuntimeStep(
             kind="tool_call",
             tool_name="<registered tool name>",
-            tool_input="<tool input string>",
+            tool_input=(
+                '<tool input as a single escaped string, e.g. "ls -la" or '
+                '"{\\"op\\":\\"status\\"}" >'
+            ),
             final_output=None,
         ).model_dump_json(),
         CliRuntimeStep(
@@ -88,7 +95,10 @@ def _build_adapter_prompt(
             tool_input=None,
         ).model_dump_json(),
         "Rules:",
+        "- `kind` must be EXACTLY 'tool_call' or 'final'. NEVER use other values like 'tool_code'.",
         "- Use only tool names listed in the system prompt's Available Tools section.",
+        "- `tool_input` MUST be a string. If the tool expects JSON, you must encode "
+        "that JSON as a string inside the tool_input field.",
         "- For `execute_bash`, return one focused shell command as the tool_input string.",
         (
             "- For `execute_git`, return the tool_input as a compact JSON object encoded "
@@ -218,14 +228,11 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         )
 
     def _build_command(self) -> list[str]:
-        """Build the gemini CLI argv for one adapter turn.
-
-        The prompt is supplied via stdin. The ``--model`` flag is added when a
-        model override is configured.
-        """
-        command = [self.executable]
+        """Build the gemini CLI argv for one adapter turn."""
+        command = [self.executable, "chat"]
         if self.model is not None:
             command.extend(["--model", self.model])
+        command.extend(["-o", "json", "--accept-raw-output-risk", "--raw-output"])
         return command
 
     def next_step(
@@ -247,20 +254,28 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         )
         command = self._build_command()
 
+        logger.debug(
+            "Running Gemini CLI",
+            extra={
+                "command": shlex.join(command),
+                "working_directory": str(working_directory),
+                "prompt_length": len(prompt),
+            },
+        )
+
         try:
             completed = subprocess.run(
                 command,
                 input=prompt,
-                text=True,
                 capture_output=True,
-                check=False,
-                timeout=self.request_timeout_seconds,
+                text=True,
+                cwd=working_directory,
                 env=self.env,
+                timeout=self.request_timeout_seconds,
             )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(
-                "Gemini CLI adapter timed out after "
-                f"{self.request_timeout_seconds}s while selecting the next runtime step."
+                f"Gemini CLI adapter timed out after {self.request_timeout_seconds}s."
             ) from exc
         except OSError as exc:
             raise RuntimeError(
@@ -274,14 +289,27 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 f"stdout: {_truncate_detail(completed.stdout)}"
             )
 
-        raw_output = completed.stdout.strip()
+        raw_output = completed.stdout
+        # If we asked for JSON output, try to parse the structured response first.
+        try:
+            structured = json.loads(raw_output)
+            if isinstance(structured, dict) and "response" in structured:
+                raw_output = str(structured["response"])
+        except json.JSONDecodeError:
+            # Fall back to raw output if it wasn't valid JSON (e.g. CLI warnings)
+            pass
+        raw_output = raw_output.strip()
         if not raw_output:
             raise RuntimeError("Gemini CLI adapter returned an empty response body.")
 
         if override_prompt is not None:
             try:
                 raw_json = _extract_json(raw_output)
-            except RuntimeError:
+                parsed = json.loads(raw_json)
+                if isinstance(parsed, dict) and isinstance(parsed.get("tool_input"), dict):
+                    parsed["tool_input"] = json.dumps(parsed["tool_input"])
+                    raw_json = json.dumps(parsed)
+            except (RuntimeError, json.JSONDecodeError):
                 return CliRuntimeStep(
                     kind="final",
                     final_output=raw_output,
@@ -298,11 +326,29 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                     tool_input=None,
                 )
 
-        raw_json = _extract_json(raw_output)
+        try:
+            raw_json = _extract_json(raw_output)
+            parsed = json.loads(raw_json)
+            if isinstance(parsed, dict) and isinstance(parsed.get("tool_input"), dict):
+                parsed["tool_input"] = json.dumps(parsed["tool_input"])
+                raw_json = json.dumps(parsed)
+        except (RuntimeError, json.JSONDecodeError):
+            # If we can't extract or parse JSON, treat the entire output as final_output.
+            return CliRuntimeStep(
+                kind="final",
+                final_output=raw_output,
+                tool_name=None,
+                tool_input=None,
+            )
+
         try:
             return CliRuntimeStep.model_validate_json(raw_json)
-        except Exception as exc:
-            raise RuntimeError(
-                "Gemini CLI adapter returned a response that did not match "
-                f"CliRuntimeStep: {_truncate_detail(raw_json)}"
-            ) from exc
+        except Exception:
+            # Fall back to a 'final' step if the JSON is valid but not a CliRuntimeStep.
+            # This allows parsing one-shot review results or mis-shaped outputs gracefully.
+            return CliRuntimeStep(
+                kind="final",
+                final_output=raw_json,
+                tool_name=None,
+                tool_input=None,
+            )
