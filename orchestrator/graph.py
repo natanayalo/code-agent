@@ -16,7 +16,7 @@ from langgraph.types import interrupt
 
 from db.base import utc_now
 from db.enums import TimelineEventType
-from orchestrator.review import review_result
+from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, review_result
 from orchestrator.state import (
     SUPPORTED_WORKER_TYPES,
     ApprovalCheckpoint,
@@ -444,7 +444,7 @@ def _route_after_await_approval(state_input: OrchestratorState) -> str:
 def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
     """Build the typed worker request from orchestrator state."""
     task_text = state.normalized_task_text or state.task.task_text
-    repair_task_text = state.task.constraints.get("independent_review_repair_request")
+    repair_task_text = state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT)
     if isinstance(repair_task_text, str) and repair_task_text.strip():
         task_text = repair_task_text.strip()
 

@@ -32,11 +32,11 @@ DEFAULT_SUPPRESSED_STYLE_CATEGORIES: frozenset[str] = frozenset(
     {"style", "formatting", "naming", "whitespace"}
 )
 SUPPRESSED_FINDINGS_SUMMARY_PREFIX = "All findings were suppressed by policy thresholds."
-_REPAIR_REQUEST_CONSTRAINT = "independent_review_repair_request"
-_REPAIR_PASSES_USED_CONSTRAINT = "independent_review_repair_passes_used"
-_REPAIR_MAX_PASSES_CONSTRAINT = "independent_review_max_repair_passes"
-_SKIP_INDEPENDENT_REVIEW_CONSTRAINT = "skip_independent_review"
-_ENABLE_REPAIR_HANDOFF_CONSTRAINT = "independent_review_enable_repair_handoff"
+REPAIR_REQUEST_CONSTRAINT = "independent_review_repair_request"
+REPAIR_PASSES_USED_CONSTRAINT = "independent_review_repair_passes_used"
+REPAIR_MAX_PASSES_CONSTRAINT = "independent_review_max_repair_passes"
+SKIP_INDEPENDENT_REVIEW_CONSTRAINT = "skip_independent_review"
+ENABLE_REPAIR_HANDOFF_CONSTRAINT = "independent_review_enable_repair_handoff"
 
 
 def _coerce_positive_int_like(value: object) -> int | None:
@@ -276,17 +276,17 @@ def _session_state_for_review_context(state: OrchestratorState) -> Mapping[str, 
 
 def _resolve_repair_handoff_budget(constraints: Mapping[str, Any]) -> tuple[int, int]:
     """Resolve bounded independent-review repair-loop settings."""
-    max_passes = _coerce_non_negative_int_like(constraints.get(_REPAIR_MAX_PASSES_CONSTRAINT))
+    max_passes = _coerce_non_negative_int_like(constraints.get(REPAIR_MAX_PASSES_CONSTRAINT))
     if max_passes is None:
         max_passes = DEFAULT_INDEPENDENT_REVIEW_MAX_REPAIR_PASSES
-    used_passes = _coerce_non_negative_int_like(constraints.get(_REPAIR_PASSES_USED_CONSTRAINT))
+    used_passes = _coerce_non_negative_int_like(constraints.get(REPAIR_PASSES_USED_CONSTRAINT))
     if used_passes is None:
         used_passes = 0
     return max_passes, used_passes
 
 
 def _build_review_repair_task_text(*, task_text: str, findings: list[ReviewFinding]) -> str:
-    """Create a focused one-pass repair instruction from actionable review findings."""
+    """Create a focused repair instruction from actionable review findings."""
     lines = [
         "Apply targeted code fixes for independent review findings.",
         "Keep changes minimal and limited to the issues listed below.",
@@ -317,10 +317,10 @@ def _build_review_repair_task_text(*, task_text: str, findings: list[ReviewFindi
 
 
 def _cleanup_repair_handoff_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:
-    """Drop one-pass repair handoff constraint fields after the repair attempt completes."""
+    """Drop transient repair handoff constraint fields after the repair attempt completes."""
     cleaned = dict(constraints)
-    cleaned.pop(_REPAIR_REQUEST_CONSTRAINT, None)
-    cleaned.pop(_SKIP_INDEPENDENT_REVIEW_CONSTRAINT, None)
+    cleaned.pop(REPAIR_REQUEST_CONSTRAINT, None)
+    cleaned.pop(SKIP_INDEPENDENT_REVIEW_CONSTRAINT, None)
     return cleaned
 
 
@@ -328,12 +328,12 @@ def _repair_handoff_update(
     state: OrchestratorState,
     parsed_review: ReviewResult,
 ) -> dict[str, Any] | None:
-    """Build state updates that hand off one bounded review-driven repair pass."""
+    """Build state updates that hand off a bounded review-driven repair pass."""
     if not parsed_review.findings:
         return None
 
     constraints = state.task.constraints
-    if constraints.get(_ENABLE_REPAIR_HANDOFF_CONSTRAINT) is not True:
+    if constraints.get(ENABLE_REPAIR_HANDOFF_CONSTRAINT) is not True:
         return None
 
     max_passes, used_passes = _resolve_repair_handoff_budget(constraints)
@@ -346,16 +346,16 @@ def _repair_handoff_update(
         findings=parsed_review.findings,
     )
     updated_constraints = dict(constraints)
-    updated_constraints[_REPAIR_REQUEST_CONSTRAINT] = repair_task_text
-    updated_constraints[_REPAIR_PASSES_USED_CONSTRAINT] = used_passes + 1
-    # Prevent builder-reviewer ping-pong after the one permitted repair pass.
-    updated_constraints[_SKIP_INDEPENDENT_REVIEW_CONSTRAINT] = True
+    updated_constraints[REPAIR_REQUEST_CONSTRAINT] = repair_task_text
+    updated_constraints[REPAIR_PASSES_USED_CONSTRAINT] = used_passes + 1
+    # Prevent builder-reviewer ping-pong once the repair budget is exhausted.
+    updated_constraints[SKIP_INDEPENDENT_REVIEW_CONSTRAINT] = used_passes + 1 >= max_passes
     updated_task = state.task.model_copy(update={"constraints": updated_constraints})
 
     return {
         "current_step": "review_result",
         "task": updated_task.model_dump(),
-        "review": None,
+        "review": parsed_review.model_dump(),
         "verification": None,
         "repair_handoff_requested": True,
         "progress_updates": [
@@ -372,8 +372,8 @@ async def review_result(
 ) -> dict[str, Any]:
     """Perform an independent advisory review pass after successful verification."""
     if (
-        state.task.constraints.get(_REPAIR_REQUEST_CONSTRAINT) is not None
-        and state.task.constraints.get(_SKIP_INDEPENDENT_REVIEW_CONSTRAINT) is True
+        state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT) is not None
+        and state.task.constraints.get(SKIP_INDEPENDENT_REVIEW_CONSTRAINT) is True
     ):
         updated_task = state.task.model_copy(
             update={
@@ -390,7 +390,7 @@ async def review_result(
         }
 
     # 1. Check if we should skip
-    if state.task.constraints.get(_SKIP_INDEPENDENT_REVIEW_CONSTRAINT):
+    if state.task.constraints.get(SKIP_INDEPENDENT_REVIEW_CONSTRAINT):
         return {"current_step": "review_result"}
 
     # Only review successful runs (or warnings)
