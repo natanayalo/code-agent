@@ -383,6 +383,7 @@ async def review_result(
         return {
             "current_step": "review_result",
             "task": updated_task.model_dump(),
+            "review": None,
             "progress_updates": [
                 *state.progress_updates,
                 "independent review skipped after repair",

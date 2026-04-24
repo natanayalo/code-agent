@@ -105,6 +105,22 @@ async def test_review_result_handles_worker_failure_gracefully():
             "task": {"task_text": "demo"},
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
+            "review": {
+                "reviewer_kind": "independent_reviewer",
+                "summary": "stale findings from prior review",
+                "confidence": 0.85,
+                "outcome": "findings",
+                "findings": [
+                    {
+                        "title": "Stale finding",
+                        "category": "logic",
+                        "confidence": 0.8,
+                        "file_path": "main.py",
+                        "severity": "high",
+                        "why_it_matters": "No longer applicable after repair",
+                    }
+                ],
+            },
             "dispatch": {"worker_type": "gemini"},
         }
     )
@@ -636,6 +652,7 @@ async def test_review_result_cleans_repair_handoff_constraints_after_repair_pass
     res = await review_result(state, worker_factory={"gemini": AsyncMock()})
 
     assert res["current_step"] == "review_result"
+    assert res["review"] is None
     assert "independent_review_repair_request" not in res["task"]["constraints"]
     assert "skip_independent_review" not in res["task"]["constraints"]
     assert res["task"]["constraints"]["independent_review_repair_passes_used"] == 1
