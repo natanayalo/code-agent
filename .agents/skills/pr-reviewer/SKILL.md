@@ -103,7 +103,8 @@ Default to the native review format of the environment:
 
 ### GitHub-Native Review Comment Mode
 
-When requested to publish findings, post them as real GitHub PR review comments.
+When a GitHub PR context is available (PR number/URL/head branch), post findings as real GitHub PR review comments by default.
+Do not stop at chat-only findings unless the user explicitly asks for chat-only review.
 
 Rules for this mode:
 
@@ -116,6 +117,8 @@ Rules for this mode:
 - If no substantial findings are present, do not post noise comments.
 - Keep this as the default reporting mode for PR review flows.
 - Do not switch to JSON payload output unless the caller explicitly requires machine-readable output.
+- After posting, report the posted review URL (or comment URLs) in the final response.
+- If posting fails, include the exact failing command and stderr, then provide a retry command.
 
 Publishing gate (must pass all before posting to GitHub):
 
@@ -126,6 +129,14 @@ Publishing gate (must pass all before posting to GitHub):
 - Confidence threshold: do not post if confidence is below 0.85.
 - Scope threshold: do not post broad refactor or architecture-preference comments.
 - Verdict rule: if final verdict is effectively LGTM, avoid posting inline nits; keep non-blocking ideas in chat.
+
+Execution order for PR reviews:
+
+1. Review code and produce candidate findings.
+2. Apply publishing gate and keep only postable findings.
+3. If at least one postable finding exists, post review comments to the PR.
+4. If no postable findings exist, post nothing and return explicit "no posted findings".
+5. Always include an action report: posted count, skipped count, PR link.
 
 ### Posting GitHub Review Comments (Examples)
 
