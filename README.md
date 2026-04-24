@@ -186,6 +186,19 @@ Run the deterministic frozen evaluation harness (Milestone 14, T-106 slice):
   --output artifacts/evaluations/frozen-suite-report.json
 ```
 
+For reviewer-quality A/B evaluation (T-119), you can tag prompt/model profiles and compare
+against a baseline report:
+
+```bash
+.venv/bin/python scripts/e2e/run_frozen_eval.py \
+  --runner replay \
+  --variant-label candidate \
+  --review-prompt-profile review-prompt-v2 \
+  --reviewer-model-profile gpt-5.4-reviewer \
+  --compare-to-report artifacts/evaluations/frozen-suite-baseline.json \
+  --output artifacts/evaluations/frozen-suite-candidate.json
+```
+
 Commit messages are validated with Commitizen, so use Conventional Commits such as:
 
 ```text

@@ -11,8 +11,11 @@ import pytest
 from evaluation import (
     OrchestratorReplayRunner,
     ReplayRunner,
+    ReviewExpectation,
+    ReviewOutcome,
     TaskExpectation,
     WorkerOutcome,
+    compare_reports,
     default_replay_outcomes,
     evaluate_suite,
     load_frozen_suite,
@@ -362,6 +365,7 @@ def test_write_report_persists_structured_json(tmp_path: Path) -> None:
     assert payload["total_cases"] == len(suite.cases)
     assert payload["passed_cases"] == len(suite.cases)
     assert payload["results"][0]["case_id"] == suite.cases[0].case_id
+    assert payload["review_metrics"]["reviewed_cases"] == 0
 
 
 def test_orchestrator_runner_executes_case_through_graph_path() -> None:
@@ -473,6 +477,64 @@ def test_load_replay_outcomes_accepts_error_status(tmp_path: Path) -> None:
 
     assert outcomes["case-1"].status == "error"
     assert outcomes["case-1"].summary == "system-level failure"
+
+
+def test_load_frozen_suite_accepts_review_expectation_payload(tmp_path: Path) -> None:
+    suite_path = tmp_path / "review-suite.json"
+    suite_path.write_text(
+        json.dumps(
+            {
+                "suite_name": "review-suite",
+                "cases": [
+                    {
+                        "case_id": "review-case",
+                        "repo_fixture": "fixtures/one",
+                        "task_text": "Run review",
+                        "expectation": {
+                            "require_success": False,
+                            "review": {
+                                "expected_outcome": "no_findings",
+                                "expect_fix_after_review": False,
+                            },
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    suite = load_frozen_suite(path=suite_path)
+
+    assert suite.cases[0].expectation.review is not None
+    assert suite.cases[0].expectation.review.expected_outcome == "no_findings"
+
+
+def test_load_replay_outcomes_accepts_review_payload(tmp_path: Path) -> None:
+    replay_path = tmp_path / "review-replay.json"
+    replay_path.write_text(
+        json.dumps(
+            {
+                "case-1": {
+                    "status": "success",
+                    "summary": "review done",
+                    "review": {
+                        "findings_count": 3,
+                        "actionable_findings_count": 2,
+                        "false_positive_findings_count": 1,
+                        "fix_after_review_attempted": True,
+                        "fix_after_review_succeeded": False,
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    outcomes = load_replay_outcomes(replay_path)
+
+    assert outcomes["case-1"].review is not None
+    assert outcomes["case-1"].review.actionable_findings_count == 2
 
 
 def test_load_frozen_suite_rejects_non_object_payload(tmp_path: Path) -> None:
@@ -648,3 +710,126 @@ def test_load_replay_outcomes_rejects_unexpected_fields(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="unexpected"):
         load_replay_outcomes(replay_path)
+
+
+def test_evaluate_suite_computes_review_quality_metrics() -> None:
+    cases = (
+        FrozenTaskCase(
+            case_id="review-findings",
+            repo_fixture="fixtures/a",
+            task_text="review case one",
+            expectation=TaskExpectation(
+                require_success=False,
+                review=ReviewExpectation(
+                    expected_outcome="findings",
+                    expect_fix_after_review=True,
+                ),
+            ),
+        ),
+        FrozenTaskCase(
+            case_id="review-empty",
+            repo_fixture="fixtures/b",
+            task_text="review case two",
+            expectation=TaskExpectation(
+                require_success=False,
+                review=ReviewExpectation(expected_outcome="no_findings"),
+            ),
+        ),
+    )
+
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="review-metrics",
+            cases=cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "review-findings": WorkerOutcome(
+                        status="success",
+                        summary="reviewed",
+                        review=ReviewOutcome(
+                            findings_count=2,
+                            actionable_findings_count=1,
+                            false_positive_findings_count=1,
+                            fix_after_review_attempted=True,
+                            fix_after_review_succeeded=True,
+                        ),
+                    ),
+                    "review-empty": WorkerOutcome(
+                        status="success",
+                        summary="empty",
+                        review=ReviewOutcome(
+                            findings_count=0,
+                            actionable_findings_count=0,
+                            false_positive_findings_count=0,
+                        ),
+                    ),
+                }
+            ),
+        )
+    )
+
+    assert report.review_metrics is not None
+    assert report.review_metrics.reviewed_cases == 2
+    assert report.review_metrics.precision == pytest.approx(0.5)
+    assert report.review_metrics.actionable_rate == pytest.approx(0.5)
+    assert report.review_metrics.false_positive_rate == pytest.approx(0.5)
+    assert report.review_metrics.fix_after_review_success == pytest.approx(1.0)
+    assert report.review_metrics.empty_review_correctness == pytest.approx(1.0)
+
+
+def test_compare_reports_includes_review_metric_deltas() -> None:
+    cases = (
+        FrozenTaskCase(
+            case_id="case-1",
+            repo_fixture="fixtures/a",
+            task_text="review case",
+            expectation=TaskExpectation(
+                require_success=False,
+                review=ReviewExpectation(expected_outcome="findings"),
+            ),
+        ),
+    )
+    report_baseline = asyncio.run(
+        evaluate_suite(
+            suite_name="ab-compare",
+            cases=cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "case-1": WorkerOutcome(
+                        status="success",
+                        summary="baseline",
+                        review=ReviewOutcome(
+                            findings_count=2,
+                            actionable_findings_count=1,
+                            false_positive_findings_count=1,
+                        ),
+                    )
+                }
+            ),
+        )
+    )
+    report_candidate = asyncio.run(
+        evaluate_suite(
+            suite_name="ab-compare",
+            cases=cases,
+            runner=ReplayRunner(
+                outcomes_by_case_id={
+                    "case-1": WorkerOutcome(
+                        status="success",
+                        summary="candidate",
+                        review=ReviewOutcome(
+                            findings_count=2,
+                            actionable_findings_count=2,
+                            false_positive_findings_count=0,
+                        ),
+                    )
+                }
+            ),
+        )
+    )
+
+    comparison = compare_reports(baseline=report_baseline, candidate=report_candidate)
+
+    assert comparison.delta_total_score == 0
+    assert comparison.delta_precision == pytest.approx(0.5)
+    assert comparison.delta_false_positive_rate == pytest.approx(-0.5)

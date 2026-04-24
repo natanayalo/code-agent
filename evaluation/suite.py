@@ -9,7 +9,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError, field_validator
 
-from evaluation.harness import FrozenTaskCase, TaskExpectation, WorkerOutcome
+from evaluation.harness import (
+    FrozenTaskCase,
+    ReviewExpectation,
+    ReviewOutcome,
+    TaskExpectation,
+    WorkerOutcome,
+)
 
 _DEFAULT_SUITE_PATH = Path(__file__).with_name("frozen_suite.json")
 
@@ -29,6 +35,14 @@ class _ExpectationPayload(BaseModel):
     require_tests_passed: bool = False
     required_files_changed: list[str] | None = None
     required_summary_substrings: list[str] | None = None
+    review: _ReviewExpectationPayload | None = None
+
+
+class _ReviewExpectationPayload(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    expected_outcome: Literal["no_findings", "findings"] | None = None
+    expect_fix_after_review: bool | None = None
 
 
 class _CasePayload(BaseModel):
@@ -68,6 +82,17 @@ class _ReplayOutcomePayload(BaseModel):
     summary: str
     files_changed: list[str] | None = None
     tests_passed: bool | None = None
+    review: _ReviewOutcomePayload | None = None
+
+
+class _ReviewOutcomePayload(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    findings_count: int = 0
+    actionable_findings_count: int = 0
+    false_positive_findings_count: int = 0
+    fix_after_review_attempted: bool | None = None
+    fix_after_review_succeeded: bool | None = None
 
 
 _REPLAY_OUTCOMES_ADAPTER = TypeAdapter(dict[str, _ReplayOutcomePayload])
@@ -118,6 +143,14 @@ def load_frozen_suite(path: Path | None = None) -> FrozenSuite:
             required_summary_substrings=tuple(
                 expectation_payload.required_summary_substrings or ()
             ),
+            review=(
+                None
+                if expectation_payload.review is None
+                else ReviewExpectation(
+                    expected_outcome=expectation_payload.review.expected_outcome,
+                    expect_fix_after_review=expectation_payload.review.expect_fix_after_review,
+                )
+            ),
         )
 
         cases.append(
@@ -151,6 +184,17 @@ def load_replay_outcomes(path: Path) -> dict[str, WorkerOutcome]:
             summary=raw_outcome.summary,
             files_changed=tuple(raw_outcome.files_changed or ()),
             tests_passed=raw_outcome.tests_passed,
+            review=(
+                None
+                if raw_outcome.review is None
+                else ReviewOutcome(
+                    findings_count=raw_outcome.review.findings_count,
+                    actionable_findings_count=raw_outcome.review.actionable_findings_count,
+                    false_positive_findings_count=raw_outcome.review.false_positive_findings_count,
+                    fix_after_review_attempted=raw_outcome.review.fix_after_review_attempted,
+                    fix_after_review_succeeded=raw_outcome.review.fix_after_review_succeeded,
+                )
+            ),
         )
 
     return outcomes
@@ -168,5 +212,24 @@ def default_replay_outcomes(cases: tuple[FrozenTaskCase, ...]) -> dict[str, Work
             summary="; ".join(suffix_parts),
             files_changed=case.expectation.required_files_changed,
             tests_passed=True if case.expectation.require_tests_passed else None,
+            review=(
+                None
+                if case.expectation.review is None
+                else ReviewOutcome(
+                    findings_count=(
+                        0 if case.expectation.review.expected_outcome == "no_findings" else 1
+                    ),
+                    actionable_findings_count=(
+                        0 if case.expectation.review.expected_outcome == "no_findings" else 1
+                    ),
+                    false_positive_findings_count=0,
+                    fix_after_review_attempted=(
+                        True if case.expectation.review.expect_fix_after_review else None
+                    ),
+                    fix_after_review_succeeded=(
+                        True if case.expectation.review.expect_fix_after_review else None
+                    ),
+                )
+            ),
         )
     return outcomes
