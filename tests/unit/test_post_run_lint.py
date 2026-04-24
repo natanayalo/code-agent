@@ -219,6 +219,7 @@ def test_merge_post_run_lint_results_combines_metadata_across_passes() -> None:
         {"command": "ruff format -- a.py"},
         {"command": "ruff check --fix -- a.py"},
     ]
+    assert merged["reason"] is None
     assert merged["errors"] == ["`ruff check --fix -- a.py` exited with status 1"]
     assert merged["artifacts"] == [{"name": "first.log"}, {"name": "second.log"}]
 

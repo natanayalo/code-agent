@@ -95,14 +95,15 @@ def merge_post_run_lint_results(
     else:
         merged_status = "skipped"
 
+    merged_ran = bool(existing_result.get("ran") or new_result.get("ran"))
     merged_reason = new_result.get("reason")
     if merged_reason in (None, ""):
         merged_reason = existing_result.get("reason")
 
     return {
-        "ran": bool(existing_result.get("ran") or new_result.get("ran")),
+        "ran": merged_ran,
         "status": merged_status,
-        "reason": merged_reason,
+        "reason": None if merged_ran else merged_reason,
         "commands": merged_commands,
         "errors": merged_errors,
         "artifacts": merged_artifacts,
