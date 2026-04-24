@@ -110,8 +110,10 @@ Rules for this mode:
 
 - Prefer inline review comments tied to exact file/line when possible.
 - Use top-level PR comments only when no stable inline location exists.
-- Post only high-confidence actionable findings (default: critical/high).
-- Keep medium/low suggestions in chat summary unless the user explicitly asks to post them.
+- Post high-confidence actionable findings by default:
+  - always post critical/high that pass the publishing gate
+  - post medium when they pass the publishing gate with strong evidence
+  - keep low in chat unless the user explicitly asks to post them
 - Make comment bodies directly actionable from thread context alone.
 - Include minimal safe fix guidance in each posted comment.
 - If no substantial findings are present, do not post noise comments.
@@ -126,7 +128,10 @@ Publishing gate (must pass all before posting to GitHub):
 - Concrete impact: explain user/operator-visible downside.
 - Concrete evidence: tie claim to exact changed code path/line.
 - Concrete fix: propose the smallest safe code/test change.
-- Confidence threshold: do not post if confidence is below 0.85.
+- Confidence threshold:
+  - critical/high: do not post below 0.85
+  - medium: do not post below 0.90
+  - low: do not post by default
 - Scope threshold: do not post broad refactor or architecture-preference comments.
 - Verdict rule: if final verdict is effectively LGTM, avoid posting inline nits; keep non-blocking ideas in chat.
 
@@ -137,6 +142,7 @@ Execution order for PR reviews:
 3. If at least one postable finding exists, post review comments to the PR.
 4. If no postable findings exist, post nothing and return explicit "no posted findings".
 5. Always include an action report: posted count, skipped count, PR link.
+6. Do not finalize the response until the action report is present and reconciles with executed `gh` commands.
 
 ### Posting GitHub Review Comments (Examples)
 
