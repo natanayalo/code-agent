@@ -48,14 +48,7 @@ def _collect_changed_files_with_fallback(
 
 def _merge_changed_files(existing_files: Sequence[str], new_files: Sequence[str]) -> list[str]:
     """Merge changed-file lists with stable order and de-duplication."""
-    merged: list[str] = []
-    seen: set[str] = set()
-    for path in [*existing_files, *new_files]:
-        if path in seen:
-            continue
-        seen.add(path)
-        merged.append(path)
-    return merged
+    return list(dict.fromkeys([*existing_files, *new_files]))
 
 
 def _python_files_only(files_changed: Sequence[str]) -> list[str]:

@@ -700,6 +700,12 @@ def test_codex_cli_worker_fixes_review_findings_with_bounded_retry(tmp_path: Pat
     )
 
     assert result.status == "success"
+    assert [command.command for command in result.commands_run] == [
+        "printf 'assert True\\n' > tests/test_note.py"
+    ]
+    assert result.review_result is not None
+    assert result.review_result.outcome == "no_findings"
+    assert result.budget_usage is not None
 
 
 def test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_path: Path) -> None:
