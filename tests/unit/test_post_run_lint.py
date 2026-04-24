@@ -278,3 +278,35 @@ def test_collect_and_lint_uses_repo_path_fallback_when_session_collect_returns_e
     assert len(execution.commands_run) == 2
     assert len(lint_artifacts) == 0
     assert session.calls == [(format_command, 8), (check_command, 8)]
+
+
+def test_collect_and_lint_preserves_existing_files_when_collectors_return_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty recollection should not discard previously known changed files."""
+    session = _FakeSession({})
+    execution = SimpleNamespace(commands_run=[])
+
+    monkeypatch.setattr("workers.post_run_lint.collect_changed_files", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        "workers.post_run_lint.collect_changed_files_from_repo_path",
+        lambda *args, **kwargs: [],
+    )
+
+    files_changed, lint_result, lint_artifacts = (
+        collect_changed_files_and_apply_post_run_lint_format(
+            session=session,
+            execution=execution,
+            expect_changed_files_artifact=True,
+            repo_path_for_detection=tmp_path,
+            repo_working_directory=tmp_path,
+            timeout_seconds=8,
+            existing_files_changed=["workers/codex_cli_worker.py"],
+        )
+    )
+
+    assert files_changed == ["workers/codex_cli_worker.py"]
+    assert lint_result["status"] == "skipped"
+    assert lint_artifacts == []
+    assert session.calls == []

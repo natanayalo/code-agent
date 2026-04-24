@@ -347,16 +347,18 @@ def collect_changed_files_and_apply_post_run_lint_format(
     """Collect changed files (with fallback) and run post-run lint/format."""
     files_changed = list(existing_files_changed or [])
     if expect_changed_files_artifact:
-        files_changed = collect_changed_files(
+        collected_files = collect_changed_files(
             session,
             working_directory=repo_working_directory,
             timeout_seconds=timeout_seconds,
         )
-        if not files_changed:
-            files_changed = collect_changed_files_from_repo_path(
+        if not collected_files:
+            collected_files = collect_changed_files_from_repo_path(
                 repo_path_for_detection,
                 timeout_seconds=timeout_seconds,
             )
+        if collected_files:
+            files_changed = collected_files
 
     return apply_post_run_lint_format(
         session=session,
