@@ -467,7 +467,9 @@ def _metric_delta_payload(
         payload[delta_field_name] = _delta_metric(
             candidate_value,
             baseline_value,
-            treat_missing_as_zero=(metric_field_name in {"precision"}),
+            treat_missing_as_zero=(
+                metric_field_name in {"precision", "false_discovery_rate", "false_positive_rate"}
+            ),
         )
     return payload
 

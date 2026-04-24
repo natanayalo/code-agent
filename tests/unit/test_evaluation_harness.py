@@ -1125,6 +1125,8 @@ def test_compare_reports_treats_missing_baseline_precision_as_zero() -> None:
     comparison = compare_reports(baseline=report_baseline, candidate=report_candidate)
 
     assert comparison.delta_precision == pytest.approx(1.0)
+    assert comparison.delta_false_discovery_rate == pytest.approx(0.0)
+    assert comparison.delta_false_positive_rate == pytest.approx(0.0)
 
 
 def test_compare_reports_delta_mapping_covers_all_review_metrics() -> None:
