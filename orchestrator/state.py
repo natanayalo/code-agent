@@ -201,6 +201,7 @@ class OrchestratorState(OrchestratorModel):
     progress_updates: list[str] = Field(default_factory=list)
     timeline_events: Annotated[list[TaskTimelineEventState], add] = Field(default_factory=list)
     timeline_persisted_count: int = 0
+    repair_handoff_requested: bool = False
     errors: list[str] = Field(default_factory=list)
     attempt_count: int = Field(default=0, ge=0)
     session_state_update: SessionStateUpdate | None = None

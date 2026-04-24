@@ -35,7 +35,7 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
    - move a finished task slice out of `Next` or `In Progress`
    - add it to `Done` with the PR number once the work is published
    - leave the task in `In Progress` only when the slice is still actively unfinished or unpublished
-9. Stage only the task files, create a specific commit, push the branch, and create a Pull Request (PR) when the user wants the slice published. Use `gh pr create` with a descriptive title and body.
+9. Stage only the task files, create a specific commit, push the branch, and create a Pull Request (PR) by default once checks pass; skip publish steps only if the user explicitly asks not to publish. Use `gh pr create` with a descriptive title and body.
 10. Update `README.md` or other nearby instructions when local workflow, verification, or CI/CD behavior changes.
 11. Call out any manual external follow-up that cannot be enforced from repo code, then summarize what changed, what was verified, what was deferred, and provide the PR link.
 

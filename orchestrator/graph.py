@@ -16,7 +16,7 @@ from langgraph.types import interrupt
 
 from db.base import utc_now
 from db.enums import TimelineEventType
-from orchestrator.review import review_result
+from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, review_result
 from orchestrator.state import (
     SUPPORTED_WORKER_TYPES,
     ApprovalCheckpoint,
@@ -443,11 +443,16 @@ def _route_after_await_approval(state_input: OrchestratorState) -> str:
 
 def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
     """Build the typed worker request from orchestrator state."""
+    task_text = state.normalized_task_text or state.task.task_text
+    repair_task_text = state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT)
+    if isinstance(repair_task_text, str) and repair_task_text.strip():
+        task_text = repair_task_text.strip()
+
     return WorkerRequest(
         session_id=state.session.session_id if state.session is not None else None,
         repo_url=state.task.repo_url,
         branch=state.task.branch,
-        task_text=state.normalized_task_text or state.task.task_text,
+        task_text=task_text,
         memory_context=state.memory.model_dump(),
         task_plan=state.task_plan.model_dump(mode="json") if state.task_plan is not None else None,
         constraints=dict(state.task.constraints),
@@ -963,6 +968,7 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
     return {
         "current_step": "dispatch_job",
         "dispatch": dispatch.model_dump(),
+        "repair_handoff_requested": False,
         "progress_updates": _progress_update(state, "worker dispatched"),
         **_timeline_event(
             state,
@@ -1167,6 +1173,14 @@ def _route_after_await_permission_escalation(state_input: OrchestratorState) -> 
     if state.result is None:
         return "dispatch_job"
     return "verify_result"
+
+
+def _route_after_review_result(state_input: OrchestratorState) -> str:
+    """Route to a bounded repair handoff when independent review requested it."""
+    state = _ensure_state(state_input)
+    if state.repair_handoff_requested:
+        return "dispatch_job"
+    return "summarize_result"
 
 
 def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
@@ -1514,7 +1528,14 @@ def build_orchestrator_graph(
         },
     )
     builder.add_edge("verify_result", "review_result")
-    builder.add_edge("review_result", "summarize_result")
+    builder.add_conditional_edges(
+        "review_result",
+        RunnableLambda(_route_after_review_result),
+        {
+            "dispatch_job": "dispatch_job",
+            "summarize_result": "summarize_result",
+        },
+    )
     builder.add_edge("summarize_result", "persist_memory")
     builder.add_edge("persist_memory", END)
     return builder.compile(
