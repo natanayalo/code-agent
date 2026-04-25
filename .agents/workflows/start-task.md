@@ -6,5 +6,5 @@ Keep this workflow as a thin reference only.
 
 Use the skill when the user asks to:
 - start a new task
-- pick the next backlog item
+- pick the next roadmap item
 - begin the next implementation slice or PR

@@ -11,7 +11,7 @@ Use this skill when a task changes database models or migrations.
 
 Read these first:
 - `AGENTS.md`
-- `docs/mvp_backlog.md`
+- `docs/roadmap.md`
 - `docs/status.md`
 - `db/base.py`
 - `db/models.py`
