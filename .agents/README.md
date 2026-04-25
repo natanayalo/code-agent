@@ -9,8 +9,7 @@ These files do not replace the canonical repo guidance. They operationalize it.
 Always defer to these files if guidance overlaps:
 - `AGENTS.md`
 - `README.md`
-- `docs/implementation_order.md`
-- `docs/mvp_backlog.md`
+- `docs/roadmap.md`
 - `docs/status.md`
 
 ## Purpose

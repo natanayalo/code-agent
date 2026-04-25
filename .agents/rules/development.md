@@ -6,10 +6,9 @@ Use this rule for normal implementation work in this repository.
 
 Follow these in order:
 1. `AGENTS.md`
-2. `docs/implementation_order.md`
-3. `docs/mvp_backlog.md`
-4. `docs/status.md`
-5. nearby code and tests
+2. `docs/roadmap.md`
+3. `docs/status.md`
+4. nearby code and tests
 
 If this rule conflicts with `AGENTS.md`, follow `AGENTS.md`.
 
@@ -26,7 +25,7 @@ Every non-trivial task must follow this sequence:
 ## Scope control
 
 - Keep changes small and reviewable.
-- Do not pull work from a later implementation step unless explicitly asked.
+- Do not pull work from a later roadmap phase unless explicitly asked.
 - Do not mix unrelated repo-ops, docs, and feature work in one PR unless the task explicitly requires it.
 - Keep file ownership boundaries intact:
   - `apps/` entrypoints only
@@ -50,4 +49,4 @@ Every non-trivial task must follow this sequence:
 - Update `docs/status.md` when task state or sequencing changes.
 - If a change depends on external settings that are not stored in the repo, document the manual
   follow-up clearly and do not describe it as repo-enforced.
-- Add follow-up backlog items when you intentionally defer a real design decision.
+- Add follow-up roadmap/status notes when you intentionally defer a real design decision.

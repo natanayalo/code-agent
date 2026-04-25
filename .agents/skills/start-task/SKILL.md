@@ -1,6 +1,6 @@
 ---
 name: start-task
-description: Use when the user asks to start a new task, begin the next implementation slice or PR, or pick the next backlog item from docs/status.md and docs/mvp_backlog.md.
+description: Use when the user asks to start a new task, begin the next implementation slice or PR, or pick the next roadmap item from docs/roadmap.md and docs/status.md.
 ---
 
 # Start Task Skill
@@ -11,16 +11,15 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 
 - `AGENTS.md`
 - `README.md`
+- `docs/roadmap.md`
 - `docs/status.md`
-- `docs/implementation_order.md`
-- `docs/mvp_backlog.md`
 - nearby code, tests, and config for the task area
 
 ## Trigger rules
 
 - If the user names a specific task, scope the work to that task.
-- If the user says "start a new task" or equivalent without naming one, prefer the first item under `Next` in `docs/status.md`.
-- Do not jump ahead of `docs/implementation_order.md`.
+- If the user says "start a new task" or equivalent without naming one, choose the first unfinished item from the `Current Backlog` in `docs/status.md`.
+- If `docs/status.md` is empty or ambiguous, fall back to the first unfinished item in the current phase from `docs/roadmap.md`.
 
 ## Required workflow
 
