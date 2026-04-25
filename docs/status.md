@@ -42,7 +42,7 @@ Active focus:
 Granular tasks for the active and upcoming milestones:
 
 ### Milestone B: Operator UX (Dashboard/PWA)
-- [x] T-130: design PWA frontend architecture and choose tech stack (React/Vite)
+- [x] T-130: design PWA frontend architecture and choose tech stack (React/Vite) (#114)
 - [ ] T-131: implement API endpoints for task/session listing and detailed view
 - [ ] T-132: build core dashboard layout with task status board
 - [ ] T-133: implement approval/rejection UI components in the dashboard
