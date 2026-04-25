@@ -43,7 +43,6 @@ Detailed architecture: [`docs/architecture.md`](docs/architecture.md)
 - runbook and troubleshooting: [`docs/runbook.md`](docs/runbook.md)
 - forward plan: [`docs/roadmap.md`](docs/roadmap.md)
 - current snapshot/status: [`docs/status.md`](docs/status.md)
-- task catalog and sequencing references: [`docs/mvp_backlog.md`](docs/mvp_backlog.md), [`docs/implementation_order.md`](docs/implementation_order.md)
 
 ## Repository Layout
 

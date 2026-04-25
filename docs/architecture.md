@@ -174,4 +174,3 @@ For day-to-day operation and troubleshooting, pair this document with:
 
 - runbook: `docs/runbook.md`
 - current operational status: `docs/status.md`
-- worker selection specifics: `docs/worker_routing_policy.md`
