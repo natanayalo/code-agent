@@ -7,6 +7,7 @@ import logging
 import os
 import shlex
 import subprocess
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final
@@ -174,6 +175,24 @@ def _extract_json(text: str) -> str:
     raise RuntimeError(f"No JSON object found in Gemini CLI response: {_truncate_detail(stripped)}")
 
 
+def _coerce_step_payload(parsed: object) -> dict[str, object] | None:
+    """Normalize near-miss adapter payloads into CliRuntimeStep-compatible JSON."""
+    if not isinstance(parsed, dict):
+        return None
+    kind = parsed.get("kind")
+    if kind not in {"tool_call", "final"}:
+        return None
+
+    payload: dict[str, object] = dict(parsed)
+    payload.setdefault("tool_name", None)
+    payload.setdefault("tool_input", None)
+    payload.setdefault("final_output", None)
+
+    if kind == "tool_call" and isinstance(payload.get("tool_input"), dict):
+        payload["tool_input"] = json.dumps(payload["tool_input"])
+    return payload
+
+
 class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
     """Resolve runtime turns by shelling out to the Gemini CLI.
 
@@ -187,6 +206,7 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         executable: str = DEFAULT_GEMINI_EXECUTABLE,
         model: str | None = None,
         request_timeout_seconds: int = DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS,
+        working_directory: str | Path | None = None,
         env: Mapping[str, str] | None = None,
     ) -> None:
         resolved_env = os.environ if env is None else env
@@ -195,6 +215,7 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         self.request_timeout_seconds = _coerce_positive_int(
             request_timeout_seconds, default=DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS
         )
+        self.working_directory = Path(working_directory or tempfile.gettempdir()).expanduser()
         self.env = build_gemini_subprocess_env(resolved_env)
 
     @classmethod
@@ -251,12 +272,18 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         )
 
         try:
+            execution_cwd = (
+                self.working_directory if override_prompt is not None else working_directory
+            )
             completed = subprocess.run(
                 command,
                 input=prompt,
                 capture_output=True,
                 text=True,
-                cwd=working_directory,
+                # Keep self-review (prompt_override) subprocesses out of the workspace repo
+                # to prevent side-effect edits that bypass runtime command capture.
+                # For normal runtime turns, use the worker-provided workspace cwd.
+                cwd=execution_cwd,
                 env=self.env,
                 timeout=self.request_timeout_seconds,
             )
@@ -294,9 +321,9 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
             try:
                 raw_json = _extract_json(raw_output)
                 parsed = json.loads(raw_json)
-                if isinstance(parsed, dict) and isinstance(parsed.get("tool_input"), dict):
-                    parsed["tool_input"] = json.dumps(parsed["tool_input"])
-                    raw_json = json.dumps(parsed)
+                normalized = _coerce_step_payload(parsed)
+                if normalized is not None:
+                    raw_json = json.dumps(normalized)
             except (RuntimeError, json.JSONDecodeError):
                 return CliRuntimeStep(
                     kind="final",
@@ -317,9 +344,9 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         try:
             raw_json = _extract_json(raw_output)
             parsed = json.loads(raw_json)
-            if isinstance(parsed, dict) and isinstance(parsed.get("tool_input"), dict):
-                parsed["tool_input"] = json.dumps(parsed["tool_input"])
-                raw_json = json.dumps(parsed)
+            normalized = _coerce_step_payload(parsed)
+            if normalized is not None:
+                raw_json = json.dumps(normalized)
         except (RuntimeError, json.JSONDecodeError):
             # If we can't extract or parse JSON, treat the entire output as final_output.
             return CliRuntimeStep(

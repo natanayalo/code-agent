@@ -69,17 +69,17 @@ _VALID_EXECUTION_MODES = frozenset({_INTERACTIVE_EXECUTION_MODE, _UNATTENDED_EXE
 # T-102: global defaults and hard caps for runtime budgets.
 _DEFAULT_EXECUTION_BUDGETS: dict[str, dict[str, int]] = {
     _INTERACTIVE_EXECUTION_MODE: {
-        "max_iterations": 8,
+        "max_iterations": 16,
         "worker_timeout_seconds": 300,
-        "max_tool_calls": 24,
-        "max_shell_commands": 24,
+        "max_tool_calls": 48,
+        "max_shell_commands": 48,
         "max_retries": 2,
     },
     _UNATTENDED_EXECUTION_MODE: {
-        "max_iterations": 5,
+        "max_iterations": 12,
         "worker_timeout_seconds": 180,
-        "max_tool_calls": 12,
-        "max_shell_commands": 12,
+        "max_tool_calls": 24,
+        "max_shell_commands": 24,
         "max_retries": 1,
     },
 }
@@ -101,6 +101,7 @@ _NON_NEGATIVE_BUDGET_KEYS = frozenset(
 _NON_NEGATIVE_DEFAULT_BUDGET_KEYS = frozenset(
     {"max_retries", "max_tool_calls", "max_shell_commands"}
 )
+_MODE_MINIMUM_BUDGET_KEYS = frozenset({"max_iterations"})
 
 
 class ExecutionModel(BaseModel):
@@ -181,6 +182,15 @@ def _apply_execution_budget_policy(
             effective_budget[key] = min(coerced_value, cap)
         elif key in effective_budget:
             effective_budget.pop(key, None)
+
+    for key in _MODE_MINIMUM_BUDGET_KEYS:
+        minimum = _DEFAULT_EXECUTION_BUDGETS[execution_mode].get(key)
+        if minimum is None:
+            continue
+        coerced_value = coerce_positive_int_like(effective_budget.get(key))
+        if coerced_value is None:
+            continue
+        effective_budget[key] = max(coerced_value, minimum)
 
     return effective_budget
 

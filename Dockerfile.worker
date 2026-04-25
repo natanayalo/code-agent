@@ -17,7 +17,7 @@ RUN set -eu; \
 
 RUN set -eu; \
     apt-get update; \
-    apt-get install -y --no-install-recommends nodejs npm ca-certificates git curl tar; \
+    apt-get install -y --no-install-recommends nodejs npm ca-certificates git curl tar ripgrep; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
       amd64) docker_arch="x86_64" ;; \

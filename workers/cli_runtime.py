@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import shlex
@@ -64,6 +65,13 @@ MODEL_CONTEXT_WINDOW_TOKENS: dict[str, int] = {
     "gpt-5.4": 272000,
     "gemini-2.5-pro": 1048576,
 }
+_TOOL_NAME_ALIASES: dict[str, str] = {
+    "functions.exec_command": "execute_bash",
+    "exec_command": "execute_bash",
+    "bash": "execute_bash",
+    "run_shell_command": "execute_bash",
+}
+_RECOVERABLE_UNKNOWN_TOOL_NAMES = frozenset({"enter_plan_mode", "exit_plan_mode"})
 _FILE_ARGUMENT_COMMANDS = frozenset(
     {
         "awk",
@@ -734,6 +742,105 @@ def _format_expected_artifacts(tool: ToolDefinition) -> str:
     return ", ".join(artifact.value for artifact in tool.expected_artifacts)
 
 
+def _normalize_requested_tool_name(tool_name: str) -> str:
+    """Map known adapter/runtime aliases onto registered tool names."""
+    normalized = tool_name.strip()
+    if not normalized:
+        return tool_name
+    return _TOOL_NAME_ALIASES.get(normalized, normalized)
+
+
+def _extract_first_json_object(text: str) -> str | None:
+    """Extract the first syntactically valid JSON object from free-form text."""
+    stripped = text.strip()
+    search_from = 0
+    while True:
+        start = stripped.find("{", search_from)
+        if start == -1:
+            return None
+        depth = 0
+        in_string = False
+        escape_next = False
+        end = -1
+        for index, char in enumerate(stripped[start:], start=start):
+            if escape_next:
+                escape_next = False
+                continue
+            if in_string:
+                if char == "\\":
+                    escape_next = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    end = index
+                    break
+        if end == -1:
+            return None
+        candidate = stripped[start : end + 1]
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            search_from = end + 1
+
+
+def _parse_runtime_step_from_text(text: str) -> CliRuntimeStep | None:
+    """Attempt to parse an embedded CliRuntimeStep payload from text content."""
+    stripped = text.strip()
+    if not stripped:
+        return None
+    try:
+        return CliRuntimeStep.model_validate_json(stripped)
+    except Exception:
+        pass
+    candidate = _extract_first_json_object(stripped)
+    if candidate is None:
+        return None
+    try:
+        return CliRuntimeStep.model_validate_json(candidate)
+    except Exception:
+        return None
+
+
+def _looks_like_tool_call_payload_text(text: str) -> bool:
+    """Heuristically detect tool_call payload text even when JSON is malformed."""
+    lowered = text.lower()
+    return (
+        '"kind"' in lowered
+        and '"tool_call"' in lowered
+        and '"tool_name"' in lowered
+        and '"tool_input"' in lowered
+    )
+
+
+def _format_unsupported_tool_observation(
+    *,
+    tool_name: str,
+    max_characters: int,
+) -> str:
+    """Render a recoverable observation for adapter-only control tools."""
+    guidance = (
+        "Tool is unavailable in this runtime. Continue with registered tools only "
+        "(for example, execute_bash, view_file, search_file, search_dir, str_replace_editor)."
+    )
+    content, _ = _truncate_text(guidance, max_characters=max_characters)
+    return "\n".join(
+        [
+            f"Tool result: {tool_name}",
+            "Status: unavailable_tool",
+            "Error: tool is not registered in this runtime.",
+            f"Guidance: {content}",
+        ]
+    )
+
+
 def _tool_call_transcript(tool: ToolDefinition, command: str) -> str:
     """Render a compact assistant transcript entry for a tool call."""
     return "\n".join(
@@ -783,6 +890,34 @@ def format_bash_observation(
         tool_name="execute_bash",
         max_characters=max_characters,
     )
+
+
+def _format_invalid_tool_input_observation(
+    *,
+    tool_name: str,
+    tool_input: str,
+    error: str,
+    max_characters: int,
+) -> str:
+    """Render recoverable tool-input validation feedback for the adapter."""
+    raw_input, truncated = _truncate_text(tool_input, max_characters=max_characters)
+    lines = [
+        f"Tool result: {tool_name}",
+        "Status: input_validation_failed",
+        f"Error: {error}",
+        "Raw tool_input:",
+        "```text",
+        raw_input or "<empty>",
+        "```",
+    ]
+    if truncated:
+        lines.append(f"[tool_input truncated to {max_characters} characters]")
+    if tool_name == STR_REPLACE_EDITOR_TOOL_NAME:
+        lines.append(
+            "Guidance: for multiline edits, use `execute_bash` (for example, a heredoc rewrite); "
+            "use `str_replace_editor` only for single-line old_text/new_text replacements."
+        )
+    return "\n".join(lines)
 
 
 def _resolve_tool_command(tool: ToolDefinition, raw_input: str) -> str:
@@ -987,6 +1122,27 @@ def run_cli_runtime_loop(
             assert step.final_output is not None  # Validated by CliRuntimeStep.
             final_output = step.final_output.strip()
             messages.append(CliRuntimeMessage(role="assistant", content=final_output))
+            parsed_step = _parse_runtime_step_from_text(final_output)
+            if (
+                parsed_step is not None and parsed_step.kind == "tool_call"
+            ) or _looks_like_tool_call_payload_text(final_output):
+                _update_budget_ledger(
+                    budget_ledger,
+                    started_at=started_at,
+                    clock=clock,
+                    iterations_used=iteration,
+                )
+                return CliRuntimeExecutionResult(
+                    status="error",
+                    summary=(
+                        "CLI runtime adapter returned a tool_call payload as final output "
+                        f"at iteration {iteration}."
+                    ),
+                    stop_reason="adapter_error",
+                    commands_run=commands_run,
+                    messages=messages,
+                    budget_ledger=budget_ledger,
+                )
             _update_budget_ledger(
                 budget_ledger,
                 started_at=started_at,
@@ -1003,9 +1159,39 @@ def run_cli_runtime_loop(
             )
 
         assert step.tool_name is not None  # Validated by CliRuntimeStep.
+        requested_tool_name = _normalize_requested_tool_name(step.tool_name)
         try:
-            tool = resolved_tool_client.require_tool_definition(step.tool_name)
+            tool = resolved_tool_client.require_tool_definition(requested_tool_name)
         except UnknownToolError as exc:
+            if requested_tool_name in _RECOVERABLE_UNKNOWN_TOOL_NAMES:
+                if (
+                    settings.max_tool_calls is not None
+                    and budget_ledger.tool_calls_used >= settings.max_tool_calls
+                ):
+                    return _budget_exceeded_result(
+                        summary=(
+                            "CLI runtime exceeded its tool-call budget "
+                            f"({settings.max_tool_calls}) before handling `{requested_tool_name}`."
+                        ),
+                        started_at=started_at,
+                        clock=clock,
+                        iteration=iteration,
+                        budget_ledger=budget_ledger,
+                        commands_run=commands_run,
+                        messages=messages,
+                    )
+                budget_ledger.tool_calls_used += 1
+                messages.append(
+                    CliRuntimeMessage(
+                        role="tool",
+                        tool_name=requested_tool_name,
+                        content=_format_unsupported_tool_observation(
+                            tool_name=requested_tool_name,
+                            max_characters=settings.max_observation_characters,
+                        ),
+                    )
+                )
+                continue
             _update_budget_ledger(
                 budget_ledger,
                 started_at=started_at,
@@ -1025,6 +1211,38 @@ def run_cli_runtime_loop(
         try:
             command = _resolve_tool_command(tool, step.tool_input)
         except ValueError as exc:
+            if (
+                settings.max_tool_calls is not None
+                and budget_ledger.tool_calls_used >= settings.max_tool_calls
+            ):
+                return _budget_exceeded_result(
+                    summary=(
+                        "CLI runtime exceeded its tool-call budget "
+                        f"({settings.max_tool_calls}) before handling `{tool.name}` input."
+                    ),
+                    started_at=started_at,
+                    clock=clock,
+                    iteration=iteration,
+                    budget_ledger=budget_ledger,
+                    commands_run=commands_run,
+                    messages=messages,
+                )
+            budget_ledger.tool_calls_used += 1
+            messages.append(
+                CliRuntimeMessage(
+                    role="tool",
+                    tool_name=tool.name,
+                    content=_format_invalid_tool_input_observation(
+                        tool_name=tool.name,
+                        tool_input=step.tool_input,
+                        error=str(exc),
+                        max_characters=settings.max_observation_characters,
+                    ),
+                )
+            )
+            # Let the adapter recover by choosing a different tool/call pattern.
+            if tool.name == STR_REPLACE_EDITOR_TOOL_NAME:
+                continue
             _update_budget_ledger(
                 budget_ledger,
                 started_at=started_at,

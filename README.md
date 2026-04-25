@@ -93,9 +93,11 @@ export CODE_AGENT_OPENROUTER_TIMEOUT_SECONDS=120
 export CODE_AGENT_OPENROUTER_HTTP_REFERER=https://github.com/natanayalo/code-agent
 export CODE_AGENT_OPENROUTER_X_TITLE=code-agent
 export CODE_AGENT_OPENROUTER_ROLE_NATIVE_MESSAGES=false
+export CODE_AGENT_SANDBOX_IMAGE=code-agent-worker
 export CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS=2
 export CODE_AGENT_QUEUE_LEASE_SECONDS=60
 export CODE_AGENT_QUEUE_MAX_ATTEMPTS=3
+export CODE_AGENT_WEBHOOK_DEFAULT_REPO_URL=https://github.com/your-user/your-repo
 ```
 
 Optional progress delivery for Milestone 10:

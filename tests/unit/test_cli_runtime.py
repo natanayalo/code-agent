@@ -25,6 +25,7 @@ from workers.cli_runtime import (
     _estimate_messages_characters,
     _extract_file_hints_from_command,
     _messages_for_adapter_turn,
+    _normalize_requested_tool_name,
     collect_changed_files,
     collect_changed_files_from_repo_path,
     format_bash_observation,
@@ -242,6 +243,63 @@ def test_run_cli_runtime_loop_completes_a_multi_turn_sequence() -> None:
     assert any(message.role == "tool" for message in execution.messages)
     assert "Tool call: execute_bash" in execution.messages[1].content
     assert "Exit code: 0" in execution.messages[2].content
+
+
+def test_run_cli_runtime_loop_rejects_tool_call_payload_returned_as_final_output() -> None:
+    """Malformed adapter finals that contain tool_call JSON should fail as adapter errors."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="final",
+                final_output=(
+                    '{"kind":"tool_call","tool_name":"execute_bash",'
+                    '"tool_input":"cat > docs/architecture.md <<EOF\\nupdated\\nEOF",'
+                    '"final_output":null}'
+                ),
+            )
+        ]
+    )
+    session = _FakeSession({})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=2, worker_timeout_seconds=30),
+    )
+
+    assert execution.status == "error"
+    assert execution.stop_reason == "adapter_error"
+    assert "tool_call payload as final output" in (execution.summary or "")
+    assert execution.commands_run == []
+
+
+def test_run_cli_runtime_loop_rejects_malformed_tool_call_like_final_output() -> None:
+    """Heuristic guard should reject tool_call-like final text even when JSON is malformed."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="final",
+                final_output=(
+                    '{"kind":"tool_call","tool_name":"execute_bash",'
+                    '"tool_input":"echo \\`bad-json-escape\\`","final_output":null}'
+                ),
+            )
+        ]
+    )
+    session = _FakeSession({})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=2, worker_timeout_seconds=30),
+    )
+
+    assert execution.status == "error"
+    assert execution.stop_reason == "adapter_error"
+    assert "tool_call payload as final output" in (execution.summary or "")
+    assert execution.commands_run == []
 
 
 def test_run_cli_runtime_loop_skips_condensation_when_history_is_within_threshold() -> None:
@@ -1028,15 +1086,16 @@ def test_run_cli_runtime_loop_rejects_invalid_git_helper_input() -> None:
     assert session.calls == []
 
 
-def test_run_cli_runtime_loop_rejects_invalid_str_replace_editor_input() -> None:
-    """Structured editor requests should fail clearly on invalid tool input."""
+def test_run_cli_runtime_loop_recovers_from_invalid_str_replace_editor_input() -> None:
+    """Invalid str_replace_editor payloads should return feedback and let the adapter recover."""
     adapter = _ScriptedAdapter(
         [
             CliRuntimeStep(
                 kind="tool_call",
                 tool_name="str_replace_editor",
                 tool_input='{"path":"README.md","old_text":"", "new_text":"replacement"}',
-            )
+            ),
+            CliRuntimeStep(kind="final", final_output="Switched to a safer edit approach."),
         ]
     )
     session = _FakeSession({})
@@ -1045,13 +1104,21 @@ def test_run_cli_runtime_loop_rejects_invalid_str_replace_editor_input() -> None
         adapter,
         session,
         system_prompt="System prompt",
-        settings=CliRuntimeSettings(max_iterations=1, worker_timeout_seconds=30),
+        settings=CliRuntimeSettings(max_iterations=2, worker_timeout_seconds=30),
     )
 
-    assert execution.status == "error"
-    assert execution.stop_reason == "adapter_error"
-    assert "invalid input for `str_replace_editor`" in execution.summary
+    assert execution.status == "success"
+    assert execution.stop_reason == "final_answer"
+    assert execution.summary == "Switched to a safer edit approach."
     assert session.calls == []
+    assert execution.budget_ledger.tool_calls_used == 1
+    assert any(
+        message.role == "tool"
+        and message.tool_name == "str_replace_editor"
+        and "input_validation_failed" in message.content
+        and "Guidance: for multiline edits, use `execute_bash`" in message.content
+        for message in execution.messages
+    )
 
 
 def test_run_cli_runtime_loop_blocks_commands_that_require_higher_permission() -> None:
@@ -1357,6 +1424,43 @@ def test_run_cli_runtime_loop_returns_adapter_error_for_unknown_tools() -> None:
     assert execution.status == "error"
     assert execution.stop_reason == "adapter_error"
     assert "unknown tool" in execution.summary.lower()
+
+
+def test_run_cli_runtime_loop_recovers_from_plan_mode_unknown_tool() -> None:
+    """Gemini plan-mode control tools should be recoverable unknown-tool observations."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="enter_plan_mode", tool_input="{}"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pwd"),
+            CliRuntimeStep(kind="final", final_output="done"),
+        ]
+    )
+    session = _FakeSession({"pwd": _command_result("pwd", output="/workspace/repo\n")})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=4, worker_timeout_seconds=30),
+    )
+
+    assert execution.status == "success"
+    assert execution.summary == "done"
+    assert [command.command for command in execution.commands_run] == ["pwd"]
+    assert any(
+        message.role == "tool"
+        and message.tool_name == "enter_plan_mode"
+        and "unavailable_tool" in message.content
+        for message in execution.messages
+    )
+
+
+def test_normalize_requested_tool_name_maps_exec_command_aliases() -> None:
+    """Common external adapter names should map onto registered execute_bash."""
+    assert _normalize_requested_tool_name("functions.exec_command") == "execute_bash"
+    assert _normalize_requested_tool_name("exec_command") == "execute_bash"
+    assert _normalize_requested_tool_name("bash") == "execute_bash"
+    assert _normalize_requested_tool_name("execute_git") == "execute_git"
 
 
 def test_collect_changed_files_parses_modified_renamed_and_untracked_paths() -> None:
