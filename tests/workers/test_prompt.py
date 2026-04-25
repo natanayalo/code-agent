@@ -1022,6 +1022,23 @@ def test_build_runtime_adapter_tool_guidance_lines_filters_to_system_prompt_tool
     assert all("execute_git" not in line for line in lines)
 
 
+def test_build_runtime_adapter_tool_guidance_lines_empty_available_tools_section() -> None:
+    """An explicit empty Available Tools section should produce no tool guidance."""
+    system_prompt = "\n".join(
+        [
+            "## Available Tools",
+            "- No tools configured.",
+            "",
+            "## Task Context",
+            "Task text: demo",
+        ]
+    )
+
+    lines = prompt.build_runtime_adapter_tool_guidance_lines(system_prompt=system_prompt)
+
+    assert lines == []
+
+
 def test_read_workspace_agents_guidance_missing_and_short_paths(tmp_path: Path) -> None:
     """AGENTS guidance should return None when absent and full text when within budget."""
     assert prompt.read_workspace_agents_guidance(tmp_path) is None

@@ -146,7 +146,7 @@ def _extract_available_tool_names_from_system_prompt(system_prompt: str | None) 
         for name in re.findall(r"^### `([^`]+)`\s*$", section_body, flags=re.MULTILINE)
         if name.strip()
     }
-    return names or None
+    return names
 
 
 def _schema_type_names(raw_type: object) -> tuple[str, ...]:
