@@ -434,6 +434,14 @@ def test_build_role_native_instructions_labels_json_examples() -> None:
     assert "Example final:" in instructions
 
 
+def test_build_role_native_instructions_examples_omit_null_fields() -> None:
+    """Instruction JSON examples should omit null fields for concise prompting."""
+    instructions = _build_role_native_instructions()
+    assert '"final_output":null' not in instructions
+    assert '"tool_name":null' not in instructions
+    assert '"tool_input":null' not in instructions
+
+
 def test_message_content_to_text_joins_text_blocks() -> None:
     """Adapter content normalization should join text blocks from list content."""
     content = [
