@@ -33,11 +33,52 @@ button {
   font-family: inherit;
 }
 
+/* Layout Utilities */
+.dashboard-container {
+  padding: var(--spacing-xl);
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.dashboard-header {
+  margin-bottom: var(--spacing-xl);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.dashboard-main {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--spacing-lg);
+}
+
+/* Component Styles */
 .glass-panel {
   background: var(--color-surface);
   backdrop-filter: var(--glass-blur);
   border: var(--glass-border);
   border-radius: 1rem;
+}
+
+.icon-wrapper {
+  background: var(--color-accent-gradient);
+  padding: var(--spacing-sm);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dashboard-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.dashboard-subtitle {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
 }
 
 .gradient-text {
@@ -46,3 +87,76 @@ button {
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+
+/* Task Card Styles */
+.task-card {
+  padding: var(--spacing-lg);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-md);
+}
+
+.status-badge {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--color-accent-primary-bg);
+  color: var(--color-accent-primary);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: 4px;
+}
+
+.task-title {
+  margin-bottom: 0.5rem;
+}
+
+.task-description {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  margin-bottom: 1.5rem;
+}
+
+.card-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding-top: var(--spacing-md);
+  display: flex;
+  gap: var(--spacing-md);
+}
+
+.task-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+/* Stats Styles */
+.stats-card {
+  padding: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.stats-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.stats-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.stats-label {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.success-icon { color: var(--color-success); }
+.error-icon { color: var(--color-error); }
