@@ -631,7 +631,7 @@ def _looks_read_only_command(command: str) -> bool:
     if any(marker in normalized for marker in _WRITE_COMMAND_MARKERS):
         return False
     return any(
-        normalized == prefix.rstrip() or normalized.startswith(prefix)
+        normalized == prefix.rstrip() or normalized.startswith(prefix.rstrip() + " ")
         for prefix in _READ_ONLY_COMMAND_PREFIXES
     )
 
@@ -1534,6 +1534,8 @@ def run_cli_runtime_loop(
             commands_with_writes += 1
             if first_execution_iteration is None:
                 first_execution_iteration = iteration
+            # Keep repeated-read stall checks scoped to the post-write phase.
+            read_counts_by_file = {}
         file_hints = _extract_file_hints_from_command(command)
         new_file_hints_count = 0
         for file_hint in file_hints:
@@ -1585,7 +1587,7 @@ def run_cli_runtime_loop(
             count > settings.max_repeated_file_reads for count in read_counts_by_file.values()
         )
         has_stall_signals = all_recent_read_only and (
-            commands_with_writes == 0 or no_new_files_recently or repeated_same_file_reads
+            no_new_files_recently or repeated_same_file_reads
         )
         if has_stall_signals:
             if stall_correction_injected_at is None and settings.stall_correction_turns > 0:

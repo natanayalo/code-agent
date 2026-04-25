@@ -24,6 +24,7 @@ from workers.cli_runtime import (
     _coerce_non_negative_int,
     _estimate_messages_characters,
     _extract_file_hints_from_command,
+    _looks_read_only_command,
     _messages_for_adapter_turn,
     _normalize_requested_tool_name,
     collect_changed_files,
@@ -533,6 +534,16 @@ def test_extract_file_hints_skips_current_and_parent_directory_tokens() -> None:
     assert "../notes.txt" in hints
     assert "." not in hints
     assert ".." not in hints
+
+
+def test_looks_read_only_command_uses_word_boundary_for_short_commands() -> None:
+    """Short read-only commands should not match unrelated command-name prefixes."""
+    assert _looks_read_only_command("ls") is True
+    assert _looks_read_only_command("pwd") is True
+    assert _looks_read_only_command("ls src") is True
+    assert _looks_read_only_command("pwd /tmp") is True
+    assert _looks_read_only_command("lsrc") is False
+    assert _looks_read_only_command("pwd_helper") is False
 
 
 def test_build_condensed_context_summary_truncation_stays_within_budget() -> None:
@@ -1404,6 +1415,47 @@ def test_run_cli_runtime_loop_stops_as_stalled_in_inspection_after_write_progres
     assert execution.status == "failure"
     assert execution.stop_reason == "stalled_in_inspection"
     assert "stalled in repeated inspection" in execution.summary
+
+
+def test_run_cli_runtime_loop_resets_repeated_read_tracking_after_write() -> None:
+    """A concrete write should reset repeated-read counters before post-write inspection."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat a.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat b.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat a.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="touch a.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat a.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat c.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat a.txt"),
+            CliRuntimeStep(kind="final", final_output="done"),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "cat a.txt": _command_result("cat a.txt", output="x\n"),
+            "cat b.txt": _command_result("cat b.txt", output="y\n"),
+            "touch a.txt": _command_result("touch a.txt", output=""),
+            "cat c.txt": _command_result("cat c.txt", output="z\n"),
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=8,
+            worker_timeout_seconds=30,
+            stall_window_iterations=3,
+            max_repeated_file_reads=2,
+            stall_correction_turns=0,
+        ),
+    )
+
+    assert execution.status == "success"
+    assert execution.stop_reason == "final_answer"
+    assert execution.summary == "done"
 
 
 def test_run_cli_runtime_loop_stops_as_exploration_exhausted() -> None:
