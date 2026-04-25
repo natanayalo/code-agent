@@ -363,6 +363,69 @@ def test_gemini_cli_worker_self_review_with_findings(tmp_path: Path) -> None:
     assert result.review_result.outcome == "no_findings"
 
 
+def test_gemini_cli_worker_checks_cancel_before_self_review(tmp_path: Path) -> None:
+    """The self-review coordinator should honor cancellation before review starts."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): DockerShellCommandResult(
+                command=_git_status_command(container.working_dir),
+                exit_code=0,
+                output="",
+                duration_seconds=0.0,
+            )
+        }
+    )
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="Done")])
+    worker = GeminiCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: session,
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+    )
+
+    with patch(
+        "workers.gemini_cli_worker.run_shared_self_review_fix_loop",
+        return_value=(None, [], None, []),
+    ) as review_loop:
+        result = asyncio.run(
+            worker.run(WorkerRequest(task_text="task", repo_url="https://example.com/repo"))
+        )
+
+    assert result.status == "success"
+    assert review_loop.call_args is not None
+    assert review_loop.call_args.kwargs["check_cancel_before_review"] is True
+
+
+def test_gemini_cli_worker_stops_container_when_setup_fails_after_start(tmp_path: Path) -> None:
+    """Setup failures after container start should still clean up the started container."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    container_manager = _FakeContainerManager(container)
+
+    def _failing_session_factory(_, **__):
+        raise OSError("session init failed")
+
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=container_manager,
+        session_factory=_failing_session_factory,
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(task_text="task", repo_url="https://example.com/repo", branch="main")
+        )
+    )
+
+    assert result.status == "error"
+    assert "session init failed" in (result.summary or "")
+    assert container_manager.stop_requests == [container]
+
+
 def test_gemini_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_path: Path) -> None:
     """Lint artifacts from each lint pass should be preserved on the final worker result."""
     workspace = _make_workspace(tmp_path)

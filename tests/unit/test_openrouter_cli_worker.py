@@ -647,6 +647,27 @@ def test_openrouter_run_sync_container_start_error(tmp_path) -> None:
     assert result.failure_kind == "sandbox_infra"
 
 
+def test_openrouter_run_sync_stops_container_when_setup_fails_after_start(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    container_manager = _FakeContainerManager(container)
+
+    def _failing_session_factory(_, **__):
+        raise OSError("session init failed")
+
+    worker = OpenRouterCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=container_manager,
+        session_factory=_failing_session_factory,
+    )
+
+    result = worker._run_sync(WorkerRequest(task_text="task", repo_url="https://x.com/r"))
+    assert result.status == "error"
+    assert "session init failed" in (result.summary or "")
+    assert container_manager.stop_requests == [container]
+
+
 def test_openrouter_run_cancellation(tmp_path) -> None:
     import asyncio
 

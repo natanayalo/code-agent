@@ -657,6 +657,86 @@ def test_codex_cli_worker_records_no_findings_self_review(tmp_path: Path) -> Non
     assert "## Review Task" in adapter.prompt_overrides[1]
 
 
+def test_codex_cli_worker_checks_cancel_before_self_review(tmp_path: Path) -> None:
+    """The self-review coordinator should honor cancellation before review starts."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-cancel-review",
+        image="python:3.12-slim",
+    )
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="Done")])
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
+                output="",
+            )
+        }
+    )
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda started_container, **_: session,
+    )
+
+    with patch(
+        "workers.codex_cli_worker.run_shared_self_review_fix_loop",
+        return_value=(None, [], None, []),
+    ) as review_loop:
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-cancel-before-review",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Complete task then review",
+                )
+            )
+        )
+
+    assert result.status == "success"
+    assert review_loop.call_args is not None
+    assert review_loop.call_args.kwargs["check_cancel_before_review"] is True
+
+
+def test_codex_cli_worker_stops_container_when_setup_fails_after_start(tmp_path: Path) -> None:
+    """Setup failures after container start should still clean up the started container."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-setup-fail",
+        image="python:3.12-slim",
+    )
+    container_manager = _FakeContainerManager(container)
+
+    def _failing_session_factory(started_container, **_):
+        raise OSError("session init failed")
+
+    worker = CodexCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=container_manager,
+        session_factory=_failing_session_factory,
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-setup-fail",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Trigger setup failure",
+            )
+        )
+    )
+
+    assert result.status == "error"
+    assert "session init failed" in (result.summary or "")
+    assert container_manager.stop_requests == [container]
+
+
 def test_codex_cli_worker_fixes_review_findings_with_bounded_retry(tmp_path: Path) -> None:
     """Actionable self-review findings should trigger a bounded follow-up fix loop."""
     workspace = _workspace_handle(tmp_path)

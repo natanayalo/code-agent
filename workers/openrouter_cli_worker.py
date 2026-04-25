@@ -375,39 +375,46 @@ class OpenRouterCliWorker(Worker):
                 environment=scoped_secrets,
             )
         )
-        session = self._session_factory(container, secrets=request.secrets)
-        runtime_settings = settings_from_budget(
-            request.budget,
-            defaults=self.runtime_settings,
-        )
-        granted_permission = granted_permission_from_constraints(request.constraints)
-        bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
-        fallback_command_template = (
-            request.constraints.get("post_run_lint_format_command")
-            if isinstance(request.constraints.get("post_run_lint_format_command"), str)
-            else None
-        )
-        system_prompt = (
-            system_prompt_override
-            if system_prompt_override is not None
-            else build_system_prompt(
-                request,
-                workspace.repo_path,
-                tool_registry=self.tool_registry,
+        session: ShellSessionProtocol | None = None
+        try:
+            session = self._session_factory(container, secrets=request.secrets)
+            runtime_settings = settings_from_budget(
+                request.budget,
+                defaults=self.runtime_settings,
             )
-        )
+            granted_permission = granted_permission_from_constraints(request.constraints)
+            bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
+            fallback_command_template = (
+                request.constraints.get("post_run_lint_format_command")
+                if isinstance(request.constraints.get("post_run_lint_format_command"), str)
+                else None
+            )
+            system_prompt = (
+                system_prompt_override
+                if system_prompt_override is not None
+                else build_system_prompt(
+                    request,
+                    workspace.repo_path,
+                    tool_registry=self.tool_registry,
+                )
+            )
 
-        return _RuntimeSetup(
-            container=container,
-            session=session,
-            runtime_settings=runtime_settings,
-            granted_permission=granted_permission,
-            expects_changed_files=(
-                ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts
-            ),
-            fallback_command_template=fallback_command_template,
-            system_prompt=system_prompt,
-        )
+            return _RuntimeSetup(
+                container=container,
+                session=session,
+                runtime_settings=runtime_settings,
+                granted_permission=granted_permission,
+                expects_changed_files=(
+                    ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts
+                ),
+                fallback_command_template=fallback_command_template,
+                system_prompt=system_prompt,
+            )
+        except Exception:
+            if session is not None:
+                self._close_session(session)
+            self._stop_container(container)
+            raise
 
     def _execute_runtime_phase(
         self,
