@@ -111,8 +111,8 @@ docker compose run --rm --no-deps worker gemini auth login
 Run the core checks from the repo virtualenv:
 
 ```bash
-.venv/bin/pytest
-.venv/bin/pre-commit run --all-files
+poetry run pytest
+poetry run pre-commit run --all-files
 ```
 
 ## Current Focus

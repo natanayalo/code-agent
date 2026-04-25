@@ -127,10 +127,9 @@ This lane remains controlled, inspectable, and human-in-the-loop for high-risk o
 ```mermaid
 flowchart TD
     U[Operator via Telegram or HTTP] --> API[FastAPI Ingress]
-    API --> DB[(Postgres)]
-    API --> Q[Queued Task]
+    API --> DB[(Postgres<br/>Task Queue)]
 
-    W[Worker Process] --> Q
+    DB --> W[Worker Process]
     W --> ORCH[TaskExecutionService + Orchestrator Graph]
     ORCH --> MEM[Memory + Session State]
     ORCH --> ROUTE[Worker Routing]
