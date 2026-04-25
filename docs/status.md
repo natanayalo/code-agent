@@ -100,6 +100,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-125 Extract shared self-review + fix-loop coordinator. PR: [#107](https://github.com/natanayalo/code-agent/pull/107)
 - T-126 Decompose CLI worker `_run_sync` into focused phases. PR: [#108](https://github.com/natanayalo/code-agent/pull/108)
 - T-127 Move tool-use guidance to shared prompt source-of-truth. PR: [#109](https://github.com/natanayalo/code-agent/pull/109)
+- T-128 Evaluate and migrate toward role-native adapter messaging. PR: [#110](https://github.com/natanayalo/code-agent/pull/110)
 
 ## In Progress
 

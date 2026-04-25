@@ -10,6 +10,9 @@ from workers.cli_runtime import CliRuntimeMessage
 from workers.openrouter_adapter import (
     OpenRouterCliRuntimeAdapter,
     _build_adapter_prompt,
+    _build_role_native_instructions,
+    _build_role_native_request_messages,
+    _coerce_bool,
     _message_content_to_text,
 )
 
@@ -62,12 +65,14 @@ def test_openrouter_adapter_from_env_maps_settings(monkeypatch: pytest.MonkeyPat
             "CODE_AGENT_OPENROUTER_TIMEOUT_SECONDS": "45",
             "CODE_AGENT_OPENROUTER_HTTP_REFERER": "https://example.com/app",
             "CODE_AGENT_OPENROUTER_X_TITLE": "Code Agent Dev",
+            "CODE_AGENT_OPENROUTER_ROLE_NATIVE_MESSAGES": "true",
         }
     )
 
     assert adapter.api_key == "key-123"
     assert adapter.model == "meta-llama/llama-3.1-70b-instruct"
     assert adapter.request_timeout_seconds == 45
+    assert adapter.use_role_native_messages is True
     assert fake_client is not None
     assert fake_client.kwargs["base_url"] == "https://openrouter.ai/api/v1"
     assert fake_client.kwargs["default_headers"] == {
@@ -100,6 +105,49 @@ def test_openrouter_adapter_next_step_requests_chat_completion(
     assert len(fake_client.calls) == 1
     assert fake_client.calls[0]["model"] == "anthropic/claude-3.5-sonnet"
     assert fake_client.calls[0]["response_format"] == {"type": "json_object"}
+
+
+def test_openrouter_adapter_next_step_role_native_mode_uses_structured_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Role-native mode should send a structured message array to OpenRouter."""
+
+    fake_client: _FakeOpenAI | None = None
+
+    def _fake_openai(**kwargs):
+        nonlocal fake_client
+        fake_client = _FakeOpenAI(**kwargs)
+        return fake_client
+
+    monkeypatch.setattr("workers.openrouter_adapter.OpenAI", _fake_openai)
+    adapter = OpenRouterCliRuntimeAdapter(api_key="test-key", use_role_native_messages=True)
+
+    step = adapter.next_step(
+        [
+            CliRuntimeMessage(role="system", content="Runtime system context."),
+            CliRuntimeMessage(role="assistant", content='{"kind":"tool_call"}'),
+            CliRuntimeMessage(
+                role="tool",
+                tool_name="execute_bash",
+                content="Exit code: 0\nOutput:\nhello",
+            ),
+        ],
+        system_prompt="Worker policy text.",
+    )
+
+    assert step.kind == "final"
+    assert fake_client is not None
+    payload_messages = fake_client.calls[0]["messages"]
+    assert isinstance(payload_messages, list)
+    assert payload_messages[0]["role"] == "system"
+    assert "Return exactly one JSON object" in payload_messages[0]["content"]
+    assert "## Worker System Prompt\nWorker policy text." in payload_messages[0]["content"]
+    assert payload_messages[1] == {"role": "system", "content": "Runtime system context."}
+    assert payload_messages[2] == {"role": "assistant", "content": '{"kind":"tool_call"}'}
+    assert payload_messages[3] == {
+        "role": "user",
+        "content": "Tool result (execute_bash):\nExit code: 0\nOutput:\nhello",
+    }
 
 
 def test_openrouter_adapter_next_step_rejects_empty_response(
@@ -303,7 +351,7 @@ def test_openrouter_adapter_next_step_wraps_non_runtime_json_as_final(
 def test_openrouter_adapter_prompt_override_bypasses_runtime_prompt_shaping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Prompt overrides should send raw prompt text and wrap review JSON as final."""
+    """Prompt overrides should remain raw when role-native mode is disabled."""
 
     fake_client: _FakeOpenAI | None = None
 
@@ -344,6 +392,98 @@ def test_openrouter_adapter_prompt_override_bypasses_runtime_prompt_shaping(
         fake_client.calls[0]["messages"][0]["content"]
         == "Review these edits and return ReviewResult JSON only."
     )
+
+
+def test_openrouter_adapter_prompt_override_role_native_mode_includes_system_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Role-native override mode should include protocol rules in a system message."""
+
+    fake_client: _FakeOpenAI | None = None
+
+    class _ReviewJsonResponseOpenAI(_FakeOpenAI):
+        def _create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=(
+                                '{"reviewer_kind":"worker_self_review","summary":"ok",'
+                                '"confidence":0.8,"outcome":"no_findings","findings":[]}'
+                            )
+                        )
+                    )
+                ]
+            )
+
+    def _fake_openai(**kwargs):
+        nonlocal fake_client
+        fake_client = _ReviewJsonResponseOpenAI(**kwargs)
+        return fake_client
+
+    monkeypatch.setattr("workers.openrouter_adapter.OpenAI", _fake_openai)
+    adapter = OpenRouterCliRuntimeAdapter(api_key="test-key", use_role_native_messages=True)
+    step = adapter.next_step(
+        [],
+        prompt_override="Review these edits and return ReviewResult JSON only.",
+    )
+
+    assert step.kind == "final"
+    assert step.final_output is not None
+    assert fake_client is not None
+    assert "Return exactly one JSON object" in fake_client.calls[0]["messages"][0]["content"]
+    assert (
+        fake_client.calls[0]["messages"][1]["content"]
+        == "Review these edits and return ReviewResult JSON only."
+    )
+
+
+def test_build_role_native_request_messages_serializes_tool_transcript_entries() -> None:
+    """Tool transcript messages should serialize with explicit tool labels."""
+    request_messages = _build_role_native_request_messages(
+        (
+            CliRuntimeMessage(role="system", content="Runtime instructions"),
+            CliRuntimeMessage(role="assistant", content="tool call emitted"),
+            CliRuntimeMessage(role="tool", tool_name="search_dir", content="2 matches"),
+        ),
+        system_prompt="Worker system prompt",
+    )
+
+    assert request_messages[0]["role"] == "system"
+    assert "## Worker System Prompt\nWorker system prompt" in request_messages[0]["content"]
+    assert request_messages[1] == {"role": "system", "content": "Runtime instructions"}
+    assert request_messages[2] == {"role": "assistant", "content": "tool call emitted"}
+    assert request_messages[3] == {
+        "role": "user",
+        "content": "Tool result (search_dir):\n2 matches",
+    }
+
+
+def test_coerce_bool_parses_supported_values() -> None:
+    """Boolean parser should accept common env-style truthy/falsy strings."""
+    assert _coerce_bool(True, default=False) is True
+    assert _coerce_bool("true", default=False) is True
+    assert _coerce_bool(" YES ", default=False) is True
+    assert _coerce_bool("0", default=True) is False
+    assert _coerce_bool("off", default=True) is False
+    assert _coerce_bool("unknown", default=True) is True
+
+
+def test_build_role_native_instructions_labels_json_examples() -> None:
+    """Role-native instruction examples should be explicitly labeled."""
+    instructions = _build_role_native_instructions()
+    assert "Examples:" in instructions
+    assert "Example tool_call:" in instructions
+    assert "Example final:" in instructions
+
+
+def test_build_role_native_instructions_examples_omit_null_fields() -> None:
+    """Instruction JSON examples should omit null fields for concise prompting."""
+    instructions = _build_role_native_instructions()
+    assert '"final_output":null' not in instructions
+    assert '"tool_name":null' not in instructions
+    assert '"tool_input":null' not in instructions
 
 
 def test_message_content_to_text_joins_text_blocks() -> None:
