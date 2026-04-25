@@ -10,6 +10,7 @@ from workers.cli_runtime import CliRuntimeMessage
 from workers.openrouter_adapter import (
     OpenRouterCliRuntimeAdapter,
     _build_adapter_prompt,
+    _build_role_native_instructions,
     _build_role_native_request_messages,
     _coerce_bool,
     _message_content_to_text,
@@ -140,13 +141,10 @@ def test_openrouter_adapter_next_step_role_native_mode_uses_structured_messages(
     assert isinstance(payload_messages, list)
     assert payload_messages[0]["role"] == "system"
     assert "Return exactly one JSON object" in payload_messages[0]["content"]
-    assert payload_messages[1] == {
-        "role": "system",
-        "content": "## Worker System Prompt\nWorker policy text.",
-    }
-    assert payload_messages[2] == {"role": "system", "content": "Runtime system context."}
-    assert payload_messages[3] == {"role": "assistant", "content": '{"kind":"tool_call"}'}
-    assert payload_messages[4] == {
+    assert "## Worker System Prompt\nWorker policy text." in payload_messages[0]["content"]
+    assert payload_messages[1] == {"role": "system", "content": "Runtime system context."}
+    assert payload_messages[2] == {"role": "assistant", "content": '{"kind":"tool_call"}'}
+    assert payload_messages[3] == {
         "role": "user",
         "content": "Tool result (execute_bash):\nExit code: 0\nOutput:\nhello",
     }
@@ -353,7 +351,7 @@ def test_openrouter_adapter_next_step_wraps_non_runtime_json_as_final(
 def test_openrouter_adapter_prompt_override_bypasses_runtime_prompt_shaping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Prompt overrides should send raw prompt text and wrap review JSON as final."""
+    """Prompt overrides should include JSON-only system rules and preserve user prompt."""
 
     fake_client: _FakeOpenAI | None = None
 
@@ -390,8 +388,9 @@ def test_openrouter_adapter_prompt_override_bypasses_runtime_prompt_shaping(
     assert '"reviewer_kind":"worker_self_review"' in step.final_output
     assert fake_client is not None
     assert len(fake_client.calls) == 1
+    assert "Return exactly one JSON object" in fake_client.calls[0]["messages"][0]["content"]
     assert (
-        fake_client.calls[0]["messages"][0]["content"]
+        fake_client.calls[0]["messages"][1]["content"]
         == "Review these edits and return ReviewResult JSON only."
     )
 
@@ -408,10 +407,10 @@ def test_build_role_native_request_messages_serializes_tool_transcript_entries()
     )
 
     assert request_messages[0]["role"] == "system"
-    assert request_messages[1]["role"] == "system"
-    assert request_messages[2] == {"role": "system", "content": "Runtime instructions"}
-    assert request_messages[3] == {"role": "assistant", "content": "tool call emitted"}
-    assert request_messages[4] == {
+    assert "## Worker System Prompt\nWorker system prompt" in request_messages[0]["content"]
+    assert request_messages[1] == {"role": "system", "content": "Runtime instructions"}
+    assert request_messages[2] == {"role": "assistant", "content": "tool call emitted"}
+    assert request_messages[3] == {
         "role": "user",
         "content": "Tool result (search_dir):\n2 matches",
     }
@@ -425,6 +424,14 @@ def test_coerce_bool_parses_supported_values() -> None:
     assert _coerce_bool("0", default=True) is False
     assert _coerce_bool("off", default=True) is False
     assert _coerce_bool("unknown", default=True) is True
+
+
+def test_build_role_native_instructions_labels_json_examples() -> None:
+    """Role-native instruction examples should be explicitly labeled."""
+    instructions = _build_role_native_instructions()
+    assert "Examples:" in instructions
+    assert "Example tool_call:" in instructions
+    assert "Example final:" in instructions
 
 
 def test_message_content_to_text_joins_text_blocks() -> None:

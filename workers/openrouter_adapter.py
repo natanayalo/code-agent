@@ -157,13 +157,16 @@ def _build_role_native_instructions(*, system_prompt: str | None = None) -> str:
             "Return exactly one JSON object with no surrounding text, "
             "no markdown fences, and no explanation."
         ),
-        "Choose one of two actions:",
+        "Choose one of two actions.",
+        "Examples:",
+        "Example tool_call:",
         CliRuntimeStep(
             kind="tool_call",
             tool_name="<registered tool name>",
             tool_input="<tool input string>",
             final_output=None,
         ).model_dump_json(),
+        "Example final:",
         CliRuntimeStep(
             kind="final",
             final_output="<final summary for the user>",
@@ -178,6 +181,35 @@ def _build_role_native_instructions(*, system_prompt: str | None = None) -> str:
         "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
         "- Return ONLY a raw JSON object. No markdown fences, no extra explanation.",
     ]
+    if system_prompt is not None and system_prompt.strip():
+        lines.extend(
+            [
+                "",
+                "## Worker System Prompt",
+                system_prompt.strip(),
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _build_override_system_instructions(*, system_prompt: str | None = None) -> str:
+    """Build override-safe system instructions that still enforce JSON-only output."""
+    lines = [
+        "You are the OpenRouter runtime adapter for a bounded coding worker.",
+        (
+            "Return exactly one JSON object with no surrounding text, "
+            "no markdown fences, and no explanation."
+        ),
+        "Follow the user message instructions for the expected JSON schema and fields.",
+    ]
+    if system_prompt is not None and system_prompt.strip():
+        lines.extend(
+            [
+                "",
+                "## Worker System Prompt",
+                system_prompt.strip(),
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -193,13 +225,6 @@ def _build_role_native_request_messages(
             "content": _build_role_native_instructions(system_prompt=system_prompt),
         }
     ]
-    if system_prompt is not None and system_prompt.strip():
-        request_messages.append(
-            {
-                "role": "system",
-                "content": f"## Worker System Prompt\n{system_prompt.strip()}",
-            }
-        )
     transcript = build_role_native_transcript(tuple(messages))
     request_messages.extend(
         cast(list[ChatCompletionMessageParam], serialize_openai_compatible_messages(transcript))
@@ -323,7 +348,13 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         if override_prompt is not None:
             request_messages = cast(
                 list[ChatCompletionMessageParam],
-                [{"role": "user", "content": override_prompt}],
+                [
+                    {
+                        "role": "system",
+                        "content": _build_override_system_instructions(system_prompt=system_prompt),
+                    },
+                    {"role": "user", "content": override_prompt},
+                ],
             )
         elif self.use_role_native_messages:
             request_messages = _build_role_native_request_messages(
