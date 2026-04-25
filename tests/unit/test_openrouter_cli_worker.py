@@ -172,6 +172,27 @@ def test_openrouter_cli_worker_errors_without_repo_url(tmp_path: Path) -> None:
     assert result.next_action_hint == "provide_repo_url"
 
 
+def test_openrouter_validate_request_phase_returns_none_for_valid_repo_url(
+    tmp_path: Path,
+) -> None:
+    """The request-validation phase should pass through when repo_url is present."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    worker = OpenRouterCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: _FakeSession({}),
+    )
+
+    assert (
+        worker._validate_request(
+            WorkerRequest(task_text="do something", repo_url="https://example.com/repo.git")
+        )
+        is None
+    )
+
+
 def test_openrouter_cli_worker_errors_when_workspace_provisioning_fails(tmp_path: Path) -> None:
     """Worker should return an error result when workspace creation raises."""
 
@@ -624,6 +645,27 @@ def test_openrouter_run_sync_container_start_error(tmp_path) -> None:
     assert result.status == "error"
     assert "start fail" in result.summary
     assert result.failure_kind == "sandbox_infra"
+
+
+def test_openrouter_run_sync_stops_container_when_setup_fails_after_start(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    container_manager = _FakeContainerManager(container)
+
+    def _failing_session_factory(_, **__):
+        raise OSError("session init failed")
+
+    worker = OpenRouterCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=container_manager,
+        session_factory=_failing_session_factory,
+    )
+
+    result = worker._run_sync(WorkerRequest(task_text="task", repo_url="https://x.com/r"))
+    assert result.status == "error"
+    assert "session init failed" in (result.summary or "")
+    assert container_manager.stop_requests == [container]
 
 
 def test_openrouter_run_cancellation(tmp_path) -> None:

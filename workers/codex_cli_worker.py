@@ -7,6 +7,7 @@ import logging
 import re
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Protocol
@@ -29,6 +30,7 @@ from tools import (
     DEFAULT_TOOL_REGISTRY,
     EXECUTE_BASH_TOOL_NAME,
     ToolExpectedArtifact,
+    ToolPermissionLevel,
     ToolRegistry,
     UnknownToolError,
     granted_permission_from_constraints,
@@ -54,6 +56,30 @@ from workers.self_review import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _RuntimeSetup:
+    """Container/session/runtime context prepared before entering the CLI loop."""
+
+    container: DockerSandboxContainer
+    session: ShellSessionProtocol
+    runtime_settings: CliRuntimeSettings
+    granted_permission: ToolPermissionLevel
+    expects_changed_files: bool
+    fallback_command_template: str | None
+    system_prompt: str
+
+
+@dataclass
+class _RuntimeExecutionPhase:
+    """Outputs captured from runtime execution and post-processing phases."""
+
+    execution: CliRuntimeExecutionResult
+    files_changed: list[str]
+    lint_format_result: dict[str, object] | None
+    lint_format_artifacts: list[ArtifactReference]
+    review_result: ReviewResult | None
 
 
 class ShellSessionFactory(Protocol):
@@ -295,13 +321,8 @@ class CodexCliWorker(Worker):
         except OSError:
             logger.exception("Codex CLI worker failed to close the persistent shell session")
 
-    def _run_sync(
-        self,
-        request: WorkerRequest,
-        cancel_token: Callable[[], bool] | None = None,
-        system_prompt_override: str | None = None,
-    ) -> WorkerResult:
-        """Provision a workspace, run the CLI runtime, and return a typed result."""
+    def _validate_request(self, request: WorkerRequest) -> WorkerResult | None:
+        """Return an early error when required request inputs are missing."""
         if request.repo_url is None or not request.repo_url.strip():
             return WorkerResult(
                 status="error",
@@ -311,63 +332,50 @@ class CodexCliWorker(Worker):
                 failure_kind="unknown",
                 next_action_hint="provide_repo_url",
             )
+        return None
 
-        workspace_task_id = _workspace_task_id(request)
-        logger.info(
-            "Starting Codex CLI worker run",
-            extra={
-                "session_id": request.session_id,
-                "repo_url": _mask_url_credentials(request.repo_url),
-                "branch": request.branch,
-                "workspace_task_id": workspace_task_id,
-            },
+    def _provision_workspace(
+        self,
+        repo_url: str,
+        branch: str | None,
+        *,
+        workspace_task_id: str,
+    ) -> WorkspaceHandle:
+        """Create the sandbox workspace for this run."""
+        return self.workspace_manager.create_workspace(
+            WorkspaceRequest(
+                task_id=workspace_task_id,
+                repo_url=repo_url,
+                branch=branch,
+                cleanup_policy=self.cleanup_policy,
+            )
         )
 
-        try:
-            workspace = self.workspace_manager.create_workspace(
-                WorkspaceRequest(
-                    task_id=workspace_task_id,
-                    repo_url=request.repo_url,
-                    branch=request.branch,
-                    cleanup_policy=self.cleanup_policy,
-                )
-            )
-        except (WorkspaceManagerError, OSError) as exc:
-            logger.exception(
-                "Codex CLI worker failed to provision workspace",
-                extra={"session_id": request.session_id, "workspace_task_id": workspace_task_id},
-            )
-            return WorkerResult(
-                status="error",
-                summary=f"CodexCliWorker failed to provision a workspace: {exc}",
-                failure_kind="sandbox_infra",
-                next_action_hint="inspect_worker_configuration",
-            )
+    def _setup_runtime_phase(
+        self,
+        request: WorkerRequest,
+        *,
+        workspace: WorkspaceHandle,
+        system_prompt_override: str | None,
+    ) -> _RuntimeSetup:
+        """Prepare runtime dependencies before entering the main CLI loop."""
+        tool_names = request.tools
+        if tool_names is None:
+            tool_names = [tool.name for tool in self.tool_registry.list_tools()]
 
-        result: WorkerResult | None = None
-        run_succeeded = False
-        container: DockerSandboxContainer | None = None
+        scoped_secrets = self.tool_registry.get_scoped_secrets(
+            tool_names=tool_names,
+            available_secrets=request.secrets,
+        )
+
+        container = self.container_manager.start(
+            DockerSandboxContainerRequest(
+                workspace=workspace,
+                environment=scoped_secrets,
+            )
+        )
         session: ShellSessionProtocol | None = None
-
         try:
-            # Scope secrets: only inject those required by the tools available for this run.
-            tool_names = request.tools
-            if tool_names is None:
-                tool_names = [tool.name for tool in self.tool_registry.list_tools()]
-
-            scoped_secrets = self.tool_registry.get_scoped_secrets(
-                tool_names=tool_names,
-                available_secrets=request.secrets,
-            )
-
-            container = self.container_manager.start(
-                DockerSandboxContainerRequest(
-                    workspace=workspace,
-                    environment=scoped_secrets,
-                )
-            )
-            # Redact ALL secrets: the session redactor should know about every secret
-            # provided by the user, even if they weren't injected into the environment.
             session = self._session_factory(container, secrets=request.secrets)
             runtime_settings = settings_from_budget(
                 request.budget,
@@ -389,95 +397,208 @@ class CodexCliWorker(Worker):
                     tool_registry=self.tool_registry,
                 )
             )
-            execution = run_cli_runtime_loop(
-                self.runtime_adapter,
-                session,
-                system_prompt=system_prompt,
-                settings=runtime_settings,
-                tool_registry=self.tool_registry,
+
+            return _RuntimeSetup(
+                container=container,
+                session=session,
+                runtime_settings=runtime_settings,
                 granted_permission=granted_permission,
-                working_directory=workspace.repo_path,
+                expects_changed_files=(
+                    ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts
+                ),
+                fallback_command_template=fallback_command_template,
+                system_prompt=system_prompt,
+            )
+        except Exception:
+            if session is not None:
+                self._close_session(session)
+            self._stop_container(container)
+            raise
+
+    def _execute_runtime_phase(
+        self,
+        request: WorkerRequest,
+        *,
+        workspace: WorkspaceHandle,
+        runtime_setup: _RuntimeSetup,
+        cancel_token: Callable[[], bool] | None,
+    ) -> _RuntimeExecutionPhase:
+        """Execute the main CLI loop and post-run review/lint phases."""
+        execution = run_cli_runtime_loop(
+            self.runtime_adapter,
+            runtime_setup.session,
+            system_prompt=runtime_setup.system_prompt,
+            settings=runtime_setup.runtime_settings,
+            tool_registry=self.tool_registry,
+            granted_permission=runtime_setup.granted_permission,
+            working_directory=workspace.repo_path,
+            cancel_token=cancel_token,
+            model_name=getattr(self.runtime_adapter, "model", None),
+        )
+
+        files_changed, lint_format_result, lint_format_artifacts = (
+            collect_changed_files_and_apply_post_run_lint_format(
+                session=runtime_setup.session,
+                execution=execution,
+                expect_changed_files_artifact=runtime_setup.expects_changed_files,
+                repo_path_for_detection=workspace.repo_path,
+                repo_working_directory=Path(runtime_setup.container.working_dir),
+                timeout_seconds=runtime_setup.runtime_settings.command_timeout_seconds,
+                fallback_command_template=runtime_setup.fallback_command_template,
+            )
+        )
+
+        review_result: ReviewResult | None = None
+        if execution.status == "success":
+            (
+                review_result,
+                files_changed,
+                lint_format_result,
+                lint_format_artifacts,
+            ) = run_shared_self_review_fix_loop(
+                execution=execution,
+                task_text=request.task_text,
+                constraints=request.constraints,
+                runtime_adapter=self.runtime_adapter,
+                runtime_settings=runtime_setup.runtime_settings,
+                system_prompt=runtime_setup.system_prompt,
+                repo_path=workspace.repo_path,
+                files_changed=files_changed,
+                lint_format_result=lint_format_result,
+                lint_format_artifacts=lint_format_artifacts,
+                post_run_lint_collector=(
+                    lambda current_execution, existing_files: (
+                        collect_changed_files_and_apply_post_run_lint_format(
+                            session=runtime_setup.session,
+                            execution=current_execution,
+                            expect_changed_files_artifact=runtime_setup.expects_changed_files,
+                            repo_path_for_detection=workspace.repo_path,
+                            repo_working_directory=Path(runtime_setup.container.working_dir),
+                            existing_files_changed=existing_files,
+                            timeout_seconds=runtime_setup.runtime_settings.command_timeout_seconds,
+                            fallback_command_template=runtime_setup.fallback_command_template,
+                        )
+                    )
+                ),
+                tool_registry=self.tool_registry,
+                granted_permission=runtime_setup.granted_permission,
+                session=runtime_setup.session,
                 cancel_token=cancel_token,
                 model_name=getattr(self.runtime_adapter, "model", None),
+                adapter_failure_log_message=(
+                    "Codex CLI worker self-review adapter failed; recording explicit "
+                    "no-findings fallback."
+                ),
+                adapter_failure_logger=logger,
+                check_cancel_before_review=True,
             )
 
-            expects_changed_files = (
-                ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts
-            )
-            files_changed, lint_format_result, lint_format_artifacts = (
-                collect_changed_files_and_apply_post_run_lint_format(
-                    session=session,
-                    execution=execution,
-                    expect_changed_files_artifact=expects_changed_files,
-                    repo_path_for_detection=workspace.repo_path,
-                    repo_working_directory=Path(container.working_dir),
-                    timeout_seconds=runtime_settings.command_timeout_seconds,
-                    fallback_command_template=fallback_command_template,
-                )
-            )
-            review_result: ReviewResult | None = None
-            if execution.status == "success":
-                (
-                    review_result,
-                    files_changed,
-                    lint_format_result,
-                    lint_format_artifacts,
-                ) = run_shared_self_review_fix_loop(
-                    execution=execution,
-                    task_text=request.task_text,
-                    constraints=request.constraints,
-                    runtime_adapter=self.runtime_adapter,
-                    runtime_settings=runtime_settings,
-                    system_prompt=system_prompt,
-                    repo_path=workspace.repo_path,
-                    files_changed=files_changed,
-                    lint_format_result=lint_format_result,
-                    lint_format_artifacts=lint_format_artifacts,
-                    post_run_lint_collector=(
-                        lambda current_execution, existing_files: (
-                            collect_changed_files_and_apply_post_run_lint_format(
-                                session=session,
-                                execution=current_execution,
-                                expect_changed_files_artifact=expects_changed_files,
-                                repo_path_for_detection=workspace.repo_path,
-                                repo_working_directory=Path(container.working_dir),
-                                existing_files_changed=existing_files,
-                                timeout_seconds=runtime_settings.command_timeout_seconds,
-                                fallback_command_template=fallback_command_template,
-                            )
-                        )
-                    ),
-                    tool_registry=self.tool_registry,
-                    granted_permission=granted_permission,
-                    session=session,
-                    cancel_token=cancel_token,
-                    model_name=getattr(self.runtime_adapter, "model", None),
-                    adapter_failure_log_message=(
-                        "Codex CLI worker self-review adapter failed; recording explicit "
-                        "no-findings fallback."
-                    ),
-                    adapter_failure_logger=logger,
-                )
+        return _RuntimeExecutionPhase(
+            execution=execution,
+            files_changed=files_changed,
+            lint_format_result=lint_format_result,
+            lint_format_artifacts=lint_format_artifacts,
+            review_result=review_result,
+        )
 
-            result = _worker_result_from_execution(
+    def _finalize_runtime_result(
+        self,
+        workspace: WorkspaceHandle,
+        runtime_phase: _RuntimeExecutionPhase,
+        *,
+        runtime_settings: CliRuntimeSettings,
+        cancel_token: Callable[[], bool] | None,
+    ) -> WorkerResult:
+        """Map runtime phase outputs to the worker result contract."""
+        result = _worker_result_from_execution(
+            workspace,
+            runtime_phase.execution,
+            files_changed=runtime_phase.files_changed,
+            post_run_lint_format=runtime_phase.lint_format_result,
+            review_result=runtime_phase.review_result,
+            diff_text=collect_diff_for_review(
+                workspace.repo_path,
+                timeout_seconds=runtime_settings.command_timeout_seconds,
+            )
+            if runtime_phase.execution.status == "success"
+            else None,
+            artifacts=runtime_phase.lint_format_artifacts,
+        )
+        if cancel_token and cancel_token():
+            result.status = "error"
+            result.summary = "CLI runtime loop was cancelled by the orchestrator timeout."
+            result.failure_kind = "timeout"
+            result.next_action_hint = "inspect_workspace_artifacts"
+        return result
+
+    def _run_sync(
+        self,
+        request: WorkerRequest,
+        cancel_token: Callable[[], bool] | None = None,
+        system_prompt_override: str | None = None,
+    ) -> WorkerResult:
+        """Provision a workspace, run the CLI runtime, and return a typed result."""
+        invalid_request_result = self._validate_request(request)
+        if invalid_request_result is not None:
+            return invalid_request_result
+        repo_url = request.repo_url
+        if repo_url is None:
+            raise RuntimeError("CodexCliWorker request validation expected repo_url to be set.")
+
+        workspace_task_id = _workspace_task_id(request)
+        logger.info(
+            "Starting Codex CLI worker run",
+            extra={
+                "session_id": request.session_id,
+                "repo_url": _mask_url_credentials(repo_url),
+                "branch": request.branch,
+                "workspace_task_id": workspace_task_id,
+            },
+        )
+
+        try:
+            workspace = self._provision_workspace(
+                repo_url,
+                request.branch,
+                workspace_task_id=workspace_task_id,
+            )
+        except (WorkspaceManagerError, OSError) as exc:
+            logger.exception(
+                "Codex CLI worker failed to provision workspace",
+                extra={"session_id": request.session_id, "workspace_task_id": workspace_task_id},
+            )
+            return WorkerResult(
+                status="error",
+                summary=f"CodexCliWorker failed to provision a workspace: {exc}",
+                failure_kind="sandbox_infra",
+                next_action_hint="inspect_worker_configuration",
+            )
+
+        result: WorkerResult | None = None
+        run_succeeded = False
+        container: DockerSandboxContainer | None = None
+        session: ShellSessionProtocol | None = None
+
+        try:
+            runtime_setup = self._setup_runtime_phase(
+                request,
+                workspace=workspace,
+                system_prompt_override=system_prompt_override,
+            )
+            container = runtime_setup.container
+            session = runtime_setup.session
+            runtime_phase = self._execute_runtime_phase(
+                request,
+                workspace=workspace,
+                runtime_setup=runtime_setup,
+                cancel_token=cancel_token,
+            )
+            result = self._finalize_runtime_result(
                 workspace,
-                execution,
-                files_changed=files_changed,
-                post_run_lint_format=lint_format_result,
-                review_result=review_result,
-                diff_text=collect_diff_for_review(
-                    workspace.repo_path,
-                    timeout_seconds=runtime_settings.command_timeout_seconds,
-                )
-                if execution.status == "success"
-                else None,
-                artifacts=lint_format_artifacts,
+                runtime_phase,
+                runtime_settings=runtime_setup.runtime_settings,
+                cancel_token=cancel_token,
             )
-            if cancel_token and cancel_token():
-                result.status = "error"
-                result.summary = "CLI runtime loop was cancelled by the orchestrator timeout."
-                result.failure_kind = "timeout"
-                result.next_action_hint = "inspect_workspace_artifacts"
             run_succeeded = result.status == "success"
         except (
             DockerSandboxContainerError,
