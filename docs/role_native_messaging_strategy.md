@@ -42,8 +42,7 @@ This keeps transcript semantics explicit while avoiding provider-level schema re
 
 When enabled, requests use role-native message arrays with:
 
-- system protocol instructions
-- optional worker system prompt (as system message)
+- one system message containing protocol instructions plus optional worker prompt section
 - serialized transcript entries
 
 ## Rollback

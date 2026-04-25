@@ -35,8 +35,7 @@ Expected output contract remains unchanged in both modes:
 ### Role-native mode
 
 - Sends structured message array:
-  - `system`: adapter protocol instructions
-  - `system` (optional): worker system prompt
+  - `system`: adapter protocol instructions, with optional worker prompt appended in the same message
   - transcript roles serialized from shared strategy
 - `tool` transcript entries are currently encoded as tagged `user` messages for OpenAI-compatible transport safety.
 - Improves semantic separation and adapter portability.
