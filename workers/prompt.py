@@ -196,6 +196,18 @@ def _example_value_from_schema(property_name: str, property_schema: object) -> o
         item_schema = property_schema.get("items")
         return [_example_value_from_schema(f"{property_name}_item", item_schema)]
     if "object" in type_names:
+        properties = property_schema.get("properties")
+        required = property_schema.get("required")
+        if isinstance(properties, dict) and isinstance(required, list):
+            payload: dict[str, object] = {}
+            for nested_name in required:
+                if not isinstance(nested_name, str) or not nested_name:
+                    continue
+                payload[nested_name] = _example_value_from_schema(
+                    nested_name,
+                    properties.get(nested_name),
+                )
+            return payload
         return {}
     if type_names == {"null"}:
         return None

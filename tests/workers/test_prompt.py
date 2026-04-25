@@ -1039,6 +1039,25 @@ def test_build_runtime_adapter_tool_guidance_lines_empty_available_tools_section
     assert lines == []
 
 
+def test_example_value_from_schema_populates_required_nested_object_keys() -> None:
+    """Nested object examples should include required sub-keys for valid tool-input hints."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "mode": {
+                "type": "string",
+                "enum": ["strict", "relaxed"],
+            },
+            "enabled": {"type": "boolean"},
+        },
+        "required": ["mode", "enabled"],
+    }
+
+    value = prompt._example_value_from_schema("config", schema)
+
+    assert value == {"mode": "strict", "enabled": True}
+
+
 def test_read_workspace_agents_guidance_missing_and_short_paths(tmp_path: Path) -> None:
     """AGENTS guidance should return None when absent and full text when within budget."""
     assert prompt.read_workspace_agents_guidance(tmp_path) is None
