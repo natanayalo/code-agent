@@ -97,6 +97,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-119 Extend evaluation harness for reviewer quality. PR: [#103](https://github.com/natanayalo/code-agent/pull/103)
 - T-123 Add shared adapter prompt override for review-mode calls. PR: [#104](https://github.com/natanayalo/code-agent/pull/104)
 - T-124 Extract shared changed-files + post-run lint/format helper. PR: [#105](https://github.com/natanayalo/code-agent/pull/105)
+- T-125 Extract shared self-review + fix-loop coordinator. PR: [#107](https://github.com/natanayalo/code-agent/pull/107)
 
 ## In Progress
 
@@ -104,7 +105,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Next
 
-- None
+- T-126 Decompose CLI worker `_run_sync` into focused phases.
 
 ## Blocked
 

@@ -45,20 +45,12 @@ from workers.cli_runtime import (
 from workers.failure_taxonomy import classify_failure_kind
 from workers.post_run_lint import (
     collect_changed_files_and_apply_post_run_lint_format,
-    merge_post_run_lint_results,
 )
 from workers.prompt import build_system_prompt
 from workers.review import ReviewResult
 from workers.self_review import (
-    build_fix_loop_prompt,
-    build_self_review_prompt,
     collect_diff_for_review,
-    fallback_no_findings_review,
-    merge_budget_ledgers,
-    parse_review_result,
-    remaining_runtime_settings,
-    resolve_self_review_max_fix_iterations,
-    should_skip_self_review,
+    run_shared_self_review_fix_loop,
 )
 
 logger = logging.getLogger(__name__)
@@ -424,112 +416,48 @@ class CodexCliWorker(Worker):
                 )
             )
             review_result: ReviewResult | None = None
-            if execution.status == "success" and not should_skip_self_review(request.constraints):
-                max_fix_iterations = resolve_self_review_max_fix_iterations(request.constraints)
-                for review_attempt in range(max_fix_iterations + 1):
-                    diff_text = collect_diff_for_review(
-                        workspace.repo_path,
-                        timeout_seconds=runtime_settings.command_timeout_seconds,
-                    )
-                    review_prompt = build_self_review_prompt(
-                        task_text=request.task_text,
-                        worker_summary=execution.summary,
-                        files_changed=files_changed,
-                        diff_text=diff_text,
-                        repo_path=workspace.repo_path,
-                        commands_run=execution.commands_run,
-                    )
-
-                    try:
-                        review_step = self.runtime_adapter.next_step(
-                            (),
-                            prompt_override=review_prompt,
-                            working_directory=workspace.repo_path,
+            if execution.status == "success":
+                (
+                    review_result,
+                    files_changed,
+                    lint_format_result,
+                    lint_format_artifacts,
+                ) = run_shared_self_review_fix_loop(
+                    execution=execution,
+                    task_text=request.task_text,
+                    constraints=request.constraints,
+                    runtime_adapter=self.runtime_adapter,
+                    runtime_settings=runtime_settings,
+                    system_prompt=system_prompt,
+                    repo_path=workspace.repo_path,
+                    files_changed=files_changed,
+                    lint_format_result=lint_format_result,
+                    lint_format_artifacts=lint_format_artifacts,
+                    post_run_lint_collector=(
+                        lambda current_execution, existing_files: (
+                            collect_changed_files_and_apply_post_run_lint_format(
+                                session=session,
+                                execution=current_execution,
+                                expect_changed_files_artifact=expects_changed_files,
+                                repo_path_for_detection=workspace.repo_path,
+                                repo_working_directory=Path(container.working_dir),
+                                existing_files_changed=existing_files,
+                                timeout_seconds=runtime_settings.command_timeout_seconds,
+                                fallback_command_template=fallback_command_template,
+                            )
                         )
-                    except Exception as exc:
-                        logger.warning(
-                            "Codex CLI worker self-review adapter failed; recording explicit "
-                            "no-findings fallback.",
-                            exc_info=exc,
-                        )
-                        review_result = fallback_no_findings_review(
-                            "Worker self-review failed to return a structured payload."
-                        )
-                        break
-
-                    if review_step.kind != "final" or review_step.final_output is None:
-                        review_result = fallback_no_findings_review(
-                            "Worker self-review returned a non-final response."
-                        )
-                        break
-
-                    parsed_review_result = parse_review_result(review_step.final_output)
-                    if parsed_review_result is None:
-                        review_result = fallback_no_findings_review(
-                            "Worker self-review returned an invalid structured payload."
-                        )
-                        break
-
-                    review_result = parsed_review_result
-                    if review_result.outcome == "no_findings":
-                        break
-                    if review_attempt >= max_fix_iterations:
-                        break
-
-                    follow_up_settings = remaining_runtime_settings(
-                        runtime_settings,
-                        budget_ledger=execution.budget_ledger,
-                    )
-                    if follow_up_settings is None:
-                        execution.status = "failure"
-                        execution.summary = (
-                            "CLI runtime exhausted its remaining budget before applying "
-                            "self-review fixes."
-                        )
-                        execution.stop_reason = "budget_exceeded"
-                        break
-
-                    follow_up_execution = run_cli_runtime_loop(
-                        self.runtime_adapter,
-                        session,
-                        system_prompt=build_fix_loop_prompt(
-                            base_system_prompt=system_prompt,
-                            review_result=review_result,
-                        ),
-                        settings=follow_up_settings,
-                        tool_registry=self.tool_registry,
-                        granted_permission=granted_permission,
-                        working_directory=workspace.repo_path,
-                        cancel_token=cancel_token,
-                        model_name=getattr(self.runtime_adapter, "model", None),
-                    )
-                    merge_budget_ledgers(execution.budget_ledger, follow_up_execution.budget_ledger)
-                    execution.commands_run.extend(follow_up_execution.commands_run)
-                    execution.messages.extend(follow_up_execution.messages)
-                    execution.status = follow_up_execution.status
-                    execution.summary = follow_up_execution.summary
-                    execution.stop_reason = follow_up_execution.stop_reason
-                    execution.permission_decision = follow_up_execution.permission_decision
-                    if execution.status != "success":
-                        break
-
-                    files_changed, new_lint_format_result, new_lint_format_artifacts = (
-                        collect_changed_files_and_apply_post_run_lint_format(
-                            session=session,
-                            execution=execution,
-                            expect_changed_files_artifact=expects_changed_files,
-                            repo_path_for_detection=workspace.repo_path,
-                            repo_working_directory=Path(container.working_dir),
-                            existing_files_changed=files_changed,
-                            timeout_seconds=runtime_settings.command_timeout_seconds,
-                            fallback_command_template=fallback_command_template,
-                        )
-                    )
-                    lint_format_result = merge_post_run_lint_results(
-                        lint_format_result,
-                        new_lint_format_result,
-                    )
-                    lint_format_artifacts.extend(new_lint_format_artifacts)
+                    ),
+                    tool_registry=self.tool_registry,
+                    granted_permission=granted_permission,
+                    session=session,
+                    cancel_token=cancel_token,
+                    model_name=getattr(self.runtime_adapter, "model", None),
+                    adapter_failure_log_message=(
+                        "Codex CLI worker self-review adapter failed; recording explicit "
+                        "no-findings fallback."
+                    ),
+                    adapter_failure_logger=logger,
+                )
 
             result = _worker_result_from_execution(
                 workspace,

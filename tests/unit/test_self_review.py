@@ -4,8 +4,15 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 import workers.self_review as self_review
+from tools import DEFAULT_TOOL_REGISTRY, ToolPermissionLevel
 from workers.base import WorkerCommand
-from workers.cli_runtime import CliRuntimeBudgetLedger, CliRuntimeSettings
+from workers.cli_runtime import (
+    CliRuntimeBudgetLedger,
+    CliRuntimeExecutionResult,
+    CliRuntimeMessage,
+    CliRuntimeSettings,
+    CliRuntimeStep,
+)
 from workers.self_review import (
     _extract_diff_line_hints,
     _extract_json_object,
@@ -15,6 +22,7 @@ from workers.self_review import (
     merge_budget_ledgers,
     parse_review_result,
     remaining_runtime_settings,
+    run_shared_self_review_fix_loop,
     should_skip_self_review,
 )
 
@@ -499,3 +507,140 @@ def test_extract_diff_line_hints_unescapes_quoted_paths():
     hints = _extract_diff_line_hints(diff_text)
     assert 'folder\\name "quoted".py' in hints
     assert hints['folder\\name "quoted".py'] == [(2, 2)]
+
+
+def _runtime_result(
+    *,
+    summary: str,
+    status: str = "success",
+    stop_reason: str = "final_answer",
+) -> CliRuntimeExecutionResult:
+    return CliRuntimeExecutionResult(
+        status=status,
+        summary=summary,
+        stop_reason=stop_reason,
+        commands_run=[],
+        messages=[CliRuntimeMessage(role="assistant", content=summary)],
+        budget_ledger=CliRuntimeBudgetLedger(max_iterations=6),
+    )
+
+
+def test_run_shared_self_review_fix_loop_skips_when_disabled(tmp_path):
+    execution = _runtime_result(summary="Initial success.")
+    adapter = MagicMock()
+    review_result, files_changed, lint_result, lint_artifacts = run_shared_self_review_fix_loop(
+        execution=execution,
+        task_text="Do work",
+        constraints={"skip_self_review": True},
+        runtime_adapter=adapter,
+        runtime_settings=CliRuntimeSettings(max_iterations=6, worker_timeout_seconds=60),
+        system_prompt="base prompt",
+        repo_path=tmp_path,
+        files_changed=["a.py"],
+        lint_format_result={"ran": False, "status": "skipped"},
+        lint_format_artifacts=[],
+        post_run_lint_collector=lambda *_: (["a.py"], {"ran": False, "status": "skipped"}, []),
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+        session=MagicMock(),
+    )
+
+    assert review_result is None
+    assert files_changed == ["a.py"]
+    assert lint_result["status"] == "skipped"
+    assert lint_artifacts == []
+    adapter.next_step.assert_not_called()
+
+
+@patch("workers.self_review.collect_diff_for_review", return_value="diff payload")
+@patch("workers.self_review.run_cli_runtime_loop")
+def test_run_shared_self_review_fix_loop_runs_fix_pass_and_merges_artifacts(
+    mock_run_loop, _mock_collect_diff, tmp_path
+):
+    review_steps = [
+        CliRuntimeStep(
+            kind="final",
+            final_output=json.dumps(
+                {
+                    "summary": "Missing assertion coverage.",
+                    "confidence": 1.0,
+                    "outcome": "findings",
+                    "findings": [
+                        {
+                            "severity": "low",
+                            "category": "test",
+                            "confidence": 1.0,
+                            "file_path": "tests/test_app.py",
+                            "line_start": 1,
+                            "line_end": 1,
+                            "title": "Add focused assertion",
+                            "why_it_matters": "Coverage gap",
+                        }
+                    ],
+                }
+            ),
+        ),
+        CliRuntimeStep(
+            kind="final",
+            final_output=json.dumps(
+                {
+                    "summary": "All issues fixed.",
+                    "confidence": 1.0,
+                    "outcome": "no_findings",
+                    "findings": [],
+                }
+            ),
+        ),
+    ]
+
+    class _Adapter:
+        def __init__(self) -> None:
+            self._steps = list(review_steps)
+
+        def next_step(self, *_args, **_kwargs):
+            return self._steps.pop(0)
+
+    follow_up = _runtime_result(summary="Applied fix pass.")
+    follow_up.commands_run = [WorkerCommand(command="pytest -q", exit_code=0)]
+    mock_run_loop.return_value = follow_up
+
+    def _post_run_lint_collector(_execution, existing_files):
+        return (
+            [*existing_files, "tests/test_app.py"],
+            {"ran": True, "status": "warning", "errors": ["second pass warning"]},
+            [],
+        )
+
+    execution = _runtime_result(summary="Initial success.")
+    review_result, files_changed, lint_result, lint_artifacts = run_shared_self_review_fix_loop(
+        execution=execution,
+        task_text="Ship tiny change",
+        constraints={},
+        runtime_adapter=_Adapter(),
+        runtime_settings=CliRuntimeSettings(max_iterations=6, worker_timeout_seconds=60),
+        system_prompt="base prompt",
+        repo_path=tmp_path,
+        files_changed=["app.py"],
+        lint_format_result={
+            "ran": True,
+            "status": "passed",
+            "errors": [],
+            "commands": [],
+            "artifacts": [],
+        },
+        lint_format_artifacts=[],
+        post_run_lint_collector=_post_run_lint_collector,
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+        granted_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+        session=MagicMock(),
+    )
+
+    assert mock_run_loop.call_count == 1
+    assert execution.summary == "Applied fix pass."
+    assert execution.commands_run == [WorkerCommand(command="pytest -q", exit_code=0)]
+    assert review_result is not None
+    assert review_result.outcome == "no_findings"
+    assert files_changed == ["app.py", "tests/test_app.py"]
+    assert lint_result["status"] == "warning"
+    assert lint_result["errors"] == ["second pass warning"]
+    assert lint_artifacts == []

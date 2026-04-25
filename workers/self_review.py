@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from tools import ToolPermissionLevel, ToolRegistry
 from tools.numeric import coerce_non_negative_int_like
-from workers.base import WorkerCommand
-from workers.cli_runtime import CliRuntimeBudgetLedger, CliRuntimeSettings
+from workers.base import ArtifactReference, WorkerCommand
+from workers.cli_runtime import (
+    CliRuntimeAdapter,
+    CliRuntimeBudgetLedger,
+    CliRuntimeExecutionResult,
+    CliRuntimeSettings,
+    ShellSessionProtocol,
+    run_cli_runtime_loop,
+)
 from workers.markdown import markdown_fence_for_content
+from workers.post_run_lint import merge_post_run_lint_results
 from workers.prompt import build_review_prompt
 from workers.review import ReviewResult
 
@@ -231,6 +241,136 @@ def remaining_runtime_settings(
         update_payload["max_retries"] = remaining_retries
 
     return base.model_copy(update=update_payload)
+
+
+def run_shared_self_review_fix_loop(
+    *,
+    execution: CliRuntimeExecutionResult,
+    task_text: str,
+    constraints: Mapping[str, Any],
+    runtime_adapter: CliRuntimeAdapter,
+    runtime_settings: CliRuntimeSettings,
+    system_prompt: str,
+    repo_path: Path,
+    files_changed: list[str],
+    lint_format_result: dict[str, Any],
+    lint_format_artifacts: list[ArtifactReference],
+    post_run_lint_collector: Callable[
+        [CliRuntimeExecutionResult, list[str]],
+        tuple[list[str], dict[str, Any], list[ArtifactReference]],
+    ],
+    tool_registry: ToolRegistry,
+    granted_permission: ToolPermissionLevel,
+    session: ShellSessionProtocol,
+    cancel_token: Callable[[], bool] | None = None,
+    model_name: str | None = None,
+    adapter_failure_log_message: str | None = None,
+    adapter_failure_logger: logging.Logger | None = None,
+    check_cancel_before_review: bool = False,
+) -> tuple[ReviewResult | None, list[str], dict[str, Any], list[ArtifactReference]]:
+    """Run worker self-review with bounded fix-loop retries, mutating execution in place."""
+    review_result: ReviewResult | None = None
+    if execution.status != "success" or should_skip_self_review(constraints):
+        return review_result, files_changed, lint_format_result, lint_format_artifacts
+
+    max_fix_iterations = resolve_self_review_max_fix_iterations(constraints)
+    for review_attempt in range(max_fix_iterations + 1):
+        if check_cancel_before_review and cancel_token and cancel_token():
+            break
+
+        diff_text = collect_diff_for_review(
+            repo_path,
+            timeout_seconds=runtime_settings.command_timeout_seconds,
+        )
+        review_prompt = build_self_review_prompt(
+            task_text=task_text,
+            worker_summary=execution.summary,
+            files_changed=files_changed,
+            diff_text=diff_text,
+            repo_path=repo_path,
+            commands_run=execution.commands_run,
+        )
+
+        try:
+            review_step = runtime_adapter.next_step(
+                (),
+                prompt_override=review_prompt,
+                working_directory=repo_path,
+            )
+        except Exception as exc:
+            if adapter_failure_log_message and adapter_failure_logger is not None:
+                adapter_failure_logger.warning(adapter_failure_log_message, exc_info=exc)
+            review_result = fallback_no_findings_review(
+                "Worker self-review failed to return a structured payload."
+            )
+            break
+
+        if review_step.kind != "final" or review_step.final_output is None:
+            review_result = fallback_no_findings_review(
+                "Worker self-review returned a non-final response."
+            )
+            break
+
+        parsed_review_result = parse_review_result(review_step.final_output)
+        if parsed_review_result is None:
+            review_result = fallback_no_findings_review(
+                "Worker self-review returned an invalid structured payload."
+            )
+            break
+
+        review_result = parsed_review_result
+        if review_result.outcome == "no_findings":
+            break
+        if review_attempt >= max_fix_iterations:
+            break
+
+        follow_up_settings = remaining_runtime_settings(
+            runtime_settings,
+            budget_ledger=execution.budget_ledger,
+        )
+        if follow_up_settings is None:
+            execution.status = "failure"
+            execution.summary = (
+                "CLI runtime exhausted its remaining budget before applying " "self-review fixes."
+            )
+            execution.stop_reason = "budget_exceeded"
+            break
+
+        follow_up_execution = run_cli_runtime_loop(
+            runtime_adapter,
+            session,
+            system_prompt=build_fix_loop_prompt(
+                base_system_prompt=system_prompt,
+                review_result=review_result,
+            ),
+            settings=follow_up_settings,
+            tool_registry=tool_registry,
+            granted_permission=granted_permission,
+            working_directory=repo_path,
+            cancel_token=cancel_token,
+            model_name=model_name,
+        )
+        merge_budget_ledgers(execution.budget_ledger, follow_up_execution.budget_ledger)
+        execution.commands_run.extend(follow_up_execution.commands_run)
+        execution.messages.extend(follow_up_execution.messages)
+        execution.status = follow_up_execution.status
+        execution.summary = follow_up_execution.summary
+        execution.stop_reason = follow_up_execution.stop_reason
+        execution.permission_decision = follow_up_execution.permission_decision
+        if execution.status != "success":
+            break
+
+        files_changed, new_lint_format_result, new_lint_format_artifacts = post_run_lint_collector(
+            execution,
+            files_changed,
+        )
+        lint_format_result = merge_post_run_lint_results(
+            lint_format_result,
+            new_lint_format_result,
+        )
+        lint_format_artifacts.extend(new_lint_format_artifacts)
+
+    return review_result, files_changed, lint_format_result, lint_format_artifacts
 
 
 def build_targeted_review_context_packet(
