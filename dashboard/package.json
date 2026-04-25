@@ -15,9 +15,7 @@
     "react-router-dom": "^6.22.3",
     "@tanstack/react-query": "^5.28.14",
     "axios": "^1.6.8",
-    "lucide-react": "^0.363.0",
-    "clsx": "^2.1.0",
-    "tailwind-merge": "^2.2.2"
+    "lucide-react": "^0.363.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",

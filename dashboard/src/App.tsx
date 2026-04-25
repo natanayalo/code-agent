@@ -3,11 +3,11 @@ import { Layout, Play, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 
 function App() {
   return (
-    <div style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
-      <header style={{ marginBottom: '3rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+    <div style={{ padding: 'var(--spacing-xl)', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
+      <header style={{ marginBottom: 'var(--spacing-xl)', display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
         <div style={{
           background: 'var(--color-accent-gradient)',
-          padding: '0.75rem',
+          padding: 'var(--spacing-sm)',
           borderRadius: '12px',
           display: 'flex',
           alignItems: 'center',
@@ -21,17 +21,17 @@ function App() {
         </div>
       </header>
 
-      <main style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
+      <main style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 'var(--spacing-lg)' }}>
         {/* Placeholder Task Card */}
-        <div className="glass-panel" style={{ padding: '1.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+        <div className="glass-panel" style={{ padding: 'var(--spacing-lg)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--spacing-md)' }}>
             <span style={{
               fontSize: '0.75rem',
               textTransform: 'uppercase',
               letterSpacing: '0.05em',
-              background: 'rgba(56, 189, 248, 0.1)',
+              background: 'rgba(56, 189, 248, 0.1)', // TODO: Add as variable if used often
               color: 'var(--color-accent-primary)',
-              padding: '0.25rem 0.5rem',
+              padding: 'var(--spacing-xs) var(--spacing-sm)',
               borderRadius: '4px'
             }}>Running</span>
             <Clock size={16} color="var(--color-text-muted)" />
@@ -40,7 +40,7 @@ function App() {
           <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
             Designing the core structure and selecting technology stack for the operator dashboard.
           </p>
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '1rem', display: 'flex', gap: '1rem' }}>
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 'var(--spacing-md)', display: 'flex', gap: 'var(--spacing-md)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
               <Play size={14} />
               <span>3 commands run</span>
@@ -49,15 +49,15 @@ function App() {
         </div>
 
         {/* Stats placeholder */}
-        <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div className="glass-panel" style={{ padding: 'var(--spacing-lg)', display: 'flex', flexDirection: 'column', gap: 'var(--spacing-md)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
             <div style={{ color: 'var(--color-success)' }}><CheckCircle size={20} /></div>
             <div>
               <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>124</div>
               <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>Tasks Completed</div>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
             <div style={{ color: 'var(--color-error)' }}><AlertCircle size={20} /></div>
             <div>
               <div style={{ fontSize: '1.25rem', fontWeight: 600 }}>2</div>
