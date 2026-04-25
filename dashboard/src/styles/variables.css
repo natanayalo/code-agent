@@ -41,4 +41,6 @@
 
   --glass-blur: blur(12px);
   --glass-border: 1px solid rgba(255, 255, 255, 0.1);
+  --color-border-subtle: 1px solid rgba(255, 255, 255, 0.05);
+  --border-subtle: var(--color-border-subtle);
 }

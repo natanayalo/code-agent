@@ -5,7 +5,7 @@ export function Header() {
   return (
     <header className="dashboard-header">
       <div className="icon-wrapper">
-        <Layout size={24} color="white" />
+        <Layout size={24} color="var(--color-text-primary)" />
       </div>
       <div>
         <h1 className="dashboard-title gradient-text">Code Agent</h1>
