@@ -103,7 +103,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## In Progress
 
-- None
+- T-128 Evaluate and migrate toward role-native adapter messaging.
 
 ## Next
 

@@ -7,10 +7,15 @@ import os
 import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 
 from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
+from workers.adapter_messages import (
+    build_role_native_transcript,
+    serialize_openai_compatible_messages,
+)
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
 from workers.prompt import build_runtime_adapter_tool_guidance_lines
 
@@ -26,6 +31,7 @@ OPENROUTER_MODEL_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_MODEL"
 OPENROUTER_TIMEOUT_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_TIMEOUT_SECONDS"
 OPENROUTER_HTTP_REFERER_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_HTTP_REFERER"
 OPENROUTER_X_TITLE_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_X_TITLE"
+OPENROUTER_ROLE_NATIVE_MESSAGES_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_ROLE_NATIVE_MESSAGES"
 
 
 def _coerce_positive_int(value: object, *, default: int) -> int:
@@ -60,6 +66,19 @@ def _truncate_detail(text: str, *, max_characters: int = _DETAIL_PREVIEW_CHARACT
     if len(stripped) <= max_characters:
         return stripped
     return f"{stripped[:max_characters]}...[truncated]"
+
+
+def _coerce_bool(value: object, *, default: bool) -> bool:
+    """Parse boolean-like values and fall back to the provided default."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
 
 
 def _message_heading(message: CliRuntimeMessage, *, index: int) -> str:
@@ -129,6 +148,65 @@ def _build_adapter_prompt(
     return "\n".join(lines).rstrip()
 
 
+def _build_role_native_instructions(*, system_prompt: str | None = None) -> str:
+    """Build adapter protocol instructions for role-native chat payloads."""
+    tool_guidance_lines = build_runtime_adapter_tool_guidance_lines(system_prompt=system_prompt)
+    lines = [
+        "You are the OpenRouter runtime adapter for a bounded coding worker.",
+        (
+            "Return exactly one JSON object with no surrounding text, "
+            "no markdown fences, and no explanation."
+        ),
+        "Choose one of two actions:",
+        CliRuntimeStep(
+            kind="tool_call",
+            tool_name="<registered tool name>",
+            tool_input="<tool input string>",
+            final_output=None,
+        ).model_dump_json(),
+        CliRuntimeStep(
+            kind="final",
+            final_output="<final summary for the user>",
+            tool_name=None,
+            tool_input=None,
+        ).model_dump_json(),
+        "Rules:",
+        "- Use only tool names listed in the system prompt's Available Tools section.",
+        "- `tool_input` MUST be a string. If the tool expects JSON, encode that JSON as a string.",
+        *tool_guidance_lines,
+        "- If the transcript already contains enough information to finish, return `final`.",
+        "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
+        "- Return ONLY a raw JSON object. No markdown fences, no extra explanation.",
+    ]
+    return "\n".join(lines)
+
+
+def _build_role_native_request_messages(
+    messages: Sequence[CliRuntimeMessage],
+    *,
+    system_prompt: str | None = None,
+) -> list[ChatCompletionMessageParam]:
+    """Build role-native request messages for OpenRouter-compatible chat APIs."""
+    request_messages: list[ChatCompletionMessageParam] = [
+        {
+            "role": "system",
+            "content": _build_role_native_instructions(system_prompt=system_prompt),
+        }
+    ]
+    if system_prompt is not None and system_prompt.strip():
+        request_messages.append(
+            {
+                "role": "system",
+                "content": f"## Worker System Prompt\n{system_prompt.strip()}",
+            }
+        )
+    transcript = build_role_native_transcript(tuple(messages))
+    request_messages.extend(
+        cast(list[ChatCompletionMessageParam], serialize_openai_compatible_messages(transcript))
+    )
+    return request_messages
+
+
 def _message_content_to_text(content: object) -> str:
     """Normalize chat completion message content into plain text."""
     if isinstance(content, str):
@@ -172,6 +250,7 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         request_timeout_seconds: int = DEFAULT_OPENROUTER_REQUEST_TIMEOUT_SECONDS,
         http_referer: str = DEFAULT_OPENROUTER_HTTP_REFERER,
         x_title: str = DEFAULT_OPENROUTER_X_TITLE,
+        use_role_native_messages: bool = False,
     ) -> None:
         api_key_stripped = api_key.strip()
         if not api_key_stripped:
@@ -188,6 +267,7 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
             http_referer.strip() if http_referer.strip() else DEFAULT_OPENROUTER_HTTP_REFERER
         )
         self.x_title = x_title.strip() if x_title.strip() else DEFAULT_OPENROUTER_X_TITLE
+        self.use_role_native_messages = use_role_native_messages
         self.client = OpenAI(
             api_key=self.api_key,
             base_url=self.base_url,
@@ -221,6 +301,10 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
                 DEFAULT_OPENROUTER_HTTP_REFERER,
             ),
             x_title=resolved_env.get(OPENROUTER_X_TITLE_ENV_VAR, DEFAULT_OPENROUTER_X_TITLE),
+            use_role_native_messages=_coerce_bool(
+                resolved_env.get(OPENROUTER_ROLE_NATIVE_MESSAGES_ENV_VAR),
+                default=False,
+            ),
         )
 
     def next_step(
@@ -235,21 +319,32 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         override_prompt = (
             prompt_override.strip() if prompt_override and prompt_override.strip() else None
         )
-        prompt = (
-            override_prompt
-            if override_prompt is not None
-            else _build_adapter_prompt(messages, system_prompt=system_prompt)
-        )
+        request_messages: list[ChatCompletionMessageParam]
+        if override_prompt is not None:
+            request_messages = cast(
+                list[ChatCompletionMessageParam],
+                [{"role": "user", "content": override_prompt}],
+            )
+        elif self.use_role_native_messages:
+            request_messages = _build_role_native_request_messages(
+                messages,
+                system_prompt=system_prompt,
+            )
+        else:
+            request_messages = cast(
+                list[ChatCompletionMessageParam],
+                [
+                    {
+                        "role": "user",
+                        "content": _build_adapter_prompt(messages, system_prompt=system_prompt),
+                    }
+                ],
+            )
 
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-                ],
+                messages=request_messages,
                 response_format={"type": "json_object"},
             )
         except Exception as exc:  # pragma: no cover - exercised via unit tests with stubs

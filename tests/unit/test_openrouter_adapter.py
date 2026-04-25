@@ -10,6 +10,8 @@ from workers.cli_runtime import CliRuntimeMessage
 from workers.openrouter_adapter import (
     OpenRouterCliRuntimeAdapter,
     _build_adapter_prompt,
+    _build_role_native_request_messages,
+    _coerce_bool,
     _message_content_to_text,
 )
 
@@ -62,12 +64,14 @@ def test_openrouter_adapter_from_env_maps_settings(monkeypatch: pytest.MonkeyPat
             "CODE_AGENT_OPENROUTER_TIMEOUT_SECONDS": "45",
             "CODE_AGENT_OPENROUTER_HTTP_REFERER": "https://example.com/app",
             "CODE_AGENT_OPENROUTER_X_TITLE": "Code Agent Dev",
+            "CODE_AGENT_OPENROUTER_ROLE_NATIVE_MESSAGES": "true",
         }
     )
 
     assert adapter.api_key == "key-123"
     assert adapter.model == "meta-llama/llama-3.1-70b-instruct"
     assert adapter.request_timeout_seconds == 45
+    assert adapter.use_role_native_messages is True
     assert fake_client is not None
     assert fake_client.kwargs["base_url"] == "https://openrouter.ai/api/v1"
     assert fake_client.kwargs["default_headers"] == {
@@ -100,6 +104,52 @@ def test_openrouter_adapter_next_step_requests_chat_completion(
     assert len(fake_client.calls) == 1
     assert fake_client.calls[0]["model"] == "anthropic/claude-3.5-sonnet"
     assert fake_client.calls[0]["response_format"] == {"type": "json_object"}
+
+
+def test_openrouter_adapter_next_step_role_native_mode_uses_structured_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Role-native mode should send a structured message array to OpenRouter."""
+
+    fake_client: _FakeOpenAI | None = None
+
+    def _fake_openai(**kwargs):
+        nonlocal fake_client
+        fake_client = _FakeOpenAI(**kwargs)
+        return fake_client
+
+    monkeypatch.setattr("workers.openrouter_adapter.OpenAI", _fake_openai)
+    adapter = OpenRouterCliRuntimeAdapter(api_key="test-key", use_role_native_messages=True)
+
+    step = adapter.next_step(
+        [
+            CliRuntimeMessage(role="system", content="Runtime system context."),
+            CliRuntimeMessage(role="assistant", content='{"kind":"tool_call"}'),
+            CliRuntimeMessage(
+                role="tool",
+                tool_name="execute_bash",
+                content="Exit code: 0\nOutput:\nhello",
+            ),
+        ],
+        system_prompt="Worker policy text.",
+    )
+
+    assert step.kind == "final"
+    assert fake_client is not None
+    payload_messages = fake_client.calls[0]["messages"]
+    assert isinstance(payload_messages, list)
+    assert payload_messages[0]["role"] == "system"
+    assert "Return exactly one JSON object" in payload_messages[0]["content"]
+    assert payload_messages[1] == {
+        "role": "system",
+        "content": "## Worker System Prompt\nWorker policy text.",
+    }
+    assert payload_messages[2] == {"role": "system", "content": "Runtime system context."}
+    assert payload_messages[3] == {"role": "assistant", "content": '{"kind":"tool_call"}'}
+    assert payload_messages[4] == {
+        "role": "user",
+        "content": "Tool result (execute_bash):\nExit code: 0\nOutput:\nhello",
+    }
 
 
 def test_openrouter_adapter_next_step_rejects_empty_response(
@@ -344,6 +394,37 @@ def test_openrouter_adapter_prompt_override_bypasses_runtime_prompt_shaping(
         fake_client.calls[0]["messages"][0]["content"]
         == "Review these edits and return ReviewResult JSON only."
     )
+
+
+def test_build_role_native_request_messages_serializes_tool_transcript_entries() -> None:
+    """Tool transcript messages should serialize with explicit tool labels."""
+    request_messages = _build_role_native_request_messages(
+        (
+            CliRuntimeMessage(role="system", content="Runtime instructions"),
+            CliRuntimeMessage(role="assistant", content="tool call emitted"),
+            CliRuntimeMessage(role="tool", tool_name="search_dir", content="2 matches"),
+        ),
+        system_prompt="Worker system prompt",
+    )
+
+    assert request_messages[0]["role"] == "system"
+    assert request_messages[1]["role"] == "system"
+    assert request_messages[2] == {"role": "system", "content": "Runtime instructions"}
+    assert request_messages[3] == {"role": "assistant", "content": "tool call emitted"}
+    assert request_messages[4] == {
+        "role": "user",
+        "content": "Tool result (search_dir):\n2 matches",
+    }
+
+
+def test_coerce_bool_parses_supported_values() -> None:
+    """Boolean parser should accept common env-style truthy/falsy strings."""
+    assert _coerce_bool(True, default=False) is True
+    assert _coerce_bool("true", default=False) is True
+    assert _coerce_bool(" YES ", default=False) is True
+    assert _coerce_bool("0", default=True) is False
+    assert _coerce_bool("off", default=True) is False
+    assert _coerce_bool("unknown", default=True) is True
 
 
 def test_message_content_to_text_joins_text_blocks() -> None:
