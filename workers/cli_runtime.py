@@ -102,14 +102,18 @@ _WRITE_COMMAND_MARKERS = (
     "chown ",
     "cp ",
     "git add ",
+    "git apply ",
     "git commit",
     "git mv ",
     "git restore ",
     "git rm ",
     "mkdir ",
     "mv ",
+    "patch ",
     "rm ",
     "rmdir ",
+    "sed -i",
+    "tee ",
     "touch ",
 )
 _FILE_ARGUMENT_COMMANDS = frozenset(

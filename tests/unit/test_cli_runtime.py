@@ -547,6 +547,10 @@ def test_looks_read_only_command_uses_word_boundary_for_short_commands() -> None
     assert _looks_read_only_command("grep TODO README.md") is True
     assert _looks_read_only_command("awk '{print $1}' README.md") is True
     assert _looks_read_only_command("grep TODO README.md>out.txt") is False
+    assert _looks_read_only_command("ls | tee output.txt") is False
+    assert _looks_read_only_command("patch < fix.patch") is False
+    assert _looks_read_only_command("git apply fix.patch") is False
+    assert _looks_read_only_command("sed -i 's/a/b/' file.txt") is False
 
 
 def test_build_condensed_context_summary_truncation_stays_within_budget() -> None:
