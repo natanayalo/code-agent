@@ -234,6 +234,32 @@ def test_webhook_full_payload_creates_and_completes_task(
         assert task.status is TaskStatus.COMPLETED
 
 
+def test_webhook_uses_default_repo_url_when_omitted(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When repo_url is omitted, webhook submissions should use the configured default repo."""
+    monkeypatch.setenv(
+        "CODE_AGENT_WEBHOOK_DEFAULT_REPO_URL",
+        "https://github.com/natanayalo/code-agent.git",
+    )
+
+    response = client.post(
+        "/webhook",
+        json={
+            "task_text": "run lint",
+            "source": "ci",
+            "external_user_id": "bot",
+            "external_thread_id": "run-43",
+        },
+    )
+    assert response.status_code == 202
+
+    _run_one_queued_task(client)
+    worker = client.app.state.test_worker
+    assert len(worker.requests) == 1
+    assert worker.requests[0].repo_url == "https://github.com/natanayalo/code-agent.git"
+
+
 def test_webhook_delivery_id_is_idempotent(client: TestClient) -> None:
     """A repeated webhook delivery_id should return the first task without re-running work."""
     payload = {

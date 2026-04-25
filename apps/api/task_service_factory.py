@@ -17,6 +17,7 @@ from apps.api.progress import (
 from apps.runtime import coerce_positive_int_env as _coerce_positive_int
 from orchestrator.execution import ProgressNotifier, TaskExecutionService
 from repositories import create_engine_from_url, create_session_factory
+from sandbox import DockerSandboxContainerManager
 from sandbox.workspace import default_workspace_root
 from workers import (
     CodexCliWorker,
@@ -47,6 +48,7 @@ TELEGRAM_BOT_TOKEN_ENV_VAR: Final[str] = "CODE_AGENT_TELEGRAM_BOT_TOKEN"
 TELEGRAM_API_BASE_URL_ENV_VAR: Final[str] = "CODE_AGENT_TELEGRAM_API_BASE_URL"
 CHECKPOINT_DB_PATH_ENV_VAR: Final[str] = "CODE_AGENT_CHECKPOINT_DB_PATH"
 WORKSPACE_ROOT_ENV_VAR: Final[str] = "CODE_AGENT_WORKSPACE_ROOT"
+SANDBOX_IMAGE_ENV_VAR: Final[str] = "CODE_AGENT_SANDBOX_IMAGE"
 
 
 def _is_enabled(value: str | None) -> bool:
@@ -108,7 +110,18 @@ def build_task_service_from_env(
     else:
         engine = create_engine_from_url(database_url)
     session_factory = create_session_factory(engine)
-    codex_worker = CodexCliWorker(runtime_adapter=CodexExecCliRuntimeAdapter.from_env(resolved_env))
+    sandbox_image = resolved_env.get(SANDBOX_IMAGE_ENV_VAR)
+    resolved_sandbox_image = sandbox_image.strip() if sandbox_image else ""
+    container_manager = (
+        DockerSandboxContainerManager(default_image=resolved_sandbox_image)
+        if resolved_sandbox_image
+        else DockerSandboxContainerManager()
+    )
+
+    codex_worker = CodexCliWorker(
+        runtime_adapter=CodexExecCliRuntimeAdapter.from_env(resolved_env),
+        container_manager=container_manager,
+    )
     gemini_worker: GeminiCliWorker | None = None
     openrouter_worker: OpenRouterCliWorker | None = None
     if any(
@@ -116,11 +129,13 @@ def build_task_service_from_env(
         for k in (GEMINI_EXECUTABLE_ENV_VAR, GEMINI_MODEL_ENV_VAR, GEMINI_TIMEOUT_ENV_VAR)
     ):
         gemini_worker = GeminiCliWorker(
-            runtime_adapter=GeminiCliRuntimeAdapter.from_env(resolved_env)
+            runtime_adapter=GeminiCliRuntimeAdapter.from_env(resolved_env),
+            container_manager=container_manager,
         )
     if resolved_env.get(OPENROUTER_API_KEY_ENV_VAR):
         openrouter_worker = OpenRouterCliWorker(
-            runtime_adapter=OpenRouterCliRuntimeAdapter.from_env(resolved_env)
+            runtime_adapter=OpenRouterCliRuntimeAdapter.from_env(resolved_env),
+            container_manager=container_manager,
         )
     if outbound_http_clients is None:
         raise RuntimeError(

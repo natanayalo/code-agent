@@ -206,7 +206,7 @@ def granted_permission_from_constraints(
     default: ToolPermissionLevel = ToolPermissionLevel.WORKSPACE_WRITE,
 ) -> ToolPermissionLevel:
     """Resolve the currently granted permission level from worker constraints."""
-    for key in ("granted_permission", "allowed_permission_level", "permission_level"):
+    for key in ("granted_permission", "allowed_permission_level", "permission_level", "permission"):
         resolved = coerce_permission_level(constraints.get(key))
         if resolved is not None:
             return resolved

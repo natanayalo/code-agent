@@ -122,6 +122,27 @@ def test_build_task_service_from_env_builds_a_codex_cli_worker(tmp_path: Path) -
         _close_outbound_http_clients(outbound_http_clients)
 
 
+def test_build_task_service_from_env_applies_sandbox_image_override(tmp_path: Path) -> None:
+    """Configured sandbox image should become the default image for worker containers."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+            "CODE_AGENT_SANDBOX_IMAGE": "code-agent-worker",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert isinstance(service.worker, CodexCliWorker)
+        assert service.worker.container_manager.default_image == "code-agent-worker"
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
 def test_build_task_service_from_env_uses_default_workspace_root_when_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

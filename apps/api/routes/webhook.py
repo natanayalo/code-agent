@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from typing import Any
 
@@ -20,6 +21,7 @@ from orchestrator.execution import (
 )
 
 router = APIRouter(prefix="/webhook", tags=["webhook"], dependencies=[Depends(require_api_auth)])
+WEBHOOK_DEFAULT_REPO_URL_ENV_VAR = "CODE_AGENT_WEBHOOK_DEFAULT_REPO_URL"
 
 
 class WebhookPayload(BaseModel):
@@ -81,6 +83,11 @@ def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
     )
     external_thread_id = payload.external_thread_id or str(uuid.uuid4())
 
+    default_repo = os.environ.get(WEBHOOK_DEFAULT_REPO_URL_ENV_VAR)
+    resolved_repo_url = payload.repo_url if payload.repo_url and payload.repo_url.strip() else None
+    if resolved_repo_url is None:
+        resolved_repo_url = default_repo if default_repo and default_repo.strip() else None
+
     session = SubmissionSession(
         channel=channel,
         external_user_id=external_user_id,
@@ -89,7 +96,7 @@ def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
     )
     return TaskSubmission(
         task_text=payload.task_text,
-        repo_url=payload.repo_url,
+        repo_url=resolved_repo_url,
         branch=payload.branch,
         priority=payload.priority,
         worker_override=payload.worker_override,

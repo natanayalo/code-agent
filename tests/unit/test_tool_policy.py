@@ -24,6 +24,13 @@ def test_granted_permission_from_constraints_parses_known_strings() -> None:
     assert resolved == ToolPermissionLevel.DANGEROUS_SHELL
 
 
+def test_granted_permission_from_constraints_accepts_legacy_permission_key() -> None:
+    """Webhook callers may provide the shorthand `permission` key; treat it as granted level."""
+    resolved = granted_permission_from_constraints({"permission": "dangerous_shell"})
+
+    assert resolved == ToolPermissionLevel.DANGEROUS_SHELL
+
+
 def test_coerce_permission_level_parses_known_values() -> None:
     """Permission coercion should normalize casing/whitespace and accept enum instances."""
     assert coerce_permission_level("  NetWorked_Write  ") == ToolPermissionLevel.NETWORKED_WRITE

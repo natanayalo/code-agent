@@ -71,6 +71,158 @@ def test_gemini_adapter_parses_bare_json_tool_call(monkeypatch) -> None:
     assert "## Runtime Transcript" in str(recorded["input"])
 
 
+def test_gemini_adapter_uses_safe_subprocess_cwd(monkeypatch, tmp_path) -> None:
+    """Prompt-override calls should not inherit the workspace repository cwd."""
+    recorded: dict[str, object] = {}
+
+    def fake_run(
+        command: Sequence[str],
+        *,
+        input: str,
+        text: bool,
+        capture_output: bool,
+        check: bool = False,
+        timeout: int,
+        env: dict[str, str] | None,
+        cwd: object,
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        recorded["cwd"] = cwd
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(
+                '{"kind":"tool_call","tool_name":"execute_bash"'
+                ',"tool_input":"ls -la","final_output":null}\n'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    adapter = GeminiCliRuntimeAdapter(working_directory=tmp_path)
+    workspace_repo_path = tmp_path / "workspace-repo"
+    step = adapter.next_step(
+        [CliRuntimeMessage(role="system", content="You are a coding agent.")],
+        prompt_override="Return review JSON only.",
+        working_directory=workspace_repo_path,
+    )
+
+    assert step.kind == "tool_call"
+    assert recorded["cwd"] == tmp_path
+    assert recorded["cwd"] != workspace_repo_path
+
+
+def test_gemini_adapter_uses_workspace_cwd_for_normal_runtime_turns(monkeypatch, tmp_path) -> None:
+    """Normal runtime turns should execute Gemini in the provided workspace cwd."""
+    recorded: dict[str, object] = {}
+
+    def fake_run(
+        command: Sequence[str],
+        *,
+        input: str,
+        text: bool,
+        capture_output: bool,
+        check: bool = False,
+        timeout: int,
+        env: dict[str, str] | None,
+        cwd: object,
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        recorded["cwd"] = cwd
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=(
+                '{"kind":"tool_call","tool_name":"execute_bash"'
+                ',"tool_input":"ls -la","final_output":null}\n'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    adapter = GeminiCliRuntimeAdapter(working_directory=tmp_path / "safe-root")
+    workspace_repo_path = tmp_path / "workspace-repo"
+    step = adapter.next_step(
+        [CliRuntimeMessage(role="system", content="You are a coding agent.")],
+        working_directory=workspace_repo_path,
+    )
+
+    assert step.kind == "tool_call"
+    assert recorded["cwd"] == workspace_repo_path
+
+
+def test_gemini_adapter_uses_safe_cwd_for_prompt_override(monkeypatch, tmp_path) -> None:
+    """Prompt-override calls (self-review) should run outside the workspace cwd."""
+    recorded: dict[str, object] = {}
+
+    def fake_run(
+        command: Sequence[str],
+        *,
+        input: str,
+        text: bool,
+        capture_output: bool,
+        check: bool = False,
+        timeout: int,
+        env: dict[str, str] | None,
+        cwd: object,
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        recorded["cwd"] = cwd
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout='{"reviewer_kind":"worker_self_review","outcome":"no_findings","findings":[]}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    safe_root = tmp_path / "safe-root"
+    adapter = GeminiCliRuntimeAdapter(working_directory=safe_root)
+    workspace_repo_path = tmp_path / "workspace-repo"
+    _ = adapter.next_step(
+        [CliRuntimeMessage(role="system", content="You are a coding agent.")],
+        prompt_override="Return review JSON only.",
+        working_directory=workspace_repo_path,
+    )
+
+    assert recorded["cwd"] == safe_root
+    assert recorded["cwd"] != workspace_repo_path
+
+
+def test_gemini_adapter_coerces_tool_call_missing_final_output_field(monkeypatch) -> None:
+    """Gemini tool-call payloads that omit final_output should still parse as tool calls."""
+
+    def fake_run(
+        command: Sequence[str],
+        *,
+        input: str,
+        text: bool,
+        capture_output: bool,
+        check: bool = False,
+        timeout: int,
+        env: dict[str, str] | None,
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout='{"kind":"tool_call","tool_name":"execute_bash","tool_input":"ls -la"}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    adapter = GeminiCliRuntimeAdapter()
+    step = adapter.next_step([CliRuntimeMessage(role="system", content="Go.")])
+
+    assert step.kind == "tool_call"
+    assert step.tool_name == "execute_bash"
+    assert step.tool_input == "ls -la"
+
+
 def test_gemini_adapter_parses_json_in_markdown_fence(monkeypatch) -> None:
     """A JSON object wrapped in a markdown code fence should still be accepted."""
 
