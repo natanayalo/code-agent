@@ -102,7 +102,17 @@ npm install
 npm run dev
 ```
 
-The dashboard will be available at `http://localhost:3000`. It is configured to proxy API requests to `http://localhost:8000`.
+The dashboard will be available at `http://localhost:3000`.
+
+### Run with Docker Compose
+
+If you are using the full stack via Docker Compose, the dashboard is included:
+
+```bash
+docker compose up
+```
+
+The UI will automatically proxy API requests to the `api` service.
 
 ### Build for Production
 
