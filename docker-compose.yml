@@ -104,6 +104,21 @@ services:
       - ${CODE_AGENT_CODEX_AUTH_DIR?Please set CODE_AGENT_CODEX_AUTH_DIR in env}:/root/.codex
       - ${CODE_AGENT_GEMINI_AUTH_DIR?Please set CODE_AGENT_GEMINI_AUTH_DIR in env}:/root/.gemini
       - ${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}:${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      target: dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./dashboard:/app
+      - /app/node_modules
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      VITE_API_URL: http://api:8000
   ngrok:
     image: ngrok/ngrok:latest
     restart: unless-stopped

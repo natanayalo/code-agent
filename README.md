@@ -90,6 +90,37 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/ready
 ```
 
+## Dashboard / Operator UI
+
+The dashboard is a React-based PWA located in the `dashboard/` directory.
+
+### Setup and Run
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+The dashboard will be available at `http://localhost:3000`.
+
+### Run with Docker Compose
+
+If you are using the full stack via Docker Compose, the dashboard is included:
+
+```bash
+docker compose up
+```
+
+The UI will automatically proxy API requests to the `api` service.
+
+### Build for Production
+
+```bash
+cd dashboard
+npm run build
+```
+
 ## CLI Worker Auth Bootstrap
 
 Before running real worker tasks with mounted auth directories:
