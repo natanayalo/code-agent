@@ -76,12 +76,14 @@ _TOOL_NAME_ALIASES: dict[str, str] = {
 }
 _RECOVERABLE_UNKNOWN_TOOL_NAMES = frozenset({"enter_plan_mode", "exit_plan_mode"})
 _READ_ONLY_COMMAND_PREFIXES = (
+    "awk ",
     "cat ",
     "find ",
     "git diff",
     "git log",
     "git show",
     "git status",
+    "grep ",
     "head ",
     "less ",
     "ls",
@@ -1175,29 +1177,29 @@ def run_cli_runtime_loop(
                     )
                 )
                 stall_correction_injected_at = iteration
-                continue
-            if (
+            elif (
                 stall_correction_injected_at is not None
                 and iteration - stall_correction_injected_at <= settings.stall_correction_turns
             ):
-                continue
-            _update_budget_ledger(
-                budget_ledger,
-                started_at=started_at,
-                clock=clock,
-                iterations_used=iteration,
-            )
-            return CliRuntimeExecutionResult(
-                status="failure",
-                summary=(
-                    "CLI runtime exhausted its exploration-phase budget before producing a plan, "
-                    "concrete edit, or final answer."
-                ),
-                stop_reason="exploration_exhausted",
-                commands_run=commands_run,
-                messages=messages,
-                budget_ledger=budget_ledger,
-            )
+                pass
+            else:
+                _update_budget_ledger(
+                    budget_ledger,
+                    started_at=started_at,
+                    clock=clock,
+                    iterations_used=iteration,
+                )
+                return CliRuntimeExecutionResult(
+                    status="failure",
+                    summary=(
+                        "CLI runtime exhausted its exploration-phase budget "
+                        "before producing a plan, concrete edit, or final answer."
+                    ),
+                    stop_reason="exploration_exhausted",
+                    commands_run=commands_run,
+                    messages=messages,
+                    budget_ledger=budget_ledger,
+                )
         if (
             settings.max_execution_iterations is not None
             and first_execution_iteration is not None
@@ -1543,7 +1545,7 @@ def run_cli_runtime_loop(
                 seen_files.add(file_hint)
                 new_file_hints_count += 1
         if read_only_command:
-            for file_hint in file_hints:
+            for file_hint in set(file_hints):
                 read_counts_by_file[file_hint] = read_counts_by_file.get(file_hint, 0) + 1
         recent_iteration_signals.append(
             {

@@ -544,6 +544,8 @@ def test_looks_read_only_command_uses_word_boundary_for_short_commands() -> None
     assert _looks_read_only_command("pwd /tmp") is True
     assert _looks_read_only_command("lsrc") is False
     assert _looks_read_only_command("pwd_helper") is False
+    assert _looks_read_only_command("grep TODO README.md") is True
+    assert _looks_read_only_command("awk '{print $1}' README.md") is True
 
 
 def test_build_condensed_context_summary_truncation_stays_within_budget() -> None:
@@ -1490,6 +1492,80 @@ def test_run_cli_runtime_loop_stops_as_exploration_exhausted() -> None:
     assert execution.status == "failure"
     assert execution.stop_reason == "exploration_exhausted"
     assert "exploration-phase budget" in execution.summary
+
+
+def test_run_cli_runtime_loop_allows_correction_turn_adapter_response() -> None:
+    """Correction turns should still dispatch to adapter so it can respond to guidance."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="ls"),
+            CliRuntimeStep(kind="final", final_output="Provided plan after correction."),
+        ]
+    )
+    session = _FakeSession({"ls": _command_result("ls", output="README.md\n")})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=3,
+            worker_timeout_seconds=30,
+            max_exploration_iterations=1,
+            stall_correction_turns=1,
+        ),
+    )
+
+    assert execution.status == "success"
+    assert execution.stop_reason == "final_answer"
+    assert execution.summary == "Provided plan after correction."
+    assert len(adapter.calls) == 2
+    assert any(
+        message.role == "assistant"
+        and "Runtime corrective message: exploration budget is nearly exhausted." in message.content
+        for message in adapter.calls[1]
+    )
+
+
+def test_run_cli_runtime_loop_deduplicates_file_hints_per_turn_for_read_counts() -> None:
+    """Repeated file tokens within one command should only count once for stall counters."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="execute_bash",
+                tool_input="cat file.txt file.txt file.txt",
+            ),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat other.txt"),
+            CliRuntimeStep(kind="final", final_output="done"),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "cat file.txt file.txt file.txt": _command_result(
+                "cat file.txt file.txt file.txt",
+                output="x\nx\nx\n",
+            ),
+            "cat other.txt": _command_result("cat other.txt", output="y\n"),
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=4,
+            worker_timeout_seconds=30,
+            stall_window_iterations=2,
+            max_repeated_file_reads=2,
+            stall_correction_turns=0,
+        ),
+    )
+
+    assert execution.status == "success"
+    assert execution.stop_reason == "final_answer"
+    assert execution.summary == "done"
 
 
 def test_run_cli_runtime_loop_stops_at_the_worker_timeout() -> None:
