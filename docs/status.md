@@ -37,6 +37,22 @@ Active focus:
 4. define bounded Scout mode design (Milestone D) with explicit budget and permission boundaries
 5. introduce structured friction/improvement proposal pipeline (Milestone E)
 
+## Current Backlog
+
+Granular tasks for the active and upcoming milestones:
+
+### Milestone B: Operator UX (Dashboard/PWA)
+- [ ] T-130: design PWA frontend architecture and choose tech stack (React/Vite)
+- [ ] T-131: implement API endpoints for task/session listing and detailed view
+- [ ] T-132: build core dashboard layout with task status board
+- [ ] T-133: implement approval/rejection UI components in the dashboard
+- [ ] T-134: implement task replay/retry controls in the dashboard
+
+### Milestone C: Worker Profile Strategy
+- [ ] T-140: define `WorkerProfile` Pydantic model and capability matrix
+- [ ] T-141: implement profile-based worker selection logic in the orchestrator
+- [ ] T-142: map existing workers (Gemini, Codex, OpenRouter) to capabilities (Planning, Coding, Reviewing)
+
 ## Recent Completed Milestones
 
 - Milestone 10: Telegram ingress and progress update flow (T-050 to T-053)

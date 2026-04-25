@@ -18,8 +18,8 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 ## Trigger rules
 
 - If the user names a specific task, scope the work to that task.
-- If the user says "start a new task" or equivalent without naming one, choose the first unfinished item in the current phase from `docs/roadmap.md`.
-- If `docs/roadmap.md` is ambiguous for execution order, fall back to `docs/status.md` `Next Priorities` order.
+- If the user says "start a new task" or equivalent without naming one, choose the first unfinished item from the `Current Backlog` in `docs/status.md`.
+- If `docs/status.md` is empty or ambiguous, fall back to the first unfinished item in the current phase from `docs/roadmap.md`.
 
 ## Required workflow
 

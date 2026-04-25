@@ -52,9 +52,17 @@ Active worker/runtime implementations:
 - Gemini CLI worker (`workers/gemini_cli_worker.py`)
 - OpenRouter-backed runtime worker (`workers/openrouter_cli_worker.py`)
 
-Shared contract boundary:
-
 - `workers/base.py`
+
+### Worker Routing Policy (Current)
+
+Until the full profile-based strategy (Milestone C) is implemented, the platform uses a simplified routing heuristic:
+
+- **Codex Worker**: Default for straightforward coding tasks, documentation updates, and small-scale refactors.
+- **Gemini Worker**: Used for complex tasks requiring high-level reasoning, architectural changes, or multi-step cognitive loops.
+- **OpenRouter Worker**: Used for model evaluation and as a fallback for specific model capabilities not covered by the primary workers.
+
+The routing decision is currently made by the orchestrator based on task complexity hints or manual operator overrides.
 
 ## 3) Sandbox + Tool Layer
 
