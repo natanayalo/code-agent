@@ -346,16 +346,24 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         )
         request_messages: list[ChatCompletionMessageParam]
         if override_prompt is not None:
-            request_messages = cast(
-                list[ChatCompletionMessageParam],
-                [
-                    {
-                        "role": "system",
-                        "content": _build_override_system_instructions(system_prompt=system_prompt),
-                    },
-                    {"role": "user", "content": override_prompt},
-                ],
-            )
+            if self.use_role_native_messages:
+                request_messages = cast(
+                    list[ChatCompletionMessageParam],
+                    [
+                        {
+                            "role": "system",
+                            "content": _build_override_system_instructions(
+                                system_prompt=system_prompt
+                            ),
+                        },
+                        {"role": "user", "content": override_prompt},
+                    ],
+                )
+            else:
+                request_messages = cast(
+                    list[ChatCompletionMessageParam],
+                    [{"role": "user", "content": override_prompt}],
+                )
         elif self.use_role_native_messages:
             request_messages = _build_role_native_request_messages(
                 messages,
