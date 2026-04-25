@@ -397,6 +397,59 @@ def test_compute_route_task_kind_implementation_fallback_when_codex_unavailable(
     assert route.route_reason == "preferred_unavailable"
 
 
+def test_compute_route_task_text_explicit_highest_quality_preference():
+    """Explicit caller wording should request the high-quality route even without budget flags."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "Use the highest quality worker for this change"}}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "budget_preference"
+
+
+def test_compute_route_task_text_explicit_low_cost_preference():
+    """Explicit caller wording should request the lower-cost route even without budget flags."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "Keep this as low cost as possible"}}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "codex"
+    assert route.route_reason == "budget_preference"
+
+
+def test_compute_route_task_text_low_cost_marker_uses_word_boundaries():
+    """Low-cost marker should not match unrelated substrings like 'slow cost'."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "Choose based on slow cost convergence, not budget preference"}}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "codex"
+    assert route.route_reason == "cheap_mechanical_change"
+
+
+def test_compute_route_task_text_high_quality_marker_uses_word_boundaries():
+    """High-quality marker should not match unrelated substrings like 'highlight quality'."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "Please highlight quality concerns in the summary only"}}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "codex"
+    assert route.route_reason == "cheap_mechanical_change"
+
+
+def test_compute_route_multi_file_task_prefers_high_quality_worker():
+    """Implementation tasks that span many files should use the higher-quality route."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Implement this change across files in orchestrator and workers"},
+            "task_kind": "implementation",
+        }
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "high_stakes_refactor"
+
+
 def test_compute_route_verifier_failure_escalation():
     """T-071: failed prior verifier escalates to alternate worker."""
     state = OrchestratorState.model_validate(
@@ -472,8 +525,8 @@ def test_compute_route_uses_worker_failure_kind_when_verifier_failure_kind_does_
     assert route.route_reason == "previous_worker_failed"
 
 
-def test_compute_route_keeps_worker_for_non_rerouteable_failure_kind():
-    """Environment/auth failures should not trigger automatic cross-worker reroute."""
+def test_compute_route_retries_same_worker_for_environment_failure_kind():
+    """Environment/auth failures should retry the same worker instead of cross-worker reroute."""
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "fix the code"},
@@ -491,7 +544,30 @@ def test_compute_route_keeps_worker_for_non_rerouteable_failure_kind():
     )
     route = _compute_route_decision(state, _ALL_WORKERS)
     assert route.chosen_worker == "codex"
-    assert route.route_reason == "cheap_mechanical_change"
+    assert route.route_reason == "environment_retry_same_worker"
+
+
+def test_compute_route_environment_failure_does_not_downgrade_prior_high_quality_worker():
+    """An environment failure on gemini should not silently downgrade to codex on retry."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "fix the code"},
+            "task_kind": "implementation",
+            "attempt_count": 1,
+            "dispatch": {"worker_type": "gemini"},
+            "result": {
+                "status": "error",
+                "failure_kind": "provider_auth",
+                "commands_run": [],
+                "files_changed": [],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "gemini"
+    assert route.route_reason == "environment_retry_same_worker"
 
 
 def test_compute_route_escalation_fails_explicitly_when_alternate_unavailable():

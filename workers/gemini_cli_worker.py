@@ -140,7 +140,14 @@ def _next_action_hint(execution: CliRuntimeExecutionResult) -> str:
     """Return the best follow-up hint for a retained workspace."""
     if execution.stop_reason == "permission_required":
         return "request_higher_permission"
-    if execution.stop_reason in {"max_iterations", "worker_timeout", "budget_exceeded"}:
+    if execution.stop_reason in {
+        "max_iterations",
+        "worker_timeout",
+        "budget_exceeded",
+        "stalled_in_inspection",
+        "exploration_exhausted",
+        "no_progress_before_budget",
+    }:
         return "increase_budget_or_reduce_scope"
     if execution.stop_reason == "context_window":
         return "reduce_context_or_scope"

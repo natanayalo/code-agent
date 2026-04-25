@@ -24,6 +24,7 @@ from workers.cli_runtime import (
     _coerce_non_negative_int,
     _estimate_messages_characters,
     _extract_file_hints_from_command,
+    _looks_read_only_command,
     _messages_for_adapter_turn,
     _normalize_requested_tool_name,
     collect_changed_files,
@@ -90,6 +91,11 @@ def test_settings_from_budget_applies_supported_runtime_overrides() -> None:
             "max_shell_commands": 6,
             "max_retries": 0,
             "max_verifier_passes": "1",
+            "max_exploration_iterations": 4,
+            "max_execution_iterations": "6",
+            "stall_window_iterations": 5,
+            "max_repeated_file_reads": "7",
+            "stall_correction_turns": 2,
             "max_observation_characters": 512,
             "context_window_limit_tokens": "64000",
         },
@@ -103,6 +109,11 @@ def test_settings_from_budget_applies_supported_runtime_overrides() -> None:
     assert settings.max_shell_commands == 6
     assert settings.max_retries == 0
     assert settings.max_verifier_passes == 1
+    assert settings.max_exploration_iterations == 4
+    assert settings.max_execution_iterations == 6
+    assert settings.stall_window_iterations == 5
+    assert settings.max_repeated_file_reads == 7
+    assert settings.stall_correction_turns == 2
     assert settings.max_observation_characters == 512
     assert settings.context_window_limit_tokens == 64000
 
@@ -523,6 +534,23 @@ def test_extract_file_hints_skips_current_and_parent_directory_tokens() -> None:
     assert "../notes.txt" in hints
     assert "." not in hints
     assert ".." not in hints
+
+
+def test_looks_read_only_command_uses_word_boundary_for_short_commands() -> None:
+    """Short read-only commands should not match unrelated command-name prefixes."""
+    assert _looks_read_only_command("ls") is True
+    assert _looks_read_only_command("pwd") is True
+    assert _looks_read_only_command("ls src") is True
+    assert _looks_read_only_command("pwd /tmp") is True
+    assert _looks_read_only_command("lsrc") is False
+    assert _looks_read_only_command("pwd_helper") is False
+    assert _looks_read_only_command("grep TODO README.md") is True
+    assert _looks_read_only_command("awk '{print $1}' README.md") is True
+    assert _looks_read_only_command("grep TODO README.md>out.txt") is False
+    assert _looks_read_only_command("ls | tee output.txt") is False
+    assert _looks_read_only_command("patch < fix.patch") is False
+    assert _looks_read_only_command("git apply fix.patch") is False
+    assert _looks_read_only_command("sed -i 's/a/b/' file.txt") is False
 
 
 def test_build_condensed_context_summary_truncation_stays_within_budget() -> None:
@@ -1323,7 +1351,7 @@ def test_run_cli_runtime_loop_counts_interleaved_failures_toward_retry_budget() 
 
 
 def test_run_cli_runtime_loop_stops_at_the_iteration_budget() -> None:
-    """The runtime should fail cleanly when no final answer appears in time."""
+    """Read-only loops without progress should stop with a typed no-progress reason."""
     adapter = _ScriptedAdapter(
         [CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pwd")]
     )
@@ -1337,9 +1365,212 @@ def test_run_cli_runtime_loop_stops_at_the_iteration_budget() -> None:
     )
 
     assert execution.status == "failure"
+    assert execution.stop_reason == "no_progress_before_budget"
+    assert "without meaningful task progress" in execution.summary
+    assert len(execution.commands_run) == 1
+
+
+def test_run_cli_runtime_loop_stops_at_max_iterations_after_write_progress() -> None:
+    """Max-iteration remains the stop reason once concrete write progress has started."""
+    adapter = _ScriptedAdapter(
+        [CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="touch note.txt")]
+    )
+    session = _FakeSession({"touch note.txt": _command_result("touch note.txt", output="")})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=1, worker_timeout_seconds=30),
+    )
+
+    assert execution.status == "failure"
     assert execution.stop_reason == "max_iterations"
     assert "max iteration budget (1)" in execution.summary
-    assert len(execution.commands_run) == 1
+
+
+def test_run_cli_runtime_loop_stops_as_stalled_in_inspection_after_write_progress() -> None:
+    """Repeated read-only loops after an initial write should emit stalled_in_inspection."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="touch a.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat a.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat a.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat a.txt"),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "touch a.txt": _command_result("touch a.txt", output=""),
+            "cat a.txt": _command_result("cat a.txt", output="x\n"),
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=6,
+            worker_timeout_seconds=30,
+            stall_window_iterations=2,
+            max_repeated_file_reads=2,
+            stall_correction_turns=0,
+        ),
+    )
+
+    assert execution.status == "failure"
+    assert execution.stop_reason == "stalled_in_inspection"
+    assert "stalled in repeated inspection" in execution.summary
+
+
+def test_run_cli_runtime_loop_resets_repeated_read_tracking_after_write() -> None:
+    """A concrete write should reset repeated-read counters before post-write inspection."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat a.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat b.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat a.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="touch a.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat a.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat c.txt"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat a.txt"),
+            CliRuntimeStep(kind="final", final_output="done"),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "cat a.txt": _command_result("cat a.txt", output="x\n"),
+            "cat b.txt": _command_result("cat b.txt", output="y\n"),
+            "touch a.txt": _command_result("touch a.txt", output=""),
+            "cat c.txt": _command_result("cat c.txt", output="z\n"),
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=8,
+            worker_timeout_seconds=30,
+            stall_window_iterations=3,
+            max_repeated_file_reads=2,
+            stall_correction_turns=0,
+        ),
+    )
+
+    assert execution.status == "success"
+    assert execution.stop_reason == "final_answer"
+    assert execution.summary == "done"
+
+
+def test_run_cli_runtime_loop_stops_as_exploration_exhausted() -> None:
+    """Exploration-phase budget should stop broad read-only probing before max iterations."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="ls"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pwd"),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat README.md"),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "ls": _command_result("ls", output="README.md\n"),
+            "pwd": _command_result("pwd", output="/workspace/repo\n"),
+            "cat README.md": _command_result("cat README.md", output="hello\n"),
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=6,
+            worker_timeout_seconds=30,
+            max_exploration_iterations=1,
+            stall_correction_turns=0,
+        ),
+    )
+
+    assert execution.status == "failure"
+    assert execution.stop_reason == "exploration_exhausted"
+    assert "exploration-phase budget" in execution.summary
+
+
+def test_run_cli_runtime_loop_allows_correction_turn_adapter_response() -> None:
+    """Correction turns should still dispatch to adapter so it can respond to guidance."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="ls"),
+            CliRuntimeStep(kind="final", final_output="Provided plan after correction."),
+        ]
+    )
+    session = _FakeSession({"ls": _command_result("ls", output="README.md\n")})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=3,
+            worker_timeout_seconds=30,
+            max_exploration_iterations=1,
+            stall_correction_turns=1,
+        ),
+    )
+
+    assert execution.status == "success"
+    assert execution.stop_reason == "final_answer"
+    assert execution.summary == "Provided plan after correction."
+    assert len(adapter.calls) == 2
+    assert any(
+        message.role == "assistant"
+        and "Runtime corrective message: exploration budget is nearly exhausted." in message.content
+        for message in adapter.calls[1]
+    )
+
+
+def test_run_cli_runtime_loop_deduplicates_file_hints_per_turn_for_read_counts() -> None:
+    """Repeated file tokens within one command should only count once for stall counters."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="execute_bash",
+                tool_input="cat file.txt file.txt file.txt",
+            ),
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="cat other.txt"),
+            CliRuntimeStep(kind="final", final_output="done"),
+        ]
+    )
+    session = _FakeSession(
+        {
+            "cat file.txt file.txt file.txt": _command_result(
+                "cat file.txt file.txt file.txt",
+                output="x\nx\nx\n",
+            ),
+            "cat other.txt": _command_result("cat other.txt", output="y\n"),
+        }
+    )
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(
+            max_iterations=4,
+            worker_timeout_seconds=30,
+            stall_window_iterations=2,
+            max_repeated_file_reads=2,
+            stall_correction_turns=0,
+        ),
+    )
+
+    assert execution.status == "success"
+    assert execution.stop_reason == "final_answer"
+    assert execution.summary == "done"
 
 
 def test_run_cli_runtime_loop_stops_at_the_worker_timeout() -> None:

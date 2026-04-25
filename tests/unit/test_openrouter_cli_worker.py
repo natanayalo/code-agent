@@ -562,6 +562,9 @@ def test_openrouter_next_action_hint() -> None:
 
     assert _next_action_hint(make_exec("permission_required")) == "request_higher_permission"
     assert _next_action_hint(make_exec("max_iterations")) == "increase_budget_or_reduce_scope"
+    assert (
+        _next_action_hint(make_exec("stalled_in_inspection")) == "increase_budget_or_reduce_scope"
+    )
     assert _next_action_hint(make_exec("context_window")) == "reduce_context_or_scope"
     assert _next_action_hint(make_exec("adapter_error")) == "inspect_worker_configuration"
     assert _next_action_hint(make_exec("shell_error")) == "inspect_workspace_artifacts"

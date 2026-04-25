@@ -83,6 +83,12 @@ def classify_failure_kind(
         return "permission_denied"
     if stop_reason == "worker_timeout":
         return "timeout"
+    if stop_reason in {
+        "stalled_in_inspection",
+        "exploration_exhausted",
+        "no_progress_before_budget",
+    }:
+        return "budget_exceeded"
     if stop_reason == "budget_exceeded":
         return "budget_exceeded"
     if stop_reason == "context_window":
