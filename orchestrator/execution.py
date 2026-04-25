@@ -101,7 +101,6 @@ _NON_NEGATIVE_BUDGET_KEYS = frozenset(
 _NON_NEGATIVE_DEFAULT_BUDGET_KEYS = frozenset(
     {"max_retries", "max_tool_calls", "max_shell_commands"}
 )
-_MODE_MINIMUM_BUDGET_KEYS = frozenset({"max_iterations"})
 
 
 class ExecutionModel(BaseModel):
@@ -182,15 +181,6 @@ def _apply_execution_budget_policy(
             effective_budget[key] = min(coerced_value, cap)
         elif key in effective_budget:
             effective_budget.pop(key, None)
-
-    for key in _MODE_MINIMUM_BUDGET_KEYS:
-        minimum = _DEFAULT_EXECUTION_BUDGETS[execution_mode].get(key)
-        if minimum is None:
-            continue
-        coerced_value = coerce_positive_int_like(effective_budget.get(key))
-        if coerced_value is None:
-            continue
-        effective_budget[key] = max(coerced_value, minimum)
 
     return effective_budget
 

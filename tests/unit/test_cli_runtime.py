@@ -302,6 +302,33 @@ def test_run_cli_runtime_loop_rejects_malformed_tool_call_like_final_output() ->
     assert execution.commands_run == []
 
 
+def test_run_cli_runtime_loop_allows_valid_final_step_json_with_tool_call_keywords() -> None:
+    """Heuristic guard should not fire when a valid parsed final-step payload is returned."""
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="final",
+                final_output=(
+                    '{"kind":"final","final_output":"summary includes tool_name and '
+                    'tool_input as plain text for documentation"}'
+                ),
+            )
+        ]
+    )
+    session = _FakeSession({})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=2, worker_timeout_seconds=30),
+    )
+
+    assert execution.status == "success"
+    assert execution.stop_reason == "final_answer"
+    assert execution.commands_run == []
+
+
 def test_run_cli_runtime_loop_skips_condensation_when_history_is_within_threshold() -> None:
     """Short histories should be passed to the adapter unchanged."""
     adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")])

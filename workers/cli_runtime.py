@@ -1123,9 +1123,9 @@ def run_cli_runtime_loop(
             final_output = step.final_output.strip()
             messages.append(CliRuntimeMessage(role="assistant", content=final_output))
             parsed_step = _parse_runtime_step_from_text(final_output)
-            if (
-                parsed_step is not None and parsed_step.kind == "tool_call"
-            ) or _looks_like_tool_call_payload_text(final_output):
+            if (parsed_step is not None and parsed_step.kind == "tool_call") or (
+                parsed_step is None and _looks_like_tool_call_payload_text(final_output)
+            ):
                 _update_budget_ledger(
                     budget_ledger,
                     started_at=started_at,

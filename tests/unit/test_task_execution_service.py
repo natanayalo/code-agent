@@ -368,25 +368,6 @@ def test_apply_execution_budget_policy_keeps_zero_for_non_negative_limits() -> N
     assert budget["max_shell_commands"] == 0
 
 
-def test_apply_execution_budget_policy_enforces_mode_floor_for_low_iteration_budget() -> None:
-    """Very low iteration budgets should be lifted to execution-mode minimums."""
-    unattended_budget = execution_module._apply_execution_budget_policy(
-        channel="webhook:ci",
-        constraints={},
-        budget={"max_iterations": 1},
-    )
-    interactive_budget = execution_module._apply_execution_budget_policy(
-        channel="telegram",
-        constraints={},
-        budget={"max_iterations": 2},
-    )
-
-    assert unattended_budget["execution_mode"] == "unattended"
-    assert unattended_budget["max_iterations"] == 5
-    assert interactive_budget["execution_mode"] == "interactive"
-    assert interactive_budget["max_iterations"] == 8
-
-
 def test_apply_execution_budget_policy_drops_invalid_capped_values() -> None:
     """Invalid values for capped budget keys should be removed from effective runtime budget."""
     budget = execution_module._apply_execution_budget_policy(
