@@ -985,6 +985,43 @@ def test_build_available_tools_section_handles_empty_tool_list() -> None:
     assert section == "## Available Tools\n- No tools configured."
 
 
+def test_build_runtime_adapter_tool_guidance_lines_reflect_registry_metadata() -> None:
+    """Runtime adapter guidance should be generated from shared tool metadata."""
+    lines = prompt.build_runtime_adapter_tool_guidance_lines()
+
+    assert any("For `execute_bash`" in line and "focused shell command" in line for line in lines)
+    assert any(
+        "For `execute_git`" in line
+        and "required key: `operation`" in line
+        and "supported operations: `status`" in line
+        for line in lines
+    )
+    assert any(
+        "For `execute_github`" in line and "`repository_full_name`" in line for line in lines
+    )
+
+
+def test_build_runtime_adapter_tool_guidance_lines_filters_to_system_prompt_tools() -> None:
+    """Tool guidance should honor the Available Tools section when provided."""
+    system_prompt = "\n".join(
+        [
+            "## Available Tools",
+            "### `execute_bash`",
+            "### `view_file`",
+            "",
+            "## Task Context",
+            "Task text: demo",
+        ]
+    )
+
+    lines = prompt.build_runtime_adapter_tool_guidance_lines(system_prompt=system_prompt)
+
+    assert len(lines) == 2
+    assert any("For `execute_bash`" in line for line in lines)
+    assert any("For `view_file`" in line for line in lines)
+    assert all("execute_git" not in line for line in lines)
+
+
 def test_read_workspace_agents_guidance_missing_and_short_paths(tmp_path: Path) -> None:
     """AGENTS guidance should return None when absent and full text when within budget."""
     assert prompt.read_workspace_agents_guidance(tmp_path) is None

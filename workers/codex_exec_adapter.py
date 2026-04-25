@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Final
 
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
+from workers.prompt import build_runtime_adapter_tool_guidance_lines
 from workers.subprocess_env import build_codex_subprocess_env
 
 DEFAULT_CODEX_EXECUTABLE: Final[str] = "codex"
@@ -72,6 +73,7 @@ def _build_adapter_prompt(
     system_prompt: str | None = None,
 ) -> str:
     """Build the single-shot prompt sent to `codex exec` for one runtime turn."""
+    tool_guidance_lines = build_runtime_adapter_tool_guidance_lines(system_prompt=system_prompt)
     lines = [
         "You are the Codex runtime adapter for a bounded coding worker.",
         (
@@ -89,22 +91,8 @@ def _build_adapter_prompt(
         ),
         "Rules:",
         "- Use only tool names listed in the system prompt's Available Tools section.",
-        "- For `execute_bash`, return one focused shell command as the tool_input string.",
-        (
-            "- For `execute_git`, return the tool_input as a compact JSON object encoded "
-            'as a string, for example {"operation":"status","porcelain":true}.'
-        ),
-        (
-            "- For `execute_github`, return the tool_input as a compact JSON object encoded "
-            "as a string, for example "
-            '{"operation":"pr_comment","repository_full_name":"owner/repo",'
-            '"pr_number":1,"comment_body":"Looks good."}.'
-        ),
-        (
-            "- For `execute_browser`, return the tool_input as a compact JSON object encoded "
-            "as a string, for example "
-            '{"operation":"search","query":"langgraph","limit":3}.'
-        ),
+        "- `tool_input` MUST be a string. If the tool expects JSON, encode that JSON as a string.",
+        *tool_guidance_lines,
         "- If the transcript already contains enough information to finish, return `final`.",
         "- If the latest tool result failed, adapt to that failure instead of "
         "repeating blindly.",
