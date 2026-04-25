@@ -40,6 +40,15 @@ def test_classify_failure_kind_context_window_stop_reason() -> None:
     assert failure_kind == "context_window"
 
 
+def test_classify_failure_kind_stall_stop_reason_maps_to_budget_exceeded() -> None:
+    failure_kind = classify_failure_kind(
+        status="failure",
+        stop_reason="stalled_in_inspection",
+        summary="runtime stalled while repeatedly inspecting files",
+    )
+    assert failure_kind == "budget_exceeded"
+
+
 def test_classify_failure_kind_auth_error() -> None:
     failure_kind = classify_failure_kind(
         status="error",

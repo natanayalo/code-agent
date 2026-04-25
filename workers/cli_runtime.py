@@ -61,6 +61,9 @@ DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN = 4
 DEFAULT_CONDENSED_SUMMARY_MAX_DECISIONS = 5
 DEFAULT_CONDENSED_SUMMARY_MAX_FILE_HINTS = 8
 DEFAULT_CONDENSED_SUMMARY_MAX_ERRORS = 3
+DEFAULT_STALL_WINDOW_ITERATIONS = 3
+DEFAULT_MAX_REPEATED_FILE_READS = 3
+DEFAULT_STALL_CORRECTION_TURNS = 1
 MODEL_CONTEXT_WINDOW_TOKENS: dict[str, int] = {
     "gpt-5.4": 272000,
     "gemini-2.5-pro": 1048576,
@@ -72,6 +75,40 @@ _TOOL_NAME_ALIASES: dict[str, str] = {
     "run_shell_command": "execute_bash",
 }
 _RECOVERABLE_UNKNOWN_TOOL_NAMES = frozenset({"enter_plan_mode", "exit_plan_mode"})
+_READ_ONLY_COMMAND_PREFIXES = (
+    "cat ",
+    "find ",
+    "git diff",
+    "git log",
+    "git show",
+    "git status",
+    "head ",
+    "less ",
+    "ls",
+    "more ",
+    "pwd",
+    "rg ",
+    "sed -n",
+    "tail ",
+    "wc ",
+)
+_WRITE_COMMAND_MARKERS = (
+    " >",
+    ">>",
+    "chmod ",
+    "chown ",
+    "cp ",
+    "git add ",
+    "git commit",
+    "git mv ",
+    "git restore ",
+    "git rm ",
+    "mkdir ",
+    "mv ",
+    "rm ",
+    "rmdir ",
+    "touch ",
+)
 _FILE_ARGUMENT_COMMANDS = frozenset(
     {
         "awk",
@@ -176,6 +213,11 @@ class CliRuntimeSettings(CliRuntimeModel):
     max_shell_commands: int | None = Field(default=None, ge=0)
     max_retries: int | None = Field(default=None, ge=0)
     max_verifier_passes: int | None = Field(default=None, ge=0)
+    max_exploration_iterations: int | None = Field(default=None, ge=1)
+    max_execution_iterations: int | None = Field(default=None, ge=1)
+    stall_window_iterations: int = Field(default=DEFAULT_STALL_WINDOW_ITERATIONS, ge=2)
+    max_repeated_file_reads: int = Field(default=DEFAULT_MAX_REPEATED_FILE_READS, ge=2)
+    stall_correction_turns: int = Field(default=DEFAULT_STALL_CORRECTION_TURNS, ge=0)
     max_observation_characters: int = Field(
         default=DEFAULT_MAX_OBSERVATION_CHARACTERS,
         ge=256,
@@ -223,6 +265,9 @@ class CliRuntimeExecutionResult(CliRuntimeModel):
     stop_reason: Literal[
         "final_answer",
         "max_iterations",
+        "stalled_in_inspection",
+        "exploration_exhausted",
+        "no_progress_before_budget",
         "worker_timeout",
         "budget_exceeded",
         "context_window",
@@ -304,6 +349,25 @@ def settings_from_budget(
     max_verifier_passes = _coerce_non_negative_int(budget.get("max_verifier_passes"))
     if max_verifier_passes is not None:
         resolved["max_verifier_passes"] = max_verifier_passes
+    max_exploration_iterations = coerce_positive_int_like(budget.get("max_exploration_iterations"))
+    if max_exploration_iterations is not None:
+        resolved["max_exploration_iterations"] = max_exploration_iterations
+
+    max_execution_iterations = coerce_positive_int_like(budget.get("max_execution_iterations"))
+    if max_execution_iterations is not None:
+        resolved["max_execution_iterations"] = max_execution_iterations
+
+    stall_window_iterations = coerce_positive_int_like(budget.get("stall_window_iterations"))
+    if stall_window_iterations is not None:
+        resolved["stall_window_iterations"] = stall_window_iterations
+
+    max_repeated_file_reads = coerce_positive_int_like(budget.get("max_repeated_file_reads"))
+    if max_repeated_file_reads is not None:
+        resolved["max_repeated_file_reads"] = max_repeated_file_reads
+
+    stall_correction_turns = _coerce_non_negative_int(budget.get("stall_correction_turns"))
+    if stall_correction_turns is not None:
+        resolved["stall_correction_turns"] = stall_correction_turns
 
     max_observation_characters = coerce_positive_int_like(budget.get("max_observation_characters"))
     if max_observation_characters is not None:
@@ -557,6 +621,19 @@ def _extract_file_hints_from_command(command: str) -> list[str]:
             hints.append(candidate)
         command_argument_index += 1
     return hints
+
+
+def _looks_read_only_command(command: str) -> bool:
+    """Best-effort command classification for stall detection heuristics."""
+    normalized = " ".join(command.strip().split()).lower()
+    if not normalized:
+        return True
+    if any(marker in normalized for marker in _WRITE_COMMAND_MARKERS):
+        return False
+    return any(
+        normalized == prefix.rstrip() or normalized.startswith(prefix)
+        for prefix in _READ_ONLY_COMMAND_PREFIXES
+    )
 
 
 def _inline_code(value: str) -> str:
@@ -1042,6 +1119,12 @@ def run_cli_runtime_loop(
     messages = [CliRuntimeMessage(role="system", content=system_prompt)]
     commands_run: list[WorkerCommand] = []
     budget_ledger = _build_budget_ledger(settings)
+    commands_with_writes = 0
+    first_execution_iteration: int | None = None
+    seen_files: set[str] = set()
+    read_counts_by_file: dict[str, int] = {}
+    recent_iteration_signals: list[dict[str, Any]] = []
+    stall_correction_injected_at: int | None = None
 
     for iteration in range(1, settings.max_iterations + 1):
         _update_budget_ledger(
@@ -1069,6 +1152,70 @@ def run_cli_runtime_loop(
                     f"({settings.worker_timeout_seconds}s) before reaching a final answer."
                 ),
                 stop_reason="worker_timeout",
+                commands_run=commands_run,
+                messages=messages,
+                budget_ledger=budget_ledger,
+            )
+
+        if (
+            settings.max_exploration_iterations is not None
+            and commands_with_writes == 0
+            and iteration > settings.max_exploration_iterations
+        ):
+            if stall_correction_injected_at is None and settings.stall_correction_turns > 0:
+                messages.append(
+                    CliRuntimeMessage(
+                        role="assistant",
+                        content=(
+                            "Runtime corrective message: exploration budget is nearly exhausted. "
+                            "Please do one now: (1) produce a concise plan, "
+                            "(2) make the first concrete change, or "
+                            "(3) provide a final answer with findings and gaps."
+                        ),
+                    )
+                )
+                stall_correction_injected_at = iteration
+                continue
+            if (
+                stall_correction_injected_at is not None
+                and iteration - stall_correction_injected_at <= settings.stall_correction_turns
+            ):
+                continue
+            _update_budget_ledger(
+                budget_ledger,
+                started_at=started_at,
+                clock=clock,
+                iterations_used=iteration,
+            )
+            return CliRuntimeExecutionResult(
+                status="failure",
+                summary=(
+                    "CLI runtime exhausted its exploration-phase budget before producing a plan, "
+                    "concrete edit, or final answer."
+                ),
+                stop_reason="exploration_exhausted",
+                commands_run=commands_run,
+                messages=messages,
+                budget_ledger=budget_ledger,
+            )
+        if (
+            settings.max_execution_iterations is not None
+            and first_execution_iteration is not None
+            and (iteration - first_execution_iteration + 1) > settings.max_execution_iterations
+        ):
+            _update_budget_ledger(
+                budget_ledger,
+                started_at=started_at,
+                clock=clock,
+                iterations_used=iteration,
+            )
+            return CliRuntimeExecutionResult(
+                status="failure",
+                summary=(
+                    "CLI runtime exhausted its execution-phase budget "
+                    f"({settings.max_execution_iterations}) before reaching a final answer."
+                ),
+                stop_reason="budget_exceeded",
                 commands_run=commands_run,
                 messages=messages,
                 budget_ledger=budget_ledger,
@@ -1382,6 +1529,29 @@ def run_cli_runtime_loop(
                 duration_seconds=shell_result.duration_seconds,
             )
         )
+        read_only_command = _looks_read_only_command(command)
+        if not read_only_command:
+            commands_with_writes += 1
+            if first_execution_iteration is None:
+                first_execution_iteration = iteration
+        file_hints = _extract_file_hints_from_command(command)
+        new_file_hints_count = 0
+        for file_hint in file_hints:
+            if file_hint not in seen_files:
+                seen_files.add(file_hint)
+                new_file_hints_count += 1
+        if read_only_command:
+            for file_hint in file_hints:
+                read_counts_by_file[file_hint] = read_counts_by_file.get(file_hint, 0) + 1
+        recent_iteration_signals.append(
+            {
+                "read_only": read_only_command,
+                "files": file_hints,
+                "new_files": new_file_hints_count,
+            }
+        )
+        if len(recent_iteration_signals) > settings.stall_window_iterations:
+            recent_iteration_signals = recent_iteration_signals[-settings.stall_window_iterations :]
         if shell_result.exit_code == 0:
             budget_ledger.failed_command_attempts.pop(command_budget_key, None)
         else:
@@ -1404,13 +1574,82 @@ def run_cli_runtime_loop(
             )
         )
 
+        last_window = recent_iteration_signals[-settings.stall_window_iterations :]
+        all_recent_read_only = len(last_window) == settings.stall_window_iterations and all(
+            signal["read_only"] for signal in last_window
+        )
+        no_new_files_recently = len(last_window) == settings.stall_window_iterations and all(
+            signal["new_files"] == 0 for signal in last_window
+        )
+        repeated_same_file_reads = any(
+            count > settings.max_repeated_file_reads for count in read_counts_by_file.values()
+        )
+        has_stall_signals = all_recent_read_only and (
+            commands_with_writes == 0 or no_new_files_recently or repeated_same_file_reads
+        )
+        if has_stall_signals:
+            if stall_correction_injected_at is None and settings.stall_correction_turns > 0:
+                messages.append(
+                    CliRuntimeMessage(
+                        role="assistant",
+                        content=(
+                            "Runtime corrective message: progress appears stalled. "
+                            "Please stop rereading and do one now: "
+                            "(1) concise plan, (2) first concrete edit, or "
+                            "(3) final answer with findings and missing info."
+                        ),
+                    )
+                )
+                stall_correction_injected_at = iteration
+                continue
+            if (
+                stall_correction_injected_at is not None
+                and iteration - stall_correction_injected_at <= settings.stall_correction_turns
+            ):
+                continue
+            _update_budget_ledger(
+                budget_ledger,
+                started_at=started_at,
+                clock=clock,
+                iterations_used=iteration,
+            )
+            if commands_with_writes == 0:
+                return CliRuntimeExecutionResult(
+                    status="failure",
+                    summary=(
+                        "CLI runtime consumed iterations without meaningful task progress "
+                        "before budget exhaustion."
+                    ),
+                    stop_reason="no_progress_before_budget",
+                    commands_run=commands_run,
+                    messages=messages,
+                    budget_ledger=budget_ledger,
+                )
+            return CliRuntimeExecutionResult(
+                status="failure",
+                summary=(
+                    "CLI runtime stalled in repeated inspection without converging to "
+                    "concrete edits or a final answer."
+                ),
+                stop_reason="stalled_in_inspection",
+                commands_run=commands_run,
+                messages=messages,
+                budget_ledger=budget_ledger,
+            )
+
+    exhausted_without_progress = commands_run and commands_with_writes == 0
     return CliRuntimeExecutionResult(
         status="failure",
         summary=(
-            "CLI runtime hit its max iteration budget "
-            f"({settings.max_iterations}) before reaching a final answer."
+            "CLI runtime consumed iterations without meaningful task progress "
+            "before budget exhaustion."
+            if exhausted_without_progress
+            else (
+                "CLI runtime hit its max iteration budget "
+                f"({settings.max_iterations}) before reaching a final answer."
+            )
         ),
-        stop_reason="max_iterations",
+        stop_reason="no_progress_before_budget" if exhausted_without_progress else "max_iterations",
         commands_run=commands_run,
         messages=messages,
         budget_ledger=budget_ledger,

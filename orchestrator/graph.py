@@ -93,6 +93,24 @@ _WORKER_FAILURE_REROUTE_KINDS = frozenset(
     }
 )
 _VERIFICATION_FAILURE_REROUTE_KINDS = frozenset({"test_regression", "scope_mismatch", "unknown"})
+_WORKER_FAILURE_RETRY_SAME_WORKER_KINDS = frozenset(
+    {
+        "sandbox_infra",
+        "provider_auth",
+        "permission_denied",
+    }
+)
+_HIGH_QUALITY_REQUEST_MARKERS = (
+    "highest quality",
+    "high quality",
+    "best quality",
+)
+_LOW_COST_REQUEST_MARKERS = (
+    "lower cost",
+    "low cost",
+    "cheapest",
+    "cheaper",
+)
 
 
 def _resolve_orchestrator_timeout_seconds(state: OrchestratorState) -> int:
@@ -712,6 +730,12 @@ def _route_by_preference(
     )
 
 
+def _task_has_request_marker(task_text: str, markers: tuple[str, ...]) -> bool:
+    """Return whether the task text contains an explicit routing preference marker."""
+    normalized = task_text.lower()
+    return any(marker in normalized for marker in markers)
+
+
 def _compute_route_decision(
     state: OrchestratorState,
     available_workers: frozenset[str],
@@ -792,16 +816,46 @@ def _compute_route_decision(
                 override_applied=False,
             )
 
+        # Environment/auth/permission failures should retry with the same worker after fixes.
+        if state.result is not None and state.result.status != "success":
+            failure_kind = state.result.failure_kind or "unknown"
+            if failure_kind in _WORKER_FAILURE_RETRY_SAME_WORKER_KINDS:
+                if prior_worker in available_workers:
+                    return RouteDecision(
+                        chosen_worker=prior_worker,
+                        route_reason="environment_retry_same_worker",
+                        override_applied=False,
+                    )
+                logger.warning(
+                    "Environment retry requires same worker but it is unavailable",
+                    extra={"prior_worker": prior_worker},
+                )
+                return RouteDecision(
+                    chosen_worker=prior_worker,
+                    route_reason="runtime_unavailable",
+                    override_applied=False,
+                )
+
     # T-071: heuristic 2 — explicit budget preference.
     budget = state.task.budget
-    if budget.get("prefer_high_quality"):
+    task_text = state.normalized_task_text or state.task.task_text
+    constraints = state.task.constraints
+    if (
+        budget.get("prefer_high_quality")
+        or constraints.get("prefer_high_quality")
+        or _task_has_request_marker(task_text, _HIGH_QUALITY_REQUEST_MARKERS)
+    ):
         return _route_by_preference(
             "gemini",
             ("openrouter", "codex"),
             "budget_preference",
             available_workers,
         )
-    if budget.get("prefer_low_cost"):
+    if (
+        budget.get("prefer_low_cost")
+        or constraints.get("prefer_low_cost")
+        or _task_has_request_marker(task_text, _LOW_COST_REQUEST_MARKERS)
+    ):
         return _route_by_preference(
             "codex",
             ("openrouter", "gemini"),
@@ -823,6 +877,13 @@ def _compute_route_decision(
             "gemini",
             ("openrouter", "codex"),
             "ambiguous_task",
+            available_workers,
+        )
+    if _task_complexity_reason(state) == "multi_file_task":
+        return _route_by_preference(
+            "gemini",
+            ("openrouter", "codex"),
+            "high_stakes_refactor",
             available_workers,
         )
     return _route_by_preference(
