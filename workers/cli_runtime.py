@@ -95,6 +95,7 @@ _READ_ONLY_COMMAND_PREFIXES = (
     "wc ",
 )
 _WRITE_COMMAND_MARKERS = (
+    ">",
     " >",
     ">>",
     "chmod ",
