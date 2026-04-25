@@ -1,346 +1,177 @@
 # Architecture
 
-## Overview
+## Product Model
 
-This service is a personal coding-agent platform.
+`code-agent` is a local-first coding agent platform with a strict separation between:
 
-It receives tasks from messages or webhooks, restores session context, loads memory,
-routes the task to a coding worker, executes inside an isolated workspace, then returns
-progress and final results.
+- session/control concerns (platform)
+- repo execution concerns (workers + sandbox)
+- durable context concerns (memory + persistence)
 
-The system separates:
-- control plane
-- execution plane
-- memory plane
+Core principle: use the platform for cross-run control, and worker runtimes for session-local cognition.
 
-## High-level diagram
+## Layered Architecture
+
+## 1) Platform / Control Plane
+
+Owns request intake, durable state, and run lifecycle governance.
+
+Responsibilities:
+
+- ingress and auth for API/webhook/Telegram
+- session + task creation and persistence
+- queueing and lease-based claiming
+- orchestration graph execution
+- worker routing policy and manual override handling
+- approval checkpoints and operator decisions
+- replay/retry lifecycle control
+- timeline/metrics emission
+
+Primary modules:
+
+- `apps/api/`
+- `apps/runtime.py`
+- `orchestrator/`
+- `repositories/`
+- `db/`
+
+## 2) Worker Runtime Layer
+
+Owns provider-specific coding execution behind a shared contract.
+
+Responsibilities:
+
+- adapt generic worker requests into provider-specific runtime calls
+- run bounded coding loops with explicit tool boundaries
+- emit structured outputs (`status`, `summary`, `commands_run`, `files_changed`, artifacts)
+- perform worker-local self-review/fix loops where configured
+
+Active worker/runtime implementations:
+
+- Codex CLI worker (`workers/codex_cli_worker.py`)
+- Gemini CLI worker (`workers/gemini_cli_worker.py`)
+- OpenRouter-backed runtime worker (`workers/openrouter_cli_worker.py`)
+
+Shared contract boundary:
+
+- `workers/base.py`
+
+## 3) Sandbox + Tool Layer
+
+Owns safe execution of repository mutations and command/tool effects.
+
+Responsibilities:
+
+- provision isolated workspaces and persistent sandbox containers
+- execute shell commands through policy gates
+- enforce path and permission policies
+- redact sensitive data in captured outputs
+- capture command/test/diff artifacts and retention metadata
+
+Primary modules:
+
+- `sandbox/`
+- `tools/`
+
+## 4) Memory Layer
+
+Owns durable context that survives individual runs.
+
+Responsibilities:
+
+- persist skeptical memory entries with provenance + confidence metadata
+- maintain compact session state across turns
+- load relevant hints during orchestration
+- keep memory inspectable/editable/deletable via API/admin paths
+
+Memory categories in v1:
+
+- personal memory
+- project memory
+- session/thread state
+
+Primary modules:
+
+- `memory/`
+- memory-related repositories in `repositories/`
+- schema in `db/models.py` + migrations
+
+## 5) Operator Surfaces
+
+Owns human-facing control and visibility interfaces.
+
+Current operator surfaces:
+
+- task submission/status/replay/approval endpoints (`/tasks`)
+- webhook + Telegram ingress routes
+- progress notifications (`started`, `running`, terminal)
+- health/readiness + operational metrics endpoints
+
+Future operator surface direction is a local dashboard/PWA for richer inspection and controls.
+
+## 6) Future Reflection / Autonomy Layer
+
+Planned, not yet a full implemented subsystem.
+
+Intended responsibilities:
+
+- bounded scout mode for proactive idea generation
+- structured friction and improvement proposal pipelines
+- operator-curated review queues for suggested changes
+- explicit maintenance-action requests (not privileged self-mutation)
+
+This lane remains controlled, inspectable, and human-in-the-loop for high-risk operations.
+
+## Runtime Topology (Today)
 
 ```mermaid
 flowchart TD
-    U[User / Telegram / Webhook] --> G[Gateway API]
-    G --> S[Session Router]
-    S --> O[Orchestrator]
+    U[Operator via Telegram or HTTP] --> API[FastAPI Ingress]
+    API --> DB[(Postgres)]
+    API --> Q[Queued Task]
 
-    O --> M1[Session State]
-    O --> M2[Personal Memory]
-    O --> M3[Project Memory]
-    O --> M4[Compact Session State]
-    O --> Q[Job Queue]
+    W[Worker Process] --> Q
+    W --> ORCH[TaskExecutionService + Orchestrator Graph]
+    ORCH --> MEM[Memory + Session State]
+    ORCH --> ROUTE[Worker Routing]
 
-    Q --> D[Worker Dispatcher]
-    D --> GW[Gemini CLI Worker]
-    D --> OW[Codex CLI Worker]
+    ROUTE --> CW[Codex Worker]
+    ROUTE --> GW[Gemini Worker]
+    ROUTE --> OW[OpenRouter Worker]
 
-    GW --> C[CLI Runtime Adapter]
-    OW --> C
-    C --> X[Sandbox Workspace]
+    CW --> SB[Sandbox Workspace / Container]
+    GW --> SB
+    OW --> SB
 
-    X --> T[Tool Registry / Policy Layer]
-    T --> GH[Git / GitHub]
-    T --> BR[Browser / Search]
-    T --> FS[Filesystem]
-
-    O --> V[Verifier]
-    O --> R[Reply Formatter]
-    R --> U
-
-    O --> OBS[Tracing / Logs / Artifacts]
-    V --> OBS
-    GW --> OBS
-    OW --> OBS
+    SB --> TOOLS[Tool Policy + Command Execution]
+    ORCH --> ART[Artifacts / Timeline / Metrics]
+    ORCH --> API
 ```
 
-## Services
+## Queue + Lease Model
 
-### 1. Gateway API
+- API writes tasks as pending records.
+- Worker process polls queue (`CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS`, default `2`).
+- Worker atomically claims tasks with lease ownership and expiry (`CODE_AGENT_QUEUE_LEASE_SECONDS`, default `60`).
+- Heartbeats extend lease while the run is active.
+- On success/failure, lease is cleared and status transitions persist.
+- Failed attempts are retried up to configured max attempts before terminal failure.
 
-Responsibilities:
+## Safety Boundaries
 
-- HTTP webhook ingress
-- Telegram webhook ingress
-- auth / allowlist checks
-- session lookup / creation
-- reply delivery
-- health endpoints
+Hard boundaries currently enforced:
 
-Does not own:
+- sandboxed repo execution through dedicated workspace/container flow
+- task ingress protected by shared-secret auth
+- explicit approval checkpoint flow for tasks requiring manual approval
+- callback SSRF protections for outbound progress webhooks
+- secret-redaction and command artifact capture for inspection/audit
+- budget and tool permission gates in orchestration/worker runtime paths
 
-- task routing logic
-- memory selection logic
-- repo execution
+## Source Of Truth For Behavior
 
-### 2. Orchestrator
+For day-to-day operation and troubleshooting, pair this document with:
 
-Responsibilities:
-
-- task classification
-- skeptical memory load/save
-- worker routing
-- approval checkpoints
-- budget enforcement
-- retries
-- state persistence
-- verifier orchestration
-- result summarization
-
-Recommended implementation:
-
-- LangGraph-backed workflow
-- explicit node/state model
-
-### 3. Worker layer
-
-Responsibilities:
-
-- convert generic task into provider-specific worker execution
-- adapt CLI/SDK/hook/subprocess runtimes behind the shared worker contract
-- manage coding-task loop
-- request tool execution through a policy-aware tool boundary
-- report usage/accounting when the runtime exposes it
-- return structured results
-
-Workers:
-
-- Gemini CLI worker
-- Codex CLI worker
-
-All workers implement the same interface.
-
-### 4. Sandbox
-
-Responsibilities:
-
-- create isolated workspace
-- clone repo or create worktree
-- run commands in container
-- capture artifacts/logs/diffs
-- expose safe paths to worker
-
-### 5. Memory layer
-
-Responsibilities:
-
-- persist and retrieve structured memory
-- keep memory inspectable
-- support memory deletion/editing
-- load relevant memory by repo/session/user
-- treat stored memory as hints that may require verification before action
-- compact long-running sessions into concise working state
-
-Memory buckets:
-
-- personal
-- project
-- session/thread working state
-
-### 6. Tool layer
-
-Responsibilities:
-
-- wrap integrations behind stable interfaces
-- declare explicit tool metadata and permission requirements
-- prepare for MCP (Model Context Protocol) compatibility
-- isolate external side effects
-
-Each tool should declare:
-
-- capability category
-- side-effect level
-- required permission
-- timeout
-- network requirement
-- expected artifacts
-- deterministic vs non-deterministic behavior
-
-## CLI-driven runtime boundary
-
-The current execution plan is CLI-first rather than raw-API-first.
-
-What the system should control directly:
-
-- worker selection
-- stable session scaffold construction
-- tool registry and permission policy
-- sandbox lifecycle
-- compact memory header
-- budget ledger
-- artifact capture
-- verifier inputs/outputs
-
-What may be owned by the CLI runtime and must be treated as optional:
-
-- provider-specific session identifiers
-- prompt/session caching behavior
-- usage token accounting
-- streaming event detail
-- hook injection points
-
-If a CLI exposes resumable session handles or usage events, persist them. If it does not, regenerate
-the same stable scaffold deterministically and continue without assuming hidden cache features.
-
-## State model
-
-### Session
-
-Represents an ongoing conversation/thread.
-
-Fields:
-
-- session_id
-- user_id
-- channel
-- external_thread_id
-- active_task_id
-- status
-- last_seen_at
-
-### Task
-
-Represents one requested unit of work.
-
-Fields:
-
-- task_id
-- session_id
-- repo_url
-- branch
-- task_text
-- status
-- priority
-- chosen_worker
-- route_reason
-- created_at
-- updated_at
-
-### Worker run
-
-Represents one coding-worker execution attempt.
-
-Fields:
-
-- run_id
-- task_id
-- worker_type
-- workspace_id
-- started_at
-- finished_at
-- status
-- summary
-- commands_run
-- files_changed_count
-- artifact_index
-- stop_reason
-- usage/accounting
-- verifier_result
-
-## Orchestrator flow
-
-1. Ingest task
-2. Normalize input
-3. Classify task
-4. Load personal/project/session memory and compact working state
-5. Choose worker/runtime
-6. Dispatch worker job
-7. Wait for result or permission escalation
-8. Verify result
-9. Summarize result
-10. Persist useful memory and updated compact state
-11. Send reply
-
-## Routing policy
-
-### Route to Gemini-family worker when
-
-- task is high-stakes
-- task is ambiguous
-- multi-file refactor
-- architectural reasoning needed
-- prior cheaper worker failed
-- prior verifier result suggests the cheaper worker under-scoped the task
-
-### Route to Codex-family worker when
-
-- task is straightforward
-- cheaper daily implementation is preferred
-- repetitive edits
-- lower-risk coding loop
-- runtime availability and budget preference favor the cheaper path
-
-Manual override should always exist.
-
-## Security boundaries
-
-### Trusted zone
-
-- gateway service
-- orchestrator service
-- DB
-- artifact store
-
-### Less-trusted execution zone
-
-- per-task sandbox container
-- worker process
-- repo workspace
-
-Rules:
-
-- worker never runs directly on host for task execution
-- secrets are injected minimally
-- destructive actions require approval
-- permission enforcement must happen at the tool/command boundary, not only from task-text heuristics
-- auth/billing/sandbox code paths are protected
-
-## Failure handling
-
-### Worker failure
-
-- record run failure
-- preserve logs/artifacts
-- retry only if policy allows
-- optionally reroute to alternate worker
-
-### Sandbox failure
-
-- mark workspace failed
-- keep logs
-- do not auto-retry infinite loops
-
-### Orchestrator restart
-
-- restore graph state/checkpoint
-- resume waiting tasks safely
-
-## Observability
-
-Track:
-
-- task duration
-- worker choice
-- route reason
-- retry count
-- success/failure status
-- sandbox command history
-- changed files count
-- approval interruptions
-- permission escalations
-- budget consumption
-- verifier outcome
-
-## V1 choices
-
-Use:
-
-- FastAPI
-- LangGraph
-- Postgres
-- Docker sandbox
-- CLI-first Gemini + Codex worker adapters over the shared worker interface
-- simple structured memory tables with verification metadata and compact session state
-
-Do not add in v1:
-
-- complex graph memory infra
-- multi-user billing
-- autonomous self-modifying code
-- broad device/chat integrations
+- runbook: `docs/runbook.md`
+- current operational status: `docs/status.md`
+- worker selection specifics: `docs/worker_routing_policy.md`
