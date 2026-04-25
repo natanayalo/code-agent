@@ -128,7 +128,7 @@ Useful commands:
 
 ```bash
 docker compose ps
-docker images | rg code-agent-worker
+docker images | grep code-agent-worker
 ```
 
 ## CLI auth failures inside worker

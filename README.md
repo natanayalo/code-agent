@@ -68,9 +68,9 @@ poetry run pre-commit install --hook-type pre-commit --hook-type commit-msg
 Run the API only (local dev mode):
 
 ```bash
-export CODE_AGENT_RUN_API=1
-export CODE_AGENT_RUN_WORKER=0
-export CODE_AGENT_ENABLE_TASK_SERVICE=1
+export CODE_AGENT_RUN_API="1"
+export CODE_AGENT_RUN_WORKER="0"
+export CODE_AGENT_ENABLE_TASK_SERVICE="1"
 export CODE_AGENT_API_SHARED_SECRET="<shared-secret>"
 export DATABASE_URL="postgresql+psycopg://code_agent:<password>@localhost:5432/code_agent"
 poetry run python -m uvicorn apps.api.main:app --reload
