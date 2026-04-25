@@ -14,6 +14,7 @@
   /* Accents */
   --color-accent-primary: #38bdf8; /* Cyan-400 */
   --color-accent-secondary: #818cf8; /* Indigo-400 */
+  --color-accent-primary-bg: rgba(56, 189, 248, 0.1);
   --color-accent-gradient: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
 
   /* Status Colors */

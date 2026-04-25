@@ -29,7 +29,7 @@ function App() {
               fontSize: '0.75rem',
               textTransform: 'uppercase',
               letterSpacing: '0.05em',
-              background: 'rgba(56, 189, 248, 0.1)', // TODO: Add as variable if used often
+              background: 'var(--color-accent-primary-bg)',
               color: 'var(--color-accent-primary)',
               padding: 'var(--spacing-xs) var(--spacing-sm)',
               borderRadius: '4px'
