@@ -99,6 +99,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 - T-124 Extract shared changed-files + post-run lint/format helper. PR: [#105](https://github.com/natanayalo/code-agent/pull/105)
 - T-125 Extract shared self-review + fix-loop coordinator. PR: [#107](https://github.com/natanayalo/code-agent/pull/107)
 - T-126 Decompose CLI worker `_run_sync` into focused phases. PR: [#108](https://github.com/natanayalo/code-agent/pull/108)
+- T-127 Move tool-use guidance to shared prompt source-of-truth. PR: [#109](https://github.com/natanayalo/code-agent/pull/109)
 
 ## In Progress
 
@@ -106,7 +107,7 @@ Use `docs/mvp_backlog.md` for the canonical task catalog and scope.
 
 ## Next
 
-- T-127 Move tool-use guidance to shared prompt source-of-truth.
+- None
 
 ## Blocked
 
