@@ -417,6 +417,26 @@ def test_compute_route_task_text_explicit_low_cost_preference():
     assert route.route_reason == "budget_preference"
 
 
+def test_compute_route_task_text_low_cost_marker_uses_word_boundaries():
+    """Low-cost marker should not match unrelated substrings like 'slow cost'."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "Choose based on slow cost convergence, not budget preference"}}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "codex"
+    assert route.route_reason == "cheap_mechanical_change"
+
+
+def test_compute_route_task_text_high_quality_marker_uses_word_boundaries():
+    """High-quality marker should not match unrelated substrings like 'highlight quality'."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "Please highlight quality concerns in the summary only"}}
+    )
+    route = _compute_route_decision(state, _ALL_WORKERS)
+    assert route.chosen_worker == "codex"
+    assert route.route_reason == "cheap_mechanical_change"
+
+
 def test_compute_route_multi_file_task_prefers_high_quality_worker():
     """Implementation tasks that span many files should use the higher-quality route."""
     state = OrchestratorState.model_validate(

@@ -733,7 +733,7 @@ def _route_by_preference(
 def _task_has_request_marker(task_text: str, markers: tuple[str, ...]) -> bool:
     """Return whether the task text contains an explicit routing preference marker."""
     normalized = task_text.lower()
-    return any(marker in normalized for marker in markers)
+    return any(re.search(rf"\b{re.escape(marker)}\b", normalized) is not None for marker in markers)
 
 
 def _compute_route_decision(
