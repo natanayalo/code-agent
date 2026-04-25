@@ -128,7 +128,7 @@ Useful commands:
 
 ```bash
 docker compose ps
-docker images | grep code-agent-worker
+docker images "${CODE_AGENT_SANDBOX_IMAGE:-code-agent-worker}"
 ```
 
 ## CLI auth failures inside worker
