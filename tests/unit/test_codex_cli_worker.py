@@ -178,6 +178,28 @@ def test_codex_cli_worker_requires_repo_url(tmp_path: Path) -> None:
     assert result.next_action_hint == "provide_repo_url"
 
 
+def test_codex_validate_request_phase_returns_none_for_valid_repo_url(tmp_path: Path) -> None:
+    """The request-validation phase should pass through when repo_url is present."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-47",
+        image="python:3.12-slim",
+    )
+    worker = CodexCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+    )
+
+    assert (
+        worker._validate_request(
+            WorkerRequest(task_text="Inspect the repo", repo_url="https://example.com/repo.git")
+        )
+        is None
+    )
+
+
 def test_codex_cli_worker_runs_the_shared_runtime_and_retains_the_workspace(
     tmp_path: Path,
 ) -> None:

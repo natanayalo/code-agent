@@ -172,6 +172,27 @@ def test_openrouter_cli_worker_errors_without_repo_url(tmp_path: Path) -> None:
     assert result.next_action_hint == "provide_repo_url"
 
 
+def test_openrouter_validate_request_phase_returns_none_for_valid_repo_url(
+    tmp_path: Path,
+) -> None:
+    """The request-validation phase should pass through when repo_url is present."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    worker = OpenRouterCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: _FakeSession({}),
+    )
+
+    assert (
+        worker._validate_request(
+            WorkerRequest(task_text="do something", repo_url="https://example.com/repo.git")
+        )
+        is None
+    )
+
+
 def test_openrouter_cli_worker_errors_when_workspace_provisioning_fails(tmp_path: Path) -> None:
     """Worker should return an error result when workspace creation raises."""
 
