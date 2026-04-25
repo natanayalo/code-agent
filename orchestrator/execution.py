@@ -69,17 +69,17 @@ _VALID_EXECUTION_MODES = frozenset({_INTERACTIVE_EXECUTION_MODE, _UNATTENDED_EXE
 # T-102: global defaults and hard caps for runtime budgets.
 _DEFAULT_EXECUTION_BUDGETS: dict[str, dict[str, int]] = {
     _INTERACTIVE_EXECUTION_MODE: {
-        "max_iterations": 16,
+        "max_iterations": 8,
         "worker_timeout_seconds": 300,
-        "max_tool_calls": 48,
-        "max_shell_commands": 48,
+        "max_tool_calls": 24,
+        "max_shell_commands": 24,
         "max_retries": 2,
     },
     _UNATTENDED_EXECUTION_MODE: {
-        "max_iterations": 12,
+        "max_iterations": 5,
         "worker_timeout_seconds": 180,
-        "max_tool_calls": 24,
-        "max_shell_commands": 24,
+        "max_tool_calls": 12,
+        "max_shell_commands": 12,
         "max_retries": 1,
     },
 }

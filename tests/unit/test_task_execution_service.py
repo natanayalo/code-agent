@@ -239,10 +239,10 @@ def test_apply_execution_budget_policy_defaults_to_unattended_for_non_telegram_c
     )
 
     assert budget["execution_mode"] == "unattended"
-    assert budget["max_iterations"] == 12
+    assert budget["max_iterations"] == 5
     assert budget["worker_timeout_seconds"] == 180
-    assert budget["max_tool_calls"] == 24
-    assert budget["max_shell_commands"] == 24
+    assert budget["max_tool_calls"] == 12
+    assert budget["max_shell_commands"] == 12
     assert budget["max_retries"] == 1
 
 
@@ -255,10 +255,10 @@ def test_apply_execution_budget_policy_defaults_to_interactive_for_telegram() ->
     )
 
     assert budget["execution_mode"] == "interactive"
-    assert budget["max_iterations"] == 16
+    assert budget["max_iterations"] == 8
     assert budget["worker_timeout_seconds"] == 300
-    assert budget["max_tool_calls"] == 48
-    assert budget["max_shell_commands"] == 48
+    assert budget["max_tool_calls"] == 24
+    assert budget["max_shell_commands"] == 24
     assert budget["max_retries"] == 2
 
 
@@ -382,9 +382,9 @@ def test_apply_execution_budget_policy_enforces_mode_floor_for_low_iteration_bud
     )
 
     assert unattended_budget["execution_mode"] == "unattended"
-    assert unattended_budget["max_iterations"] == 12
+    assert unattended_budget["max_iterations"] == 5
     assert interactive_budget["execution_mode"] == "interactive"
-    assert interactive_budget["max_iterations"] == 16
+    assert interactive_budget["max_iterations"] == 8
 
 
 def test_apply_execution_budget_policy_drops_invalid_capped_values() -> None:
