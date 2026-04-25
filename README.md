@@ -58,11 +58,11 @@ Detailed architecture: [`docs/architecture.md`](docs/architecture.md)
 
 ## Local Setup
 
-Install dependencies with Poetry from the repo virtualenv:
+Install dependencies with Poetry:
 
 ```bash
-.venv/bin/poetry install
-.venv/bin/pre-commit install --hook-type pre-commit --hook-type commit-msg
+poetry install
+poetry run pre-commit install --hook-type pre-commit --hook-type commit-msg
 ```
 
 Run the API only (local dev mode):

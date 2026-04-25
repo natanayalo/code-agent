@@ -145,7 +145,7 @@ flowchart TD
 
     SB --> TOOLS[Tool Policy + Command Execution]
     ORCH --> ART[Artifacts / Timeline / Metrics]
-    ORCH --> API
+    ORCH --> DB
 ```
 
 ## Queue + Lease Model
