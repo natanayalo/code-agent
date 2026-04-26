@@ -31,6 +31,7 @@ interface TaskBoardProps {
 
 export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBoardProps) {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const hasError = error != null;
 
   const groupedTasks = useMemo(() => {
     const groups: Record<string, TaskSummarySnapshot[]> = {
@@ -57,7 +58,7 @@ export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBo
 
   return (
     <div className="task-board-container">
-      {error && (
+      {hasError && (
         <div className="board-error-banner">
           <p>{errorMessage}</p>
           <button onClick={() => refetch()}>Try Again</button>
