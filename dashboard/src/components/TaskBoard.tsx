@@ -5,7 +5,7 @@ import { TaskSummarySnapshot, TaskStatus } from '../types/task';
 import { TaskCard } from './TaskCard';
 import { RefreshCw, LayoutGrid, List } from 'lucide-react';
 
-const REFRESH_INTERVAL_MS = 5000;
+const REFRESH_INTERVAL_MS = 30000;
 
 const COLUMNS = [
   {
@@ -80,19 +80,21 @@ export function TaskBoard() {
           <p className="board-subtitle">Real-time view of agent execution pipeline</p>
         </div>
         <div className="board-actions">
-          <button className="icon-button" onClick={() => refetch()} disabled={loading}>
+          <button className="icon-button" onClick={() => refetch()} disabled={loading} aria-label="Refresh tasks">
             <RefreshCw size={18} className={loading ? 'spin' : ''} />
           </button>
           <div className="view-toggle">
             <button
               className={`toggle-button ${viewMode === 'grid' ? 'active' : ''}`}
               onClick={() => setViewMode('grid')}
+              aria-label="Grid view"
             >
               <LayoutGrid size={18} />
             </button>
             <button
               className={`toggle-button ${viewMode === 'list' ? 'active' : ''}`}
               onClick={() => setViewMode('list')}
+              aria-label="List view"
             >
               <List size={18} />
             </button>
