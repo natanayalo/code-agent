@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from apps.api.dependencies import get_task_service, require_api_auth
+from db.enums import TaskStatus
 from orchestrator.execution import (
     TaskApprovalDecision,
     TaskExecutionService,
@@ -29,9 +30,9 @@ def submit_task(
 @router.get("", response_model=list[TaskSnapshot])
 def list_tasks(
     session_id: str | None = None,
-    status_filter: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    status_filter: TaskStatus | None = None,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> list[TaskSnapshot]:
     """List tasks with optional filtering and pagination."""

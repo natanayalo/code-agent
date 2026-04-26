@@ -1256,72 +1256,27 @@ class TaskExecutionService:
     def get_task(self, task_id: str) -> TaskSnapshot | None:
         """Load the current persisted task state and its latest worker run."""
         with session_scope(self.session_factory) as session:
-            task_repo = TaskRepository(session)
-            worker_run_repo = WorkerRunRepository(session)
-            artifact_repo = ArtifactRepository(session)
+            # Use preloading even for single task to ensure enrichment
+            # Find the specific task if it exists (repo.get is simpler but lacks preloading)
+            # Actually, repo.get(task_id) is simpler but we want preloading.
+            # Let's just use a select with preloading here directly or update repo.get.
+            from sqlalchemy import select
+            from sqlalchemy.orm import selectinload
 
-            task = task_repo.get(task_id)
+            from db.models import Task, WorkerRun
+
+            statement = (
+                select(Task)
+                .where(Task.id == task_id)
+                .options(
+                    selectinload(Task.timeline_events),
+                    selectinload(Task.worker_runs).selectinload(WorkerRun.artifacts),
+                )
+            )
+            task = session.scalar(statement)
             if task is None:
                 return None
-
-            latest_run_snapshot: WorkerRunSnapshot | None = None
-            worker_runs = worker_run_repo.list_by_task(task.id)
-            if worker_runs:
-                latest_run = worker_runs[-1]
-                artifacts = artifact_repo.list_by_run(latest_run.id)
-                latest_run_snapshot = WorkerRunSnapshot(
-                    run_id=latest_run.id,
-                    session_id=latest_run.session_id,
-                    worker_type=_enum_value(latest_run.worker_type) or "unknown",
-                    workspace_id=latest_run.workspace_id,
-                    status=_enum_value(latest_run.status) or WorkerRunStatus.ERROR.value,
-                    started_at=latest_run.started_at,
-                    finished_at=latest_run.finished_at,
-                    summary=latest_run.summary,
-                    requested_permission=latest_run.requested_permission,
-                    budget_usage=latest_run.budget_usage,
-                    verifier_outcome=latest_run.verifier_outcome,
-                    commands_run=list(latest_run.commands_run or []),
-                    files_changed_count=latest_run.files_changed_count,
-                    artifact_index=list(latest_run.artifact_index or []),
-                    artifacts=[
-                        ArtifactSnapshot(
-                            artifact_id=artifact.id,
-                            artifact_type=_enum_value(artifact.artifact_type)
-                            or ArtifactType.RESULT_SUMMARY.value,
-                            name=artifact.name,
-                            uri=artifact.uri,
-                            artifact_metadata=artifact.artifact_metadata,
-                        )
-                        for artifact in artifacts
-                    ],
-                )
-
-            return TaskSnapshot(
-                task_id=task.id,
-                session_id=task.session_id,
-                status=_enum_value(task.status) or TaskStatus.FAILED.value,
-                task_text=task.task_text,
-                repo_url=task.repo_url,
-                branch=task.branch,
-                priority=task.priority,
-                chosen_worker=_enum_value(task.chosen_worker),
-                route_reason=task.route_reason,
-                created_at=task.created_at,
-                updated_at=task.updated_at,
-                latest_run=latest_run_snapshot,
-                timeline=[
-                    TaskTimelineEventSnapshot(
-                        event_type=_enum_value(event.event_type) or "unknown",
-                        attempt_number=event.attempt_number,
-                        sequence_number=event.sequence_number,
-                        message=event.message,
-                        payload=event.payload,
-                        created_at=event.created_at,
-                    )
-                    for event in task.timeline_events
-                ],
-            )
+            return self._map_task_to_snapshot(task)
 
     def list_tasks(
         self,
@@ -1340,9 +1295,7 @@ class TaskExecutionService:
                 limit=limit,
                 offset=offset,
             )
-            # We use get_task for each to ensure full snapshot enrichment (runs, timeline)
-            # Optimization: could be done in a batch if performance becomes an issue.
-            return [t for t in (self.get_task(task.id) for task in tasks) if t is not None]
+            return [self._map_task_to_snapshot(task) for task in tasks]
 
     def list_sessions(
         self,
@@ -1354,20 +1307,7 @@ class TaskExecutionService:
         with session_scope(self.session_factory) as session:
             session_repo = SessionRepository(session)
             sessions = session_repo.list_all(limit=limit, offset=offset)
-            return [
-                SessionSnapshot(
-                    session_id=s.id,
-                    user_id=s.user_id,
-                    channel=s.channel,
-                    external_thread_id=s.external_thread_id,
-                    active_task_id=s.active_task_id,
-                    status=_enum_value(s.status) or "active",
-                    last_seen_at=s.last_seen_at,
-                    created_at=s.created_at,
-                    updated_at=s.updated_at,
-                )
-                for s in sessions
-            ]
+            return [self._map_session_to_snapshot(s) for s in sessions]
 
     def get_session(self, session_id: str) -> SessionSnapshot | None:
         """Load the current persisted session state."""
@@ -1376,17 +1316,83 @@ class TaskExecutionService:
             s = session_repo.get(session_id)
             if s is None:
                 return None
-            return SessionSnapshot(
-                session_id=s.id,
-                user_id=s.user_id,
-                channel=s.channel,
-                external_thread_id=s.external_thread_id,
-                active_task_id=s.active_task_id,
-                status=_enum_value(s.status) or "active",
-                last_seen_at=s.last_seen_at,
-                created_at=s.created_at,
-                updated_at=s.updated_at,
+            return self._map_session_to_snapshot(s)
+
+    def _map_task_to_snapshot(self, task: Task) -> TaskSnapshot:
+        """Map a Task database model to a TaskSnapshot Pydantic model (T-131)."""
+        latest_run_snapshot: WorkerRunSnapshot | None = None
+        # Assuming worker_runs is preloaded and sorted by created_at in model or here
+        if task.worker_runs:
+            # Sort by started_at desc to find latest
+            sorted_runs = sorted(task.worker_runs, key=lambda r: r.started_at)
+            latest_run = sorted_runs[-1]
+            latest_run_snapshot = WorkerRunSnapshot(
+                run_id=latest_run.id,
+                session_id=latest_run.session_id,
+                worker_type=_enum_value(latest_run.worker_type) or "unknown",
+                workspace_id=latest_run.workspace_id,
+                status=_enum_value(latest_run.status) or WorkerRunStatus.ERROR.value,
+                started_at=latest_run.started_at,
+                finished_at=latest_run.finished_at,
+                summary=latest_run.summary,
+                requested_permission=latest_run.requested_permission,
+                budget_usage=latest_run.budget_usage,
+                verifier_outcome=latest_run.verifier_outcome,
+                commands_run=list(latest_run.commands_run or []),
+                files_changed_count=latest_run.files_changed_count,
+                artifact_index=list(latest_run.artifact_index or []),
+                artifacts=[
+                    ArtifactSnapshot(
+                        artifact_id=artifact.id,
+                        artifact_type=_enum_value(artifact.artifact_type)
+                        or ArtifactType.RESULT_SUMMARY.value,
+                        name=artifact.name,
+                        uri=artifact.uri,
+                        artifact_metadata=artifact.artifact_metadata,
+                    )
+                    for artifact in latest_run.artifacts
+                ],
             )
+
+        return TaskSnapshot(
+            task_id=task.id,
+            session_id=task.session_id,
+            status=_enum_value(task.status) or TaskStatus.FAILED.value,
+            task_text=task.task_text,
+            repo_url=task.repo_url,
+            branch=task.branch,
+            priority=task.priority,
+            chosen_worker=_enum_value(task.chosen_worker),
+            route_reason=task.route_reason,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+            latest_run=latest_run_snapshot,
+            timeline=[
+                TaskTimelineEventSnapshot(
+                    event_type=_enum_value(event.event_type) or "unknown",
+                    attempt_number=event.attempt_number,
+                    sequence_number=event.sequence_number,
+                    message=event.message,
+                    payload=event.payload,
+                    created_at=event.created_at,
+                )
+                for event in task.timeline_events
+            ],
+        )
+
+    def _map_session_to_snapshot(self, s: ConversationSession) -> SessionSnapshot:
+        """Map a ConversationSession database model to a SessionSnapshot Pydantic model (T-131)."""
+        return SessionSnapshot(
+            session_id=s.id,
+            user_id=s.user_id,
+            channel=s.channel,
+            external_thread_id=s.external_thread_id,
+            active_task_id=s.active_task_id,
+            status=_enum_value(s.status) or "active",
+            last_seen_at=s.last_seen_at,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+        )
 
     def apply_task_approval_decision(
         self,

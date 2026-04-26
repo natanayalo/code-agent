@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from sqlalchemy import and_, case, delete, func, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from db.base import utc_now
 from db.enums import (
@@ -300,13 +300,24 @@ class TaskRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> list[Task]:
-        """List all tasks with optional filtering and pagination."""
-        statement = select(Task).order_by(Task.created_at.desc())
+        """List all tasks with optional filtering and pagination.
+
+        Uses selectinload to eagerly load related runs, artifacts, and timeline events (T-131).
+        """
+        statement = (
+            select(Task)
+            .options(
+                selectinload(Task.timeline_events),
+                selectinload(Task.worker_runs).selectinload(WorkerRun.artifacts),
+            )
+            .order_by(Task.created_at.desc())
+        )
 
         if session_id:
             statement = statement.where(Task.session_id == session_id)
         if status:
-            statement = statement.where(Task.status == cast(TaskStatus, status))
+            status_val = status if isinstance(status, TaskStatus) else TaskStatus(status)
+            statement = statement.where(Task.status == status_val)
 
         statement = statement.limit(max(1, limit)).offset(max(0, offset))
         return list(self.session.scalars(statement))

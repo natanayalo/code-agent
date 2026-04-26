@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from apps.api.dependencies import get_task_service, require_api_auth
 from orchestrator.execution import (
@@ -15,8 +15,8 @@ router = APIRouter(prefix="/sessions", tags=["sessions"], dependencies=[Depends(
 
 @router.get("", response_model=list[SessionSnapshot])
 def list_sessions(
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> list[SessionSnapshot]:
     """List sessions with pagination."""
