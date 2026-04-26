@@ -2,18 +2,20 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TaskCard } from './TaskCard';
-import { TaskStatus, ApprovalStatus } from '../types/task';
+import { TaskStatus, ApprovalStatus, TaskSnapshot } from '../types/task';
 import { api } from '../services/api';
 
 vi.mock('../services/api', () => ({
   api: {
     decideTaskApproval: vi.fn(),
+    replayTask: vi.fn(),
   },
 }));
 
 describe('TaskCard', () => {
   beforeEach(() => {
     vi.mocked(api.decideTaskApproval).mockClear();
+    vi.mocked(api.replayTask).mockClear();
   });
 
   const mockTask = {
@@ -251,6 +253,83 @@ describe('TaskCard', () => {
       fireEvent.click(approveBtn);
 
       expect(api.decideTaskApproval).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Replay Control', () => {
+    it('renders replay button for terminal tasks', () => {
+      const completedTask = { ...mockTask, status: TaskStatus.COMPLETED };
+      const { container } = render(<TaskCard task={completedTask} />);
+      expect(container.querySelector('.btn-replay')).toBeInTheDocument();
+
+      const failedTask = { ...mockTask, status: TaskStatus.FAILED };
+      const { container: containerFailed } = render(<TaskCard task={failedTask} />);
+      expect(containerFailed.querySelector('.btn-replay')).toBeInTheDocument();
+
+      const cancelledTask = { ...mockTask, status: TaskStatus.CANCELLED };
+      const { container: containerCancelled } = render(<TaskCard task={cancelledTask} />);
+      expect(containerCancelled.querySelector('.btn-replay')).toBeInTheDocument();
+    });
+
+    it('does not render replay button for non-terminal tasks', () => {
+      const runningTask = { ...mockTask, status: TaskStatus.IN_PROGRESS };
+      const { container } = render(<TaskCard task={runningTask} />);
+      expect(container.querySelector('.btn-replay')).toBeNull();
+
+      const pendingTask = { ...mockTask, status: TaskStatus.PENDING };
+      const { container: containerPending } = render(<TaskCard task={pendingTask} />);
+      expect(containerPending.querySelector('.btn-replay')).toBeNull();
+    });
+
+    it('handles replay click and prevents propagation', async () => {
+      const onRefresh = vi.fn();
+      const onCardClick = vi.fn();
+      const completedTask = { ...mockTask, status: TaskStatus.COMPLETED };
+      vi.mocked(api.replayTask).mockResolvedValueOnce({} as TaskSnapshot);
+
+      const { container } = render(
+        <TaskCard task={completedTask} onRefresh={onRefresh} onClick={onCardClick} />
+      );
+
+      const replayBtn = container.querySelector('.btn-replay');
+      fireEvent.click(replayBtn!);
+
+      expect(api.replayTask).toHaveBeenCalledWith(completedTask.task_id);
+      expect(onCardClick).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    });
+
+    it('disables replay button during processing', async () => {
+      const completedTask = { ...mockTask, status: TaskStatus.COMPLETED };
+      let resolveReplay: (value: TaskSnapshot) => void;
+      const replayPromise = new Promise<TaskSnapshot>((resolve) => {
+        resolveReplay = resolve;
+      });
+      vi.mocked(api.replayTask).mockReturnValueOnce(replayPromise);
+
+      const { container } = render(<TaskCard task={completedTask} />);
+      const replayBtn = container.querySelector('.btn-replay') as HTMLButtonElement;
+
+      fireEvent.click(replayBtn);
+      expect(replayBtn.disabled).toBe(true);
+
+      // @ts-expect-error: resolveReplay is captured
+      resolveReplay({});
+      await vi.waitFor(() => expect(replayBtn.disabled).toBe(false));
+    });
+
+    it('displays error message when replay fails', async () => {
+      const completedTask = { ...mockTask, status: TaskStatus.COMPLETED };
+      vi.mocked(api.replayTask).mockRejectedValueOnce(new Error('Replay failed server-side'));
+
+      const { container } = render(<TaskCard task={completedTask} />);
+      const replayBtn = container.querySelector('.btn-replay');
+
+      fireEvent.click(replayBtn!);
+
+      await vi.waitFor(() => {
+        expect(screen.getByText('Replay failed server-side')).toBeInTheDocument();
+      });
     });
   });
 });

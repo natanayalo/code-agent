@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Clock, Terminal, Github, GitBranch, CheckCircle2, XCircle, ShieldAlert } from 'lucide-react';
+import { Clock, Terminal, Github, GitBranch, CheckCircle2, XCircle, ShieldAlert, RotateCcw } from 'lucide-react';
 import { TaskSummarySnapshot, TaskStatus } from '../types/task';
 import { api } from '../services/api';
 
@@ -64,6 +64,7 @@ const getRunStatusClass = (status: string | null | undefined) => {
 
 export function TaskCard({ task, onClick, onRefresh }: TaskCardProps) {
   const [isDeciding, setIsDeciding] = React.useState(false);
+  const [isReplaying, setIsReplaying] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const repoName = useMemo(() => {
@@ -85,6 +86,25 @@ export function TaskCard({ task, onClick, onRefresh }: TaskCardProps) {
     }
   };
 
+  const handleReplay = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isReplaying) return;
+    setIsReplaying(true);
+    try {
+      setError(null);
+      await api.replayTask(task.task_id);
+      onRefresh?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to replay task');
+    } finally {
+      setIsReplaying(false);
+    }
+  };
+
+  const isTerminal = task.status === TaskStatus.COMPLETED ||
+                     task.status === TaskStatus.FAILED ||
+                     task.status === TaskStatus.CANCELLED;
+
   return (
     <div className={`glass-panel task-card ${onClick ? 'task-card-clickable' : ''}`} onClick={onClick}>
       <div className="card-header">
@@ -98,6 +118,12 @@ export function TaskCard({ task, onClick, onRefresh }: TaskCardProps) {
       </div>
 
       <h3 className="task-title-text">{task.task_text}</h3>
+
+      {error && task.approval_status !== 'pending' && (
+        <div className="card-error-text">
+          {error}
+        </div>
+      )}
 
       <div className="task-details">
         {task.repo_url && (
@@ -119,11 +145,23 @@ export function TaskCard({ task, onClick, onRefresh }: TaskCardProps) {
           <Terminal size={14} />
           <span>{task.latest_run_worker || task.chosen_worker || 'auto'}</span>
         </div>
-        {task.latest_run_status && (
-          <div className={`run-status ${getRunStatusClass(task.latest_run_status)}`}>
-            {task.latest_run_status.replace(/_/g, ' ')}
-          </div>
-        )}
+        <div className="footer-actions">
+          {isTerminal && (
+            <button
+              className="btn-icon-sm btn-replay"
+              onClick={handleReplay}
+              disabled={isReplaying}
+              title="Replay task (unchanged)"
+            >
+              <RotateCcw size={14} className={isReplaying ? 'spin' : ''} />
+            </button>
+          )}
+          {task.latest_run_status && (
+            <div className={`run-status ${getRunStatusClass(task.latest_run_status)}`}>
+              {task.latest_run_status.replace(/_/g, ' ')}
+            </div>
+          )}
+        </div>
       </div>
 
       {task.approval_status === 'pending' && (

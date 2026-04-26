@@ -47,7 +47,7 @@ Granular tasks for the active and upcoming milestones:
 - [x] T-132: build core dashboard layout with task status board
 - [x] T-133: implement comprehensive test suite and CI (90% coverage)
 - [x] T-134: implement approval/rejection UI components in the dashboard
-- [ ] T-135: implement task replay/retry controls in the dashboard
+- [x] T-135: implement task replay control (unchanged) in the dashboard (#115)
 - [ ] T-136: implement secure dashboard authentication (HttpOnly cookies/OIDC)
 
 ### Milestone C: Worker Profile Strategy

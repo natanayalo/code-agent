@@ -235,5 +235,29 @@ describe('api service', () => {
       });
       await expect(api.listTasks()).rejects.toThrow('received content-type: unknown');
     });
+    it('replayTask sends correct POST request', async () => {
+      const mockSnapshot = { task_id: 'new-task', status: 'pending' };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockSnapshot,
+      });
+
+      const result = await api.replayTask('old-task');
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/tasks/old-task/replay');
+      expect(options.method).toBe('POST');
+      expect(result).toEqual(mockSnapshot);
+    });
+
+    it('replayTask catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(api.replayTask('1')).rejects.toThrow('Network fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
   });
 });

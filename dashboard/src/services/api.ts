@@ -1,4 +1,4 @@
-import { TaskSummarySnapshot } from '../types/task';
+import { TaskSummarySnapshot, TaskSnapshot } from '../types/task';
 import { SessionSnapshot } from '../types/session';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -93,6 +93,17 @@ export const api = {
       });
     } catch (error) {
       console.warn(`Failed to ${approved ? 'approve' : 'reject'} task ${taskId}`, error);
+      throw error;
+    }
+  },
+
+  async replayTask(taskId: string): Promise<TaskSnapshot> {
+    try {
+      return await fetchWithAuth(`/tasks/${taskId}/replay`, {
+        method: 'POST',
+      });
+    } catch (error) {
+      console.warn(`Failed to replay task ${taskId}`, error);
       throw error;
     }
   },
