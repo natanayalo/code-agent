@@ -52,7 +52,12 @@ export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBo
     });
 
     Object.values(groups).forEach(group => {
-      group.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+      group.sort((a, b) => {
+        const aDate = a.created_at || '';
+        const bDate = b.created_at || '';
+        if (bDate === aDate) return 0;
+        return bDate > aDate ? 1 : -1;
+      });
     });
 
     return groups;
