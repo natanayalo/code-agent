@@ -69,7 +69,7 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
     <div className={`glass-panel task-card ${onClick ? 'task-card-clickable' : ''}`} onClick={onClick}>
       <div className="card-header">
         <span className={`status-badge ${getStatusClass(task.status)}`}>
-          {task.status.replace('_', ' ')}
+          {task.status.replace(/_/g, ' ')}
         </span>
         <div className="task-time">
           <Clock size={12} />
@@ -101,7 +101,7 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
         </div>
         {task.latest_run_status && (
           <div className={`run-status ${getRunStatusClass(task.latest_run_status)}`}>
-            {task.latest_run_status.replace('_', ' ')}
+            {task.latest_run_status.replace(/_/g, ' ')}
           </div>
         )}
       </div>
