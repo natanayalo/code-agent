@@ -38,31 +38,37 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
     throw new Error(errorMessage);
   }
 
-  return response.json();
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch (e) {
+    console.error('Failed to parse API response as JSON:', e);
+    return null;
+  }
 }
 
 export const api = {
   async listTasks(): Promise<TaskSummarySnapshot[]> {
     try {
-      return await fetchWithAuth('/tasks');
+      return (await fetchWithAuth('/tasks')) || [];
     } catch (error) {
       console.warn('Failed to fetch tasks from API', error);
       if (import.meta.env.DEV) {
         return MOCK_TASKS;
       }
-      throw error;
+      return [];
     }
   },
 
   async listSessions(): Promise<SessionSnapshot[]> {
     try {
-      return await fetchWithAuth('/sessions');
+      return (await fetchWithAuth('/sessions')) || [];
     } catch (error) {
       console.warn('Failed to fetch sessions from API', error);
       if (import.meta.env.DEV) {
         return MOCK_SESSIONS;
       }
-      throw error;
+      return [];
     }
   },
 };
