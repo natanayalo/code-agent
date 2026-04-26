@@ -25,8 +25,9 @@ from uuid import uuid4
 from anyio import to_thread
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from db.base import utc_now
 from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
@@ -36,6 +37,7 @@ from db.models import (
 from db.models import (
     Task,
     User,
+    WorkerRun,
 )
 from orchestrator.checkpoints import create_async_sqlite_checkpointer
 from orchestrator.graph import build_orchestrator_graph
@@ -390,8 +392,22 @@ class TaskTimelineEventSnapshot(ExecutionModel):
     created_at: datetime
 
 
-class TaskSnapshot(ExecutionModel):
-    """The persisted task view returned by POST/GET task endpoints."""
+class SessionSnapshot(ExecutionModel):
+    """The persisted session view returned by session listing/detail endpoints."""
+
+    session_id: str
+    user_id: str
+    channel: str
+    external_thread_id: str
+    active_task_id: str | None = None
+    status: str
+    last_seen_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class TaskSummarySnapshot(ExecutionModel):
+    """A lightweight task view for listing endpoints (T-131)."""
 
     task_id: str
     session_id: str
@@ -399,11 +415,19 @@ class TaskSnapshot(ExecutionModel):
     task_text: str
     repo_url: str | None = None
     branch: str | None = None
-    priority: int
+    priority: int = 0
     chosen_worker: str | None = None
     route_reason: str | None = None
     created_at: datetime
     updated_at: datetime
+    latest_run_id: str | None = None
+    latest_run_status: str | None = None
+    latest_run_worker: str | None = None
+
+
+class TaskSnapshot(TaskSummarySnapshot):
+    """The full task view with execution history and timeline."""
+
     latest_run: WorkerRunSnapshot | None = None
     timeline: list[TaskTimelineEventSnapshot] = Field(default_factory=list)
 
@@ -1240,74 +1264,171 @@ class TaskExecutionService:
             )
 
     def get_task(self, task_id: str) -> TaskSnapshot | None:
-        """Load the current persisted task state and its latest worker run."""
+        """Load the current persisted task state with full timeline and latest run (T-131)."""
         with session_scope(self.session_factory) as session:
-            task_repo = TaskRepository(session)
-            worker_run_repo = WorkerRunRepository(session)
-            artifact_repo = ArtifactRepository(session)
-
-            task = task_repo.get(task_id)
+            statement = (
+                select(Task)
+                .where(Task.id == task_id)
+                .options(
+                    selectinload(Task.timeline_events),
+                    selectinload(Task.worker_runs).selectinload(WorkerRun.artifacts),
+                )
+            )
+            task = session.scalar(statement)
             if task is None:
                 return None
+            return self._map_task_to_snapshot(task)
 
-            latest_run_snapshot: WorkerRunSnapshot | None = None
-            worker_runs = worker_run_repo.list_by_task(task.id)
-            if worker_runs:
-                latest_run = worker_runs[-1]
-                artifacts = artifact_repo.list_by_run(latest_run.id)
-                latest_run_snapshot = WorkerRunSnapshot(
-                    run_id=latest_run.id,
-                    session_id=latest_run.session_id,
-                    worker_type=_enum_value(latest_run.worker_type) or "unknown",
-                    workspace_id=latest_run.workspace_id,
-                    status=_enum_value(latest_run.status) or WorkerRunStatus.ERROR.value,
-                    started_at=latest_run.started_at,
-                    finished_at=latest_run.finished_at,
-                    summary=latest_run.summary,
-                    requested_permission=latest_run.requested_permission,
-                    budget_usage=latest_run.budget_usage,
-                    verifier_outcome=latest_run.verifier_outcome,
-                    commands_run=list(latest_run.commands_run or []),
-                    files_changed_count=latest_run.files_changed_count,
-                    artifact_index=list(latest_run.artifact_index or []),
-                    artifacts=[
-                        ArtifactSnapshot(
-                            artifact_id=artifact.id,
-                            artifact_type=_enum_value(artifact.artifact_type)
-                            or ArtifactType.RESULT_SUMMARY.value,
-                            name=artifact.name,
-                            uri=artifact.uri,
-                            artifact_metadata=artifact.artifact_metadata,
-                        )
-                        for artifact in artifacts
-                    ],
-                )
+    def list_tasks(
+        self,
+        *,
+        session_id: str | None = None,
+        status: str | TaskStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[TaskSummarySnapshot]:
+        """List tasks with optional filtering and pagination using summary views (T-131)."""
+        with session_scope(self.session_factory) as session:
+            task_repo = TaskRepository(session)
+            tasks = task_repo.list_all(
+                session_id=session_id,
+                status=status,
+                limit=limit,
+                offset=offset,
+                # Optimization: do not load full timeline/runs history for listing
+                preload_history=False,
+            )
+            return [self._map_task_to_summary(task) for task in tasks]
 
-            return TaskSnapshot(
-                task_id=task.id,
-                session_id=task.session_id,
-                status=_enum_value(task.status) or TaskStatus.FAILED.value,
-                task_text=task.task_text,
-                repo_url=task.repo_url,
-                branch=task.branch,
-                priority=task.priority,
-                chosen_worker=_enum_value(task.chosen_worker),
-                route_reason=task.route_reason,
-                created_at=task.created_at,
-                updated_at=task.updated_at,
-                latest_run=latest_run_snapshot,
-                timeline=[
-                    TaskTimelineEventSnapshot(
-                        event_type=_enum_value(event.event_type) or "unknown",
-                        attempt_number=event.attempt_number,
-                        sequence_number=event.sequence_number,
-                        message=event.message,
-                        payload=event.payload,
-                        created_at=event.created_at,
+    def list_sessions(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[SessionSnapshot]:
+        """List sessions with pagination."""
+        with session_scope(self.session_factory) as session:
+            session_repo = SessionRepository(session)
+            sessions = session_repo.list_all(limit=limit, offset=offset)
+            return [self._map_session_to_snapshot(s) for s in sessions]
+
+    def get_session(self, session_id: str) -> SessionSnapshot | None:
+        """Load the current persisted session state."""
+        with session_scope(self.session_factory) as session:
+            session_repo = SessionRepository(session)
+            s = session_repo.get(session_id)
+            if s is None:
+                return None
+            return self._map_session_to_snapshot(s)
+
+    def _map_task_to_snapshot(self, task: Task) -> TaskSnapshot:
+        """Map a Task database model to a full TaskSnapshot Pydantic model (T-131)."""
+        latest_run_snapshot: WorkerRunSnapshot | None = None
+        latest_run_obj: WorkerRun | None = None
+
+        if task.worker_runs:
+            latest_run_obj = max(task.worker_runs, key=lambda r: r.started_at)
+            latest_run_snapshot = WorkerRunSnapshot(
+                run_id=latest_run_obj.id,
+                session_id=latest_run_obj.session_id,
+                worker_type=_enum_value(latest_run_obj.worker_type) or "unknown",
+                workspace_id=latest_run_obj.workspace_id,
+                status=_enum_value(latest_run_obj.status) or WorkerRunStatus.ERROR.value,
+                started_at=latest_run_obj.started_at,
+                finished_at=latest_run_obj.finished_at,
+                summary=latest_run_obj.summary,
+                requested_permission=latest_run_obj.requested_permission,
+                budget_usage=latest_run_obj.budget_usage,
+                verifier_outcome=latest_run_obj.verifier_outcome,
+                commands_run=list(latest_run_obj.commands_run or []),
+                files_changed_count=latest_run_obj.files_changed_count,
+                artifact_index=list(latest_run_obj.artifact_index or []),
+                artifacts=[
+                    ArtifactSnapshot(
+                        artifact_id=artifact.id,
+                        artifact_type=_enum_value(artifact.artifact_type)
+                        or ArtifactType.RESULT_SUMMARY.value,
+                        name=artifact.name,
+                        uri=artifact.uri,
+                        artifact_metadata=artifact.artifact_metadata,
                     )
-                    for event in task.timeline_events
+                    for artifact in latest_run_obj.artifacts
                 ],
             )
+
+        summary = self._map_task_to_summary(task, latest_run=latest_run_obj)
+
+        return TaskSnapshot(
+            **summary.model_dump(),
+            latest_run=latest_run_snapshot,
+            timeline=[
+                TaskTimelineEventSnapshot(
+                    event_type=_enum_value(event.event_type) or "unknown",
+                    attempt_number=event.attempt_number,
+                    sequence_number=event.sequence_number,
+                    message=event.message,
+                    payload=event.payload,
+                    created_at=event.created_at,
+                )
+                for event in task.timeline_events
+            ],
+        )
+
+    def _map_task_to_summary(
+        self,
+        task: Task,
+        *,
+        latest_run: WorkerRun | None = None,
+    ) -> TaskSummarySnapshot:
+        """Map a Task database model to a lightweight TaskSummarySnapshot (T-131)."""
+        latest_run_id = getattr(task, "_latest_run_id", None)
+        latest_run_status = _enum_value(getattr(task, "_latest_run_status", None))
+        latest_run_worker = _enum_value(getattr(task, "_latest_run_worker", None))
+
+        # Fallback if metadata not pre-identified (e.g. from get_task or create_task)
+        if latest_run_id is None:
+            if latest_run:
+                run = latest_run
+                latest_run_id = run.id
+                latest_run_status = _enum_value(run.status)
+                latest_run_worker = _enum_value(run.worker_type)
+            # Only check task.worker_runs if it's already loaded to avoid N+1 lazy loads in listing
+            elif "worker_runs" in task.__dict__ and task.worker_runs:
+                run = max(task.worker_runs, key=lambda r: r.started_at)
+                latest_run_id = run.id
+                latest_run_status = _enum_value(run.status)
+                latest_run_worker = _enum_value(run.worker_type)
+
+        return TaskSummarySnapshot(
+            task_id=task.id,
+            session_id=task.session_id,
+            status=_enum_value(task.status) or TaskStatus.FAILED.value,
+            task_text=task.task_text,
+            repo_url=task.repo_url,
+            branch=task.branch,
+            priority=task.priority,
+            chosen_worker=_enum_value(task.chosen_worker),
+            route_reason=task.route_reason,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+            latest_run_id=latest_run_id,
+            latest_run_status=latest_run_status,
+            latest_run_worker=latest_run_worker,
+        )
+
+    def _map_session_to_snapshot(self, s: ConversationSession) -> SessionSnapshot:
+        """Map a ConversationSession database model to a SessionSnapshot Pydantic model (T-131)."""
+        return SessionSnapshot(
+            session_id=s.id,
+            user_id=s.user_id,
+            channel=s.channel,
+            external_thread_id=s.external_thread_id,
+            active_task_id=s.active_task_id,
+            status=_enum_value(s.status) or "active",
+            last_seen_at=s.last_seen_at,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+        )
 
     def apply_task_approval_decision(
         self,
