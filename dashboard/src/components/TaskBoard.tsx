@@ -27,6 +27,7 @@ const REFRESH_INTERVAL_MS = 30000;
 export function TaskBoard() {
   const [tasks, setTasks] = useState<TaskSummarySnapshot[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const isPollingRef = useRef(false);
   const isMountedRef = useRef(true);
@@ -43,9 +44,13 @@ export function TaskBoard() {
       const data = await api.listTasks();
       if (isMountedRef.current) {
         setTasks(data);
+        setError(null);
       }
-    } catch (error) {
-      console.error('Failed to load tasks:', error);
+    } catch (err) {
+      console.error('Failed to load tasks:', err);
+      if (isMountedRef.current && !isAutoRefresh) {
+        setError('Failed to connect to the agent service. Please check your connection.');
+      }
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
@@ -72,12 +77,21 @@ export function TaskBoard() {
   }, [loadTasks]);
 
   const groupedTasks = useMemo(() => {
-    const groups: Record<string, TaskSummarySnapshot[]> = {};
+    const groups: Record<string, TaskSummarySnapshot[]> = {
+      active: [],
+      completed: [],
+      failed: []
+    };
 
-    COLUMNS.forEach(col => {
-      groups[col.id] = tasks
-        .filter(t => col.statuses.includes(t.status))
-        .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    tasks.forEach(task => {
+      const column = COLUMNS.find(col => col.statuses.includes(task.status));
+      if (column) {
+        groups[column.id].push(task);
+      }
+    });
+
+    Object.values(groups).forEach(group => {
+      group.sort((a, b) => b.created_at.localeCompare(a.created_at));
     });
 
     return groups;
@@ -85,6 +99,12 @@ export function TaskBoard() {
 
   return (
     <div className="task-board-container">
+      {error && (
+        <div className="board-error-banner">
+          <p>{error}</p>
+          <button onClick={() => loadTasks()}>Try Again</button>
+        </div>
+      )}
       <div className="board-header">
         <div className="board-info">
           <h2 className="board-title">Task Status Board</h2>

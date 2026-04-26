@@ -194,6 +194,34 @@ button {
   align-items: flex-end;
 }
 
+.board-error-banner {
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--color-error);
+  color: var(--color-error);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-radius: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.875rem;
+  margin-bottom: var(--spacing-md);
+}
+
+.board-error-banner button {
+  background-color: var(--color-error);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.75rem;
+  transition: var(--transition-fast);
+}
+
+.board-error-banner button:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
 .board-title {
   font-size: 1.5rem;
   font-weight: 700;

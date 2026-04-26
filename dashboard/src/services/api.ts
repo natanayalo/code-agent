@@ -4,7 +4,10 @@ import { SessionSnapshot, SessionStatus } from '../types/session';
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const API_SECRET_HEADER = 'X-Agent-Secret';
 
-// For development, we can store the secret in localStorage or use an env var
+// For development, we can store the secret in localStorage or use an env var.
+// SECURITY NOTE: Storing sensitive credentials like AGENT_SECRET in localStorage
+// makes them vulnerable to XSS attacks. For a production-grade implementation,
+// consider using HttpOnly cookies or a dedicated OAuth2/OIDC flow to manage sessions.
 const getApiSecret = () => localStorage.getItem('AGENT_SECRET') || import.meta.env.VITE_API_SECRET || '';
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
