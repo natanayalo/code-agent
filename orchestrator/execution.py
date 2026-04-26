@@ -1386,11 +1386,18 @@ class TaskExecutionService:
         latest_run_worker = _enum_value(getattr(task, "_latest_run_worker", None))
 
         # Fallback if metadata not pre-identified (e.g. from get_task or create_task)
-        if latest_run_id is None and (latest_run or task.worker_runs):
-            run = latest_run or max(task.worker_runs, key=lambda r: r.started_at)
-            latest_run_id = run.id
-            latest_run_status = _enum_value(run.status)
-            latest_run_worker = _enum_value(run.worker_type)
+        if latest_run_id is None:
+            if latest_run:
+                run = latest_run
+                latest_run_id = run.id
+                latest_run_status = _enum_value(run.status)
+                latest_run_worker = _enum_value(run.worker_type)
+            # Only check task.worker_runs if it's already loaded to avoid N+1 lazy loads in listing
+            elif "worker_runs" in task.__dict__ and task.worker_runs:
+                run = max(task.worker_runs, key=lambda r: r.started_at)
+                latest_run_id = run.id
+                latest_run_status = _enum_value(run.status)
+                latest_run_worker = _enum_value(run.worker_type)
 
         return TaskSummarySnapshot(
             task_id=task.id,
