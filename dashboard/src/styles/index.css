@@ -623,3 +623,49 @@ button {
 .text-warning {
   color: var(--color-warning);
 }
+.footer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.btn-icon-sm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-secondary);
+  transition: var(--transition-fast);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.btn-icon-sm:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--color-text-primary);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+.btn-icon-sm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-replay:hover:not(:disabled) {
+  color: var(--color-accent-primary);
+  border-color: rgba(56, 189, 248, 0.2);
+  background-color: rgba(56, 189, 248, 0.05);
+}
+
+.card-error-text {
+  font-size: 0.75rem;
+  color: var(--color-error);
+  background-color: rgba(239, 68, 68, 0.05);
+  padding: 4px 8px;
+  border-radius: 6px;
+  margin-bottom: var(--spacing-md);
+  border: 1px solid rgba(239, 68, 68, 0.1);
+}

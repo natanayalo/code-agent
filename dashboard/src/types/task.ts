@@ -28,3 +28,24 @@ export interface TaskSummarySnapshot {
   approval_type?: string | null;
   approval_reason?: string | null;
 }
+export interface WorkerRunSnapshot {
+  run_id: string;
+  worker_type: string;
+  status: string;
+  started_at: string;
+  finished_at?: string | null;
+  summary?: string | null;
+  commands_run: unknown[];
+  files_changed_count: number;
+}
+
+export interface TaskTimelineEventSnapshot {
+  event_type: string;
+  message?: string | null;
+  created_at: string;
+}
+
+export interface TaskSnapshot extends TaskSummarySnapshot {
+  latest_run?: WorkerRunSnapshot | null;
+  timeline: TaskTimelineEventSnapshot[];
+}
