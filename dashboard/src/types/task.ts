@@ -6,6 +6,8 @@ export enum TaskStatus {
   CANCELLED = 'cancelled',
 }
 
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'not_required';
+
 export interface TaskSummarySnapshot {
   task_id: string;
   session_id: string;
@@ -21,4 +23,8 @@ export interface TaskSummarySnapshot {
   latest_run_id?: string | null;
   latest_run_status?: string | null;
   latest_run_worker?: string | null;
+  latest_run_requested_permission?: string | null;
+  approval_status?: ApprovalStatus | null;
+  approval_type?: string | null;
+  approval_reason?: string | null;
 }

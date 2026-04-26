@@ -347,12 +347,20 @@ class TaskRepository:
                 .limit(1)
                 .scalar_subquery()
             )
+            latest_run_requested_permission_sq = (
+                select(WorkerRun.requested_permission)
+                .where(WorkerRun.task_id == Task.id)
+                .order_by(WorkerRun.started_at.desc())
+                .limit(1)
+                .scalar_subquery()
+            )
 
             statement = select(
                 Task,
                 latest_run_id_sq.label("latest_run_id"),
                 latest_run_status_sq.label("latest_run_status"),
                 latest_run_worker_sq.label("latest_run_worker"),
+                latest_run_requested_permission_sq.label("latest_run_requested_permission"),
             ).order_by(Task.created_at.desc())
 
             if session_id:
@@ -371,6 +379,7 @@ class TaskRepository:
                 task._latest_run_id = row[1]
                 task._latest_run_status = row[2]
                 task._latest_run_worker = row[3]
+                task._latest_run_requested_permission = row[4]
                 tasks.append(task)
             return tasks
 

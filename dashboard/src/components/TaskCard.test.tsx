@@ -2,7 +2,14 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { TaskCard } from './TaskCard';
-import { TaskStatus } from '../types/task';
+import { TaskStatus, ApprovalStatus } from '../types/task';
+import { api } from '../services/api';
+
+vi.mock('../services/api', () => ({
+  api: {
+    decideTaskApproval: vi.fn(),
+  },
+}));
 
 describe('TaskCard', () => {
   const mockTask = {
@@ -131,6 +138,73 @@ describe('TaskCard', () => {
         expect(badge).toHaveClass(expected);
       }
       unmount();
+    });
+  });
+
+  describe('Approval UI', () => {
+    const approvalTask = {
+      ...mockTask,
+      approval_status: 'pending' as ApprovalStatus,
+      approval_type: 'permission_escalation',
+      approval_reason: 'Testing approval',
+      latest_run_requested_permission: 'dangerous_command',
+    };
+
+    it('renders approval banner when pending', () => {
+      render(<TaskCard task={approvalTask} />);
+      expect(screen.getByText('permission escalation')).toBeInTheDocument();
+      expect(screen.getByText('Testing approval')).toBeInTheDocument();
+      expect(screen.getByText('dangerous_command')).toBeInTheDocument();
+      expect(screen.getByText('Approve')).toBeInTheDocument();
+      expect(screen.getByText('Reject')).toBeInTheDocument();
+    });
+
+    it('does not render approval banner when not pending', () => {
+      const approvedTask = { ...approvalTask, approval_status: 'approved' as ApprovalStatus };
+      render(<TaskCard task={approvedTask} />);
+      expect(screen.queryByText('Approve')).toBeNull();
+    });
+
+    it('handles approval click', async () => {
+      const onRefresh = vi.fn();
+      vi.mocked(api.decideTaskApproval).mockResolvedValueOnce({});
+      render(<TaskCard task={approvalTask} onRefresh={onRefresh} />);
+
+      fireEvent.click(screen.getByText('Approve'));
+      expect(api.decideTaskApproval).toHaveBeenCalledWith(approvalTask.task_id, true);
+      // Wait for async handler
+      await vi.waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    });
+
+    it('handles rejection click', async () => {
+      const onRefresh = vi.fn();
+      vi.mocked(api.decideTaskApproval).mockResolvedValueOnce({});
+      render(<TaskCard task={approvalTask} onRefresh={onRefresh} />);
+
+      fireEvent.click(screen.getByText('Reject'));
+      expect(api.decideTaskApproval).toHaveBeenCalledWith(approvalTask.task_id, false);
+      await vi.waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    });
+
+    it('disables buttons during processing', async () => {
+      // Create a promise we can control
+      let resolveApproval: (value: unknown) => void;
+      const approvalPromise = new Promise((resolve) => {
+        resolveApproval = resolve;
+      });
+      vi.mocked(api.decideTaskApproval).mockReturnValueOnce(approvalPromise);
+
+      render(<TaskCard task={approvalTask} />);
+      const approveBtn = screen.getByText('Approve').closest('button');
+      const rejectBtn = screen.getByText('Reject').closest('button');
+
+      fireEvent.click(approveBtn!);
+      expect(approveBtn).toBeDisabled();
+      expect(rejectBtn).toBeDisabled();
+
+      // @ts-expect-error: resolveApproval is captured from promise constructor
+      resolveApproval({});
+      await vi.waitFor(() => expect(approveBtn).not.toBeDisabled());
     });
   });
 });

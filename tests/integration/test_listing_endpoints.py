@@ -15,6 +15,7 @@ from orchestrator.execution import TaskExecutionService
 from repositories import (
     create_engine_from_url,
     create_session_factory,
+    session_scope,
 )
 from workers import Worker, WorkerRequest, WorkerResult
 
@@ -202,3 +203,50 @@ def test_get_task_returns_detailed_snapshot(client: TestClient) -> None:
     assert "timeline" in payload
     # In StaticWorker tests, there might be events created during submission
     assert isinstance(payload["timeline"], list)
+
+
+def test_list_tasks_includes_approval_context(client: TestClient, session_factory) -> None:
+    """GET /tasks should include approval status, type, reason, and requested permission (T-134)."""
+    with session_scope(session_factory) as session:
+        # Create a task with approval constraints
+        from datetime import datetime
+
+        from db.enums import TaskStatus, WorkerRunStatus, WorkerType
+        from db.models import Task, WorkerRun
+
+        task = Task(
+            session_id="session-1",
+            task_text="approval test task",
+            status=TaskStatus.FAILED,  # Checkpoint pauses usually mark task as failed
+            constraints={
+                "approval": {
+                    "status": "pending",
+                    "approval_type": "permission_escalation",
+                    "reason": "Dangerous command requested",
+                }
+            },
+        )
+        session.add(task)
+        session.flush()
+
+        # Create a run for it with requested permission
+        run = WorkerRun(
+            task_id=task.id,
+            worker_type=WorkerType.CODEX,
+            started_at=datetime.utcnow(),
+            status=WorkerRunStatus.FAILURE,
+            requested_permission="dangerous_shell",
+        )
+        session.add(run)
+        session.commit()
+
+    response = client.get("/tasks")
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) >= 1
+
+    task_snapshot = next(t for t in payload if t["task_text"] == "approval test task")
+    assert task_snapshot["approval_status"] == "pending"
+    assert task_snapshot["approval_type"] == "permission_escalation"
+    assert task_snapshot["approval_reason"] == "Dangerous command requested"
+    assert task_snapshot["latest_run_requested_permission"] == "dangerous_shell"

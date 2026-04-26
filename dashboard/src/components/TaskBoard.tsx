@@ -45,7 +45,11 @@ export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBo
     });
 
     tasks.forEach(task => {
-      const columnId = STATUS_TO_COLUMN[task.status];
+      let columnId = STATUS_TO_COLUMN[task.status];
+      // Force tasks awaiting approval into the Active column for operator visibility (T-134)
+      if (task.approval_status === 'pending') {
+        columnId = 'active';
+      }
       if (columnId) {
         groups[columnId].push(task);
       }
@@ -119,7 +123,7 @@ export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBo
                   <div className="empty-column">Loading tasks...</div>
                 )}
                 {columnTasks.map(task => (
-                  <TaskCard key={task.task_id} task={task} />
+                  <TaskCard key={task.task_id} task={task} onRefresh={refetch} />
                 ))}
                 {columnTasks.length === 0 && !loading && (
                   <div className="empty-column">No tasks</div>

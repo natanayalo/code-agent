@@ -1,10 +1,12 @@
 import React, { useMemo } from 'react';
-import { Clock, Terminal, Github, GitBranch } from 'lucide-react';
+import { Clock, Terminal, Github, GitBranch, CheckCircle2, XCircle, ShieldAlert } from 'lucide-react';
 import { TaskSummarySnapshot, TaskStatus } from '../types/task';
+import { api } from '../services/api';
 
 interface TaskCardProps {
   task: TaskSummarySnapshot;
   onClick?: () => void;
+  onRefresh?: () => void;
 }
 
 const formatDate = (dateString: string) => {
@@ -60,11 +62,26 @@ const getRunStatusClass = (status: string | null | undefined) => {
   }
 };
 
-export function TaskCard({ task, onClick }: TaskCardProps) {
+export function TaskCard({ task, onClick, onRefresh }: TaskCardProps) {
+  const [isDeciding, setIsDeciding] = React.useState(false);
+
   const repoName = useMemo(() => {
     if (!task.repo_url) return 'Unknown Repo';
     return deriveRepoName(task.repo_url);
   }, [task.repo_url]);
+
+  const handleApproval = async (approved: boolean) => {
+    if (isDeciding) return;
+    setIsDeciding(true);
+    try {
+      await api.decideTaskApproval(task.task_id, approved);
+      onRefresh?.();
+    } catch (error) {
+      // Errors are logged in api service, but we could add a toast here
+    } finally {
+      setIsDeciding(false);
+    }
+  };
 
   return (
     <div className={`glass-panel task-card ${onClick ? 'task-card-clickable' : ''}`} onClick={onClick}>
@@ -106,6 +123,47 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
           </div>
         )}
       </div>
+
+      {task.approval_status === 'pending' && (
+        <div className="approval-banner" onClick={(e) => e.stopPropagation()}>
+          <div className="approval-content">
+            <ShieldAlert size={16} className="text-warning" />
+            <div className="approval-text">
+              <p className="approval-type">
+                {task.approval_type?.replace(/_/g, ' ') || 'Approval Required'}
+              </p>
+              {task.latest_run_requested_permission && (
+                <p className="permission-tag">
+                  Permission: <code>{task.latest_run_requested_permission}</code>
+                </p>
+              )}
+              {task.approval_reason && (
+                <p className="approval-reason truncate" title={task.approval_reason}>
+                  {task.approval_reason}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="approval-buttons">
+            <button
+              className="btn btn-sm btn-reject"
+              onClick={() => handleApproval(false)}
+              disabled={isDeciding}
+            >
+              <XCircle size={14} />
+              <span>Reject</span>
+            </button>
+            <button
+              className="btn btn-sm btn-approve"
+              onClick={() => handleApproval(true)}
+              disabled={isDeciding}
+            >
+              <CheckCircle2 size={14} />
+              <span>Approve</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
