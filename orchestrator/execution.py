@@ -1323,26 +1323,26 @@ class TaskExecutionService:
 
     def _map_task_to_snapshot(self, task: Task) -> TaskSnapshot:
         """Map a Task database model to a full TaskSnapshot Pydantic model (T-131)."""
-        summary = self._map_task_to_summary(task)
         latest_run_snapshot: WorkerRunSnapshot | None = None
+        latest_run_obj: WorkerRun | None = None
 
         if task.worker_runs:
-            latest_run = max(task.worker_runs, key=lambda r: r.started_at)
+            latest_run_obj = max(task.worker_runs, key=lambda r: r.started_at)
             latest_run_snapshot = WorkerRunSnapshot(
-                run_id=latest_run.id,
-                session_id=latest_run.session_id,
-                worker_type=_enum_value(latest_run.worker_type) or "unknown",
-                workspace_id=latest_run.workspace_id,
-                status=_enum_value(latest_run.status) or WorkerRunStatus.ERROR.value,
-                started_at=latest_run.started_at,
-                finished_at=latest_run.finished_at,
-                summary=latest_run.summary,
-                requested_permission=latest_run.requested_permission,
-                budget_usage=latest_run.budget_usage,
-                verifier_outcome=latest_run.verifier_outcome,
-                commands_run=list(latest_run.commands_run or []),
-                files_changed_count=latest_run.files_changed_count,
-                artifact_index=list(latest_run.artifact_index or []),
+                run_id=latest_run_obj.id,
+                session_id=latest_run_obj.session_id,
+                worker_type=_enum_value(latest_run_obj.worker_type) or "unknown",
+                workspace_id=latest_run_obj.workspace_id,
+                status=_enum_value(latest_run_obj.status) or WorkerRunStatus.ERROR.value,
+                started_at=latest_run_obj.started_at,
+                finished_at=latest_run_obj.finished_at,
+                summary=latest_run_obj.summary,
+                requested_permission=latest_run_obj.requested_permission,
+                budget_usage=latest_run_obj.budget_usage,
+                verifier_outcome=latest_run_obj.verifier_outcome,
+                commands_run=list(latest_run_obj.commands_run or []),
+                files_changed_count=latest_run_obj.files_changed_count,
+                artifact_index=list(latest_run_obj.artifact_index or []),
                 artifacts=[
                     ArtifactSnapshot(
                         artifact_id=artifact.id,
@@ -1352,9 +1352,11 @@ class TaskExecutionService:
                         uri=artifact.uri,
                         artifact_metadata=artifact.artifact_metadata,
                     )
-                    for artifact in latest_run.artifacts
+                    for artifact in latest_run_obj.artifacts
                 ],
             )
+
+        summary = self._map_task_to_summary(task, latest_run=latest_run_obj)
 
         return TaskSnapshot(
             **summary.model_dump(),
@@ -1372,21 +1374,23 @@ class TaskExecutionService:
             ],
         )
 
-    def _map_task_to_summary(self, task: Task) -> TaskSummarySnapshot:
+    def _map_task_to_summary(
+        self,
+        task: Task,
+        *,
+        latest_run: WorkerRun | None = None,
+    ) -> TaskSummarySnapshot:
         """Map a Task database model to a lightweight TaskSummarySnapshot (T-131)."""
-        latest_run_id = None
-        latest_run_status = None
-        latest_run_worker = None
+        latest_run_id = getattr(task, "_latest_run_id", None)
+        latest_run_status = _enum_value(getattr(task, "_latest_run_status", None))
+        latest_run_worker = _enum_value(getattr(task, "_latest_run_worker", None))
 
-        if task.worker_runs:
-            # Note: if not preloaded, this triggers a lazy load of all runs.
-            # TaskRepository.list_all(preload_history=False) will only load basic Task.
-            # To be truly efficient, we should join the latest run ID in the query.
-            # For now, we optimize by at least avoiding the full timeline load in list view.
-            latest_run = max(task.worker_runs, key=lambda r: r.started_at)
-            latest_run_id = latest_run.id
-            latest_run_status = _enum_value(latest_run.status)
-            latest_run_worker = _enum_value(latest_run.worker_type)
+        # Fallback if metadata not pre-identified (e.g. from get_task or create_task)
+        if latest_run_id is None and (latest_run or task.worker_runs):
+            run = latest_run or max(task.worker_runs, key=lambda r: r.started_at)
+            latest_run_id = run.id
+            latest_run_status = _enum_value(run.status)
+            latest_run_worker = _enum_value(run.worker_type)
 
         return TaskSummarySnapshot(
             task_id=task.id,

@@ -304,30 +304,75 @@ class TaskRepository:
         """List all tasks with optional filtering and pagination.
 
         Uses selectinload to eagerly load related runs, artifacts, and timeline events (T-131).
-        If preload_history is False, only the basic Task object is fetched (optimized for listing).
+        If preload_history is False, only the basic Task object is fetched, with latest
+        run metadata joined via scalar subqueries (highly optimized for listing).
         """
-        statement = select(Task).order_by(Task.created_at.desc())
-
         if preload_history:
-            statement = statement.options(
-                selectinload(Task.timeline_events),
-                selectinload(Task.worker_runs).selectinload(WorkerRun.artifacts),
+            statement = (
+                select(Task)
+                .options(
+                    selectinload(Task.timeline_events),
+                    selectinload(Task.worker_runs).selectinload(WorkerRun.artifacts),
+                )
+                .order_by(Task.created_at.desc())
             )
+            if session_id:
+                statement = statement.where(Task.session_id == session_id)
+            if status:
+                status_val = status if isinstance(status, TaskStatus) else TaskStatus(status)
+                statement = statement.where(Task.status == status_val)
+
+            statement = statement.limit(max(1, limit)).offset(max(0, offset))
+            return list(self.session.scalars(statement))
         else:
-            # For summary listing, we only need the latest run info.
-            # To avoid N+1 when accessing task.worker_runs in map_to_summary,
-            # we still use selectinload for worker_runs but WITHOUT artifacts or timeline.
-            # This is a compromise: it fetches all run objects but not their full detail.
-            statement = statement.options(selectinload(Task.worker_runs))
+            # Optimized listing path: join latest run metadata via scalar subqueries (T-131)
+            latest_run_id_sq = (
+                select(WorkerRun.id)
+                .where(WorkerRun.task_id == Task.id)
+                .order_by(WorkerRun.started_at.desc())
+                .limit(1)
+                .scalar_subquery()
+            )
+            latest_run_status_sq = (
+                select(WorkerRun.status)
+                .where(WorkerRun.task_id == Task.id)
+                .order_by(WorkerRun.started_at.desc())
+                .limit(1)
+                .scalar_subquery()
+            )
+            latest_run_worker_sq = (
+                select(WorkerRun.worker_type)
+                .where(WorkerRun.task_id == Task.id)
+                .order_by(WorkerRun.started_at.desc())
+                .limit(1)
+                .scalar_subquery()
+            )
 
-        if session_id:
-            statement = statement.where(Task.session_id == session_id)
-        if status:
-            status_val = status if isinstance(status, TaskStatus) else TaskStatus(status)
-            statement = statement.where(Task.status == status_val)
+            statement = select(
+                Task,
+                latest_run_id_sq.label("latest_run_id"),
+                latest_run_status_sq.label("latest_run_status"),
+                latest_run_worker_sq.label("latest_run_worker"),
+            ).order_by(Task.created_at.desc())
 
-        statement = statement.limit(max(1, limit)).offset(max(0, offset))
-        return list(self.session.scalars(statement))
+            if session_id:
+                statement = statement.where(Task.session_id == session_id)
+            if status:
+                status_val = status if isinstance(status, TaskStatus) else TaskStatus(status)
+                statement = statement.where(Task.status == status_val)
+
+            statement = statement.limit(max(1, limit)).offset(max(0, offset))
+            results = self.session.execute(statement).all()
+
+            tasks = []
+            for row in results:
+                task = row[0]
+                # Attach temporary attributes to the Task object for mapping
+                task._latest_run_id = row[1]
+                task._latest_run_status = row[2]
+                task._latest_run_worker = row[3]
+                tasks.append(task)
+            return tasks
 
     def set_route(
         self,
