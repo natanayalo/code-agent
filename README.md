@@ -144,6 +144,8 @@ Run the core checks from the repo virtualenv:
 ```bash
 poetry run pytest
 poetry run pre-commit run --all-files
+# Dashboard checks
+cd dashboard && npm run test:run
 ```
 
 ## Current Focus
