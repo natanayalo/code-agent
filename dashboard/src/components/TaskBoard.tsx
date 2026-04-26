@@ -21,6 +21,10 @@ const COLUMNS = [
   },
 ];
 
+const STATUS_TO_COLUMN: Partial<Record<TaskStatus, string>> = Object.fromEntries(
+  COLUMNS.flatMap(col => col.statuses.map(status => [status, col.id] as const))
+);
+
 interface TaskBoardProps {
   tasks: TaskSummarySnapshot[];
   loading: boolean;
@@ -32,6 +36,7 @@ interface TaskBoardProps {
 export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBoardProps) {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const hasError = error != null;
+  const isInitialLoading = loading && tasks.length === 0;
 
   const groupedTasks = useMemo(() => {
     const groups: Record<string, TaskSummarySnapshot[]> = {};
@@ -40,9 +45,9 @@ export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBo
     });
 
     tasks.forEach(task => {
-      const column = COLUMNS.find(col => col.statuses.includes(task.status));
-      if (column) {
-        groups[column.id].push(task);
+      const columnId = STATUS_TO_COLUMN[task.status];
+      if (columnId) {
+        groups[columnId].push(task);
       }
     });
 
@@ -106,6 +111,9 @@ export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBo
                 <span className="column-count">{columnTasks.length}</span>
               </div>
               <div className="column-tasks">
+                {isInitialLoading && (
+                  <div className="empty-column">Loading tasks...</div>
+                )}
                 {columnTasks.map(task => (
                   <TaskCard key={task.task_id} task={task} />
                 ))}
