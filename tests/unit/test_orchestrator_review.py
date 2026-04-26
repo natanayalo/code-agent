@@ -182,7 +182,7 @@ async def test_review_result_resolves_windows_style_workspace_uri_for_prompt(mon
     }
     mock_reviewer.run.return_value = WorkerResult(
         status="success",
-        summary=("```json\n" f"{json.dumps(review_payload)}\n" "```"),
+        summary=(f"```json\n{json.dumps(review_payload)}\n```"),
     )
 
     res = await review_result(state, worker_factory={"gemini": mock_reviewer})

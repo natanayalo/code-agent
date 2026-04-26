@@ -331,7 +331,7 @@ def run_shared_self_review_fix_loop(
         if follow_up_settings is None:
             execution.status = "failure"
             execution.summary = (
-                "CLI runtime exhausted its remaining budget before applying " "self-review fixes."
+                "CLI runtime exhausted its remaining budget before applying self-review fixes."
             )
             execution.stop_reason = "budget_exceeded"
             break

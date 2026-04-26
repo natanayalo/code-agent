@@ -15,6 +15,7 @@ from apps.api.auth import (
     build_api_auth_config_from_env,
 )
 from apps.api.progress import create_outbound_http_clients
+from apps.api.routes.auth import router as auth_router
 from apps.api.routes.health import router as health_router
 from apps.api.routes.metrics import router as metrics_router
 from apps.api.routes.sessions import router as sessions_router
@@ -48,6 +49,20 @@ def create_app(
                 app.state.api_auth_config = (
                     auth_config if auth_config is not None else build_api_auth_config_from_env()
                 )
+
+                # Startup validation for dashboard auth
+                if (
+                    app.state.api_auth_config.shared_secret
+                    and not app.state.api_auth_config.allowed_origins
+                ):
+                    logger.warning(
+                        "DASHBOARD AUTH WARNING: CODE_AGENT_ALLOWED_ORIGINS is not set. "
+                        "Dashboard login will succeed, but all state-changing actions "
+                        "(approval, replay, etc.) "
+                        "will fail due to mandatory CSRF protection. "
+                        "Set CODE_AGENT_ALLOWED_ORIGINS to the dashboard URL (e.g., http://localhost:3000)."
+                    )
+
                 app.state.task_service = build_task_service_from_env(
                     outbound_http_clients=outbound_http_clients
                 )
@@ -107,6 +122,7 @@ def create_app(
     )
     app.include_router(health_router)
     app.include_router(metrics_router)
+    app.include_router(auth_router)
     app.include_router(tasks_router)
     app.include_router(sessions_router)
     app.include_router(webhook_router)

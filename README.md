@@ -137,6 +137,17 @@ docker compose run --rm --no-deps worker codex login
 docker compose run --rm --no-deps worker gemini auth login
 ```
 
+### Dashboard Authentication
+
+The dashboard uses HttpOnly cookies for session management. To enable it:
+
+1. Set `CODE_AGENT_ALLOWED_ORIGINS` to your dashboard URL (e.g., `http://localhost:3000`).
+2. Set `CODE_AGENT_COOKIE_SECURE=1` if running behind an HTTPS proxy.
+3. Users log in via the dashboard UI using the same `CODE_AGENT_API_SHARED_SECRET`.
+
+> [!NOTE]
+> **Stateless Logout**: The dashboard uses stateless JWTs with a 1-hour expiry. Logging out clears the browser cookie, but the token remains technically valid until it expires.
+
 ## Verification Commands
 
 Run the core checks from the repo virtualenv:

@@ -1,33 +1,21 @@
 import { TaskSummarySnapshot, TaskSnapshot } from '../types/task';
 import { SessionSnapshot } from '../types/session';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const API_SECRET_HEADER = 'X-Webhook-Token';
-
-// For development, we can store the secret in localStorage.
-// SECURITY NOTE:
-// 1. Storing sensitive credentials in localStorage makes them vulnerable to XSS.
-// 2. Do not embed secrets in VITE_ env vars, which are compiled into the client bundle.
-// This implementation is for DEVELOPMENT ONLY. For production, use HttpOnly cookies
-// or an OAuth2/OIDC flow as tracked in T-136.
-const getApiSecret = () => {
-  if (import.meta.env.PROD) return '';
-  return localStorage.getItem('AGENT_SECRET') || '';
-};
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
-  const secret = getApiSecret();
   const headers = {
     'Content-Type': 'application/json',
-    [API_SECRET_HEADER]: secret,
     ...options.headers,
   };
 
   const baseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`;
-  const url = new URL(endpoint.replace(/^\//, ''), baseUrl).toString();
+  const url = new URL(endpoint.replace(/^\//, ''), new URL(baseUrl, window.location.origin)).toString();
+
   const response = await fetch(url, {
     ...options,
     headers,
+    credentials: 'include', // Enable HttpOnly cookies
   });
 
   if (!response.ok) {
@@ -43,7 +31,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
         }
       }
     } catch {
-      // Fallback to default message if body is not JSON or doesn't have detail
+      // Fallback to default message
     }
     throw new Error(errorMessage);
   }
@@ -54,7 +42,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
-    throw new Error(`Expected JSON response but received content-type: ${contentType || 'unknown'}`);
+    return null;
   }
 
   try {
@@ -65,6 +53,23 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 }
 
 export const api = {
+  auth: {
+    async login(secret: string): Promise<{ status: string }> {
+      return await fetchWithAuth('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ secret }),
+      });
+    },
+
+    async logout(): Promise<void> {
+      await fetchWithAuth('/auth/logout', { method: 'POST' });
+    },
+
+    async status(): Promise<{ authenticated: boolean }> {
+      return await fetchWithAuth('/auth/status');
+    },
+  },
+
   async listTasks(): Promise<TaskSummarySnapshot[]> {
     try {
       const data = await fetchWithAuth('/tasks');

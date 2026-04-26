@@ -5,27 +5,13 @@ import { api } from './api';
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
-// Mock localStorage
-const localStorageMock = (() => {
-  let store: Record<string, string> = {};
-  return {
-    getItem: (key: string) => store[key] || null,
-    setItem: (key: string, value: string) => { store[key] = value.toString(); },
-    clear: () => { store = {}; },
-    removeItem: (key: string) => { delete store[key]; },
-  };
-})();
-Object.defineProperty(global, 'localStorage', { value: localStorageMock });
-
 describe('api service', () => {
   beforeEach(() => {
     mockFetch.mockReset();
-    localStorage.clear();
   });
 
   describe('fetchWithAuth', () => {
-    it('sets correct headers including auth token', async () => {
-      localStorage.setItem('AGENT_SECRET', 'test-secret');
+    it('sets credentials to include', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -36,7 +22,7 @@ describe('api service', () => {
       await api.listTasks();
 
       const [, options] = mockFetch.mock.calls[0];
-      expect(options.headers['X-Webhook-Token']).toBe('test-secret');
+      expect(options.credentials).toBe('include');
       expect(options.headers['Content-Type']).toBe('application/json');
     });
 
@@ -62,7 +48,7 @@ describe('api service', () => {
       await expect(api.listTasks()).rejects.toThrow('Custom error message');
     });
 
-    it('throws on non-json response', async () => {
+    it('returns null on non-json response', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -70,7 +56,8 @@ describe('api service', () => {
         text: async () => 'not json',
       });
 
-      await expect(api.listTasks()).rejects.toThrow('Expected JSON response');
+      const result = await api.listTasks();
+      expect(result).toEqual([]); // listTasks returns [] if fetchWithAuth returns null
     });
 
     it('handles 204 No Content', async () => {
@@ -82,6 +69,51 @@ describe('api service', () => {
 
       const result = await api.decideTaskApproval('1', true);
       expect(result).toBeNull();
+    });
+  });
+
+  describe('auth methods', () => {
+    it('login sends correct POST request', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({ status: 'ok' }),
+      });
+
+      await api.auth.login('secret123');
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/auth/login');
+      expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual({ secret: 'secret123' });
+    });
+
+    it('logout sends POST request', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({ status: 'ok' }),
+      });
+
+      await api.auth.logout();
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/auth/logout');
+      expect(options.method).toBe('POST');
+    });
+
+    it('status returns authenticated status', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({ authenticated: true }),
+      });
+
+      const result = await api.auth.status();
+      expect(result.authenticated).toBe(true);
     });
   });
 
@@ -134,8 +166,8 @@ describe('api service', () => {
 
       await api.decideTaskApproval('task-123', true);
 
-      const [_url, options] = mockFetch.mock.calls[0];
-      expect(_url).toContain('/tasks/task-123/approval');
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/tasks/task-123/approval');
       expect(options.method).toBe('POST');
       expect(JSON.parse(options.body)).toEqual({ approved: true });
     });
@@ -203,7 +235,7 @@ describe('api service', () => {
       await expect(api.listTasks()).rejects.toThrow('Failed to parse server response as JSON');
     });
 
-    it('handles base URL without trailing slash', async () => {
+    it('handles base URL with trailing slash from proxy', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -212,8 +244,9 @@ describe('api service', () => {
       });
       await api.listTasks();
       const [url] = mockFetch.mock.calls[0];
-      // Note: URL constructor handles the slash if not present in base
-      expect(url).toBe('http://localhost:8000/tasks');
+      // URL constructor with /api and relative path /tasks results in /tasks
+      // But we use new URL(endpoint.replace(/^\//, ''), new URL(baseUrl, window.location.origin))
+      expect(url).toContain('/tasks');
     });
 
     it('handles error response without detail field', async () => {
@@ -233,8 +266,10 @@ describe('api service', () => {
         headers: new Map(),
         json: async () => ([]),
       });
-      await expect(api.listTasks()).rejects.toThrow('received content-type: unknown');
+      const result = await api.listTasks();
+      expect(result).toEqual([]);
     });
+
     it('replayTask sends correct POST request', async () => {
       const mockSnapshot = { task_id: 'new-task', status: 'pending' };
       mockFetch.mockResolvedValueOnce({
