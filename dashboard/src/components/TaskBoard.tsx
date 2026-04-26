@@ -53,10 +53,9 @@ export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBo
 
     Object.values(groups).forEach(group => {
       group.sort((a, b) => {
-        const aDate = a.created_at || '';
-        const bDate = b.created_at || '';
-        if (bDate === aDate) return 0;
-        return bDate > aDate ? 1 : -1;
+        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return bTime - aTime;
       });
     });
 

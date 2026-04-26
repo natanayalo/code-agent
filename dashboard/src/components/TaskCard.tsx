@@ -45,7 +45,8 @@ const deriveRepoName = (repoUrl: string) => {
   }
 };
 
-const getRunStatusClass = (status: string) => {
+const getRunStatusClass = (status: string | null | undefined) => {
+  if (!status) return '';
   switch (status) {
     case TaskStatus.COMPLETED:
       return 'success';
