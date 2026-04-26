@@ -10,7 +10,10 @@ const API_SECRET_HEADER = 'X-Agent-Secret';
 // 2. Do not embed secrets in VITE_ env vars, which are compiled into the client bundle.
 // This implementation is for DEVELOPMENT ONLY. For production, use HttpOnly cookies
 // or an OAuth2/OIDC flow as planned in Milestone 13.
-const getApiSecret = () => localStorage.getItem('AGENT_SECRET') || '';
+const getApiSecret = () => {
+  if (import.meta.env.PROD) return '';
+  return localStorage.getItem('AGENT_SECRET') || '';
+};
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const secret = getApiSecret();

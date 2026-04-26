@@ -45,6 +45,20 @@ const deriveRepoName = (repoUrl: string) => {
   }
 };
 
+const getRunStatusClass = (status: string) => {
+  switch (status) {
+    case TaskStatus.COMPLETED:
+      return 'success';
+    case TaskStatus.FAILED:
+    case TaskStatus.CANCELLED:
+      return 'error';
+    case TaskStatus.IN_PROGRESS:
+      return 'running';
+    default:
+      return status;
+  }
+};
+
 export function TaskCard({ task, onClick }: TaskCardProps) {
   const repoName = useMemo(() => {
     if (!task.repo_url) return 'Unknown Repo';
@@ -86,8 +100,8 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
           <span>{task.latest_run_worker || task.chosen_worker || 'auto'}</span>
         </div>
         {task.latest_run_status && (
-          <div className={`run-status ${task.latest_run_status}`}>
-            {task.latest_run_status}
+          <div className={`run-status ${getRunStatusClass(task.latest_run_status)}`}>
+            {task.latest_run_status.replace('_', ' ')}
           </div>
         )}
       </div>
