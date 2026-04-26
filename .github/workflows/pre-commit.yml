@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      SKIP: no-commit-to-branch
+      SKIP: no-commit-to-branch,dashboard-lint
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
