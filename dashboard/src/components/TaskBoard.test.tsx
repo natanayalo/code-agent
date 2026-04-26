@@ -154,4 +154,26 @@ describe('TaskBoard', () => {
     expect(taskTexts[0]).toBe('New Task');
     expect(taskTexts[1]).toBe('Old Task');
   });
+
+  it('handles unknown status gracefully', () => {
+    const unknownTask = {
+      task_id: 'unknown',
+      task_text: 'Unknown Status Task',
+      // @ts-expect-error: testing unknown status
+      status: 'invalid_status',
+      created_at: new Date().toISOString(),
+    };
+
+    render(
+      <TaskBoard
+        tasks={[unknownTask]}
+        loading={false}
+        isFetching={false}
+        error={null}
+        refetch={mockRefetch}
+      />
+    );
+
+    expect(screen.queryByText('Unknown Status Task')).toBeNull();
+  });
 });
