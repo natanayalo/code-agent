@@ -45,8 +45,9 @@ Granular tasks for the active and upcoming milestones:
 - [x] T-130: design PWA frontend architecture and choose tech stack (React/Vite) (#114)
 - [x] T-131: implement API endpoints for task/session listing and detailed view
 - [x] T-132: build core dashboard layout with task status board
-- [ ] T-133: implement approval/rejection UI components in the dashboard
-- [ ] T-134: implement task replay/retry controls in the dashboard
+- [x] T-133: implement comprehensive test suite and CI (90% coverage)
+- [ ] T-134: implement approval/rejection UI components in the dashboard
+- [ ] T-135: implement task replay/retry controls in the dashboard
 
 ### Milestone C: Worker Profile Strategy
 - [ ] T-140: define `WorkerProfile` Pydantic model and capability matrix

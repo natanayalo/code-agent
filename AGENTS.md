@@ -97,6 +97,14 @@ For each task:
 - Prefer `.venv/bin/...` invocations (for example: `.venv/bin/poetry`, `.venv/bin/pytest`, `.venv/bin/pre-commit`, `.venv/bin/ruff`, `.venv/bin/mypy`).
 - Do not rely on globally installed `python`, `pytest`, or `pre-commit` binaries.
 
+## Dashboard tooling environment
+
+- Use **npm** for dependency management.
+- Prefer `npm ci` in CI environments for reproducibility.
+- Use **Vitest** for testing and maintain a **90% coverage threshold**.
+- Run `npm run test:coverage` to verify dashboard changes.
+- Ensure all new components have corresponding `*.test.tsx` files.
+
 ## Definition of done
 
 A task is done only if:

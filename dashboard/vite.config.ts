@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -48,6 +49,28 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, '')
         }
+      }
+    },
+    test: {
+      globals: true,
+      environment: 'jsdom',
+      setupFiles: ['./src/setupTests.ts'],
+      coverage: {
+        provider: 'v8',
+        reporter: ['text', 'json', 'html'],
+        thresholds: {
+          lines: 90,
+          functions: 90,
+          branches: 90,
+          statements: 90
+        },
+        exclude: [
+          'node_modules/',
+          'src/setupTests.ts',
+          '**/*.d.ts',
+          '**/*.config.ts',
+          'dist/'
+        ]
       }
     }
   };

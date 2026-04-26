@@ -49,6 +49,12 @@ repos:
         entry: shellcheck
         language: system
         types: [shell]
+      - id: dashboard-lint
+        name: Dashboard Lint
+        entry: bash -c "cd dashboard && npm run lint"
+        language: system
+        files: ^dashboard/.*
+        pass_filenames: false
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.4.4
     hooks:

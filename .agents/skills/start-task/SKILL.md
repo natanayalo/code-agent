@@ -28,7 +28,7 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 3. Call out the main risk and the smallest safe scope.
 4. Implement the narrowest working slice.
 5. Add or update tests in the same slice.
-6. Run the minimal checks and tests that cover the changed behavior, including `pre-commit` and `pytest` with coverage on the changed files. Once these pass, run the full `pytest` suite to ensure no regressions. If a command needs approval or is blocked, request approval or report the blocker clearly.
+6. Run the minimal checks and tests that cover the changed behavior, including `pre-commit`, `pytest`, or `npm run test` with coverage on the changed files. Once these pass, run the full test suite (pytest or npm run test:run) to ensure no regressions. If a command needs approval or is blocked, request approval or report the blocker clearly.
 7. Create or switch to a focused task branch before publishing work. Prefer `task/<task-id>-<short-slug>` when a task ID exists; otherwise use `task/<short-slug>`.
 8. Update `docs/status.md` before wrapping up:
    - move a finished task slice out of `Next` or `In Progress`

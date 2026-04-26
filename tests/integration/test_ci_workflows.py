@@ -113,7 +113,8 @@ def test_pre_commit_workflow_runs_on_push_without_ci_branch_guard_failures() -> 
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] is True
     assert workflow["jobs"]["pre-commit"]["timeout-minutes"] == 10
-    assert workflow["jobs"]["pre-commit"]["env"]["SKIP"] == "no-commit-to-branch"
+    assert "no-commit-to-branch" in workflow["jobs"]["pre-commit"]["env"]["SKIP"]
+    assert "dashboard-lint" in workflow["jobs"]["pre-commit"]["env"]["SKIP"]
     assert "--hook-stage manual" in run_step["run"]
 
 
