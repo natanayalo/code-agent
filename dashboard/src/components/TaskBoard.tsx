@@ -34,11 +34,10 @@ export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBo
   const hasError = error != null;
 
   const groupedTasks = useMemo(() => {
-    const groups: Record<string, TaskSummarySnapshot[]> = {
-      active: [],
-      completed: [],
-      failed: []
-    };
+    const groups: Record<string, TaskSummarySnapshot[]> = {};
+    COLUMNS.forEach(col => {
+      groups[col.id] = [];
+    });
 
     tasks.forEach(task => {
       const column = COLUMNS.find(col => col.statuses.includes(task.status));
@@ -48,7 +47,7 @@ export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBo
     });
 
     Object.values(groups).forEach(group => {
-      group.sort((a, b) => b.created_at.localeCompare(a.created_at));
+      group.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
     });
 
     return groups;

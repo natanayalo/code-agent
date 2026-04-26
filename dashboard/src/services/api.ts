@@ -44,9 +44,8 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const text = await response.text();
   try {
     return text ? JSON.parse(text) : null;
-  } catch (e) {
-    console.error('Failed to parse API response as JSON:', e);
-    return null;
+  } catch {
+    throw new Error('Failed to parse server response as JSON');
   }
 }
 
