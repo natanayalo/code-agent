@@ -20,7 +20,8 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
     ...options.headers,
   };
 
-  const url = `${API_BASE_URL.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}`;
+  const baseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`;
+  const url = new URL(endpoint.replace(/^\//, ''), baseUrl).toString();
   const response = await fetch(url, {
     ...options,
     headers,
@@ -41,9 +42,12 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
     throw new Error(errorMessage);
   }
 
-  const text = await response.text();
+  if (response.status === 204) {
+    return null;
+  }
+
   try {
-    return text ? JSON.parse(text) : null;
+    return await response.json();
   } catch {
     throw new Error('Failed to parse server response as JSON');
   }
