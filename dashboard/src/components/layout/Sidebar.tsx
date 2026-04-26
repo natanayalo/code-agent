@@ -50,7 +50,7 @@ export function Sidebar() {
             <span className="warning-pill">DEV MODE</span>
             <p className="warning-text">
               <strong>Security Alert:</strong> LocalStorage & VITE_ env vars are insecure for secrets.
-              Production must use HttpOnly cookies/OIDC (Milestone 13).
+              Production must use HttpOnly cookies/OIDC (tracked in T-136).
             </p>
           </div>
         )}

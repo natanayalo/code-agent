@@ -9,7 +9,7 @@ const API_SECRET_HEADER = 'X-Webhook-Token';
 // 1. Storing sensitive credentials in localStorage makes them vulnerable to XSS.
 // 2. Do not embed secrets in VITE_ env vars, which are compiled into the client bundle.
 // This implementation is for DEVELOPMENT ONLY. For production, use HttpOnly cookies
-// or an OAuth2/OIDC flow as planned in Milestone 13.
+// or an OAuth2/OIDC flow as tracked in T-136.
 const getApiSecret = () => {
   if (import.meta.env.PROD) return '';
   return localStorage.getItem('AGENT_SECRET') || '';
