@@ -41,7 +41,7 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
         {task.repo_url && (
           <div className="detail-item">
             <Github size={14} />
-            <span className="truncate">{task.repo_url.split('/').pop()}</span>
+            <span className="truncate">{task.repo_url.replace(/\/$/, '').split('/').pop()}</span>
           </div>
         )}
         {task.branch && (

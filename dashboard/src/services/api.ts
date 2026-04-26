@@ -32,8 +32,11 @@ export const api = {
     try {
       return await fetchWithAuth('/tasks');
     } catch (error) {
-      console.warn('Failed to fetch tasks from API, using mock data', error);
-      return MOCK_TASKS;
+      console.warn('Failed to fetch tasks from API', error);
+      if (import.meta.env.DEV) {
+        return MOCK_TASKS;
+      }
+      throw error;
     }
   },
 
@@ -41,8 +44,11 @@ export const api = {
     try {
       return await fetchWithAuth('/sessions');
     } catch (error) {
-      console.warn('Failed to fetch sessions from API, using mock data', error);
-      return MOCK_SESSIONS;
+      console.warn('Failed to fetch sessions from API', error);
+      if (import.meta.env.DEV) {
+        return MOCK_SESSIONS;
+      }
+      throw error;
     }
   },
 };
