@@ -31,6 +31,7 @@ export function TaskBoard() {
   const {
     data: tasks = [],
     isLoading: loading,
+    isFetching,
     error,
     refetch
   } = useQuery({
@@ -80,8 +81,13 @@ export function TaskBoard() {
           <p className="board-subtitle">Real-time view of agent execution pipeline</p>
         </div>
         <div className="board-actions">
-          <button className="icon-button" onClick={() => refetch()} disabled={loading} aria-label="Refresh tasks">
-            <RefreshCw size={18} className={loading ? 'spin' : ''} />
+          <button
+            className="icon-button"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            aria-label="Refresh tasks"
+          >
+            <RefreshCw size={18} className={isFetching ? 'spin' : ''} />
           </button>
           <div className="view-toggle">
             <button

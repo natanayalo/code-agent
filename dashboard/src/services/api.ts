@@ -18,7 +18,8 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
     ...options.headers,
   };
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const url = `${API_BASE_URL.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}`;
+  const response = await fetch(url, {
     ...options,
     headers,
   });
