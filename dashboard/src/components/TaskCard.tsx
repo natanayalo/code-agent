@@ -64,6 +64,7 @@ const getRunStatusClass = (status: string | null | undefined) => {
 
 export function TaskCard({ task, onClick, onRefresh }: TaskCardProps) {
   const [isDeciding, setIsDeciding] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
   const repoName = useMemo(() => {
     if (!task.repo_url) return 'Unknown Repo';
@@ -74,10 +75,11 @@ export function TaskCard({ task, onClick, onRefresh }: TaskCardProps) {
     if (isDeciding) return;
     setIsDeciding(true);
     try {
+      setError(null);
       await api.decideTaskApproval(task.task_id, approved);
       onRefresh?.();
-    } catch (error) {
-      // Errors are logged in api service, but we could add a toast here
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save approval decision');
     } finally {
       setIsDeciding(false);
     }
@@ -140,6 +142,11 @@ export function TaskCard({ task, onClick, onRefresh }: TaskCardProps) {
               {task.approval_reason && (
                 <p className="approval-reason truncate" title={task.approval_reason}>
                   {task.approval_reason}
+                </p>
+              )}
+              {error && (
+                <p className="approval-error">
+                  {error}
                 </p>
               )}
             </div>

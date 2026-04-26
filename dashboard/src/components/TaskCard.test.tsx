@@ -231,6 +231,17 @@ describe('TaskCard', () => {
       await vi.waitFor(() => expect(approveBtn).not.toBeDisabled());
     });
 
+    it('displays error message when approval fails', async () => {
+      vi.mocked(api.decideTaskApproval).mockRejectedValueOnce(new Error('Conflict: Task already approved'));
+      render(<TaskCard task={approvalTask} />);
+
+      fireEvent.click(screen.getByText('Approve'));
+
+      await vi.waitFor(() => {
+        expect(screen.getByText('Conflict: Task already approved')).toBeInTheDocument();
+      });
+    });
+
     it('prevents duplicate clicks while processing', async () => {
       vi.mocked(api.decideTaskApproval).mockReturnValueOnce(new Promise(() => {})); // Never resolves
       render(<TaskCard task={approvalTask} />);
