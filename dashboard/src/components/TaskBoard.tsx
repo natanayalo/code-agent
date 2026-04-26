@@ -1,8 +1,11 @@
-import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { TaskSummarySnapshot, TaskStatus } from '../types/task';
 import { TaskCard } from './TaskCard';
 import { RefreshCw, LayoutGrid, List } from 'lucide-react';
+
+const REFRESH_INTERVAL_MS = 5000;
 
 const COLUMNS = [
   {
@@ -19,64 +22,22 @@ const COLUMNS = [
     id: 'failed',
     title: 'Failed',
     statuses: [TaskStatus.FAILED, TaskStatus.CANCELLED]
-  }
+  },
 ];
 
-const REFRESH_INTERVAL_MS = 30000;
-
 export function TaskBoard() {
-  const [tasks, setTasks] = useState<TaskSummarySnapshot[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout>>();
-  const isPollingRef = useRef(false);
-  const isMountedRef = useRef(true);
-
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  const loadTasks = useCallback(async (isAutoRefresh = false) => {
-    if (!isAutoRefresh && isMountedRef.current) {
-      setLoading(true);
-    }
-
-    if (isPollingRef.current || !isMountedRef.current) return;
-
-    isPollingRef.current = true;
-    try {
-      const data = await api.listTasks();
-      if (isMountedRef.current) {
-        setTasks(data);
-        setError(null);
-      }
-    } catch (err) {
-      console.error('Failed to load tasks:', err);
-      if (isMountedRef.current && !isAutoRefresh) {
-        setError('Failed to connect to the agent service. Please check your connection.');
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setLoading(false);
-        isPollingRef.current = false;
-
-        // Schedule next poll only after current one finishes
-        if (pollTimerRef.current) {
-          clearTimeout(pollTimerRef.current);
-        }
-        pollTimerRef.current = setTimeout(() => loadTasks(true), REFRESH_INTERVAL_MS);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    loadTasks();
-    return () => {
-      isMountedRef.current = false;
-      if (pollTimerRef.current) {
-        clearTimeout(pollTimerRef.current);
-      }
-    };
-  }, [loadTasks]);
+  const {
+    data: tasks = [],
+    isLoading: loading,
+    error,
+    refetch
+  } = useQuery({
+    queryKey: ['tasks'],
+    queryFn: () => api.listTasks(),
+    refetchInterval: REFRESH_INTERVAL_MS,
+  });
 
   const groupedTasks = useMemo(() => {
     const groups: Record<string, TaskSummarySnapshot[]> = {
@@ -103,12 +64,14 @@ export function TaskBoard() {
     return groups;
   }, [tasks]);
 
+  const errorMessage = error instanceof Error ? error.message : 'Failed to connect to the agent service.';
+
   return (
     <div className="task-board-container">
       {error && (
         <div className="board-error-banner">
-          <p>{error}</p>
-          <button onClick={() => loadTasks()}>Try Again</button>
+          <p>{errorMessage}</p>
+          <button onClick={() => refetch()}>Try Again</button>
         </div>
       )}
       <div className="board-header">
@@ -117,7 +80,7 @@ export function TaskBoard() {
           <p className="board-subtitle">Real-time view of agent execution pipeline</p>
         </div>
         <div className="board-actions">
-          <button className="icon-button" onClick={() => loadTasks()} disabled={loading}>
+          <button className="icon-button" onClick={() => refetch()} disabled={loading}>
             <RefreshCw size={18} className={loading ? 'spin' : ''} />
           </button>
           <div className="view-toggle">
