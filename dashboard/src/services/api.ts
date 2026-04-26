@@ -2,14 +2,14 @@ import { TaskSummarySnapshot } from '../types/task';
 import { SessionSnapshot } from '../types/session';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const API_SECRET_HEADER = 'X-Agent-Secret';
+const API_SECRET_HEADER = 'X-Webhook-Token';
 
 // For development, we can store the secret in localStorage.
 // SECURITY NOTE:
 // 1. Storing sensitive credentials in localStorage makes them vulnerable to XSS.
 // 2. Do not embed secrets in VITE_ env vars, which are compiled into the client bundle.
 // This implementation is for DEVELOPMENT ONLY. For production, use HttpOnly cookies
-// or an OAuth2/OIDC flow as planned in Milestone 13.
+// or an OAuth2/OIDC flow as tracked in T-136.
 const getApiSecret = () => {
   if (import.meta.env.PROD) return '';
   return localStorage.getItem('AGENT_SECRET') || '';
@@ -81,6 +81,18 @@ export const api = {
       return Array.isArray(data) ? data : [];
     } catch (error) {
       console.warn('Failed to fetch sessions from API', error);
+      throw error;
+    }
+  },
+
+  async decideTaskApproval(taskId: string, approved: boolean): Promise<unknown> {
+    try {
+      return await fetchWithAuth(`/tasks/${taskId}/approval`, {
+        method: 'POST',
+        body: JSON.stringify({ approved }),
+      });
+    } catch (error) {
+      console.warn(`Failed to ${approved ? 'approve' : 'reject'} task ${taskId}`, error);
       throw error;
     }
   },

@@ -423,6 +423,10 @@ class TaskSummarySnapshot(ExecutionModel):
     latest_run_id: str | None = None
     latest_run_status: str | None = None
     latest_run_worker: str | None = None
+    latest_run_requested_permission: str | None = None
+    approval_status: Literal["pending", "approved", "rejected", "not_required"] | None = None
+    approval_type: str | None = None
+    approval_reason: str | None = None
 
 
 class TaskSnapshot(TaskSummarySnapshot):
@@ -1384,6 +1388,7 @@ class TaskExecutionService:
         latest_run_id = getattr(task, "_latest_run_id", None)
         latest_run_status = _enum_value(getattr(task, "_latest_run_status", None))
         latest_run_worker = _enum_value(getattr(task, "_latest_run_worker", None))
+        latest_run_requested_permission = getattr(task, "_latest_run_requested_permission", None)
 
         # Fallback if metadata not pre-identified (e.g. from get_task or create_task)
         if latest_run_id is None:
@@ -1392,12 +1397,25 @@ class TaskExecutionService:
                 latest_run_id = run.id
                 latest_run_status = _enum_value(run.status)
                 latest_run_worker = _enum_value(run.worker_type)
+                latest_run_requested_permission = run.requested_permission
             # Only check task.worker_runs if it's already loaded to avoid N+1 lazy loads in listing
             elif "worker_runs" in task.__dict__ and task.worker_runs:
                 run = max(task.worker_runs, key=lambda r: r.started_at)
                 latest_run_id = run.id
                 latest_run_status = _enum_value(run.status)
                 latest_run_worker = _enum_value(run.worker_type)
+                latest_run_requested_permission = run.requested_permission
+
+        # Extract approval context from task constraints (T-134)
+        constraints = task.constraints or {}
+        approval_checkpoint = constraints.get("approval")
+        approval_status = None
+        approval_type = None
+        approval_reason = None
+        if isinstance(approval_checkpoint, Mapping):
+            approval_status = approval_checkpoint.get("status")
+            approval_type = approval_checkpoint.get("approval_type")
+            approval_reason = approval_checkpoint.get("reason")
 
         return TaskSummarySnapshot(
             task_id=task.id,
@@ -1414,6 +1432,10 @@ class TaskExecutionService:
             latest_run_id=latest_run_id,
             latest_run_status=latest_run_status,
             latest_run_worker=latest_run_worker,
+            latest_run_requested_permission=latest_run_requested_permission,
+            approval_status=approval_status,  # type: ignore[arg-type]
+            approval_type=approval_type,
+            approval_reason=approval_reason,
         )
 
     def _map_session_to_snapshot(self, s: ConversationSession) -> SessionSnapshot:

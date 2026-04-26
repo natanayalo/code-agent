@@ -1,10 +1,21 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TaskCard } from './TaskCard';
-import { TaskStatus } from '../types/task';
+import { TaskStatus, ApprovalStatus } from '../types/task';
+import { api } from '../services/api';
+
+vi.mock('../services/api', () => ({
+  api: {
+    decideTaskApproval: vi.fn(),
+  },
+}));
 
 describe('TaskCard', () => {
+  beforeEach(() => {
+    vi.mocked(api.decideTaskApproval).mockClear();
+  });
+
   const mockTask = {
     task_id: 'test-task-1',
     task_text: 'Test task description',
@@ -94,6 +105,8 @@ describe('TaskCard', () => {
       { url: 'https://github.com/', expected: 'Unknown Repo' },
       { url: 'git@github.com:user/ssh-repo.git', expected: 'ssh-repo' },
       { url: 'git@github.com:', expected: 'git@github.com' },
+      { url: ':', expected: 'Unknown Repo' },
+      { url: '.git', expected: 'Unknown Repo' },
       { url: 'just-a-name', expected: 'just-a-name' },
       { url: '', expected: 'Unknown Repo' },
       { url: '   ', expected: 'Unknown Repo' },
@@ -131,6 +144,113 @@ describe('TaskCard', () => {
         expect(badge).toHaveClass(expected);
       }
       unmount();
+    });
+  });
+
+  it('handles missing run status gracefully', () => {
+    const task = { ...mockTask, latest_run_status: null };
+    const { container } = render(<TaskCard task={task} />);
+    expect(container.querySelector('.run-status')).toBeNull();
+  });
+
+  it('handles undefined run status gracefully', () => {
+    const task = { ...mockTask, latest_run_status: undefined };
+    const { container } = render(<TaskCard task={task} />);
+    expect(container.querySelector('.run-status')).toBeNull();
+  });
+
+  it('provides fallback for missing approval type', () => {
+    const task = { ...mockTask, approval_status: 'pending' as ApprovalStatus, approval_type: null };
+    render(<TaskCard task={task} />);
+    expect(screen.getByText('Approval Required')).toBeInTheDocument();
+  });
+
+  describe('Approval UI', () => {
+    const approvalTask = {
+      ...mockTask,
+      approval_status: 'pending' as ApprovalStatus,
+      approval_type: 'permission_escalation',
+      approval_reason: 'Testing approval',
+      latest_run_requested_permission: 'dangerous_command',
+    };
+
+    it('renders approval banner when pending', () => {
+      render(<TaskCard task={approvalTask} />);
+      expect(screen.getByText('permission escalation')).toBeInTheDocument();
+      expect(screen.getByText('Testing approval')).toBeInTheDocument();
+      expect(screen.getByText('dangerous_command')).toBeInTheDocument();
+      expect(screen.getByText('Approve')).toBeInTheDocument();
+      expect(screen.getByText('Reject')).toBeInTheDocument();
+    });
+
+    it('does not render approval banner when not pending', () => {
+      const approvedTask = { ...approvalTask, approval_status: 'approved' as ApprovalStatus };
+      render(<TaskCard task={approvedTask} />);
+      expect(screen.queryByText('Approve')).toBeNull();
+    });
+
+    it('handles approval click', async () => {
+      const onRefresh = vi.fn();
+      vi.mocked(api.decideTaskApproval).mockResolvedValueOnce({});
+      render(<TaskCard task={approvalTask} onRefresh={onRefresh} />);
+
+      fireEvent.click(screen.getByText('Approve'));
+      expect(api.decideTaskApproval).toHaveBeenCalledWith(approvalTask.task_id, true);
+      // Wait for async handler
+      await vi.waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    });
+
+    it('handles rejection click', async () => {
+      const onRefresh = vi.fn();
+      vi.mocked(api.decideTaskApproval).mockResolvedValueOnce({});
+      render(<TaskCard task={approvalTask} onRefresh={onRefresh} />);
+
+      fireEvent.click(screen.getByText('Reject'));
+      expect(api.decideTaskApproval).toHaveBeenCalledWith(approvalTask.task_id, false);
+      await vi.waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    });
+
+    it('disables buttons during processing', async () => {
+      // Create a promise we can control
+      let resolveApproval: (value: unknown) => void;
+      const approvalPromise = new Promise((resolve) => {
+        resolveApproval = resolve;
+      });
+      vi.mocked(api.decideTaskApproval).mockReturnValueOnce(approvalPromise);
+
+      render(<TaskCard task={approvalTask} />);
+      const approveBtn = screen.getByText('Approve').closest('button');
+      const rejectBtn = screen.getByText('Reject').closest('button');
+
+      fireEvent.click(approveBtn!);
+      expect(approveBtn).toBeDisabled();
+      expect(rejectBtn).toBeDisabled();
+
+      // @ts-expect-error: resolveApproval is captured from promise constructor
+      resolveApproval({});
+      await vi.waitFor(() => expect(approveBtn).not.toBeDisabled());
+    });
+
+    it('displays error message when approval fails', async () => {
+      vi.mocked(api.decideTaskApproval).mockRejectedValueOnce(new Error('Conflict: Task already approved'));
+      render(<TaskCard task={approvalTask} />);
+
+      fireEvent.click(screen.getByText('Approve'));
+
+      await vi.waitFor(() => {
+        expect(screen.getByText('Conflict: Task already approved')).toBeInTheDocument();
+      });
+    });
+
+    it('prevents duplicate clicks while processing', async () => {
+      vi.mocked(api.decideTaskApproval).mockReturnValueOnce(new Promise(() => {})); // Never resolves
+      render(<TaskCard task={approvalTask} />);
+
+      const approveBtn = screen.getByText('Approve');
+      fireEvent.click(approveBtn);
+      fireEvent.click(approveBtn);
+
+      expect(api.decideTaskApproval).toHaveBeenCalledTimes(1);
     });
   });
 });
