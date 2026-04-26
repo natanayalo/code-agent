@@ -44,7 +44,7 @@ Granular tasks for the active and upcoming milestones:
 ### Milestone B: Operator UX (Dashboard/PWA)
 - [x] T-130: design PWA frontend architecture and choose tech stack (React/Vite) (#114)
 - [x] T-131: implement API endpoints for task/session listing and detailed view
-- [ ] T-132: build core dashboard layout with task status board
+- [x] T-132: build core dashboard layout with task status board
 - [ ] T-133: implement approval/rejection UI components in the dashboard
 - [ ] T-134: implement task replay/retry controls in the dashboard
 
