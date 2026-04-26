@@ -146,7 +146,7 @@ export function TaskBoard() {
                 {columnTasks.map(task => (
                   <TaskCard key={task.task_id} task={task} />
                 ))}
-                {columnTasks.length === 0 && (
+                {columnTasks.length === 0 && !loading && (
                   <div className="empty-column">No tasks</div>
                 )}
               </div>

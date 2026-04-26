@@ -7,21 +7,22 @@ interface TaskCardProps {
   onClick?: () => void;
 }
 
-export function TaskCard({ task, onClick }: TaskCardProps) {
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
+const formatDate = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
 
-  const getStatusClass = (status: TaskStatus) => {
-    switch (status) {
-      case TaskStatus.IN_PROGRESS: return 'status-running';
-      case TaskStatus.COMPLETED: return 'status-success';
-      case TaskStatus.FAILED:
-      case TaskStatus.CANCELLED: return 'status-error';
-      default: return 'status-pending';
-    }
-  };
+const getStatusClass = (status: TaskStatus) => {
+  switch (status) {
+    case TaskStatus.IN_PROGRESS: return 'status-running';
+    case TaskStatus.COMPLETED: return 'status-success';
+    case TaskStatus.FAILED:
+    case TaskStatus.CANCELLED: return 'status-error';
+    default: return 'status-pending';
+  }
+};
+
+export function TaskCard({ task, onClick }: TaskCardProps) {
 
   return (
     <div className={`glass-panel task-card ${onClick ? 'task-card-clickable' : ''}`} onClick={onClick}>
