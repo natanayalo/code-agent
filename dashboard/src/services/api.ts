@@ -51,7 +51,8 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 export const api = {
   async listTasks(): Promise<TaskSummarySnapshot[]> {
     try {
-      return (await fetchWithAuth('/tasks')) || [];
+      const data = await fetchWithAuth('/tasks');
+      return Array.isArray(data) ? data : [];
     } catch (error) {
       if (import.meta.env.DEV) {
         console.warn('Failed to fetch tasks from API, falling back to mock data', error);
@@ -63,7 +64,8 @@ export const api = {
 
   async listSessions(): Promise<SessionSnapshot[]> {
     try {
-      return (await fetchWithAuth('/sessions')) || [];
+      const data = await fetchWithAuth('/sessions');
+      return Array.isArray(data) ? data : [];
     } catch (error) {
       if (import.meta.env.DEV) {
         console.warn('Failed to fetch sessions from API, falling back to mock data', error);

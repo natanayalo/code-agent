@@ -22,10 +22,17 @@ function App() {
   });
 
   const stats = useMemo(() => {
-    return {
-      completed: tasks.filter(t => t.status === TaskStatus.COMPLETED).length,
-      failed: tasks.filter(t => t.status === TaskStatus.FAILED || t.status === TaskStatus.CANCELLED).length
-    };
+    return tasks.reduce(
+      (acc, t) => {
+        if (t.status === TaskStatus.COMPLETED) {
+          acc.completed++;
+        } else if (t.status === TaskStatus.FAILED || t.status === TaskStatus.CANCELLED) {
+          acc.failed++;
+        }
+        return acc;
+      },
+      { completed: 0, failed: 0 }
+    );
   }, [tasks]);
 
   return (
