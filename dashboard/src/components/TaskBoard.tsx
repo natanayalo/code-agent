@@ -27,11 +27,12 @@ const REFRESH_INTERVAL_MS = 30000;
 export function TaskBoard() {
   const [tasks, setTasks] = useState<TaskSummarySnapshot[]>([]);
   const [loading, setLoading] = useState(true);
-  const pollTimerRef = useRef<NodeJS.Timeout>();
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const isPollingRef = useRef(false);
+  const isMountedRef = useRef(true);
 
   const loadTasks = useCallback(async (isAutoRefresh = false) => {
-    if (isPollingRef.current) return;
+    if (isPollingRef.current || !isMountedRef.current) return;
 
     if (!isAutoRefresh) {
       setLoading(true);
@@ -40,24 +41,30 @@ export function TaskBoard() {
     isPollingRef.current = true;
     try {
       const data = await api.listTasks();
-      setTasks(data);
+      if (isMountedRef.current) {
+        setTasks(data);
+      }
     } catch (error) {
       console.error('Failed to load tasks:', error);
     } finally {
-      setLoading(false);
-      isPollingRef.current = false;
+      if (isMountedRef.current) {
+        setLoading(false);
+        isPollingRef.current = false;
 
-      // Schedule next poll only after current one finishes
-      if (pollTimerRef.current) {
-        clearTimeout(pollTimerRef.current);
+        // Schedule next poll only after current one finishes
+        if (pollTimerRef.current) {
+          clearTimeout(pollTimerRef.current);
+        }
+        pollTimerRef.current = setTimeout(() => loadTasks(true), REFRESH_INTERVAL_MS);
       }
-      pollTimerRef.current = setTimeout(() => loadTasks(true), REFRESH_INTERVAL_MS);
     }
   }, []);
 
   useEffect(() => {
+    isMountedRef.current = true;
     loadTasks();
     return () => {
+      isMountedRef.current = false;
       if (pollTimerRef.current) {
         clearTimeout(pollTimerRef.current);
       }

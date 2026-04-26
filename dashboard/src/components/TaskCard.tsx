@@ -24,7 +24,7 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
   };
 
   return (
-    <div className="glass-panel task-card" onClick={onClick}>
+    <div className={`glass-panel task-card ${onClick ? 'task-card-clickable' : ''}`} onClick={onClick}>
       <div className="card-header">
         <span className={`status-badge ${getStatusClass(task.status)}`}>
           {task.status.replace('_', ' ')}

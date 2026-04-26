@@ -261,11 +261,14 @@ button {
 /* Task Card Enhanced */
 .task-card {
   padding: var(--spacing-lg);
-  cursor: pointer;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.task-card:hover {
+.task-card-clickable {
+  cursor: pointer;
+}
+
+.task-card-clickable:hover {
   background: var(--color-surface-hover);
   transform: translateY(-2px);
   border-color: rgba(255, 255, 255, 0.1);
