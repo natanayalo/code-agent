@@ -31,7 +31,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (secret: string) => {
     await api.auth.login(secret);
-    setAuthenticated(true);
+    // Verify that the session cookie was actually stored and accepted
+    const { authenticated: verified } = await api.auth.status();
+    setAuthenticated(verified);
+
+    if (!verified) {
+      throw new Error(
+        'Session could not be established. Please ensure your browser accepts cookies ' +
+          'and you are using a secure connection if required.'
+      );
+    }
   };
 
   const logout = async () => {
