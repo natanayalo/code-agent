@@ -1,27 +1,67 @@
 import React from 'react';
-import { Play, Clock } from 'lucide-react';
+import { Clock, Terminal, Github, GitBranch } from 'lucide-react';
+import { TaskSummarySnapshot, TaskStatus } from '../types/task';
 
 interface TaskCardProps {
-  status: string;
-  title: string;
-  description: string;
-  commandsRun: number;
+  task: TaskSummarySnapshot;
+  onClick?: () => void;
 }
 
-export function TaskCard({ status, title, description, commandsRun }: TaskCardProps) {
+export function TaskCard({ task, onClick }: TaskCardProps) {
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getStatusClass = (status: TaskStatus) => {
+    switch (status) {
+      case TaskStatus.IN_PROGRESS: return 'status-running';
+      case TaskStatus.COMPLETED: return 'status-success';
+      case TaskStatus.FAILED:
+      case TaskStatus.CANCELLED: return 'status-error';
+      default: return 'status-pending';
+    }
+  };
+
   return (
-    <div className="glass-panel task-card">
+    <div className="glass-panel task-card" onClick={onClick}>
       <div className="card-header">
-        <span className="status-badge">{status}</span>
-        <Clock size={16} color="var(--color-text-muted)" />
+        <span className={`status-badge ${getStatusClass(task.status)}`}>
+          {task.status.replace('_', ' ')}
+        </span>
+        <div className="task-time">
+          <Clock size={12} />
+          <span>{formatDate(task.created_at)}</span>
+        </div>
       </div>
-      <h3 className="task-title">{title}</h3>
-      <p className="task-description">{description}</p>
+
+      <h3 className="task-title-text">{task.task_text}</h3>
+
+      <div className="task-details">
+        {task.repo_url && (
+          <div className="detail-item">
+            <Github size={14} />
+            <span className="truncate">{task.repo_url.split('/').pop()}</span>
+          </div>
+        )}
+        {task.branch && (
+          <div className="detail-item">
+            <GitBranch size={14} />
+            <span>{task.branch}</span>
+          </div>
+        )}
+      </div>
+
       <div className="card-footer">
         <div className="task-meta">
-          <Play size={14} />
-          <span>{commandsRun} commands run</span>
+          <Terminal size={14} />
+          <span>{task.latest_run_worker || task.chosen_worker || 'auto'}</span>
         </div>
+        {task.latest_run_status && (
+          <div className={`run-status ${task.latest_run_status}`}>
+            {task.latest_run_status}
+          </div>
+        )}
       </div>
     </div>
   );
