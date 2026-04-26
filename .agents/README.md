@@ -31,6 +31,7 @@ Use `.agents/` to make repeated development work more consistent:
 - `.agents/skills/start-task/SKILL.md`
 - `.agents/skills/address-review/SKILL.md`
 - `.agents/skills/db-schema/SKILL.md`
+- `.agents/skills/dashboard/SKILL.md`
 - `.agents/workflows/start-task.md`
 - `.agents/workflows/address-review.md`
 - `.agents/workflows/schema-change.md`

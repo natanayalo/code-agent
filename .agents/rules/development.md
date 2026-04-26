@@ -20,6 +20,8 @@ Every non-trivial task must follow this sequence:
 3. Implement the smallest working slice.
 4. Add or update tests at the right level.
 5. Run targeted verification.
+    - For Python: `pytest <path>` and `pre-commit run --files <changed files>`.
+    - For Dashboard: `npm run test:run` and `npm run lint` in `dashboard/`.
 6. Summarize what changed, what was verified, and any follow-ups.
 
 ## Scope control
