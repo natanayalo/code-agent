@@ -26,6 +26,23 @@ def submit_task(
     return task_snapshot
 
 
+@router.get("", response_model=list[TaskSnapshot])
+def list_tasks(
+    session_id: str | None = None,
+    status_filter: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> list[TaskSnapshot]:
+    """List tasks with optional filtering and pagination."""
+    return task_service.list_tasks(
+        session_id=session_id,
+        status=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.get("/{task_id}", response_model=TaskSnapshot)
 def get_task(
     task_id: str,

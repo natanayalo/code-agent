@@ -137,6 +137,21 @@ class SessionRepository:
         )
         return list(self.session.scalars(statement))
 
+    def list_all(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ConversationSession]:
+        """List all sessions with pagination."""
+        statement = (
+            select(ConversationSession)
+            .order_by(ConversationSession.created_at.desc())
+            .limit(max(1, limit))
+            .offset(max(0, offset))
+        )
+        return list(self.session.scalars(statement))
+
     def set_active_task(
         self,
         *,
@@ -275,6 +290,25 @@ class TaskRepository:
         statement = (
             select(Task).where(Task.session_id == session_id).order_by(Task.created_at.asc())
         )
+        return list(self.session.scalars(statement))
+
+    def list_all(
+        self,
+        *,
+        session_id: str | None = None,
+        status: str | TaskStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Task]:
+        """List all tasks with optional filtering and pagination."""
+        statement = select(Task).order_by(Task.created_at.desc())
+
+        if session_id:
+            statement = statement.where(Task.session_id == session_id)
+        if status:
+            statement = statement.where(Task.status == cast(TaskStatus, status))
+
+        statement = statement.limit(max(1, limit)).offset(max(0, offset))
         return list(self.session.scalars(statement))
 
     def set_route(

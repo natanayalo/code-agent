@@ -462,3 +462,57 @@ def test_project_memory_upsert_recovers_from_duplicate_insert_race(
         assert updated_entry.id == existing_entry.id
         assert stored_entry is not None
         assert stored_entry.value == {"docker": "updated after retry"}
+
+
+def test_repository_listing_with_pagination(session_factory) -> None:
+    """Repositories should support listing all records with pagination and filtering."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+
+        user = user_repo.create(external_user_id="list:user", display_name="List User")
+
+        # Create multiple sessions
+        sessions = []
+        for i in range(10):
+            s = session_repo.create(
+                user_id=user.id,
+                channel="http",
+                external_thread_id=f"thread-{i}",
+            )
+            sessions.append(s)
+
+            # Create a task for each session
+            task_repo.create(
+                session_id=s.id,
+                task_text=f"task {i}",
+                status=TaskStatus.COMPLETED if i % 2 == 0 else TaskStatus.FAILED,
+            )
+
+        # Test session listing
+        all_sessions = session_repo.list_all(limit=5, offset=0)
+        assert len(all_sessions) == 5
+        # Should be ordered by created_at desc
+        assert all_sessions[0].external_thread_id == "thread-9"
+
+        second_page_sessions = session_repo.list_all(limit=5, offset=5)
+        assert len(second_page_sessions) == 5
+        assert second_page_sessions[0].external_thread_id == "thread-4"
+
+        # Test task listing
+        all_tasks = task_repo.list_all(limit=5, offset=0)
+        assert len(all_tasks) == 5
+        # Should be ordered by created_at desc
+        assert all_tasks[0].task_text == "task 9"
+
+        # Test task filtering by session
+        session_tasks = task_repo.list_all(session_id=sessions[0].id)
+        assert len(session_tasks) == 1
+        assert session_tasks[0].task_text == "task 0"
+
+        # Test task filtering by status
+        completed_tasks = task_repo.list_all(status=TaskStatus.COMPLETED)
+        assert len(completed_tasks) == 5
+        for t in completed_tasks:
+            assert t.status is TaskStatus.COMPLETED

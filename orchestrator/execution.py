@@ -390,6 +390,20 @@ class TaskTimelineEventSnapshot(ExecutionModel):
     created_at: datetime
 
 
+class SessionSnapshot(ExecutionModel):
+    """The persisted session view returned by session listing/detail endpoints."""
+
+    session_id: str
+    user_id: str
+    channel: str
+    external_thread_id: str
+    active_task_id: str | None = None
+    status: str
+    last_seen_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class TaskSnapshot(ExecutionModel):
     """The persisted task view returned by POST/GET task endpoints."""
 
@@ -1307,6 +1321,71 @@ class TaskExecutionService:
                     )
                     for event in task.timeline_events
                 ],
+            )
+
+    def list_tasks(
+        self,
+        *,
+        session_id: str | None = None,
+        status: str | TaskStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[TaskSnapshot]:
+        """List tasks with optional filtering and pagination."""
+        with session_scope(self.session_factory) as session:
+            task_repo = TaskRepository(session)
+            tasks = task_repo.list_all(
+                session_id=session_id,
+                status=status,
+                limit=limit,
+                offset=offset,
+            )
+            # We use get_task for each to ensure full snapshot enrichment (runs, timeline)
+            # Optimization: could be done in a batch if performance becomes an issue.
+            return [t for t in (self.get_task(task.id) for task in tasks) if t is not None]
+
+    def list_sessions(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[SessionSnapshot]:
+        """List sessions with pagination."""
+        with session_scope(self.session_factory) as session:
+            session_repo = SessionRepository(session)
+            sessions = session_repo.list_all(limit=limit, offset=offset)
+            return [
+                SessionSnapshot(
+                    session_id=s.id,
+                    user_id=s.user_id,
+                    channel=s.channel,
+                    external_thread_id=s.external_thread_id,
+                    active_task_id=s.active_task_id,
+                    status=_enum_value(s.status) or "active",
+                    last_seen_at=s.last_seen_at,
+                    created_at=s.created_at,
+                    updated_at=s.updated_at,
+                )
+                for s in sessions
+            ]
+
+    def get_session(self, session_id: str) -> SessionSnapshot | None:
+        """Load the current persisted session state."""
+        with session_scope(self.session_factory) as session:
+            session_repo = SessionRepository(session)
+            s = session_repo.get(session_id)
+            if s is None:
+                return None
+            return SessionSnapshot(
+                session_id=s.id,
+                user_id=s.user_id,
+                channel=s.channel,
+                external_thread_id=s.external_thread_id,
+                active_task_id=s.active_task_id,
+                status=_enum_value(s.status) or "active",
+                last_seen_at=s.last_seen_at,
+                created_at=s.created_at,
+                updated_at=s.updated_at,
             )
 
     def apply_task_approval_decision(
