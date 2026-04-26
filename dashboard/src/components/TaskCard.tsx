@@ -36,8 +36,10 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
     try {
       const url = new URL(task.repo_url);
       const pathParts = url.pathname.split('/').filter(Boolean);
-      return pathParts.length > 0 ? pathParts[pathParts.length - 1] : 'Unknown Repo';
-    } catch (e) {
+      if (pathParts.length === 0) return 'Unknown Repo';
+      const lastPart = pathParts[pathParts.length - 1];
+      return lastPart.replace(/\.git$/i, '');
+    } catch {
       return 'Unknown Repo';
     }
   }, [task.repo_url]);
