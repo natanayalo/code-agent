@@ -27,7 +27,7 @@ export function Sidebar() {
         <div className="brand-icon">
           <Shield size={24} color="var(--color-accent-primary)" />
         </div>
-        <span className="brand-name gradient-text">Antigravity</span>
+        <span className="brand-name gradient-text">Code Agent</span>
       </div>
 
       <nav className="sidebar-nav">
