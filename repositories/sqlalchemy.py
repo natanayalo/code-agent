@@ -299,19 +299,26 @@ class TaskRepository:
         status: str | TaskStatus | None = None,
         limit: int = 50,
         offset: int = 0,
+        preload_history: bool = True,
     ) -> list[Task]:
         """List all tasks with optional filtering and pagination.
 
         Uses selectinload to eagerly load related runs, artifacts, and timeline events (T-131).
+        If preload_history is False, only the basic Task object is fetched (optimized for listing).
         """
-        statement = (
-            select(Task)
-            .options(
+        statement = select(Task).order_by(Task.created_at.desc())
+
+        if preload_history:
+            statement = statement.options(
                 selectinload(Task.timeline_events),
                 selectinload(Task.worker_runs).selectinload(WorkerRun.artifacts),
             )
-            .order_by(Task.created_at.desc())
-        )
+        else:
+            # For summary listing, we only need the latest run info.
+            # To avoid N+1 when accessing task.worker_runs in map_to_summary,
+            # we still use selectinload for worker_runs but WITHOUT artifacts or timeline.
+            # This is a compromise: it fetches all run objects but not their full detail.
+            statement = statement.options(selectinload(Task.worker_runs))
 
         if session_id:
             statement = statement.where(Task.session_id == session_id)

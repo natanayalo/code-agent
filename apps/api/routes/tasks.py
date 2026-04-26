@@ -12,6 +12,7 @@ from orchestrator.execution import (
     TaskReplayRequest,
     TaskSnapshot,
     TaskSubmission,
+    TaskSummarySnapshot,
 )
 
 router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(require_api_auth)])
@@ -27,15 +28,15 @@ def submit_task(
     return task_snapshot
 
 
-@router.get("", response_model=list[TaskSnapshot])
+@router.get("", response_model=list[TaskSummarySnapshot])
 def list_tasks(
     session_id: str | None = None,
     status_filter: TaskStatus | None = None,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     task_service: TaskExecutionService = Depends(get_task_service),
-) -> list[TaskSnapshot]:
-    """List tasks with optional filtering and pagination."""
+) -> list[TaskSummarySnapshot]:
+    """List tasks with optional filtering and pagination using summary views."""
     return task_service.list_tasks(
         session_id=session_id,
         status=status_filter,

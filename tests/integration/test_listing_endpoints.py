@@ -82,6 +82,10 @@ def test_list_tasks_returns_paginated_tasks(client: TestClient) -> None:
     payload = response.json()
     assert len(payload) == 3
     assert payload[0]["task_text"] == "task 4"  # Descending order
+    # Verify summary view lacks full history (T-131 optimization)
+    assert "timeline" not in payload[0]
+    assert "latest_run" not in payload[0]
+    assert "latest_run_id" in payload[0]
 
 
 def test_list_tasks_filters_by_session_and_status(client: TestClient) -> None:
@@ -174,3 +178,27 @@ def test_get_session_returns_404_for_missing_session(client: TestClient) -> None
     response = client.get("/sessions/session-missing")
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
+
+
+def test_get_task_returns_detailed_snapshot(client: TestClient) -> None:
+    """GET /tasks/{id} should return a full task snapshot with timeline."""
+    resp = client.post(
+        "/tasks",
+        json={
+            "task_text": "detailed task",
+            "session": {
+                "channel": "http",
+                "external_user_id": "test-user",
+                "external_thread_id": "thread-detail",
+            },
+        },
+    )
+    task_id = resp.json()["task_id"]
+
+    response = client.get(f"/tasks/{task_id}")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["task_id"] == task_id
+    assert "timeline" in payload
+    # In StaticWorker tests, there might be events created during submission
+    assert isinstance(payload["timeline"], list)

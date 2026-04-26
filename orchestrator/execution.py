@@ -406,8 +406,8 @@ class SessionSnapshot(ExecutionModel):
     updated_at: datetime
 
 
-class TaskSnapshot(ExecutionModel):
-    """The persisted task view returned by POST/GET task endpoints."""
+class TaskSummarySnapshot(ExecutionModel):
+    """A lightweight task view for listing endpoints (T-131)."""
 
     task_id: str
     session_id: str
@@ -415,11 +415,19 @@ class TaskSnapshot(ExecutionModel):
     task_text: str
     repo_url: str | None = None
     branch: str | None = None
-    priority: int
+    priority: int = 0
     chosen_worker: str | None = None
     route_reason: str | None = None
     created_at: datetime
     updated_at: datetime
+    latest_run_id: str | None = None
+    latest_run_status: str | None = None
+    latest_run_worker: str | None = None
+
+
+class TaskSnapshot(TaskSummarySnapshot):
+    """The full task view with execution history and timeline."""
+
     latest_run: WorkerRunSnapshot | None = None
     timeline: list[TaskTimelineEventSnapshot] = Field(default_factory=list)
 
@@ -1256,7 +1264,7 @@ class TaskExecutionService:
             )
 
     def get_task(self, task_id: str) -> TaskSnapshot | None:
-        """Load the current persisted task state and its latest worker run."""
+        """Load the current persisted task state with full timeline and latest run (T-131)."""
         with session_scope(self.session_factory) as session:
             statement = (
                 select(Task)
@@ -1278,8 +1286,8 @@ class TaskExecutionService:
         status: str | TaskStatus | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[TaskSnapshot]:
-        """List tasks with optional filtering and pagination."""
+    ) -> list[TaskSummarySnapshot]:
+        """List tasks with optional filtering and pagination using summary views (T-131)."""
         with session_scope(self.session_factory) as session:
             task_repo = TaskRepository(session)
             tasks = task_repo.list_all(
@@ -1287,8 +1295,10 @@ class TaskExecutionService:
                 status=status,
                 limit=limit,
                 offset=offset,
+                # Optimization: do not load full timeline/runs history for listing
+                preload_history=False,
             )
-            return [self._map_task_to_snapshot(task) for task in tasks]
+            return [self._map_task_to_summary(task) for task in tasks]
 
     def list_sessions(
         self,
@@ -1312,9 +1322,10 @@ class TaskExecutionService:
             return self._map_session_to_snapshot(s)
 
     def _map_task_to_snapshot(self, task: Task) -> TaskSnapshot:
-        """Map a Task database model to a TaskSnapshot Pydantic model (T-131)."""
+        """Map a Task database model to a full TaskSnapshot Pydantic model (T-131)."""
+        summary = self._map_task_to_summary(task)
         latest_run_snapshot: WorkerRunSnapshot | None = None
-        # Assuming worker_runs is preloaded; find the latest run by started_at.
+
         if task.worker_runs:
             latest_run = max(task.worker_runs, key=lambda r: r.started_at)
             latest_run_snapshot = WorkerRunSnapshot(
@@ -1346,17 +1357,7 @@ class TaskExecutionService:
             )
 
         return TaskSnapshot(
-            task_id=task.id,
-            session_id=task.session_id,
-            status=_enum_value(task.status) or TaskStatus.FAILED.value,
-            task_text=task.task_text,
-            repo_url=task.repo_url,
-            branch=task.branch,
-            priority=task.priority,
-            chosen_worker=_enum_value(task.chosen_worker),
-            route_reason=task.route_reason,
-            created_at=task.created_at,
-            updated_at=task.updated_at,
+            **summary.model_dump(),
             latest_run=latest_run_snapshot,
             timeline=[
                 TaskTimelineEventSnapshot(
@@ -1369,6 +1370,39 @@ class TaskExecutionService:
                 )
                 for event in task.timeline_events
             ],
+        )
+
+    def _map_task_to_summary(self, task: Task) -> TaskSummarySnapshot:
+        """Map a Task database model to a lightweight TaskSummarySnapshot (T-131)."""
+        latest_run_id = None
+        latest_run_status = None
+        latest_run_worker = None
+
+        if task.worker_runs:
+            # Note: if not preloaded, this triggers a lazy load of all runs.
+            # TaskRepository.list_all(preload_history=False) will only load basic Task.
+            # To be truly efficient, we should join the latest run ID in the query.
+            # For now, we optimize by at least avoiding the full timeline load in list view.
+            latest_run = max(task.worker_runs, key=lambda r: r.started_at)
+            latest_run_id = latest_run.id
+            latest_run_status = _enum_value(latest_run.status)
+            latest_run_worker = _enum_value(latest_run.worker_type)
+
+        return TaskSummarySnapshot(
+            task_id=task.id,
+            session_id=task.session_id,
+            status=_enum_value(task.status) or TaskStatus.FAILED.value,
+            task_text=task.task_text,
+            repo_url=task.repo_url,
+            branch=task.branch,
+            priority=task.priority,
+            chosen_worker=_enum_value(task.chosen_worker),
+            route_reason=task.route_reason,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+            latest_run_id=latest_run_id,
+            latest_run_status=latest_run_status,
+            latest_run_worker=latest_run_worker,
         )
 
     def _map_session_to_snapshot(self, s: ConversationSession) -> SessionSnapshot:
