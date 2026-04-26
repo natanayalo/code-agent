@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Clock, Terminal, Github, GitBranch } from 'lucide-react';
 import { TaskSummarySnapshot, TaskStatus } from '../types/task';
 
@@ -31,6 +31,16 @@ const getStatusClass = (status: TaskStatus) => {
 };
 
 export function TaskCard({ task, onClick }: TaskCardProps) {
+  const repoName = useMemo(() => {
+    if (!task.repo_url) return 'Unknown Repo';
+    try {
+      const url = new URL(task.repo_url);
+      const pathParts = url.pathname.split('/').filter(Boolean);
+      return pathParts.length > 0 ? pathParts[pathParts.length - 1] : 'Unknown Repo';
+    } catch (e) {
+      return 'Unknown Repo';
+    }
+  }, [task.repo_url]);
 
   return (
     <div className={`glass-panel task-card ${onClick ? 'task-card-clickable' : ''}`} onClick={onClick}>
@@ -50,7 +60,7 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
         {task.repo_url && (
           <div className="detail-item">
             <Github size={14} />
-            <span className="truncate">{task.repo_url.replace(/\/$/, '').split('/').pop()}</span>
+            <span className="truncate">{repoName}</span>
           </div>
         )}
         {task.branch && (
