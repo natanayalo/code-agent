@@ -35,11 +35,11 @@ export function TaskBoard() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   const loadTasks = useCallback(async (isAutoRefresh = false) => {
-    if (isPollingRef.current || !isMountedRef.current) return;
-
-    if (!isAutoRefresh) {
+    if (!isAutoRefresh && isMountedRef.current) {
       setLoading(true);
     }
+
+    if (isPollingRef.current || !isMountedRef.current) return;
 
     isPollingRef.current = true;
     try {
@@ -93,7 +93,11 @@ export function TaskBoard() {
     });
 
     Object.values(groups).forEach(group => {
-      group.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+      group.sort((a, b) => {
+        const dateA = a.created_at || '';
+        const dateB = b.created_at || '';
+        return dateB > dateA ? 1 : dateB < dateA ? -1 : 0;
+      });
     });
 
     return groups;
