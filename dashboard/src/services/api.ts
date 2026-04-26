@@ -29,14 +29,17 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 
   if (!response.ok) {
     let errorMessage = `API Error: ${response.status} ${response.statusText}`;
+    const contentType = response.headers.get('content-type') || '';
     try {
-      const errorData = await response.json();
-      if (errorData && errorData.detail) {
-        errorMessage = typeof errorData.detail === 'string'
-          ? errorData.detail
-          : JSON.stringify(errorData.detail);
+      if (contentType.includes('application/json')) {
+        const errorData = await response.json();
+        if (errorData && errorData.detail) {
+          errorMessage = typeof errorData.detail === 'string'
+            ? errorData.detail
+            : JSON.stringify(errorData.detail);
+        }
       }
-    } catch (e) {
+    } catch {
       // Fallback to default message if body is not JSON or doesn't have detail
     }
     throw new Error(errorMessage);
@@ -44,6 +47,11 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 
   if (response.status === 204) {
     return null;
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error(`Expected JSON response but received content-type: ${contentType || 'unknown'}`);
   }
 
   try {

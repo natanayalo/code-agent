@@ -30,18 +30,25 @@ const getStatusClass = (status: TaskStatus) => {
   }
 };
 
+const deriveRepoName = (repoUrl: string) => {
+  try {
+    const url = new URL(repoUrl);
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    if (pathParts.length === 0) return 'Unknown Repo';
+    return pathParts[pathParts.length - 1].replace(/\.git$/i, '');
+  } catch {
+    // Support common non-URL git formats like git@github.com:owner/repo.git
+    const normalized = repoUrl.trim().replace(/[:/]+$/, '');
+    const pathParts = normalized.split(/[/:]/).filter(Boolean);
+    if (pathParts.length === 0) return 'Unknown Repo';
+    return pathParts[pathParts.length - 1].replace(/\.git$/i, '') || 'Unknown Repo';
+  }
+};
+
 export function TaskCard({ task, onClick }: TaskCardProps) {
   const repoName = useMemo(() => {
     if (!task.repo_url) return 'Unknown Repo';
-    try {
-      const url = new URL(task.repo_url);
-      const pathParts = url.pathname.split('/').filter(Boolean);
-      if (pathParts.length === 0) return 'Unknown Repo';
-      const lastPart = pathParts[pathParts.length - 1];
-      return lastPart.replace(/\.git$/i, '');
-    } catch {
-      return 'Unknown Repo';
-    }
+    return deriveRepoName(task.repo_url);
   }, [task.repo_url]);
 
   return (
