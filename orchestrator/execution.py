@@ -25,8 +25,9 @@ from uuid import uuid4
 from anyio import to_thread
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from db.base import utc_now
 from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
@@ -36,6 +37,7 @@ from db.models import (
 from db.models import (
     Task,
     User,
+    WorkerRun,
 )
 from orchestrator.checkpoints import create_async_sqlite_checkpointer
 from orchestrator.graph import build_orchestrator_graph
@@ -1256,15 +1258,6 @@ class TaskExecutionService:
     def get_task(self, task_id: str) -> TaskSnapshot | None:
         """Load the current persisted task state and its latest worker run."""
         with session_scope(self.session_factory) as session:
-            # Use preloading even for single task to ensure enrichment
-            # Find the specific task if it exists (repo.get is simpler but lacks preloading)
-            # Actually, repo.get(task_id) is simpler but we want preloading.
-            # Let's just use a select with preloading here directly or update repo.get.
-            from sqlalchemy import select
-            from sqlalchemy.orm import selectinload
-
-            from db.models import Task, WorkerRun
-
             statement = (
                 select(Task)
                 .where(Task.id == task_id)
@@ -1321,11 +1314,9 @@ class TaskExecutionService:
     def _map_task_to_snapshot(self, task: Task) -> TaskSnapshot:
         """Map a Task database model to a TaskSnapshot Pydantic model (T-131)."""
         latest_run_snapshot: WorkerRunSnapshot | None = None
-        # Assuming worker_runs is preloaded and sorted by created_at in model or here
+        # Assuming worker_runs is preloaded; find the latest run by started_at.
         if task.worker_runs:
-            # Sort by started_at desc to find latest
-            sorted_runs = sorted(task.worker_runs, key=lambda r: r.started_at)
-            latest_run = sorted_runs[-1]
+            latest_run = max(task.worker_runs, key=lambda r: r.started_at)
             latest_run_snapshot = WorkerRunSnapshot(
                 run_id=latest_run.id,
                 session_id=latest_run.session_id,
