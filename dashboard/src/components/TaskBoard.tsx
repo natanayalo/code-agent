@@ -32,6 +32,8 @@ export function TaskBoard() {
   const isPollingRef = useRef(false);
   const isMountedRef = useRef(true);
 
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
   const loadTasks = useCallback(async (isAutoRefresh = false) => {
     if (isPollingRef.current || !isMountedRef.current) return;
 
@@ -91,7 +93,7 @@ export function TaskBoard() {
     });
 
     Object.values(groups).forEach(group => {
-      group.sort((a, b) => b.created_at.localeCompare(a.created_at));
+      group.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
     });
 
     return groups;
@@ -115,13 +117,23 @@ export function TaskBoard() {
             <RefreshCw size={18} className={loading ? 'spin' : ''} />
           </button>
           <div className="view-toggle">
-            <button className="toggle-button active"><LayoutGrid size={18} /></button>
-            <button className="toggle-button"><List size={18} /></button>
+            <button
+              className={`toggle-button ${viewMode === 'grid' ? 'active' : ''}`}
+              onClick={() => setViewMode('grid')}
+            >
+              <LayoutGrid size={18} />
+            </button>
+            <button
+              className={`toggle-button ${viewMode === 'list' ? 'active' : ''}`}
+              onClick={() => setViewMode('list')}
+            >
+              <List size={18} />
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="task-board">
+      <div className={`task-board view-${viewMode}`}>
         {COLUMNS.map(column => {
           const columnTasks = groupedTasks[column.id] || [];
           return (

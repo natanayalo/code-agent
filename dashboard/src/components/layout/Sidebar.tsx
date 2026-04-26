@@ -45,6 +45,12 @@ export function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
+        {import.meta.env.DEV && (
+          <div className="dev-warning">
+            <span className="warning-pill">DEV MODE</span>
+            <p className="warning-text">Sensitive data stored in localStorage for convenience. Use HttpOnly cookies in production.</p>
+          </div>
+        )}
         <div className="user-profile">
           <div className="user-avatar">OP</div>
           <div className="user-info">
