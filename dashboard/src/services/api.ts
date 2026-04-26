@@ -5,9 +5,11 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000
 const API_SECRET_HEADER = 'X-Agent-Secret';
 
 // For development, we can store the secret in localStorage or use an env var.
-// SECURITY NOTE: Storing sensitive credentials like AGENT_SECRET in localStorage
-// makes them vulnerable to XSS attacks. For a production-grade implementation,
-// consider using HttpOnly cookies or a dedicated OAuth2/OIDC flow to manage sessions.
+// SECURITY NOTE:
+// 1. Storing sensitive credentials in localStorage makes them vulnerable to XSS.
+// 2. Environment variables prefixed with VITE_ are embedded in the client bundle.
+// This implementation is for DEVELOPMENT ONLY. For production, use HttpOnly cookies
+// or an OAuth2/OIDC flow as planned in Milestone 13.
 const getApiSecret = () => localStorage.getItem('AGENT_SECRET') || import.meta.env.VITE_API_SECRET || '';
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {

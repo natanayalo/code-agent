@@ -48,7 +48,10 @@ export function Sidebar() {
         {import.meta.env.DEV && (
           <div className="dev-warning">
             <span className="warning-pill">DEV MODE</span>
-            <p className="warning-text">Sensitive data stored in localStorage for convenience. Use HttpOnly cookies in production.</p>
+            <p className="warning-text">
+              <strong>Security Alert:</strong> LocalStorage & VITE_ env vars are insecure for secrets.
+              Production must use HttpOnly cookies/OIDC (Milestone 13).
+            </p>
           </div>
         )}
         <div className="user-profile">
