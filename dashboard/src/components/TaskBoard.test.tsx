@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { TaskBoard } from './TaskBoard';
 import { TaskStatus } from '../types/task';
@@ -146,12 +146,12 @@ describe('TaskBoard', () => {
       />
     );
 
-    const taskElements = screen.getAllByRole('heading', { level: 3 });
-    // "New Task" should be first in its group
-    const taskTexts = taskElements.map(el => el.textContent);
-    expect(taskTexts).toContain('New Task');
-    expect(taskTexts).toContain('Old Task');
-    // The grouping logic sorts within the group, but we have multiple groups.
-    // In the "Completed" column, New Task should appear before Old Task.
+    const completedColumn = screen.getByText('Completed').closest('.board-column')!;
+    const taskElements = within(completedColumn as HTMLElement).getAllByRole('heading', { level: 3 });
+    const taskTexts = taskElements.map(el => el.textContent).slice(1);
+
+    // In the "Completed" column, New Task should appear before Old Task (descending sort by created_at)
+    expect(taskTexts[0]).toBe('New Task');
+    expect(taskTexts[1]).toBe('Old Task');
   });
 });
