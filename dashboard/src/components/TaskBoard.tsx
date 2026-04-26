@@ -55,11 +55,7 @@ export function TaskBoard() {
     });
 
     Object.values(groups).forEach(group => {
-      group.sort((a, b) => {
-        const dateA = a.created_at || '';
-        const dateB = b.created_at || '';
-        return dateB > dateA ? 1 : dateB < dateA ? -1 : 0;
-      });
+      group.sort((a, b) => b.created_at.localeCompare(a.created_at));
     });
 
     return groups;

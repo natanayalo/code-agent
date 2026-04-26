@@ -53,11 +53,11 @@ export const api = {
     try {
       return (await fetchWithAuth('/tasks')) || [];
     } catch (error) {
-      console.warn('Failed to fetch tasks from API', error);
       if (import.meta.env.DEV) {
+        console.warn('Failed to fetch tasks from API, falling back to mock data', error);
         return MOCK_TASKS;
       }
-      return [];
+      throw error;
     }
   },
 
@@ -65,11 +65,11 @@ export const api = {
     try {
       return (await fetchWithAuth('/sessions')) || [];
     } catch (error) {
-      console.warn('Failed to fetch sessions from API', error);
       if (import.meta.env.DEV) {
+        console.warn('Failed to fetch sessions from API, falling back to mock data', error);
         return MOCK_SESSIONS;
       }
-      return [];
+      throw error;
     }
   },
 };
