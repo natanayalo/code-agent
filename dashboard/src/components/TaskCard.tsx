@@ -11,7 +11,13 @@ const formatDate = (dateString: string) => {
   if (!dateString) return 'N/A';
   const date = new Date(dateString);
   if (isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+
+  return isToday
+    ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
 const getStatusClass = (status: TaskStatus) => {

@@ -1,11 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '../services/api';
 import { TaskSummarySnapshot, TaskStatus } from '../types/task';
 import { TaskCard } from './TaskCard';
 import { RefreshCw, LayoutGrid, List } from 'lucide-react';
-
-const REFRESH_INTERVAL_MS = 30000;
 
 const COLUMNS = [
   {
@@ -25,20 +21,16 @@ const COLUMNS = [
   },
 ];
 
-export function TaskBoard() {
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+interface TaskBoardProps {
+  tasks: TaskSummarySnapshot[];
+  loading: boolean;
+  isFetching: boolean;
+  error: unknown;
+  refetch: () => void;
+}
 
-  const {
-    data: tasks = [],
-    isLoading: loading,
-    isFetching,
-    error,
-    refetch
-  } = useQuery({
-    queryKey: ['tasks'],
-    queryFn: () => api.listTasks(),
-    refetchInterval: REFRESH_INTERVAL_MS,
-  });
+export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBoardProps) {
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   const groupedTasks = useMemo(() => {
     const groups: Record<string, TaskSummarySnapshot[]> = {
