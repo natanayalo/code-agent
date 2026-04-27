@@ -92,7 +92,7 @@ export function SessionsPage() {
 
               <div className="session-card-footer">
                 <span className="timestamp">
-                  Created: {new Date(session.created_at).toLocaleString()}
+                  Created: {session.created_at ? new Date(session.created_at).toLocaleString() : 'N/A'}
                 </span>
               </div>
             </div>

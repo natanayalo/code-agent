@@ -250,6 +250,33 @@ describe('SessionsPage', () => {
     expect(unknownBadge.className).toContain('status-unknown-status');
   });
 
+  it('handles missing created_at by displaying N/A', async () => {
+    const mockSessions = [
+      {
+        session_id: 's-no-date',
+        user_id: 'u3',
+        channel: 'http',
+        external_thread_id: 't3',
+        status: SessionStatus.ACTIVE,
+        // @ts-expect-error: testing missing created_at
+        created_at: null,
+        updated_at: new Date().toISOString(),
+      },
+    ];
+
+    vi.mocked(api.listSessions).mockResolvedValue(mockSessions);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SessionsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText('Created: N/A')).toBeInTheDocument();
+  });
+
   it('retries fetching sessions when Retry button is clicked', async () => {
     vi.mocked(api.listSessions).mockRejectedValueOnce(new Error('First fail'));
 
