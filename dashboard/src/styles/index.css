@@ -33,6 +33,12 @@ button {
   color: inherit;
 }
 
+.truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Layout Architecture */
 .dashboard-app-container {
   display: flex;

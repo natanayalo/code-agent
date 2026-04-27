@@ -8,8 +8,17 @@ import { Clock, MessageSquare, User, Activity } from 'lucide-react';
 const ID_PREVIEW_LENGTH = 8;
 const SESSIONS_REFETCH_INTERVAL_MS = 30000;
 
-function formatIdPreview(id: string): string {
+function formatIdPreview(id: string | undefined | null): string {
+  if (!id) return '';
   return id.length > ID_PREVIEW_LENGTH ? `${id.substring(0, ID_PREVIEW_LENGTH)}...` : id;
+}
+
+function getStatusClass(status: string): string {
+  const s = status.toLowerCase();
+  if (s === 'active') return 'running';
+  if (s === 'closed' || s === 'completed') return 'success';
+  if (s === 'failed') return 'error';
+  return s;
 }
 
 export function SessionsPage() {
@@ -59,7 +68,7 @@ export function SessionsPage() {
           {sessions.map((session: SessionSnapshot) => (
             <div key={session.session_id} className="session-card card">
               <div className="session-card-header">
-                <div className={`status-badge status-${session.status.toLowerCase()}`}>
+                <div className={`status-badge status-${getStatusClass(session.status)}`}>
                   {session.status}
                 </div>
                 <span className="session-id">ID: {formatIdPreview(session.session_id)}</span>
@@ -68,7 +77,7 @@ export function SessionsPage() {
               <div className="session-card-body">
                 <div className="session-info-item">
                   <User size={16} />
-                  <span>{session.user_id}</span>
+                  <span className="truncate">{session.user_id}</span>
                 </div>
                 <div className="session-info-item">
                   <Activity size={16} />
@@ -76,7 +85,7 @@ export function SessionsPage() {
                 </div>
                 <div className="session-info-item">
                   <MessageSquare size={16} />
-                  <span>Thread: {session.external_thread_id}</span>
+                  <span className="truncate">Thread: {session.external_thread_id}</span>
                 </div>
                 {session.active_task_id && (
                   <div className="session-info-item active-task">

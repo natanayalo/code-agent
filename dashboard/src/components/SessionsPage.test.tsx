@@ -171,4 +171,36 @@ describe('SessionsPage', () => {
 
     expect(api.listSessions).toHaveBeenCalledTimes(2);
   });
+
+  it('handles sessions with missing or null IDs and optional fields', async () => {
+    const mockSessions = [
+      {
+        session_id: 's-null-task',
+        user_id: 'u-long-identifier-that-should-be-truncated-in-the-ui-to-prevent-layout-issues',
+        channel: 'http',
+        external_thread_id: 'thread-long-identifier-that-should-also-be-truncated',
+        active_task_id: null,
+        status: SessionStatus.CLOSED,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ];
+
+    vi.mocked(api.listSessions).mockResolvedValue(mockSessions);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SessionsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText(/u-long-identifier/i)).toBeInTheDocument();
+    // Verify that Active Task label is not shown when task_id is null
+    expect(screen.queryByText(/Active Task:/)).not.toBeInTheDocument();
+    // Verify status class mapping (closed -> success)
+    const badge = screen.getByText('closed');
+    expect(badge.className).toContain('status-success');
+  });
 });
