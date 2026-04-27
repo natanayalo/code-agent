@@ -26,6 +26,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from db.enums import (
     ArtifactType,
+    HumanInteractionStatus,
+    HumanInteractionType,
     SessionStatus,
     TaskStatus,
     TimelineEventType,
@@ -42,6 +44,10 @@ WORKER_TYPE_ENUM = build_sql_enum(WorkerType, name="worker_type")
 WORKER_RUN_STATUS_ENUM = build_sql_enum(WorkerRunStatus, name="worker_run_status")
 ARTIFACT_TYPE_ENUM = build_sql_enum(ArtifactType, name="artifact_type")
 TIMELINE_EVENT_TYPE_ENUM = build_sql_enum(TimelineEventType, name="timeline_event_type")
+HUMAN_INTERACTION_TYPE_ENUM = build_sql_enum(HumanInteractionType, name="human_interaction_type")
+HUMAN_INTERACTION_STATUS_ENUM = build_sql_enum(
+    HumanInteractionStatus, name="human_interaction_status"
+)
 
 
 class EncryptedJSON(TypeDecorator):
@@ -245,6 +251,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     session: Mapped[Session] = relationship(back_populates="tasks")
     worker_runs: Mapped[list[WorkerRun]] = relationship(back_populates="task")
     inbound_deliveries: Mapped[list[InboundDelivery]] = relationship(back_populates="task")
+    human_interactions: Mapped[list[HumanInteraction]] = relationship(back_populates="task")
     timeline_events: Mapped[list[TaskTimelineEvent]] = relationship(
         back_populates="task",
         order_by="TaskTimelineEvent.attempt_number.asc(), TaskTimelineEvent.sequence_number.asc()",
@@ -491,3 +498,40 @@ class TaskTimelineEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         """Normalize assigned event types to the canonical enum."""
 
         return TimelineEventType(value)
+
+
+class HumanInteraction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A persisted human checkpoint requiring operator intervention."""
+
+    __tablename__ = "human_interactions"
+    __table_args__ = (Index("ix_human_interactions_task_id_status", "task_id", "status"),)
+
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    interaction_type: Mapped[HumanInteractionType] = mapped_column(
+        HUMAN_INTERACTION_TYPE_ENUM, nullable=False
+    )
+    status: Mapped[HumanInteractionStatus] = mapped_column(
+        HUMAN_INTERACTION_STATUS_ENUM, nullable=False, default=HumanInteractionStatus.PENDING
+    )
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    response_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+    task: Mapped[Task] = relationship(back_populates="human_interactions")
+
+    @validates("interaction_type")
+    def _coerce_interaction_type(
+        self, _key: str, value: HumanInteractionType | str
+    ) -> HumanInteractionType:
+        """Normalize assigned interaction types to the canonical enum."""
+        return HumanInteractionType(value)
+
+    @validates("status")
+    def _coerce_status(
+        self, _key: str, value: HumanInteractionStatus | str
+    ) -> HumanInteractionStatus:
+        """Normalize assigned status to the canonical enum."""
+        return HumanInteractionStatus(value)
