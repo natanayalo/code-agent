@@ -6,9 +6,9 @@ Phase 1: clarity and control.
 
 Active focus:
 
-- Milestone 14 (product identity + docs refresh)
-- preparation for Milestone 15 (operator dashboard/PWA)
-- preparation for Milestone 16 (worker mode/runtime profile strategy)
+- Milestone 15 (product identity + docs refresh)
+- preparation for Milestone 16 (operator dashboard/PWA)
+- preparation for Milestone 17 (worker mode/runtime profile strategy)
 
 ## Current Capabilities
 
@@ -31,17 +31,17 @@ Active focus:
 
 ## Next Priorities
 
-1. complete Milestone 14 documentation refresh and keep docs synchronized with behavior
-2. implement Milestone 15 thin local dashboard/PWA for visibility, approvals, replay/retry controls
-3. implement Milestone 16 worker profile + capability matrix + policy/config mapping
-4. define bounded Scout mode design (Milestone 17) with explicit budget and permission boundaries
-5. introduce structured friction/improvement proposal pipeline (Milestone 18)
+1. complete Milestone 15 documentation refresh and keep docs synchronized with behavior
+2. implement Milestone 16 thin local dashboard/PWA for visibility, approvals, replay/retry controls
+3. implement Milestone 17 worker profile + capability matrix + policy/config mapping
+4. define bounded Scout mode design (Milestone 18) with explicit budget and permission boundaries
+5. introduce structured friction/improvement proposal pipeline (Milestone 19)
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
-### Milestone 15: Operator UX (Dashboard/PWA)
+### Milestone 16: Operator UX (Dashboard/PWA)
 - [x] T-130: design PWA frontend architecture and choose tech stack (React/Vite) (#114)
 - [x] T-131: implement API endpoints for task/session listing and detailed view
 - [x] T-132: build core dashboard layout with task status board
@@ -56,7 +56,7 @@ Granular tasks for the active and upcoming milestones:
 - [ ] T-144: implement API & UI for Knowledge Base (Skeptical Memory) management
 - [ ] T-145: implement API & UI for Tool Inventory and Sandbox status
 
-### Milestone 16: Worker Profile Strategy
+### Milestone 17: Worker Profile Strategy
 - [ ] T-140: define `WorkerProfile` Pydantic model and capability matrix
 - [ ] T-141: implement profile-based worker selection logic in the orchestrator
 - [ ] T-142: map existing workers (Gemini, Codex, OpenRouter) to capabilities (Planning, Coding, Reviewing)
