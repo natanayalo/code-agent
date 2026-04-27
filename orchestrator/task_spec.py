@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 from orchestrator.constants import (
     AMBIGUOUS_ASKS,
@@ -20,7 +20,14 @@ from orchestrator.constants import (
     RISK_ORDER,
     VALID_DELIVERY_MODES,
 )
-from orchestrator.state import TaskPlan, TaskRequest, TaskSpec, TaskSpecType
+from orchestrator.state import (
+    TaskDeliveryMode,
+    TaskPlan,
+    TaskRequest,
+    TaskRiskLevel,
+    TaskSpec,
+    TaskSpecType,
+)
 
 
 def _normalized_text(text: str) -> str:
@@ -82,7 +89,7 @@ def _resolve_risk_level(
     constraints: Mapping[str, Any],
     task_type: TaskSpecType,
     task_plan: TaskPlan | None,
-) -> str:
+) -> TaskRiskLevel:
     """Apply deterministic risk classification with explicit constraints as an upper hint."""
     explicit_risk = constraints.get("risk_level")
     explicit = explicit_risk.strip().lower() if isinstance(explicit_risk, str) else "low"
@@ -96,16 +103,16 @@ def _resolve_risk_level(
     if task_type in {"refactor", "review_fix"} or (task_plan is not None and task_plan.triggered):
         risk = _max_risk(risk, "medium")
 
-    return _max_risk(risk, explicit)
+    return cast(TaskRiskLevel, _max_risk(risk, explicit))
 
 
-def _resolve_delivery_mode(task_text: str, constraints: Mapping[str, Any]) -> str:
+def _resolve_delivery_mode(task_text: str, constraints: Mapping[str, Any]) -> TaskDeliveryMode:
     """Resolve desired delivery without claiming the current runtime can perform it yet."""
     explicit_delivery_mode = constraints.get("delivery_mode")
     if isinstance(explicit_delivery_mode, str):
         normalized = explicit_delivery_mode.strip().lower()
         if normalized in VALID_DELIVERY_MODES:
-            return normalized
+            return cast(TaskDeliveryMode, normalized)
 
     if contains_marker(task_text, ("draft pr", "pull request", "pr")):
         return "draft_pr"
@@ -221,7 +228,7 @@ def build_task_spec(
         assumptions=list(dict.fromkeys(assumptions)),
         acceptance_criteria=acceptance_criteria,
         non_goals=list(dict.fromkeys(non_goals)),
-        risk_level=risk_level,  # type: ignore[arg-type]
+        risk_level=risk_level,
         task_type=task_type,
         allowed_actions=allowed_actions,
         forbidden_actions=list(dict.fromkeys(forbidden_actions)),
@@ -231,7 +238,7 @@ def build_task_spec(
         clarification_questions=clarification_questions,
         requires_permission=requires_permission,
         permission_reason=permission_reason,
-        delivery_mode=delivery_mode,  # type: ignore[arg-type]
+        delivery_mode=delivery_mode,
     )
 
 

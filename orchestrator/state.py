@@ -45,7 +45,7 @@ WorkflowStep = Literal[
 class OrchestratorModel(BaseModel):
     """Base model for orchestrator state boundaries."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
 class SessionRef(OrchestratorModel):
