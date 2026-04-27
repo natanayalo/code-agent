@@ -56,8 +56,9 @@ describe('api service', () => {
         text: async () => 'not json',
       });
 
-      const result = await api.listTasks();
-      expect(result).toEqual([]); // listTasks returns [] if fetchWithAuth returns null
+      await expect(api.listTasks()).rejects.toThrow(
+        'Expected JSON response but received content-type: text/plain'
+      );
     });
 
     it('handles 204 No Content', async () => {
@@ -266,8 +267,9 @@ describe('api service', () => {
         headers: new Map(),
         json: async () => ([]),
       });
-      const result = await api.listTasks();
-      expect(result).toEqual([]);
+      await expect(api.listTasks()).rejects.toThrow(
+        'Expected JSON response but received content-type: unknown'
+      );
     });
 
     it('replayTask sends correct POST request', async () => {

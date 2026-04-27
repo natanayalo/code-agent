@@ -42,7 +42,8 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
-    return null;
+    if (response.status === 204) return null;
+    throw new Error(`Expected JSON response but received content-type: ${contentType || 'unknown'}`);
   }
 
   try {

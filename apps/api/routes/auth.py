@@ -104,5 +104,7 @@ def get_auth_status(
     try:
         require_any_valid_auth(request)
         return AuthStatusResponse(authenticated=True)
-    except HTTPException:
-        return AuthStatusResponse(authenticated=False)
+    except HTTPException as exc:
+        if exc.status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
+            return AuthStatusResponse(authenticated=False)
+        raise
