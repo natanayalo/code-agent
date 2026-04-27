@@ -72,7 +72,7 @@ export function SessionsPage() {
               <div className="session-card-body">
                 <div className="session-info-item">
                   <User size={16} />
-                  <span>User: </span><span className="truncate">{session.user_id}</span>
+                  <span>User: </span><span className="truncate" title={session.user_id}>{session.user_id}</span>
                 </div>
                 <div className="session-info-item">
                   <Activity size={16} />
@@ -80,7 +80,7 @@ export function SessionsPage() {
                 </div>
                 <div className="session-info-item">
                   <MessageSquare size={16} />
-                  <span>Thread: </span><span className="truncate">{session.external_thread_id}</span>
+                  <span>Thread: </span><span className="truncate" title={session.external_thread_id}>{session.external_thread_id}</span>
                 </div>
                 {session.active_task_id && (
                   <div className="session-info-item active-task">
