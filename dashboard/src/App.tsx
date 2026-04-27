@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { TaskBoard } from './components/TaskBoard';
 import { StatsPanel } from './components/StatsPanel';
@@ -59,14 +59,27 @@ function DashboardContent() {
   );
 }
 
+interface LocationState {
+  from?: {
+    pathname: string;
+  };
+}
+
 function AppRoutes() {
   const { authenticated } = useAuth();
+  const location = useLocation();
 
   return (
     <Routes>
       <Route
         path="/login"
-        element={authenticated ? <Navigate to="/" replace /> : <LoginPage />}
+        element={
+          authenticated ? (
+            <Navigate to={(location.state as LocationState)?.from?.pathname || '/'} replace />
+          ) : (
+            <LoginPage />
+          )
+        }
       />
       <Route
         path="/"
