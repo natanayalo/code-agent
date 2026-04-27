@@ -46,7 +46,7 @@ Granular tasks for the active and upcoming milestones:
 
 ### Milestone A: TaskSpec and Human Workflow Foundation
 - [x] T-146: add TaskSpec model, persistence, deterministic generation, API visibility, and focused tests
-- [ ] T-147: add HumanInteraction model for clarification, permission, review, merge, and blocked-help states
+- [x] T-147: add HumanInteraction model for clarification, permission, review, merge, and blocked-help states (#134)
 - [ ] T-148: map TaskSpec clarification/permission flags into resumable HumanInteraction records
 - [ ] T-149: show TaskSpec and pending interactions in dashboard task detail/operator inbox
 

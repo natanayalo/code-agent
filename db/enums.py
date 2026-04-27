@@ -24,6 +24,25 @@ class TaskStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class HumanInteractionType(StrEnum):
+    """Allowed categories of human interactions."""
+
+    CLARIFICATION = "clarification"
+    PERMISSION = "permission"
+    REVIEW = "review"
+    MERGE = "merge"
+    BLOCKED_HELP = "blocked_help"
+
+
+class HumanInteractionStatus(StrEnum):
+    """Allowed lifecycle states for human interactions."""
+
+    PENDING = "pending"
+    RESOLVED = "resolved"
+    REJECTED = "rejected"
+    CANCELLED = "cancelled"
+
+
 class WorkerType(StrEnum):
     """Supported worker identifiers stored in persistence."""
 

@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, inspect, text
 EXPECTED_TABLES = {
     "alembic_version",
     "artifacts",
+    "human_interactions",
     "inbound_deliveries",
     "memory_personal",
     "memory_project",
@@ -57,6 +58,21 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "workspace",
             "review_result",
             "independent_review_result",
+        },
+    },
+    "human_interactions": {
+        "ck_human_interactions_human_interaction_type": {
+            "clarification",
+            "permission",
+            "review",
+            "merge",
+            "blocked_help",
+        },
+        "ck_human_interactions_human_interaction_status": {
+            "pending",
+            "resolved",
+            "rejected",
+            "cancelled",
         },
     },
     "task_timeline_events": {
