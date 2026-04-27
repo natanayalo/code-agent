@@ -85,7 +85,7 @@ export function SessionsPage() {
                 {session.active_task_id && (
                   <div className="session-info-item active-task">
                     <Clock size={16} />
-                    <span>Active Task: </span><span className="truncate" title={session.active_task_id || ''}>{session.active_task_id}</span>
+                    <span>Active Task: </span><span className="truncate" title={session.active_task_id}>{session.active_task_id}</span>
                   </div>
                 )}
               </div>
