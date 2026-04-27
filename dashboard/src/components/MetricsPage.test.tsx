@@ -105,6 +105,33 @@ describe('MetricsPage', () => {
     expect(icon).toHaveAttribute('stroke', 'var(--color-status-failed)');
   });
 
+  it('renders high retry rate with failure color', async () => {
+    const highRetryMetrics = {
+      total_tasks: 10,
+      retried_tasks: 5,
+      retry_rate: 0.5, // > 0.1 threshold
+      status_counts: {},
+      worker_usage: {},
+      avg_duration_seconds: 0,
+      success_rate: 1.0,
+    };
+
+    vi.mocked(api.getMetrics).mockResolvedValue(highRetryMetrics);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <MetricsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    const retryRateText = await screen.findByText('Retry Rate');
+    const retryCard = retryRateText.closest('.metric-summary-card');
+    const icon = retryCard?.querySelector('svg');
+    expect(icon).toHaveAttribute('stroke', 'var(--color-status-failed)');
+  });
+
   it('renders error state on failure', async () => {
     vi.mocked(api.getMetrics).mockRejectedValue(new Error('Failed to fetch'));
 

@@ -62,7 +62,7 @@ export function MetricsPage() {
               value={`${metrics.avg_duration_seconds.toFixed(1)}s`}
             />
             <MetricCard
-              icon={<Activity size={24} color="var(--color-status-failed)" />}
+              icon={<Activity size={24} color={metrics.retry_rate > 0.1 ? 'var(--color-status-failed)' : 'var(--color-text-muted)'} />}
               label="Retry Rate"
               value={`${(metrics.retry_rate * 100).toFixed(1)}%`}
             />
