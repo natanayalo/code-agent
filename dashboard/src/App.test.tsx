@@ -10,6 +10,8 @@ import { api } from './services/api';
 vi.mock('./services/api', () => ({
   api: {
     listTasks: vi.fn(),
+    listSessions: vi.fn(),
+    getMetrics: vi.fn(),
     auth: {
       status: vi.fn(),
     },

@@ -9,6 +9,8 @@ import { TaskStatus } from './types/task';
 import { AuthProvider, useAuth } from './components/auth/AuthContext';
 import { AuthGuard } from './components/auth/AuthGuard';
 import { LoginPage } from './components/auth/LoginPage';
+import { SessionsPage } from './components/SessionsPage';
+import { MetricsPage } from './components/MetricsPage';
 
 const REFRESH_INTERVAL_MS = 30000;
 
@@ -86,6 +88,22 @@ function AppRoutes() {
         element={
           <AuthGuard>
             <DashboardContent />
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/sessions"
+        element={
+          <AuthGuard>
+            <SessionsPage />
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/metrics"
+        element={
+          <AuthGuard>
+            <MetricsPage />
           </AuthGuard>
         }
       />
