@@ -72,7 +72,9 @@ export function MetricsPage() {
             <div className="metric-detail-card card">
               <h3>Status Distribution</h3>
               <div className="status-list">
-                {Object.entries(metrics.status_counts).map(([status, count]) => {
+                {Object.entries(metrics.status_counts)
+                  .sort(([, a], [, b]) => (b as number) - (a as number))
+                  .map(([status, count]) => {
                   const displayStatus = status.toLowerCase().replace(/_/g, ' ');
                   const statusClass = status.toLowerCase() === 'in_progress' ? 'running' : status.toLowerCase();
                   return (
