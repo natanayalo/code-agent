@@ -300,10 +300,10 @@ Priority order and active task tracking are maintained in [docs/status.md](docs/
 
 ## Commit guidance
 
-Commit messages should be specific:
-- `add langgraph task state and checkpoint store`
-- `implement docker sandbox workspace runner`
-- `add codex worker adapter for repo task execution`
+Commit messages should be specific and follow the commitizen format:
+- `feat: add langgraph task state and checkpoint store`
+- `feat: implement docker sandbox workspace runner`
+- `feat: add codex worker adapter for repo task execution`
 
 Avoid vague messages:
 - `fix stuff`
