@@ -102,7 +102,7 @@ def _resolve_delivery_mode(task_text: str, constraints: Mapping[str, Any]) -> st
         if normalized in VALID_DELIVERY_MODES:
             return normalized
 
-    if _contains_marker(task_text, ("draft pr", "pull request")):
+    if _contains_marker(task_text, ("draft pr", "pull request", "pr")):
         return "draft_pr"
     if _contains_marker(task_text, ("branch",)):
         return "branch"
@@ -116,9 +116,7 @@ def _requires_clarification(task_text: str, task_kind: str | None) -> bool:
     normalized = task_text.lower().strip()
     if len(normalized.split()) <= 2 and task_kind == "ambiguous":
         return True
-    return any(
-        normalized == marker or normalized.startswith(f"{marker}.") for marker in AMBIGUOUS_ASKS
-    )
+    return _contains_marker(normalized, AMBIGUOUS_ASKS)
 
 
 def build_task_spec(
