@@ -37,7 +37,7 @@ Deliverables:
 
 Status:
 
-- in progress (this documentation slice)
+- completed (documentation synchronized with behavior)
 
 ## Milestone 16: Operator UX and Transparency
 

@@ -6,8 +6,7 @@ Phase 1: clarity and control.
 
 Active focus:
 
-- Milestone 15 (product identity + docs refresh)
-- preparation for Milestone 16 (operator dashboard/PWA)
+- Milestone 16 (operator dashboard/PWA)
 - preparation for Milestone 17 (worker mode/runtime profile strategy)
 
 ## Current Capabilities
@@ -31,8 +30,7 @@ Active focus:
 
 ## Next Priorities
 
-1. complete Milestone 15 documentation refresh and keep docs synchronized with behavior
-2. implement Milestone 16 thin local dashboard/PWA for visibility, approvals, replay/retry controls
+1. implement Milestone 16 thin local dashboard/PWA for visibility, approvals, replay/retry controls
 3. implement Milestone 17 worker profile + capability matrix + policy/config mapping
 4. define bounded Scout mode design (Milestone 18) with explicit budget and permission boundaries
 5. introduce structured friction/improvement proposal pipeline (Milestone 19)
@@ -68,3 +66,4 @@ Granular tasks for the active and upcoming milestones:
 - Milestone 12: observability + replay (T-090 to T-092)
 - Milestone 13 (remainder): hardening controls including auth/safety/budget/retention (T-100 to T-105)
 - Milestone 14 baseline: planning/context/review intelligence slices (T-106, T-108 to T-112, T-114 to T-128)
+- Milestone 15: product identity and documentation refresh

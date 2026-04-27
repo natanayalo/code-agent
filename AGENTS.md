@@ -294,7 +294,7 @@ Priority order:
 12. Milestone 12: Observability + replay (T-090 to T-092)
 13. Milestone 13 (remainder): Hardening (T-100 to T-103, T-105)
 14. [DONE] Milestone 14: Agent intelligence baseline (T-106, T-108 to T-112, T-114 to T-128)
-15. Milestone 15: Product Identity and Documentation Refresh
+15. [DONE] Milestone 15: Product Identity and Documentation Refresh
 16. Milestone 16: Operator UX (Dashboard/PWA) (T-130 to T-139, T-143 to T-145)
 17. Milestone 17: Worker Profile Strategy (T-140 to T-142)
 
