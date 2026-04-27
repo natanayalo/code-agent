@@ -13,7 +13,6 @@ from orchestrator.graph import (
     _compute_route_decision,
     _default_worker_result_provider,
     _ensure_state,
-    _is_destructive_task,
     _resolve_orchestrator_timeout_seconds,
     _route_after_review_result,
     await_approval,
@@ -26,6 +25,7 @@ from orchestrator.graph import (
     verify_result,
 )
 from orchestrator.state import OrchestratorState
+from orchestrator.task_spec import is_destructive_task
 from workers import WorkerRequest, WorkerResult
 
 
@@ -43,7 +43,7 @@ def test_classify_task_kind():
 
 
 def test_is_destructive_task():
-    assert _is_destructive_task("test", {"destructive_action": True}) is True
+    assert is_destructive_task("test", {"destructive_action": True}) is True
 
 
 def test_coerce_approval_decision():
