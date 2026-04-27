@@ -475,6 +475,8 @@ button {
   background: rgba(255, 255, 255, 0.03);
   padding: 4px 8px;
   border-radius: 6px;
+}
+
 .detail-item .truncate {
   max-width: 120px;
 }

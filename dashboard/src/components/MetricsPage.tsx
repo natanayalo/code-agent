@@ -72,13 +72,17 @@ export function MetricsPage() {
             <div className="metric-detail-card card">
               <h3>Status Distribution</h3>
               <div className="status-list">
-                {Object.entries(metrics.status_counts).map(([status, count]) => (
-                  <div key={status} className="status-item">
-                    <span className={`status-dot status-${status.toLowerCase()}`}></span>
-                    <span className="status-label">{status}</span>
-                    <span className="status-count">{count}</span>
-                  </div>
-                ))}
+                {Object.entries(metrics.status_counts).map(([status, count]) => {
+                  const displayStatus = status.toLowerCase().replace(/_/g, ' ');
+                  const statusClass = status.toLowerCase() === 'in_progress' ? 'running' : status.toLowerCase();
+                  return (
+                    <div key={status} className="status-item">
+                      <span className={`status-dot status-${statusClass}`}></span>
+                      <span className="status-label">{displayStatus}</span>
+                      <span className="status-count">{count}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
