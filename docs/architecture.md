@@ -56,7 +56,7 @@ Active worker/runtime implementations:
 
 ### Worker Routing Policy (Current)
 
-Until the full profile-based strategy (Milestone C) is implemented, the platform uses a simplified routing heuristic:
+Until the full profile-based strategy (Milestone 16) is implemented, the platform uses a simplified routing heuristic:
 
 - **Codex Worker**: Default for straightforward coding tasks, documentation updates, and small-scale refactors.
 - **Gemini Worker**: Used for complex tasks requiring high-level reasoning, architectural changes, or multi-step cognitive loops.

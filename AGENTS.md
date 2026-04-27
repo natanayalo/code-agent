@@ -93,6 +93,7 @@ For each task:
 ## Python tooling environment
 
 - Use **Poetry** for dependency management (`poetry install`).
+- Use **Pytest** for testing with a **90% coverage threshold** enforced in CI (`--cov-fail-under=90`).
 - Use the repository virtualenv explicitly for Python tooling and checks.
 - Prefer `.venv/bin/...` invocations (for example: `.venv/bin/poetry`, `.venv/bin/pytest`, `.venv/bin/pre-commit`, `.venv/bin/ruff`, `.venv/bin/mypy`).
 - Do not rely on globally installed `python`, `pytest`, or `pre-commit` binaries.
@@ -145,7 +146,7 @@ No session ownership here.
 Owns workspace creation, repo lifecycle, container execution, artifact capture.
 
 ### memory/
-Owns structured memory persistence and retrieval.
+Entry point for memory-specific schemas and logic. Note: Current persistence logic for skeptical memory resides in `repositories/sqlalchemy.py`.
 
 ### tools/
 Owns integration wrappers and tool abstractions.
@@ -154,7 +155,7 @@ Owns integration wrappers and tool abstractions.
 Owns schema/migrations only.
 
 ### repositories/
-Owns persistence access patterns and CRUD boundaries.
+Owns persistence access patterns, CRUD boundaries, and memory persistence logic.
 No business policy here.
 
 ## Worker contract
@@ -292,7 +293,9 @@ Priority order:
 11. Milestone 11: External tool wrappers and MCP compatibility (T-083, T-080, T-087, T-081, T-082, T-088, T-089, T-107)
 12. Milestone 12: Observability + replay (T-090 to T-092)
 13. Milestone 13 (remainder): Hardening (T-100 to T-103, T-105)
-14. Milestone 14: Agent intelligence (T-106, T-108, T-109, T-110, T-111, T-112)
+14. [DONE] Milestone 14: Agent intelligence baseline (T-106, T-108 to T-112, T-114 to T-128)
+15. Milestone 15: Operator UX (Dashboard/PWA) (T-130 to T-139, T-143 to T-145)
+16. Milestone 16: Worker Profile Strategy (T-140 to T-142)
 
 ## Code style
 
