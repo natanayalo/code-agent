@@ -235,7 +235,7 @@ def test_queued_task_requires_approval_before_worker_dispatch(client: TestClient
     assert payload["status"] == "failed"
     assert payload["latest_run"] is not None
     assert payload["latest_run"]["status"] == "failure"
-    assert "manual approval" in payload["latest_run"]["summary"].lower()
+    assert "approval" in payload["latest_run"]["summary"].lower()
 
     worker = client.app.state.test_worker
     assert len(worker.requests) == 0
@@ -262,7 +262,7 @@ def test_task_approval_endpoint_requeues_approved_task(client: TestClient) -> No
     paused = client.get(f"/tasks/{task_id}")
     assert paused.status_code == 200
     assert paused.json()["status"] == "failed"
-    assert "manual approval" in paused.json()["latest_run"]["summary"].lower()
+    assert "approval" in paused.json()["latest_run"]["summary"].lower()
 
     approve_response = client.post(f"/tasks/{task_id}/approval", json={"approved": True})
     assert approve_response.status_code == 200

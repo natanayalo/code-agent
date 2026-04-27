@@ -372,7 +372,10 @@ def _is_destructive_task(task_text: str, constraints: dict[str, Any]) -> bool:
 
 
 def _task_requires_approval(task_text: str, constraints: dict[str, Any]) -> bool:
-    """Return whether the task should pause for manual approval."""
+    """Return True if the task involves destructive actions or explicit approval constraints."""
+    approval_data = constraints.get("approval")
+    if isinstance(approval_data, dict) and approval_data.get("status") == "approved":
+        return False
     if constraints.get("requires_approval") is True:
         return True
     return _is_destructive_task(task_text, constraints)
@@ -698,8 +701,8 @@ def generate_task_spec(state_input: OrchestratorState) -> dict[str, Any]:
             files_changed=[],
             test_results=[],
             artifacts=[],
-            next_action_hint="inspect_worker_configuration",
-        ).model_dump()
+            next_action_hint="halt_policy_violation",
+        )
     return response
 
 
