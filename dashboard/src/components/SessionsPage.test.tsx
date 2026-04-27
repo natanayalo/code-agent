@@ -72,9 +72,11 @@ describe('SessionsPage', () => {
 
     expect(await screen.findByRole('heading', { name: /Sessions/i })).toBeInTheDocument();
     expect(await screen.findByText('ID: s1')).toBeInTheDocument();
-    expect(screen.getByText('Active Task: task-1')).toBeInTheDocument();
+    expect(screen.getByText(/Active Task:/i)).toBeInTheDocument();
+    expect(screen.getByText('task-1')).toBeInTheDocument();
     expect(screen.getByText(/u1/i)).toBeInTheDocument();
-    expect(screen.getByText(/Channel: http/i)).toBeInTheDocument();
+    expect(screen.getByText(/Channel:/i)).toBeInTheDocument();
+    expect(screen.getByText('http')).toBeInTheDocument();
   });
 
   it('truncates long IDs with ellipsis', async () => {
@@ -102,7 +104,8 @@ describe('SessionsPage', () => {
     );
 
     expect(await screen.findByText('ID: 12345678...')).toBeInTheDocument();
-    expect(screen.getByText('Active Task: abcdefgh...')).toBeInTheDocument();
+    expect(await screen.findByText(/Active Task:/i)).toBeInTheDocument();
+    expect(screen.getByText('abcdefgh...')).toBeInTheDocument();
   });
 
   it('renders empty state when no sessions', async () => {

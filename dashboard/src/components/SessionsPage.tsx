@@ -77,20 +77,20 @@ export function SessionsPage() {
               <div className="session-card-body">
                 <div className="session-info-item">
                   <User size={16} />
-                  <span className="truncate">{session.user_id}</span>
+                  <span>User: </span><span className="truncate">{session.user_id}</span>
                 </div>
                 <div className="session-info-item">
                   <Activity size={16} />
-                  <span>Channel: {session.channel}</span>
+                  <span>Channel: </span><span>{session.channel}</span>
                 </div>
                 <div className="session-info-item">
                   <MessageSquare size={16} />
-                  <span className="truncate">Thread: {session.external_thread_id}</span>
+                  <span>Thread: </span><span className="truncate">{session.external_thread_id}</span>
                 </div>
                 {session.active_task_id && (
                   <div className="session-info-item active-task">
                     <Clock size={16} />
-                    <span>Active Task: {formatIdPreview(session.active_task_id)}</span>
+                    <span>Active Task: </span><span>{formatIdPreview(session.active_task_id)}</span>
                   </div>
                 )}
               </div>
