@@ -146,7 +146,7 @@ def build_task_spec(
     delivery_mode = _resolve_delivery_mode(normalized_task_text, task_constraints)
 
     assumptions = _coerce_string_list(task_constraints.get("assumptions"))
-    if repo_url is None:
+    if not repo_url:
         assumptions.append("No repository URL was provided; use the configured workspace context.")
     assumptions.append("Prefer the smallest safe implementation slice.")
 
@@ -195,6 +195,8 @@ def build_task_spec(
             explicit_reason.strip()
             if isinstance(explicit_reason, str) and explicit_reason.strip()
             else f"Task is classified as {risk_level} risk."
+            if risk_level in {"high", "critical"}
+            else "Manual approval required for this task."
         )
 
     requires_clarification = _requires_clarification(normalized_task_text, task_kind)
