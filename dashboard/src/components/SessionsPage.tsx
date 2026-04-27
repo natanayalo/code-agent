@@ -9,8 +9,8 @@ import { Clock, MessageSquare, User, Activity } from 'lucide-react';
 const SESSIONS_REFETCH_INTERVAL_MS = 30000;
 
 function getStatusClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === 'active') return 'running';
+  const s = (status || '').toLowerCase().replace(/[\s_]+/g, '-');
+  if (s === 'active' || s === 'in-progress') return 'running';
   if (s === 'closed' || s === 'completed') return 'success';
   if (s === 'failed') return 'error';
   return s;

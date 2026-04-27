@@ -74,7 +74,7 @@ export function MetricsPage() {
               <h3>Status Distribution</h3>
               <div className="status-list">
                 {Object.entries(metrics.status_counts)
-                  .sort(([, a], [, b]) => b - a)
+                  .sort(([statusA, countA], [statusB, countB]) => (countB - countA) || statusA.localeCompare(statusB))
                   .map(([status, count]) => {
                     const displayStatus = status.toLowerCase().replace(/_/g, ' ');
                     const statusClass = status.toLowerCase() === 'in_progress' ? 'running' : status.toLowerCase();
@@ -93,7 +93,7 @@ export function MetricsPage() {
               <h3>Worker Usage</h3>
               <div className="worker-list">
                 {Object.entries(metrics.worker_usage)
-                  .sort(([, a], [, b]) => b - a)
+                  .sort(([workerA, countA], [workerB, countB]) => (countB - countA) || workerA.localeCompare(workerB))
                   .map(([worker, count]) => (
                     <div key={worker} className="worker-item">
                       <Cpu size={16} />
