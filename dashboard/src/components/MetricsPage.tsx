@@ -89,7 +89,9 @@ export function MetricsPage() {
             <div className="metric-detail-card card">
               <h3>Worker Usage</h3>
               <div className="worker-list">
-                {Object.entries(metrics.worker_usage).map(([worker, count]) => (
+                {Object.entries(metrics.worker_usage)
+                  .sort(([, a], [, b]) => (b as number) - (a as number))
+                  .map(([worker, count]) => (
                   <div key={worker} className="worker-item">
                     <Cpu size={16} />
                     <span className="worker-label">{worker}</span>
