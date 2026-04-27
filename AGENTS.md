@@ -279,24 +279,7 @@ Before merging:
 
 ## Priorities
 
-Priority order:
-1. [DONE] Milestone 3: Artifact capture baseline (T-032)
-2. [DONE] Milestone 4: First worker interface + implementation (T-040/T-041)
-3. [DONE] Milestone 5: Vertical Slice E2E milestone (T-042 + T-044)
-4. [DONE] Milestone 6: Sandbox hardening milestone (T-054/T-055)
-5. [DONE] Milestone 7: Memory integration milestone (T-060 to T-065)
-6. [DONE] Milestone 8: Structured run observability (T-043) + Milestone 9: T-070 second worker (GeminiCliWorker)
-7. [DONE] Milestone 9 (remaining): T-071 routing heuristics + T-072 manual override
-8. [DONE] Milestone 10: Telegram ingress milestone (T-050 to T-053)
-9. [DONE] Review follow-ups: T-084, T-085, T-086
-10. T-104: API authentication (pulled from Milestone 13 — close auth gap before adding capabilities)
-11. Milestone 11: External tool wrappers and MCP compatibility (T-083, T-080, T-087, T-081, T-082, T-088, T-089, T-107)
-12. Milestone 12: Observability + replay (T-090 to T-092)
-13. Milestone 13 (remainder): Hardening (T-100 to T-103, T-105)
-14. [DONE] Milestone 14: Agent intelligence baseline (T-106, T-108 to T-112, T-114 to T-128)
-15. [DONE] Milestone 15: Product Identity and Documentation Refresh
-16. Milestone 16: Operator UX (Dashboard/PWA) (T-130 to T-139, T-143 to T-145)
-17. Milestone 17: Worker Profile Strategy (T-140 to T-142)
+Priority order and active task tracking are maintained in [docs/status.md](docs/status.md). For long-term vision and phase sequencing, see [docs/roadmap.md](docs/roadmap.md).
 
 ## Code style
 
