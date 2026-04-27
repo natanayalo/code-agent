@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from apps.api.dependencies import get_task_service, require_api_auth
+from apps.api.dependencies import get_task_service, require_any_valid_auth
 from orchestrator.execution import OperationalMetrics, TaskExecutionService
 
-router = APIRouter(prefix="/metrics", tags=["metrics"], dependencies=[Depends(require_api_auth)])
+router = APIRouter(
+    prefix="/metrics", tags=["metrics"], dependencies=[Depends(require_any_valid_auth)]
+)
 
 
 @router.get("", response_model=OperationalMetrics)
