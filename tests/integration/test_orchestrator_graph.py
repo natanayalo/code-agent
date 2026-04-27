@@ -130,6 +130,8 @@ def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
     assert state.current_step == "persist_memory"
     assert state.normalized_task_text == "Add generic webhook endpoint"
     assert state.task_kind == "implementation"
+    assert state.task_spec is not None
+    assert state.task_spec.goal == "Add generic webhook endpoint"
     assert state.route.chosen_worker == "codex"
     assert state.approval.required is False
     assert state.approval.status == "not_required"
@@ -140,6 +142,8 @@ def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
     assert worker.requests[0].task_text == "Add generic webhook endpoint"
     assert worker.requests[0].repo_url == "https://github.com/natanayalo/code-agent"
     assert worker.requests[0].branch == "master"
+    assert worker.requests[0].task_spec is not None
+    assert worker.requests[0].task_spec["goal"] == "Add generic webhook endpoint"
     assert state.result is not None
     assert state.result.status == "success"
     assert state.result.summary == "codex finished with status success"
@@ -148,6 +152,7 @@ def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
         "task ingested",
         "task classified as implementation",
         "planning skipped: task is straightforward",
+        "task spec generated",
         "memory context loaded",
         "worker selected: codex (reason: cheap_mechanical_change)",
         "approval not required",
@@ -196,6 +201,7 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
             "task ingested",
             "task classified as implementation",
             "planning skipped: task is straightforward",
+            "task spec generated",
             "memory context loaded",
             "worker selected: codex (reason: cheap_mechanical_change)",
             "approval not required",
@@ -244,6 +250,7 @@ def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
             "task ingested",
             "task classified as implementation",
             "planning skipped: task is straightforward",
+            "task spec generated",
             "memory context loaded",
             "worker selected: codex (reason: cheap_mechanical_change)",
             "approval not required",
@@ -306,6 +313,7 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
         "task ingested",
         "task classified as implementation",
         "planning skipped: task is straightforward",
+        "task spec generated",
         "memory context loaded",
         "worker selected: gemini (reason: runtime_unavailable)",
         "approval not required",
@@ -372,6 +380,7 @@ def test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly(
                 "task ingested",
                 "task classified as implementation",
                 "planning skipped: task is straightforward",
+                "task spec generated",
                 "memory context loaded",
                 "worker selected: codex (reason: cheap_mechanical_change)",
                 "approval requested",
@@ -396,6 +405,7 @@ def test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly(
             "task ingested",
             "task classified as implementation",
             "planning skipped: task is straightforward",
+            "task spec generated",
             "memory context loaded",
             "worker selected: codex (reason: cheap_mechanical_change)",
             "approval requested",
@@ -453,6 +463,7 @@ def test_orchestrator_graph_stops_when_approval_is_rejected(tmp_path: Path) -> N
             "task ingested",
             "task classified as implementation",
             "planning skipped: task is straightforward",
+            "task spec generated",
             "memory context loaded",
             "worker selected: codex (reason: cheap_mechanical_change)",
             "approval requested",
@@ -497,6 +508,7 @@ def test_orchestrator_graph_returns_a_structured_timeout_result() -> None:
         "task ingested",
         "task classified as implementation",
         "planning skipped: task is straightforward",
+        "task spec generated",
         "memory context loaded",
         "worker selected: codex (reason: cheap_mechanical_change)",
         "approval not required",
@@ -549,6 +561,7 @@ def test_orchestrator_graph_surfaces_worker_cancellation_as_a_result() -> None:
             "task ingested",
             "task classified as implementation",
             "planning skipped: task is straightforward",
+            "task spec generated",
             "memory context loaded",
             "worker selected: codex (reason: cheap_mechanical_change)",
             "approval not required",
@@ -593,6 +606,7 @@ def test_orchestrator_graph_returns_a_structured_error_for_worker_crashes() -> N
         "task ingested",
         "task classified as implementation",
         "planning skipped: task is straightforward",
+        "task spec generated",
         "memory context loaded",
         "worker selected: codex (reason: cheap_mechanical_change)",
         "approval not required",
@@ -636,6 +650,7 @@ def test_orchestrator_graph_timeout_path_tolerates_cleanup_exceptions() -> None:
         "task ingested",
         "task classified as implementation",
         "planning skipped: task is straightforward",
+        "task spec generated",
         "memory context loaded",
         "worker selected: codex (reason: cheap_mechanical_change)",
         "approval not required",

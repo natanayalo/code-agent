@@ -6,6 +6,7 @@ Phase 1: clarity and control.
 
 Active focus:
 
+- Milestone A (TaskSpec foundation and human workflow)
 - Milestone 16 (operator dashboard/PWA)
 - preparation for Milestone 17 (worker mode/runtime profile strategy)
 
@@ -20,24 +21,34 @@ Active focus:
 - sandboxed workspace/container execution with command artifact capture and retention controls
 - skeptical memory + compact session state persistence
 - operational controls: task replay, approval decision endpoint, progress callbacks, and metrics
+- generated TaskSpec contract for task goal/risk/type/delivery policy before worker routing
 
 ## Open Risks
 
 - operator inspection/control still relies on API + logs more than dedicated UI
+- TaskSpec can surface clarification/permission needs, but generic HumanInteraction states are not first-class yet
+- PR-native delivery is represented as desired delivery metadata only; branch/PR creation is still a future slice
 - runtime profile strategy (planner/executor/reviewer/scout defaults) is not yet fully codified
 - autonomy/reflection work is not yet separated into a bounded scout lane
 - worker runtime internals still contain hotspot complexity despite recent decomposition progress
 
 ## Next Priorities
 
-1. implement Milestone 16 thin local dashboard/PWA for visibility, approvals, replay/retry controls
+1. complete TaskSpec + HumanInteraction foundation before expanding worker autonomy
+2. implement Milestone 16 detailed dashboard views around TaskSpec, timeline, logs, artifacts, replay controls
 3. implement Milestone 17 worker profile + capability matrix + policy/config mapping
-4. define bounded Scout mode design (Milestone 18) with explicit budget and permission boundaries
-5. introduce structured friction/improvement proposal pipeline (Milestone 19)
+4. add PR-native delivery fields and GitHub branch/draft-PR integration
+5. introduce evals before adding more scout/autonomy behavior
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
+
+### Milestone A: TaskSpec and Human Workflow Foundation
+- [x] T-146: add TaskSpec model, persistence, deterministic generation, API visibility, and focused tests
+- [ ] T-147: add HumanInteraction model for clarification, permission, review, merge, and blocked-help states
+- [ ] T-148: map TaskSpec clarification/permission flags into resumable HumanInteraction records
+- [ ] T-149: show TaskSpec and pending interactions in dashboard task detail/operator inbox
 
 ### Milestone 16: Operator UX (Dashboard/PWA)
 - [x] T-130: design PWA frontend architecture and choose tech stack (React/Vite) (#114)

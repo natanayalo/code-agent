@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import DateTime
+from sqlalchemy import JSON, DateTime
 from sqlalchemy import Enum as SQLAlchemyEnum
 
 import db.models  # noqa: F401
@@ -61,3 +61,9 @@ def test_model_metadata_defines_retention_expiry_column_type() -> None:
     """Retention cleanup needs an explicit timestamp on worker runs."""
     column_type = Base.metadata.tables["worker_runs"].c["retention_expires_at"].type
     assert isinstance(column_type, DateTime)
+
+
+def test_model_metadata_defines_task_spec_column_type() -> None:
+    """TaskSpec generation needs an inspectable JSON contract on tasks."""
+    column_type = Base.metadata.tables["tasks"].c["task_spec"].type
+    assert isinstance(column_type, JSON)

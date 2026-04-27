@@ -16,6 +16,7 @@ def test_worker_request_supports_contract_fields() -> None:
         branch="task/t-040-worker-interface",
         task_text="Define worker interface",
         memory_context={"project": [{"memory_key": "pitfall"}]},
+        task_spec={"goal": "Define worker interface", "risk_level": "low"},
         constraints={"requires_approval": False},
         budget={"max_minutes": 15},
     )
@@ -23,6 +24,7 @@ def test_worker_request_supports_contract_fields() -> None:
     assert request.session_id == "session-1"
     assert request.repo_url == "https://github.com/natanayalo/code-agent"
     assert request.task_text == "Define worker interface"
+    assert request.task_spec == {"goal": "Define worker interface", "risk_level": "low"}
 
 
 def test_worker_request_rejects_unknown_fields() -> None:

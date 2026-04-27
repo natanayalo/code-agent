@@ -17,10 +17,27 @@ def test_orchestrator_state_supports_minimal_task_input() -> None:
     assert state.task.priority == 0
     assert state.memory.personal == []
     assert state.route.chosen_worker is None
+    assert state.task_spec is None
     assert state.approval.required is False
     assert state.approval.status == "not_required"
     assert state.progress_updates == []
     assert state.errors == []
+
+
+def test_orchestrator_state_preserves_secret_whitespace() -> None:
+    """Secret values should remain byte-exact and must not be globally trimmed."""
+    state = OrchestratorState(
+        task={
+            "task_text": "Run with exact secret",
+            "secrets": {
+                "TOKEN": "  leading-and-trailing  ",
+                "MIXED": "a b",
+            },
+        }
+    )
+
+    assert state.task.secrets["TOKEN"] == "  leading-and-trailing  "
+    assert state.task.secrets["MIXED"] == "a b"
 
 
 def test_orchestrator_state_supports_nested_workflow_data() -> None:
@@ -39,6 +56,14 @@ def test_orchestrator_state_supports_nested_workflow_data() -> None:
             "repo_url": "https://github.com/natanayalo/code-agent",
             "branch": "master",
             "worker_override": "codex",
+        },
+        task_spec={
+            "goal": "Route to codex",
+            "repo_url": "https://github.com/natanayalo/code-agent",
+            "target_branch": "master",
+            "risk_level": "low",
+            "task_type": "feature",
+            "delivery_mode": "workspace",
         },
         memory={
             "personal": [
@@ -105,6 +130,8 @@ def test_orchestrator_state_supports_nested_workflow_data() -> None:
     assert state.approval.status == "approved"
     assert state.result is not None
     assert state.result.commands_run[0].command == "pytest"
+    assert state.task_spec is not None
+    assert state.task_spec.goal == "Route to codex"
     assert state.memory.project[0].memory_key == "known_pitfalls"
     assert state.memory_to_persist[0].category == "project"
 

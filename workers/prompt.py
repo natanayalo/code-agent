@@ -1148,6 +1148,15 @@ def build_task_context_section(request: WorkerRequest) -> str:
                 "```",
             ]
         )
+    if request.task_spec:
+        lines.extend(
+            [
+                "Task spec:",
+                "```json",
+                _render_json_block(request.task_spec),
+                "```",
+            ]
+        )
     if request.constraints:
         lines.extend(
             [

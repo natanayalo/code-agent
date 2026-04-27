@@ -13,8 +13,9 @@ Phase 1: clarity and control.
 Priority sequence:
 
 1. Milestone 15: Product identity and documentation refresh
-2. Milestone 16: Operator UX and transparency
-3. Milestone 17: Worker profile and runtime leverage
+2. Milestone A: TaskSpec and human workflow foundation
+3. Milestone 16: Operator UX and transparency
+4. Milestone 17: Worker profile and runtime leverage
 
 Planned next phases:
 
@@ -38,6 +39,33 @@ Deliverables:
 Status:
 
 - completed (documentation synchronized with behavior)
+
+## Milestone A: TaskSpec and Human Workflow Foundation
+
+Goal:
+
+- establish a structured task contract and first-class human checkpoints before expanding worker autonomy
+
+Planned deliverables:
+
+- persisted `TaskSpec` with goal, task type, risk, acceptance criteria, policy, verification, and delivery metadata
+- deterministic TaskSpec generation before worker routing
+- task status API and dashboard visibility for TaskSpec
+- generic HumanInteraction records for clarification, permission, final review, merge approval, and blocked help
+- compatibility path from existing approval endpoints to HumanInteraction
+
+Non-goals:
+
+- branch/PR creation
+- merge automation
+- scout/autonomy expansion
+- replacing worker-profile routing in this milestone
+
+Success criteria:
+
+- every worker run starts from an inspectable task contract
+- ambiguous and high-risk tasks expose the precise human checkpoint needed
+- dashboard/operator views can prioritize tasks needing input
 
 ## Milestone 16: Operator UX and Transparency
 
@@ -175,8 +203,9 @@ Approach:
 Phase 1:
 
 1. Milestone 15
-2. Milestone 16
-3. Milestone 17
+2. Milestone A
+3. Milestone 16
+4. Milestone 17
 
 Phase 2:
 

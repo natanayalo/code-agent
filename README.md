@@ -163,7 +163,7 @@ cd dashboard && npm run test:run
 
 The next phase prioritizes:
 
-1. product/docs clarity and operator runbook quality
+1. TaskSpec + human workflow foundation
 2. operator UX via a thin local dashboard/PWA
 3. stronger worker-mode/profile strategy and runtime leverage
 

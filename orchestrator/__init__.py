@@ -21,6 +21,7 @@ from orchestrator.state import (
     TaskPlan,
     TaskPlanStep,
     TaskRequest,
+    TaskSpec,
     WorkerDispatch,
     WorkflowStep,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "TaskQueueWorker",
     "TaskSnapshot",
     "TaskRequest",
+    "TaskSpec",
     "TaskSubmission",
     "TestResult",
     "WorkerCommand",

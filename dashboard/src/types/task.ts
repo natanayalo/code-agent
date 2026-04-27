@@ -8,6 +8,37 @@ export enum TaskStatus {
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'not_required';
 
+export type TaskRiskLevel = 'low' | 'medium' | 'high' | 'critical';
+export type TaskSpecType =
+  | 'docs'
+  | 'bugfix'
+  | 'feature'
+  | 'refactor'
+  | 'investigation'
+  | 'review_fix'
+  | 'maintenance';
+export type TaskDeliveryMode = 'summary' | 'workspace' | 'branch' | 'draft_pr';
+
+export interface TaskSpec {
+  goal: string;
+  repo_url?: string | null;
+  target_branch?: string | null;
+  assumptions: string[];
+  acceptance_criteria: string[];
+  non_goals: string[];
+  risk_level: TaskRiskLevel;
+  task_type: TaskSpecType;
+  allowed_actions: string[];
+  forbidden_actions: string[];
+  verification_commands: string[];
+  expected_artifacts: string[];
+  requires_clarification: boolean;
+  clarification_questions: string[];
+  requires_permission: boolean;
+  permission_reason?: string | null;
+  delivery_mode: TaskDeliveryMode;
+}
+
 export interface TaskSummarySnapshot {
   task_id: string;
   session_id: string;
@@ -46,6 +77,7 @@ export interface TaskTimelineEventSnapshot {
 }
 
 export interface TaskSnapshot extends TaskSummarySnapshot {
+  task_spec?: TaskSpec | null;
   latest_run?: WorkerRunSnapshot | null;
   timeline: TaskTimelineEventSnapshot[];
 }
