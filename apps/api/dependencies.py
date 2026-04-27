@@ -105,7 +105,7 @@ def require_dashboard_user(request: Request) -> None:
         )
 
 
-def _enforce_csrf_protection(request: Request) -> None:
+def enforce_csrf_protection(request: Request) -> None:
     """Reject requests from untrusted origins when using cookie authentication."""
     auth_config = get_api_auth_config(request)
 
@@ -173,7 +173,7 @@ def require_any_valid_auth(request: Request) -> None:
         require_dashboard_user(request)
         # If cookie auth is used, enforce CSRF protection for mutating methods.
         if request.method in ("POST", "PUT", "DELETE", "PATCH"):
-            _enforce_csrf_protection(request)
+            enforce_csrf_protection(request)
         return
 
     # 3. Both missing

@@ -13,7 +13,11 @@ from apps.api.auth import (
     ApiAuthConfig,
     create_dashboard_token,
 )
-from apps.api.dependencies import get_api_auth_config, require_any_valid_auth
+from apps.api.dependencies import (
+    enforce_csrf_protection,
+    get_api_auth_config,
+    require_any_valid_auth,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -88,15 +92,19 @@ def login(
     return LoginResponse()
 
 
-@router.post(
-    "/logout", response_model=LogoutResponse, dependencies=[Depends(require_any_valid_auth)]
-)
+@router.post("/logout", response_model=LogoutResponse)
 def logout(
     response: Response,
     request: Request,
     auth_config: ApiAuthConfig = Depends(get_api_auth_config),
 ) -> LogoutResponse:
     """Clear the session cookie."""
+    # Enforce CSRF protection if a session cookie is present.
+    # This maintains security for the logout action even if the session is expired,
+    # ensuring the route is idempotent for authentication but still protected from CSRF.
+    if DASHBOARD_COOKIE_NAME in request.cookies:
+        enforce_csrf_protection(request)
+
     is_secure = _is_cookie_secure(request, auth_config)
     response.delete_cookie(
         key=DASHBOARD_COOKIE_NAME,

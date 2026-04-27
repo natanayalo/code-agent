@@ -133,3 +133,16 @@ def test_proxy_secure_cookie(client: TestClient) -> None:
     assert response.status_code == 200
     set_cookie = response.headers.get("set-cookie")
     assert "secure" in set_cookie.lower()
+
+
+def test_logout_idempotency(client: TestClient) -> None:
+    """Logout should succeed even if session is invalid, but still check CSRF."""
+    # 1. Invalid cookie but valid CSRF -> should succeed (idempotency)
+    client.cookies.set(DASHBOARD_COOKIE_NAME, "invalid-token", path="/")
+    response = client.post("/auth/logout", headers={"Origin": "http://localhost:3000"})
+    assert response.status_code == 200
+
+    # 2. Invalid cookie and missing CSRF -> should fail (security)
+    client.cookies.set(DASHBOARD_COOKIE_NAME, "invalid-token", path="/")
+    response = client.post("/auth/logout")
+    assert response.status_code == 403
