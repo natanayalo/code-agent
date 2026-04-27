@@ -6,7 +6,7 @@ import logging
 import os
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 import jwt
@@ -40,13 +40,8 @@ class ApiAuthConfig:
 
     shared_secret: str | None = None
     telegram_webhook_secret: str | None = None
-    allowed_origins: list[str] | None = None
+    allowed_origins: list[str] = field(default_factory=list)
     cookie_secure: bool = False
-
-    def __post_init__(self) -> None:
-        # Dataclasses with frozen=True need object.__setattr__
-        if self.allowed_origins is None:
-            object.__setattr__(self, "allowed_origins", [])
 
 
 def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) -> ApiAuthConfig:

@@ -35,9 +35,22 @@ This is the conceptual review checklist. For end-to-end PR execution (discovery,
 4. Validate each suspected issue against the actual code, not against generic best practices.
 5. Report only the strongest findings, ordered by severity.
 
+### Required Two-Pass Flow
+
+All PR reviews must run in two passes:
+
+1. **Pass A — Discovery (high recall, no posting)**
+   - Build a candidate list of plausible findings across touched files and directly-related context.
+   - Bias toward recall and include borderline candidates while gathering evidence.
+   - Do not post comments to GitHub in this pass.
+2. **Pass B — Validation + Publishing (high precision)**
+   - Re-check each candidate against current head, tests, and existing PR discussion.
+   - Apply duplicate/stale suppression, confidence thresholds, and publishing gate.
+   - Post only findings that survive validation.
+
 ## Review Rules
 
-- Prefer precision over recall.
+- Use two-pass behavior: prioritize recall in Pass A, then prioritize precision in Pass B.
 - Do not comment on naming, formatting, or style unless it affects correctness, maintainability, or team rules.
 - Do not restate the diff or praise code in place of review findings.
 - Cite exact code evidence for every finding.
@@ -221,8 +234,8 @@ Execution order for PR reviews:
    - `GH_PAGER=cat gh pr view $PR_NUMBER --repo $OWNER/$REPO --json title,body,baseRefName,headRefName,url,files,commits`
    - `GH_PAGER=cat gh pr diff $PR_NUMBER --repo $OWNER/$REPO --patch`
 3. Fetch existing remote comments/reviews/threads.
-4. Review code and produce candidate findings.
-5. Remove candidates that are duplicate, stale, out-of-scope, low-confidence, or already fixed.
+4. **Pass A (Discovery):** review code and produce candidate findings (do not post in this step).
+5. **Pass B (Validation):** remove candidates that are duplicate, stale, out-of-scope, low-confidence, or already fixed.
 6. Apply review budget: prefer at most 5 posted findings unless multiple critical/high issues exist.
    If additional valid candidates exist, keep only highest-impact findings and record the rest as `skipped_review_budget`.
 7. Apply publishing gate and keep only postable findings.
