@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import logging
 from typing import cast
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request, status
 
@@ -126,9 +127,9 @@ def _enforce_csrf_protection(request: Request) -> None:
         referer = request.headers.get("Referer")
         if referer:
             # Extract scheme://host[:port] from Referer
-            parts = referer.split("/")
-            if len(parts) >= 3:
-                origin = "/".join(parts[:3])
+            parsed = urlparse(referer)
+            if parsed.scheme and parsed.netloc:
+                origin = f"{parsed.scheme}://{parsed.netloc}"
 
     if not origin:
         raise HTTPException(

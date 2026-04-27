@@ -84,13 +84,19 @@ def login(
 @router.post(
     "/logout", response_model=LogoutResponse, dependencies=[Depends(require_any_valid_auth)]
 )
-def logout(response: Response) -> LogoutResponse:
+def logout(
+    response: Response,
+    request: Request,
+    auth_config: ApiAuthConfig = Depends(get_api_auth_config),
+) -> LogoutResponse:
     """Clear the session cookie."""
+    is_secure = auth_config.cookie_secure or request.url.scheme == "https"
     response.delete_cookie(
         key=DASHBOARD_COOKIE_NAME,
         path="/",
         httponly=True,
         samesite="strict",
+        secure=is_secure,
     )
     return LogoutResponse()
 
