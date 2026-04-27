@@ -99,3 +99,25 @@ def test_csrf_protection_on_logout(client: TestClient) -> None:
     response = client.post("/auth/logout", headers={"Origin": "http://malicious.com"})
     assert response.status_code == 403
     assert "not trusted" in response.json()["detail"]
+
+
+def test_invalid_sub_claim(client: TestClient) -> None:
+    """JWT with invalid 'sub' claim should be rejected."""
+    import time
+
+    import jwt
+
+    from apps.api.auth import JWT_ALGORITHM
+
+    now = int(time.time())
+    payload = {
+        "iat": now,
+        "exp": now + 3600,
+        "sub": "not-an-operator",
+    }
+    invalid_token = jwt.encode(payload, "test-secret", algorithm=JWT_ALGORITHM)
+
+    client.cookies.set(DASHBOARD_COOKIE_NAME, invalid_token)
+    response = client.get("/auth/status")
+    assert response.status_code == 200
+    assert response.json()["authenticated"] is False

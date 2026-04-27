@@ -54,7 +54,9 @@ def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) -> 
     resolved_env = os.environ if environ is None else environ
 
     allowed_origins_str = resolved_env.get(ALLOWED_ORIGINS_ENV_VAR, "")
-    allowed_origins = [o.strip() for o in allowed_origins_str.split(",") if o.strip()]
+    allowed_origins = [
+        o.strip().rstrip("/").lower() for o in allowed_origins_str.split(",") if o.strip()
+    ]
 
     cookie_secure = resolved_env.get(COOKIE_SECURE_ENV_VAR, "0") == "1"
 
@@ -80,6 +82,7 @@ def create_dashboard_token(secret: str) -> str:
 def decode_dashboard_token(token: str, secret: str) -> dict[str, Any] | None:
     """Decode and validate a dashboard session token."""
     try:
-        return jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
+        return payload if payload.get("sub") == "operator" else None
     except jwt.PyJWTError:
         return None

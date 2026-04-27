@@ -139,8 +139,8 @@ def _enforce_csrf_protection(request: Request) -> None:
     # 3. Normalize: trim trailing slash and convert to lowercase for comparison.
     normalized_origin = origin.rstrip("/").lower()
 
-    # 4. Exact match against allowlist.
-    if normalized_origin not in [o.rstrip("/").lower() for o in auth_config.allowed_origins]:
+    # 4. Direct match against pre-normalized allowlist.
+    if normalized_origin not in (auth_config.allowed_origins or []):
         logger.warning(f"CSRF check failed: Origin '{normalized_origin}' not in allowlist.")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
