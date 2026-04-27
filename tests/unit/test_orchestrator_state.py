@@ -24,6 +24,22 @@ def test_orchestrator_state_supports_minimal_task_input() -> None:
     assert state.errors == []
 
 
+def test_orchestrator_state_preserves_secret_whitespace() -> None:
+    """Secret values should remain byte-exact and must not be globally trimmed."""
+    state = OrchestratorState(
+        task={
+            "task_text": "Run with exact secret",
+            "secrets": {
+                "TOKEN": "  leading-and-trailing  ",
+                "MIXED": "a b",
+            },
+        }
+    )
+
+    assert state.task.secrets["TOKEN"] == "  leading-and-trailing  "
+    assert state.task.secrets["MIXED"] == "a b"
+
+
 def test_orchestrator_state_supports_nested_workflow_data() -> None:
     """Nested workflow fields are validated and preserved in the typed state."""
     state = OrchestratorState(

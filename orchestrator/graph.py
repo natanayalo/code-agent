@@ -6,7 +6,7 @@ import asyncio
 import base64
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal
 
 from langchain_core.runnables import RunnableLambda
@@ -367,8 +367,11 @@ def _classify_task_kind(task_text: str) -> str:
 def _task_requires_approval(task_text: str, constraints: dict[str, Any]) -> bool:
     """Return True if the task involves destructive actions or explicit approval constraints."""
     approval_data = constraints.get("approval")
-    if isinstance(approval_data, dict) and approval_data.get("status") == "approved":
-        return False
+    if isinstance(approval_data, Mapping):
+        status = str(approval_data.get("status") or "").strip().lower()
+        source = str(approval_data.get("source") or "").strip().lower()
+        if status == "approved" and source in {"api", "orchestrator"}:
+            return False
     if constraints.get("requires_approval") is True:
         return True
     return is_destructive_task(task_text, constraints)

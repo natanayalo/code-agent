@@ -521,6 +521,7 @@ class ApprovalDecisionResult:
 _REPLAYABLE_STATUSES: frozenset[str] = frozenset(
     {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value, TaskStatus.CANCELLED.value}
 )
+_RESERVED_INTERNAL_CONSTRAINT_KEYS: frozenset[str] = frozenset({"approval"})
 
 
 @dataclass(frozen=True)
@@ -564,6 +565,14 @@ def _deep_merge(
 
     merge_in_place(merged, source)
     return merged
+
+
+def _sanitize_submission_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:
+    """Drop reserved control-plane keys that callers must not set directly."""
+    sanitized = dict(constraints)
+    for key in _RESERVED_INTERNAL_CONSTRAINT_KEYS:
+        sanitized.pop(key, None)
+    return sanitized
 
 
 def _enum_value(value: object | None) -> str | None:
@@ -1647,6 +1656,9 @@ class TaskExecutionService:
             if replay_request.secrets is not None:
                 updates["secrets"] = dict(replay_request.secrets)
 
+        if "constraints" in updates:
+            updates["constraints"] = _sanitize_submission_constraints(updates["constraints"])
+
         # Ensure provenance chain is included in the final set of constraints
         base_constraints = updates.get("constraints", submission.constraints)
         existing_chain_raw = base_constraints.get("replayed_from")
@@ -1710,11 +1722,12 @@ class TaskExecutionService:
             user_repo = UserRepository(session)
             session_repo = SessionRepository(session)
             task_repo = TaskRepository(session)
+            sanitized_constraints = _sanitize_submission_constraints(submission.constraints)
             task_spec = build_task_spec(
                 task_text=submission.task_text,
                 repo_url=submission.repo_url,
                 target_branch=submission.branch,
-                constraints=submission.constraints,
+                constraints=sanitized_constraints,
             ).model_dump(mode="json")
 
             user = user_repo.get_by_external_user_id(submission.session.external_user_id)
@@ -1753,11 +1766,11 @@ class TaskExecutionService:
                 task_spec=task_spec,
                 # Store tools in constraints to avoid a schema migration for now
                 constraints={
-                    **(submission.constraints or {}),
+                    **sanitized_constraints,
                     "tools": submission.tools,
                 }
                 if submission.tools is not None
-                else dict(submission.constraints),
+                else dict(sanitized_constraints),
                 secrets_encrypted=self.is_secret_encryption_active(),
                 status=status,
                 max_attempts=max(1, max_attempts),

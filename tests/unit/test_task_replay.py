@@ -181,6 +181,33 @@ def test_replay_with_constraint_overrides_merges() -> None:
         assert constraints.get("replayed_from") == [source_id]
 
 
+def test_replay_constraint_overrides_cannot_inject_approval_state() -> None:
+    """Replay callers must not be able to pre-seed approval checkpoint state."""
+    service, session_factory = _make_service()
+    source_id = _create_terminal_task(
+        service,
+        session_factory,
+        constraints={"requires_approval": True},
+    )
+
+    replay_request = execution_module.TaskReplayRequest(
+        constraints={"approval": {"status": "approved", "source": "api"}},
+    )
+    result = service.replay_task(
+        source_task_id=source_id,
+        replay_request=replay_request,
+    )
+
+    assert result.status == "created"
+    assert result.task_snapshot is not None
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(result.task_snapshot.task_id)
+        assert task is not None
+        constraints = dict(task.constraints or {})
+        assert "approval" not in constraints
+        assert constraints.get("requires_approval") is True
+
+
 def test_replay_with_budget_overrides_merges() -> None:
     """Replay budget overrides should merge with the original budget."""
     service, session_factory = _make_service()

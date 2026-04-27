@@ -15,6 +15,7 @@ from orchestrator.graph import (
     _ensure_state,
     _resolve_orchestrator_timeout_seconds,
     _route_after_review_result,
+    _task_requires_approval,
     await_approval,
     await_permission_escalation,
     build_choose_worker_node,
@@ -44,6 +45,16 @@ def test_classify_task_kind():
 
 def test_is_destructive_task():
     assert is_destructive_task("test", {"destructive_action": True}) is True
+
+
+def test_task_requires_approval_ignores_untrusted_approved_status() -> None:
+    constraints = {"approval": {"status": "approved", "source": "user"}}
+    assert _task_requires_approval("Delete all files", constraints) is True
+
+
+def test_task_requires_approval_accepts_trusted_approved_status() -> None:
+    constraints = {"approval": {"status": "approved", "source": "api"}}
+    assert _task_requires_approval("Delete all files", constraints) is False
 
 
 def test_coerce_approval_decision():
