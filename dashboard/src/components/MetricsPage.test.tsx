@@ -132,6 +132,33 @@ describe('MetricsPage', () => {
     expect(icon).toHaveAttribute('stroke', 'var(--color-status-failed)');
   });
 
+  it('renders healthy retry rate with muted color', async () => {
+    const healthyRetryMetrics = {
+      total_tasks: 10,
+      retried_tasks: 0,
+      retry_rate: 0.05, // <= 0.1 threshold
+      status_counts: {},
+      worker_usage: {},
+      avg_duration_seconds: 0,
+      success_rate: 1.0,
+    };
+
+    vi.mocked(api.getMetrics).mockResolvedValue(healthyRetryMetrics);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <MetricsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    const retryRateText = await screen.findByText('Retry Rate');
+    const retryCard = retryRateText.closest('.metric-summary-card');
+    const icon = retryCard?.querySelector('svg');
+    expect(icon).toHaveAttribute('stroke', 'var(--color-text-muted)');
+  });
+
   it('renders error state on failure', async () => {
     vi.mocked(api.getMetrics).mockRejectedValue(new Error('Failed to fetch'));
 
