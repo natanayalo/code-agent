@@ -73,7 +73,8 @@ repos:
           - openai>=2.0,<3.0
           - SQLAlchemy>=2.0,<3.0
           - uvicorn>=0.35,<1.0
-          - cryptography>=44.0.0,<45.0
+          - cryptography>=46.0.0,<47.0
+          - pyjwt>=2.12.1
         files: ^(apps|db|memory|orchestrator|sandbox|tools|workers)/.*\.py$
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v3.13.0

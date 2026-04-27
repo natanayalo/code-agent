@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
-import jwt  # type: ignore[import-not-found]
+import jwt
 
 logger = logging.getLogger(__name__)
 
