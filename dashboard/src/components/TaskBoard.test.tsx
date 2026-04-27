@@ -150,9 +150,43 @@ describe('TaskBoard', () => {
     const taskElements = within(completedColumn as HTMLElement).getAllByRole('heading', { level: 3 });
     const taskTexts = taskElements.map(el => el.textContent).slice(1);
 
-    // In the "Completed" column, New Task should appear before Old Task (descending sort by created_at)
     expect(taskTexts[0]).toBe('New Task');
     expect(taskTexts[1]).toBe('Old Task');
+  });
+
+  it('handles missing created_at in sorting', () => {
+    const tasksWithMissingDate = [
+      {
+        task_id: 'no-date',
+        task_text: 'No Date Task',
+        status: TaskStatus.COMPLETED,
+        created_at: null,
+      },
+      {
+        task_id: 'with-date',
+        task_text: 'With Date Task',
+        status: TaskStatus.COMPLETED,
+        created_at: '2024-01-01T10:00:00Z',
+      },
+    ];
+
+    render(
+      <TaskBoard
+        // @ts-expect-error: testing missing created_at
+        tasks={tasksWithMissingDate}
+        loading={false}
+        isFetching={false}
+        error={null}
+        refetch={mockRefetch}
+      />
+    );
+
+    const completedColumn = screen.getByText('Completed').closest('.board-column')!;
+    const taskElements = within(completedColumn as HTMLElement).getAllByRole('heading', { level: 3 });
+    const taskTexts = taskElements.map(el => el.textContent).slice(1);
+
+    expect(taskTexts[0]).toBe('With Date Task');
+    expect(taskTexts[1]).toBe('No Date Task');
   });
 
   it('handles unknown status gracefully', () => {
@@ -175,5 +209,29 @@ describe('TaskBoard', () => {
     );
 
     expect(screen.queryByText('Unknown Status Task')).toBeNull();
+  });
+
+  it('forces tasks awaiting approval into the Active column', () => {
+    const approvalTask = {
+      task_id: 'approval-1',
+      task_text: 'Awaiting Approval',
+      status: TaskStatus.COMPLETED, // Even if marked completed, if approval is pending it stays active
+      approval_status: 'pending',
+      created_at: new Date().toISOString(),
+    };
+
+    render(
+      <TaskBoard
+        // @ts-expect-error: testing pending approval logic
+        tasks={[approvalTask]}
+        loading={false}
+        isFetching={false}
+        error={null}
+        refetch={mockRefetch}
+      />
+    );
+
+    const activeColumn = screen.getByText('Active').closest('.board-column')!;
+    expect(within(activeColumn as HTMLElement).getByText('Awaiting Approval')).toBeInTheDocument();
   });
 });

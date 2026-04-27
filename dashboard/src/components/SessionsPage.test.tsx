@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -202,5 +202,67 @@ describe('SessionsPage', () => {
     // Verify status class mapping (closed -> success)
     const badge = screen.getByText('closed');
     expect(badge.className).toContain('status-success');
+  });
+
+  it('maps "failed" session status to "error" class and handles unknown status', async () => {
+    const mockSessions = [
+      {
+        session_id: 's-failed',
+        user_id: 'u1',
+        channel: 'http',
+        external_thread_id: 't1',
+        // @ts-expect-error: testing internal status mapping
+        status: 'failed',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      {
+        session_id: 's-unknown',
+        user_id: 'u2',
+        channel: 'http',
+        external_thread_id: 't2',
+        // @ts-expect-error: testing unknown status handling
+        status: 'unknown-status',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+    ];
+
+    vi.mocked(api.listSessions).mockResolvedValue(mockSessions);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SessionsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    const failedBadge = await screen.findByText('failed');
+    expect(failedBadge.className).toContain('status-error');
+
+    const unknownBadge = screen.getByText('unknown-status');
+    expect(unknownBadge.className).toContain('status-unknown-status');
+  });
+
+  it('retries fetching sessions when Retry button is clicked', async () => {
+    vi.mocked(api.listSessions).mockRejectedValueOnce(new Error('First fail'));
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SessionsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText(/Error loading sessions/i)).toBeInTheDocument();
+
+    vi.mocked(api.listSessions).mockResolvedValueOnce([]);
+    const retryButton = screen.getByText('Retry');
+    fireEvent.click(retryButton);
+
+    expect(api.listSessions).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText(/No sessions found/i)).toBeInTheDocument();
   });
 });

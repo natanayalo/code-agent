@@ -38,6 +38,7 @@ describe('App', () => {
       { task_id: '1', task_text: 'Task 1', status: TaskStatus.COMPLETED, created_at: new Date().toISOString(), session_id: 's1', priority: 1, updated_at: new Date().toISOString() },
       { task_id: '2', task_text: 'Task 2', status: TaskStatus.FAILED, created_at: new Date().toISOString(), session_id: 's1', priority: 1, updated_at: new Date().toISOString() },
       { task_id: '3', task_text: 'Task 3', status: TaskStatus.CANCELLED, created_at: new Date().toISOString(), session_id: 's1', priority: 1, updated_at: new Date().toISOString() },
+      { task_id: '4', task_text: 'Task 4', status: TaskStatus.PENDING, created_at: new Date().toISOString(), session_id: 's1', priority: 1, updated_at: new Date().toISOString() },
     ];
 
     vi.mocked(api.listTasks).mockResolvedValue(mockTasks);

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -76,6 +76,35 @@ describe('MetricsPage', () => {
     expect(screen.getByText(/40 runs/i)).toBeInTheDocument();
   });
 
+  it('renders low success rate with failure color', async () => {
+    const lowMetrics = {
+      total_tasks: 10,
+      retried_tasks: 0,
+      retry_rate: 0,
+      status_counts: { failed: 10 },
+      worker_usage: {},
+      avg_duration_seconds: 0,
+      success_rate: 0.1, // < 0.8 threshold
+    };
+
+    vi.mocked(api.getMetrics).mockResolvedValue(lowMetrics);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <MetricsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    const successRateText = await screen.findByText('Success Rate');
+    const successCard = successRateText.closest('.metric-summary-card');
+    const icon = successCard?.querySelector('svg');
+    // Success rate is 0.1, which is below 0.8 threshold, should use failure color
+    // Lucide icons map the color prop to the stroke attribute on the SVG
+    expect(icon).toHaveAttribute('stroke', 'var(--color-status-failed)');
+  });
+
   it('renders error state on failure', async () => {
     vi.mocked(api.getMetrics).mockRejectedValue(new Error('Failed to fetch'));
 
@@ -89,5 +118,35 @@ describe('MetricsPage', () => {
 
     expect(await screen.findByText(/Error loading metrics/i)).toBeInTheDocument();
     expect(screen.getByText(/Failed to fetch/i)).toBeInTheDocument();
+  });
+
+  it('retries fetching metrics when Retry button is clicked', async () => {
+    vi.mocked(api.getMetrics).mockRejectedValueOnce(new Error('First fail'));
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <MetricsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText(/Error loading metrics/i)).toBeInTheDocument();
+
+    vi.mocked(api.getMetrics).mockResolvedValueOnce({
+      total_tasks: 5,
+      retried_tasks: 0,
+      retry_rate: 0,
+      status_counts: {},
+      worker_usage: {},
+      avg_duration_seconds: 0,
+      success_rate: 1,
+    });
+
+    const retryButton = screen.getByText('Retry');
+    fireEvent.click(retryButton);
+
+    expect(api.getMetrics).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText('Operational Metrics')).toBeInTheDocument();
   });
 });

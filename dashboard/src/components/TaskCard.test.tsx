@@ -331,5 +331,23 @@ describe('TaskCard', () => {
         expect(screen.getByText('Replay failed server-side')).toBeInTheDocument();
       });
     });
+
+    it('handles non-Error objects in catch blocks', async () => {
+      vi.mocked(api.replayTask).mockRejectedValueOnce('String error');
+      const completedTask = { ...mockTask, status: TaskStatus.COMPLETED };
+      render(<TaskCard task={completedTask} />);
+
+      fireEvent.click(screen.getByTitle('Replay task (unchanged)'));
+
+      await vi.waitFor(() => {
+        expect(screen.getByText('Failed to replay task')).toBeInTheDocument();
+      });
+    });
+
+    it('handles empty run status string', () => {
+      const task = { ...mockTask, latest_run_status: '' };
+      const { container } = render(<TaskCard task={task} />);
+      expect(container.querySelector('.run-status')).toBeNull();
+    });
   });
 });
