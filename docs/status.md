@@ -6,9 +6,8 @@ Phase 1: clarity and control.
 
 Active focus:
 
-- Milestone A (product identity + docs refresh)
-- preparation for Milestone B (operator dashboard/PWA)
-- preparation for Milestone C (worker mode/runtime profile strategy)
+- Milestone 16 (operator dashboard/PWA)
+- preparation for Milestone 17 (worker mode/runtime profile strategy)
 
 ## Current Capabilities
 
@@ -31,26 +30,31 @@ Active focus:
 
 ## Next Priorities
 
-1. complete Milestone A documentation refresh and keep docs synchronized with behavior
-2. implement Milestone B thin local dashboard/PWA for visibility, approvals, replay/retry controls
-3. implement Milestone C worker profile + capability matrix + policy/config mapping
-4. define bounded Scout mode design (Milestone D) with explicit budget and permission boundaries
-5. introduce structured friction/improvement proposal pipeline (Milestone E)
+1. implement Milestone 16 thin local dashboard/PWA for visibility, approvals, replay/retry controls
+3. implement Milestone 17 worker profile + capability matrix + policy/config mapping
+4. define bounded Scout mode design (Milestone 18) with explicit budget and permission boundaries
+5. introduce structured friction/improvement proposal pipeline (Milestone 19)
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
-### Milestone B: Operator UX (Dashboard/PWA)
+### Milestone 16: Operator UX (Dashboard/PWA)
 - [x] T-130: design PWA frontend architecture and choose tech stack (React/Vite) (#114)
 - [x] T-131: implement API endpoints for task/session listing and detailed view
 - [x] T-132: build core dashboard layout with task status board
 - [x] T-133: implement comprehensive test suite and CI (90% coverage)
 - [x] T-134: implement approval/rejection UI components in the dashboard
 - [x] T-135: implement task replay control (unchanged) in the dashboard (#115)
-- [ ] T-136: implement secure dashboard authentication (HttpOnly cookies/OIDC)
+- [x] T-136: implement secure dashboard authentication (HttpOnly cookies/OIDC)
+- [ ] T-137: implement dashboard routing and pages for Sessions/Metrics (backend support exists)
+- [ ] T-138: implement detailed task view (timeline, logs, artifacts)
+- [ ] T-139: implement "Replay with Overrides" modal/form in the dashboard
+- [ ] T-143: implement API & UI for Session Working Context (Goal/Risks/Decisions)
+- [ ] T-144: implement API & UI for Knowledge Base (Skeptical Memory) management
+- [ ] T-145: implement API & UI for Tool Inventory and Sandbox status
 
-### Milestone C: Worker Profile Strategy
+### Milestone 17: Worker Profile Strategy
 - [ ] T-140: define `WorkerProfile` Pydantic model and capability matrix
 - [ ] T-141: implement profile-based worker selection logic in the orchestrator
 - [ ] T-142: map existing workers (Gemini, Codex, OpenRouter) to capabilities (Planning, Coding, Reviewing)
@@ -62,3 +66,4 @@ Granular tasks for the active and upcoming milestones:
 - Milestone 12: observability + replay (T-090 to T-092)
 - Milestone 13 (remainder): hardening controls including auth/safety/budget/retention (T-100 to T-105)
 - Milestone 14 baseline: planning/context/review intelligence slices (T-106, T-108 to T-112, T-114 to T-128)
+- Milestone 15: product identity and documentation refresh

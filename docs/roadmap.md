@@ -12,16 +12,16 @@ Phase 1: clarity and control.
 
 Priority sequence:
 
-1. Milestone A: Product identity and documentation refresh
-2. Milestone B: Operator UX and transparency
-3. Milestone C: Worker mode and runtime leverage
+1. Milestone 15: Product identity and documentation refresh
+2. Milestone 16: Operator UX and transparency
+3. Milestone 17: Worker profile and runtime leverage
 
 Planned next phases:
 
 1. Phase 2: bounded autonomy
 2. Phase 3: deeper platform maturity
 
-## Milestone A: Product Identity and Documentation Refresh
+## Milestone 15: Product Identity and Documentation Refresh
 
 Goal:
 
@@ -37,9 +37,9 @@ Deliverables:
 
 Status:
 
-- in progress (this documentation slice)
+- completed (documentation synchronized with behavior)
 
-## Milestone B: Operator UX and Transparency
+## Milestone 16: Operator UX and Transparency
 
 Goal:
 
@@ -67,7 +67,7 @@ Success criteria:
 - faster/clearer approval flow than Telegram-only
 - replay/retry invokable from dashboard
 
-## Milestone C: Worker Mode and Runtime Leverage
+## Milestone 17: Worker Mode and Runtime Leverage
 
 Goal:
 
@@ -93,7 +93,7 @@ Non-goals:
 - implementing every runtime feature
 - forcing one runtime to handle all roles
 
-## Milestone D: Controlled Autonomy / Scout Mode
+## Milestone 18: Controlled Autonomy / Scout Mode
 
 Goal:
 
@@ -112,7 +112,7 @@ Required controls:
 - no direct production mutation
 - output routed to review inbox only
 
-## Milestone E: Reflection and Improvement Pipeline
+## Milestone 19: Reflection and Improvement Pipeline
 
 Goal:
 
@@ -132,7 +132,7 @@ Manual-only zones:
 - approval core logic
 - deployment/billing controls
 
-## Milestone F: Operational Self-Awareness
+## Milestone 20: Operational Self-Awareness
 
 Goal:
 
@@ -148,7 +148,7 @@ Control rule:
 
 - agent can request privileged maintenance actions; operator/system policy decides execution
 
-## Milestone G: Worker Runtime Hotspot Refactor
+## Milestone 21: Worker Runtime Hotspot Refactor
 
 Goal:
 
@@ -174,19 +174,19 @@ Approach:
 
 Phase 1:
 
-1. Milestone A
-2. Milestone B
-3. Milestone C
+1. Milestone 15
+2. Milestone 16
+3. Milestone 17
 
 Phase 2:
 
-1. Milestone D
-2. Milestone E
+1. Milestone 18
+2. Milestone 19
 
 Phase 3:
 
-1. Milestone F
-2. Milestone G
+1. Milestone 20
+2. Milestone 21
 
 ## Open Planning Questions
 

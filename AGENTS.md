@@ -26,9 +26,9 @@ Build a service that can:
 Do not build these yet:
 - multi-user SaaS
 - autonomous self-modifying production code
-- broad multi-channel platform beyond Telegram + webhook
+- consumer-facing platform beyond Telegram/Dashboard
 - auto-merge / auto-deploy
-- general-purpose voice/consumer assistant
+- general-purpose voice assistant
 - complex multi-agent swarms
 - broad memory graph platform
 
@@ -93,6 +93,7 @@ For each task:
 ## Python tooling environment
 
 - Use **Poetry** for dependency management (`poetry install`).
+- Use **Pytest** for testing with a **90% coverage threshold** enforced in CI (`--cov-fail-under=90`).
 - Use the repository virtualenv explicitly for Python tooling and checks.
 - Prefer `.venv/bin/...` invocations (for example: `.venv/bin/poetry`, `.venv/bin/pytest`, `.venv/bin/pre-commit`, `.venv/bin/ruff`, `.venv/bin/mypy`).
 - Do not rely on globally installed `python`, `pytest`, or `pre-commit` binaries.
@@ -131,8 +132,8 @@ Current routing hints:
 ## Folder ownership
 
 ### apps/
-Entry points only.
-No business logic here.
+Entry points and application-layer logic (auth, progress, protocol mapping).
+No core business domain logic here.
 
 ### orchestrator/
 Owns workflow graph, state transitions, routing, retry policy, approval checkpoints.
@@ -145,7 +146,7 @@ No session ownership here.
 Owns workspace creation, repo lifecycle, container execution, artifact capture.
 
 ### memory/
-Owns structured memory persistence and retrieval.
+Entry point for memory-specific schemas and logic. Note: Current persistence logic for skeptical memory resides in `repositories/sqlalchemy.py`.
 
 ### tools/
 Owns integration wrappers and tool abstractions.
@@ -154,7 +155,7 @@ Owns integration wrappers and tool abstractions.
 Owns schema/migrations only.
 
 ### repositories/
-Owns persistence access patterns and CRUD boundaries.
+Owns persistence access patterns, CRUD boundaries, and memory persistence logic.
 No business policy here.
 
 ## Worker contract
@@ -167,16 +168,24 @@ Expected input:
 - branch
 - task_text
 - memory_context
+- task_plan
+- secrets
+- tools
 - constraints
 - budget
 
 Expected output:
 - status
 - summary
+- failure_kind
+- requested_permission
+- budget_usage
 - commands_run
 - files_changed
 - test_results
 - artifacts
+- review_result
+- diff_text
 - next_action_hint
 
 Workers must not:
@@ -249,12 +258,11 @@ Do not create opaque giant blobs of memory.
 Every task run must emit:
 - session_id
 - task_id
-- chosen worker
-- route reason
-- workspace id
+- worker_type
+- workspace_id
 - start/end timestamps
 - final status
-- changed files count
+- files_changed
 - artifact list
 
 Every command run in sandbox must emit:
@@ -278,21 +286,7 @@ Before merging:
 
 ## Priorities
 
-Priority order:
-1. [DONE] Milestone 3: Artifact capture baseline (T-032)
-2. [DONE] Milestone 4: First worker interface + implementation (T-040/T-041)
-3. [DONE] Milestone 5: Vertical Slice E2E milestone (T-042 + T-044)
-4. [DONE] Milestone 6: Sandbox hardening milestone (T-054/T-055)
-5. [DONE] Milestone 7: Memory integration milestone (T-060 to T-065)
-6. [DONE] Milestone 8: Structured run observability (T-043) + Milestone 9: T-070 second worker (GeminiCliWorker)
-7. [DONE] Milestone 9 (remaining): T-071 routing heuristics + T-072 manual override
-8. [DONE] Milestone 10: Telegram ingress milestone (T-050 to T-053)
-9. [DONE] Review follow-ups: T-084, T-085, T-086
-10. T-104: API authentication (pulled from Milestone 13 — close auth gap before adding capabilities)
-11. Milestone 11: External tool wrappers and MCP compatibility (T-083, T-080, T-087, T-081, T-082, T-088, T-089, T-107)
-12. Milestone 12: Observability + replay (T-090 to T-092)
-13. Milestone 13 (remainder): Hardening (T-100 to T-103, T-105)
-14. Milestone 14: Agent intelligence (T-106, T-108, T-109, T-110, T-111, T-112)
+Priority order and active task tracking are maintained in [docs/status.md](docs/status.md). For long-term vision and phase sequencing, see [docs/roadmap.md](docs/roadmap.md).
 
 ## Code style
 
