@@ -26,9 +26,9 @@ Build a service that can:
 Do not build these yet:
 - multi-user SaaS
 - autonomous self-modifying production code
-- broad multi-channel platform beyond Telegram + webhook
+- consumer-facing platform beyond Telegram/Dashboard
 - auto-merge / auto-deploy
-- general-purpose voice/consumer assistant
+- general-purpose voice assistant
 - complex multi-agent swarms
 - broad memory graph platform
 
@@ -132,8 +132,8 @@ Current routing hints:
 ## Folder ownership
 
 ### apps/
-Entry points only.
-No business logic here.
+Entry points and application-layer logic (auth, progress, protocol mapping).
+No core business domain logic here.
 
 ### orchestrator/
 Owns workflow graph, state transitions, routing, retry policy, approval checkpoints.
@@ -168,16 +168,24 @@ Expected input:
 - branch
 - task_text
 - memory_context
+- task_plan
+- secrets
+- tools
 - constraints
 - budget
 
 Expected output:
 - status
 - summary
+- failure_kind
+- requested_permission
+- budget_usage
 - commands_run
 - files_changed
 - test_results
 - artifacts
+- review_result
+- diff_text
 - next_action_hint
 
 Workers must not:
@@ -250,12 +258,11 @@ Do not create opaque giant blobs of memory.
 Every task run must emit:
 - session_id
 - task_id
-- chosen worker
-- route reason
-- workspace id
+- worker_type
+- workspace_id
 - start/end timestamps
 - final status
-- changed files count
+- files_changed
 - artifact list
 
 Every command run in sandbox must emit:
