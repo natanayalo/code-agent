@@ -130,6 +130,9 @@ def test_submit_task_persists_execution_path_and_allows_polling(
     assert payload["status"] == "pending"
     assert payload["chosen_worker"] is None
     assert payload["route_reason"] is None
+    assert payload["task_spec"]["goal"] == "Create a note and report the result"
+    assert payload["task_spec"]["task_type"] == "feature"
+    assert payload["task_spec"]["risk_level"] == "low"
     assert payload["latest_run"] is None
 
     _run_one_queued_task(client)
@@ -142,6 +145,7 @@ def test_submit_task_persists_execution_path_and_allows_polling(
     assert get_response.json()["status"] == "completed"
     assert get_response.json()["chosen_worker"] == "codex"
     assert get_response.json()["route_reason"] == "cheap_mechanical_change"
+    assert get_response.json()["task_spec"]["delivery_mode"] == "workspace"
     assert get_response.json()["latest_run"]["summary"] == (
         "Created note.txt and retained the workspace for inspection."
     )
@@ -176,6 +180,8 @@ def test_submit_task_persists_execution_path_and_allows_polling(
     assert worker.requests[0].session_id == payload["session_id"]
     assert worker.requests[0].repo_url == "https://github.com/natanayalo/code-agent"
     assert worker.requests[0].branch == "master"
+    assert worker.requests[0].task_spec is not None
+    assert worker.requests[0].task_spec["goal"] == "Create a note and report the result"
 
     with session_scope(session_factory) as session:
         task_repo = TaskRepository(session)
@@ -186,6 +192,8 @@ def test_submit_task_persists_execution_path_and_allows_polling(
         assert task is not None
         assert task.status is TaskStatus.COMPLETED
         assert task.chosen_worker.value == "codex"
+        assert task.task_spec is not None
+        assert task.task_spec["goal"] == "Create a note and report the result"
 
         worker_runs = worker_run_repo.list_by_task(task_id)
         assert len(worker_runs) == 1

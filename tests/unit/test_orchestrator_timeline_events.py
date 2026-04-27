@@ -8,6 +8,7 @@ from orchestrator.graph import (
     check_approval,
     classify_task,
     dispatch_job,
+    generate_task_spec,
     ingest_task,
     load_memory,
     plan_task,
@@ -50,6 +51,19 @@ def test_plan_task_emits_event_when_generated():
     assert len(res["timeline_events"]) == 1
     assert res["timeline_events"][0].event_type == TimelineEventType.TASK_PLANNED
     assert res["timeline_events"][0].payload["planning"] == "generated"
+
+
+def test_generate_task_spec_emits_event():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Add API pagination"},
+            "task_kind": "implementation",
+        }
+    )
+    res = generate_task_spec(state)
+    assert len(res["timeline_events"]) == 1
+    assert res["timeline_events"][0].event_type == TimelineEventType.TASK_SPEC_GENERATED
+    assert res["timeline_events"][0].payload["task_spec"]["goal"] == "Add API pagination"
 
 
 def test_choose_worker_emits_event():

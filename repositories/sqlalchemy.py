@@ -251,6 +251,7 @@ class TaskRepository:
         callback_url: str | None = None,
         worker_override: str | WorkerType | None = None,
         constraints: dict[str, Any] | None = None,
+        task_spec: dict[str, Any] | None = None,
         budget: dict[str, Any] | None = None,
         secrets: dict[str, str] | None = None,
         secrets_encrypted: bool = False,
@@ -269,6 +270,7 @@ class TaskRepository:
             callback_url=callback_url,
             worker_override=cast(WorkerType | None, worker_override),
             constraints=constraints or {},
+            task_spec=task_spec,
             budget=budget or {},
             secrets=secrets or {},
             secrets_encrypted=secrets_encrypted,
@@ -280,6 +282,16 @@ class TaskRepository:
             route_reason=route_reason,
         )
         self.session.add(task)
+        self.session.flush()
+        return task
+
+    def set_task_spec(self, *, task_id: str, task_spec: dict[str, Any]) -> Task | None:
+        """Persist the generated structured task contract for a task."""
+        task = self.get(task_id)
+        if task is None:
+            return None
+
+        task.task_spec = task_spec
         self.session.flush()
         return task
 

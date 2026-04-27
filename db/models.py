@@ -220,6 +220,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     task_text: Mapped[str] = mapped_column(Text, nullable=False)
     worker_override: Mapped[WorkerType | None] = mapped_column(WORKER_TYPE_ENUM, nullable=True)
     constraints: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    task_spec: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     budget: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     secrets: Mapped[dict[str, str]] = mapped_column(EncryptedJSON, nullable=False, default=dict)
     secrets_encrypted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

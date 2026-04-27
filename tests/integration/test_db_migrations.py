@@ -56,6 +56,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "result_summary",
             "workspace",
             "review_result",
+            "independent_review_result",
         },
     },
     "task_timeline_events": {
@@ -63,6 +64,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "task_ingested",
             "task_classified",
             "task_planned",
+            "task_spec_generated",
             "memory_loaded",
             "worker_selected",
             "approval_requested",
@@ -101,6 +103,7 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
         "task_text",
         "worker_override",
         "constraints",
+        "task_spec",
         "budget",
         "chosen_worker",
         "route_reason",
@@ -199,13 +202,15 @@ def test_alembic_downgrade_cleans_review_result_artifacts(tmp_path: Path) -> Non
             text(
                 "INSERT INTO tasks "
                 "(id, session_id, repo_url, branch, callback_url, task_text, worker_override, "
-                "constraints, budget, secrets, secrets_encrypted, status, attempt_count, "
-                "max_attempts, next_attempt_at, lease_owner, lease_expires_at, last_error, "
+                "constraints, task_spec, budget, secrets, secrets_encrypted, status, "
+                "attempt_count, max_attempts, next_attempt_at, lease_owner, lease_expires_at, "
+                "last_error, "
                 "priority, chosen_worker, route_reason, created_at, updated_at) "
                 "VALUES (:id, :session_id, :repo_url, :branch, :callback_url, :task_text, "
-                ":worker_override, :constraints, :budget, :secrets, :secrets_encrypted, "
-                ":status, :attempt_count, :max_attempts, :next_attempt_at, :lease_owner, "
-                ":lease_expires_at, :last_error, :priority, :chosen_worker, :route_reason, "
+                ":worker_override, :constraints, :task_spec, :budget, :secrets, "
+                ":secrets_encrypted, :status, :attempt_count, :max_attempts, "
+                ":next_attempt_at, :lease_owner, :lease_expires_at, :last_error, "
+                ":priority, :chosen_worker, :route_reason, "
                 ":created_at, :updated_at)"
             ),
             {
@@ -217,6 +222,7 @@ def test_alembic_downgrade_cleans_review_result_artifacts(tmp_path: Path) -> Non
                 "task_text": "test",
                 "worker_override": None,
                 "constraints": "{}",
+                "task_spec": None,
                 "budget": "{}",
                 "secrets": "{}",
                 "secrets_encrypted": 0,

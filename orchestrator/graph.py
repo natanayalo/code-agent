@@ -16,6 +16,12 @@ from langgraph.types import interrupt
 
 from db.base import utc_now
 from db.enums import TimelineEventType
+from orchestrator.constants import (
+    COMPLEX_TASK_MARKERS,
+    DESTRUCTIVE_TASK_MARKERS,
+    HIGH_QUALITY_REQUEST_MARKERS,
+    LOW_COST_REQUEST_MARKERS,
+)
 from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, review_result
 from orchestrator.state import (
     SUPPORTED_WORKER_TYPES,
@@ -32,6 +38,7 @@ from orchestrator.state import (
     WorkerDispatch,
     WorkerType,
 )
+from orchestrator.task_spec import build_task_spec_for_request, validate_task_spec_policy
 from tools import coerce_permission_level
 from tools.numeric import coerce_positive_int_like
 from workers import ArtifactReference, Worker, WorkerRequest, WorkerResult
@@ -42,6 +49,7 @@ ORCHESTRATOR_NODE_SEQUENCE = (
     "ingest_task",
     "classify_task",
     "plan_task",
+    "generate_task_spec",
     "load_memory",
     "choose_worker",
     "check_approval",
@@ -54,28 +62,6 @@ ORCHESTRATOR_NODE_SEQUENCE = (
     "persist_memory",
 )
 
-DESTRUCTIVE_TASK_MARKERS = (
-    "delete file",
-    "delete files",
-    "destroy workspace",
-    "drop database",
-    "drop table",
-    "git clean",
-    "git reset",
-    "purge data",
-    "rm -rf",
-    "wipe data",
-)
-COMPLEX_TASK_MARKERS = (
-    "across files",
-    "multiple files",
-    "multi-file",
-    "multi file",
-    "multifile",
-    "multi-module",
-    "multi module",
-    "several modules",
-)
 _COMPLEX_TASK_PATTERN = re.compile(
     rf"(?<![\w-])(?:{'|'.join(re.escape(marker) for marker in COMPLEX_TASK_MARKERS)})(?![\w-])"
 )
@@ -99,17 +85,6 @@ _WORKER_FAILURE_RETRY_SAME_WORKER_KINDS = frozenset(
         "provider_auth",
         "permission_denied",
     }
-)
-_HIGH_QUALITY_REQUEST_MARKERS = (
-    "highest quality",
-    "high quality",
-    "best quality",
-)
-_LOW_COST_REQUEST_MARKERS = (
-    "lower cost",
-    "low cost",
-    "cheapest",
-    "cheaper",
 )
 
 
@@ -473,6 +448,7 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         task_text=task_text,
         memory_context=state.memory.model_dump(),
         task_plan=state.task_plan.model_dump(mode="json") if state.task_plan is not None else None,
+        task_spec=state.task_spec.model_dump(mode="json") if state.task_spec is not None else None,
         constraints=dict(state.task.constraints),
         budget=dict(state.task.budget),
         secrets=dict(state.task.secrets),
@@ -679,6 +655,61 @@ def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
     }
 
 
+def generate_task_spec(state_input: OrchestratorState) -> dict[str, Any]:
+    """Generate the structured task contract before memory loading and worker routing."""
+    state = _ensure_state(state_input)
+    task_spec = build_task_spec_for_request(
+        state.task,
+        task_kind=state.task_kind,
+        task_plan=state.task_plan,
+    )
+    policy_violations = validate_task_spec_policy(task_spec)
+    progress_message = "task spec generated"
+    if policy_violations:
+        progress_message = "task spec generated with policy warnings"
+
+    response: dict[str, Any] = {
+        "current_step": "generate_task_spec",
+        "task_spec": task_spec.model_dump(),
+        "progress_updates": _progress_update(state, progress_message),
+        **_timeline_event(
+            state,
+            TimelineEventType.TASK_SPEC_GENERATED,
+            message="TaskSpec generated for worker routing.",
+            payload={
+                "task_spec": task_spec.model_dump(mode="json"),
+                "policy_violations": policy_violations,
+            },
+        ),
+    }
+    if policy_violations:
+        response["errors"] = [
+            *state.errors,
+            *(f"task_spec_policy:{violation}" for violation in policy_violations),
+        ]
+        response["result"] = WorkerResult(
+            status="error",
+            summary=(
+                "Task generation halted due to safety policy violations: "
+                f"{', '.join(policy_violations)}"
+            ),
+            failure_kind="unknown",
+            commands_run=[],
+            files_changed=[],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="inspect_worker_configuration",
+        ).model_dump()
+    return response
+
+
+def _route_after_generate_task_spec(state_input: OrchestratorState) -> str:
+    """Route either to load_memory or summarize_result if policy violations occur."""
+    state = _ensure_state(state_input)
+    policy_errors = [e for e in state.errors if e.startswith("task_spec_policy:")]
+    return "summarize_result" if policy_errors else "load_memory"
+
+
 def load_memory(state_input: OrchestratorState) -> dict[str, Any]:
     """Preserve the current memory context for the skeleton graph."""
     state = _ensure_state(state_input)
@@ -843,7 +874,7 @@ def _compute_route_decision(
     if (
         budget.get("prefer_high_quality")
         or constraints.get("prefer_high_quality")
-        or _task_has_request_marker(task_text, _HIGH_QUALITY_REQUEST_MARKERS)
+        or _task_has_request_marker(task_text, HIGH_QUALITY_REQUEST_MARKERS)
     ):
         return _route_by_preference(
             "gemini",
@@ -854,7 +885,7 @@ def _compute_route_decision(
     if (
         budget.get("prefer_low_cost")
         or constraints.get("prefer_low_cost")
-        or _task_has_request_marker(task_text, _LOW_COST_REQUEST_MARKERS)
+        or _task_has_request_marker(task_text, LOW_COST_REQUEST_MARKERS)
     ):
         return _route_by_preference(
             "codex",
@@ -1529,6 +1560,7 @@ def build_orchestrator_graph(
     builder.add_node("ingest_task", RunnableLambda(ingest_task))
     builder.add_node("classify_task", RunnableLambda(classify_task))
     builder.add_node("plan_task", RunnableLambda(plan_task))
+    builder.add_node("generate_task_spec", RunnableLambda(generate_task_spec))
     builder.add_node("load_memory", RunnableLambda(load_memory))
     available_workers: frozenset[str] = frozenset(
         _configured_workers(worker, gemini_worker, openrouter_worker).keys()
@@ -1552,7 +1584,15 @@ def build_orchestrator_graph(
     builder.add_edge(START, "ingest_task")
     builder.add_edge("ingest_task", "classify_task")
     builder.add_edge("classify_task", "plan_task")
-    builder.add_edge("plan_task", "load_memory")
+    builder.add_edge("plan_task", "generate_task_spec")
+    builder.add_conditional_edges(
+        "generate_task_spec",
+        RunnableLambda(_route_after_generate_task_spec),
+        {
+            "load_memory": "load_memory",
+            "summarize_result": "summarize_result",
+        },
+    )
     builder.add_edge("load_memory", "choose_worker")
     builder.add_edge("choose_worker", "check_approval")
     builder.add_conditional_edges(

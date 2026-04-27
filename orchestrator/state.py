@@ -27,6 +27,7 @@ WorkflowStep = Literal[
     "ingest_task",
     "classify_task",
     "plan_task",
+    "generate_task_spec",
     "load_memory",
     "choose_worker",
     "check_approval",
@@ -112,6 +113,41 @@ class TaskPlan(OrchestratorModel):
     steps: list[TaskPlanStep] = Field(default_factory=list)
 
 
+TaskRiskLevel = Literal["low", "medium", "high", "critical"]
+TaskSpecType = Literal[
+    "docs",
+    "bugfix",
+    "feature",
+    "refactor",
+    "investigation",
+    "review_fix",
+    "maintenance",
+]
+TaskDeliveryMode = Literal["summary", "workspace", "branch", "draft_pr"]
+
+
+class TaskSpec(OrchestratorModel):
+    """Structured task contract generated before worker routing."""
+
+    goal: str = Field(min_length=1)
+    repo_url: str | None = None
+    target_branch: str | None = None
+    assumptions: list[str] = Field(default_factory=list)
+    acceptance_criteria: list[str] = Field(default_factory=list)
+    non_goals: list[str] = Field(default_factory=list)
+    risk_level: TaskRiskLevel = "low"
+    task_type: TaskSpecType = "feature"
+    allowed_actions: list[str] = Field(default_factory=list)
+    forbidden_actions: list[str] = Field(default_factory=list)
+    verification_commands: list[str] = Field(default_factory=list)
+    expected_artifacts: list[str] = Field(default_factory=list)
+    requires_clarification: bool = False
+    clarification_questions: list[str] = Field(default_factory=list)
+    requires_permission: bool = False
+    permission_reason: str | None = None
+    delivery_mode: TaskDeliveryMode = "workspace"
+
+
 class ApprovalCheckpoint(OrchestratorModel):
     """Approval state for an interruptible workflow step."""
 
@@ -190,6 +226,7 @@ class OrchestratorState(OrchestratorModel):
     normalized_task_text: str | None = None
     task_kind: str | None = None
     task_plan: TaskPlan | None = None
+    task_spec: TaskSpec | None = None
     memory: MemoryContext = Field(default_factory=MemoryContext)
     route: RouteDecision = Field(default_factory=RouteDecision)
     approval: ApprovalCheckpoint = Field(default_factory=ApprovalCheckpoint)

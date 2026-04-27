@@ -500,6 +500,24 @@ def test_build_task_context_section_includes_task_plan_when_present() -> None:
     assert '"step_id": "1"' in section
 
 
+def test_build_task_context_section_includes_task_spec_when_present() -> None:
+    """Task specs should be rendered in task context for worker execution."""
+    section = build_task_context_section(
+        WorkerRequest(
+            task_text="Inspect and update architecture",
+            task_spec={
+                "goal": "Inspect and update architecture",
+                "task_type": "refactor",
+                "risk_level": "medium",
+            },
+        )
+    )
+
+    assert "Task spec:" in section
+    assert '"task_type": "refactor"' in section
+    assert '"risk_level": "medium"' in section
+
+
 def test_build_task_context_section_handles_mixed_type_sets() -> None:
     """Mixed-type sets should be normalized without raising during JSON rendering."""
     section = build_task_context_section(

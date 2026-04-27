@@ -20,6 +20,7 @@ from orchestrator.graph import (
     await_permission_escalation,
     build_choose_worker_node,
     choose_worker,
+    generate_task_spec,
     plan_task,
     summarize_result,
     verify_result,
@@ -85,6 +86,14 @@ def test_build_worker_request_from_state():
                 "constraints": {"requires_approval": False},
                 "budget": {"max_minutes": 15},
             },
+            "task_spec": {
+                "goal": "Add worker interface",
+                "repo_url": "https://github.com/natanayalo/code-agent",
+                "target_branch": "task/t-040-worker-interface",
+                "risk_level": "medium",
+                "task_type": "feature",
+                "delivery_mode": "workspace",
+            },
             "task_plan": {
                 "triggered": True,
                 "complexity_reason": "architecture",
@@ -105,6 +114,8 @@ def test_build_worker_request_from_state():
     assert request.task_text == "Add worker interface"
     assert request.task_plan is not None
     assert request.task_plan["complexity_reason"] == "architecture"
+    assert request.task_spec is not None
+    assert request.task_spec["goal"] == "Add worker interface"
     assert request.constraints == {"requires_approval": False}
     assert request.budget == {"max_minutes": 15}
 
@@ -194,6 +205,28 @@ def test_plan_task_detects_multifile_compound_marker():
     res = plan_task(state)
 
     assert res["task_plan"]["complexity_reason"] == "multi_file_task"
+
+
+def test_generate_task_spec_creates_policy_checked_contract_before_routing() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Delete all generated files",
+                "repo_url": "https://github.com/natanayalo/code-agent",
+                "branch": "master",
+            },
+            "task_kind": "implementation",
+        }
+    )
+
+    res = generate_task_spec(state)
+
+    assert res["current_step"] == "generate_task_spec"
+    assert res["task_spec"]["goal"] == "Delete all generated files"
+    assert res["task_spec"]["requires_permission"] is True
+    assert res["task_spec"]["risk_level"] == "high"
+    assert res["timeline_events"][0].event_type == "task_spec_generated"
+    assert res["timeline_events"][0].payload["policy_violations"] == []
 
 
 def test_plan_task_complexity_marker_uses_word_boundaries():

@@ -24,6 +24,9 @@ report_lines.extend(f"- {entry}" for entry in top_level_entries[:20] or ["(none)
 report_lines.extend(
     [
         "",
+        "Task spec:",
+        json.dumps(context.get("task_spec"), indent=2, sort_keys=True),
+        "",
         "Memory context:",
         json.dumps(context["memory_context"], indent=2, sort_keys=True),
         "",

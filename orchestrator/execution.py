@@ -41,7 +41,8 @@ from db.models import (
 )
 from orchestrator.checkpoints import create_async_sqlite_checkpointer
 from orchestrator.graph import build_orchestrator_graph
-from orchestrator.state import OrchestratorState, SessionRef
+from orchestrator.state import OrchestratorState, SessionRef, TaskSpec
+from orchestrator.task_spec import build_task_spec
 from repositories import (
     ArtifactRepository,
     InboundDeliveryRepository,
@@ -432,6 +433,7 @@ class TaskSummarySnapshot(ExecutionModel):
 class TaskSnapshot(TaskSummarySnapshot):
     """The full task view with execution history and timeline."""
 
+    task_spec: TaskSpec | None = None
     latest_run: WorkerRunSnapshot | None = None
     timeline: list[TaskTimelineEventSnapshot] = Field(default_factory=list)
 
@@ -466,6 +468,7 @@ class _PersistedTaskContext:
     external_thread_id: str
     task_id: str
     attempt_count: int
+    task_spec: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -1364,6 +1367,9 @@ class TaskExecutionService:
 
         return TaskSnapshot(
             **summary.model_dump(),
+            task_spec=TaskSpec.model_validate(task.task_spec)
+            if isinstance(task.task_spec, Mapping)
+            else None,
             latest_run=latest_run_snapshot,
             timeline=[
                 TaskTimelineEventSnapshot(
@@ -1704,6 +1710,12 @@ class TaskExecutionService:
             user_repo = UserRepository(session)
             session_repo = SessionRepository(session)
             task_repo = TaskRepository(session)
+            task_spec = build_task_spec(
+                task_text=submission.task_text,
+                repo_url=submission.repo_url,
+                target_branch=submission.branch,
+                constraints=submission.constraints,
+            ).model_dump(mode="json")
 
             user = user_repo.get_by_external_user_id(submission.session.external_user_id)
             if user is None:
@@ -1738,6 +1750,7 @@ class TaskExecutionService:
                 worker_override=submission.worker_override,
                 budget=dict(submission.budget),
                 secrets=dict(submission.secrets),
+                task_spec=task_spec,
                 # Store tools in constraints to avoid a schema migration for now
                 constraints={
                     **(submission.constraints or {}),
@@ -1771,6 +1784,7 @@ class TaskExecutionService:
                 external_thread_id=conversation_session.external_thread_id,
                 task_id=task.id,
                 attempt_count=task.attempt_count,
+                task_spec=task_spec,
             ), None
 
     def _link_delivery_to_task(
@@ -1905,6 +1919,7 @@ class TaskExecutionService:
                     "secrets": dict(submission.secrets),
                     "tools": submission.tools,
                 },
+                "task_spec": persisted.task_spec,
                 "attempt_count": persisted.attempt_count,
                 "timeline_persisted_count": initial_persisted_count,
             },
@@ -1960,6 +1975,7 @@ class TaskExecutionService:
                 external_thread_id=conversation_session.external_thread_id,
                 task_id=task.id,
                 attempt_count=task.attempt_count,
+                task_spec=dict(task.task_spec) if isinstance(task.task_spec, dict) else None,
             )
             return submission, persisted
 
@@ -2101,6 +2117,11 @@ class TaskExecutionService:
                     task_id=task_id,
                     chosen_worker=state.route.chosen_worker,
                     route_reason=state.route.route_reason,
+                )
+            if state.task_spec is not None:
+                task_repo.set_task_spec(
+                    task_id=task_id,
+                    task_spec=state.task_spec.model_dump(mode="json"),
                 )
 
             task_repo.update_status(

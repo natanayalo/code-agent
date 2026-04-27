@@ -20,6 +20,7 @@ Responsibilities:
 
 - ingress and auth for API/webhook/Telegram
 - session + task creation and persistence
+- TaskSpec generation for goal, risk, task type, policy, verification, and delivery metadata
 - queueing and lease-based claiming
 - orchestration graph execution
 - worker routing policy and manual override handling
@@ -56,7 +57,7 @@ Active worker/runtime implementations:
 
 ### Worker Routing Policy (Current)
 
-Until the full profile-based strategy (Milestone 17) is implemented, the platform uses a simplified routing heuristic:
+Before routing, the orchestrator builds and persists a TaskSpec so workers, APIs, and operator views share an inspectable task contract. Until the full profile-based strategy (Milestone 17) is implemented, the platform uses a simplified routing heuristic:
 
 - **Codex Worker**: Default for straightforward coding tasks, documentation updates, and small-scale refactors.
 - **Gemini Worker**: Used for complex tasks requiring high-level reasoning, architectural changes, or multi-step cognitive loops.
