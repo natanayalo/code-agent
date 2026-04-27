@@ -43,6 +43,15 @@ class AuthStatusResponse(BaseModel):
     authenticated: bool
 
 
+def _is_cookie_secure(request: Request, auth_config: ApiAuthConfig) -> bool:
+    """Determine if the session cookie should be marked as Secure."""
+    return (
+        auth_config.cookie_secure
+        or request.url.scheme == "https"
+        or request.headers.get("X-Forwarded-Proto") == "https"
+    )
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(
     login_req: LoginRequest,
@@ -64,13 +73,7 @@ def login(
         )
 
     token = create_dashboard_token(auth_config.shared_secret)
-
-    # Determine secure attribute: explicit env override, HTTPS scheme, or X-Forwarded-Proto
-    is_secure = (
-        auth_config.cookie_secure
-        or request.url.scheme == "https"
-        or request.headers.get("X-Forwarded-Proto") == "https"
-    )
+    is_secure = _is_cookie_secure(request, auth_config)
 
     response.set_cookie(
         key=DASHBOARD_COOKIE_NAME,
@@ -94,11 +97,7 @@ def logout(
     auth_config: ApiAuthConfig = Depends(get_api_auth_config),
 ) -> LogoutResponse:
     """Clear the session cookie."""
-    is_secure = (
-        auth_config.cookie_secure
-        or request.url.scheme == "https"
-        or request.headers.get("X-Forwarded-Proto") == "https"
-    )
+    is_secure = _is_cookie_secure(request, auth_config)
     response.delete_cookie(
         key=DASHBOARD_COOKIE_NAME,
         path="/",
