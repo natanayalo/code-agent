@@ -34,9 +34,11 @@ button {
 }
 
 .truncate {
+  display: inline-block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  vertical-align: bottom;
 }
 
 /* Layout Architecture */
@@ -473,13 +475,8 @@ button {
   background: rgba(255, 255, 255, 0.03);
   padding: 4px 8px;
   border-radius: 6px;
-}
-
-.truncate {
+.detail-item .truncate {
   max-width: 120px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .card-footer {
@@ -786,6 +783,10 @@ button {
   gap: var(--spacing-md);
   font-size: 0.875rem;
   color: var(--color-text-secondary);
+}
+
+.session-info-item .truncate {
+  max-width: 150px;
 }
 
 .session-info-item.active-task {

@@ -5,13 +5,8 @@ import { SessionSnapshot } from '../types/session';
 import { DashboardLayout } from './layout/DashboardLayout';
 import { Clock, MessageSquare, User, Activity } from 'lucide-react';
 
-const ID_PREVIEW_LENGTH = 8;
-const SESSIONS_REFETCH_INTERVAL_MS = 30000;
 
-function formatIdPreview(id: string | undefined | null): string {
-  if (!id) return '';
-  return id.length > ID_PREVIEW_LENGTH ? `${id.substring(0, ID_PREVIEW_LENGTH)}...` : id;
-}
+const SESSIONS_REFETCH_INTERVAL_MS = 30000;
 
 function getStatusClass(status: string): string {
   const s = status.toLowerCase();
@@ -71,7 +66,7 @@ export function SessionsPage() {
                 <div className={`status-badge status-${getStatusClass(session.status)}`}>
                   {session.status}
                 </div>
-                <span className="session-id">ID: {formatIdPreview(session.session_id)}</span>
+                <span className="session-id">ID: <span className="truncate" title={session.session_id}>{session.session_id}</span></span>
               </div>
 
               <div className="session-card-body">
@@ -90,7 +85,7 @@ export function SessionsPage() {
                 {session.active_task_id && (
                   <div className="session-info-item active-task">
                     <Clock size={16} />
-                    <span>Active Task: </span><span>{formatIdPreview(session.active_task_id)}</span>
+                    <span>Active Task: </span><span className="truncate" title={session.active_task_id || ''}>{session.active_task_id}</span>
                   </div>
                 )}
               </div>

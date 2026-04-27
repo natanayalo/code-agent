@@ -71,7 +71,8 @@ describe('SessionsPage', () => {
     );
 
     expect(await screen.findByRole('heading', { name: /Sessions/i })).toBeInTheDocument();
-    expect(await screen.findByText('ID: s1')).toBeInTheDocument();
+    expect(await screen.findByText(/ID:/i)).toBeInTheDocument();
+    expect(screen.getByText('s1')).toBeInTheDocument();
     expect(screen.getByText(/Active Task:/i)).toBeInTheDocument();
     expect(screen.getByText('task-1')).toBeInTheDocument();
     expect(screen.getByText(/u1/i)).toBeInTheDocument();
@@ -79,7 +80,7 @@ describe('SessionsPage', () => {
     expect(screen.getByText('http')).toBeInTheDocument();
   });
 
-  it('truncates long IDs with ellipsis', async () => {
+  it('renders long IDs for CSS truncation', async () => {
     const mockSessions = [
       {
         session_id: '123456789abc',
@@ -103,9 +104,10 @@ describe('SessionsPage', () => {
       </QueryClientProvider>
     );
 
-    expect(await screen.findByText('ID: 12345678...')).toBeInTheDocument();
+    expect(await screen.findByText('ID:')).toBeInTheDocument();
+    expect(screen.getByText('123456789abc')).toBeInTheDocument();
     expect(await screen.findByText(/Active Task:/i)).toBeInTheDocument();
-    expect(screen.getByText('abcdefgh...')).toBeInTheDocument();
+    expect(screen.getByText('abcdefghijk')).toBeInTheDocument();
   });
 
   it('renders empty state when no sessions', async () => {
