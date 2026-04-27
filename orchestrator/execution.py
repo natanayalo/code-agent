@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 from threading import Lock
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
@@ -576,24 +576,24 @@ def _enum_value(value: object | None) -> str | None:
     return str(value)
 
 
-def _task_status_from_result(state: OrchestratorState) -> str:
+def _task_status_from_result(state: OrchestratorState) -> TaskStatus:
     """Map the final orchestrator result into a persisted task status."""
     if state.result is None:
-        return TaskStatus.FAILED.value
+        return TaskStatus.FAILED
     if state.result.status == "success":
-        return TaskStatus.COMPLETED.value
-    return TaskStatus.FAILED.value
+        return TaskStatus.COMPLETED
+    return TaskStatus.FAILED
 
 
-def _worker_run_status_from_result(state: OrchestratorState) -> str:
+def _worker_run_status_from_result(state: OrchestratorState) -> WorkerRunStatus:
     """Map the final worker result into a persisted worker-run status."""
     if state.result is None:
-        return WorkerRunStatus.ERROR.value
+        return WorkerRunStatus.ERROR
     if state.result.status == "success":
-        return WorkerRunStatus.SUCCESS.value
+        return WorkerRunStatus.SUCCESS
     if state.result.status == "failure":
-        return WorkerRunStatus.FAILURE.value
-    return WorkerRunStatus.ERROR.value
+        return WorkerRunStatus.FAILURE
+    return WorkerRunStatus.ERROR
 
 
 def _worker_type_for_persistence(state: OrchestratorState) -> WorkerType:
@@ -2112,25 +2112,18 @@ class TaskExecutionService:
             worker_run_repo = WorkerRunRepository(session)
             artifact_repo = ArtifactRepository(session)
 
-            if state.route.chosen_worker is not None and state.route.route_reason is not None:
-                task_repo.set_route(
-                    task_id=task_id,
-                    chosen_worker=state.route.chosen_worker,
-                    route_reason=state.route.route_reason,
-                )
-            if state.task_spec is not None:
-                task_repo.set_task_spec(
-                    task_id=task_id,
-                    task_spec=state.task_spec.model_dump(mode="json"),
-                )
-
-            task_repo.update_status(
-                task_id=task_id,
-                status=force_task_status or _task_status_from_result(state),
-            )
             task = task_repo.get(task_id)
             if task is None:
                 raise RuntimeError(f"Task '{task_id}' disappeared while persisting execution.")
+
+            if state.route.chosen_worker is not None and state.route.route_reason is not None:
+                task.chosen_worker = cast(WorkerType, state.route.chosen_worker)
+                task.route_reason = state.route.route_reason
+
+            if state.task_spec is not None:
+                task.task_spec = state.task_spec.model_dump(mode="json")
+
+            task.status = cast(TaskStatus, force_task_status or _task_status_from_result(state))
 
             approval = state.approval
             if approval.required:

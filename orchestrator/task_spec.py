@@ -37,11 +37,10 @@ def _normalized_text(text: str) -> str:
 
 def contains_marker(text: str, markers: tuple[str, ...]) -> bool:
     """Check if any of the markers are present in the text with word boundaries."""
-    normalized = text.lower()
-    for marker in markers:
-        if re.search(rf"\b{re.escape(marker)}\b", normalized):
-            return True
-    return False
+    if not markers:
+        return False
+    pattern = rf"\b(?:{'|'.join(re.escape(m) for m in markers)})\b"
+    return re.search(pattern, text, re.IGNORECASE) is not None
 
 
 def _coerce_string_list(value: object) -> list[str]:
@@ -218,8 +217,8 @@ def build_task_spec(
         expected_artifacts.append("workspace_diff")
     if delivery_mode in {"branch", "draft_pr"}:
         expected_artifacts.append("branch_reference")
-    if delivery_mode == "draft_pr":
-        expected_artifacts.append("draft_pr_link")
+        if delivery_mode == "draft_pr":
+            expected_artifacts.append("draft_pr_link")
 
     return TaskSpec(
         goal=normalized_task_text,
