@@ -6,6 +6,7 @@ import { DashboardLayout } from './layout/DashboardLayout';
 import { Clock, MessageSquare, User, Activity } from 'lucide-react';
 
 const ID_PREVIEW_LENGTH = 8;
+const SESSIONS_REFETCH_INTERVAL_MS = 30000;
 
 function formatIdPreview(id: string): string {
   return id.length > ID_PREVIEW_LENGTH ? `${id.substring(0, ID_PREVIEW_LENGTH)}...` : id;
@@ -20,6 +21,7 @@ export function SessionsPage() {
   } = useQuery({
     queryKey: ['sessions'],
     queryFn: () => api.listSessions(),
+    refetchInterval: SESSIONS_REFETCH_INTERVAL_MS,
   });
 
   if (error) {

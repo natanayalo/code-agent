@@ -1,8 +1,8 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SessionsPage } from './SessionsPage';
 import { api } from '../services/api';
 import { SessionStatus } from '../types/session';
@@ -26,6 +26,10 @@ describe('SessionsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('renders loading state', () => {
@@ -128,5 +132,43 @@ describe('SessionsPage', () => {
 
     expect(await screen.findByText(/Error loading sessions/i)).toBeInTheDocument();
     expect(screen.getByText(/Failed to fetch/i)).toBeInTheDocument();
+  });
+
+  it('automatically refetches sessions every 30 seconds', async () => {
+    vi.useFakeTimers();
+    vi.mocked(api.listSessions).mockResolvedValue([
+      {
+        session_id: 's1',
+        user_id: 'u1',
+        channel: 'http',
+        external_thread_id: 't1',
+        status: SessionStatus.ACTIVE,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SessionsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(api.listSessions).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(api.listSessions).toHaveBeenCalledTimes(2);
   });
 });

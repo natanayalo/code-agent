@@ -886,6 +886,7 @@ button {
 .status-dot.status-completed { background: var(--color-status-completed); }
 .status-dot.status-failed { background: var(--color-status-failed); }
 .status-dot.status-running { background: var(--color-status-running); }
+.status-dot.status-pending { background: var(--color-warning); }
 
 .status-label, .worker-label {
   flex-grow: 1;

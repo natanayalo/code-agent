@@ -12,6 +12,7 @@ function SidebarItem({ icon, label, to }: SidebarItemProps) {
   return (
     <NavLink
       to={to}
+      end={to === '/'}
       className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}
     >
       <div className="sidebar-icon">{icon}</div>
