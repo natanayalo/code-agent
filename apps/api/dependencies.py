@@ -128,7 +128,7 @@ def _enforce_csrf_protection(request: Request) -> None:
             # Extract scheme://host[:port] from Referer
             parts = referer.split("/")
             if len(parts) >= 3:
-                origin = f"{parts[0]}//{parts[2]}"
+                origin = "/".join(parts[:3])
 
     if not origin:
         raise HTTPException(
