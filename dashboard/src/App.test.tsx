@@ -10,6 +10,8 @@ import { api } from './services/api';
 vi.mock('./services/api', () => ({
   api: {
     listTasks: vi.fn(),
+    listSessions: vi.fn(),
+    getMetrics: vi.fn(),
     auth: {
       status: vi.fn(),
     },
@@ -28,6 +30,7 @@ describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
+    window.history.pushState({}, '', '/');
   });
 
   it('renders without crashing and displays tasks when authenticated', async () => {
@@ -35,6 +38,7 @@ describe('App', () => {
       { task_id: '1', task_text: 'Task 1', status: TaskStatus.COMPLETED, created_at: new Date().toISOString(), session_id: 's1', priority: 1, updated_at: new Date().toISOString() },
       { task_id: '2', task_text: 'Task 2', status: TaskStatus.FAILED, created_at: new Date().toISOString(), session_id: 's1', priority: 1, updated_at: new Date().toISOString() },
       { task_id: '3', task_text: 'Task 3', status: TaskStatus.CANCELLED, created_at: new Date().toISOString(), session_id: 's1', priority: 1, updated_at: new Date().toISOString() },
+      { task_id: '4', task_text: 'Task 4', status: TaskStatus.PENDING, created_at: new Date().toISOString(), session_id: 's1', priority: 1, updated_at: new Date().toISOString() },
     ];
 
     vi.mocked(api.listTasks).mockResolvedValue(mockTasks);
@@ -66,5 +70,19 @@ describe('App', () => {
 
     expect(await screen.findByText('Agent Dashboard')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('••••••••••••••••')).toBeInTheDocument();
+  });
+
+  it('renders settings placeholder when visiting /settings', async () => {
+    window.history.pushState({}, '', '/settings');
+    vi.mocked(api.auth.status).mockResolvedValue({ authenticated: true });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByRole('heading', { name: /Settings coming soon/i })).toBeInTheDocument();
+    expect(screen.getByText(/Configuration controls are not available yet/i)).toBeInTheDocument();
   });
 });

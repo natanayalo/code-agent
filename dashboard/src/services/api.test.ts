@@ -296,5 +296,29 @@ describe('api service', () => {
       expect(warnSpy).toHaveBeenCalled();
       warnSpy.mockRestore();
     });
+
+    it('getMetrics sends correct GET request', async () => {
+      const mockMetrics = { total_tasks: 10 };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockMetrics,
+      });
+
+      const result = await api.getMetrics(48);
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('/metrics?window_hours=48');
+      expect(result).toEqual(mockMetrics);
+    });
+
+    it('getMetrics catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Metrics fail'));
+      await expect(api.getMetrics()).rejects.toThrow('Metrics fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
   });
 });

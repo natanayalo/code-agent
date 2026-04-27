@@ -1,5 +1,6 @@
 import { TaskSummarySnapshot, TaskSnapshot } from '../types/task';
 import { SessionSnapshot } from '../types/session';
+import { OperationalMetrics } from '../types/metrics';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -110,6 +111,15 @@ export const api = {
       });
     } catch (error) {
       console.warn(`Failed to replay task ${taskId}`, error);
+      throw error;
+    }
+  },
+
+  async getMetrics(windowHours: number = 24): Promise<OperationalMetrics> {
+    try {
+      return await fetchWithAuth(`/metrics?window_hours=${windowHours}`);
+    } catch (error) {
+      console.warn('Failed to fetch metrics from API', error);
       throw error;
     }
   },

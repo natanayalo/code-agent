@@ -47,7 +47,7 @@ Granular tasks for the active and upcoming milestones:
 - [x] T-134: implement approval/rejection UI components in the dashboard
 - [x] T-135: implement task replay control (unchanged) in the dashboard (#115)
 - [x] T-136: implement secure dashboard authentication (HttpOnly cookies/OIDC)
-- [ ] T-137: implement dashboard routing and pages for Sessions/Metrics (backend support exists)
+- [x] T-137: implement dashboard routing and pages for Sessions/Metrics (backend support exists)
 - [ ] T-138: implement detailed task view (timeline, logs, artifacts)
 - [ ] T-139: implement "Replay with Overrides" modal/form in the dashboard
 - [ ] T-143: implement API & UI for Session Working Context (Goal/Risks/Decisions)

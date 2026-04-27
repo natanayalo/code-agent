@@ -101,6 +101,38 @@ def test_get_metrics_requires_auth(session_factory) -> None:
         assert response.status_code == 403
 
 
+def test_get_metrics_allows_cookie_auth(session_factory) -> None:
+    """The metrics endpoint should allow authentication via dashboard session cookie."""
+    from apps.api.auth import DASHBOARD_COOKIE_NAME, create_dashboard_token
+
+    shared_secret = "test-shared-secret"
+    app = create_app(
+        task_service=TaskExecutionService(
+            session_factory=session_factory,
+            worker=StaticWorker(
+                WorkerResult(
+                    status="success",
+                    summary="ok",
+                    budget_usage={},
+                    commands_run=[],
+                    files_changed=[],
+                    artifacts=[],
+                    next_action_hint=None,
+                )
+            ),
+        ),
+        auth_config=ApiAuthConfig(shared_secret=shared_secret),
+    )
+    token = create_dashboard_token(shared_secret)
+
+    with TestClient(app) as client:
+        # No header, but valid cookie
+        client.cookies.set(DASHBOARD_COOKIE_NAME, token)
+        response = client.get("/metrics")
+        assert response.status_code == 200
+        assert "total_tasks" in response.json()
+
+
 def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factory) -> None:
     """Metrics should reflect the aggregated state of tasks and runs in the DB."""
     now = utc_now()

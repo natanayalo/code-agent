@@ -1,22 +1,23 @@
 import React from 'react';
+import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, MessageSquare, Settings, Shield, Activity } from 'lucide-react';
 
 interface SidebarItemProps {
   icon: React.ReactNode;
   label: string;
-  active?: boolean;
-  onClick?: () => void;
+  to: string;
 }
 
-function SidebarItem({ icon, label, active, onClick }: SidebarItemProps) {
+function SidebarItem({ icon, label, to }: SidebarItemProps) {
   return (
-    <button
-      className={`sidebar-item ${active ? 'active' : ''}`}
-      onClick={onClick}
+    <NavLink
+      to={to}
+      end={to === '/'}
+      className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}
     >
       <div className="sidebar-icon">{icon}</div>
       <span className="sidebar-label">{label}</span>
-    </button>
+    </NavLink>
   );
 }
 
@@ -33,27 +34,18 @@ export function Sidebar() {
       <nav className="sidebar-nav">
         <div className="nav-group">
           <div className="nav-group-label">Operations</div>
-          <SidebarItem icon={<LayoutDashboard size={20} />} label="Tasks" active />
-          <SidebarItem icon={<MessageSquare size={20} />} label="Sessions" />
-          <SidebarItem icon={<Activity size={20} />} label="Metrics" />
+          <SidebarItem icon={<LayoutDashboard size={20} />} label="Tasks" to="/" />
+          <SidebarItem icon={<MessageSquare size={20} />} label="Sessions" to="/sessions" />
+          <SidebarItem icon={<Activity size={20} />} label="Metrics" to="/metrics" />
         </div>
 
         <div className="nav-group">
           <div className="nav-group-label">System</div>
-          <SidebarItem icon={<Settings size={20} />} label="Settings" />
+          <SidebarItem icon={<Settings size={20} />} label="Settings" to="/settings" />
         </div>
       </nav>
 
       <div className="sidebar-footer">
-        {import.meta.env.DEV && (
-          <div className="dev-warning">
-            <span className="warning-pill">DEV MODE</span>
-            <p className="warning-text">
-              <strong>Security Alert:</strong> LocalStorage & VITE_ env vars are insecure for secrets.
-              Production must use HttpOnly cookies/OIDC (tracked in T-136).
-            </p>
-          </div>
-        )}
         <div className="user-profile">
           <div className="user-avatar">OP</div>
           <div className="user-info">
