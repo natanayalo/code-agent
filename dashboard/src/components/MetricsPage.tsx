@@ -20,6 +20,18 @@ export function MetricsPage() {
     refetchInterval: METRICS_REFETCH_INTERVAL_MS,
   });
 
+  const sortedStatusCounts = React.useMemo(() => {
+    if (!metrics) return [];
+    return Object.entries(metrics.status_counts)
+      .sort(([statusA, countA], [statusB, countB]) => (countB - countA) || statusA.localeCompare(statusB));
+  }, [metrics]);
+
+  const sortedWorkerUsage = React.useMemo(() => {
+    if (!metrics) return [];
+    return Object.entries(metrics.worker_usage)
+      .sort(([workerA, countA], [workerB, countB]) => (countB - countA) || workerA.localeCompare(workerB));
+  }, [metrics]);
+
   if (error) {
     return (
       <DashboardLayout>
@@ -73,34 +85,30 @@ export function MetricsPage() {
             <div className="metric-detail-card card">
               <h3>Status Distribution</h3>
               <div className="status-list">
-                {Object.entries(metrics.status_counts)
-                  .sort(([statusA, countA], [statusB, countB]) => (countB - countA) || statusA.localeCompare(statusB))
-                  .map(([status, count]) => {
-                    const displayStatus = status.toLowerCase().replace(/_/g, ' ');
-                    const statusClass = status.toLowerCase() === 'in_progress' ? 'running' : status.toLowerCase();
-                    return (
-                      <div key={status} className="status-item">
-                        <span className={`status-dot status-${statusClass}`}></span>
-                        <span className="status-label">{displayStatus}</span>
-                        <span className="status-count">{count}</span>
-                      </div>
-                    );
-                  })}
+                {sortedStatusCounts.map(([status, count]) => {
+                  const displayStatus = status.toLowerCase().replace(/_/g, ' ');
+                  const statusClass = status.toLowerCase() === 'in_progress' ? 'running' : status.toLowerCase();
+                  return (
+                    <div key={status} className="status-item">
+                      <span className={`status-dot status-${statusClass}`}></span>
+                      <span className="status-label">{displayStatus}</span>
+                      <span className="status-count">{count}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
             <div className="metric-detail-card card">
               <h3>Worker Usage</h3>
               <div className="worker-list">
-                {Object.entries(metrics.worker_usage)
-                  .sort(([workerA, countA], [workerB, countB]) => (countB - countA) || workerA.localeCompare(workerB))
-                  .map(([worker, count]) => (
-                    <div key={worker} className="worker-item">
-                      <Cpu size={16} />
-                      <span className="worker-label">{worker}</span>
-                      <span className="worker-count">{count} runs</span>
-                    </div>
-                  ))}
+                {sortedWorkerUsage.map(([worker, count]) => (
+                  <div key={worker} className="worker-item">
+                    <Cpu size={16} />
+                    <span className="worker-label">{worker}</span>
+                    <span className="worker-count">{count} runs</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>

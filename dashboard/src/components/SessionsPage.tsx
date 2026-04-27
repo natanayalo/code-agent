@@ -28,6 +28,14 @@ export function SessionsPage() {
     refetchInterval: SESSIONS_REFETCH_INTERVAL_MS,
   });
 
+  const sortedSessions = React.useMemo(() => {
+    return [...sessions].sort((a, b) => {
+      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return dateB - dateA;
+    });
+  }, [sessions]);
+
   if (error) {
     return (
       <DashboardLayout>
@@ -60,7 +68,7 @@ export function SessionsPage() {
         </div>
       ) : (
         <div className="sessions-grid">
-          {sessions.map((session: SessionSnapshot) => (
+          {sortedSessions.map((session: SessionSnapshot) => (
             <div key={session.session_id} className="session-card card">
               <div className="session-card-header">
                 <div className={`status-badge status-${getStatusClass(session.status)}`}>
