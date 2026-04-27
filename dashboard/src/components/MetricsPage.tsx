@@ -6,6 +6,7 @@ import { Activity, Clock, Database, Cpu, TrendingUp } from 'lucide-react';
 
 const METRICS_REFETCH_INTERVAL_MS = 60000;
 const SUCCESS_RATE_HEALTHY_THRESHOLD = 0.8;
+const RETRY_RATE_HEALTHY_THRESHOLD = 0.1;
 
 export function MetricsPage() {
   const {
@@ -62,7 +63,7 @@ export function MetricsPage() {
               value={`${metrics.avg_duration_seconds.toFixed(1)}s`}
             />
             <MetricCard
-              icon={<Activity size={24} color={metrics.retry_rate > 0.1 ? 'var(--color-status-failed)' : 'var(--color-text-muted)'} />}
+              icon={<Activity size={24} color={metrics.retry_rate > RETRY_RATE_HEALTHY_THRESHOLD ? 'var(--color-status-failed)' : 'var(--color-text-muted)'} />}
               label="Retry Rate"
               value={`${(metrics.retry_rate * 100).toFixed(1)}%`}
             />
@@ -73,18 +74,18 @@ export function MetricsPage() {
               <h3>Status Distribution</h3>
               <div className="status-list">
                 {Object.entries(metrics.status_counts)
-                  .sort(([, a], [, b]) => (b as number) - (a as number))
+                  .sort(([, a], [, b]) => b - a)
                   .map(([status, count]) => {
-                  const displayStatus = status.toLowerCase().replace(/_/g, ' ');
-                  const statusClass = status.toLowerCase() === 'in_progress' ? 'running' : status.toLowerCase();
-                  return (
-                    <div key={status} className="status-item">
-                      <span className={`status-dot status-${statusClass}`}></span>
-                      <span className="status-label">{displayStatus}</span>
-                      <span className="status-count">{count}</span>
-                    </div>
-                  );
-                })}
+                    const displayStatus = status.toLowerCase().replace(/_/g, ' ');
+                    const statusClass = status.toLowerCase() === 'in_progress' ? 'running' : status.toLowerCase();
+                    return (
+                      <div key={status} className="status-item">
+                        <span className={`status-dot status-${statusClass}`}></span>
+                        <span className="status-label">{displayStatus}</span>
+                        <span className="status-count">{count}</span>
+                      </div>
+                    );
+                  })}
               </div>
             </div>
 
@@ -92,14 +93,14 @@ export function MetricsPage() {
               <h3>Worker Usage</h3>
               <div className="worker-list">
                 {Object.entries(metrics.worker_usage)
-                  .sort(([, a], [, b]) => (b as number) - (a as number))
+                  .sort(([, a], [, b]) => b - a)
                   .map(([worker, count]) => (
-                  <div key={worker} className="worker-item">
-                    <Cpu size={16} />
-                    <span className="worker-label">{worker}</span>
-                    <span className="worker-count">{count} runs</span>
-                  </div>
-                ))}
+                    <div key={worker} className="worker-item">
+                      <Cpu size={16} />
+                      <span className="worker-label">{worker}</span>
+                      <span className="worker-count">{count} runs</span>
+                    </div>
+                  ))}
               </div>
             </div>
           </div>
