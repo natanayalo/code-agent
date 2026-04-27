@@ -65,8 +65,12 @@ def login(
 
     token = create_dashboard_token(auth_config.shared_secret)
 
-    # Determine secure attribute: explicit env override or HTTPS scheme
-    is_secure = auth_config.cookie_secure or request.url.scheme == "https"
+    # Determine secure attribute: explicit env override, HTTPS scheme, or X-Forwarded-Proto
+    is_secure = (
+        auth_config.cookie_secure
+        or request.url.scheme == "https"
+        or request.headers.get("X-Forwarded-Proto") == "https"
+    )
 
     response.set_cookie(
         key=DASHBOARD_COOKIE_NAME,
@@ -90,7 +94,11 @@ def logout(
     auth_config: ApiAuthConfig = Depends(get_api_auth_config),
 ) -> LogoutResponse:
     """Clear the session cookie."""
-    is_secure = auth_config.cookie_secure or request.url.scheme == "https"
+    is_secure = (
+        auth_config.cookie_secure
+        or request.url.scheme == "https"
+        or request.headers.get("X-Forwarded-Proto") == "https"
+    )
     response.delete_cookie(
         key=DASHBOARD_COOKIE_NAME,
         path="/",

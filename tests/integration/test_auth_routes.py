@@ -121,3 +121,15 @@ def test_invalid_sub_claim(client: TestClient) -> None:
     response = client.get("/auth/status")
     assert response.status_code == 200
     assert response.json()["authenticated"] is False
+
+
+def test_proxy_secure_cookie(client: TestClient) -> None:
+    """X-Forwarded-Proto: https should trigger Secure cookie attribute."""
+    response = client.post(
+        "/auth/login",
+        json={"secret": "test-secret"},
+        headers={"X-Forwarded-Proto": "https"},
+    )
+    assert response.status_code == 200
+    set_cookie = response.headers.get("set-cookie")
+    assert "secure" in set_cookie.lower()
