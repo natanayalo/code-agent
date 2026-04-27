@@ -30,6 +30,7 @@ describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
+    window.history.pushState({}, '', '/');
   });
 
   it('renders without crashing and displays tasks when authenticated', async () => {
@@ -68,5 +69,19 @@ describe('App', () => {
 
     expect(await screen.findByText('Agent Dashboard')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('••••••••••••••••')).toBeInTheDocument();
+  });
+
+  it('renders settings placeholder when visiting /settings', async () => {
+    window.history.pushState({}, '', '/settings');
+    vi.mocked(api.auth.status).mockResolvedValue({ authenticated: true });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByRole('heading', { name: /Settings coming soon/i })).toBeInTheDocument();
+    expect(screen.getByText(/Configuration controls are not available yet/i)).toBeInTheDocument();
   });
 });

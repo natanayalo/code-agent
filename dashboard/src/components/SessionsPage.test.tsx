@@ -42,13 +42,14 @@ describe('SessionsPage', () => {
     expect(screen.getByText('Loading sessions...')).toBeInTheDocument();
   });
 
-  it('renders sessions when data is loaded', async () => {
+  it('renders short IDs without ellipsis when data is loaded', async () => {
     const mockSessions = [
       {
         session_id: 's1',
         user_id: 'u1',
         channel: 'http',
         external_thread_id: 't1',
+        active_task_id: 'task-1',
         status: SessionStatus.ACTIVE,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -66,9 +67,38 @@ describe('SessionsPage', () => {
     );
 
     expect(await screen.findByRole('heading', { name: /Sessions/i })).toBeInTheDocument();
-    expect(await screen.findByText(/ID: s1/i)).toBeInTheDocument();
+    expect(await screen.findByText('ID: s1')).toBeInTheDocument();
+    expect(screen.getByText('Active Task: task-1')).toBeInTheDocument();
     expect(screen.getByText(/u1/i)).toBeInTheDocument();
     expect(screen.getByText(/Channel: http/i)).toBeInTheDocument();
+  });
+
+  it('truncates long IDs with ellipsis', async () => {
+    const mockSessions = [
+      {
+        session_id: '123456789abc',
+        user_id: 'u2',
+        channel: 'telegram',
+        external_thread_id: 'thread-2',
+        active_task_id: 'abcdefghijk',
+        status: SessionStatus.ACTIVE,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ];
+
+    vi.mocked(api.listSessions).mockResolvedValue(mockSessions);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SessionsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText('ID: 12345678...')).toBeInTheDocument();
+    expect(screen.getByText('Active Task: abcdefgh...')).toBeInTheDocument();
   });
 
   it('renders empty state when no sessions', async () => {

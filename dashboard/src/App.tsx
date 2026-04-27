@@ -61,6 +61,17 @@ function DashboardContent() {
   );
 }
 
+function SettingsPage() {
+  return (
+    <DashboardLayout>
+      <div className="empty-state">
+        <h3>Settings coming soon</h3>
+        <p>Configuration controls are not available yet.</p>
+      </div>
+    </DashboardLayout>
+  );
+}
+
 interface LocationState {
   from?: {
     pathname: string;
@@ -104,6 +115,14 @@ function AppRoutes() {
         element={
           <AuthGuard>
             <MetricsPage />
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <AuthGuard>
+            <SettingsPage />
           </AuthGuard>
         }
       />

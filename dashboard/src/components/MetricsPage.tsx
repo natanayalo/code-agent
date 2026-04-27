@@ -4,6 +4,9 @@ import { api } from '../services/api';
 import { DashboardLayout } from './layout/DashboardLayout';
 import { Activity, Clock, Database, Cpu, TrendingUp } from 'lucide-react';
 
+const METRICS_REFETCH_INTERVAL_MS = 60000;
+const SUCCESS_RATE_HEALTHY_THRESHOLD = 0.8;
+
 export function MetricsPage() {
   const {
     data: metrics,
@@ -13,7 +16,7 @@ export function MetricsPage() {
   } = useQuery({
     queryKey: ['metrics'],
     queryFn: () => api.getMetrics(),
-    refetchInterval: 60000, // Refresh every minute
+    refetchInterval: METRICS_REFETCH_INTERVAL_MS,
   });
 
   if (error) {
@@ -49,7 +52,7 @@ export function MetricsPage() {
               value={metrics.total_tasks.toString()}
             />
             <MetricCard
-              icon={<TrendingUp size={24} color={metrics.success_rate >= 0.8 ? 'var(--color-status-completed)' : 'var(--color-status-failed)'} />}
+              icon={<TrendingUp size={24} color={metrics.success_rate >= SUCCESS_RATE_HEALTHY_THRESHOLD ? 'var(--color-status-completed)' : 'var(--color-status-failed)'} />}
               label="Success Rate"
               value={`${(metrics.success_rate * 100).toFixed(1)}%`}
             />
