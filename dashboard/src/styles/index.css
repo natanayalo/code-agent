@@ -770,6 +770,10 @@ button {
   color: var(--color-text-muted);
 }
 
+.session-id .truncate {
+  max-width: 140px;
+}
+
 .session-card-body {
   display: flex;
   flex-direction: column;
