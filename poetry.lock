@@ -980,14 +980,14 @@ typing-extensions = ">=4.7.0,<5.0.0"
 
 [[package]]
 name = "langgraph"
-version = "1.1.8"
+version = "1.1.9"
 description = "Building stateful, multi-actor applications with LLMs"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "langgraph-1.1.8-py3-none-any.whl", hash = "sha256:3278c7e335da25eac3327bb474c502d4cab94ae6dcc685fbf93be2bbf7664cd5"},
-    {file = "langgraph-1.1.8.tar.gz", hash = "sha256:a97b8248129f2e007b81eef8277009ad1e1280b75fa2175889ab5aff5dcc4578"},
+    {file = "langgraph-1.1.9-py3-none-any.whl", hash = "sha256:7db13ceecde4ea643df6c097dcc9e534895dcd9fcc6500eeff2f2cde0fab16b2"},
+    {file = "langgraph-1.1.9.tar.gz", hash = "sha256:bc5a49d5a5e71fda1f9c53c06c62f4caec9a95545b739d130a58b6ab3269e274"},
 ]
 
 [package.dependencies]
@@ -2530,4 +2530,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "fd69fa9d9216b9c068a3a3aa9f8ef73f43a646e92262f9ce2b37862290204d9d"
+content-hash = "a7169a7d684013f28cb6ee7793d07b7ecae6eca5d67fbf384ff2dd924e2e5622"
