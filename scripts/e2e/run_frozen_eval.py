@@ -74,7 +74,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         "--max-parallel-cases",
         type=int,
         default=None,
-        help=("Optional concurrency cap when --parallel is enabled. " "Defaults to no cap."),
+        help=("Optional concurrency cap when --parallel is enabled. Defaults to no cap."),
     )
     parser.add_argument(
         "--variant-label",

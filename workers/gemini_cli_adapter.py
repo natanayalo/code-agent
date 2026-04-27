@@ -104,8 +104,7 @@ def _build_adapter_prompt(
         "that JSON as a string inside the tool_input field.",
         *tool_guidance_lines,
         "- If the transcript already contains enough information to finish, return `final`.",
-        "- If the latest tool result failed, adapt to that failure instead of "
-        "repeating blindly.",
+        "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
         "- Return ONLY a raw JSON object. No markdown fences, no extra explanation.",
     ]
     if system_prompt is not None and system_prompt.strip():

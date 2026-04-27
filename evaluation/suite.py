@@ -120,7 +120,7 @@ def load_frozen_suite(path: Path | None = None) -> FrozenSuite:
         parsed = _FrozenSuitePayload.model_validate(payload)
     except ValidationError as exc:
         raise ValueError(
-            "Frozen suite payload validation failed: " f"{_summarize_validation_error(exc)}"
+            f"Frozen suite payload validation failed: {_summarize_validation_error(exc)}"
         ) from exc
 
     cases: list[FrozenTaskCase] = []
@@ -174,7 +174,7 @@ def load_replay_outcomes(path: Path) -> dict[str, WorkerOutcome]:
         parsed = _REPLAY_OUTCOMES_ADAPTER.validate_python(payload)
     except ValidationError as exc:
         raise ValueError(
-            "Replay payload validation failed: " f"{_summarize_validation_error(exc)}"
+            f"Replay payload validation failed: {_summarize_validation_error(exc)}"
         ) from exc
 
     outcomes: dict[str, WorkerOutcome] = {}

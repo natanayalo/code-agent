@@ -94,8 +94,7 @@ def _build_adapter_prompt(
         "- `tool_input` MUST be a string. If the tool expects JSON, encode that JSON as a string.",
         *tool_guidance_lines,
         "- If the transcript already contains enough information to finish, return `final`.",
-        "- If the latest tool result failed, adapt to that failure instead of "
-        "repeating blindly.",
+        "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
         "- Do not wrap the JSON in Markdown or add any extra prose.",
     ]
     if system_prompt is not None and system_prompt.strip():

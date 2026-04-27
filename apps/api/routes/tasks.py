@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from apps.api.dependencies import get_task_service, require_api_auth
+from apps.api.dependencies import get_task_service, require_any_valid_auth
 from db.enums import TaskStatus
 from orchestrator.execution import (
     TaskApprovalDecision,
@@ -15,7 +15,7 @@ from orchestrator.execution import (
     TaskSummarySnapshot,
 )
 
-router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(require_api_auth)])
+router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(require_any_valid_auth)])
 
 
 @router.post("", response_model=TaskSnapshot, status_code=status.HTTP_202_ACCEPTED)

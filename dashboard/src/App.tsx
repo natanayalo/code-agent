@@ -1,14 +1,18 @@
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { TaskBoard } from './components/TaskBoard';
 import { StatsPanel } from './components/StatsPanel';
 import { api } from './services/api';
 import { TaskStatus } from './types/task';
+import { AuthProvider, useAuth } from './components/auth/AuthContext';
+import { AuthGuard } from './components/auth/AuthGuard';
+import { LoginPage } from './components/auth/LoginPage';
 
 const REFRESH_INTERVAL_MS = 30000;
 
-function App() {
+function DashboardContent() {
   const {
     data: tasks = [],
     isLoading: loading,
@@ -52,6 +56,51 @@ function App() {
         refetch={refetch}
       />
     </DashboardLayout>
+  );
+}
+
+interface LocationState {
+  from?: {
+    pathname: string;
+  };
+}
+
+function AppRoutes() {
+  const { authenticated } = useAuth();
+  const location = useLocation();
+
+  return (
+    <Routes>
+      <Route
+        path="/login"
+        element={
+          authenticated ? (
+            <Navigate to={(location.state as LocationState)?.from?.pathname || '/'} replace />
+          ) : (
+            <LoginPage />
+          )
+        }
+      />
+      <Route
+        path="/"
+        element={
+          <AuthGuard>
+            <DashboardContent />
+          </AuthGuard>
+        }
+      />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
 

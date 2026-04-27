@@ -60,15 +60,7 @@ def test_detect_post_run_lint_commands_uses_fallback_template(tmp_path: Path) ->
 def test_detect_post_run_lint_commands_uses_package_json_scripts(tmp_path: Path) -> None:
     """Package script detection should prefer format + lint flows with file args."""
     (tmp_path / "package.json").write_text(
-        (
-            "{"
-            '"scripts":{'
-            '"format":"prettier --write .",'
-            '"lint":"eslint .",'
-            '"test":"vitest run"'
-            "}"
-            "}"
-        ),
+        ('{"scripts":{"format":"prettier --write .","lint":"eslint .","test":"vitest run"}}'),
         encoding="utf-8",
     )
 

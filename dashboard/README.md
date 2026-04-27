@@ -10,6 +10,17 @@ The dashboard is a React-based PWA designed for monitoring and controlling the `
 - **Icons**: [Lucide React](https://lucide.dev/)
 - **Testing**: [Vitest](https://vitest.dev/) + [React Testing Library](https://testing-library.com/docs/react-testing-library/intro/)
 
+## Authentication
+
+The dashboard requires authentication using the agent's shared secret.
+
+- Sessions are managed via **HttpOnly cookies**.
+- The backend enforces **CSRF protection** for all state-changing actions.
+- Ensure `CODE_AGENT_ALLOWED_ORIGINS` is configured on the backend to include the dashboard's origin.
+
+> [!NOTE]
+> **Stateless Logout**: We use stateless JWTs with a 1-hour TTL. Logging out removes the cookie, but the token itself is not blacklisted and remains valid until expiry.
+
 ## Development
 
 ### Prerequisites

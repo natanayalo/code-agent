@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from apps.api.dependencies import get_task_service, require_api_auth
+from apps.api.dependencies import get_task_service, require_any_valid_auth
 from orchestrator.execution import (
     SessionSnapshot,
     TaskExecutionService,
 )
 
-router = APIRouter(prefix="/sessions", tags=["sessions"], dependencies=[Depends(require_api_auth)])
+router = APIRouter(
+    prefix="/sessions", tags=["sessions"], dependencies=[Depends(require_any_valid_auth)]
+)
 
 
 @router.get("", response_model=list[SessionSnapshot])

@@ -58,8 +58,7 @@ _REVIEW_OUTPUT_CONTRACT_TEMPLATE = "\n".join(
         "{schema_json}",
         "```",
         "Rules:",
-        "- Use outcome `no_findings` with an empty `findings` list when nothing "
-        "actionable exists.",
+        "- Use outcome `no_findings` with an empty `findings` list when nothing actionable exists.",
         "- Use outcome `findings` only when at least one concrete actionable finding exists.",
         "- Keep findings bounded to the supplied review context packet.",
     ]

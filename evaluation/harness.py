@@ -158,7 +158,7 @@ def _runner_exception_outcome(case: FrozenTaskCase, exc: Exception) -> WorkerOut
     detail = str(exc).strip()
     if detail:
         summary = (
-            f"evaluation runner raised {type(exc).__name__} for case " f"'{case.case_id}': {detail}"
+            f"evaluation runner raised {type(exc).__name__} for case '{case.case_id}': {detail}"
         )
     else:
         summary = f"evaluation runner raised {type(exc).__name__} for case '{case.case_id}'"
@@ -458,7 +458,7 @@ def _metric_delta_payload(
         if extra:
             details.append(f"unexpected mappings for {', '.join(extra)}")
         detail_text = "; ".join(details) if details else "unknown comparison mismatch"
-        raise ValueError("Comparison delta field mapping is out of sync: " f"{detail_text}")
+        raise ValueError(f"Comparison delta field mapping is out of sync: {detail_text}")
 
     payload: dict[str, float | None] = {}
     for metric_field_name, delta_field_name in _REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD.items():
