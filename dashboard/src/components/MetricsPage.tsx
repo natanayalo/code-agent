@@ -74,7 +74,7 @@ export function MetricsPage() {
               <div className="status-list">
                 {Object.entries(metrics.status_counts).map(([status, count]) => (
                   <div key={status} className="status-item">
-                    <span className={`status-dot status-${status}`}></span>
+                    <span className={`status-dot status-${status.toLowerCase()}`}></span>
                     <span className="status-label">{status}</span>
                     <span className="status-count">{count}</span>
                   </div>

@@ -59,7 +59,7 @@ export function SessionsPage() {
           {sessions.map((session: SessionSnapshot) => (
             <div key={session.session_id} className="session-card card">
               <div className="session-card-header">
-                <div className={`status-badge status-${session.status}`}>
+                <div className={`status-badge status-${session.status.toLowerCase()}`}>
                   {session.status}
                 </div>
                 <span className="session-id">ID: {formatIdPreview(session.session_id)}</span>
