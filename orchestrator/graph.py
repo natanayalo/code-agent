@@ -18,7 +18,6 @@ from db.base import utc_now
 from db.enums import TimelineEventType
 from orchestrator.constants import (
     COMPLEX_TASK_MARKERS,
-    DESTRUCTIVE_TASK_MARKERS,
     HIGH_QUALITY_REQUEST_MARKERS,
     LOW_COST_REQUEST_MARKERS,
 )
@@ -38,7 +37,12 @@ from orchestrator.state import (
     WorkerDispatch,
     WorkerType,
 )
-from orchestrator.task_spec import build_task_spec_for_request, validate_task_spec_policy
+from orchestrator.task_spec import (
+    build_task_spec_for_request,
+    contains_marker,
+    is_destructive_task,
+    validate_task_spec_policy,
+)
 from tools import coerce_permission_level
 from tools.numeric import coerce_positive_int_like
 from workers import ArtifactReference, Worker, WorkerRequest, WorkerResult
@@ -360,17 +364,6 @@ def _classify_task_kind(task_text: str) -> str:
     return "implementation"
 
 
-def _is_destructive_task(task_text: str, constraints: dict[str, Any]) -> bool:
-    """Return whether the task involves potentially destructive changes."""
-    if constraints.get("destructive_action") is True:
-        return True
-    normalized_text = task_text.lower()
-    return any(
-        re.search(rf"\b{re.escape(marker)}\b", normalized_text)
-        for marker in DESTRUCTIVE_TASK_MARKERS
-    )
-
-
 def _task_requires_approval(task_text: str, constraints: dict[str, Any]) -> bool:
     """Return True if the task involves destructive actions or explicit approval constraints."""
     approval_data = constraints.get("approval")
@@ -378,7 +371,7 @@ def _task_requires_approval(task_text: str, constraints: dict[str, Any]) -> bool
         return False
     if constraints.get("requires_approval") is True:
         return True
-    return _is_destructive_task(task_text, constraints)
+    return is_destructive_task(task_text, constraints)
 
 
 def _build_approval_checkpoint(state: OrchestratorState) -> ApprovalCheckpoint:
@@ -388,7 +381,7 @@ def _build_approval_checkpoint(state: OrchestratorState) -> ApprovalCheckpoint:
         return ApprovalCheckpoint()
 
     reason = state.task.constraints.get("approval_reason")
-    is_destructive = _is_destructive_task(task_text, state.task.constraints)
+    is_destructive = is_destructive_task(task_text, state.task.constraints)
     if not isinstance(reason, str) or not reason.strip():
         reason = (
             "Task includes a potentially destructive action."
@@ -764,12 +757,6 @@ def _route_by_preference(
     )
 
 
-def _task_has_request_marker(task_text: str, markers: tuple[str, ...]) -> bool:
-    """Return whether the task text contains an explicit routing preference marker."""
-    normalized = task_text.lower()
-    return any(re.search(rf"\b{re.escape(marker)}\b", normalized) is not None for marker in markers)
-
-
 def _compute_route_decision(
     state: OrchestratorState,
     available_workers: frozenset[str],
@@ -877,7 +864,7 @@ def _compute_route_decision(
     if (
         budget.get("prefer_high_quality")
         or constraints.get("prefer_high_quality")
-        or _task_has_request_marker(task_text, HIGH_QUALITY_REQUEST_MARKERS)
+        or contains_marker(task_text, HIGH_QUALITY_REQUEST_MARKERS)
     ):
         return _route_by_preference(
             "gemini",
@@ -888,7 +875,7 @@ def _compute_route_decision(
     if (
         budget.get("prefer_low_cost")
         or constraints.get("prefer_low_cost")
-        or _task_has_request_marker(task_text, LOW_COST_REQUEST_MARKERS)
+        or contains_marker(task_text, LOW_COST_REQUEST_MARKERS)
     ):
         return _route_by_preference(
             "codex",

@@ -28,13 +28,13 @@ def _normalized_text(text: str) -> str:
     return " ".join(text.split())
 
 
-def _contains_marker(text: str, markers: tuple[str, ...]) -> bool:
-    """Return whether text contains any marker as a phrase or word-boundary term."""
+def contains_marker(text: str, markers: tuple[str, ...]) -> bool:
+    """Check if any of the markers are present in the text with word boundaries."""
     normalized = text.lower()
-    return any(
-        re.search(rf"(?<![\w-]){re.escape(marker)}(?![\w-])", normalized) is not None
-        for marker in markers
-    )
+    for marker in markers:
+        if re.search(rf"\b{re.escape(marker)}\b", normalized):
+            return True
+    return False
 
 
 def _coerce_string_list(value: object) -> list[str]:
@@ -46,17 +46,17 @@ def _coerce_string_list(value: object) -> list[str]:
 
 def _resolve_task_type(task_text: str, task_kind: str | None) -> TaskSpecType:
     """Map raw task wording and coarse classification into the TaskSpec vocabulary."""
-    if _contains_marker(task_text, DOCS_MARKERS):
+    if contains_marker(task_text, DOCS_MARKERS):
         return "docs"
-    if _contains_marker(task_text, REVIEW_FIX_MARKERS):
+    if contains_marker(task_text, REVIEW_FIX_MARKERS):
         return "review_fix"
-    if _contains_marker(task_text, REFACTOR_MARKERS) or task_kind == "architecture":
+    if contains_marker(task_text, REFACTOR_MARKERS) or task_kind == "architecture":
         return "refactor"
-    if _contains_marker(task_text, INVESTIGATION_MARKERS) or task_kind == "ambiguous":
+    if contains_marker(task_text, INVESTIGATION_MARKERS) or task_kind == "ambiguous":
         return "investigation"
-    if _contains_marker(task_text, BUGFIX_MARKERS):
+    if contains_marker(task_text, BUGFIX_MARKERS):
         return "bugfix"
-    if _contains_marker(task_text, MAINTENANCE_MARKERS):
+    if contains_marker(task_text, MAINTENANCE_MARKERS):
         return "maintenance"
     return "feature"
 
@@ -67,6 +67,13 @@ def _max_risk(*levels: str) -> str:
     if not recognized:
         return "low"
     return max(recognized, key=lambda level: RISK_ORDER[level])
+
+
+def is_destructive_task(task_text: str, constraints: Mapping[str, Any]) -> bool:
+    """Return whether the task involves potentially destructive changes."""
+    if constraints.get("destructive_action") is True:
+        return True
+    return contains_marker(task_text, DESTRUCTIVE_TASK_MARKERS)
 
 
 def _resolve_risk_level(
@@ -81,12 +88,10 @@ def _resolve_risk_level(
     explicit = explicit_risk.strip().lower() if isinstance(explicit_risk, str) else "low"
     risk = "low"
 
-    destructive = constraints.get("destructive_action") is True or _contains_marker(
-        task_text, DESTRUCTIVE_TASK_MARKERS
-    )
-    if destructive or _contains_marker(task_text, HIGH_RISK_MARKERS):
+    destructive = is_destructive_task(task_text, constraints)
+    if destructive or contains_marker(task_text, HIGH_RISK_MARKERS):
         risk = _max_risk(risk, "high")
-    if _contains_marker(task_text, CRITICAL_MARKERS):
+    if contains_marker(task_text, CRITICAL_MARKERS):
         risk = _max_risk(risk, "critical")
     if task_type in {"refactor", "review_fix"} or (task_plan is not None and task_plan.triggered):
         risk = _max_risk(risk, "medium")
@@ -102,11 +107,11 @@ def _resolve_delivery_mode(task_text: str, constraints: Mapping[str, Any]) -> st
         if normalized in VALID_DELIVERY_MODES:
             return normalized
 
-    if _contains_marker(task_text, ("draft pr", "pull request", "pr")):
+    if contains_marker(task_text, ("draft pr", "pull request", "pr")):
         return "draft_pr"
-    if _contains_marker(task_text, ("branch",)):
+    if contains_marker(task_text, ("branch",)):
         return "branch"
-    if _contains_marker(task_text, ("summary only",)):
+    if contains_marker(task_text, ("summary only",)):
         return "summary"
     return "workspace"
 
@@ -116,7 +121,7 @@ def _requires_clarification(task_text: str, task_kind: str | None) -> bool:
     normalized = task_text.lower().strip()
     if len(normalized.split()) <= 2 and task_kind == "ambiguous":
         return True
-    return _contains_marker(normalized, AMBIGUOUS_ASKS)
+    return contains_marker(normalized, AMBIGUOUS_ASKS)
 
 
 def build_task_spec(
