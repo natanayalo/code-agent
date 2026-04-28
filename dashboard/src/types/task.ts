@@ -62,18 +62,52 @@ export interface TaskSummarySnapshot {
 }
 export interface WorkerRunSnapshot {
   run_id: string;
+  session_id?: string | null;
   worker_type: string;
+  workspace_id?: string | null;
   status: string;
   started_at: string;
   finished_at?: string | null;
   summary?: string | null;
-  commands_run: unknown[];
+  requested_permission?: string | null;
+  budget_usage?: Record<string, unknown> | null;
+  verifier_outcome?: Record<string, unknown> | null;
+  commands_run: CommandRunSnapshot[];
   files_changed_count: number;
+  artifact_index: ArtifactIndexEntry[];
+  artifacts: ArtifactSnapshot[];
+}
+
+export interface CommandRunSnapshot {
+  command?: string;
+  exit_code?: number;
+  duration_seconds?: number;
+  stdout_artifact_uri?: string;
+  stderr_artifact_uri?: string;
+  timed_out?: boolean;
+}
+
+export interface ArtifactIndexEntry {
+  name?: string;
+  uri?: string;
+  artifact_type?: string;
+  artifact_metadata?: Record<string, unknown> | null;
+}
+
+export interface ArtifactSnapshot {
+  artifact_id: string;
+  artifact_type: string;
+  name: string;
+  uri: string;
+  artifact_metadata?: Record<string, unknown> | null;
 }
 
 export interface TaskTimelineEventSnapshot {
   event_type: string;
+  attempt_number?: number;
+  sequence_number?: number;
   message?: string | null;
+  payload?: Record<string, unknown> | null;
   created_at: string;
 }
 

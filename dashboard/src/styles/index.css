@@ -664,6 +664,47 @@ button {
   margin-bottom: var(--spacing-sm);
 }
 
+.task-timeline-list,
+.task-command-list,
+.task-artifact-list {
+  margin: 0;
+  padding-left: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.task-timeline-list li,
+.task-command-list li,
+.task-artifact-list li {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: var(--spacing-sm);
+}
+
+.task-inline-meta {
+  margin-left: var(--spacing-sm);
+}
+
+.task-detail-json {
+  margin-top: var(--spacing-xs);
+  padding: var(--spacing-sm);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.task-command-artifacts {
+  margin-top: var(--spacing-xs);
+  padding-left: 1rem;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+}
+
 .task-detail-muted {
   color: var(--color-text-muted);
   font-size: 0.9rem;
