@@ -12,20 +12,18 @@ function formatLabel(value: string | null | undefined): string {
   return (value || '').replace(/_/g, ' ');
 }
 
-function listItemKey(items: string[], item: string, index: number): string {
-  const duplicateCountBefore = items.slice(0, index).filter((value) => value === item).length;
-  return `${item}-${duplicateCountBefore}`;
-}
-
 function renderStringList(title: string, items: string[] | undefined) {
   if (!items || items.length === 0) return null;
+  const duplicateCounts = new Map<string, number>();
   return (
     <div className="task-detail-group">
       <h5>{title}</h5>
       <ul>
-        {items.map((item, index) => (
-          <li key={`${title}-${listItemKey(items, item, index)}`}>{item}</li>
-        ))}
+        {items.map((item) => {
+          const duplicateIndex = duplicateCounts.get(item) || 0;
+          duplicateCounts.set(item, duplicateIndex + 1);
+          return <li key={`${title}-${item}-${duplicateIndex}`}>{item}</li>;
+        })}
       </ul>
     </div>
   );
