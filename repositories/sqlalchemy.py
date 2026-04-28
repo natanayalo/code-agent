@@ -749,10 +749,24 @@ class HumanInteractionRepository:
                 # Reuse the latest non-cancelled row to keep retries/idempotent sync
                 # from creating duplicate interactions for the same TaskSpec signal.
                 primary = active_rows[-1]
-                primary.summary = summary
-                primary.data = data
                 if primary.status == HumanInteractionStatus.PENDING:
+                    primary.summary = summary
+                    primary.data = data
                     primary.response_data = None
+                    continue
+
+                # A resolved/rejected interaction should not suppress a materially
+                # new operator checkpoint for the same task type.
+                if primary.summary != summary or primary.data != data:
+                    self.session.add(
+                        HumanInteraction(
+                            task_id=task_id,
+                            interaction_type=interaction_type,
+                            status=HumanInteractionStatus.PENDING,
+                            summary=summary,
+                            data=data,
+                        )
+                    )
                 continue
 
             self.session.add(
