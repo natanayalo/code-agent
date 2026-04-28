@@ -37,13 +37,9 @@ from db.enums import (
     WorkerRunStatus,
     WorkerType,
 )
+from db.models import HumanInteraction, Task, User, WorkerRun
 from db.models import (
     Session as ConversationSession,
-)
-from db.models import (
-    Task,
-    User,
-    WorkerRun,
 )
 from orchestrator.checkpoints import create_async_sqlite_checkpointer
 from orchestrator.graph import build_orchestrator_graph
@@ -1364,27 +1360,7 @@ class TaskExecutionService:
         """Map a Task database model to a full TaskSnapshot Pydantic model (T-131)."""
         latest_run_snapshot: WorkerRunSnapshot | None = None
         latest_run_obj: WorkerRun | None = None
-        pending_interactions = [
-            HumanInteractionSnapshot(
-                interaction_id=interaction.id,
-                interaction_type=_enum_value(interaction.interaction_type) or "unknown",
-                status=_enum_value(interaction.status) or "unknown",
-                summary=interaction.summary,
-                data=dict(interaction.data or {}),
-                response_data=(
-                    dict(interaction.response_data or {})
-                    if interaction.response_data is not None
-                    else None
-                ),
-                created_at=interaction.created_at,
-                updated_at=interaction.updated_at,
-            )
-            for interaction in sorted(
-                task.human_interactions,
-                key=lambda row: row.created_at,
-            )
-            if _enum_value(interaction.status) == HumanInteractionStatus.PENDING.value
-        ]
+        pending_interactions = self._pending_interaction_snapshots(task)
 
         if task.worker_runs:
             latest_run_obj = max(task.worker_runs, key=lambda r: r.started_at)
@@ -1469,11 +1445,7 @@ class TaskExecutionService:
 
         if pending_interaction_count is None:
             if "human_interactions" in task.__dict__:
-                pending_interaction_count = sum(
-                    1
-                    for interaction in task.human_interactions
-                    if _enum_value(interaction.status) == HumanInteractionStatus.PENDING.value
-                )
+                pending_interaction_count = self._count_pending_interactions(task)
             else:
                 pending_interaction_count = 0
 
@@ -1508,6 +1480,43 @@ class TaskExecutionService:
             approval_status=approval_status,  # type: ignore[arg-type]
             approval_type=approval_type,
             approval_reason=approval_reason,
+        )
+
+    @staticmethod
+    def _is_pending_interaction(interaction: HumanInteraction) -> bool:
+        return _enum_value(interaction.status) == HumanInteractionStatus.PENDING.value
+
+    @staticmethod
+    def _map_human_interaction_snapshot(
+        interaction: HumanInteraction,
+    ) -> HumanInteractionSnapshot:
+        return HumanInteractionSnapshot(
+            interaction_id=interaction.id,
+            interaction_type=_enum_value(interaction.interaction_type) or "unknown",
+            status=_enum_value(interaction.status) or "unknown",
+            summary=interaction.summary,
+            data=dict(interaction.data or {}),
+            response_data=(
+                dict(interaction.response_data or {})
+                if interaction.response_data is not None
+                else None
+            ),
+            created_at=interaction.created_at,
+            updated_at=interaction.updated_at,
+        )
+
+    def _pending_interaction_snapshots(self, task: Task) -> list[HumanInteractionSnapshot]:
+        return [
+            self._map_human_interaction_snapshot(interaction)
+            for interaction in sorted(task.human_interactions, key=lambda row: row.created_at)
+            if self._is_pending_interaction(interaction)
+        ]
+
+    def _count_pending_interactions(self, task: Task) -> int:
+        return sum(
+            1
+            for interaction in task.human_interactions
+            if self._is_pending_interaction(interaction)
         )
 
     def _map_session_to_snapshot(self, s: ConversationSession) -> SessionSnapshot:

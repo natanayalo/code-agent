@@ -308,6 +308,33 @@ class TaskRepository:
         )
         return list(self.session.scalars(statement))
 
+    @staticmethod
+    def _latest_run_scalar_subquery(column: Any) -> Any:
+        return (
+            select(column)
+            .where(WorkerRun.task_id == Task.id)
+            .order_by(WorkerRun.started_at.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+
+    @staticmethod
+    def _attach_task_listing_metadata(
+        *,
+        task: Task,
+        latest_run_id: Any,
+        latest_run_status: Any,
+        latest_run_worker: Any,
+        latest_run_requested_permission: Any,
+        pending_interaction_count: Any,
+    ) -> None:
+        # Attach temporary attributes used by TaskExecutionService summary mapping.
+        setattr(task, "_latest_run_id", latest_run_id)
+        setattr(task, "_latest_run_status", latest_run_status)
+        setattr(task, "_latest_run_worker", latest_run_worker)
+        setattr(task, "_latest_run_requested_permission", latest_run_requested_permission)
+        setattr(task, "_pending_interaction_count", int(pending_interaction_count or 0))
+
     def list_all(
         self,
         *,
@@ -342,33 +369,11 @@ class TaskRepository:
             return list(self.session.scalars(statement))
         else:
             # Optimized listing path: join latest run metadata via scalar subqueries (T-131)
-            latest_run_id_sq = (
-                select(WorkerRun.id)
-                .where(WorkerRun.task_id == Task.id)
-                .order_by(WorkerRun.started_at.desc())
-                .limit(1)
-                .scalar_subquery()
-            )
-            latest_run_status_sq = (
-                select(WorkerRun.status)
-                .where(WorkerRun.task_id == Task.id)
-                .order_by(WorkerRun.started_at.desc())
-                .limit(1)
-                .scalar_subquery()
-            )
-            latest_run_worker_sq = (
-                select(WorkerRun.worker_type)
-                .where(WorkerRun.task_id == Task.id)
-                .order_by(WorkerRun.started_at.desc())
-                .limit(1)
-                .scalar_subquery()
-            )
-            latest_run_requested_permission_sq = (
-                select(WorkerRun.requested_permission)
-                .where(WorkerRun.task_id == Task.id)
-                .order_by(WorkerRun.started_at.desc())
-                .limit(1)
-                .scalar_subquery()
+            latest_run_id_sq = self._latest_run_scalar_subquery(WorkerRun.id)
+            latest_run_status_sq = self._latest_run_scalar_subquery(WorkerRun.status)
+            latest_run_worker_sq = self._latest_run_scalar_subquery(WorkerRun.worker_type)
+            latest_run_requested_permission_sq = self._latest_run_scalar_subquery(
+                WorkerRun.requested_permission
             )
             pending_interaction_count_sq = (
                 select(func.count(HumanInteraction.id))
@@ -398,14 +403,22 @@ class TaskRepository:
             results = self.session.execute(statement).all()
 
             tasks = []
-            for row in results:
-                task = row[0]
-                # Attach temporary attributes to the Task object for mapping
-                task._latest_run_id = row[1]
-                task._latest_run_status = row[2]
-                task._latest_run_worker = row[3]
-                task._latest_run_requested_permission = row[4]
-                task._pending_interaction_count = int(row[5] or 0)
+            for (
+                task,
+                latest_run_id,
+                latest_run_status,
+                latest_run_worker,
+                latest_run_requested_permission,
+                pending_interaction_count,
+            ) in results:
+                self._attach_task_listing_metadata(
+                    task=task,
+                    latest_run_id=latest_run_id,
+                    latest_run_status=latest_run_status,
+                    latest_run_worker=latest_run_worker,
+                    latest_run_requested_permission=latest_run_requested_permission,
+                    pending_interaction_count=pending_interaction_count,
+                )
                 tasks.append(task)
             return tasks
 
