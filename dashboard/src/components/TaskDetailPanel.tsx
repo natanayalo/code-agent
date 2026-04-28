@@ -86,13 +86,33 @@ function artifactRows(task: TaskSnapshot) {
 }
 
 export function TaskDetailPanel({ task, loading, error, onClose }: TaskDetailPanelProps) {
+  const run = task?.latest_run ?? null;
+  const runCommands = run?.commands_run ?? [];
+  const artifacts = React.useMemo(() => (task ? artifactRows(task) : []), [task]);
+  const sortedTimeline = React.useMemo(() => {
+    if (!task?.timeline) return [];
+    return [...task.timeline].sort((a, b) => {
+      const sequenceA = a.sequence_number ?? 0;
+      const sequenceB = b.sequence_number ?? 0;
+      if (sequenceA !== sequenceB) {
+        return sequenceA - sequenceB;
+      }
+
+      const createdA = new Date(a.created_at).getTime();
+      const createdB = new Date(b.created_at).getTime();
+      const normalizedA = Number.isNaN(createdA) ? 0 : createdA;
+      const normalizedB = Number.isNaN(createdB) ? 0 : createdB;
+      if (normalizedA !== normalizedB) {
+        return normalizedA - normalizedB;
+      }
+
+      return (a.event_type || '').localeCompare(b.event_type || '');
+    });
+  }, [task?.timeline]);
+
   if (!task && !loading && !error) {
     return null;
   }
-
-  const run = task?.latest_run ?? null;
-  const runCommands = run?.commands_run ?? [];
-  const artifacts = task ? artifactRows(task) : [];
 
   return (
     <aside className="glass-panel task-detail-panel">
@@ -166,10 +186,10 @@ export function TaskDetailPanel({ task, loading, error, onClose }: TaskDetailPan
 
           <section className="task-detail-section">
             <h4>Timeline</h4>
-            {task.timeline.length > 0 ? (
+            {sortedTimeline.length > 0 ? (
               <ol className="task-timeline-list">
-                {task.timeline.map((event, idx) => (
-                  <li key={`${event.created_at}-${event.sequence_number ?? idx}`}>
+                {sortedTimeline.map((event, idx) => (
+                  <li key={`${event.created_at}-${event.sequence_number ?? idx}-${idx}`}>
                     <p>
                       <strong>{formatLabel(event.event_type)}</strong>
                       <span className="task-detail-muted task-inline-meta">

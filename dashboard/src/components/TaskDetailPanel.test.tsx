@@ -261,4 +261,44 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('No commands captured for the latest run.')).toBeInTheDocument();
     expect(screen.getByText('No artifacts persisted for the latest run.')).toBeInTheDocument();
   });
+
+  it('renders timeline in stable order by sequence then created_at', () => {
+    const task = buildTask({
+      timeline: [
+        {
+          event_type: 'worker_selected',
+          attempt_number: 0,
+          sequence_number: 2,
+          message: 'Third event',
+          payload: null,
+          created_at: '2026-04-28T00:03:00.000Z',
+        },
+        {
+          event_type: 'task_ingested',
+          attempt_number: 0,
+          sequence_number: 1,
+          message: 'Second event',
+          payload: null,
+          created_at: '2026-04-28T00:02:00.000Z',
+        },
+        {
+          event_type: 'task_ingested',
+          attempt_number: 0,
+          sequence_number: 1,
+          message: 'First event',
+          payload: null,
+          created_at: '2026-04-28T00:01:00.000Z',
+        },
+      ],
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    const first = screen.getByText('First event');
+    const second = screen.getByText('Second event');
+    const third = screen.getByText('Third event');
+
+    expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(second.compareDocumentPosition(third) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });
