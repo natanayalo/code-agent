@@ -8,8 +8,8 @@ interface TaskDetailPanelProps {
   onClose: () => void;
 }
 
-function formatLabel(value: string): string {
-  return value.replace(/_/g, ' ');
+function formatLabel(value: string | null | undefined): string {
+  return (value || '').replace(/_/g, ' ');
 }
 
 function renderStringList(title: string, items: string[] | undefined) {
@@ -18,8 +18,8 @@ function renderStringList(title: string, items: string[] | undefined) {
     <div className="task-detail-group">
       <h5>{title}</h5>
       <ul>
-        {items.map((item) => (
-          <li key={`${title}-${item}`}>{item}</li>
+        {items.map((item, index) => (
+          <li key={`${title}-${index}`}>{item}</li>
         ))}
       </ul>
     </div>
