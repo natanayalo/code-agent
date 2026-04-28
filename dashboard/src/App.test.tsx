@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import App from './App';
@@ -10,6 +10,7 @@ import { api } from './services/api';
 vi.mock('./services/api', () => ({
   api: {
     listTasks: vi.fn(),
+    getTask: vi.fn(),
     listSessions: vi.fn(),
     getMetrics: vi.fn(),
     auth: {
@@ -57,6 +58,74 @@ describe('App', () => {
     const statsValues = container.querySelectorAll('.stats-value');
     expect(statsValues[0]).toHaveTextContent('1'); // Completed
     expect(statsValues[1]).toHaveTextContent('2'); // Failed + Cancelled
+  });
+
+  it('shows TaskSpec and pending interactions in task detail from operator inbox', async () => {
+    const createdAt = new Date().toISOString();
+    vi.mocked(api.listTasks).mockResolvedValue([
+      {
+        task_id: 'task-clarify',
+        task_text: 'Need repo clarification',
+        status: TaskStatus.PENDING,
+        created_at: createdAt,
+        session_id: 's1',
+        priority: 1,
+        updated_at: createdAt,
+        pending_interaction_count: 1,
+      },
+    ]);
+    vi.mocked(api.getTask).mockResolvedValue({
+      task_id: 'task-clarify',
+      task_text: 'Need repo clarification',
+      status: TaskStatus.PENDING,
+      created_at: createdAt,
+      session_id: 's1',
+      priority: 1,
+      updated_at: createdAt,
+      task_spec: {
+        goal: 'Clarify exact repository and file targets',
+        assumptions: [],
+        acceptance_criteria: ['Target files are explicitly listed'],
+        non_goals: [],
+        risk_level: 'low',
+        task_type: 'investigation',
+        allowed_actions: [],
+        forbidden_actions: [],
+        verification_commands: [],
+        expected_artifacts: [],
+        requires_clarification: true,
+        clarification_questions: ['Which repository should be modified?'],
+        requires_permission: false,
+        delivery_mode: 'summary',
+      },
+      pending_interactions: [
+        {
+          interaction_id: 'hi-1',
+          interaction_type: 'clarification',
+          status: 'pending',
+          summary: 'Task requires clarification before execution can continue.',
+          data: {},
+          response_data: null,
+          created_at: createdAt,
+          updated_at: createdAt,
+        },
+      ],
+      timeline: [],
+    });
+    vi.mocked(api.auth.status).mockResolvedValue({ authenticated: true });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText('Operator Inbox')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /Need repo clarification/i }));
+
+    expect(await screen.findByText('Task Detail')).toBeInTheDocument();
+    expect(await screen.findByText('Clarify exact repository and file targets')).toBeInTheDocument();
+    expect(await screen.findByText('Task requires clarification before execution can continue.')).toBeInTheDocument();
   });
 
   it('renders login page when not authenticated', async () => {

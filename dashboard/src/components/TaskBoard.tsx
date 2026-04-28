@@ -31,9 +31,19 @@ interface TaskBoardProps {
   isFetching: boolean;
   error: unknown;
   refetch: () => void;
+  selectedTaskId?: string | null;
+  onTaskSelect?: (taskId: string) => void;
 }
 
-export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBoardProps) {
+export function TaskBoard({
+  tasks,
+  loading,
+  isFetching,
+  error,
+  refetch,
+  selectedTaskId = null,
+  onTaskSelect,
+}: TaskBoardProps) {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const hasError = error != null;
   const isInitialLoading = loading && tasks.length === 0;
@@ -123,7 +133,13 @@ export function TaskBoard({ tasks, loading, isFetching, error, refetch }: TaskBo
                   <div className="empty-column">Loading tasks...</div>
                 )}
                 {columnTasks.map(task => (
-                  <TaskCard key={task.task_id} task={task} onRefresh={refetch} />
+                  <TaskCard
+                    key={task.task_id}
+                    task={task}
+                    onRefresh={refetch}
+                    isSelected={selectedTaskId === task.task_id}
+                    onClick={onTaskSelect ? () => onTaskSelect(task.task_id) : undefined}
+                  />
                 ))}
                 {columnTasks.length === 0 && !loading && (
                   <div className="empty-column">No tasks</div>

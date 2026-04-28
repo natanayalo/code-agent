@@ -132,6 +132,22 @@ describe('api service', () => {
       expect(result).toEqual(mockTasks);
     });
 
+    it('getTask returns full task snapshot', async () => {
+      const mockTask = { task_id: 'task-1', task_text: 'Inspect task', timeline: [] };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockTask,
+      });
+
+      const result = await api.getTask('task-1');
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/tasks/task-1');
+      expect(result).toEqual(mockTask);
+    });
+
     it('listTasks returns empty array if response is not an array', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -155,6 +171,14 @@ describe('api service', () => {
 
       const result = await api.listSessions();
       expect(result).toEqual(mockSessions);
+    });
+
+    it('getTask catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(api.getTask('task-1')).rejects.toThrow('Network fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
 
     it('decideTaskApproval sends correct POST body', async () => {

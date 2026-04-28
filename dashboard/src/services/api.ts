@@ -82,6 +82,15 @@ export const api = {
     }
   },
 
+  async getTask(taskId: string): Promise<TaskSnapshot> {
+    try {
+      return await fetchWithAuth(`/tasks/${taskId}`);
+    } catch (error) {
+      console.warn(`Failed to fetch task ${taskId}`, error);
+      throw error;
+    }
+  },
+
   async listSessions(): Promise<SessionSnapshot[]> {
     try {
       const data = await fetchWithAuth('/sessions');

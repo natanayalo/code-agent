@@ -370,6 +370,14 @@ class TaskRepository:
                 .limit(1)
                 .scalar_subquery()
             )
+            pending_interaction_count_sq = (
+                select(func.count(HumanInteraction.id))
+                .where(
+                    HumanInteraction.task_id == Task.id,
+                    HumanInteraction.status == HumanInteractionStatus.PENDING,
+                )
+                .scalar_subquery()
+            )
 
             statement = select(
                 Task,
@@ -377,6 +385,7 @@ class TaskRepository:
                 latest_run_status_sq.label("latest_run_status"),
                 latest_run_worker_sq.label("latest_run_worker"),
                 latest_run_requested_permission_sq.label("latest_run_requested_permission"),
+                pending_interaction_count_sq.label("pending_interaction_count"),
             ).order_by(Task.created_at.desc())
 
             if session_id:
@@ -396,6 +405,7 @@ class TaskRepository:
                 task._latest_run_status = row[2]
                 task._latest_run_worker = row[3]
                 task._latest_run_requested_permission = row[4]
+                task._pending_interaction_count = int(row[5] or 0)
                 tasks.append(task)
             return tasks
 

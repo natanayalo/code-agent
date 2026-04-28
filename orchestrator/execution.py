@@ -30,7 +30,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from db.base import utc_now
-from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
+from db.enums import (
+    ArtifactType,
+    HumanInteractionStatus,
+    TaskStatus,
+    WorkerRunStatus,
+    WorkerType,
+)
 from db.models import (
     Session as ConversationSession,
 )
@@ -426,9 +432,23 @@ class TaskSummarySnapshot(ExecutionModel):
     latest_run_status: str | None = None
     latest_run_worker: str | None = None
     latest_run_requested_permission: str | None = None
+    pending_interaction_count: int = 0
     approval_status: Literal["pending", "approved", "rejected", "not_required"] | None = None
     approval_type: str | None = None
     approval_reason: str | None = None
+
+
+class HumanInteractionSnapshot(ExecutionModel):
+    """A pending or resolved human interaction associated with a task."""
+
+    interaction_id: str
+    interaction_type: str
+    status: str
+    summary: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    response_data: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class TaskSnapshot(TaskSummarySnapshot):
@@ -436,6 +456,7 @@ class TaskSnapshot(TaskSummarySnapshot):
 
     task_spec: TaskSpec | None = None
     latest_run: WorkerRunSnapshot | None = None
+    pending_interactions: list[HumanInteractionSnapshot] = Field(default_factory=list)
     timeline: list[TaskTimelineEventSnapshot] = Field(default_factory=list)
 
 
@@ -1288,6 +1309,7 @@ class TaskExecutionService:
                 .where(Task.id == task_id)
                 .options(
                     selectinload(Task.timeline_events),
+                    selectinload(Task.human_interactions),
                     selectinload(Task.worker_runs).selectinload(WorkerRun.artifacts),
                 )
             )
@@ -1342,6 +1364,27 @@ class TaskExecutionService:
         """Map a Task database model to a full TaskSnapshot Pydantic model (T-131)."""
         latest_run_snapshot: WorkerRunSnapshot | None = None
         latest_run_obj: WorkerRun | None = None
+        pending_interactions = [
+            HumanInteractionSnapshot(
+                interaction_id=interaction.id,
+                interaction_type=_enum_value(interaction.interaction_type) or "unknown",
+                status=_enum_value(interaction.status) or "unknown",
+                summary=interaction.summary,
+                data=dict(interaction.data or {}),
+                response_data=(
+                    dict(interaction.response_data or {})
+                    if interaction.response_data is not None
+                    else None
+                ),
+                created_at=interaction.created_at,
+                updated_at=interaction.updated_at,
+            )
+            for interaction in sorted(
+                task.human_interactions,
+                key=lambda row: row.created_at,
+            )
+            if _enum_value(interaction.status) == HumanInteractionStatus.PENDING.value
+        ]
 
         if task.worker_runs:
             latest_run_obj = max(task.worker_runs, key=lambda r: r.started_at)
@@ -1381,6 +1424,7 @@ class TaskExecutionService:
             if isinstance(task.task_spec, Mapping)
             else None,
             latest_run=latest_run_snapshot,
+            pending_interactions=pending_interactions,
             timeline=[
                 TaskTimelineEventSnapshot(
                     event_type=_enum_value(event.event_type) or "unknown",
@@ -1405,6 +1449,7 @@ class TaskExecutionService:
         latest_run_status = _enum_value(getattr(task, "_latest_run_status", None))
         latest_run_worker = _enum_value(getattr(task, "_latest_run_worker", None))
         latest_run_requested_permission = getattr(task, "_latest_run_requested_permission", None)
+        pending_interaction_count = getattr(task, "_pending_interaction_count", None)
 
         # Fallback if metadata not pre-identified (e.g. from get_task or create_task)
         if latest_run_id is None:
@@ -1421,6 +1466,16 @@ class TaskExecutionService:
                 latest_run_status = _enum_value(run.status)
                 latest_run_worker = _enum_value(run.worker_type)
                 latest_run_requested_permission = run.requested_permission
+
+        if pending_interaction_count is None:
+            if "human_interactions" in task.__dict__:
+                pending_interaction_count = sum(
+                    1
+                    for interaction in task.human_interactions
+                    if _enum_value(interaction.status) == HumanInteractionStatus.PENDING.value
+                )
+            else:
+                pending_interaction_count = 0
 
         # Extract approval context from task constraints (T-134)
         constraints = task.constraints or {}
@@ -1449,6 +1504,7 @@ class TaskExecutionService:
             latest_run_status=latest_run_status,
             latest_run_worker=latest_run_worker,
             latest_run_requested_permission=latest_run_requested_permission,
+            pending_interaction_count=int(pending_interaction_count or 0),
             approval_status=approval_status,  # type: ignore[arg-type]
             approval_type=approval_type,
             approval_reason=approval_reason,

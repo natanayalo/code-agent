@@ -935,6 +935,13 @@ def test_create_task_persists_task_spec_human_interactions() -> None:
             task_id=task_snapshot.task_id
         )
 
+    assert task_snapshot.pending_interaction_count == 2
+    assert len(task_snapshot.pending_interactions) == 2
+    assert {interaction.interaction_type for interaction in task_snapshot.pending_interactions} == {
+        "clarification",
+        "permission",
+    }
+
     assert len(interactions) == 2
     assert {interaction.interaction_type for interaction in interactions} == {
         HumanInteractionType.CLARIFICATION,
