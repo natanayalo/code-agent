@@ -45,6 +45,7 @@ from orchestrator.state import OrchestratorState, SessionRef, TaskSpec
 from orchestrator.task_spec import build_task_spec
 from repositories import (
     ArtifactRepository,
+    HumanInteractionRepository,
     InboundDeliveryRepository,
     SessionRepository,
     SessionStateRepository,
@@ -1722,6 +1723,7 @@ class TaskExecutionService:
             user_repo = UserRepository(session)
             session_repo = SessionRepository(session)
             task_repo = TaskRepository(session)
+            interaction_repo = HumanInteractionRepository(session)
             sanitized_constraints = _sanitize_submission_constraints(submission.constraints)
             task_spec = build_task_spec(
                 task_text=submission.task_text,
@@ -1777,6 +1779,7 @@ class TaskExecutionService:
                 next_attempt_at=now,
                 priority=submission.priority,
             )
+            interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
             session_repo.set_active_task(
                 session_id=conversation_session.id,
                 active_task_id=task.id,
@@ -2122,6 +2125,7 @@ class TaskExecutionService:
         )
         with session_scope(self.session_factory) as session:
             task_repo = TaskRepository(session)
+            interaction_repo = HumanInteractionRepository(session)
             worker_run_repo = WorkerRunRepository(session)
             artifact_repo = ArtifactRepository(session)
 
@@ -2135,6 +2139,8 @@ class TaskExecutionService:
 
             if state.task_spec is not None:
                 task.task_spec = state.task_spec.model_dump(mode="json")
+            if isinstance(task.task_spec, Mapping):
+                interaction_repo.sync_task_spec_flags(task_id=task_id, task_spec=task.task_spec)
 
             task.status = cast(TaskStatus, force_task_status or _task_status_from_result(state))
 

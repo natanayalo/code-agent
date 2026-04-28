@@ -8,10 +8,19 @@ import pytest
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
-from db.enums import ArtifactType, SessionStatus, TaskStatus, WorkerRunStatus, WorkerType
+from db.enums import (
+    ArtifactType,
+    HumanInteractionStatus,
+    HumanInteractionType,
+    SessionStatus,
+    TaskStatus,
+    WorkerRunStatus,
+    WorkerType,
+)
 from db.models import PersonalMemory, ProjectMemory
 from repositories import (
     ArtifactRepository,
+    HumanInteractionRepository,
     PersonalMemoryRepository,
     ProjectMemoryRepository,
     SessionRepository,
@@ -373,6 +382,115 @@ def test_task_repository_queue_release_guard_paths(session_factory) -> None:
         assert returned is not None
         assert returned.status is TaskStatus.IN_PROGRESS
         assert returned.lease_owner == "worker-a"
+
+
+def test_human_interaction_repository_syncs_task_spec_flags(session_factory) -> None:
+    """TaskSpec clarification/permission flags should map to resumable pending interactions."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        interaction_repo = HumanInteractionRepository(session)
+
+        user = user_repo.create(
+            external_user_id="telegram:interactions", display_name="Interactions"
+        )
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-interactions",
+        )
+        task = task_repo.create(
+            session_id=conversation_session.id, task_text="debug this and drop table"
+        )
+
+        task_spec = {
+            "goal": "debug this and drop table",
+            "requires_clarification": True,
+            "requires_permission": True,
+            "permission_reason": "Task is classified as high risk.",
+            "risk_level": "high",
+        }
+        interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
+        interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
+
+        interactions = interaction_repo.list_by_task(task_id=task.id)
+        assert len(interactions) == 2
+        assert {interaction.interaction_type for interaction in interactions} == {
+            HumanInteractionType.CLARIFICATION,
+            HumanInteractionType.PERMISSION,
+        }
+        for interaction in interactions:
+            assert interaction.status is HumanInteractionStatus.PENDING
+            assert interaction.data["source"] == "task_spec"
+            assert interaction.data["resume_token"].endswith(task.id)
+        clarification = next(
+            interaction
+            for interaction in interactions
+            if interaction.interaction_type is HumanInteractionType.CLARIFICATION
+        )
+        assert clarification.data["questions"] == [
+            "What exact repo, files, behavior, or failure should the worker target for: "
+            "debug this and drop table?"
+        ]
+
+        clarification.status = HumanInteractionStatus.RESOLVED
+        session.flush()
+        interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
+        after_resync = interaction_repo.list_by_task(task_id=task.id)
+        assert len(after_resync) == 2
+        clarification_rows = [
+            interaction
+            for interaction in after_resync
+            if interaction.interaction_type is HumanInteractionType.CLARIFICATION
+        ]
+        assert len(clarification_rows) == 1
+        assert clarification_rows[0].status is HumanInteractionStatus.RESOLVED
+
+        changed_task_spec = {
+            **task_spec,
+            "clarification_questions": ["Which migration file should be updated?"],
+        }
+        interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=changed_task_spec)
+        after_changed_spec = interaction_repo.list_by_task(task_id=task.id)
+        changed_clarification_rows = [
+            interaction
+            for interaction in after_changed_spec
+            if interaction.interaction_type is HumanInteractionType.CLARIFICATION
+        ]
+        assert len(changed_clarification_rows) == 2
+        assert any(
+            interaction.status is HumanInteractionStatus.RESOLVED
+            for interaction in changed_clarification_rows
+        )
+        pending_clarification = next(
+            interaction
+            for interaction in changed_clarification_rows
+            if interaction.status is HumanInteractionStatus.PENDING
+        )
+        assert pending_clarification.data["questions"] == [
+            "Which migration file should be updated?"
+        ]
+
+        interaction_repo.sync_task_spec_flags(
+            task_id=task.id,
+            task_spec={"requires_clarification": False, "requires_permission": False},
+        )
+        refreshed = interaction_repo.list_by_task(task_id=task.id)
+        assert len(refreshed) == 3
+        assert any(
+            interaction.status is HumanInteractionStatus.RESOLVED for interaction in refreshed
+        )
+        assert any(
+            interaction.interaction_type is HumanInteractionType.PERMISSION
+            and interaction.status is HumanInteractionStatus.CANCELLED
+            for interaction in refreshed
+        )
+        assert any(
+            interaction.interaction_type is HumanInteractionType.CLARIFICATION
+            and interaction.status is HumanInteractionStatus.CANCELLED
+            for interaction in refreshed
+        )
 
 
 def test_personal_memory_upsert_recovers_from_duplicate_insert_race(

@@ -14,7 +14,14 @@ import pytest
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base, utc_now
-from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerType
+from db.enums import (
+    ArtifactType,
+    HumanInteractionStatus,
+    HumanInteractionType,
+    TaskStatus,
+    WorkerRunStatus,
+    WorkerType,
+)
 from orchestrator import (
     ApprovalCheckpoint,
     MemoryContext,
@@ -28,6 +35,7 @@ from orchestrator import (
 from orchestrator import execution as execution_module
 from repositories import (
     ArtifactRepository,
+    HumanInteractionRepository,
     InboundDeliveryRepository,
     SessionRepository,
     SessionStateRepository,
@@ -903,6 +911,37 @@ def test_create_task_outcome_recovers_stale_delivery_without_task_id() -> None:
         )
         assert delivery is not None
         assert delivery.task_id == outcome.task_snapshot.task_id
+
+
+def test_create_task_persists_task_spec_human_interactions() -> None:
+    """Task creation should project TaskSpec clarification/permission flags to interactions."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(task_text="debug this and drop table users")
+    task_snapshot, _ = service.create_task(submission)
+
+    with session_scope(session_factory) as session:
+        interactions = HumanInteractionRepository(session).list_by_task(
+            task_id=task_snapshot.task_id
+        )
+
+    assert len(interactions) == 2
+    assert {interaction.interaction_type for interaction in interactions} == {
+        HumanInteractionType.CLARIFICATION,
+        HumanInteractionType.PERMISSION,
+    }
+    assert all(interaction.status is HumanInteractionStatus.PENDING for interaction in interactions)
+    assert all(interaction.data["source"] == "task_spec" for interaction in interactions)
 
 
 @pytest.mark.anyio

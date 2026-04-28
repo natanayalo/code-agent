@@ -7,6 +7,7 @@ from repositories.session import (
 )
 from repositories.sqlalchemy import (
     ArtifactRepository,
+    HumanInteractionRepository,
     InboundDeliveryRepository,
     PersonalMemoryRepository,
     ProjectMemoryRepository,
@@ -20,6 +21,7 @@ from repositories.sqlalchemy import (
 
 __all__ = [
     "ArtifactRepository",
+    "HumanInteractionRepository",
     "InboundDeliveryRepository",
     "PersonalMemoryRepository",
     "ProjectMemoryRepository",
