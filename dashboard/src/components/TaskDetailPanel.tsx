@@ -61,8 +61,7 @@ function renderJsonBlock(value: unknown) {
   }
 }
 
-function artifactRows(task: TaskSnapshot) {
-  const run = task.latest_run;
+function artifactRows(run: TaskSnapshot['latest_run']) {
   if (!run) return [];
   if (Array.isArray(run.artifact_index) && run.artifact_index.length > 0) {
     return run.artifact_index.map((artifact, idx) => ({
@@ -88,7 +87,7 @@ function artifactRows(task: TaskSnapshot) {
 export function TaskDetailPanel({ task, loading, error, onClose }: TaskDetailPanelProps) {
   const run = task?.latest_run ?? null;
   const runCommands = run?.commands_run ?? [];
-  const artifacts = React.useMemo(() => (task ? artifactRows(task) : []), [task]);
+  const artifacts = React.useMemo(() => artifactRows(run), [run]);
   const sortedTimeline = React.useMemo(() => {
     if (!task?.timeline) return [];
     return [...task.timeline].sort((a, b) => {
