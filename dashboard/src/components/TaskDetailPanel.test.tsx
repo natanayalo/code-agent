@@ -193,6 +193,13 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('Failed to load task detail.')).toBeInTheDocument();
   });
 
+  it('renders Error instance messages when detail loading fails', () => {
+    render(
+      <TaskDetailPanel task={null} loading={false} error={new Error('Boom')} onClose={vi.fn()} />
+    );
+    expect(screen.getByText('Boom')).toBeInTheDocument();
+  });
+
   it('falls back to persisted artifact rows and handles edge-case timeline/log branches', () => {
     const circularPayload: { self?: unknown } = {};
     circularPayload.self = circularPayload;
@@ -260,6 +267,57 @@ describe('TaskDetailPanel', () => {
 
     expect(screen.getByText('No commands captured for the latest run.')).toBeInTheDocument();
     expect(screen.getByText('No artifacts persisted for the latest run.')).toBeInTheDocument();
+  });
+
+  it('covers sparse payload fallbacks and event-type tie-break ordering', () => {
+    const task = buildTask({
+      task_spec: {
+        ...baseTask.task_spec!,
+        acceptance_criteria: [],
+        clarification_questions: [],
+      },
+      timeline: [
+        {
+          event_type: 'z_event',
+          attempt_number: 0,
+          sequence_number: 1,
+          message: 'Second alphabetical event',
+          payload: null,
+          created_at: '',
+        },
+        {
+          event_type: 'a_event',
+          attempt_number: 0,
+          sequence_number: 1,
+          message: 'First alphabetical event',
+          payload: null,
+          created_at: '',
+        },
+      ],
+      latest_run: buildLatestRun({
+        commands_run: [
+          {
+            exit_code: 0,
+          },
+        ],
+        artifact_index: [
+          {},
+        ],
+      }),
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.queryByText('Acceptance Criteria')).not.toBeInTheDocument();
+    expect(screen.queryByText('Clarification Questions')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/unknown time/i).length).toBeGreaterThan(0);
+    expect(screen.getByText('Command 1')).toBeInTheDocument();
+    expect(screen.getByText('artifact')).toBeInTheDocument();
+    expect(screen.getByText('No URI')).toBeInTheDocument();
+
+    const first = screen.getByText('First alphabetical event');
+    const second = screen.getByText('Second alphabetical event');
+    expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('renders timeline in stable order by sequence then created_at', () => {
