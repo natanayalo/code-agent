@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TaskCard } from './TaskCard';
 import { TaskStatus, ApprovalStatus, TaskSnapshot } from '../types/task';
@@ -257,28 +257,33 @@ describe('TaskCard', () => {
   });
 
   describe('Replay Control', () => {
-    it('renders replay button for terminal tasks', () => {
+    it('renders replay controls for terminal tasks', () => {
       const completedTask = { ...mockTask, status: TaskStatus.COMPLETED };
       const { container } = render(<TaskCard task={completedTask} />);
       expect(container.querySelector('.btn-replay')).toBeInTheDocument();
+      expect(container.querySelector('.btn-replay-overrides')).toBeInTheDocument();
 
       const failedTask = { ...mockTask, status: TaskStatus.FAILED };
       const { container: containerFailed } = render(<TaskCard task={failedTask} />);
       expect(containerFailed.querySelector('.btn-replay')).toBeInTheDocument();
+      expect(containerFailed.querySelector('.btn-replay-overrides')).toBeInTheDocument();
 
       const cancelledTask = { ...mockTask, status: TaskStatus.CANCELLED };
       const { container: containerCancelled } = render(<TaskCard task={cancelledTask} />);
       expect(containerCancelled.querySelector('.btn-replay')).toBeInTheDocument();
+      expect(containerCancelled.querySelector('.btn-replay-overrides')).toBeInTheDocument();
     });
 
-    it('does not render replay button for non-terminal tasks', () => {
+    it('does not render replay controls for non-terminal tasks', () => {
       const runningTask = { ...mockTask, status: TaskStatus.IN_PROGRESS };
       const { container } = render(<TaskCard task={runningTask} />);
       expect(container.querySelector('.btn-replay')).toBeNull();
+      expect(container.querySelector('.btn-replay-overrides')).toBeNull();
 
       const pendingTask = { ...mockTask, status: TaskStatus.PENDING };
       const { container: containerPending } = render(<TaskCard task={pendingTask} />);
       expect(containerPending.querySelector('.btn-replay')).toBeNull();
+      expect(containerPending.querySelector('.btn-replay-overrides')).toBeNull();
     });
 
     it('handles replay click and prevents propagation', async () => {
@@ -348,6 +353,41 @@ describe('TaskCard', () => {
       const task = { ...mockTask, latest_run_status: '' };
       const { container } = render(<TaskCard task={task} />);
       expect(container.querySelector('.run-status')).toBeNull();
+    });
+
+    it('opens replay-with-overrides modal and prevents propagation', () => {
+      const onCardClick = vi.fn();
+      const completedTask = { ...mockTask, status: TaskStatus.COMPLETED };
+      render(<TaskCard task={completedTask} onClick={onCardClick} />);
+
+      fireEvent.click(screen.getByTitle('Replay task with overrides'));
+
+      expect(screen.getByRole('dialog', { name: 'Replay With Overrides' })).toBeInTheDocument();
+      expect(onCardClick).not.toHaveBeenCalled();
+    });
+
+    it('submits replay-with-overrides payload and refreshes', async () => {
+      const onRefresh = vi.fn();
+      const completedTask = { ...mockTask, status: TaskStatus.COMPLETED };
+      vi.mocked(api.replayTask).mockResolvedValueOnce({} as TaskSnapshot);
+
+      render(<TaskCard task={completedTask} onRefresh={onRefresh} />);
+
+      fireEvent.click(screen.getByTitle('Replay task with overrides'));
+      fireEvent.change(screen.getByLabelText('Worker Override'), { target: { value: 'openrouter' } });
+      fireEvent.change(screen.getByLabelText('Constraints Override (JSON object)'), {
+        target: { value: '{"execution_mode":"apply"}' },
+      });
+      const dialog = screen.getByRole('dialog', { name: 'Replay With Overrides' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Replay Task' }));
+
+      await vi.waitFor(() =>
+        expect(api.replayTask).toHaveBeenCalledWith(completedTask.task_id, {
+          worker_override: 'openrouter',
+          constraints: { execution_mode: 'apply' },
+        })
+      );
+      expect(onRefresh).toHaveBeenCalled();
     });
   });
 });

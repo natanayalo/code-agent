@@ -1,4 +1,4 @@
-import { TaskSummarySnapshot, TaskSnapshot } from '../types/task';
+import { TaskReplayRequest, TaskSummarySnapshot, TaskSnapshot } from '../types/task';
 import { SessionSnapshot } from '../types/session';
 import { OperationalMetrics } from '../types/metrics';
 
@@ -113,10 +113,11 @@ export const api = {
     }
   },
 
-  async replayTask(taskId: string): Promise<TaskSnapshot> {
+  async replayTask(taskId: string, replayRequest?: TaskReplayRequest): Promise<TaskSnapshot> {
     try {
       return await fetchWithAuth(`/tasks/${taskId}/replay`, {
         method: 'POST',
+        ...(replayRequest ? { body: JSON.stringify(replayRequest) } : {}),
       });
     } catch (error) {
       console.warn(`Failed to replay task ${taskId}`, error);

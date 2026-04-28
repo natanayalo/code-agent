@@ -313,6 +313,32 @@ describe('api service', () => {
       expect(result).toEqual(mockSnapshot);
     });
 
+    it('replayTask sends override payload when provided', async () => {
+      const mockSnapshot = { task_id: 'new-task', status: 'pending' };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockSnapshot,
+      });
+
+      await api.replayTask('old-task', {
+        worker_override: 'gemini',
+        constraints: { max_files: 3 },
+        budget: { max_steps: 10 },
+        secrets: { API_TOKEN: 'redacted' },
+      });
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual({
+        worker_override: 'gemini',
+        constraints: { max_files: 3 },
+        budget: { max_steps: 10 },
+        secrets: { API_TOKEN: 'redacted' },
+      });
+    });
+
     it('replayTask catch block rethrows error', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       mockFetch.mockRejectedValueOnce(new Error('Network fail'));

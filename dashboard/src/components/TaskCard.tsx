@@ -1,7 +1,18 @@
 import React, { useMemo } from 'react';
-import { Clock, Terminal, Github, GitBranch, CheckCircle2, XCircle, ShieldAlert, RotateCcw } from 'lucide-react';
+import {
+  Clock,
+  Terminal,
+  Github,
+  GitBranch,
+  CheckCircle2,
+  XCircle,
+  ShieldAlert,
+  RotateCcw,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { TaskSummarySnapshot, TaskStatus } from '../types/task';
 import { api } from '../services/api';
+import { ReplayWithOverridesModal } from './ReplayWithOverridesModal';
 
 interface TaskCardProps {
   task: TaskSummarySnapshot;
@@ -66,6 +77,7 @@ const getRunStatusClass = (status: string | null | undefined) => {
 export function TaskCard({ task, onClick, onRefresh, isSelected = false }: TaskCardProps) {
   const [isDeciding, setIsDeciding] = React.useState(false);
   const [isReplaying, setIsReplaying] = React.useState(false);
+  const [isReplayModalOpen, setIsReplayModalOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const repoName = useMemo(() => {
@@ -102,119 +114,143 @@ export function TaskCard({ task, onClick, onRefresh, isSelected = false }: TaskC
     }
   };
 
+  const handleOpenReplayOverrides = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    setError(null);
+    setIsReplayModalOpen(true);
+  };
+
   const isTerminal = task.status === TaskStatus.COMPLETED ||
                      task.status === TaskStatus.FAILED ||
                      task.status === TaskStatus.CANCELLED;
 
   return (
-    <div
-      className={`glass-panel task-card ${onClick ? 'task-card-clickable' : ''} ${
-        isSelected ? 'task-card-selected' : ''
-      }`}
-      onClick={onClick}
-    >
-      <div className="card-header">
-        <span className={`status-badge ${getStatusClass(task.status)}`}>
-          {task.status.replace(/_/g, ' ')}
-        </span>
-        <div className="task-time">
-          <Clock size={12} />
-          <span>{formatDate(task.created_at)}</span>
+    <>
+      <div
+        className={`glass-panel task-card ${onClick ? 'task-card-clickable' : ''} ${
+          isSelected ? 'task-card-selected' : ''
+        }`}
+        onClick={onClick}
+      >
+        <div className="card-header">
+          <span className={`status-badge ${getStatusClass(task.status)}`}>
+            {task.status.replace(/_/g, ' ')}
+          </span>
+          <div className="task-time">
+            <Clock size={12} />
+            <span>{formatDate(task.created_at)}</span>
+          </div>
         </div>
-      </div>
 
-      <h3 className="task-title-text">{task.task_text}</h3>
+        <h3 className="task-title-text">{task.task_text}</h3>
 
-      {error && task.approval_status !== 'pending' && (
-        <div className="card-error-text">
-          {error}
-        </div>
-      )}
-
-      <div className="task-details">
-        {task.repo_url && (
-          <div className="detail-item">
-            <Github size={14} />
-            <span className="truncate">{repoName}</span>
+        {error && task.approval_status !== 'pending' && (
+          <div className="card-error-text">
+            {error}
           </div>
         )}
-        {task.branch && (
-          <div className="detail-item">
-            <GitBranch size={14} />
-            <span>{task.branch}</span>
-          </div>
-        )}
-      </div>
 
-      <div className="card-footer">
-        <div className="task-meta">
-          <Terminal size={14} />
-          <span>{task.latest_run_worker || task.chosen_worker || 'auto'}</span>
-        </div>
-        <div className="footer-actions">
-          {isTerminal && (
-            <button
-              className="btn-icon-sm btn-replay"
-              onClick={handleReplay}
-              disabled={isReplaying}
-              title="Replay task (unchanged)"
-            >
-              <RotateCcw size={14} className={isReplaying ? 'spin' : ''} />
-            </button>
+        <div className="task-details">
+          {task.repo_url && (
+            <div className="detail-item">
+              <Github size={14} />
+              <span className="truncate">{repoName}</span>
+            </div>
           )}
-          {task.latest_run_status && (
-            <div className={`run-status ${getRunStatusClass(task.latest_run_status)}`}>
-              {task.latest_run_status.replace(/_/g, ' ')}
+          {task.branch && (
+            <div className="detail-item">
+              <GitBranch size={14} />
+              <span>{task.branch}</span>
             </div>
           )}
         </div>
-      </div>
 
-      {task.approval_status === 'pending' && (
-        <div className="approval-banner" onClick={(e) => e.stopPropagation()}>
-          <div className="approval-content">
-            <ShieldAlert size={16} className="text-warning" />
-            <div className="approval-text">
-              <p className="approval-type">
-                {task.approval_type?.replace(/_/g, ' ') || 'Approval Required'}
-              </p>
-              {task.latest_run_requested_permission && (
-                <p className="permission-tag">
-                  Permission: <code>{task.latest_run_requested_permission}</code>
-                </p>
-              )}
-              {task.approval_reason && (
-                <p className="approval-reason truncate" title={task.approval_reason}>
-                  {task.approval_reason}
-                </p>
-              )}
-              {error && (
-                <p className="approval-error">
-                  {error}
-                </p>
-              )}
-            </div>
+        <div className="card-footer">
+          <div className="task-meta">
+            <Terminal size={14} />
+            <span>{task.latest_run_worker || task.chosen_worker || 'auto'}</span>
           </div>
-          <div className="approval-buttons">
-            <button
-              className="btn btn-sm btn-reject"
-              onClick={() => handleApproval(false)}
-              disabled={isDeciding}
-            >
-              <XCircle size={14} />
-              <span>Reject</span>
-            </button>
-            <button
-              className="btn btn-sm btn-approve"
-              onClick={() => handleApproval(true)}
-              disabled={isDeciding}
-            >
-              <CheckCircle2 size={14} />
-              <span>Approve</span>
-            </button>
+          <div className="footer-actions">
+            {isTerminal && (
+              <>
+                <button
+                  className="btn-icon-sm btn-replay"
+                  onClick={handleReplay}
+                  disabled={isReplaying}
+                  title="Replay task (unchanged)"
+                >
+                  <RotateCcw size={14} className={isReplaying ? 'spin' : ''} />
+                </button>
+                <button
+                  className="btn-icon-sm btn-replay-overrides"
+                  onClick={handleOpenReplayOverrides}
+                  title="Replay task with overrides"
+                >
+                  <SlidersHorizontal size={14} />
+                </button>
+              </>
+            )}
+            {task.latest_run_status && (
+              <div className={`run-status ${getRunStatusClass(task.latest_run_status)}`}>
+                {task.latest_run_status.replace(/_/g, ' ')}
+              </div>
+            )}
           </div>
         </div>
-      )}
-    </div>
+
+        {task.approval_status === 'pending' && (
+          <div className="approval-banner" onClick={(e) => e.stopPropagation()}>
+            <div className="approval-content">
+              <ShieldAlert size={16} className="text-warning" />
+              <div className="approval-text">
+                <p className="approval-type">
+                  {task.approval_type?.replace(/_/g, ' ') || 'Approval Required'}
+                </p>
+                {task.latest_run_requested_permission && (
+                  <p className="permission-tag">
+                    Permission: <code>{task.latest_run_requested_permission}</code>
+                  </p>
+                )}
+                {task.approval_reason && (
+                  <p className="approval-reason truncate" title={task.approval_reason}>
+                    {task.approval_reason}
+                  </p>
+                )}
+                {error && (
+                  <p className="approval-error">
+                    {error}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="approval-buttons">
+              <button
+                className="btn btn-sm btn-reject"
+                onClick={() => handleApproval(false)}
+                disabled={isDeciding}
+              >
+                <XCircle size={14} />
+                <span>Reject</span>
+              </button>
+              <button
+                className="btn btn-sm btn-approve"
+                onClick={() => handleApproval(true)}
+                disabled={isDeciding}
+              >
+                <CheckCircle2 size={14} />
+                <span>Approve</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <ReplayWithOverridesModal
+        taskId={task.task_id}
+        isOpen={isReplayModalOpen}
+        onClose={() => setIsReplayModalOpen(false)}
+        onReplaySuccess={onRefresh}
+      />
+    </>
   );
 }
