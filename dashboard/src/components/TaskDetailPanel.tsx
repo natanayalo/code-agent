@@ -13,7 +13,9 @@ function formatLabel(value: string | null | undefined): string {
   if (!normalized) {
     return 'unknown';
   }
-  return normalized.replace(/_/g, ' ');
+  return normalized
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -57,7 +59,11 @@ function renderJsonBlock(value: unknown) {
   try {
     return <pre className="task-detail-json">{JSON.stringify(value, null, 2)}</pre>;
   } catch {
-    return <pre className="task-detail-json">{String(value)}</pre>;
+    const valueType =
+      typeof value === 'object' && value !== null && value.constructor?.name
+        ? value.constructor.name
+        : typeof value;
+    return <pre className="task-detail-json">{`Unserializable ${valueType} value`}</pre>;
   }
 }
 

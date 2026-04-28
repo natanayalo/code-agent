@@ -252,7 +252,7 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('No TaskSpec captured for this task.')).toBeInTheDocument();
     expect(screen.getByText(/attempt 2/i)).toBeInTheDocument();
     expect(screen.getByText(/not-a-date/i)).toBeInTheDocument();
-    expect(screen.getByText('[object Object]')).toBeInTheDocument();
+    expect(screen.getByText(/Unserializable Object value/i)).toBeInTheDocument();
     expect(screen.getByText(/timed out/i)).toBeInTheDocument();
     expect(screen.getByText(/2\.0s/i)).toBeInTheDocument();
     expect(screen.getByText('artifacts/stderr.log')).toBeInTheDocument();
