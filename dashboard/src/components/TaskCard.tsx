@@ -7,6 +7,7 @@ interface TaskCardProps {
   task: TaskSummarySnapshot;
   onClick?: () => void;
   onRefresh?: () => void;
+  isSelected?: boolean;
 }
 
 const formatDate = (dateString: string) => {
@@ -62,7 +63,7 @@ const getRunStatusClass = (status: string | null | undefined) => {
   }
 };
 
-export function TaskCard({ task, onClick, onRefresh }: TaskCardProps) {
+export function TaskCard({ task, onClick, onRefresh, isSelected = false }: TaskCardProps) {
   const [isDeciding, setIsDeciding] = React.useState(false);
   const [isReplaying, setIsReplaying] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -106,7 +107,12 @@ export function TaskCard({ task, onClick, onRefresh }: TaskCardProps) {
                      task.status === TaskStatus.CANCELLED;
 
   return (
-    <div className={`glass-panel task-card ${onClick ? 'task-card-clickable' : ''}`} onClick={onClick}>
+    <div
+      className={`glass-panel task-card ${onClick ? 'task-card-clickable' : ''} ${
+        isSelected ? 'task-card-selected' : ''
+      }`}
+      onClick={onClick}
+    >
       <div className="card-header">
         <span className={`status-badge ${getStatusClass(task.status)}`}>
           {task.status.replace(/_/g, ' ')}

@@ -55,6 +55,7 @@ export interface TaskSummarySnapshot {
   latest_run_status?: string | null;
   latest_run_worker?: string | null;
   latest_run_requested_permission?: string | null;
+  pending_interaction_count?: number;
   approval_status?: ApprovalStatus | null;
   approval_type?: string | null;
   approval_reason?: string | null;
@@ -76,8 +77,20 @@ export interface TaskTimelineEventSnapshot {
   created_at: string;
 }
 
+export interface HumanInteractionSnapshot {
+  interaction_id: string;
+  interaction_type: string;
+  status: string;
+  summary: string;
+  data: Record<string, unknown>;
+  response_data?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TaskSnapshot extends TaskSummarySnapshot {
   task_spec?: TaskSpec | null;
   latest_run?: WorkerRunSnapshot | null;
+  pending_interactions?: HumanInteractionSnapshot[];
   timeline: TaskTimelineEventSnapshot[];
 }

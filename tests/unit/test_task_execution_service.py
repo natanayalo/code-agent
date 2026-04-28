@@ -22,6 +22,7 @@ from db.enums import (
     WorkerRunStatus,
     WorkerType,
 )
+from db.models import HumanInteraction
 from orchestrator import (
     ApprovalCheckpoint,
     MemoryContext,
@@ -935,6 +936,13 @@ def test_create_task_persists_task_spec_human_interactions() -> None:
             task_id=task_snapshot.task_id
         )
 
+    assert task_snapshot.pending_interaction_count == 2
+    assert len(task_snapshot.pending_interactions) == 2
+    assert {interaction.interaction_type for interaction in task_snapshot.pending_interactions} == {
+        "clarification",
+        "permission",
+    }
+
     assert len(interactions) == 2
     assert {interaction.interaction_type for interaction in interactions} == {
         HumanInteractionType.CLARIFICATION,
@@ -942,6 +950,68 @@ def test_create_task_persists_task_spec_human_interactions() -> None:
     }
     assert all(interaction.status is HumanInteractionStatus.PENDING for interaction in interactions)
     assert all(interaction.data["source"] == "task_spec" for interaction in interactions)
+
+
+def test_get_task_sorts_pending_interactions_with_id_tiebreaker() -> None:
+    """Pending interactions with equal timestamps should be ordered deterministically by id."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    task_snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(task_text="Implement deterministic ordering behavior")
+    )
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(task_snapshot.task_id)
+        assert task is not None
+        tie_time = utc_now()
+        session.add_all(
+            [
+                HumanInteraction(
+                    id="00000000-0000-0000-0000-000000000002",
+                    task_id=task.id,
+                    interaction_type=HumanInteractionType.CLARIFICATION,
+                    status=HumanInteractionStatus.PENDING,
+                    summary="Second by ID",
+                    data={"source": "test"},
+                    created_at=tie_time,
+                    updated_at=tie_time,
+                ),
+                HumanInteraction(
+                    id="00000000-0000-0000-0000-000000000001",
+                    task_id=task.id,
+                    interaction_type=HumanInteractionType.PERMISSION,
+                    status=HumanInteractionStatus.PENDING,
+                    summary="First by ID",
+                    data={"source": "test"},
+                    created_at=tie_time,
+                    updated_at=tie_time,
+                ),
+            ]
+        )
+        session.flush()
+
+    refreshed = service.get_task(task_snapshot.task_id)
+    assert refreshed is not None
+    assert refreshed.pending_interactions is not None
+    inserted = [
+        interaction
+        for interaction in refreshed.pending_interactions
+        if interaction.data.get("source") == "test"
+    ]
+    assert [interaction.interaction_id for interaction in inserted] == [
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002",
+    ]
 
 
 @pytest.mark.anyio
