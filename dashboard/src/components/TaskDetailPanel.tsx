@@ -12,6 +12,11 @@ function formatLabel(value: string | null | undefined): string {
   return (value || '').replace(/_/g, ' ');
 }
 
+function listItemKey(items: string[], item: string, index: number): string {
+  const duplicateCountBefore = items.slice(0, index).filter((value) => value === item).length;
+  return `${item}-${duplicateCountBefore}`;
+}
+
 function renderStringList(title: string, items: string[] | undefined) {
   if (!items || items.length === 0) return null;
   return (
@@ -19,7 +24,7 @@ function renderStringList(title: string, items: string[] | undefined) {
       <h5>{title}</h5>
       <ul>
         {items.map((item, index) => (
-          <li key={`${title}-${index}`}>{item}</li>
+          <li key={`${title}-${listItemKey(items, item, index)}`}>{item}</li>
         ))}
       </ul>
     </div>
