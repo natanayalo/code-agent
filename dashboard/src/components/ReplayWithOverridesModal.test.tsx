@@ -104,4 +104,38 @@ describe('ReplayWithOverridesModal', () => {
 
     expect(await screen.findByText('Replay conflict')).toBeInTheDocument();
   });
+
+  it('does not close from backdrop clicks', () => {
+    const onClose = vi.fn();
+    const { container } = render(
+      <ReplayWithOverridesModal taskId="task-1" isOpen={true} onClose={onClose} />
+    );
+
+    fireEvent.click(container.querySelector('.modal-overlay') as HTMLDivElement);
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('disables close controls while submitting', async () => {
+    let resolveReplay: () => void;
+    const replayPromise = new Promise<void>((resolve) => {
+      resolveReplay = resolve;
+    });
+    vi.mocked(api.replayTask).mockReturnValueOnce(replayPromise as never);
+
+    render(
+      <ReplayWithOverridesModal taskId="task-1" isOpen={true} onClose={vi.fn()} />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replay Task' }));
+
+    const closeButton = screen.getByRole('button', { name: 'Close replay override modal' });
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+    expect(closeButton).toBeDisabled();
+    expect(cancelButton).toBeDisabled();
+
+    // @ts-expect-error: resolveReplay is captured from promise constructor
+    resolveReplay();
+    await vi.waitFor(() => expect(closeButton).not.toBeDisabled());
+  });
 });

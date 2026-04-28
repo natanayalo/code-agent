@@ -15,6 +15,8 @@ interface JsonParseResult {
   error?: string;
 }
 
+const WORKER_OPTIONS: WorkerType[] = ['codex', 'gemini', 'openrouter'];
+
 function parseOptionalJsonObject(fieldName: string, input: string): JsonParseResult {
   const trimmed = input.trim();
   if (!trimmed) {
@@ -38,7 +40,7 @@ export function ReplayWithOverridesModal({
   onClose,
   onReplaySuccess,
 }: ReplayWithOverridesModalProps) {
-  const [workerOverride, setWorkerOverride] = React.useState('');
+  const [workerOverride, setWorkerOverride] = React.useState<'' | WorkerType>('');
   const [constraintsJson, setConstraintsJson] = React.useState('');
   const [budgetJson, setBudgetJson] = React.useState('');
   const [secretsJson, setSecretsJson] = React.useState('');
@@ -135,7 +137,7 @@ export function ReplayWithOverridesModal({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay">
       <div
         className="glass-panel replay-overrides-modal"
         role="dialog"
@@ -145,7 +147,13 @@ export function ReplayWithOverridesModal({
       >
         <div className="replay-overrides-header">
           <h4 id="replay-overrides-title">Replay With Overrides</h4>
-          <button className="icon-button" onClick={onClose} aria-label="Close replay override modal">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            aria-label="Close replay override modal"
+            disabled={isSubmitting}
+          >
             x
           </button>
         </div>
@@ -161,12 +169,14 @@ export function ReplayWithOverridesModal({
             id="replay-worker-override"
             className="replay-overrides-select"
             value={workerOverride}
-            onChange={(event) => setWorkerOverride(event.target.value)}
+            onChange={(event) => setWorkerOverride(event.target.value as '' | WorkerType)}
           >
             <option value="">Original worker selection</option>
-            <option value="codex">codex</option>
-            <option value="gemini">gemini</option>
-            <option value="openrouter">openrouter</option>
+            {WORKER_OPTIONS.map((worker, index) => (
+              <option key={`${worker}-${index}`} value={worker}>
+                {worker}
+              </option>
+            ))}
           </select>
 
           <label htmlFor="replay-constraints-json">Constraints Override (JSON object)</label>

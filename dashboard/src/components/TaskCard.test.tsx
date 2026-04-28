@@ -314,9 +314,13 @@ describe('TaskCard', () => {
 
       const { container } = render(<TaskCard task={completedTask} />);
       const replayBtn = container.querySelector('.btn-replay') as HTMLButtonElement;
+      const replayOverridesBtn = container.querySelector(
+        '.btn-replay-overrides'
+      ) as HTMLButtonElement;
 
       fireEvent.click(replayBtn);
       expect(replayBtn.disabled).toBe(true);
+      expect(replayOverridesBtn.disabled).toBe(true);
 
       // @ts-expect-error: resolveReplay is captured
       resolveReplay({});

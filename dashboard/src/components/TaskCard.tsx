@@ -184,6 +184,7 @@ export function TaskCard({ task, onClick, onRefresh, isSelected = false }: TaskC
                 <button
                   className="btn-icon-sm btn-replay-overrides"
                   onClick={handleOpenReplayOverrides}
+                  disabled={isReplaying}
                   title="Replay task with overrides"
                 >
                   <SlidersHorizontal size={14} />
