@@ -313,7 +313,7 @@ class TaskRepository:
         return (
             select(column)
             .where(WorkerRun.task_id == Task.id)
-            .order_by(WorkerRun.started_at.desc())
+            .order_by(WorkerRun.started_at.desc(), WorkerRun.id.desc())
             .limit(1)
             .scalar_subquery()
         )

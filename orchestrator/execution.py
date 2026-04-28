@@ -1363,7 +1363,7 @@ class TaskExecutionService:
         pending_interactions = self._pending_interaction_snapshots(task)
 
         if task.worker_runs:
-            latest_run_obj = max(task.worker_runs, key=lambda r: r.started_at)
+            latest_run_obj = max(task.worker_runs, key=lambda r: (r.started_at, r.id))
             latest_run_snapshot = WorkerRunSnapshot(
                 run_id=latest_run_obj.id,
                 session_id=latest_run_obj.session_id,
@@ -1437,7 +1437,7 @@ class TaskExecutionService:
                 latest_run_requested_permission = run.requested_permission
             # Only check task.worker_runs if it's already loaded to avoid N+1 lazy loads in listing
             elif "worker_runs" in task.__dict__ and task.worker_runs:
-                run = max(task.worker_runs, key=lambda r: r.started_at)
+                run = max(task.worker_runs, key=lambda r: (r.started_at, r.id))
                 latest_run_id = run.id
                 latest_run_status = _enum_value(run.status)
                 latest_run_worker = _enum_value(run.worker_type)
@@ -1513,7 +1513,9 @@ class TaskExecutionService:
         ]
         return [
             self._map_human_interaction_snapshot(interaction)
-            for interaction in sorted(pending_interactions, key=lambda row: row.created_at)
+            for interaction in sorted(
+                pending_interactions, key=lambda row: (row.created_at, row.id)
+            )
         ]
 
     def _count_pending_interactions(self, task: Task) -> int:

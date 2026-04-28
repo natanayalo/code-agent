@@ -26,7 +26,9 @@ export function OperatorInbox({ tasks, selectedTaskId, onOpenTask }: OperatorInb
                 }`}
                 onClick={() => onOpenTask(task.task_id)}
               >
-                <span className="operator-inbox-text">{task.task_text}</span>
+                <span className="operator-inbox-text truncate" title={task.task_text}>
+                  {task.task_text}
+                </span>
                 <span className="operator-inbox-count">
                   {task.pending_interaction_count || 0} pending
                 </span>

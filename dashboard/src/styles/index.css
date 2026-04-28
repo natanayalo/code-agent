@@ -598,12 +598,15 @@ button {
 
 .operator-inbox-text {
   font-size: 0.9rem;
+  min-width: 0;
+  flex: 1;
 }
 
 .operator-inbox-count {
   color: var(--color-text-muted);
   font-size: 0.8rem;
   font-family: 'JetBrains Mono', monospace;
+  flex-shrink: 0;
 }
 
 .task-detail-panel {

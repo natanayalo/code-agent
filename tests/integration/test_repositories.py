@@ -17,7 +17,7 @@ from db.enums import (
     WorkerRunStatus,
     WorkerType,
 )
-from db.models import PersonalMemory, ProjectMemory
+from db.models import PersonalMemory, ProjectMemory, WorkerRun
 from repositories import (
     ArtifactRepository,
     HumanInteractionRepository,
@@ -634,3 +634,57 @@ def test_repository_listing_with_pagination(session_factory) -> None:
         assert len(completed_tasks) == 5
         for t in completed_tasks:
             assert t.status is TaskStatus.COMPLETED
+
+
+def test_task_listing_uses_run_id_tie_breaker_for_latest_run(session_factory) -> None:
+    """Listing should deterministically choose the latest run when started_at ties."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+
+        user = user_repo.create(external_user_id="list:tie", display_name="Tie Breaker")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="http",
+            external_thread_id="thread-tie",
+        )
+        task = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="task with tied run timestamps",
+        )
+
+        tied_started_at = datetime(2026, 1, 1, tzinfo=UTC)
+        lower_id = "00000000-0000-0000-0000-000000000001"
+        higher_id = "00000000-0000-0000-0000-000000000002"
+        session.add_all(
+            [
+                WorkerRun(
+                    id=lower_id,
+                    task_id=task.id,
+                    session_id=conversation_session.id,
+                    worker_type=WorkerType.CODEX,
+                    started_at=tied_started_at,
+                    status=WorkerRunStatus.RUNNING,
+                    requested_permission="workspace_read",
+                ),
+                WorkerRun(
+                    id=higher_id,
+                    task_id=task.id,
+                    session_id=conversation_session.id,
+                    worker_type=WorkerType.GEMINI,
+                    started_at=tied_started_at,
+                    status=WorkerRunStatus.FAILURE,
+                    requested_permission="workspace_write",
+                ),
+            ]
+        )
+        session.flush()
+
+        listed_tasks = task_repo.list_all(limit=10, offset=0, preload_history=False)
+        listed_task = next(row for row in listed_tasks if row.id == task.id)
+
+        assert getattr(listed_task, "_latest_run_id") == higher_id
+        assert getattr(listed_task, "_latest_run_worker") is WorkerType.GEMINI
+        assert getattr(listed_task, "_latest_run_status") is WorkerRunStatus.FAILURE
+        assert getattr(listed_task, "_latest_run_requested_permission") == "workspace_write"
