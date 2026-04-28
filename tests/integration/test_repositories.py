@@ -8,10 +8,19 @@ import pytest
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
-from db.enums import ArtifactType, SessionStatus, TaskStatus, WorkerRunStatus, WorkerType
+from db.enums import (
+    ArtifactType,
+    HumanInteractionStatus,
+    HumanInteractionType,
+    SessionStatus,
+    TaskStatus,
+    WorkerRunStatus,
+    WorkerType,
+)
 from db.models import PersonalMemory, ProjectMemory
 from repositories import (
     ArtifactRepository,
+    HumanInteractionRepository,
     PersonalMemoryRepository,
     ProjectMemoryRepository,
     SessionRepository,
@@ -373,6 +382,58 @@ def test_task_repository_queue_release_guard_paths(session_factory) -> None:
         assert returned is not None
         assert returned.status is TaskStatus.IN_PROGRESS
         assert returned.lease_owner == "worker-a"
+
+
+def test_human_interaction_repository_syncs_task_spec_flags(session_factory) -> None:
+    """TaskSpec clarification/permission flags should map to resumable pending interactions."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        interaction_repo = HumanInteractionRepository(session)
+
+        user = user_repo.create(
+            external_user_id="telegram:interactions", display_name="Interactions"
+        )
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-interactions",
+        )
+        task = task_repo.create(
+            session_id=conversation_session.id, task_text="debug this and drop table"
+        )
+
+        task_spec = {
+            "requires_clarification": True,
+            "clarification_questions": ["Which schema should be updated?"],
+            "requires_permission": True,
+            "permission_reason": "Task is classified as high risk.",
+            "risk_level": "high",
+        }
+        interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
+        interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
+
+        interactions = interaction_repo.list_by_task(task_id=task.id)
+        assert len(interactions) == 2
+        assert {interaction.interaction_type for interaction in interactions} == {
+            HumanInteractionType.CLARIFICATION,
+            HumanInteractionType.PERMISSION,
+        }
+        for interaction in interactions:
+            assert interaction.status is HumanInteractionStatus.PENDING
+            assert interaction.data["source"] == "task_spec"
+            assert interaction.data["resume_token"].endswith(task.id)
+
+        interaction_repo.sync_task_spec_flags(
+            task_id=task.id,
+            task_spec={"requires_clarification": False, "requires_permission": False},
+        )
+        refreshed = interaction_repo.list_by_task(task_id=task.id)
+        assert len(refreshed) == 2
+        assert all(
+            interaction.status is HumanInteractionStatus.CANCELLED for interaction in refreshed
+        )
 
 
 def test_personal_memory_upsert_recovers_from_duplicate_insert_race(

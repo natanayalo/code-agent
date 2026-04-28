@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any, Final, cast
 from uuid import uuid4
@@ -13,6 +14,8 @@ from sqlalchemy.orm import Session, selectinload
 from db.base import utc_now
 from db.enums import (
     ArtifactType,
+    HumanInteractionStatus,
+    HumanInteractionType,
     TaskStatus,
     TimelineEventType,
     WorkerRunStatus,
@@ -20,6 +23,7 @@ from db.enums import (
 )
 from db.models import (
     Artifact,
+    HumanInteraction,
     InboundDelivery,
     PersonalMemory,
     ProjectMemory,
@@ -617,6 +621,134 @@ class TaskRepository:
             if retry_stats.attempted > 0
             else 0,
         }
+
+
+class HumanInteractionRepository:
+    """Persist and query human interaction checkpoints."""
+
+    _TASK_SPEC_SOURCE = "task_spec"
+    _TASK_SPEC_INTERACTION_TYPES = (
+        HumanInteractionType.CLARIFICATION,
+        HumanInteractionType.PERMISSION,
+    )
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def list_by_task(
+        self,
+        *,
+        task_id: str,
+        interaction_types: tuple[HumanInteractionType, ...] | None = None,
+        statuses: tuple[HumanInteractionStatus, ...] | None = None,
+    ) -> list[HumanInteraction]:
+        statement = (
+            select(HumanInteraction)
+            .where(HumanInteraction.task_id == task_id)
+            .order_by(HumanInteraction.created_at.asc())
+        )
+        if interaction_types is not None:
+            statement = statement.where(HumanInteraction.interaction_type.in_(interaction_types))
+        if statuses is not None:
+            statement = statement.where(HumanInteraction.status.in_(statuses))
+        return list(self.session.scalars(statement))
+
+    def sync_task_spec_flags(
+        self,
+        *,
+        task_id: str,
+        task_spec: Mapping[str, Any],
+    ) -> list[HumanInteraction]:
+        """Map TaskSpec clarification/permission flags into pending interaction rows."""
+        desired: dict[HumanInteractionType, tuple[str, dict[str, Any]]] = {}
+
+        if bool(task_spec.get("requires_clarification")):
+            raw_questions = task_spec.get("clarification_questions")
+            clarification_questions = raw_questions if isinstance(raw_questions, list) else []
+            questions = [
+                question.strip()
+                for question in clarification_questions
+                if isinstance(question, str) and question.strip()
+            ]
+            if not questions:
+                questions = [
+                    "What exact repo, files, behavior, or failure should the worker target?"
+                ]
+            desired[HumanInteractionType.CLARIFICATION] = (
+                "Task requires clarification before execution can continue.",
+                {
+                    "source": self._TASK_SPEC_SOURCE,
+                    "resume_token": f"clarification-{task_id}",
+                    "questions": questions,
+                },
+            )
+
+        if bool(task_spec.get("requires_permission")):
+            reason_raw = task_spec.get("permission_reason")
+            reason = (
+                reason_raw.strip()
+                if isinstance(reason_raw, str) and reason_raw.strip()
+                else "Task requires explicit permission before execution can continue."
+            )
+            desired[HumanInteractionType.PERMISSION] = (
+                reason,
+                {
+                    "source": self._TASK_SPEC_SOURCE,
+                    "resume_token": f"permission-{task_id}",
+                    "reason": reason,
+                    "risk_level": task_spec.get("risk_level"),
+                },
+            )
+
+        existing = self.list_by_task(
+            task_id=task_id,
+            interaction_types=self._TASK_SPEC_INTERACTION_TYPES,
+        )
+        task_spec_rows = [
+            row
+            for row in existing
+            if isinstance(row.data, Mapping) and row.data.get("source") == self._TASK_SPEC_SOURCE
+        ]
+
+        for interaction_type in self._TASK_SPEC_INTERACTION_TYPES:
+            pending_rows = [
+                row
+                for row in task_spec_rows
+                if row.interaction_type == interaction_type
+                and row.status == HumanInteractionStatus.PENDING
+            ]
+            desired_payload = desired.get(interaction_type)
+            if desired_payload is None:
+                for row in pending_rows:
+                    row.status = HumanInteractionStatus.CANCELLED
+                continue
+
+            summary, data = desired_payload
+            if pending_rows:
+                primary = pending_rows[0]
+                primary.summary = summary
+                primary.data = data
+                primary.response_data = None
+                primary.status = HumanInteractionStatus.PENDING
+                for duplicate in pending_rows[1:]:
+                    duplicate.status = HumanInteractionStatus.CANCELLED
+                continue
+
+            self.session.add(
+                HumanInteraction(
+                    task_id=task_id,
+                    interaction_type=interaction_type,
+                    status=HumanInteractionStatus.PENDING,
+                    summary=summary,
+                    data=data,
+                )
+            )
+
+        self.session.flush()
+        return self.list_by_task(
+            task_id=task_id,
+            interaction_types=self._TASK_SPEC_INTERACTION_TYPES,
+        )
 
 
 class InboundDeliveryRepository:
