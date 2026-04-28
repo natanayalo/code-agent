@@ -1506,10 +1506,14 @@ class TaskExecutionService:
         )
 
     def _pending_interaction_snapshots(self, task: Task) -> list[HumanInteractionSnapshot]:
+        pending_interactions = [
+            interaction
+            for interaction in task.human_interactions
+            if self._is_pending_interaction(interaction)
+        ]
         return [
             self._map_human_interaction_snapshot(interaction)
-            for interaction in sorted(task.human_interactions, key=lambda row: row.created_at)
-            if self._is_pending_interaction(interaction)
+            for interaction in sorted(pending_interactions, key=lambda row: row.created_at)
         ]
 
     def _count_pending_interactions(self, task: Task) -> int:
