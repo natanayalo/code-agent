@@ -665,15 +665,23 @@ class HumanInteractionRepository:
         if bool(task_spec.get("requires_clarification")):
             raw_questions = task_spec.get("clarification_questions")
             clarification_questions = raw_questions if isinstance(raw_questions, list) else []
+            goal_text_raw = task_spec.get("goal")
+            goal_text = goal_text_raw.strip() if isinstance(goal_text_raw, str) else ""
             questions = [
                 question.strip()
                 for question in clarification_questions
                 if isinstance(question, str) and question.strip()
             ]
             if not questions:
-                questions = [
-                    "What exact repo, files, behavior, or failure should the worker target?"
-                ]
+                if goal_text:
+                    questions = [
+                        "What exact repo, files, behavior, or failure should the worker target "
+                        f"for: {goal_text}?"
+                    ]
+                else:
+                    questions = [
+                        "What exact repo, files, behavior, or failure should the worker target?"
+                    ]
             desired[HumanInteractionType.CLARIFICATION] = (
                 "Task requires clarification before execution can continue.",
                 {
@@ -711,11 +719,14 @@ class HumanInteractionRepository:
         ]
 
         for interaction_type in self._TASK_SPEC_INTERACTION_TYPES:
+            interaction_rows = [
+                row for row in task_spec_rows if row.interaction_type == interaction_type
+            ]
             pending_rows = [
-                row
-                for row in task_spec_rows
-                if row.interaction_type == interaction_type
-                and row.status == HumanInteractionStatus.PENDING
+                row for row in interaction_rows if row.status == HumanInteractionStatus.PENDING
+            ]
+            active_rows = [
+                row for row in interaction_rows if row.status != HumanInteractionStatus.CANCELLED
             ]
             desired_payload = desired.get(interaction_type)
             if desired_payload is None:
@@ -732,6 +743,16 @@ class HumanInteractionRepository:
                 primary.status = HumanInteractionStatus.PENDING
                 for duplicate in pending_rows[1:]:
                     duplicate.status = HumanInteractionStatus.CANCELLED
+                continue
+
+            if active_rows:
+                # Reuse the latest non-cancelled row to keep retries/idempotent sync
+                # from creating duplicate interactions for the same TaskSpec signal.
+                primary = active_rows[-1]
+                primary.summary = summary
+                primary.data = data
+                if primary.status == HumanInteractionStatus.PENDING:
+                    primary.response_data = None
                 continue
 
             self.session.add(

@@ -405,8 +405,8 @@ def test_human_interaction_repository_syncs_task_spec_flags(session_factory) -> 
         )
 
         task_spec = {
+            "goal": "debug this and drop table",
             "requires_clarification": True,
-            "clarification_questions": ["Which schema should be updated?"],
             "requires_permission": True,
             "permission_reason": "Task is classified as high risk.",
             "risk_level": "high",
@@ -424,6 +424,28 @@ def test_human_interaction_repository_syncs_task_spec_flags(session_factory) -> 
             assert interaction.status is HumanInteractionStatus.PENDING
             assert interaction.data["source"] == "task_spec"
             assert interaction.data["resume_token"].endswith(task.id)
+        clarification = next(
+            interaction
+            for interaction in interactions
+            if interaction.interaction_type is HumanInteractionType.CLARIFICATION
+        )
+        assert clarification.data["questions"] == [
+            "What exact repo, files, behavior, or failure should the worker target for: "
+            "debug this and drop table?"
+        ]
+
+        clarification.status = HumanInteractionStatus.RESOLVED
+        session.flush()
+        interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
+        after_resync = interaction_repo.list_by_task(task_id=task.id)
+        assert len(after_resync) == 2
+        clarification_rows = [
+            interaction
+            for interaction in after_resync
+            if interaction.interaction_type is HumanInteractionType.CLARIFICATION
+        ]
+        assert len(clarification_rows) == 1
+        assert clarification_rows[0].status is HumanInteractionStatus.RESOLVED
 
         interaction_repo.sync_task_spec_flags(
             task_id=task.id,
@@ -431,8 +453,13 @@ def test_human_interaction_repository_syncs_task_spec_flags(session_factory) -> 
         )
         refreshed = interaction_repo.list_by_task(task_id=task.id)
         assert len(refreshed) == 2
-        assert all(
-            interaction.status is HumanInteractionStatus.CANCELLED for interaction in refreshed
+        assert any(
+            interaction.status is HumanInteractionStatus.RESOLVED for interaction in refreshed
+        )
+        assert any(
+            interaction.interaction_type is HumanInteractionType.PERMISSION
+            and interaction.status is HumanInteractionStatus.CANCELLED
+            for interaction in refreshed
         )
 
 
