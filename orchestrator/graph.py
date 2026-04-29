@@ -1264,6 +1264,7 @@ def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any
                     "Permission escalation to "
                     f"'{requested_permission_name}' was rejected. Run halted."
                 ),
+                "failure_kind": "permission_denied",
                 "next_action_hint": "await_manual_follow_up",
             }
         )

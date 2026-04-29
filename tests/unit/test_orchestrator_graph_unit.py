@@ -912,6 +912,7 @@ def test_await_permission_escalation_rejected():
         res["result"]["summary"]
         == "Permission escalation to 'networked_write' was rejected. Run halted."
     )
+    assert res["result"]["failure_kind"] == "permission_denied"
     assert res["result"]["next_action_hint"] == "await_manual_follow_up"
 
 

@@ -799,9 +799,19 @@ def _requires_manual_follow_up(state: OrchestratorState) -> bool:
     return state.result.next_action_hint == "await_manual_follow_up"
 
 
-def _terminal_follow_up_status(*, terminal_failure: bool) -> TaskStatus:
+def _terminal_follow_up_status(
+    *,
+    state: OrchestratorState,
+    terminal_failure: bool,
+) -> TaskStatus:
     """Map terminal follow-up intent to the persisted task status."""
-    return TaskStatus.PENDING if terminal_failure else TaskStatus.IN_PROGRESS
+    if not terminal_failure:
+        return TaskStatus.IN_PROGRESS
+    if state.approval.status == "rejected":
+        return TaskStatus.FAILED
+    if state.result is not None and state.result.failure_kind == "permission_denied":
+        return TaskStatus.FAILED
+    return TaskStatus.PENDING
 
 
 def _completion_progress_phase(task_snapshot: TaskSnapshot) -> ProgressPhase:
@@ -1227,7 +1237,10 @@ class TaskExecutionService:
                 await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
             else:
                 terminal_failure = _requires_manual_follow_up(state)
-                terminal_status = _terminal_follow_up_status(terminal_failure=terminal_failure)
+                terminal_status = _terminal_follow_up_status(
+                    state=state,
+                    terminal_failure=terminal_failure,
+                )
                 await self._run_blocking(
                     self._persist_execution_outcome,
                     task_id=persisted.task_id,
