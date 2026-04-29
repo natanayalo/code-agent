@@ -124,6 +124,65 @@ describe('SessionsPage', () => {
     expect(await screen.findByText(/No sessions found/i)).toBeInTheDocument();
   });
 
+  it('renders session working context when present', async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([
+      {
+        session_id: 's-context',
+        user_id: 'u1',
+        channel: 'http',
+        external_thread_id: 'thread-context',
+        status: SessionStatus.ACTIVE,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        working_context: {
+          active_goal: 'Ship T-143',
+          identified_risks: { scope: 'ui spillover' },
+          decisions_made: { approach: 'read-only surface' },
+          files_touched: ['apps/api/routes/sessions.py'],
+          updated_at: new Date().toISOString(),
+        },
+      },
+    ]);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SessionsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText('Working Context')).toBeInTheDocument();
+    expect(screen.getByText('Ship T-143')).toBeInTheDocument();
+    expect(screen.getByText('scope: ui spillover')).toBeInTheDocument();
+    expect(screen.getByText('approach: read-only surface')).toBeInTheDocument();
+  });
+
+  it('shows default working context placeholders when no context is available', async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([
+      {
+        session_id: 's-no-context',
+        user_id: 'u1',
+        channel: 'http',
+        external_thread_id: 'thread-no-context',
+        status: SessionStatus.ACTIVE,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SessionsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText('Not captured yet')).toBeInTheDocument();
+    expect(screen.getAllByText('None captured')).toHaveLength(2);
+  });
+
   it('renders error state on failure', async () => {
     vi.mocked(api.listSessions).mockRejectedValue(new Error('Failed to fetch'));
 

@@ -150,6 +150,7 @@ class SessionRepository:
         """List all sessions with pagination."""
         statement = (
             select(ConversationSession)
+            .options(selectinload(ConversationSession.session_state))
             .order_by(ConversationSession.created_at.desc())
             .limit(max(1, limit))
             .offset(max(0, offset))
