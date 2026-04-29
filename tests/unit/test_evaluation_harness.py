@@ -389,6 +389,22 @@ def test_orchestrator_runner_executes_case_through_graph_path() -> None:
     assert outcome.tests_passed is True
 
 
+def test_orchestrator_runner_auto_approves_non_destructive_unattended_cases() -> None:
+    suite = load_frozen_suite()
+    case = next(case for case in suite.cases if case.case_id == "frozen-002")
+    runner = OrchestratorReplayRunner(
+        outcomes_by_case_id=default_replay_outcomes(suite.cases),
+        worker_override="codex",
+    )
+
+    outcome = asyncio.run(runner.run_case(case))
+
+    assert outcome.status == "success"
+    assert "authentication" in outcome.summary
+    assert set(case.expectation.required_files_changed).issubset(set(outcome.files_changed))
+    assert outcome.tests_passed is True
+
+
 def test_orchestrator_runner_propagates_review_outcome_fields() -> None:
     case = FrozenTaskCase(
         case_id="reviewed-case",

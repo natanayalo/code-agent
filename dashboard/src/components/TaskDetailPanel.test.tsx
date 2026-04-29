@@ -115,6 +115,12 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('Need operator input')).toBeInTheDocument();
   });
 
+  it('exposes an accessible label for the close button', () => {
+    render(<TaskDetailPanel task={baseTask} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Close task detail' })).toBeInTheDocument();
+  });
+
   it('renders timeline, command logs, and artifact metadata when run details exist', () => {
     const task = buildTask({
       timeline: [

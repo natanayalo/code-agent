@@ -2261,9 +2261,11 @@ def test_run_queued_task_requeues_failed_result_when_retries_remain(monkeypatch)
     )
     Base.metadata.create_all(engine)
     session_factory = create_session_factory(engine)
+    notifier = _RecordingProgressNotifier()
     service = execution_module.TaskExecutionService(
         session_factory=session_factory,
         worker=_StaticWorker(),
+        progress_notifier=notifier,
     )
     snapshot, _ = service.create_task(
         execution_module.TaskSubmission(
@@ -2321,6 +2323,8 @@ def test_run_queued_task_requeues_failed_result_when_retries_remain(monkeypatch)
     monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
 
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
+
+    assert [event.phase for event in notifier.events] == ["started", "running", "failed"]
 
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(snapshot.task_id)
@@ -2387,7 +2391,9 @@ def test_heartbeat_interval_seconds_tracks_lease_duration() -> None:
     assert execution_module._heartbeat_interval_seconds(lease_seconds=1) == 1.0
 
 
-def test_run_queued_task_terminal_interrupt_sets_failed_without_requeue(monkeypatch) -> None:
+def test_run_queued_task_terminal_interrupt_emits_awaiting_approval_without_requeue(
+    monkeypatch,
+) -> None:
     """Manual-follow-up failures should stay terminal instead of requeueing."""
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
@@ -2396,9 +2402,11 @@ def test_run_queued_task_terminal_interrupt_sets_failed_without_requeue(monkeypa
     )
     Base.metadata.create_all(engine)
     session_factory = create_session_factory(engine)
+    notifier = _RecordingProgressNotifier()
     service = execution_module.TaskExecutionService(
         session_factory=session_factory,
         worker=_StaticWorker(),
+        progress_notifier=notifier,
     )
     snapshot, _ = service.create_task(
         execution_module.TaskSubmission(
@@ -2461,6 +2469,100 @@ def test_run_queued_task_terminal_interrupt_sets_failed_without_requeue(monkeypa
 
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
 
+    assert [event.phase for event in notifier.events] == [
+        "started",
+        "running",
+        "awaiting_approval",
+    ]
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(snapshot.task_id)
+        assert task is not None
+        assert task.status is TaskStatus.PENDING
+        assert task.next_attempt_at is None
+        assert task.lease_owner is None
+        assert task.lease_expires_at is None
+
+
+def test_run_queued_task_rejected_approval_stays_failed(monkeypatch) -> None:
+    """Explicit approval rejection should remain terminally failed, not pending."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    notifier = _RecordingProgressNotifier()
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+        progress_notifier=notifier,
+    )
+    snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="requires manual approval",
+            repo_url="https://github.com/natanayalo/code-agent",
+            constraints={"requires_approval": True},
+        )
+    )
+    claim = service.claim_next_task(worker_id="worker-a", lease_seconds=45)
+    assert claim is not None
+
+    async def fake_run_orchestrator(
+        submitted: execution_module.TaskSubmission,
+        persisted: execution_module.TaskSnapshot,
+    ) -> OrchestratorState:
+        return OrchestratorState(
+            current_step="await_approval",
+            session=SessionRef(
+                session_id=persisted.session_id,
+                user_id=persisted.user_id,
+                channel=persisted.channel,
+                external_thread_id=persisted.external_thread_id,
+                active_task_id=persisted.task_id,
+                status="active",
+            ),
+            task=TaskRequest(
+                task_id=persisted.task_id,
+                task_text=submitted.task_text,
+                repo_url=submitted.repo_url,
+                branch=submitted.branch,
+                priority=submitted.priority,
+                worker_override=submitted.worker_override,
+                constraints={"requires_approval": True},
+                budget={},
+            ),
+            normalized_task_text=submitted.task_text,
+            task_kind="implementation",
+            memory=MemoryContext(),
+            route=RouteDecision(
+                chosen_worker="codex",
+                route_reason="cheap_mechanical_change",
+                override_applied=False,
+            ),
+            approval=ApprovalCheckpoint(
+                required=True, status="rejected", approval_type="manual_approval"
+            ),
+            dispatch=WorkerDispatch(worker_type="codex"),
+            result=WorkerResult(
+                status="failure",
+                summary="Task halted because the requested destructive action was not approved.",
+                failure_kind="permission_denied",
+                next_action_hint="await_manual_follow_up",
+            ),
+        )
+
+    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+
+    asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
+
+    assert [event.phase for event in notifier.events] == ["started", "running", "failed"]
+
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(snapshot.task_id)
         assert task is not None
@@ -2468,6 +2570,9 @@ def test_run_queued_task_terminal_interrupt_sets_failed_without_requeue(monkeypa
         assert task.next_attempt_at is None
         assert task.lease_owner is None
         assert task.lease_expires_at is None
+        approval = dict(task.constraints).get("approval")
+        assert isinstance(approval, dict)
+        assert approval.get("status") == "rejected"
 
 
 def test_apply_task_approval_decision_requeues_approved_task(monkeypatch) -> None:

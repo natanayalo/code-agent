@@ -507,11 +507,14 @@ class TaskClaim:
     max_attempts: int
 
 
+ProgressPhase = Literal["started", "running", "completed", "failed", "awaiting_approval"]
+
+
 @dataclass(frozen=True)
 class ProgressEvent:
     """A task lifecycle update emitted by the execution service."""
 
-    phase: Literal["started", "running", "completed", "failed"]
+    phase: ProgressPhase
     task_id: str
     session_id: str
     channel: str
@@ -605,6 +608,10 @@ def _enum_value(value: object | None) -> str | None:
 
 def _task_status_from_result(state: OrchestratorState) -> TaskStatus:
     """Map the final orchestrator result into a persisted task status."""
+    if state.approval.required and state.approval.status == "pending":
+        # If we interrupted for manual approval, the task is still valid and pollable.
+        return TaskStatus.PENDING
+
     if state.result is None:
         return TaskStatus.FAILED
     if state.result.status == "success":
@@ -790,6 +797,33 @@ def _requires_manual_follow_up(state: OrchestratorState) -> bool:
     if state.result is None:
         return False
     return state.result.next_action_hint == "await_manual_follow_up"
+
+
+def _terminal_follow_up_status(
+    *,
+    state: OrchestratorState,
+    terminal_failure: bool,
+) -> TaskStatus:
+    """Map terminal follow-up intent to the persisted task status."""
+    if not terminal_failure:
+        return TaskStatus.IN_PROGRESS
+    if state.approval.status == "rejected":
+        return TaskStatus.FAILED
+    if state.result is not None and state.result.failure_kind == "permission_denied":
+        return TaskStatus.FAILED
+    return TaskStatus.PENDING
+
+
+def _completion_progress_phase(task_snapshot: TaskSnapshot) -> ProgressPhase:
+    """Map final task state to a user-facing progress phase."""
+    if task_snapshot.status == TaskStatus.COMPLETED.value:
+        return "completed"
+    if (
+        task_snapshot.status == TaskStatus.PENDING.value
+        and task_snapshot.approval_status == "pending"
+    ):
+        return "awaiting_approval"
+    return "failed"
 
 
 def _workspace_id_from_artifacts(artifacts: list[ArtifactReference]) -> str | None:
@@ -1142,7 +1176,7 @@ class TaskExecutionService:
         await self._emit_progress(
             submission,
             persisted,
-            phase="completed" if task_snapshot.status == TaskStatus.COMPLETED.value else "failed",
+            phase=_completion_progress_phase(task_snapshot),
             summary=self._task_summary(task_snapshot),
         )
         return None
@@ -1203,21 +1237,24 @@ class TaskExecutionService:
                 await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
             else:
                 terminal_failure = _requires_manual_follow_up(state)
+                terminal_status = _terminal_follow_up_status(
+                    state=state,
+                    terminal_failure=terminal_failure,
+                )
                 await self._run_blocking(
                     self._persist_execution_outcome,
                     task_id=persisted.task_id,
                     state=state,
                     started_at=started_at,
                     finished_at=finished_at,
-                    force_task_status=(
-                        TaskStatus.FAILED if terminal_failure else TaskStatus.IN_PROGRESS
-                    ),
+                    force_task_status=terminal_status,
                 )
                 if terminal_failure:
                     await self._run_blocking(
                         self._release_task_terminal_failure,
                         task_id=persisted.task_id,
                         worker_id=worker_id,
+                        status=terminal_status,
                     )
                 else:
                     await self._run_blocking(
@@ -1255,7 +1292,7 @@ class TaskExecutionService:
         await self._emit_progress(
             submission,
             persisted,
-            phase="completed" if task_snapshot.status == TaskStatus.COMPLETED.value else "failed",
+            phase=_completion_progress_phase(task_snapshot),
             summary=self._task_summary(task_snapshot),
         )
         return None
@@ -1929,7 +1966,7 @@ class TaskExecutionService:
         submission: TaskSubmission,
         persisted: _PersistedTaskContext,
         *,
-        phase: Literal["started", "running", "completed", "failed"],
+        phase: ProgressPhase,
         summary: str | None = None,
     ) -> None:
         """Best-effort lifecycle notification that never breaks task execution."""
@@ -2091,12 +2128,15 @@ class TaskExecutionService:
                 retry_backoff_seconds=15,
             )
 
-    def _release_task_terminal_failure(self, *, task_id: str, worker_id: str) -> None:
-        """Release queue lease while preserving terminal failure for manual follow-up."""
+    def _release_task_terminal_failure(
+        self, *, task_id: str, worker_id: str, status: TaskStatus = TaskStatus.FAILED
+    ) -> None:
+        """Release queue lease while preserving terminal status for manual follow-up."""
         with session_scope(self.session_factory) as session:
             TaskRepository(session).release_terminal_failure(
                 task_id=task_id,
                 worker_id=worker_id,
+                status=status,
             )
 
     def _record_task_attempt_error(self, *, task_id: str, error: str) -> None:
@@ -2189,6 +2229,15 @@ class TaskExecutionService:
         force_task_status: TaskStatus | None = None,
     ) -> None:
         """Persist route, task status, worker-run metadata, and artifacts."""
+        logger.info(
+            "Persisting execution outcome",
+            extra={
+                "task_id": task_id,
+                "approval_required": state.approval.required,
+                "approval_status": state.approval.status,
+                "timeline_count": len(state.timeline_events),
+            },
+        )
         retention_expires_at = (
             finished_at + timedelta(seconds=self.retention_seconds)
             if self.retention_seconds is not None
@@ -2217,11 +2266,9 @@ class TaskExecutionService:
 
             approval = state.approval
             if approval.required:
-                approval_status = (
-                    "pending"
-                    if _requires_manual_follow_up(state) and approval.status == "pending"
-                    else approval.status
-                )
+                # If approval is required, we always want to reflect its current status
+                # in the task constraints so the dashboard can show the banner.
+                approval_status = approval.status
                 if approval_status in {"pending", "approved", "rejected"}:
                     constraints = dict(task.constraints or {})
                     constraints["approval"] = _approval_constraints_payload(

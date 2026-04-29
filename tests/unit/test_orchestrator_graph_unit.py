@@ -48,13 +48,29 @@ def test_is_destructive_task():
 
 
 def test_task_requires_approval_ignores_untrusted_approved_status() -> None:
-    constraints = {"approval": {"status": "approved", "source": "user"}}
-    assert _task_requires_approval("Delete all files", constraints) is True
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_id": "t1",
+                "task_text": "Delete all files",
+                "constraints": {"approval": {"status": "approved", "source": "user"}},
+            }
+        }
+    )
+    assert _task_requires_approval(state) is True
 
 
 def test_task_requires_approval_accepts_trusted_approved_status() -> None:
-    constraints = {"approval": {"status": "approved", "source": "api"}}
-    assert _task_requires_approval("Delete all files", constraints) is False
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_id": "t1",
+                "task_text": "Delete all files",
+                "constraints": {"approval": {"status": "approved", "source": "api"}},
+            }
+        }
+    )
+    assert _task_requires_approval(state) is False
 
 
 def test_coerce_approval_decision():
@@ -896,6 +912,7 @@ def test_await_permission_escalation_rejected():
         res["result"]["summary"]
         == "Permission escalation to 'networked_write' was rejected. Run halted."
     )
+    assert res["result"]["failure_kind"] == "permission_denied"
     assert res["result"]["next_action_hint"] == "await_manual_follow_up"
 
 

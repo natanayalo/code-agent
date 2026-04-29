@@ -335,6 +335,17 @@ class TaskRepository:
         setattr(task, "_latest_run_requested_permission", latest_run_requested_permission)
         setattr(task, "_pending_interaction_count", int(pending_interaction_count or 0))
 
+    @staticmethod
+    def _claimable_pending_filter(*, now: datetime) -> Any:
+        """Return the pending-task predicate used by both select and claim CAS update."""
+        return and_(
+            Task.status == TaskStatus.PENDING,
+            or_(
+                and_(Task.attempt_count == 0, Task.next_attempt_at.is_(None)),
+                Task.next_attempt_at <= now,
+            ),
+        )
+
     def list_all(
         self,
         *,
@@ -466,10 +477,7 @@ class TaskRepository:
                 select(Task.id)
                 .where(
                     or_(
-                        and_(
-                            Task.status == TaskStatus.PENDING,
-                            or_(Task.next_attempt_at.is_(None), Task.next_attempt_at <= now),
-                        ),
+                        self._claimable_pending_filter(now=now),
                         and_(
                             Task.status == TaskStatus.IN_PROGRESS,
                             Task.lease_expires_at.is_not(None),
@@ -487,10 +495,7 @@ class TaskRepository:
                 .where(
                     Task.id == task_id,
                     or_(
-                        and_(
-                            Task.status == TaskStatus.PENDING,
-                            or_(Task.next_attempt_at.is_(None), Task.next_attempt_at <= now),
-                        ),
+                        self._claimable_pending_filter(now=now),
                         and_(
                             Task.status == TaskStatus.IN_PROGRESS,
                             Task.lease_expires_at.is_not(None),
@@ -589,15 +594,16 @@ class TaskRepository:
         *,
         task_id: str,
         worker_id: str,
+        status: TaskStatus = TaskStatus.FAILED,
     ) -> Task | None:
-        """Mark a claimed task as terminally failed and clear queue lease state."""
+        """Mark a claimed task as terminally failed/paused and clear queue lease state."""
         task = self.get(task_id)
         if task is None:
             return None
         if task.lease_owner == worker_id:
             task.lease_owner = None
             task.lease_expires_at = None
-        task.status = TaskStatus.FAILED
+        task.status = status
         task.next_attempt_at = None
         self.session.flush()
         return task

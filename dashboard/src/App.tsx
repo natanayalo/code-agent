@@ -34,6 +34,7 @@ function DashboardContent() {
     data: selectedTask = null,
     isLoading: taskDetailLoading,
     error: taskDetailError,
+    refetch: refetchTaskDetail,
   } = useQuery({
     queryKey: ['task-detail', selectedTaskId],
     queryFn: () => api.getTask(selectedTaskId as string),
@@ -75,22 +76,30 @@ function DashboardContent() {
         onOpenTask={setSelectedTaskId}
       />
 
-      <TaskBoard
-        tasks={tasks}
-        loading={loading}
-        isFetching={isFetching}
-        error={error}
-        refetch={refetch}
-        selectedTaskId={selectedTaskId}
-        onTaskSelect={setSelectedTaskId}
-      />
+      <main className={`dashboard-content ${selectedTaskId ? 'dashboard-content-with-panel' : ''}`}>
+        <div className="dashboard-content-inner">
+          <TaskBoard
+            tasks={tasks}
+            loading={loading}
+            isFetching={isFetching}
+            error={error}
+            refetch={refetch}
+            selectedTaskId={selectedTaskId}
+            onTaskSelect={setSelectedTaskId}
+          />
 
-      <TaskDetailPanel
-        task={selectedTask}
-        loading={taskDetailLoading}
-        error={taskDetailError}
-        onClose={() => setSelectedTaskId(null)}
-      />
+          <TaskDetailPanel
+            task={selectedTask}
+            loading={taskDetailLoading}
+            error={taskDetailError}
+            onClose={() => setSelectedTaskId(null)}
+            onRefresh={() => {
+              refetch();
+              refetchTaskDetail();
+            }}
+          />
+        </div>
+      </main>
     </DashboardLayout>
   );
 }

@@ -262,6 +262,23 @@ def test_format_telegram_message_for_running_phase() -> None:
     assert _format_telegram_message(event) == "Task task-1 is running."
 
 
+def test_format_telegram_message_for_awaiting_approval_phase() -> None:
+    """Approval-paused phase should avoid a failure label in Telegram output."""
+    event = ProgressEvent(
+        phase="awaiting_approval",
+        task_id="task-1",
+        session_id="session-1",
+        channel="telegram",
+        external_thread_id="telegram:chat:99",
+        task_text="Run tests",
+        summary="Run paused pending permission escalation approval.",
+    )
+
+    assert _format_telegram_message(event) == (
+        "Task task-1 is awaiting approval.\n\n" "Run paused pending permission escalation approval."
+    )
+
+
 @pytest.mark.anyio
 async def test_telegram_progress_notifier_ignores_non_telegram_channels() -> None:
     """Telegram notifier should no-op for non-telegram events."""
