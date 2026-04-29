@@ -2261,9 +2261,11 @@ def test_run_queued_task_requeues_failed_result_when_retries_remain(monkeypatch)
     )
     Base.metadata.create_all(engine)
     session_factory = create_session_factory(engine)
+    notifier = _RecordingProgressNotifier()
     service = execution_module.TaskExecutionService(
         session_factory=session_factory,
         worker=_StaticWorker(),
+        progress_notifier=notifier,
     )
     snapshot, _ = service.create_task(
         execution_module.TaskSubmission(
@@ -2321,6 +2323,8 @@ def test_run_queued_task_requeues_failed_result_when_retries_remain(monkeypatch)
     monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
 
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
+
+    assert [event.phase for event in notifier.events] == ["started", "running", "failed"]
 
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(snapshot.task_id)
@@ -2387,7 +2391,9 @@ def test_heartbeat_interval_seconds_tracks_lease_duration() -> None:
     assert execution_module._heartbeat_interval_seconds(lease_seconds=1) == 1.0
 
 
-def test_run_queued_task_terminal_interrupt_sets_failed_without_requeue(monkeypatch) -> None:
+def test_run_queued_task_terminal_interrupt_emits_awaiting_approval_without_requeue(
+    monkeypatch,
+) -> None:
     """Manual-follow-up failures should stay terminal instead of requeueing."""
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
@@ -2396,9 +2402,11 @@ def test_run_queued_task_terminal_interrupt_sets_failed_without_requeue(monkeypa
     )
     Base.metadata.create_all(engine)
     session_factory = create_session_factory(engine)
+    notifier = _RecordingProgressNotifier()
     service = execution_module.TaskExecutionService(
         session_factory=session_factory,
         worker=_StaticWorker(),
+        progress_notifier=notifier,
     )
     snapshot, _ = service.create_task(
         execution_module.TaskSubmission(
@@ -2460,6 +2468,12 @@ def test_run_queued_task_terminal_interrupt_sets_failed_without_requeue(monkeypa
     monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
 
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
+
+    assert [event.phase for event in notifier.events] == [
+        "started",
+        "running",
+        "awaiting_approval",
+    ]
 
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(snapshot.task_id)

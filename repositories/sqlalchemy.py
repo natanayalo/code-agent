@@ -335,6 +335,17 @@ class TaskRepository:
         setattr(task, "_latest_run_requested_permission", latest_run_requested_permission)
         setattr(task, "_pending_interaction_count", int(pending_interaction_count or 0))
 
+    @staticmethod
+    def _claimable_pending_filter(*, now: datetime) -> Any:
+        """Return the pending-task predicate used by both select and claim CAS update."""
+        return and_(
+            Task.status == TaskStatus.PENDING,
+            or_(
+                and_(Task.attempt_count == 0, Task.next_attempt_at.is_(None)),
+                Task.next_attempt_at <= now,
+            ),
+        )
+
     def list_all(
         self,
         *,
@@ -466,13 +477,7 @@ class TaskRepository:
                 select(Task.id)
                 .where(
                     or_(
-                        and_(
-                            Task.status == TaskStatus.PENDING,
-                            or_(
-                                and_(Task.attempt_count == 0, Task.next_attempt_at.is_(None)),
-                                Task.next_attempt_at <= now,
-                            ),
-                        ),
+                        self._claimable_pending_filter(now=now),
                         and_(
                             Task.status == TaskStatus.IN_PROGRESS,
                             Task.lease_expires_at.is_not(None),
@@ -490,13 +495,7 @@ class TaskRepository:
                 .where(
                     Task.id == task_id,
                     or_(
-                        and_(
-                            Task.status == TaskStatus.PENDING,
-                            or_(
-                                and_(Task.attempt_count == 0, Task.next_attempt_at.is_(None)),
-                                Task.next_attempt_at <= now,
-                            ),
-                        ),
+                        self._claimable_pending_filter(now=now),
                         and_(
                             Task.status == TaskStatus.IN_PROGRESS,
                             Task.lease_expires_at.is_not(None),

@@ -73,6 +73,14 @@ def _format_telegram_message(event: ProgressEvent) -> str:
         return f"{prefix}{detail}"
     if event.phase == "running":
         return f"Task {event.task_id} is running."
+    if event.phase == "awaiting_approval":
+        prefix = f"Task {event.task_id} is awaiting approval.\n\n"
+        detail = event.summary or "Task is paused pending approval."
+        truncated_detail = _truncate_telegram_text(
+            detail,
+            _TELEGRAM_MESSAGE_LIMIT - len(prefix),
+        )
+        return f"{prefix}{truncated_detail}"
     phase_label = "completed" if event.phase == "completed" else "failed"
     prefix = f"Task {event.task_id} {phase_label}.\n\n"
     detail = event.summary or f"Task {phase_label}."

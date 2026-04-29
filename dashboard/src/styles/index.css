@@ -640,6 +640,18 @@ button {
   padding-right: 450px;
 }
 
+@media (max-width: 768px) {
+  .task-detail-panel {
+    width: 100%;
+    max-width: 100%;
+    padding: var(--spacing-lg);
+  }
+
+  .dashboard-content-with-panel {
+    padding-right: 0;
+  }
+}
+
 .task-detail-header {
   display: flex;
   align-items: center;

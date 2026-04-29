@@ -507,11 +507,14 @@ class TaskClaim:
     max_attempts: int
 
 
+ProgressPhase = Literal["started", "running", "completed", "failed", "awaiting_approval"]
+
+
 @dataclass(frozen=True)
 class ProgressEvent:
     """A task lifecycle update emitted by the execution service."""
 
-    phase: Literal["started", "running", "completed", "failed"]
+    phase: ProgressPhase
     task_id: str
     session_id: str
     channel: str
@@ -794,6 +797,23 @@ def _requires_manual_follow_up(state: OrchestratorState) -> bool:
     if state.result is None:
         return False
     return state.result.next_action_hint == "await_manual_follow_up"
+
+
+def _terminal_follow_up_status(*, terminal_failure: bool) -> TaskStatus:
+    """Map terminal follow-up intent to the persisted task status."""
+    return TaskStatus.PENDING if terminal_failure else TaskStatus.IN_PROGRESS
+
+
+def _completion_progress_phase(task_snapshot: TaskSnapshot) -> ProgressPhase:
+    """Map final task state to a user-facing progress phase."""
+    if task_snapshot.status == TaskStatus.COMPLETED.value:
+        return "completed"
+    if (
+        task_snapshot.status == TaskStatus.PENDING.value
+        and task_snapshot.approval_status == "pending"
+    ):
+        return "awaiting_approval"
+    return "failed"
 
 
 def _workspace_id_from_artifacts(artifacts: list[ArtifactReference]) -> str | None:
@@ -1146,7 +1166,7 @@ class TaskExecutionService:
         await self._emit_progress(
             submission,
             persisted,
-            phase="completed" if task_snapshot.status == TaskStatus.COMPLETED.value else "failed",
+            phase=_completion_progress_phase(task_snapshot),
             summary=self._task_summary(task_snapshot),
         )
         return None
@@ -1207,22 +1227,21 @@ class TaskExecutionService:
                 await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
             else:
                 terminal_failure = _requires_manual_follow_up(state)
+                terminal_status = _terminal_follow_up_status(terminal_failure=terminal_failure)
                 await self._run_blocking(
                     self._persist_execution_outcome,
                     task_id=persisted.task_id,
                     state=state,
                     started_at=started_at,
                     finished_at=finished_at,
-                    force_task_status=(
-                        TaskStatus.PENDING if terminal_failure else TaskStatus.IN_PROGRESS
-                    ),
+                    force_task_status=terminal_status,
                 )
                 if terminal_failure:
                     await self._run_blocking(
                         self._release_task_terminal_failure,
                         task_id=persisted.task_id,
                         worker_id=worker_id,
-                        status=TaskStatus.PENDING,
+                        status=terminal_status,
                     )
                 else:
                     await self._run_blocking(
@@ -1260,7 +1279,7 @@ class TaskExecutionService:
         await self._emit_progress(
             submission,
             persisted,
-            phase="completed" if task_snapshot.status == TaskStatus.COMPLETED.value else "failed",
+            phase=_completion_progress_phase(task_snapshot),
             summary=self._task_summary(task_snapshot),
         )
         return None
@@ -1934,7 +1953,7 @@ class TaskExecutionService:
         submission: TaskSubmission,
         persisted: _PersistedTaskContext,
         *,
-        phase: Literal["started", "running", "completed", "failed"],
+        phase: ProgressPhase,
         summary: str | None = None,
     ) -> None:
         """Best-effort lifecycle notification that never breaks task execution."""
