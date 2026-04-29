@@ -1576,7 +1576,7 @@ class TaskExecutionService:
     def _map_session_to_snapshot(self, s: ConversationSession) -> SessionSnapshot:
         """Map a ConversationSession database model to a SessionSnapshot Pydantic model (T-131)."""
         working_context: SessionWorkingContextSnapshot | None = None
-        if s.session_state is not None:
+        if "session_state" in s.__dict__ and s.session_state is not None:
             state = s.session_state
             working_context = SessionWorkingContextSnapshot(
                 active_goal=state.active_goal,

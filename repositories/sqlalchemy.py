@@ -119,7 +119,12 @@ class SessionRepository:
         return conversation_session
 
     def get(self, session_id: str) -> ConversationSession | None:
-        return self.session.get(ConversationSession, session_id)
+        statement = (
+            select(ConversationSession)
+            .options(selectinload(ConversationSession.session_state))
+            .where(ConversationSession.id == session_id)
+        )
+        return self.session.scalar(statement)
 
     def get_by_channel_thread(
         self,

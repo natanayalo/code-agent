@@ -121,7 +121,13 @@ export function SessionsPage() {
                   <div className="session-working-context">
                     <p className="session-working-context-title">Working Context</p>
                     <p>
-                      <strong>Goal:</strong> {session.working_context?.active_goal || 'Not captured yet'}
+                      <strong>Goal:</strong>{' '}
+                      <span
+                        className="truncate session-goal-value"
+                        title={session.working_context?.active_goal || 'Not captured yet'}
+                      >
+                        {session.working_context?.active_goal || 'Not captured yet'}
+                      </span>
                     </p>
 
                     <p>
@@ -129,8 +135,8 @@ export function SessionsPage() {
                     </p>
                     {riskEntries.length > 0 ? (
                       <ul className="session-context-list">
-                        {riskEntries.map((risk) => (
-                          <li key={`${session.session_id}-risk-${risk}`}>{risk}</li>
+                        {riskEntries.map((risk, index) => (
+                          <li key={`${session.session_id}-risk-${index}`}>{risk}</li>
                         ))}
                       </ul>
                     ) : (
@@ -142,8 +148,8 @@ export function SessionsPage() {
                     </p>
                     {decisionEntries.length > 0 ? (
                       <ul className="session-context-list">
-                        {decisionEntries.map((decision) => (
-                          <li key={`${session.session_id}-decision-${decision}`}>{decision}</li>
+                        {decisionEntries.map((decision, index) => (
+                          <li key={`${session.session_id}-decision-${index}`}>{decision}</li>
                         ))}
                       </ul>
                     ) : (
