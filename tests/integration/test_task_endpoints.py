@@ -95,6 +95,7 @@ def client(session_factory) -> Iterator[TestClient]:
         task_service=TaskExecutionService(
             session_factory=session_factory,
             worker=worker,
+            checkpoint_path="test_checkpoints.sqlite",
         ),
         auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
     )
@@ -228,11 +229,10 @@ def test_queued_task_requires_approval_before_worker_dispatch(client: TestClient
     task_id = response.json()["task_id"]
 
     _run_one_queued_task(client)
-
     get_response = client.get(f"/tasks/{task_id}")
     assert get_response.status_code == 200
     payload = get_response.json()
-    assert payload["status"] == "failed"
+    assert payload["status"] == "pending"
     assert payload["latest_run"] is not None
     assert payload["latest_run"]["status"] == "failure"
     assert "approval" in payload["latest_run"]["summary"].lower()
@@ -259,11 +259,10 @@ def test_queued_task_ignores_injected_approval_constraints(client: TestClient) -
     task_id = response.json()["task_id"]
 
     _run_one_queued_task(client)
-
     get_response = client.get(f"/tasks/{task_id}")
     assert get_response.status_code == 200
     payload = get_response.json()
-    assert payload["status"] == "failed"
+    assert payload["status"] == "pending"
     assert payload["latest_run"] is not None
     assert payload["latest_run"]["status"] == "failure"
     assert "approval" in payload["latest_run"]["summary"].lower()
@@ -300,7 +299,7 @@ def test_task_approval_endpoint_requeues_approved_task(client: TestClient) -> No
     _run_one_queued_task(client)
     paused = client.get(f"/tasks/{task_id}")
     assert paused.status_code == 200
-    assert paused.json()["status"] == "failed"
+    assert paused.json()["status"] == "pending"
     assert "approval" in paused.json()["latest_run"]["summary"].lower()
 
     approve_response = client.post(f"/tasks/{task_id}/approval", json={"approved": True})

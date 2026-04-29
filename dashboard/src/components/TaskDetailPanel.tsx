@@ -1,11 +1,14 @@
 import React from 'react';
+import { X } from 'lucide-react';
 import { TaskSnapshot } from '../types/task';
+import { TaskApprovalSection } from './TaskApprovalSection';
 
 interface TaskDetailPanelProps {
   task: TaskSnapshot | null;
   loading: boolean;
   error: unknown;
   onClose: () => void;
+  onRefresh?: () => void;
 }
 
 function formatLabel(value: string | null | undefined): string {
@@ -90,7 +93,7 @@ function artifactRows(run: TaskSnapshot['latest_run']) {
   return [];
 }
 
-export function TaskDetailPanel({ task, loading, error, onClose }: TaskDetailPanelProps) {
+export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: TaskDetailPanelProps) {
   const run = task?.latest_run ?? null;
   const runCommands = run?.commands_run ?? [];
   const artifacts = React.useMemo(() => artifactRows(run), [run]);
@@ -123,8 +126,8 @@ export function TaskDetailPanel({ task, loading, error, onClose }: TaskDetailPan
     <aside className="glass-panel task-detail-panel">
       <div className="task-detail-header">
         <h3>Task Detail</h3>
-        <button className="icon-button" onClick={onClose} aria-label="Close task detail">
-          x
+        <button onClick={onClose} className="icon-button" title="Close Panel">
+          <X size={20} />
         </button>
       </div>
 
@@ -142,6 +145,8 @@ export function TaskDetailPanel({ task, loading, error, onClose }: TaskDetailPan
           <p className="task-detail-meta">
             Status: <strong>{formatLabel(task.status)}</strong>
           </p>
+
+          <TaskApprovalSection task={task} onRefresh={onRefresh} className="task-detail-approval" />
 
           {task.task_spec ? (
             <section className="task-detail-section">

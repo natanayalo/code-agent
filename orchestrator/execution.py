@@ -605,6 +605,10 @@ def _enum_value(value: object | None) -> str | None:
 
 def _task_status_from_result(state: OrchestratorState) -> TaskStatus:
     """Map the final orchestrator result into a persisted task status."""
+    if state.approval.required and state.approval.status == "pending":
+        # If we interrupted for manual approval, the task is still valid and pollable.
+        return TaskStatus.PENDING
+
     if state.result is None:
         return TaskStatus.FAILED
     if state.result.status == "success":
@@ -1210,7 +1214,7 @@ class TaskExecutionService:
                     started_at=started_at,
                     finished_at=finished_at,
                     force_task_status=(
-                        TaskStatus.FAILED if terminal_failure else TaskStatus.IN_PROGRESS
+                        TaskStatus.PENDING if terminal_failure else TaskStatus.IN_PROGRESS
                     ),
                 )
                 if terminal_failure:
@@ -1218,6 +1222,7 @@ class TaskExecutionService:
                         self._release_task_terminal_failure,
                         task_id=persisted.task_id,
                         worker_id=worker_id,
+                        status=TaskStatus.PENDING,
                     )
                 else:
                     await self._run_blocking(
@@ -2091,12 +2096,15 @@ class TaskExecutionService:
                 retry_backoff_seconds=15,
             )
 
-    def _release_task_terminal_failure(self, *, task_id: str, worker_id: str) -> None:
-        """Release queue lease while preserving terminal failure for manual follow-up."""
+    def _release_task_terminal_failure(
+        self, *, task_id: str, worker_id: str, status: TaskStatus = TaskStatus.FAILED
+    ) -> None:
+        """Release queue lease while preserving terminal status for manual follow-up."""
         with session_scope(self.session_factory) as session:
             TaskRepository(session).release_terminal_failure(
                 task_id=task_id,
                 worker_id=worker_id,
+                status=status,
             )
 
     def _record_task_attempt_error(self, *, task_id: str, error: str) -> None:
@@ -2189,6 +2197,15 @@ class TaskExecutionService:
         force_task_status: TaskStatus | None = None,
     ) -> None:
         """Persist route, task status, worker-run metadata, and artifacts."""
+        logger.info(
+            "Persisting execution outcome",
+            extra={
+                "task_id": task_id,
+                "approval_required": state.approval.required,
+                "approval_status": state.approval.status,
+                "timeline_count": len(state.timeline_events),
+            },
+        )
         retention_expires_at = (
             finished_at + timedelta(seconds=self.retention_seconds)
             if self.retention_seconds is not None
@@ -2217,11 +2234,9 @@ class TaskExecutionService:
 
             approval = state.approval
             if approval.required:
-                approval_status = (
-                    "pending"
-                    if _requires_manual_follow_up(state) and approval.status == "pending"
-                    else approval.status
-                )
+                # If approval is required, we always want to reflect its current status
+                # in the task constraints so the dashboard can show the banner.
+                approval_status = approval.status
                 if approval_status in {"pending", "approved", "rejected"}:
                     constraints = dict(task.constraints or {})
                     constraints["approval"] = _approval_constraints_payload(

@@ -2464,7 +2464,7 @@ def test_run_queued_task_terminal_interrupt_sets_failed_without_requeue(monkeypa
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(snapshot.task_id)
         assert task is not None
-        assert task.status is TaskStatus.FAILED
+        assert task.status is TaskStatus.PENDING
         assert task.next_attempt_at is None
         assert task.lease_owner is None
         assert task.lease_expires_at is None

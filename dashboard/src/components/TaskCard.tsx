@@ -4,14 +4,12 @@ import {
   Terminal,
   Github,
   GitBranch,
-  CheckCircle2,
-  XCircle,
-  ShieldAlert,
   RotateCcw,
   SlidersHorizontal,
 } from 'lucide-react';
 import { TaskSummarySnapshot, TaskStatus } from '../types/task';
 import { api } from '../services/api';
+import { TaskApprovalSection } from './TaskApprovalSection';
 
 interface TaskCardProps {
   task: TaskSummarySnapshot;
@@ -81,7 +79,6 @@ export function TaskCard({
   onReplayWithOverrides,
   isSelected = false,
 }: TaskCardProps) {
-  const [isDeciding, setIsDeciding] = React.useState(false);
   const [isReplaying, setIsReplaying] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -90,19 +87,6 @@ export function TaskCard({
     return deriveRepoName(task.repo_url);
   }, [task.repo_url]);
 
-  const handleApproval = async (approved: boolean) => {
-    if (isDeciding) return;
-    setIsDeciding(true);
-    try {
-      setError(null);
-      await api.decideTaskApproval(task.task_id, approved);
-      onRefresh?.();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save approval decision');
-    } finally {
-      setIsDeciding(false);
-    }
-  };
 
   const handleReplay = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -203,51 +187,7 @@ export function TaskCard({
           </div>
         </div>
 
-        {task.approval_status === 'pending' && (
-          <div className="approval-banner" onClick={(e) => e.stopPropagation()}>
-            <div className="approval-content">
-              <ShieldAlert size={16} className="text-warning" />
-              <div className="approval-text">
-                <p className="approval-type">
-                  {task.approval_type?.replace(/_/g, ' ') || 'Approval Required'}
-                </p>
-                {task.latest_run_requested_permission && (
-                  <p className="permission-tag">
-                    Permission: <code>{task.latest_run_requested_permission}</code>
-                  </p>
-                )}
-                {task.approval_reason && (
-                  <p className="approval-reason truncate" title={task.approval_reason}>
-                    {task.approval_reason}
-                  </p>
-                )}
-                {error && (
-                  <p className="approval-error">
-                    {error}
-                  </p>
-                )}
-              </div>
-            </div>
-            <div className="approval-buttons">
-              <button
-                className="btn btn-sm btn-reject"
-                onClick={() => handleApproval(false)}
-                disabled={isDeciding}
-              >
-                <XCircle size={14} />
-                <span>Reject</span>
-              </button>
-              <button
-                className="btn btn-sm btn-approve"
-                onClick={() => handleApproval(true)}
-                disabled={isDeciding}
-              >
-                <CheckCircle2 size={14} />
-                <span>Approve</span>
-              </button>
-            </div>
-          </div>
-        )}
+        <TaskApprovalSection task={task} onRefresh={onRefresh} />
     </div>
   );
 }

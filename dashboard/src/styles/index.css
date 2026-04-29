@@ -14,6 +14,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.5;
   overflow-x: hidden;
+  height: 100%;
 }
 
 #root {
@@ -610,8 +611,33 @@ button {
 }
 
 .task-detail-panel {
-  margin-top: var(--spacing-lg);
-  padding: var(--spacing-lg);
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 450px;
+  height: 100vh;
+  z-index: 40;
+  border-left: var(--glass-border);
+  border-radius: 0;
+  overflow-y: auto;
+  margin-top: 0;
+  padding: var(--spacing-xl);
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.3);
+  animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.dashboard-content-inner {
+  display: flex;
+  position: relative;
+}
+
+.dashboard-content-with-panel {
+  padding-right: 450px;
 }
 
 .task-detail-header {

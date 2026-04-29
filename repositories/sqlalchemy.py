@@ -468,7 +468,10 @@ class TaskRepository:
                     or_(
                         and_(
                             Task.status == TaskStatus.PENDING,
-                            or_(Task.next_attempt_at.is_(None), Task.next_attempt_at <= now),
+                            or_(
+                                and_(Task.attempt_count == 0, Task.next_attempt_at.is_(None)),
+                                Task.next_attempt_at <= now,
+                            ),
                         ),
                         and_(
                             Task.status == TaskStatus.IN_PROGRESS,
@@ -489,7 +492,10 @@ class TaskRepository:
                     or_(
                         and_(
                             Task.status == TaskStatus.PENDING,
-                            or_(Task.next_attempt_at.is_(None), Task.next_attempt_at <= now),
+                            or_(
+                                and_(Task.attempt_count == 0, Task.next_attempt_at.is_(None)),
+                                Task.next_attempt_at <= now,
+                            ),
                         ),
                         and_(
                             Task.status == TaskStatus.IN_PROGRESS,
@@ -589,15 +595,16 @@ class TaskRepository:
         *,
         task_id: str,
         worker_id: str,
+        status: TaskStatus = TaskStatus.FAILED,
     ) -> Task | None:
-        """Mark a claimed task as terminally failed and clear queue lease state."""
+        """Mark a claimed task as terminally failed/paused and clear queue lease state."""
         task = self.get(task_id)
         if task is None:
             return None
         if task.lease_owner == worker_id:
             task.lease_owner = None
             task.lease_expires_at = None
-        task.status = TaskStatus.FAILED
+        task.status = status
         task.next_attempt_at = None
         self.session.flush()
         return task

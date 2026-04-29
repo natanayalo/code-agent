@@ -23,6 +23,13 @@
   --color-error: #ef4444;
   --color-info: #3b82f6;
 
+  /* Dashboard Specific Statuses (Aliased to standard colors) */
+  --color-status-completed: var(--color-success);
+  --color-status-failed: var(--color-error);
+  --color-status-running: var(--color-accent-primary);
+  --color-status-pending: var(--color-warning);
+  --color-status-cancelled: var(--color-text-muted);
+
   /* Spacing */
   --spacing-xs: 0.25rem;
   --spacing-sm: 0.5rem;
