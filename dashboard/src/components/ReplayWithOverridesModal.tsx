@@ -1,5 +1,5 @@
 import React from 'react';
-import { RotateCcw } from 'lucide-react';
+import { RotateCcw, X } from 'lucide-react';
 import { api } from '../services/api';
 import { TaskReplayRequest, WORKER_OPTIONS, WorkerType } from '../types/task';
 
@@ -152,7 +152,7 @@ export function ReplayWithOverridesModal({
             aria-label="Close replay override modal"
             disabled={isSubmitting}
           >
-            x
+            <X size={18} />
           </button>
         </div>
 

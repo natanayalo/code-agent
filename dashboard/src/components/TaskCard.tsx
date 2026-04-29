@@ -130,13 +130,12 @@ export function TaskCard({
                      task.status === TaskStatus.CANCELLED;
 
   return (
-    <>
-      <div
-        className={`glass-panel task-card ${onClick ? 'task-card-clickable' : ''} ${
-          isSelected ? 'task-card-selected' : ''
-        }`}
-        onClick={onClick}
-      >
+    <div
+      className={`glass-panel task-card ${onClick ? 'task-card-clickable' : ''} ${
+        isSelected ? 'task-card-selected' : ''
+      }`}
+      onClick={onClick}
+    >
         <div className="card-header">
           <span className={`status-badge ${getStatusClass(task.status)}`}>
             {task.status.replace(/_/g, ' ')}
@@ -249,8 +248,6 @@ export function TaskCard({
             </div>
           </div>
         )}
-      </div>
-
-    </>
+    </div>
   );
 }
