@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { TaskSummarySnapshot, TaskStatus } from '../types/task';
 import { TaskCard } from './TaskCard';
+import { ReplayWithOverridesModal } from './ReplayWithOverridesModal';
 import { RefreshCw, LayoutGrid, List } from 'lucide-react';
 
 const COLUMNS = [
@@ -45,6 +46,7 @@ export function TaskBoard({
   onTaskSelect,
 }: TaskBoardProps) {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [activeReplayTaskId, setActiveReplayTaskId] = useState<string | null>(null);
   const hasError = error != null;
   const isInitialLoading = loading && tasks.length === 0;
 
@@ -137,6 +139,7 @@ export function TaskBoard({
                     key={task.task_id}
                     task={task}
                     onRefresh={refetch}
+                    onReplayWithOverrides={setActiveReplayTaskId}
                     isSelected={selectedTaskId === task.task_id}
                     onClick={onTaskSelect ? () => onTaskSelect(task.task_id) : undefined}
                   />
@@ -149,6 +152,15 @@ export function TaskBoard({
           );
         })}
       </div>
+
+      {activeReplayTaskId && (
+        <ReplayWithOverridesModal
+          taskId={activeReplayTaskId}
+          isOpen={true}
+          onClose={() => setActiveReplayTaskId(null)}
+          onReplaySuccess={refetch}
+        />
+      )}
     </div>
   );
 }

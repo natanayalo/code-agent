@@ -1,7 +1,7 @@
 import React from 'react';
 import { RotateCcw } from 'lucide-react';
 import { api } from '../services/api';
-import { TaskReplayRequest, WorkerType } from '../types/task';
+import { TaskReplayRequest, WORKER_OPTIONS, WorkerType } from '../types/task';
 
 interface ReplayWithOverridesModalProps {
   taskId: string;
@@ -14,8 +14,6 @@ interface JsonParseResult {
   parsed?: Record<string, unknown>;
   error?: string;
 }
-
-const WORKER_OPTIONS: WorkerType[] = ['codex', 'gemini', 'openrouter'];
 
 function parseOptionalJsonObject(fieldName: string, input: string): JsonParseResult {
   const trimmed = input.trim();

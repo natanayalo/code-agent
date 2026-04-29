@@ -6,7 +6,8 @@ export enum TaskStatus {
   CANCELLED = 'cancelled',
 }
 
-export type WorkerType = 'codex' | 'gemini' | 'openrouter';
+export const WORKER_OPTIONS = ['codex', 'gemini', 'openrouter'] as const;
+export type WorkerType = (typeof WORKER_OPTIONS)[number];
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'not_required';
 

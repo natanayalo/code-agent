@@ -12,12 +12,12 @@ import {
 } from 'lucide-react';
 import { TaskSummarySnapshot, TaskStatus } from '../types/task';
 import { api } from '../services/api';
-import { ReplayWithOverridesModal } from './ReplayWithOverridesModal';
 
 interface TaskCardProps {
   task: TaskSummarySnapshot;
   onClick?: () => void;
   onRefresh?: () => void;
+  onReplayWithOverrides?: (taskId: string) => void;
   isSelected?: boolean;
 }
 
@@ -74,10 +74,15 @@ const getRunStatusClass = (status: string | null | undefined) => {
   }
 };
 
-export function TaskCard({ task, onClick, onRefresh, isSelected = false }: TaskCardProps) {
+export function TaskCard({
+  task,
+  onClick,
+  onRefresh,
+  onReplayWithOverrides,
+  isSelected = false,
+}: TaskCardProps) {
   const [isDeciding, setIsDeciding] = React.useState(false);
   const [isReplaying, setIsReplaying] = React.useState(false);
-  const [isReplayModalOpen, setIsReplayModalOpen] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const repoName = useMemo(() => {
@@ -117,7 +122,7 @@ export function TaskCard({ task, onClick, onRefresh, isSelected = false }: TaskC
   const handleOpenReplayOverrides = (event: React.MouseEvent) => {
     event.stopPropagation();
     setError(null);
-    setIsReplayModalOpen(true);
+    onReplayWithOverrides?.(task.task_id);
   };
 
   const isTerminal = task.status === TaskStatus.COMPLETED ||
@@ -246,12 +251,6 @@ export function TaskCard({ task, onClick, onRefresh, isSelected = false }: TaskC
         )}
       </div>
 
-      <ReplayWithOverridesModal
-        taskId={task.task_id}
-        isOpen={isReplayModalOpen}
-        onClose={() => setIsReplayModalOpen(false)}
-        onReplaySuccess={onRefresh}
-      />
     </>
   );
 }

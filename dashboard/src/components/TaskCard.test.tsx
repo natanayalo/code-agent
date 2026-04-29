@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TaskCard } from './TaskCard';
 import { TaskStatus, ApprovalStatus, TaskSnapshot } from '../types/task';
@@ -359,39 +359,22 @@ describe('TaskCard', () => {
       expect(container.querySelector('.run-status')).toBeNull();
     });
 
-    it('opens replay-with-overrides modal and prevents propagation', () => {
+    it('requests replay-with-overrides open and prevents propagation', () => {
       const onCardClick = vi.fn();
+      const onReplayWithOverrides = vi.fn();
       const completedTask = { ...mockTask, status: TaskStatus.COMPLETED };
-      render(<TaskCard task={completedTask} onClick={onCardClick} />);
-
-      fireEvent.click(screen.getByTitle('Replay task with overrides'));
-
-      expect(screen.getByRole('dialog', { name: 'Replay With Overrides' })).toBeInTheDocument();
-      expect(onCardClick).not.toHaveBeenCalled();
-    });
-
-    it('submits replay-with-overrides payload and refreshes', async () => {
-      const onRefresh = vi.fn();
-      const completedTask = { ...mockTask, status: TaskStatus.COMPLETED };
-      vi.mocked(api.replayTask).mockResolvedValueOnce({} as TaskSnapshot);
-
-      render(<TaskCard task={completedTask} onRefresh={onRefresh} />);
-
-      fireEvent.click(screen.getByTitle('Replay task with overrides'));
-      fireEvent.change(screen.getByLabelText('Worker Override'), { target: { value: 'openrouter' } });
-      fireEvent.change(screen.getByLabelText('Constraints Override (JSON object)'), {
-        target: { value: '{"execution_mode":"apply"}' },
-      });
-      const dialog = screen.getByRole('dialog', { name: 'Replay With Overrides' });
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Replay Task' }));
-
-      await vi.waitFor(() =>
-        expect(api.replayTask).toHaveBeenCalledWith(completedTask.task_id, {
-          worker_override: 'openrouter',
-          constraints: { execution_mode: 'apply' },
-        })
+      render(
+        <TaskCard
+          task={completedTask}
+          onClick={onCardClick}
+          onReplayWithOverrides={onReplayWithOverrides}
+        />
       );
-      expect(onRefresh).toHaveBeenCalled();
+
+      fireEvent.click(screen.getByTitle('Replay task with overrides'));
+
+      expect(onReplayWithOverrides).toHaveBeenCalledWith(completedTask.task_id);
+      expect(onCardClick).not.toHaveBeenCalled();
     });
   });
 });
