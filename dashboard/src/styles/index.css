@@ -915,6 +915,84 @@ button {
   background-color: rgba(56, 189, 248, 0.05);
 }
 
+.btn-replay-overrides:hover:not(:disabled) {
+  color: var(--color-info);
+  border-color: rgba(59, 130, 246, 0.3);
+  background-color: rgba(59, 130, 246, 0.12);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(2, 6, 23, 0.75);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: var(--spacing-lg);
+}
+
+.replay-overrides-modal {
+  width: min(680px, 95vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: var(--spacing-lg);
+}
+
+.replay-overrides-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-sm);
+}
+
+.replay-overrides-header h4 {
+  margin: 0;
+}
+
+.replay-overrides-form {
+  margin-top: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.replay-overrides-form label {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.replay-overrides-select,
+.replay-overrides-textarea {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background-color: rgba(15, 23, 42, 0.85);
+  color: var(--color-text-primary);
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  font-family: 'JetBrains Mono', monospace;
+  resize: vertical;
+}
+
+.replay-overrides-select:focus,
+.replay-overrides-textarea:focus {
+  outline: none;
+  border-color: rgba(56, 189, 248, 0.6);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.12);
+}
+
+.replay-overrides-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.replay-overrides-error {
+  margin: 0;
+}
+
 .card-error-text {
   font-size: 0.75rem;
   color: var(--color-error);

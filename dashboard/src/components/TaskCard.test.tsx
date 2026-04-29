@@ -257,28 +257,33 @@ describe('TaskCard', () => {
   });
 
   describe('Replay Control', () => {
-    it('renders replay button for terminal tasks', () => {
+    it('renders replay controls for terminal tasks', () => {
       const completedTask = { ...mockTask, status: TaskStatus.COMPLETED };
       const { container } = render(<TaskCard task={completedTask} />);
       expect(container.querySelector('.btn-replay')).toBeInTheDocument();
+      expect(container.querySelector('.btn-replay-overrides')).toBeInTheDocument();
 
       const failedTask = { ...mockTask, status: TaskStatus.FAILED };
       const { container: containerFailed } = render(<TaskCard task={failedTask} />);
       expect(containerFailed.querySelector('.btn-replay')).toBeInTheDocument();
+      expect(containerFailed.querySelector('.btn-replay-overrides')).toBeInTheDocument();
 
       const cancelledTask = { ...mockTask, status: TaskStatus.CANCELLED };
       const { container: containerCancelled } = render(<TaskCard task={cancelledTask} />);
       expect(containerCancelled.querySelector('.btn-replay')).toBeInTheDocument();
+      expect(containerCancelled.querySelector('.btn-replay-overrides')).toBeInTheDocument();
     });
 
-    it('does not render replay button for non-terminal tasks', () => {
+    it('does not render replay controls for non-terminal tasks', () => {
       const runningTask = { ...mockTask, status: TaskStatus.IN_PROGRESS };
       const { container } = render(<TaskCard task={runningTask} />);
       expect(container.querySelector('.btn-replay')).toBeNull();
+      expect(container.querySelector('.btn-replay-overrides')).toBeNull();
 
       const pendingTask = { ...mockTask, status: TaskStatus.PENDING };
       const { container: containerPending } = render(<TaskCard task={pendingTask} />);
       expect(containerPending.querySelector('.btn-replay')).toBeNull();
+      expect(containerPending.querySelector('.btn-replay-overrides')).toBeNull();
     });
 
     it('handles replay click and prevents propagation', async () => {
@@ -309,9 +314,13 @@ describe('TaskCard', () => {
 
       const { container } = render(<TaskCard task={completedTask} />);
       const replayBtn = container.querySelector('.btn-replay') as HTMLButtonElement;
+      const replayOverridesBtn = container.querySelector(
+        '.btn-replay-overrides'
+      ) as HTMLButtonElement;
 
       fireEvent.click(replayBtn);
       expect(replayBtn.disabled).toBe(true);
+      expect(replayOverridesBtn.disabled).toBe(true);
 
       // @ts-expect-error: resolveReplay is captured
       resolveReplay({});
@@ -348,6 +357,24 @@ describe('TaskCard', () => {
       const task = { ...mockTask, latest_run_status: '' };
       const { container } = render(<TaskCard task={task} />);
       expect(container.querySelector('.run-status')).toBeNull();
+    });
+
+    it('requests replay-with-overrides open and prevents propagation', () => {
+      const onCardClick = vi.fn();
+      const onReplayWithOverrides = vi.fn();
+      const completedTask = { ...mockTask, status: TaskStatus.COMPLETED };
+      render(
+        <TaskCard
+          task={completedTask}
+          onClick={onCardClick}
+          onReplayWithOverrides={onReplayWithOverrides}
+        />
+      );
+
+      fireEvent.click(screen.getByTitle('Replay task with overrides'));
+
+      expect(onReplayWithOverrides).toHaveBeenCalledWith(completedTask.task_id);
+      expect(onCardClick).not.toHaveBeenCalled();
     });
   });
 });

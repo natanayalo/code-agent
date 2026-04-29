@@ -6,6 +6,9 @@ export enum TaskStatus {
   CANCELLED = 'cancelled',
 }
 
+export const WORKER_OPTIONS = ['codex', 'gemini', 'openrouter'] as const;
+export type WorkerType = (typeof WORKER_OPTIONS)[number];
+
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'not_required';
 
 export type TaskRiskLevel = 'low' | 'medium' | 'high' | 'critical';
@@ -127,4 +130,11 @@ export interface TaskSnapshot extends TaskSummarySnapshot {
   latest_run?: WorkerRunSnapshot | null;
   pending_interactions?: HumanInteractionSnapshot[];
   timeline: TaskTimelineEventSnapshot[];
+}
+
+export interface TaskReplayRequest {
+  worker_override?: WorkerType;
+  constraints?: Record<string, unknown>;
+  budget?: Record<string, unknown>;
+  secrets?: Record<string, string>;
 }

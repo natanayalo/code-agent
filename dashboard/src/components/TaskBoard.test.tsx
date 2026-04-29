@@ -234,4 +234,23 @@ describe('TaskBoard', () => {
     const activeColumn = screen.getByText('Active').closest('.board-column')!;
     expect(within(activeColumn as HTMLElement).getByText('Awaiting Approval')).toBeInTheDocument();
   });
+
+  it('uses one shared replay-overrides modal instance', () => {
+    render(
+      <TaskBoard
+        tasks={mockTasks}
+        loading={false}
+        isFetching={false}
+        error={null}
+        refetch={mockRefetch}
+      />
+    );
+
+    const replayOverrideButtons = screen.getAllByTitle('Replay task with overrides');
+    fireEvent.click(replayOverrideButtons[0]);
+    expect(screen.getAllByRole('dialog', { name: 'Replay With Overrides' })).toHaveLength(1);
+
+    fireEvent.click(replayOverrideButtons[1]);
+    expect(screen.getAllByRole('dialog', { name: 'Replay With Overrides' })).toHaveLength(1);
+  });
 });
