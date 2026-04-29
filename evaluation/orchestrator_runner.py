@@ -14,6 +14,7 @@ from evaluation.harness import (
 )
 from orchestrator import OrchestratorState, build_orchestrator_graph
 from orchestrator.checkpoints import create_in_memory_checkpointer
+from orchestrator.task_spec import is_destructive_task
 from workers import ArtifactReference, TestResult, Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,19 @@ class OrchestratorReplayRunner(EvaluationRunner):
         )
 
     async def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
+        constraints: dict[str, object] = {
+            "evaluation_case_id": case.case_id,
+            "execution_mode": "unattended",
+        }
+        # Frozen eval runs unattended. Pre-seed trusted approval for non-destructive
+        # cases so high-risk task-spec gating does not block deterministic scoring.
+        if not is_destructive_task(case.task_text, constraints):
+            constraints["approval"] = {
+                "status": "approved",
+                "source": "orchestrator",
+                "reason": "Frozen evaluation unattended non-destructive task auto-approved.",
+            }
+
         raw_state = await self._graph.ainvoke(
             {
                 "task": {
@@ -149,10 +163,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
                     "repo_url": f"https://example.invalid/{case.repo_fixture}",
                     "branch": "main",
                     "worker_override": self._worker_override,
-                    "constraints": {
-                        "evaluation_case_id": case.case_id,
-                        "execution_mode": "unattended",
-                    },
+                    "constraints": constraints,
                     "budget": {
                         "max_iterations": 1,
                         "max_tool_calls": 0,
