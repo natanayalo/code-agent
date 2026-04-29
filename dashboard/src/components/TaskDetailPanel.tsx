@@ -126,7 +126,12 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
     <aside className="glass-panel task-detail-panel">
       <div className="task-detail-header">
         <h3>Task Detail</h3>
-        <button onClick={onClose} className="icon-button" title="Close Panel">
+        <button
+          onClick={onClose}
+          className="icon-button"
+          title="Close Panel"
+          aria-label="Close task detail"
+        >
           <X size={20} />
         </button>
       </div>
