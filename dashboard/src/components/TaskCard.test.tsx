@@ -178,7 +178,7 @@ describe('TaskCard', () => {
 
     it('renders approval banner when pending', () => {
       render(<TaskCard task={approvalTask} />);
-      expect(screen.getByText('permission escalation')).toBeInTheDocument();
+      expect(screen.getByText('Permission Escalation')).toBeInTheDocument();
       expect(screen.getByText('Testing approval')).toBeInTheDocument();
       expect(screen.getByText('dangerous_command')).toBeInTheDocument();
       expect(screen.getByText('Approve')).toBeInTheDocument();

@@ -9,6 +9,16 @@ interface TaskApprovalSectionProps {
   className?: string;
 }
 
+function formatApprovalType(value: string | null | undefined): string {
+  const normalized = (value || '').trim();
+  if (!normalized) {
+    return '';
+  }
+  return normalized
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 export function TaskApprovalSection({ task, onRefresh, className = "" }: TaskApprovalSectionProps) {
   const [isDeciding, setIsDeciding] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -37,7 +47,7 @@ export function TaskApprovalSection({ task, onRefresh, className = "" }: TaskApp
         <ShieldAlert size={16} className="text-warning" />
         <div className="approval-text">
           <p className="approval-type">
-            {task.approval_type?.replace(/_/g, ' ') || 'Approval Required'}
+            {formatApprovalType(task.approval_type) || 'Approval Required'}
           </p>
           {task.latest_run_requested_permission && (
             <p className="permission-tag">
