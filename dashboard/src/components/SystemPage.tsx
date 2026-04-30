@@ -42,12 +42,12 @@ export function SystemPage() {
                 <AlertTriangle size={16} /> Failed to load sandbox status.
               </div>
             ) : sandbox ? (
-              <dl className="key-value-list" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '1rem', background: 'var(--color-background-elevated)', padding: '1.5rem', borderRadius: '8px', margin: 0 }}>
-                <dt style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>Default Image</dt>
-                <dd style={{ fontFamily: 'monospace', color: 'var(--color-text-primary)', margin: 0 }}>{sandbox.default_image || 'None'}</dd>
+              <dl className="key-value-list">
+                <dt className="key-value-dt">Default Image</dt>
+                <dd className="key-value-dd">{sandbox.default_image || 'None'}</dd>
 
-                <dt style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>Workspace Root</dt>
-                <dd style={{ fontFamily: 'monospace', color: 'var(--color-text-primary)', margin: 0 }}>{sandbox.workspace_root || 'None'}</dd>
+                <dt className="key-value-dt">Workspace Root</dt>
+                <dd className="key-value-dd">{sandbox.workspace_root || 'None'}</dd>
               </dl>
             ) : null}
           </section>

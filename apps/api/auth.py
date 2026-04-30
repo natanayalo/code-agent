@@ -7,9 +7,16 @@ import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 import jwt
+
+
+class RequestProto(Protocol):
+    """Minimal protocol for objects with headers (like FastAPI Request)."""
+
+    headers: Mapping[str, str]
+
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +49,18 @@ class ApiAuthConfig:
     telegram_webhook_secret: str | None = None
     allowed_origins: list[str] = field(default_factory=list)
     cookie_secure: bool = False
+
+    def is_cookie_secure(self, request: RequestProto | None = None) -> bool:
+        """Determine if cookies should be marked Secure based on config and request."""
+        # Explicit override always wins
+        if os.environ.get(COOKIE_SECURE_ENV_VAR) is not None:
+            return self.cookie_secure
+
+        # Pragmatic default: trust X-Forwarded-Proto if present
+        if request and request.headers.get("X-Forwarded-Proto") == "https":
+            return True
+
+        return self.cookie_secure
 
 
 def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) -> ApiAuthConfig:
