@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from sandbox.container import DEFAULT_SANDBOX_IMAGE
@@ -17,10 +18,11 @@ class SystemConfig:
     workspace_root: str
 
     @classmethod
-    def load_from_env(cls) -> SystemConfig:
+    def load_from_env(cls, env: Mapping[str, str] | None = None) -> SystemConfig:
         """Load and normalize system configuration from environment variables."""
-        image = os.environ.get("CODE_AGENT_SANDBOX_IMAGE", "").strip() or DEFAULT_SANDBOX_IMAGE
-        workspace_root = os.environ.get("CODE_AGENT_WORKSPACE_ROOT", "").strip() or str(
+        environ = env if env is not None else os.environ
+        image = environ.get("CODE_AGENT_SANDBOX_IMAGE", "").strip() or DEFAULT_SANDBOX_IMAGE
+        workspace_root = environ.get("CODE_AGENT_WORKSPACE_ROOT", "").strip() or str(
             default_workspace_root()
         )
 

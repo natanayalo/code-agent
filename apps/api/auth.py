@@ -26,6 +26,7 @@ ALLOWED_ORIGINS_ENV_VAR: Final[str] = "CODE_AGENT_ALLOWED_ORIGINS"
 
 # Security override constants
 COOKIE_SECURE_ENV_VAR: Final[str] = "CODE_AGENT_COOKIE_SECURE"
+API_FORCE_HTTPS_ENV_VAR: Final[str] = "CODE_AGENT_API_FORCE_HTTPS"
 
 API_SHARED_SECRET_HEADER: Final[str] = "X-Webhook-Token"
 TELEGRAM_WEBHOOK_SECRET_HEADER: Final[str] = "X-Telegram-Bot-Api-Secret-Token"
@@ -54,13 +55,19 @@ class ApiAuthConfig:
 
     def is_cookie_secure(self, request: RequestProto | None = None) -> bool:
         """Determine if cookies should be marked Secure based on config and request."""
-        # Explicit override always wins
+        # 1. Explicit override via CODE_AGENT_COOKIE_SECURE always wins
         if os.environ.get(COOKIE_SECURE_ENV_VAR) is not None:
             return self.cookie_secure
 
-        # Pragmatic default: trust X-Forwarded-Proto if present
-        if request and request.headers.get("X-Forwarded-Proto") == "https":
+        # 2. Force HTTPS override via environment variable
+        if os.environ.get(API_FORCE_HTTPS_ENV_VAR, "").lower() == "true":
             return True
+
+        # 3. Pragmatic default: trust X-Forwarded-Proto case-insensitively if present
+        if request:
+            proto = request.headers.get("X-Forwarded-Proto", "").lower()
+            if proto == "https":
+                return True
 
         return self.cookie_secure
 
