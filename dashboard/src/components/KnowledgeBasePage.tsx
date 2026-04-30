@@ -77,7 +77,6 @@ export function KnowledgeBasePage() {
   const personalQueryEnabled = personalUserFilter.length > 0;
 
   const resetPersonalForm = React.useCallback(() => {
-    setPersonalUserId('');
     setPersonalMemoryKey('');
     setPersonalValueJson(DEFAULT_MEMORY_VALUE_JSON);
     setPersonalSource('');
@@ -87,7 +86,6 @@ export function KnowledgeBasePage() {
   }, []);
 
   const resetProjectForm = React.useCallback(() => {
-    setProjectRepoUrl('');
     setProjectMemoryKey('');
     setProjectValueJson(DEFAULT_MEMORY_VALUE_JSON);
     setProjectSource('');

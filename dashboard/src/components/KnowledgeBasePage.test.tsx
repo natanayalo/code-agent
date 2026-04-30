@@ -139,7 +139,7 @@ describe('KnowledgeBasePage', () => {
       confidence: 0.25,
       requires_verification: false,
     });
-    expect(screen.getByLabelText('Personal User ID')).toHaveValue('');
+    expect(screen.getByLabelText('Personal User ID')).toHaveValue('user-2');
     expect(screen.getByLabelText('Personal Memory Key')).toHaveValue('');
     expect(screen.getByLabelText('Personal Memory Value (JSON object)')).toHaveValue('{\n  \n}');
     expect(screen.getByLabelText('Personal Source')).toHaveValue('');
@@ -267,7 +267,7 @@ describe('KnowledgeBasePage', () => {
       confidence: 1,
       requires_verification: false,
     });
-    expect(screen.getByLabelText('Project Repository URL')).toHaveValue('');
+    expect(screen.getByLabelText('Project Repository URL')).toHaveValue('  https://example.com/repo  ');
     expect(screen.getByLabelText('Project Memory Key')).toHaveValue('');
     expect(screen.getByLabelText('Project Memory Value (JSON object)')).toHaveValue('{\n  \n}');
     expect(screen.getByLabelText('Project Source')).toHaveValue('');
