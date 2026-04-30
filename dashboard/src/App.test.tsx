@@ -12,6 +12,8 @@ vi.mock('./services/api', () => ({
     listTasks: vi.fn(),
     getTask: vi.fn(),
     listSessions: vi.fn(),
+    listPersonalMemory: vi.fn(),
+    listProjectMemory: vi.fn(),
     getMetrics: vi.fn(),
     auth: {
       status: vi.fn(),
@@ -153,5 +155,23 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: /Settings coming soon/i })).toBeInTheDocument();
     expect(screen.getByText(/Configuration controls are not available yet/i)).toBeInTheDocument();
+  });
+
+  it('renders knowledge base page when visiting /knowledge-base', async () => {
+    window.history.pushState({}, '', '/knowledge-base');
+    vi.mocked(api.auth.status).mockResolvedValue({ authenticated: true });
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByRole('heading', { name: /Knowledge Base/i })).toBeInTheDocument();
+    expect(
+      screen.getByText(/Manage skeptical memory entries with confidence and verification metadata/i)
+    ).toBeInTheDocument();
   });
 });

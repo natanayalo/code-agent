@@ -209,6 +209,67 @@ describe('api service', () => {
       expect(result).toEqual([]);
     });
 
+    it('listPersonalMemory returns array of entries', async () => {
+      const mockEntries = [{ memory_id: 'm1', user_id: 'u1', memory_key: 'style', value: {} }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockEntries,
+      });
+
+      const result = await api.listPersonalMemory('u1');
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/personal?user_id=u1');
+      expect(result).toEqual(mockEntries);
+    });
+
+    it('upsertPersonalMemory sends PUT payload', async () => {
+      const mockEntry = {
+        memory_id: 'm1',
+        user_id: 'u1',
+        memory_key: 'style',
+        value: { style: 'concise' },
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockEntry,
+      });
+
+      await api.upsertPersonalMemory({
+        user_id: 'u1',
+        memory_key: 'style',
+        value: { style: 'concise' },
+      });
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/knowledge-base/personal');
+      expect(options.method).toBe('PUT');
+      expect(JSON.parse(options.body)).toEqual({
+        user_id: 'u1',
+        memory_key: 'style',
+        value: { style: 'concise' },
+      });
+    });
+
+    it('deleteProjectMemory sends DELETE with encoded query params', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        headers: new Map(),
+      });
+
+      await api.deleteProjectMemory('https://github.com/natanayalo/code-agent', 'build command');
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/knowledge-base/project?');
+      expect(url).toContain('memory_key=build+command');
+      expect(options.method).toBe('DELETE');
+    });
+
     it('decideTaskApproval rejection sends correct POST body and logs correctly', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,

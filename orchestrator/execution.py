@@ -37,7 +37,7 @@ from db.enums import (
     WorkerRunStatus,
     WorkerType,
 )
-from db.models import HumanInteraction, Task, User, WorkerRun
+from db.models import HumanInteraction, PersonalMemory, ProjectMemory, Task, User, WorkerRun
 from db.models import (
     Session as ConversationSession,
 )
@@ -49,6 +49,8 @@ from repositories import (
     ArtifactRepository,
     HumanInteractionRepository,
     InboundDeliveryRepository,
+    PersonalMemoryRepository,
+    ProjectMemoryRepository,
     SessionRepository,
     SessionStateRepository,
     TaskRepository,
@@ -419,6 +421,64 @@ class SessionWorkingContextSnapshot(ExecutionModel):
     identified_risks: dict[str, Any] = Field(default_factory=dict)
     files_touched: list[str] = Field(default_factory=list)
     updated_at: datetime | None = None
+
+
+class PersonalMemorySnapshot(ExecutionModel):
+    """A persisted user-scoped skeptical memory entry."""
+
+    memory_id: str
+    user_id: str
+    memory_key: str
+    value: dict[str, Any]
+    source: str | None = None
+    confidence: float = 1.0
+    scope: str | None = None
+    last_verified_at: datetime | None = None
+    requires_verification: bool = True
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectMemorySnapshot(ExecutionModel):
+    """A persisted repository-scoped skeptical memory entry."""
+
+    memory_id: str
+    repo_url: str
+    memory_key: str
+    value: dict[str, Any]
+    source: str | None = None
+    confidence: float = 1.0
+    scope: str | None = None
+    last_verified_at: datetime | None = None
+    requires_verification: bool = True
+    created_at: datetime
+    updated_at: datetime
+
+
+class PersonalMemoryUpsertRequest(ExecutionModel):
+    """Input payload for creating/updating a personal memory entry."""
+
+    user_id: str = Field(min_length=1)
+    memory_key: str = Field(min_length=1)
+    value: dict[str, Any] = Field(default_factory=dict)
+    source: str | None = None
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    scope: str | None = None
+    last_verified_at: datetime | None = None
+    requires_verification: bool = True
+
+
+class ProjectMemoryUpsertRequest(ExecutionModel):
+    """Input payload for creating/updating a project memory entry."""
+
+    repo_url: str = Field(min_length=1)
+    memory_key: str = Field(min_length=1)
+    value: dict[str, Any] = Field(default_factory=dict)
+    source: str | None = None
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    scope: str | None = None
+    last_verified_at: datetime | None = None
+    requires_verification: bool = True
 
 
 class TaskSummarySnapshot(ExecutionModel):
@@ -1404,6 +1464,94 @@ class TaskExecutionService:
                 return None
             return self._map_session_to_snapshot(s)
 
+    def list_personal_memory(
+        self,
+        *,
+        user_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[PersonalMemorySnapshot]:
+        """List persisted personal memory entries with optional user filtering."""
+        with session_scope(self.session_factory) as session:
+            memory_repo = PersonalMemoryRepository(session)
+            memories = memory_repo.list_all(user_id=user_id, limit=limit, offset=offset)
+            return [self._map_personal_memory_to_snapshot(memory) for memory in memories]
+
+    def upsert_personal_memory(
+        self,
+        payload: PersonalMemoryUpsertRequest,
+    ) -> PersonalMemorySnapshot:
+        """Create or update one personal memory entry."""
+        with session_scope(self.session_factory) as session:
+            memory_repo = PersonalMemoryRepository(session)
+            upsert_kwargs: dict[str, Any] = {
+                "user_id": payload.user_id,
+                "memory_key": payload.memory_key,
+                "value": payload.value,
+            }
+            for field_name in (
+                "source",
+                "confidence",
+                "scope",
+                "last_verified_at",
+                "requires_verification",
+            ):
+                if field_name in payload.model_fields_set:
+                    upsert_kwargs[field_name] = getattr(payload, field_name)
+
+            memory = memory_repo.upsert(**upsert_kwargs)
+            return self._map_personal_memory_to_snapshot(memory)
+
+    def delete_personal_memory(self, *, user_id: str, memory_key: str) -> bool:
+        """Delete one personal memory entry by key."""
+        with session_scope(self.session_factory) as session:
+            memory_repo = PersonalMemoryRepository(session)
+            return memory_repo.delete(user_id=user_id, memory_key=memory_key)
+
+    def list_project_memory(
+        self,
+        *,
+        repo_url: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ProjectMemorySnapshot]:
+        """List persisted project memory entries with optional repo filtering."""
+        with session_scope(self.session_factory) as session:
+            memory_repo = ProjectMemoryRepository(session)
+            memories = memory_repo.list_all(repo_url=repo_url, limit=limit, offset=offset)
+            return [self._map_project_memory_to_snapshot(memory) for memory in memories]
+
+    def upsert_project_memory(
+        self,
+        payload: ProjectMemoryUpsertRequest,
+    ) -> ProjectMemorySnapshot:
+        """Create or update one project memory entry."""
+        with session_scope(self.session_factory) as session:
+            memory_repo = ProjectMemoryRepository(session)
+            upsert_kwargs: dict[str, Any] = {
+                "repo_url": payload.repo_url,
+                "memory_key": payload.memory_key,
+                "value": payload.value,
+            }
+            for field_name in (
+                "source",
+                "confidence",
+                "scope",
+                "last_verified_at",
+                "requires_verification",
+            ):
+                if field_name in payload.model_fields_set:
+                    upsert_kwargs[field_name] = getattr(payload, field_name)
+
+            memory = memory_repo.upsert(**upsert_kwargs)
+            return self._map_project_memory_to_snapshot(memory)
+
+    def delete_project_memory(self, *, repo_url: str, memory_key: str) -> bool:
+        """Delete one project memory entry by key."""
+        with session_scope(self.session_factory) as session:
+            memory_repo = ProjectMemoryRepository(session)
+            return memory_repo.delete(repo_url=repo_url, memory_key=memory_key)
+
     def _map_task_to_snapshot(self, task: Task) -> TaskSnapshot:
         """Map a Task database model to a full TaskSnapshot Pydantic model (T-131)."""
         latest_run_snapshot: WorkerRunSnapshot | None = None
@@ -1597,6 +1745,38 @@ class TaskExecutionService:
             created_at=s.created_at,
             updated_at=s.updated_at,
             working_context=working_context,
+        )
+
+    @staticmethod
+    def _map_personal_memory_to_snapshot(memory: PersonalMemory) -> PersonalMemorySnapshot:
+        return PersonalMemorySnapshot(
+            memory_id=memory.id,
+            user_id=memory.user_id,
+            memory_key=memory.memory_key,
+            value=dict(memory.value or {}),
+            source=memory.source,
+            confidence=memory.confidence,
+            scope=memory.scope,
+            last_verified_at=memory.last_verified_at,
+            requires_verification=memory.requires_verification,
+            created_at=memory.created_at,
+            updated_at=memory.updated_at,
+        )
+
+    @staticmethod
+    def _map_project_memory_to_snapshot(memory: ProjectMemory) -> ProjectMemorySnapshot:
+        return ProjectMemorySnapshot(
+            memory_id=memory.id,
+            repo_url=memory.repo_url,
+            memory_key=memory.memory_key,
+            value=dict(memory.value or {}),
+            source=memory.source,
+            confidence=memory.confidence,
+            scope=memory.scope,
+            last_verified_at=memory.last_verified_at,
+            requires_verification=memory.requires_verification,
+            created_at=memory.created_at,
+            updated_at=memory.updated_at,
         )
 
     def apply_task_approval_decision(
