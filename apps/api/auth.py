@@ -71,12 +71,14 @@ class ApiAuthConfig:
         # 3. Pragmatic default: trust request scheme or X-Forwarded-Proto
         if request:
             # Check direct scheme first
-            if getattr(request.url, "scheme", None) == "https":
+            url = getattr(request, "url", None)
+            if url and getattr(url, "scheme", None) == "https":
                 return True
 
             # Trust X-Forwarded-Proto case-insensitively if present
             # Handle comma-separated values (common in multi-proxy setups)
-            proto = request.headers.get("X-Forwarded-Proto", "")
+            headers = getattr(request, "headers", {})
+            proto = headers.get("X-Forwarded-Proto", "")
             if any(p.strip().lower() == "https" for p in proto.split(",")):
                 return True
 
