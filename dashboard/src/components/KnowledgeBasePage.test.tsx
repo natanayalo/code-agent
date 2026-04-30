@@ -114,6 +114,12 @@ describe('KnowledgeBasePage', () => {
     fireEvent.change(screen.getByLabelText('Personal Memory Value (JSON object)'), {
       target: { value: '{"theme":"light"}' },
     });
+    fireEvent.change(screen.getByLabelText('Personal Source'), { target: { value: 'operator' } });
+    fireEvent.change(screen.getByLabelText('Personal Scope'), { target: { value: 'global' } });
+    fireEvent.change(screen.getByLabelText('Personal Confidence (0.0-1.0)'), {
+      target: { value: '0.25' },
+    });
+    fireEvent.click(screen.getAllByLabelText('Requires verification')[0]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Personal Entry' }));
 
@@ -122,10 +128,10 @@ describe('KnowledgeBasePage', () => {
       user_id: 'user-2',
       memory_key: 'editor',
       value: { theme: 'light' },
-      source: undefined,
-      scope: undefined,
-      confidence: 1,
-      requires_verification: true,
+      source: 'operator',
+      scope: 'global',
+      confidence: 0.25,
+      requires_verification: false,
     });
   });
 
@@ -181,5 +187,156 @@ describe('KnowledgeBasePage', () => {
         'remove_me'
       );
     });
+  });
+
+  it('renders load error and retries both queries', async () => {
+    vi.mocked(api.listPersonalMemory).mockRejectedValue(new Error('personal failed'));
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    expect(await screen.findByText('Error loading knowledge base')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => {
+      expect(api.listPersonalMemory).toHaveBeenCalledTimes(2);
+      expect(api.listProjectMemory).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('submits project memory payload and handles empty optional values', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.upsertProjectMemory).mockResolvedValue({
+      memory_id: 'pj-upsert',
+      repo_url: 'https://example.com/repo',
+      memory_key: 'build',
+      value: { cmd: 'npm test' },
+      confidence: 1.0,
+      source: null,
+      scope: null,
+      last_verified_at: new Date().toISOString(),
+      requires_verification: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    renderKnowledgeBasePage();
+
+    await screen.findByLabelText('Project Repository URL');
+    fireEvent.change(screen.getByLabelText('Project Repository URL'), {
+      target: { value: '  https://example.com/repo  ' },
+    });
+    fireEvent.change(screen.getByLabelText('Project Memory Key'), {
+      target: { value: '  build  ' },
+    });
+    fireEvent.change(screen.getByLabelText('Project Memory Value (JSON object)'), {
+      target: { value: '{"cmd":"npm test"}' },
+    });
+    fireEvent.change(screen.getByLabelText('Project Source'), {
+      target: { value: '   ' },
+    });
+    fireEvent.change(screen.getByLabelText('Project Scope'), {
+      target: { value: '   ' },
+    });
+    fireEvent.change(screen.getByLabelText('Project Confidence (0.0-1.0)'), {
+      target: { value: '   ' },
+    });
+    fireEvent.click(screen.getAllByLabelText('Requires verification')[1]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Project Entry' }));
+
+    await waitFor(() => expect(api.upsertProjectMemory).toHaveBeenCalledTimes(1));
+    expect(api.upsertProjectMemory).toHaveBeenCalledWith({
+      repo_url: 'https://example.com/repo',
+      memory_key: 'build',
+      value: { cmd: 'npm test' },
+      source: undefined,
+      scope: undefined,
+      confidence: 1,
+      requires_verification: false,
+    });
+  });
+
+  it('validates project confidence range', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    await screen.findByLabelText('Project Repository URL');
+    fireEvent.change(screen.getByLabelText('Project Repository URL'), {
+      target: { value: 'https://example.com/repo' },
+    });
+    fireEvent.change(screen.getByLabelText('Project Memory Key'), {
+      target: { value: 'build' },
+    });
+    fireEvent.change(screen.getByLabelText('Project Memory Value (JSON object)'), {
+      target: { value: '{"cmd":"npm test"}' },
+    });
+    fireEvent.change(screen.getByLabelText('Project Confidence (0.0-1.0)'), {
+      target: { value: '1.5' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Project Entry' }));
+
+    expect(await screen.findByText('Confidence must be a number between 0 and 1.')).toBeInTheDocument();
+    expect(api.upsertProjectMemory).not.toHaveBeenCalled();
+  });
+
+  it('deletes a personal memory entry', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([
+      {
+        memory_id: 'pm-delete',
+        user_id: 'user-delete',
+        memory_key: 'remove_personal',
+        value: { stale: true },
+        confidence: 0.4,
+        scope: 'global',
+        source: null,
+        last_verified_at: new Date().toISOString(),
+        requires_verification: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.deletePersonalMemory).mockResolvedValue();
+
+    renderKnowledgeBasePage();
+
+    await screen.findByText('remove_personal');
+    fireEvent.click(screen.getByTitle('Delete entry'));
+
+    await waitFor(() => {
+      expect(api.deletePersonalMemory).toHaveBeenCalledWith('user-delete', 'remove_personal');
+    });
+  });
+
+  it('shows delete errors for project entries', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([
+      {
+        memory_id: 'pj-error',
+        repo_url: 'https://github.com/natanayalo/code-agent',
+        memory_key: 'cannot-delete',
+        value: { stale: true },
+        confidence: 0.5,
+        scope: 'repo',
+        source: null,
+        last_verified_at: null,
+        requires_verification: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    vi.mocked(api.deleteProjectMemory).mockRejectedValue(new Error('delete failed'));
+
+    renderKnowledgeBasePage();
+
+    await screen.findByText('cannot-delete');
+    fireEvent.click(screen.getByTitle('Delete entry'));
+
+    expect(await screen.findByText('delete failed')).toBeInTheDocument();
   });
 });
