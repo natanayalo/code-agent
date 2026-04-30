@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskSnapshot, TaskStatus } from '../types/task';
@@ -186,7 +186,101 @@ describe('TaskDetailPanel', () => {
 
     expect(screen.getByText('No timeline events recorded yet.')).toBeInTheDocument();
     expect(screen.getByText('No run metadata available yet.')).toBeInTheDocument();
+    expect(screen.getByText('No trace metadata available yet.')).toBeInTheDocument();
     expect(screen.getByText('No artifacts persisted for the latest run.')).toBeInTheDocument();
+  });
+
+  it('renders trace observability details from run and timeline metadata', () => {
+    const task = buildTask({
+      timeline: [
+        {
+          event_type: 'worker_completed',
+          attempt_number: 0,
+          sequence_number: 10,
+          message: 'Worker completed',
+          payload: {
+            telemetry: {
+              spans: [{ status: 'ok' }, { status: 'error' }, { status: 'ok' }],
+              trace_ids: ['trace-from-array'],
+            },
+          },
+          created_at: '2026-04-28T00:10:00.000Z',
+        },
+      ],
+      latest_run: buildLatestRun({
+        budget_usage: {
+          telemetry: {
+            trace_id: 'trace-123',
+            trace_url: 'https://smith.langchain.com/public/trace/trace-123',
+            span_status_counts: {
+              ok: 4,
+              warning: 1,
+            },
+          },
+        },
+        verifier_outcome: {
+          traceparent: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
+        },
+      }),
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Trace Observability')).toBeInTheDocument();
+    expect(screen.getByText('Trace IDs')).toBeInTheDocument();
+    expect(screen.getByText('trace-123')).toBeInTheDocument();
+    expect(screen.getByText('4bf92f3577b34da6a3ce929d0e0e4736')).toBeInTheDocument();
+    expect(screen.getByText('trace-from-array')).toBeInTheDocument();
+    expect(screen.getByText('Provider Deep Links')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', {
+        name: 'https://smith.langchain.com/public/trace/trace-123',
+      })
+    ).toHaveAttribute('href', 'https://smith.langchain.com/public/trace/trace-123');
+    expect(
+      screen.getByRole('link', {
+        name: 'https://smith.langchain.com/public/trace/trace-123',
+      })
+    ).toHaveAttribute('title', 'https://smith.langchain.com/public/trace/trace-123');
+    expect(
+      screen.getByRole('link', {
+        name: 'https://smith.langchain.com/public/trace/trace-123',
+      })
+    ).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(screen.getByText('Span Status Summary')).toBeInTheDocument();
+    const okRow = screen.getByText('Ok:').closest('li');
+    const warningRow = screen.getByText('Warning:').closest('li');
+    const errorRow = screen.getByText('Error:').closest('li');
+    expect(okRow).not.toBeNull();
+    expect(warningRow).not.toBeNull();
+    expect(errorRow).not.toBeNull();
+    expect(within(okRow as HTMLElement).getByText('6')).toBeInTheDocument();
+    expect(within(warningRow as HTMLElement).getByText('1')).toBeInTheDocument();
+    expect(within(errorRow as HTMLElement).getByText('1')).toBeInTheDocument();
+  });
+
+  it('does not map deceptive hostnames to trusted trace providers', () => {
+    const task = buildTask({
+      latest_run: buildLatestRun({
+        budget_usage: {
+          telemetry: {
+            trace_url: 'https://smith.langchain.com.evil.example/public/trace/abc',
+            langfuse_trace_url: 'https://langfuse.evil.com/public/trace/def',
+            phoenix_trace_url: 'https://phoenix.attacker.example/trace/ghi',
+          },
+        },
+      }),
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Provider Deep Links')).toBeInTheDocument();
+    expect(screen.queryByText('LangSmith')).not.toBeInTheDocument();
+    expect(screen.queryByText('Langfuse')).not.toBeInTheDocument();
+    expect(screen.queryByText('Phoenix')).not.toBeInTheDocument();
+    expect(screen.getByText('smith.langchain.com.evil.example')).toBeInTheDocument();
+    expect(screen.getByText('langfuse.evil.com')).toBeInTheDocument();
+    expect(screen.getByText('phoenix.attacker.example')).toBeInTheDocument();
   });
 
   it('renders loading and fallback error states without task data', () => {
