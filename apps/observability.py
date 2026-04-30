@@ -56,7 +56,7 @@ def bootstrap_langsmith_otel(
             cache_clear = getattr(langsmith_utils.get_env_var, "cache_clear", None)
             if callable(cache_clear):
                 cache_clear()
-        except Exception:
+        except (ImportError, AttributeError):
             pass
         logger.info(
             "Enabled %s=true because %s is true.",
