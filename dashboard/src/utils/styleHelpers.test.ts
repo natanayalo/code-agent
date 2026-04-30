@@ -3,15 +3,16 @@ import { formatLabel } from './formatters';
 import { getCategoryThemeClass, getNetworkStyle, getPermissionStyle } from './styleHelpers';
 
 describe('formatLabel', () => {
-  it('returns empty string for nullish input', () => {
-    expect(formatLabel(undefined)).toBe('');
-    expect(formatLabel(null)).toBe('');
-    expect(formatLabel('')).toBe('');
+  it('returns unknown fallback for nullish input', () => {
+    expect(formatLabel(undefined)).toBe('unknown');
+    expect(formatLabel(null)).toBe('unknown');
+    expect(formatLabel('')).toBe('unknown');
   });
 
-  it('formats snake and kebab case labels', () => {
+  it('formats snake and kebab case labels and preserves acronyms', () => {
     expect(formatLabel('shell_command')).toBe('Shell Command');
     expect(formatLabel('trace-observability')).toBe('Trace Observability');
+    expect(formatLabel('API_key')).toBe('API Key');
   });
 });
 

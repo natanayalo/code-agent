@@ -3,11 +3,16 @@
  * Example: "shell_command" -> "Shell Command"
  */
 export const formatLabel = (value: string | undefined | null): string => {
-  if (!value) return '';
+  if (!value) return 'unknown';
 
   return value
     .split(/[_-]+/)
     .filter(Boolean)
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .map(word => {
+      if (word.toUpperCase() === word) {
+        return word;
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
     .join(' ');
 };

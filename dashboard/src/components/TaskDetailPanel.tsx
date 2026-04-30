@@ -131,8 +131,7 @@ function inferTraceProvider(url: URL): string {
   const host = url.hostname.toLowerCase();
   if (hostMatchesDomain(host, 'smith.langchain.com')) return 'LangSmith';
   if (hostMatchesDomain(host, 'langfuse.com')) return 'Langfuse';
-  if (hostMatchesDomain(host, 'arize.com') || hostMatchesDomain(host, 'phoenix.arize.com'))
-    return 'Phoenix';
+  if (hostMatchesDomain(host, 'arize.com')) return 'Phoenix';
   return host;
 }
 
