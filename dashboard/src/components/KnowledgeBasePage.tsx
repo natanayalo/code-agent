@@ -107,8 +107,8 @@ export function KnowledgeBasePage() {
   });
 
   const isLoading = projectLoading || (personalQueryEnabled && personalLoading);
-  const loadError = projectLoadError;
   const personalQueryError = personalQueryEnabled ? (personalLoadError as Error | null) : null;
+  const projectQueryError = projectLoadError as Error | null;
   const personalHasMore =
     personalQueryEnabled &&
     personalEntries.length >= personalLimit &&
@@ -196,28 +196,6 @@ export function KnowledgeBasePage() {
     }
   };
 
-  if (loadError) {
-    return (
-      <DashboardLayout>
-        <div className="error-container">
-          <h2>Error loading knowledge base</h2>
-          <p>{(loadError as Error).message}</p>
-          <button
-            onClick={() => {
-              if (personalQueryEnabled) {
-                refetchPersonal();
-              }
-              refetchProject();
-            }}
-            className="btn-primary"
-          >
-            Retry
-          </button>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
   return (
     <DashboardLayout>
       <div className="page-header">
@@ -282,6 +260,10 @@ export function KnowledgeBasePage() {
               <label htmlFor="personal-memory-confidence">Personal Confidence (0.0-1.0)</label>
               <input
                 id="personal-memory-confidence"
+                type="number"
+                step="0.01"
+                min="0"
+                max="1"
                 value={personalConfidence}
                 onChange={(event) => setPersonalConfidence(event.target.value)}
                 required
@@ -404,6 +386,10 @@ export function KnowledgeBasePage() {
               <label htmlFor="project-memory-confidence">Project Confidence (0.0-1.0)</label>
               <input
                 id="project-memory-confidence"
+                type="number"
+                step="0.01"
+                min="0"
+                max="1"
                 value={projectConfidence}
                 onChange={(event) => setProjectConfidence(event.target.value)}
                 required
@@ -425,7 +411,15 @@ export function KnowledgeBasePage() {
             </form>
 
             <div className="knowledge-list">
-              {projectEntries.length === 0 ? (
+              {projectQueryError ? (
+                <div className="error-container">
+                  <h3>Error loading project memory</h3>
+                  <p>{projectQueryError.message}</p>
+                  <button onClick={() => refetchProject()} className="btn-primary" type="button">
+                    Retry Project Memory
+                  </button>
+                </div>
+              ) : projectEntries.length === 0 ? (
                 <p className="session-context-muted">No project entries found.</p>
               ) : (
                 projectEntries.map((entry) => (
@@ -456,7 +450,7 @@ export function KnowledgeBasePage() {
                 ))
               )}
             </div>
-            {projectHasMore ? (
+            {projectQueryError ? null : projectHasMore ? (
               <button
                 type="button"
                 className="knowledge-load-more"

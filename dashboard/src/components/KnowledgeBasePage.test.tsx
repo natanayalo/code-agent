@@ -194,14 +194,14 @@ describe('KnowledgeBasePage', () => {
     });
   });
 
-  it('renders load error and retries project query', async () => {
+  it('shows project-section load error and retries project query', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockRejectedValue(new Error('project failed'));
 
     renderKnowledgeBasePage();
 
-    expect(await screen.findByText('Error loading knowledge base')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Error loading project memory')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Project Memory' }));
 
     await waitFor(() => {
       expect(api.listProjectMemory).toHaveBeenCalledTimes(2);
@@ -244,9 +244,6 @@ describe('KnowledgeBasePage', () => {
     fireEvent.change(screen.getByLabelText('Project Scope'), {
       target: { value: '   ' },
     });
-    fireEvent.change(screen.getByLabelText('Project Confidence (0.0-1.0)'), {
-      target: { value: '   ' },
-    });
     fireEvent.click(screen.getAllByLabelText('Requires verification')[1]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Project Entry' }));
@@ -279,14 +276,28 @@ describe('KnowledgeBasePage', () => {
     fireEvent.change(screen.getByLabelText('Project Memory Value (JSON object)'), {
       target: { value: '{"cmd":"npm test"}' },
     });
-    fireEvent.change(screen.getByLabelText('Project Confidence (0.0-1.0)'), {
+    const projectConfidenceInput = screen.getByLabelText(
+      'Project Confidence (0.0-1.0)'
+    ) as HTMLInputElement;
+    fireEvent.change(projectConfidenceInput, {
       target: { value: '1.5' },
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Project Entry' }));
 
-    expect(await screen.findByText('Confidence must be a number between 0 and 1.')).toBeInTheDocument();
+    expect(projectConfidenceInput.validity.rangeOverflow).toBe(true);
     expect(api.upsertProjectMemory).not.toHaveBeenCalled();
+  });
+
+  it('uses numeric inputs for confidence fields', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    await screen.findByLabelText('Personal Confidence (0.0-1.0)');
+    expect(screen.getByLabelText('Personal Confidence (0.0-1.0)')).toHaveAttribute('type', 'number');
+    expect(screen.getByLabelText('Project Confidence (0.0-1.0)')).toHaveAttribute('type', 'number');
   });
 
   it('deletes a personal memory entry', async () => {
