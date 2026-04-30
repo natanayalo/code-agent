@@ -66,15 +66,15 @@ Granular tasks for the active and upcoming milestones:
 - [x] T-145: implement API & UI for Tool Inventory and Sandbox status
 - [x] T-153: add trace visibility to task detail UI (trace IDs, provider deep-links, basic span status summary) (#143)
 
+### Observability Follow-up: OpenTelemetry Integration
+- [x] T-150: enable LangSmith OTEL auto-tracing and verify graph/node visibility (#144)
+- [ ] T-151: add manual spans for TaskExecutionService, worker runtime, sandbox/shell, review, and PR/CI stages
+- [ ] T-152: add OTEL collector fan-out/export path for LangSmith, Langfuse, and Phoenix
+
 ### Milestone 17: Worker Profile Strategy
 - [ ] T-140: define `WorkerProfile` Pydantic model and capability matrix
 - [ ] T-141: implement profile-based worker selection logic in the orchestrator
 - [ ] T-142: map existing workers (Gemini, Codex, OpenRouter) to capabilities (Planning, Coding, Reviewing)
-
-### Observability Follow-up: OpenTelemetry Integration
-- [ ] T-150: enable LangSmith OTEL auto-tracing and verify graph/node visibility
-- [ ] T-151: add manual spans for TaskExecutionService, worker runtime, sandbox/shell, review, and PR/CI stages
-- [ ] T-152: add OTEL collector fan-out/export path for LangSmith, Langfuse, and Phoenix
 
 ## Recent Completed Milestones
 
