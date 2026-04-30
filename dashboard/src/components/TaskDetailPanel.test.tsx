@@ -201,6 +201,7 @@ describe('TaskDetailPanel', () => {
           payload: {
             telemetry: {
               spans: [{ status: 'ok' }, { status: 'error' }, { status: 'ok' }],
+              trace_ids: ['trace-from-array'],
             },
           },
           created_at: '2026-04-28T00:10:00.000Z',
@@ -229,6 +230,7 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('Trace IDs')).toBeInTheDocument();
     expect(screen.getByText('trace-123')).toBeInTheDocument();
     expect(screen.getByText('4bf92f3577b34da6a3ce929d0e0e4736')).toBeInTheDocument();
+    expect(screen.getByText('trace-from-array')).toBeInTheDocument();
     expect(screen.getByText('Provider Deep Links')).toBeInTheDocument();
     expect(
       screen.getByRole('link', {
@@ -245,6 +247,24 @@ describe('TaskDetailPanel', () => {
     expect(within(okRow as HTMLElement).getByText('6')).toBeInTheDocument();
     expect(within(warningRow as HTMLElement).getByText('1')).toBeInTheDocument();
     expect(within(errorRow as HTMLElement).getByText('1')).toBeInTheDocument();
+  });
+
+  it('does not map deceptive hostnames to trusted trace providers', () => {
+    const task = buildTask({
+      latest_run: buildLatestRun({
+        budget_usage: {
+          telemetry: {
+            trace_url: 'https://smith.langchain.com.evil.example/public/trace/abc',
+          },
+        },
+      }),
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Provider Deep Links')).toBeInTheDocument();
+    expect(screen.queryByText('LangSmith')).not.toBeInTheDocument();
+    expect(screen.getByText('smith.langchain.com.evil.example')).toBeInTheDocument();
   });
 
   it('renders loading and fallback error states without task data', () => {

@@ -132,11 +132,16 @@ function parseHttpUrl(value: string): URL | null {
   }
 }
 
+function hostMatchesDomain(host: string, domain: string): boolean {
+  return host === domain || host.endsWith(`.${domain}`);
+}
+
 function inferTraceProvider(url: URL): string {
   const host = url.hostname.toLowerCase();
-  if (host.includes('smith.langchain.com')) return 'LangSmith';
-  if (host.includes('langfuse')) return 'Langfuse';
-  if (host.includes('arize') || host.includes('phoenix')) return 'Phoenix';
+  const hostLabels = host.split('.').filter(Boolean);
+  if (hostMatchesDomain(host, 'smith.langchain.com')) return 'LangSmith';
+  if (hostMatchesDomain(host, 'langfuse.com') || hostLabels.includes('langfuse')) return 'Langfuse';
+  if (hostLabels.includes('arize') || hostLabels.includes('phoenix')) return 'Phoenix';
   return host;
 }
 
@@ -221,17 +226,16 @@ function extractTraceObservability(task: TaskSnapshot | null): TraceObservabilit
     }
   };
 
-  const visit = (value: unknown, path: string[] = [], depth = 0) => {
+  const visit = (value: unknown, key = '', depth = 0) => {
     if (depth > 6 || value == null) return;
+    const normalizedKey = normalizeToken(key);
 
     if (Array.isArray(value)) {
-      value.forEach((item, index) => visit(item, [...path, String(index)], depth + 1));
+      value.forEach((item) => visit(item, key, depth + 1));
       return;
     }
 
     if (typeof value === 'string') {
-      const key = path[path.length - 1] || '';
-      const normalizedKey = normalizeToken(key);
       if (isTraceIdKey(normalizedKey)) {
         addTraceId(value);
       }
@@ -249,8 +253,6 @@ function extractTraceObservability(task: TaskSnapshot | null): TraceObservabilit
     if (visited.has(objectValue)) return;
     visited.add(objectValue);
 
-    const key = path[path.length - 1] || '';
-    const normalizedKey = normalizeToken(key);
     if (isSpanSummaryKey(normalizedKey)) {
       extractSpanStatusMap(objectValue);
     }
@@ -269,7 +271,7 @@ function extractTraceObservability(task: TaskSnapshot | null): TraceObservabilit
           }
         }
       }
-      visit(entryValue, [...path, entryKey], depth + 1);
+      visit(entryValue, entryKey, depth + 1);
     }
   };
 
@@ -277,10 +279,10 @@ function extractTraceObservability(task: TaskSnapshot | null): TraceObservabilit
   if (task?.latest_run) {
     sources.push(task.latest_run.budget_usage, task.latest_run.verifier_outcome);
     task.latest_run.artifact_index?.forEach((artifact) => {
-      sources.push(artifact, artifact?.artifact_metadata);
+      sources.push(artifact);
     });
     task.latest_run.artifacts?.forEach((artifact) => {
-      sources.push(artifact, artifact?.artifact_metadata);
+      sources.push(artifact);
     });
   }
   task?.timeline?.forEach((event) => {
@@ -519,7 +521,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                     <h5>Span Status Summary</h5>
                     <ul className="task-trace-list">
                       {traceObservability.spanStatusCounts.map((entry) => (
-                        <li key={`${entry.status}-${entry.count}`}>
+                        <li key={entry.status}>
                           <strong>{formatLabel(entry.status)}:</strong> {entry.count}
                         </li>
                       ))}
