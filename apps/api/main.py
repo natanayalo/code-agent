@@ -14,12 +14,14 @@ from apps.api.auth import (
     ApiAuthConfig,
     build_api_auth_config_from_env,
 )
+from apps.api.config import SystemConfig
 from apps.api.progress import create_outbound_http_clients
 from apps.api.routes.auth import router as auth_router
 from apps.api.routes.health import router as health_router
 from apps.api.routes.knowledge_base import router as knowledge_base_router
 from apps.api.routes.metrics import router as metrics_router
 from apps.api.routes.sessions import router as sessions_router
+from apps.api.routes.system import router as system_router
 from apps.api.routes.tasks import router as tasks_router
 from apps.api.routes.telegram import router as telegram_router
 from apps.api.routes.webhook import router as webhook_router
@@ -50,6 +52,7 @@ def create_app(
                 app.state.api_auth_config = (
                     auth_config if auth_config is not None else build_api_auth_config_from_env()
                 )
+                app.state.system_config = SystemConfig.load_from_env()
 
                 # Startup validation for dashboard auth
                 if (
@@ -110,6 +113,7 @@ def create_app(
         else:
             try:
                 app.state.api_auth_config = auth_config or ApiAuthConfig()
+                app.state.system_config = SystemConfig.load_from_env()
                 app.state.task_service = task_service
                 yield
             finally:
@@ -126,6 +130,7 @@ def create_app(
     app.include_router(auth_router)
     app.include_router(tasks_router)
     app.include_router(sessions_router)
+    app.include_router(system_router)
     app.include_router(knowledge_base_router)
     app.include_router(webhook_router)
     app.include_router(telegram_router)

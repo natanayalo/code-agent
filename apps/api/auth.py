@@ -7,16 +7,30 @@ import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Final
+from typing import Any, Final, Protocol
 
 import jwt
+
+
+class RequestProto(Protocol):
+    """Minimal protocol for objects with headers (like FastAPI Request)."""
+
+    @property
+    def headers(self) -> Mapping[str, str]: ...
+
+    @property
+    def url(self) -> Any: ...
+
 
 logger = logging.getLogger(__name__)
 
 API_SHARED_SECRET_ENV_VAR: Final[str] = "CODE_AGENT_API_SHARED_SECRET"
 TELEGRAM_WEBHOOK_SECRET_ENV_VAR: Final[str] = "CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN"
 ALLOWED_ORIGINS_ENV_VAR: Final[str] = "CODE_AGENT_ALLOWED_ORIGINS"
+
+# Security override constants
 COOKIE_SECURE_ENV_VAR: Final[str] = "CODE_AGENT_COOKIE_SECURE"
+API_FORCE_HTTPS_ENV_VAR: Final[str] = "CODE_AGENT_API_FORCE_HTTPS"
 
 API_SHARED_SECRET_HEADER: Final[str] = "X-Webhook-Token"
 TELEGRAM_WEBHOOK_SECRET_HEADER: Final[str] = "X-Telegram-Bot-Api-Secret-Token"
@@ -41,25 +55,62 @@ class ApiAuthConfig:
     shared_secret: str | None = None
     telegram_webhook_secret: str | None = None
     allowed_origins: list[str] = field(default_factory=list)
-    cookie_secure: bool = False
+    cookie_secure_override: bool | None = None
+    force_https: bool = False
+
+    def is_cookie_secure(self, request: RequestProto | None = None) -> bool:
+        """Determine if cookies should be marked Secure based on config and request."""
+        # 1. Explicit override via CODE_AGENT_COOKIE_SECURE always wins
+        if self.cookie_secure_override is not None:
+            return self.cookie_secure_override
+
+        # 2. Force HTTPS override (resolved at load time)
+        if self.force_https:
+            return True
+
+        # 3. Pragmatic default: trust request scheme or X-Forwarded-Proto
+        if request:
+            # Check direct scheme first
+            url = getattr(request, "url", None)
+            if url and getattr(url, "scheme", None) == "https":
+                return True
+
+            # Trust X-Forwarded-Proto case-insensitively if present
+            # Handle comma-separated values (common in multi-proxy setups)
+            headers = getattr(request, "headers", {})
+            proto = next(
+                (value for key, value in headers.items() if key.lower() == "x-forwarded-proto"),
+                "",
+            )
+            if any(p.strip().lower() == "https" for p in proto.split(",")):
+                return True
+
+        return False
 
 
 def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) -> ApiAuthConfig:
     """Load inbound API authentication settings from environment variables."""
-    resolved_env = os.environ if environ is None else environ
+    env = environ if environ is not None else os.environ
 
-    allowed_origins_str = resolved_env.get(ALLOWED_ORIGINS_ENV_VAR, "")
+    allowed_origins_str = env.get(ALLOWED_ORIGINS_ENV_VAR, "")
     allowed_origins = [
         o.strip().rstrip("/").lower() for o in allowed_origins_str.split(",") if o.strip()
     ]
 
-    cookie_secure = resolved_env.get(COOKIE_SECURE_ENV_VAR, "0") == "1"
+    # Resolve overrides
+    cookie_secure_val = env.get(COOKIE_SECURE_ENV_VAR)
+    cookie_secure_override = None
+    if cookie_secure_val is not None:
+        cookie_secure_override = cookie_secure_val.lower() in ("true", "1")
+
+    force_https = env.get(API_FORCE_HTTPS_ENV_VAR, "").lower() in ("true", "1")
 
     return ApiAuthConfig(
-        shared_secret=_clean_secret(resolved_env.get(API_SHARED_SECRET_ENV_VAR)),
-        telegram_webhook_secret=_clean_secret(resolved_env.get(TELEGRAM_WEBHOOK_SECRET_ENV_VAR)),
+        shared_secret=_clean_secret(env.get(API_SHARED_SECRET_ENV_VAR)),
+        telegram_webhook_secret=_clean_secret(env.get(TELEGRAM_WEBHOOK_SECRET_ENV_VAR)),
         allowed_origins=allowed_origins,
-        cookie_secure=cookie_secure,
+        cookie_secure_override=cookie_secure_override,
+        force_https=force_https,
     )
 
 

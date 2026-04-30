@@ -49,11 +49,7 @@ class AuthStatusResponse(BaseModel):
 
 def _is_cookie_secure(request: Request, auth_config: ApiAuthConfig) -> bool:
     """Determine if the session cookie should be marked as Secure."""
-    return (
-        auth_config.cookie_secure
-        or request.url.scheme == "https"
-        or request.headers.get("X-Forwarded-Proto") == "https"
-    )
+    return auth_config.is_cookie_secure(request)
 
 
 @router.post("/login", response_model=LoginResponse)

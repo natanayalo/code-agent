@@ -1,0 +1,37 @@
+/**
+ * Style helpers for mapping API status values to theme variables and labels.
+ */
+
+export const getPermissionStyle = (permission: string) => {
+  if (permission === 'read_only') {
+    return {
+      color: 'var(--color-text-secondary)',
+      showShield: false,
+    };
+  }
+
+  return {
+    color: 'var(--color-warning)',
+    showShield: true,
+  };
+};
+
+export const getNetworkStyle = (required: boolean) => {
+  return {
+    color: required ? 'var(--color-warning)' : 'var(--color-text-secondary)',
+    label: required ? 'Required' : 'None',
+  };
+};
+
+/**
+ * Maps a tool capability category to a CSS theme class.
+ */
+export const getCategoryThemeClass = (category: string | null | undefined): string => {
+  // Normalize the category string for future CSS class mapping
+  const normalized = (category || 'default')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '-');
+
+  // Return the base badge classes plus a category-specific class for CSS overrides
+  return `badge badge-neutral category-${normalized}`;
+};

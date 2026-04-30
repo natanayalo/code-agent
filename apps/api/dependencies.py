@@ -16,6 +16,7 @@ from apps.api.auth import (
     ApiAuthConfig,
     decode_dashboard_token,
 )
+from apps.api.config import SystemConfig
 from orchestrator.execution import TaskExecutionService
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,11 @@ def get_task_service(request: Request) -> TaskExecutionService:
 def get_api_auth_config(request: Request) -> ApiAuthConfig:
     """Return the configured inbound auth settings for the app instance."""
     return cast(ApiAuthConfig, request.app.state.api_auth_config)
+
+
+def get_system_config(request: Request) -> SystemConfig:
+    """Return the pre-loaded system configuration for the app instance."""
+    return cast(SystemConfig, request.app.state.system_config)
 
 
 def _ensure_secret_matches(
