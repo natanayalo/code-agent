@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, MessageSquare, Settings, Shield, Activity, BookOpen } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Settings, Shield, Activity, BookOpen, Server } from 'lucide-react';
 
 interface SidebarItemProps {
   icon: React.ReactNode;
@@ -42,6 +42,7 @@ export function Sidebar() {
 
         <div className="nav-group">
           <div className="nav-group-label">System</div>
+          <SidebarItem icon={<Server size={20} />} label="System Config" to="/system" />
           <SidebarItem icon={<Settings size={20} />} label="Settings" to="/settings" />
         </div>
       </nav>

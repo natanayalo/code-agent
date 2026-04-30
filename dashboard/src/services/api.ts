@@ -7,6 +7,7 @@ import {
   ProjectMemorySnapshot,
   ProjectMemoryUpsertRequest,
 } from '../types/memory';
+import { ToolDefinition, SandboxStatusResponse } from '../types/system';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -239,6 +240,25 @@ export const api = {
       return await fetchWithAuth(`/metrics?window_hours=${windowHours}`);
     } catch (error) {
       console.warn('Failed to fetch metrics from API', error);
+      throw error;
+    }
+  },
+
+  async getSystemTools(): Promise<ToolDefinition[]> {
+    try {
+      const data = await fetchWithAuth('/system/tools');
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to fetch system tools from API', error);
+      throw error;
+    }
+  },
+
+  async getSandboxStatus(): Promise<SandboxStatusResponse> {
+    try {
+      return await fetchWithAuth('/system/sandbox');
+    } catch (error) {
+      console.warn('Failed to fetch sandbox status from API', error);
       throw error;
     }
   },

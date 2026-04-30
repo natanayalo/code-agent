@@ -12,6 +12,7 @@ import { LoginPage } from './components/auth/LoginPage';
 import { SessionsPage } from './components/SessionsPage';
 import { MetricsPage } from './components/MetricsPage';
 import { KnowledgeBasePage } from './components/KnowledgeBasePage';
+import { SystemPage } from './components/SystemPage';
 import { TaskDetailPanel } from './components/TaskDetailPanel';
 import { OperatorInbox } from './components/OperatorInbox';
 
@@ -167,6 +168,14 @@ function AppRoutes() {
         element={
           <AuthGuard>
             <KnowledgeBasePage />
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/system"
+        element={
+          <AuthGuard>
+            <SystemPage />
           </AuthGuard>
         }
       />
