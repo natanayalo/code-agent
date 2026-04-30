@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from apps.api.dependencies import require_any_valid_auth
+from sandbox.container import DEFAULT_SANDBOX_IMAGE
 from sandbox.workspace import default_workspace_root
 from tools.registry import DEFAULT_TOOL_REGISTRY, ToolDefinition
 
@@ -34,7 +35,7 @@ def list_tools() -> list[ToolDefinition]:
 @router.get("/sandbox", response_model=SandboxStatusResponse)
 def get_sandbox_status() -> SandboxStatusResponse:
     """Return the configuration and status of the task sandbox."""
-    image = os.environ.get("CODE_AGENT_SANDBOX_IMAGE", "").strip() or "python:3.12-slim"
+    image = os.environ.get("CODE_AGENT_SANDBOX_IMAGE", "").strip() or DEFAULT_SANDBOX_IMAGE
     workspace_root = str(default_workspace_root())
     return SandboxStatusResponse(
         default_image=image,

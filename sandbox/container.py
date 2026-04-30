@@ -14,6 +14,8 @@ from sandbox.workspace import SandboxModel, WorkspaceHandle, _mask_url_credentia
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SANDBOX_IMAGE = "python:3.12-slim"
+
 
 class DockerContainerCommandRunner(Protocol):
     """Protocol for running docker commands on the host."""
@@ -163,7 +165,7 @@ class DockerSandboxContainerManager:
     def __init__(
         self,
         *,
-        default_image: str = "python:3.12-slim",
+        default_image: str = DEFAULT_SANDBOX_IMAGE,
         docker_binary: str = "docker",
         command_runner: DockerContainerCommandRunner | None = None,
         inspect_timeout_seconds: int = 10,

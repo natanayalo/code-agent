@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterator
 
 import pytest
@@ -40,23 +39,21 @@ def test_list_tools_returns_registry(client: TestClient) -> None:
     assert "execute_git" in names
 
 
-def test_get_sandbox_status_returns_config(client: TestClient) -> None:
+def test_get_sandbox_status_returns_config(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The /system/sandbox endpoint returns the sandbox config."""
-    os.environ["CODE_AGENT_SANDBOX_IMAGE"] = "custom-test-image"
-    os.environ["CODE_AGENT_WORKSPACE_ROOT"] = "/tmp/test-workspace-root"
+    monkeypatch.setenv("CODE_AGENT_SANDBOX_IMAGE", "custom-test-image")
+    monkeypatch.setenv("CODE_AGENT_WORKSPACE_ROOT", "/tmp/test-workspace-root")
 
-    try:
-        response = client.get(
-            "/system/sandbox",
-            headers={API_SHARED_SECRET_HEADER: "test-secret"},
-        )
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert data["default_image"] == "custom-test-image"
-        assert data["workspace_root"] == "/tmp/test-workspace-root"
-    finally:
-        os.environ.pop("CODE_AGENT_SANDBOX_IMAGE", None)
-        os.environ.pop("CODE_AGENT_WORKSPACE_ROOT", None)
+    response = client.get(
+        "/system/sandbox",
+        headers={API_SHARED_SECRET_HEADER: "test-secret"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["default_image"] == "custom-test-image"
+    assert data["workspace_root"] == "/tmp/test-workspace-root"
 
 
 def test_system_endpoints_require_auth(client: TestClient) -> None:
