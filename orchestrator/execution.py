@@ -408,6 +408,17 @@ class SessionSnapshot(ExecutionModel):
     last_seen_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    working_context: SessionWorkingContextSnapshot | None = None
+
+
+class SessionWorkingContextSnapshot(ExecutionModel):
+    """Compact working context persisted for a session."""
+
+    active_goal: str | None = None
+    decisions_made: dict[str, Any] = Field(default_factory=dict)
+    identified_risks: dict[str, Any] = Field(default_factory=dict)
+    files_touched: list[str] = Field(default_factory=list)
+    updated_at: datetime | None = None
 
 
 class TaskSummarySnapshot(ExecutionModel):
@@ -1564,6 +1575,17 @@ class TaskExecutionService:
 
     def _map_session_to_snapshot(self, s: ConversationSession) -> SessionSnapshot:
         """Map a ConversationSession database model to a SessionSnapshot Pydantic model (T-131)."""
+        working_context: SessionWorkingContextSnapshot | None = None
+        if "session_state" in s.__dict__ and s.session_state is not None:
+            state = s.session_state
+            working_context = SessionWorkingContextSnapshot(
+                active_goal=state.active_goal,
+                decisions_made=dict(state.decisions_made or {}),
+                identified_risks=dict(state.identified_risks or {}),
+                files_touched=list(state.files_touched or []),
+                updated_at=state.updated_at,
+            )
+
         return SessionSnapshot(
             session_id=s.id,
             user_id=s.user_id,
@@ -1574,6 +1596,7 @@ class TaskExecutionService:
             last_seen_at=s.last_seen_at,
             created_at=s.created_at,
             updated_at=s.updated_at,
+            working_context=working_context,
         )
 
     def apply_task_approval_decision(

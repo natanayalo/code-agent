@@ -1095,6 +1095,46 @@ button {
   border-radius: 8px;
 }
 
+.session-working-context {
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-md);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.session-working-context-title {
+  margin: 0 0 var(--spacing-sm);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+
+.session-goal-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.session-context-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5ch;
+}
+
+.session-context-list {
+  margin: 0 0 var(--spacing-sm);
+  padding-left: 1.2rem;
+  color: var(--color-text-secondary);
+}
+
+.session-context-muted {
+  margin: 0 0 var(--spacing-sm);
+  color: var(--color-text-muted);
+}
+
 .session-card-footer {
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   padding-top: var(--spacing-md);

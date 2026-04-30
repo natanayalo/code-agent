@@ -13,6 +13,7 @@ from apps.api.main import create_app
 from db.base import Base
 from orchestrator.execution import TaskExecutionService
 from repositories import (
+    SessionStateRepository,
     create_engine_from_url,
     create_session_factory,
     session_scope,
@@ -172,6 +173,51 @@ def test_get_session_returns_snapshot(client: TestClient) -> None:
     payload = response.json()
     assert payload["session_id"] == session_id
     assert payload["external_thread_id"] == "thread-1"
+    assert payload["working_context"] is None
+
+
+def test_session_endpoints_include_working_context(client: TestClient, session_factory) -> None:
+    """Session list/detail endpoints should expose compact working context (T-143)."""
+    resp = client.post(
+        "/tasks",
+        json={
+            "task_text": "capture session context",
+            "session": {
+                "channel": "http",
+                "external_user_id": "test-user",
+                "external_thread_id": "thread-context",
+            },
+        },
+    )
+    session_id = resp.json()["session_id"]
+
+    with session_scope(session_factory) as session:
+        SessionStateRepository(session).upsert(
+            session_id=session_id,
+            active_goal="Ship T-143",
+            identified_risks={"scope": "ui spillover"},
+            decisions_made={"approach": "read-only surface"},
+            files_touched=["apps/api/routes/sessions.py"],
+        )
+
+    list_response = client.get("/sessions")
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    session_payload = next(item for item in list_payload if item["session_id"] == session_id)
+    working_context = session_payload["working_context"]
+    assert working_context["active_goal"] == "Ship T-143"
+    assert working_context["identified_risks"] == {"scope": "ui spillover"}
+    assert working_context["decisions_made"] == {"approach": "read-only surface"}
+    assert working_context["files_touched"] == ["apps/api/routes/sessions.py"]
+    assert working_context["updated_at"] is not None
+
+    detail_response = client.get(f"/sessions/{session_id}")
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    detail_context = detail_payload["working_context"]
+    assert detail_context["active_goal"] == "Ship T-143"
+    assert detail_context["identified_risks"] == {"scope": "ui spillover"}
+    assert detail_context["decisions_made"] == {"approach": "read-only surface"}
 
 
 def test_get_session_returns_404_for_missing_session(client: TestClient) -> None:

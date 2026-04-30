@@ -16,6 +16,28 @@ function getStatusClass(status: string): string {
   return s;
 }
 
+function formatContextEntries(value: Record<string, unknown> | null | undefined): string[] {
+  if (!value || typeof value !== 'object') {
+    return [];
+  }
+
+  return Object.entries(value).map(([key, entryValue]) => {
+    if (typeof entryValue === 'string') {
+      return `${key}: ${entryValue}`;
+    }
+    try {
+      return `${key}: ${JSON.stringify(entryValue)}`;
+    } catch {
+      return `${key}: [unserializable]`;
+    }
+  });
+}
+
+function formatSessionGoal(value: string | null | undefined): string {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : 'Not captured yet';
+}
+
 export function SessionsPage() {
   const {
     data: sessions = [],
@@ -68,43 +90,88 @@ export function SessionsPage() {
         </div>
       ) : (
         <div className="sessions-grid">
-          {sortedSessions.map((session: SessionSnapshot) => (
-            <div key={session.session_id} className="session-card card">
-              <div className="session-card-header">
-                <div className={`status-badge status-${getStatusClass(session.status)}`}>
-                  {session.status}
-                </div>
-                <span className="session-id">ID: <span className="truncate" title={session.session_id}>{session.session_id}</span></span>
-              </div>
+          {sortedSessions.map((session: SessionSnapshot) => {
+            const riskEntries = formatContextEntries(session.working_context?.identified_risks);
+            const decisionEntries = formatContextEntries(session.working_context?.decisions_made);
+            const goalText = formatSessionGoal(session.working_context?.active_goal);
 
-              <div className="session-card-body">
-                <div className="session-info-item">
-                  <User size={16} />
-                  <span>User: </span><span className="truncate" title={session.user_id}>{session.user_id}</span>
-                </div>
-                <div className="session-info-item">
-                  <Activity size={16} />
-                  <span>Channel: </span><span>{session.channel}</span>
-                </div>
-                <div className="session-info-item">
-                  <MessageSquare size={16} />
-                  <span>Thread: </span><span className="truncate" title={session.external_thread_id}>{session.external_thread_id}</span>
-                </div>
-                {session.active_task_id && (
-                  <div className="session-info-item active-task">
-                    <Clock size={16} />
-                    <span>Active Task: </span><span className="truncate" title={session.active_task_id}>{session.active_task_id}</span>
+            return (
+              <div key={session.session_id} className="session-card card">
+                <div className="session-card-header">
+                  <div className={`status-badge status-${getStatusClass(session.status)}`}>
+                    {session.status}
                   </div>
-                )}
-              </div>
+                  <span className="session-id">ID: <span className="truncate" title={session.session_id}>{session.session_id}</span></span>
+                </div>
 
-              <div className="session-card-footer">
-                <span className="timestamp">
-                  Created: {session.created_at ? new Date(session.created_at).toLocaleString() : 'N/A'}
-                </span>
+                <div className="session-card-body">
+                  <div className="session-info-item">
+                    <User size={16} />
+                    <span>User: </span><span className="truncate" title={session.user_id}>{session.user_id}</span>
+                  </div>
+                  <div className="session-info-item">
+                    <Activity size={16} />
+                    <span>Channel: </span><span>{session.channel}</span>
+                  </div>
+                  <div className="session-info-item">
+                    <MessageSquare size={16} />
+                    <span>Thread: </span><span className="truncate" title={session.external_thread_id}>{session.external_thread_id}</span>
+                  </div>
+                  {session.active_task_id && (
+                    <div className="session-info-item active-task">
+                      <Clock size={16} />
+                      <span>Active Task: </span><span className="truncate" title={session.active_task_id}>{session.active_task_id}</span>
+                    </div>
+                  )}
+
+                  <div className="session-working-context">
+                    <p className="session-working-context-title">Working Context</p>
+                    <p className="session-context-line">
+                      <strong>Goal:</strong>{' '}
+                      <span
+                        className="truncate session-goal-value"
+                        title={goalText}
+                      >
+                        {goalText}
+                      </span>
+                    </p>
+
+                    <p>
+                      <strong>Risks:</strong>
+                    </p>
+                    {riskEntries.length > 0 ? (
+                      <ul className="session-context-list">
+                        {riskEntries.map((risk, index) => (
+                          <li key={`${session.session_id}-risk-${index}`}>{risk}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="session-context-muted">None captured</p>
+                    )}
+
+                    <p>
+                      <strong>Decisions:</strong>
+                    </p>
+                    {decisionEntries.length > 0 ? (
+                      <ul className="session-context-list">
+                        {decisionEntries.map((decision, index) => (
+                          <li key={`${session.session_id}-decision-${index}`}>{decision}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="session-context-muted">None captured</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="session-card-footer">
+                  <span className="timestamp">
+                    Created: {session.created_at ? new Date(session.created_at).toLocaleString() : 'N/A'}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </DashboardLayout>
