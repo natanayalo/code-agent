@@ -46,6 +46,11 @@ def test_get_sandbox_status_returns_config(
     monkeypatch.setenv("CODE_AGENT_SANDBOX_IMAGE", "custom-test-image")
     monkeypatch.setenv("CODE_AGENT_WORKSPACE_ROOT", "/tmp/test-workspace-root")
 
+    # Manually reload config in app state to reflect monkeypatched environment
+    from apps.api.config import SystemConfig
+
+    client.app.state.system_config = SystemConfig.load_from_env()
+
     response = client.get(
         "/system/sandbox",
         headers={API_SHARED_SECRET_HEADER: "test-secret"},

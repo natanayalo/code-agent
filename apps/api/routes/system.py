@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from apps.api.config import SystemConfig
-from apps.api.dependencies import require_any_valid_auth
+from apps.api.dependencies import get_system_config, require_any_valid_auth
 from tools.registry import DEFAULT_TOOL_REGISTRY, ToolDefinition
 
 router = APIRouter(
@@ -30,9 +30,10 @@ def list_tools() -> list[ToolDefinition]:
 
 
 @router.get("/sandbox", response_model=SandboxStatusResponse)
-def get_sandbox_status() -> SandboxStatusResponse:
+def get_sandbox_status(
+    config: SystemConfig = Depends(get_system_config),
+) -> SandboxStatusResponse:
     """Return the configuration and status of the task sandbox."""
-    config = SystemConfig.load_from_env()
     return SandboxStatusResponse(
         default_image=config.default_image,
         workspace_root=config.workspace_root,

@@ -14,6 +14,7 @@ from apps.api.auth import (
     ApiAuthConfig,
     build_api_auth_config_from_env,
 )
+from apps.api.config import SystemConfig
 from apps.api.progress import create_outbound_http_clients
 from apps.api.routes.auth import router as auth_router
 from apps.api.routes.health import router as health_router
@@ -51,6 +52,7 @@ def create_app(
                 app.state.api_auth_config = (
                     auth_config if auth_config is not None else build_api_auth_config_from_env()
                 )
+                app.state.system_config = SystemConfig.load_from_env()
 
                 # Startup validation for dashboard auth
                 if (
@@ -111,6 +113,7 @@ def create_app(
         else:
             try:
                 app.state.api_auth_config = auth_config or ApiAuthConfig()
+                app.state.system_config = SystemConfig.load_from_env()
                 app.state.task_service = task_service
                 yield
             finally:
