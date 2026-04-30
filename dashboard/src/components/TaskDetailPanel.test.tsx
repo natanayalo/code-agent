@@ -237,6 +237,11 @@ describe('TaskDetailPanel', () => {
         name: 'https://smith.langchain.com/public/trace/trace-123',
       })
     ).toHaveAttribute('href', 'https://smith.langchain.com/public/trace/trace-123');
+    expect(
+      screen.getByRole('link', {
+        name: 'https://smith.langchain.com/public/trace/trace-123',
+      })
+    ).toHaveAttribute('rel', 'noopener noreferrer');
     expect(screen.getByText('Span Status Summary')).toBeInTheDocument();
     const okRow = screen.getByText('Ok:').closest('li');
     const warningRow = screen.getByText('Warning:').closest('li');
