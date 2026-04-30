@@ -265,6 +265,8 @@ describe('TaskDetailPanel', () => {
         budget_usage: {
           telemetry: {
             trace_url: 'https://smith.langchain.com.evil.example/public/trace/abc',
+            langfuse_trace_url: 'https://langfuse.evil.com/public/trace/def',
+            phoenix_trace_url: 'https://phoenix.attacker.example/trace/ghi',
           },
         },
       }),
@@ -274,7 +276,11 @@ describe('TaskDetailPanel', () => {
 
     expect(screen.getByText('Provider Deep Links')).toBeInTheDocument();
     expect(screen.queryByText('LangSmith')).not.toBeInTheDocument();
+    expect(screen.queryByText('Langfuse')).not.toBeInTheDocument();
+    expect(screen.queryByText('Phoenix')).not.toBeInTheDocument();
     expect(screen.getByText('smith.langchain.com.evil.example')).toBeInTheDocument();
+    expect(screen.getByText('langfuse.evil.com')).toBeInTheDocument();
+    expect(screen.getByText('phoenix.attacker.example')).toBeInTheDocument();
   });
 
   it('renders loading and fallback error states without task data', () => {

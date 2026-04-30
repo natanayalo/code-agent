@@ -2,6 +2,7 @@ import React from 'react';
 import { X } from 'lucide-react';
 import { TaskSnapshot } from '../types/task';
 import { TaskApprovalSection } from './TaskApprovalSection';
+import { formatLabel } from '../utils/formatters';
 
 interface TaskDetailPanelProps {
   task: TaskSnapshot | null;
@@ -25,16 +26,6 @@ interface TraceObservabilitySnapshot {
   traceIds: string[];
   providerLinks: TraceLink[];
   spanStatusCounts: SpanStatusCount[];
-}
-
-function formatLabel(value: string | null | undefined): string {
-  const normalized = (value || '').trim();
-  if (!normalized) {
-    return 'unknown';
-  }
-  return normalized
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -138,10 +129,10 @@ function hostMatchesDomain(host: string, domain: string): boolean {
 
 function inferTraceProvider(url: URL): string {
   const host = url.hostname.toLowerCase();
-  const hostLabels = host.split('.').filter(Boolean);
   if (hostMatchesDomain(host, 'smith.langchain.com')) return 'LangSmith';
-  if (hostMatchesDomain(host, 'langfuse.com') || hostLabels.includes('langfuse')) return 'Langfuse';
-  if (hostLabels.includes('arize') || hostLabels.includes('phoenix')) return 'Phoenix';
+  if (hostMatchesDomain(host, 'langfuse.com')) return 'Langfuse';
+  if (hostMatchesDomain(host, 'arize.com') || hostMatchesDomain(host, 'phoenix.arize.com'))
+    return 'Phoenix';
   return host;
 }
 
