@@ -26,6 +26,7 @@ from apps.api.routes.tasks import router as tasks_router
 from apps.api.routes.telegram import router as telegram_router
 from apps.api.routes.webhook import router as webhook_router
 from apps.api.task_service_factory import build_task_service_from_env
+from apps.observability import configure_tracing_from_env
 from apps.runtime import RUN_API_ENV_VAR, should_run_api
 from orchestrator.execution import TaskExecutionService, shutdown_callback_dns_executor
 
@@ -45,6 +46,9 @@ def create_app(
             raise RuntimeError(
                 f"API runtime is disabled for this process. Set {RUN_API_ENV_VAR}=1 to enable it."
             )
+
+        configure_tracing_from_env(service_name="code-agent-api")
+
         if task_service is None:
             outbound_http_clients = create_outbound_http_clients()
             try:

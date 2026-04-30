@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from contextlib import AbstractAsyncContextManager
+from contextlib import AbstractAsyncContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
@@ -2220,38 +2220,55 @@ class TaskExecutionService:
             budget=submission.budget,
         )
 
-        raw_output = await self.graph.ainvoke(
-            {
-                "session": SessionRef(
-                    session_id=persisted.session_id,
-                    user_id=persisted.user_id,
-                    channel=persisted.channel,
-                    external_thread_id=persisted.external_thread_id,
-                    active_task_id=persisted.task_id,
-                    status="active",
-                ).model_dump(),
-                "task": {
-                    "task_id": persisted.task_id,
-                    "task_text": submission.task_text,
-                    "repo_url": submission.repo_url,
-                    "branch": submission.branch,
-                    "priority": submission.priority,
-                    "worker_override": (
-                        submission.worker_override.value
-                        if submission.worker_override is not None
-                        else None
-                    ),
-                    "constraints": dict(submission.constraints),
-                    "budget": effective_budget,
-                    "secrets": dict(submission.secrets),
-                    "tools": submission.tools,
+        span_cm: Any = nullcontext()
+        try:
+            from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+            span_cm = otel_trace.get_tracer("orchestrator.execution").start_as_current_span(
+                "orchestrator.graph.run",
+                attributes={
+                    "code_agent.task_id": persisted.task_id,
+                    "code_agent.session_id": persisted.session_id,
+                    "code_agent.attempt_count": persisted.attempt_count,
+                    "code_agent.channel": persisted.channel,
                 },
-                "task_spec": persisted.task_spec,
-                "attempt_count": persisted.attempt_count,
-                "timeline_persisted_count": initial_persisted_count,
-            },
-            config=config,
-        )
+            )
+        except ImportError:
+            span_cm = nullcontext()
+
+        with span_cm:
+            raw_output = await self.graph.ainvoke(
+                {
+                    "session": SessionRef(
+                        session_id=persisted.session_id,
+                        user_id=persisted.user_id,
+                        channel=persisted.channel,
+                        external_thread_id=persisted.external_thread_id,
+                        active_task_id=persisted.task_id,
+                        status="active",
+                    ).model_dump(),
+                    "task": {
+                        "task_id": persisted.task_id,
+                        "task_text": submission.task_text,
+                        "repo_url": submission.repo_url,
+                        "branch": submission.branch,
+                        "priority": submission.priority,
+                        "worker_override": (
+                            submission.worker_override.value
+                            if submission.worker_override is not None
+                            else None
+                        ),
+                        "constraints": dict(submission.constraints),
+                        "budget": effective_budget,
+                        "secrets": dict(submission.secrets),
+                        "tools": submission.tools,
+                    },
+                    "task_spec": persisted.task_spec,
+                    "attempt_count": persisted.attempt_count,
+                    "timeline_persisted_count": initial_persisted_count,
+                },
+                config=config,
+            )
         normalized_output = _normalize_orchestrator_graph_output(raw_output)
         return OrchestratorState.model_validate(normalized_output)
 

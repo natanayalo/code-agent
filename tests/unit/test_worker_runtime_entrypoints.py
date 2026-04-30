@@ -168,6 +168,46 @@ async def test_run_worker_forever_builds_queue_worker_from_env_and_runs(
     assert set(close_calls) == {"telegram", "webhook"}
 
 
+@pytest.mark.anyio
+async def test_run_worker_forever_bootstraps_observability(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Worker runtime should invoke tracing bootstrap before queue startup."""
+    close_calls: list[str] = []
+    tracing_calls: list[str] = []
+    outbound_clients = SimpleNamespace(
+        telegram=_FakeAsyncClient("telegram", close_calls),
+        webhook=_FakeAsyncClient("webhook", close_calls),
+    )
+
+    class _FakeQueueWorker:
+        def __init__(
+            self,
+            *,
+            service: object,
+            worker_id: str,
+            poll_interval_seconds: float,
+            lease_seconds: int,
+        ) -> None:
+            self.service = service
+
+        async def run_forever(self) -> None:
+            return None
+
+    monkeypatch.setattr(worker_main, "should_run_worker", lambda: True)
+    monkeypatch.setattr(worker_main, "create_outbound_http_clients", lambda: outbound_clients)
+    monkeypatch.setattr(worker_main, "build_task_service_from_env", lambda **_: object())
+    monkeypatch.setattr(worker_main, "TaskQueueWorker", _FakeQueueWorker)
+    monkeypatch.setattr(
+        worker_main,
+        "configure_tracing_from_env",
+        lambda *, service_name: tracing_calls.append(service_name),
+    )
+
+    await worker_main.run_worker_forever()
+
+    assert tracing_calls == ["code-agent-worker"]
+    assert set(close_calls) == {"telegram", "webhook"}
+
+
 def test_worker_main_calls_async_entrypoint_with_configured_logging(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -49,6 +49,9 @@ services:
       CODE_AGENT_WEBHOOK_DEFAULT_REPO_URL: ${CODE_AGENT_WEBHOOK_DEFAULT_REPO_URL:-}
       CODE_AGENT_ALLOWED_ORIGINS: ${CODE_AGENT_ALLOWED_ORIGINS:-}
       CODE_AGENT_COOKIE_SECURE: ${CODE_AGENT_COOKIE_SECURE:-0}
+      CODE_AGENT_ENABLE_TRACING: ${CODE_AGENT_ENABLE_TRACING:-0}
+      CODE_AGENT_TRACING_PROJECT: ${CODE_AGENT_TRACING_PROJECT:-code-agent-local}
+      CODE_AGENT_TRACING_OTLP_ENDPOINT: ${CODE_AGENT_TRACING_OTLP_ENDPOINT:-http://phoenix:6006/v1/traces}
       DATABASE_HOST: ${DATABASE_HOST:-postgres}
       DATABASE_PORT: ${DATABASE_PORT:-5432}
       POSTGRES_DB: ${POSTGRES_DB?Please set POSTGRES_DB in .env}
@@ -96,6 +99,9 @@ services:
       CODE_AGENT_QUEUE_LEASE_SECONDS: ${CODE_AGENT_QUEUE_LEASE_SECONDS:-60}
       CODE_AGENT_QUEUE_MAX_ATTEMPTS: ${CODE_AGENT_QUEUE_MAX_ATTEMPTS:-3}
       CODE_AGENT_WORKSPACE_ROOT: ${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}
+      CODE_AGENT_ENABLE_TRACING: ${CODE_AGENT_ENABLE_TRACING:-0}
+      CODE_AGENT_TRACING_PROJECT: ${CODE_AGENT_TRACING_PROJECT:-code-agent-local}
+      CODE_AGENT_TRACING_OTLP_ENDPOINT: ${CODE_AGENT_TRACING_OTLP_ENDPOINT:-http://phoenix:6006/v1/traces}
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,6 +112,13 @@ services:
       - ${CODE_AGENT_CODEX_AUTH_DIR?Please set CODE_AGENT_CODEX_AUTH_DIR in env}:/root/.codex
       - ${CODE_AGENT_GEMINI_AUTH_DIR?Please set CODE_AGENT_GEMINI_AUTH_DIR in env}:/root/.gemini
       - ${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}:${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    ports:
+      - "6006:6006"
+      - "4317:4317"
+    profiles:
+      - observability
   dashboard:
     build:
       context: ./dashboard

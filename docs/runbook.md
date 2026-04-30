@@ -60,6 +60,28 @@ Relevant environment controls:
 - `CODE_AGENT_QUEUE_LEASE_SECONDS` (default `60`)
 - `CODE_AGENT_QUEUE_MAX_ATTEMPTS` (default `3`)
 
+## 3.1) Tracing and Observability (Phoenix OSS)
+
+`code-agent` can emit OpenTelemetry/OpenInference traces for LangGraph/orchestrator runs.
+
+Enable tracing env vars:
+
+- `CODE_AGENT_ENABLE_TRACING=1`
+- `CODE_AGENT_TRACING_PROJECT=<project-name>`
+- `CODE_AGENT_TRACING_OTLP_ENDPOINT=http://phoenix:6006/v1/traces`
+
+Run local/self-hosted Phoenix:
+
+```bash
+docker compose --profile observability up -d phoenix
+```
+
+Phoenix UI and OTLP endpoints:
+
+- UI: `http://localhost:6006`
+- OTLP HTTP collector: `http://localhost:6006/v1/traces`
+- OTLP gRPC collector: `localhost:4317`
+
 ## 4) Approval Flow
 
 Manual approval checkpoints are persisted in task constraints and surfaced through:

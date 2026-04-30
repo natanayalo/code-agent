@@ -91,6 +91,25 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/ready
 ```
 
+### Trace observability (Phoenix + OpenInference)
+
+Run self-hosted Phoenix locally:
+
+```bash
+docker compose --profile observability up -d phoenix
+```
+
+Enable tracing in `.env`:
+
+```bash
+CODE_AGENT_ENABLE_TRACING=1
+CODE_AGENT_TRACING_PROJECT=code-agent-local
+CODE_AGENT_TRACING_OTLP_ENDPOINT=http://phoenix:6006/v1/traces
+```
+
+Then start the stack (`scripts/up.sh` or `docker compose up`) and open Phoenix at
+`http://localhost:6006` to inspect LangGraph/orchestrator traces.
+
 ## Dashboard / Operator UI
 
 The dashboard is a React-based PWA located in the `dashboard/` directory.

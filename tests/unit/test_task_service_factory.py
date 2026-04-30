@@ -267,8 +267,18 @@ def test_create_app_uses_env_bootstrap_when_no_task_service_is_injected(
     monkeypatch,
 ) -> None:
     """App startup should pick up the env-backed task service builder automatically."""
-    sentinel = AsyncMock()
-    sentinel.__aenter__.return_value = sentinel
+
+    class _FakeTaskService:
+        async def __aenter__(self) -> _FakeTaskService:
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def is_secret_encryption_active(self) -> bool:
+            return True
+
+    sentinel = _FakeTaskService()
     seen_kwargs: dict[str, object] = {}
 
     def _build_task_service_from_env(**kwargs):
@@ -286,6 +296,40 @@ def test_create_app_uses_env_bootstrap_when_no_task_service_is_injected(
     with TestClient(app) as client:
         assert client.app.state.task_service is sentinel
         assert "outbound_http_clients" in seen_kwargs
+
+
+def test_create_app_bootstraps_observability_on_startup(monkeypatch) -> None:
+    """API lifespan should invoke tracing bootstrap during startup."""
+    tracing_calls: list[str] = []
+
+    class _FakeTaskService:
+        async def __aenter__(self) -> _FakeTaskService:
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def is_secret_encryption_active(self) -> bool:
+            return True
+
+    sentinel = _FakeTaskService()
+
+    monkeypatch.setattr(
+        "apps.api.main.configure_tracing_from_env",
+        lambda *, service_name: tracing_calls.append(service_name),
+    )
+    monkeypatch.setattr("apps.api.main.build_task_service_from_env", lambda **_: sentinel)
+    monkeypatch.setattr(
+        "apps.api.main.build_api_auth_config_from_env",
+        lambda: ApiAuthConfig(shared_secret="test-shared-secret"),
+    )
+
+    app = create_app()
+
+    with TestClient(app):
+        pass
+
+    assert tracing_calls == ["code-agent-api"]
 
 
 def test_create_app_requires_api_auth_when_env_bootstrap_builds_task_service(
