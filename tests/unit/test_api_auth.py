@@ -18,6 +18,7 @@ def test_build_api_auth_config_from_env_trims_secrets() -> None:
             "CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN": "  telegram-secret  ",
             "CODE_AGENT_ALLOWED_ORIGINS": " http://localhost:3000 , https://agent.local ",
             "CODE_AGENT_COOKIE_SECURE": "1",
+            "CODE_AGENT_API_FORCE_HTTPS": "1",
         }
     )
 
@@ -25,6 +26,7 @@ def test_build_api_auth_config_from_env_trims_secrets() -> None:
     assert config.telegram_webhook_secret == "telegram-secret"
     assert config.allowed_origins == ["http://localhost:3000", "https://agent.local"]
     assert config.cookie_secure_override is True
+    assert config.force_https is True
 
 
 def test_build_api_auth_config_from_env_treats_blank_as_missing() -> None:

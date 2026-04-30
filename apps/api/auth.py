@@ -98,9 +98,7 @@ def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) -> 
     if cookie_secure_val is not None:
         cookie_secure_override = cookie_secure_val.lower() in ("true", "1")
 
-    force_https = env.get(API_FORCE_HTTPS_ENV_VAR, "").lower() in ("true", "1") or env.get(
-        "FORCE_HTTPS", "false"
-    ).lower() in ("true", "1")
+    force_https = env.get(API_FORCE_HTTPS_ENV_VAR, "").lower() in ("true", "1")
 
     return ApiAuthConfig(
         shared_secret=_clean_secret(env.get(API_SHARED_SECRET_ENV_VAR)),
