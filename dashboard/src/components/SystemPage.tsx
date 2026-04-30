@@ -77,29 +77,33 @@ export function SystemPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {tools.map(tool => (
-                      <tr key={tool.name} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-                        <td style={{ padding: '0.75rem 1rem', fontFamily: 'monospace', color: 'var(--color-accent-secondary)' }}>{tool.name}</td>
-                        <td style={{ padding: '0.75rem 1rem' }}>
-                          <span className={getCategoryThemeClass()}>
-                            {formatLabel(tool.capability_category)}
-                          </span>
-                        </td>
-                        <td style={{ padding: '0.75rem 1rem' }}>
-                          <span style={{
-                            display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-                            color: getPermissionStyle(tool.required_permission).color
-                          }}>
-                            {getPermissionStyle(tool.required_permission).showShield && <Shield size={14} />}
-                            {formatLabel(tool.required_permission)}
-                          </span>
-                        </td>
-                        <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-secondary)' }}>{formatLabel(tool.side_effect_level)}</td>
-                        <td style={{ padding: '0.75rem 1rem', color: getNetworkStyle(tool.network_required).color }}>
-                          {getNetworkStyle(tool.network_required).label}
-                        </td>
-                      </tr>
-                    ))}
+                    {tools.map((tool, index) => {
+                      const permissionStyle = getPermissionStyle(tool.required_permission);
+                      const networkStyle = getNetworkStyle(tool.network_required);
+                      return (
+                        <tr key={tool.name + "-" + index} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                          <td style={{ padding: '0.75rem 1rem', fontFamily: 'monospace', color: 'var(--color-accent-secondary)' }}>{tool.name}</td>
+                          <td style={{ padding: '0.75rem 1rem' }}>
+                            <span className={getCategoryThemeClass(tool.capability_category)}>
+                              {formatLabel(tool.capability_category)}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem' }}>
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
+                              color: permissionStyle.color
+                            }}>
+                              {permissionStyle.showShield && <Shield size={14} />}
+                              {formatLabel(tool.required_permission)}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-secondary)' }}>{formatLabel(tool.side_effect_level)}</td>
+                          <td style={{ padding: '0.75rem 1rem', color: networkStyle.color }}>
+                            {networkStyle.label}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

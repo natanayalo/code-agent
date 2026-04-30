@@ -26,8 +26,9 @@ export const getNetworkStyle = (required: boolean) => {
 /**
  * Maps a tool capability category to a CSS theme class.
  */
-export const getCategoryThemeClass = (): string => {
-  // For now, all categories use the neutral badge style
-  // but this can be extended for specific category coloring.
+export const getCategoryThemeClass = (category: string): string => {
+  // Use category to determine specific theme classes in the future.
+  // For now, all categories use the neutral badge style.
+  void category;
   return 'badge badge-neutral';
 };
