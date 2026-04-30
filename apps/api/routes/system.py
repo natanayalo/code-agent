@@ -23,7 +23,9 @@ class SandboxStatusResponse(BaseModel):
     workspace_root: str
 
 
-@router.get("/tools", response_model=list[ToolDefinition])
+@router.get(
+    "/tools", response_model=list[ToolDefinition], response_model_exclude={"mcp_input_schema"}
+)
 def list_tools() -> list[ToolDefinition]:
     """Return the registry of tools available to the worker runtime."""
     return list(DEFAULT_TOOL_REGISTRY.list_tools())

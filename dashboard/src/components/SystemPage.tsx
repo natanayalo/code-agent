@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Server, Wrench, Shield, HardDrive, AlertTriangle } from 'lucide-react';
 import { DashboardLayout } from './layout/DashboardLayout';
 import { api } from '../services/api';
+import { getPermissionStyle, getNetworkStyle } from '../utils/styleHelpers';
 
 export function SystemPage() {
   const { data: tools, isLoading: toolsLoading, error: toolsError } = useQuery({
@@ -86,15 +87,15 @@ export function SystemPage() {
                         <td style={{ padding: '0.75rem 1rem' }}>
                           <span style={{
                             display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-                            color: tool.required_permission === 'read_only' ? 'var(--color-text-secondary)' : 'var(--color-warning)'
+                            color: getPermissionStyle(tool.required_permission).color
                           }}>
-                            {tool.required_permission !== 'read_only' && <Shield size={14} />}
+                            {getPermissionStyle(tool.required_permission).showShield && <Shield size={14} />}
                             {tool.required_permission}
                           </span>
                         </td>
                         <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-secondary)' }}>{tool.side_effect_level}</td>
-                        <td style={{ padding: '0.75rem 1rem', color: tool.network_required ? 'var(--color-warning)' : 'var(--color-text-secondary)' }}>
-                          {tool.network_required ? 'Required' : 'None'}
+                        <td style={{ padding: '0.75rem 1rem', color: getNetworkStyle(tool.network_required).color }}>
+                          {getNetworkStyle(tool.network_required).label}
                         </td>
                       </tr>
                     ))}
