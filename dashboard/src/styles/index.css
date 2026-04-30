@@ -1142,6 +1142,156 @@ button {
   font-size: 0.75rem;
 }
 
+/* Knowledge Base Page */
+.knowledge-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--spacing-lg);
+}
+
+.knowledge-section {
+  padding: var(--spacing-lg);
+}
+
+.knowledge-section h2 {
+  margin: 0 0 var(--spacing-xs);
+}
+
+.knowledge-section-subtitle {
+  margin: 0 0 var(--spacing-md);
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+}
+
+.knowledge-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-lg);
+}
+
+.knowledge-form label {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+.knowledge-form input,
+.knowledge-form textarea {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background-color: rgba(15, 23, 42, 0.85);
+  color: var(--color-text-primary);
+  padding: 9px 11px;
+  font-size: 0.82rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.knowledge-form textarea {
+  resize: vertical;
+}
+
+.knowledge-form input:focus,
+.knowledge-form textarea:focus {
+  outline: none;
+  border-color: rgba(56, 189, 248, 0.6);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.12);
+}
+
+.knowledge-checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.knowledge-checkbox input {
+  width: auto;
+}
+
+.knowledge-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.knowledge-load-more {
+  margin-top: var(--spacing-sm);
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.75);
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+}
+
+.knowledge-load-more:hover:not(:disabled) {
+  border-color: rgba(56, 189, 248, 0.55);
+  color: var(--color-text-primary);
+}
+
+.knowledge-load-more:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.knowledge-entry {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: var(--spacing-md);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.knowledge-entry-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.knowledge-entry-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.knowledge-entry-header p {
+  margin: 2px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+}
+
+.knowledge-entry-meta {
+  margin-top: var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.knowledge-entry pre {
+  margin: var(--spacing-sm) 0 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  background-color: rgba(15, 23, 42, 0.6);
+  border-radius: 8px;
+  padding: 8px 10px;
+  overflow-x: auto;
+}
+
+.knowledge-page-footer {
+  margin-top: var(--spacing-lg);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+.knowledge-page-footer p {
+  margin: 0;
+}
+
 /* Metrics Page */
 .metrics-container {
   display: flex;

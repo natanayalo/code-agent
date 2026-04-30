@@ -14,8 +14,10 @@ describe('Sidebar', () => {
 
     const tasksLink = screen.getByRole('link', { name: /Tasks/i });
     const sessionsLink = screen.getByRole('link', { name: /Sessions/i });
+    const knowledgeLink = screen.getByRole('link', { name: /Knowledge Base/i });
 
     expect(tasksLink).not.toHaveClass('active');
     expect(sessionsLink).toHaveClass('active');
+    expect(knowledgeLink).not.toHaveClass('active');
   });
 });

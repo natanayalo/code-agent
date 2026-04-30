@@ -209,6 +209,215 @@ describe('api service', () => {
       expect(result).toEqual([]);
     });
 
+    it('listPersonalMemory returns array of entries', async () => {
+      const mockEntries = [{ memory_id: 'm1', user_id: 'u1', memory_key: 'style', value: {} }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockEntries,
+      });
+
+      const result = await api.listPersonalMemory('u1');
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/personal?user_id=u1');
+      expect(result).toEqual(mockEntries);
+    });
+
+    it('listPersonalMemory includes pagination params and handles non-array fallback', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({ not: 'array' }),
+      });
+
+      const result = await api.listPersonalMemory('u-2', 25, 50);
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('/knowledge-base/personal?');
+      expect(url).toContain('user_id=u-2');
+      expect(url).toContain('limit=25');
+      expect(url).toContain('offset=50');
+      expect(result).toEqual([]);
+    });
+
+    it('upsertPersonalMemory sends PUT payload', async () => {
+      const mockEntry = {
+        memory_id: 'm1',
+        user_id: 'u1',
+        memory_key: 'style',
+        value: { style: 'concise' },
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockEntry,
+      });
+
+      await api.upsertPersonalMemory({
+        user_id: 'u1',
+        memory_key: 'style',
+        value: { style: 'concise' },
+      });
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/knowledge-base/personal');
+      expect(options.method).toBe('PUT');
+      expect(JSON.parse(options.body)).toEqual({
+        user_id: 'u1',
+        memory_key: 'style',
+        value: { style: 'concise' },
+      });
+    });
+
+    it('listPersonalMemory catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(api.listPersonalMemory('u1')).rejects.toThrow('Network fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('upsertPersonalMemory catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(
+        api.upsertPersonalMemory({ user_id: 'u1', memory_key: 'k1', value: {} })
+      ).rejects.toThrow('Network fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('deletePersonalMemory sends DELETE with encoded query params', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        headers: new Map(),
+      });
+
+      await api.deletePersonalMemory('u 1', 'key/one');
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/knowledge-base/personal?');
+      expect(url).toContain('user_id=u+1');
+      expect(url).toContain('memory_key=key%2Fone');
+      expect(options.method).toBe('DELETE');
+    });
+
+    it('deletePersonalMemory catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(api.deletePersonalMemory('u1', 'k1')).rejects.toThrow('Network fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('listProjectMemory returns entries and supports no filter query', async () => {
+      const mockEntries = [{ memory_id: 'p1', repo_url: 'https://repo', memory_key: 'k1', value: {} }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockEntries,
+      });
+
+      const result = await api.listProjectMemory();
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('/knowledge-base/project');
+      expect(url).not.toContain('repo_url=');
+      expect(result).toEqual(mockEntries);
+    });
+
+    it('listProjectMemory includes optional repo and pagination filters', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ([]),
+      });
+
+      await api.listProjectMemory('https://repo', 10, 20);
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/project?');
+      expect(url).toContain('repo_url=https%3A%2F%2Frepo');
+      expect(url).toContain('limit=10');
+      expect(url).toContain('offset=20');
+    });
+
+    it('listProjectMemory catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(api.listProjectMemory('https://repo')).rejects.toThrow('Network fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('upsertProjectMemory sends PUT payload', async () => {
+      const mockEntry = {
+        memory_id: 'p1',
+        repo_url: 'https://repo',
+        memory_key: 'k1',
+        value: { cmd: 'pytest' },
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockEntry,
+      });
+
+      await api.upsertProjectMemory({
+        repo_url: 'https://repo',
+        memory_key: 'k1',
+        value: { cmd: 'pytest' },
+      });
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/knowledge-base/project');
+      expect(options.method).toBe('PUT');
+      expect(JSON.parse(options.body)).toEqual({
+        repo_url: 'https://repo',
+        memory_key: 'k1',
+        value: { cmd: 'pytest' },
+      });
+    });
+
+    it('upsertProjectMemory catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(
+        api.upsertProjectMemory({ repo_url: 'https://repo', memory_key: 'k1', value: {} })
+      ).rejects.toThrow('Network fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('deleteProjectMemory sends DELETE with encoded query params', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        headers: new Map(),
+      });
+
+      await api.deleteProjectMemory('https://github.com/natanayalo/code-agent', 'build command');
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/knowledge-base/project?');
+      expect(url).toContain('memory_key=build+command');
+      expect(options.method).toBe('DELETE');
+    });
+
+    it('deleteProjectMemory catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(api.deleteProjectMemory('https://repo', 'k1')).rejects.toThrow('Network fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
     it('decideTaskApproval rejection sends correct POST body and logs correctly', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,

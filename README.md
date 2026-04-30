@@ -19,6 +19,7 @@ The platform is built for one operator-first use case: reliable coding execution
 - persistent Docker sandbox workspaces with audit artifacts and retention
 - structured skeptical memory + compact session state persistence
 - replay and approval-decision task controls via API
+- dashboard knowledge-base management for personal/project skeptical memory entries
 - operational metrics and lifecycle progress callbacks
 
 ## Product Boundaries

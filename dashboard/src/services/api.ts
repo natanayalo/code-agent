@@ -1,6 +1,12 @@
 import { TaskReplayRequest, TaskSummarySnapshot, TaskSnapshot } from '../types/task';
 import { SessionSnapshot } from '../types/session';
 import { OperationalMetrics } from '../types/metrics';
+import {
+  PersonalMemorySnapshot,
+  PersonalMemoryUpsertRequest,
+  ProjectMemorySnapshot,
+  ProjectMemoryUpsertRequest,
+} from '../types/memory';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -43,7 +49,6 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
-    if (response.status === 204) return null;
     throw new Error(`Expected JSON response but received content-type: ${contentType || 'unknown'}`);
   }
 
@@ -97,6 +102,110 @@ export const api = {
       return Array.isArray(data) ? data : [];
     } catch (error) {
       console.warn('Failed to fetch sessions from API', error);
+      throw error;
+    }
+  },
+
+  async listPersonalMemory(
+    userId: string,
+    limit?: number,
+    offset?: number,
+  ): Promise<PersonalMemorySnapshot[]> {
+    try {
+      const query = new URLSearchParams({ user_id: userId });
+      if (typeof limit === 'number') {
+        query.set('limit', String(limit));
+      }
+      if (typeof offset === 'number') {
+        query.set('offset', String(offset));
+      }
+      const data = await fetchWithAuth(`/knowledge-base/personal?${query.toString()}`);
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to fetch personal memory from API', error);
+      throw error;
+    }
+  },
+
+  async upsertPersonalMemory(
+    payload: PersonalMemoryUpsertRequest,
+  ): Promise<PersonalMemorySnapshot> {
+    try {
+      return await fetchWithAuth('/knowledge-base/personal', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      console.warn('Failed to upsert personal memory entry', error);
+      throw error;
+    }
+  },
+
+  async deletePersonalMemory(userId: string, memoryKey: string): Promise<void> {
+    try {
+      const query = new URLSearchParams({
+        user_id: userId,
+        memory_key: memoryKey,
+      });
+      await fetchWithAuth(`/knowledge-base/personal?${query.toString()}`, {
+        method: 'DELETE',
+      });
+    } catch (error) {
+      console.warn('Failed to delete personal memory entry', error);
+      throw error;
+    }
+  },
+
+  async listProjectMemory(
+    repoUrl?: string,
+    limit?: number,
+    offset?: number,
+  ): Promise<ProjectMemorySnapshot[]> {
+    try {
+      const query = new URLSearchParams();
+      if (repoUrl) {
+        query.set('repo_url', repoUrl);
+      }
+      if (typeof limit === 'number') {
+        query.set('limit', String(limit));
+      }
+      if (typeof offset === 'number') {
+        query.set('offset', String(offset));
+      }
+      const queryString = query.toString();
+      const data = await fetchWithAuth(
+        `/knowledge-base/project${queryString.length > 0 ? `?${queryString}` : ''}`
+      );
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to fetch project memory from API', error);
+      throw error;
+    }
+  },
+
+  async upsertProjectMemory(payload: ProjectMemoryUpsertRequest): Promise<ProjectMemorySnapshot> {
+    try {
+      return await fetchWithAuth('/knowledge-base/project', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      console.warn('Failed to upsert project memory entry', error);
+      throw error;
+    }
+  },
+
+  async deleteProjectMemory(repoUrl: string, memoryKey: string): Promise<void> {
+    try {
+      const query = new URLSearchParams({
+        repo_url: repoUrl,
+        memory_key: memoryKey,
+      });
+      await fetchWithAuth(`/knowledge-base/project?${query.toString()}`, {
+        method: 'DELETE',
+      });
+    } catch (error) {
+      console.warn('Failed to delete project memory entry', error);
       throw error;
     }
   },
