@@ -6,7 +6,8 @@ export const formatLabel = (value: string | undefined | null): string => {
   if (!value) return '';
 
   return value
-    .split(/[_-]/)
+    .split(/[_-]+/)
+    .filter(Boolean)
     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(' ');
 };
