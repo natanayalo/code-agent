@@ -33,6 +33,11 @@ function formatContextEntries(value: Record<string, unknown> | null | undefined)
   });
 }
 
+function formatSessionGoal(value: string | null | undefined): string {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : 'Not captured yet';
+}
+
 export function SessionsPage() {
   const {
     data: sessions = [],
@@ -88,6 +93,7 @@ export function SessionsPage() {
           {sortedSessions.map((session: SessionSnapshot) => {
             const riskEntries = formatContextEntries(session.working_context?.identified_risks);
             const decisionEntries = formatContextEntries(session.working_context?.decisions_made);
+            const goalText = formatSessionGoal(session.working_context?.active_goal);
 
             return (
               <div key={session.session_id} className="session-card card">
@@ -120,13 +126,13 @@ export function SessionsPage() {
 
                   <div className="session-working-context">
                     <p className="session-working-context-title">Working Context</p>
-                    <p>
+                    <p className="session-context-line">
                       <strong>Goal:</strong>{' '}
                       <span
                         className="truncate session-goal-value"
-                        title={session.working_context?.active_goal || 'Not captured yet'}
+                        title={goalText}
                       >
-                        {session.working_context?.active_goal || 'Not captured yet'}
+                        {goalText}
                       </span>
                     </p>
 

@@ -1114,7 +1114,14 @@ button {
 }
 
 .session-goal-value {
-  max-width: calc(100% - 3.5rem);
+  flex: 1;
+  min-width: 0;
+}
+
+.session-context-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5ch;
 }
 
 .session-context-list {
