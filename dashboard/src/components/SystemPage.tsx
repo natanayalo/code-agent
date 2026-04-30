@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Server, Wrench, Shield, HardDrive, AlertTriangle } from 'lucide-react';
 import { DashboardLayout } from './layout/DashboardLayout';
 import { api } from '../services/api';
-import { getPermissionStyle, getNetworkStyle } from '../utils/styleHelpers';
+import { getPermissionStyle, getNetworkStyle, getCategoryThemeClass } from '../utils/styleHelpers';
 import { formatLabel } from '../utils/formatters';
 
 export function SystemPage() {
@@ -81,7 +81,7 @@ export function SystemPage() {
                       <tr key={tool.name} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
                         <td style={{ padding: '0.75rem 1rem', fontFamily: 'monospace', color: 'var(--color-accent-secondary)' }}>{tool.name}</td>
                         <td style={{ padding: '0.75rem 1rem' }}>
-                          <span style={{ background: 'var(--color-background)', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.85rem' }}>
+                          <span className={getCategoryThemeClass()}>
                             {formatLabel(tool.capability_category)}
                           </span>
                         </td>
