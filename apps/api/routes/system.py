@@ -33,9 +33,7 @@ def list_tools() -> list[ToolDefinition]:
 def get_sandbox_status() -> SandboxStatusResponse:
     """Return the configuration and status of the task sandbox."""
     image = os.environ.get("CODE_AGENT_SANDBOX_IMAGE", "").strip() or "python:3.12-slim"
-    workspace_root = os.environ.get("CODE_AGENT_WORKSPACE_ROOT", "").strip() or str(
-        default_workspace_root()
-    )
+    workspace_root = str(default_workspace_root())
     return SandboxStatusResponse(
         default_image=image,
         workspace_root=workspace_root,
