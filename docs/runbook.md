@@ -87,6 +87,21 @@ Ingress protection:
 
 ## 6) Common Failure Debugging
 
+### LangSmith traces are missing or incomplete
+
+Checks:
+
+- set `LANGSMITH_TRACING=true` and `LANGSMITH_API_KEY`
+- for OTEL graph/node visibility also set `LANGSMITH_OTEL_ENABLED=true`
+- confirm OTEL deps are installed (`opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-http`)
+- check startup logs for OTEL bootstrap warnings about missing env or dependencies
+
+Verification:
+
+1. Submit a short task.
+2. Open the task detail trace metadata in the dashboard.
+3. Confirm a LangSmith trace exists and includes nested graph/node runs.
+
 ## API will not start
 
 Checks:

@@ -91,6 +91,19 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/ready
 ```
 
+## Optional: LangSmith OTEL Tracing
+
+To enable LangSmith tracing with OTEL graph/node visibility:
+
+```bash
+export LANGSMITH_TRACING=true
+export LANGSMITH_OTEL_ENABLED=true
+export LANGSMITH_API_KEY=<your-langsmith-api-key>
+export LANGSMITH_PROJECT=code-agent-local
+```
+
+The runtime now validates this configuration on startup and logs a warning if required OTEL packages or env vars are missing.
+
 ## Dashboard / Operator UI
 
 The dashboard is a React-based PWA located in the `dashboard/` directory.

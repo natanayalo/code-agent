@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -302,6 +302,22 @@ def test_create_app_requires_api_auth_when_env_bootstrap_builds_task_service(
     with pytest.raises(RuntimeError, match="CODE_AGENT_API_SHARED_SECRET"):
         with TestClient(app):
             pass
+
+
+def test_create_app_bootstraps_langsmith_otel_on_startup(monkeypatch) -> None:
+    """App startup should always run LangSmith OTEL bootstrap checks."""
+    otel_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "apps.api.main.bootstrap_langsmith_otel",
+        lambda **kwargs: otel_calls.append(kwargs),
+    )
+
+    app = create_app(task_service=object())
+
+    with TestClient(app):
+        pass
+
+    assert otel_calls == [{"runtime_name": "api", "logger": ANY}]
 
 
 def test_create_app_with_injected_task_service_skips_outbound_client_bootstrap(

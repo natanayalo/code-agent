@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from apps.api.progress import create_outbound_http_clients
 from apps.api.task_service_factory import build_task_service_from_env
+from apps.observability import bootstrap_langsmith_otel
 from apps.runtime import (
     RUN_WORKER_ENV_VAR,
     should_run_worker,
@@ -83,6 +84,7 @@ async def run_worker_forever() -> None:
 def main() -> None:
     """CLI entrypoint for the queue worker runtime."""
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+    bootstrap_langsmith_otel(runtime_name="worker", logger=logger)
     asyncio.run(run_worker_forever())
 
 

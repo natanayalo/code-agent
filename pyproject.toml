@@ -21,7 +21,9 @@ dependencies = [
     "alembic>=1.18.4,<2.0",
     "psycopg[binary]>=3.3.3,<4.0",
     "openai>=2.0.0,<3.0",
-    "pyjwt (>=2.12.1,<3.0.0)"
+    "pyjwt (>=2.12.1,<3.0.0)",
+    "opentelemetry-sdk>=1.38.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.38.0,<2.0.0"
 ]
 
 [tool.poetry.group.dev.dependencies]

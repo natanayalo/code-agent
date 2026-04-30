@@ -174,6 +174,7 @@ def test_worker_main_calls_async_entrypoint_with_configured_logging(
     """main() should configure logging and delegate to asyncio.run."""
     logging_calls: list[dict[str, object]] = []
     run_calls: list[object] = []
+    otel_bootstrap_calls: list[dict[str, object]] = []
 
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
     monkeypatch.setattr(
@@ -186,9 +187,15 @@ def test_worker_main_calls_async_entrypoint_with_configured_logging(
         "run",
         lambda coro: run_calls.append(coro),
     )
+    monkeypatch.setattr(
+        worker_main,
+        "bootstrap_langsmith_otel",
+        lambda **kwargs: otel_bootstrap_calls.append(kwargs),
+    )
 
     worker_main.main()
 
     assert logging_calls == [{"level": "DEBUG"}]
+    assert otel_bootstrap_calls == [{"runtime_name": "worker", "logger": worker_main.logger}]
     assert len(run_calls) == 1
     run_calls[0].close()
