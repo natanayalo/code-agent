@@ -51,7 +51,6 @@ class ApiAuthConfig:
     shared_secret: str | None = None
     telegram_webhook_secret: str | None = None
     allowed_origins: list[str] = field(default_factory=list)
-    cookie_secure: bool = False
     cookie_secure_override: bool | None = None
     force_https: bool = False
 
@@ -72,7 +71,7 @@ class ApiAuthConfig:
             if any(p.strip().lower() == "https" for p in proto.split(",")):
                 return True
 
-        return self.cookie_secure
+        return False
 
 
 def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) -> ApiAuthConfig:
@@ -98,7 +97,6 @@ def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) -> 
         shared_secret=_clean_secret(env.get(API_SHARED_SECRET_ENV_VAR)),
         telegram_webhook_secret=_clean_secret(env.get(TELEGRAM_WEBHOOK_SECRET_ENV_VAR)),
         allowed_origins=allowed_origins,
-        cookie_secure=bool(cookie_secure_override),
         cookie_secure_override=cookie_secure_override,
         force_https=force_https,
     )
