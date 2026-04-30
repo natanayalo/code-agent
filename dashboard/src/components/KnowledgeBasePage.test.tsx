@@ -388,6 +388,7 @@ describe('KnowledgeBasePage', () => {
     expect(api.listPersonalMemory).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText('Personal User ID'), { target: { value: 'user-filter' } });
+    expect(api.listPersonalMemory).not.toHaveBeenCalled();
 
     await waitFor(() => {
       expect(api.listPersonalMemory).toHaveBeenCalledWith('user-filter', 50, 0);
@@ -419,6 +420,42 @@ describe('KnowledgeBasePage', () => {
 
     await waitFor(() => {
       expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 100, 0);
+    });
+  });
+
+  it('caps project pagination at backend limit', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockImplementation(async (_repoUrl, limit) =>
+      Array.from({ length: limit ?? 0 }, (_, index) => ({
+        memory_id: `pj-cap-${limit}-${index}`,
+        repo_url: 'https://github.com/natanayalo/code-agent',
+        memory_key: `cap-${index}`,
+        value: { index },
+        confidence: 1,
+        scope: 'repo',
+        source: null,
+        last_verified_at: null,
+        requires_verification: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }))
+    );
+
+    renderKnowledgeBasePage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Load More Project Entries' })); // 50 -> 100
+    await waitFor(() => expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 100, 0));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Load More Project Entries' })); // 100 -> 150
+    await waitFor(() => expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 150, 0));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Load More Project Entries' })); // 150 -> 200
+    await waitFor(() => expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 200, 0));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('button', { name: 'Load More Project Entries' })
+      ).not.toBeInTheDocument();
     });
   });
 });
