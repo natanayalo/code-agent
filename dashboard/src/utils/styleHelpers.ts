@@ -26,9 +26,14 @@ export const getNetworkStyle = (required: boolean) => {
 /**
  * Maps a tool capability category to a CSS theme class.
  */
-export const getCategoryThemeClass = (category: string): string => {
-  // Use category to determine specific theme classes in the future.
+export const getCategoryThemeClass = (category: string | null | undefined): string => {
+  // Normalize the category string for future CSS class mapping
+  const normalized = (category || 'default')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '-');
+
   // For now, all categories use the neutral badge style.
-  void category;
+  // The normalized value can be used here for dynamic class mapping in the future.
+  void normalized;
   return 'badge badge-neutral';
 };
