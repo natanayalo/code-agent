@@ -11,6 +11,22 @@ interface TaskDetailPanelProps {
   onRefresh?: () => void;
 }
 
+interface TraceLink {
+  provider: string;
+  url: string;
+}
+
+interface SpanStatusCount {
+  status: string;
+  count: number;
+}
+
+interface TraceObservabilitySnapshot {
+  traceIds: string[];
+  providerLinks: TraceLink[];
+  spanStatusCounts: SpanStatusCount[];
+}
+
 function formatLabel(value: string | null | undefined): string {
   const normalized = (value || '').trim();
   if (!normalized) {
@@ -93,10 +109,206 @@ function artifactRows(run: TaskSnapshot['latest_run']) {
   return [];
 }
 
+function normalizeToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function parseHttpUrl(value: string): URL | null {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function inferTraceProvider(url: URL): string {
+  const host = url.hostname.toLowerCase();
+  if (host.includes('smith.langchain.com')) return 'LangSmith';
+  if (host.includes('langfuse')) return 'Langfuse';
+  if (host.includes('arize') || host.includes('phoenix')) return 'Phoenix';
+  return host;
+}
+
+function isTraceIdKey(normalizedKey: string): boolean {
+  return (
+    normalizedKey === 'traceid' ||
+    normalizedKey.endsWith('traceid') ||
+    (normalizedKey.includes('trace') && normalizedKey.includes('id'))
+  );
+}
+
+function isTraceUrlKey(normalizedKey: string): boolean {
+  return (
+    normalizedKey.includes('trace') ||
+    normalizedKey.includes('span') ||
+    normalizedKey.includes('otel') ||
+    normalizedKey.includes('langsmith') ||
+    normalizedKey.includes('langfuse') ||
+    normalizedKey.includes('phoenix') ||
+    normalizedKey === 'runurl'
+  );
+}
+
+function isSpanSummaryKey(normalizedKey: string): boolean {
+  return (
+    normalizedKey.includes('spanstatus') ||
+    normalizedKey.includes('spansbystatus') ||
+    normalizedKey.includes('spanstatuscounts') ||
+    normalizedKey.includes('spancounts')
+  );
+}
+
+function isSpansArrayKey(normalizedKey: string): boolean {
+  return normalizedKey === 'spans' || normalizedKey.endsWith('spans');
+}
+
+function extractTraceObservability(task: TaskSnapshot | null): TraceObservabilitySnapshot {
+  const traceIds = new Set<string>();
+  const providerLinks = new Map<string, TraceLink>();
+  const spanStatusCounts = new Map<string, number>();
+  const visited = new WeakSet<object>();
+
+  const addTraceId = (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed) {
+      traceIds.add(trimmed);
+    }
+  };
+
+  const addProviderLink = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    const parsed = parseHttpUrl(trimmed);
+    if (!parsed) return;
+    providerLinks.set(parsed.toString(), {
+      provider: inferTraceProvider(parsed),
+      url: parsed.toString(),
+    });
+  };
+
+  const addSpanCount = (status: string, count: number) => {
+    if (!Number.isFinite(count) || count < 0) return;
+    const normalizedStatus = status.trim();
+    if (!normalizedStatus) return;
+    spanStatusCounts.set(normalizedStatus, (spanStatusCounts.get(normalizedStatus) || 0) + count);
+  };
+
+  const extractSpanStatusMap = (candidate: Record<string, unknown>) => {
+    for (const [status, rawCount] of Object.entries(candidate)) {
+      if (typeof rawCount === 'number') {
+        addSpanCount(status, rawCount);
+      }
+    }
+  };
+
+  const parseTraceParent = (traceParentValue: string) => {
+    const match = traceParentValue
+      .trim()
+      .match(/^[\da-f]{2}-([\da-f]{32})-[\da-f]{16}-[\da-f]{2}$/i);
+    if (match) {
+      addTraceId(match[1]);
+    }
+  };
+
+  const visit = (value: unknown, path: string[] = [], depth = 0) => {
+    if (depth > 6 || value == null) return;
+
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, [...path, String(index)], depth + 1));
+      return;
+    }
+
+    if (typeof value === 'string') {
+      const key = path[path.length - 1] || '';
+      const normalizedKey = normalizeToken(key);
+      if (isTraceIdKey(normalizedKey)) {
+        addTraceId(value);
+      }
+      if (normalizedKey === 'traceparent') {
+        parseTraceParent(value);
+      }
+      if (isTraceUrlKey(normalizedKey)) {
+        addProviderLink(value);
+      }
+      return;
+    }
+
+    const objectValue = asRecord(value);
+    if (!objectValue) return;
+    if (visited.has(objectValue)) return;
+    visited.add(objectValue);
+
+    const key = path[path.length - 1] || '';
+    const normalizedKey = normalizeToken(key);
+    if (isSpanSummaryKey(normalizedKey)) {
+      extractSpanStatusMap(objectValue);
+    }
+
+    for (const [entryKey, entryValue] of Object.entries(objectValue)) {
+      const entryKeyNormalized = normalizeToken(entryKey);
+      if (typeof entryValue === 'number' && isSpanSummaryKey(entryKeyNormalized)) {
+        addSpanCount(entryKey, entryValue);
+      }
+      if (isSpansArrayKey(entryKeyNormalized) && Array.isArray(entryValue)) {
+        for (const span of entryValue) {
+          const spanRecord = asRecord(span);
+          const statusValue = spanRecord?.status;
+          if (typeof statusValue === 'string') {
+            addSpanCount(statusValue, 1);
+          }
+        }
+      }
+      visit(entryValue, [...path, entryKey], depth + 1);
+    }
+  };
+
+  const sources: unknown[] = [];
+  if (task?.latest_run) {
+    sources.push(task.latest_run.budget_usage, task.latest_run.verifier_outcome);
+    task.latest_run.artifact_index?.forEach((artifact) => {
+      sources.push(artifact, artifact?.artifact_metadata);
+    });
+    task.latest_run.artifacts?.forEach((artifact) => {
+      sources.push(artifact, artifact?.artifact_metadata);
+    });
+  }
+  task?.timeline?.forEach((event) => {
+    sources.push(event.payload);
+  });
+
+  sources.forEach((source) => visit(source));
+
+  const sortedTraceIds = [...traceIds].sort((a, b) => a.localeCompare(b));
+  const sortedLinks = [...providerLinks.values()].sort((a, b) =>
+    `${a.provider}:${a.url}`.localeCompare(`${b.provider}:${b.url}`)
+  );
+  const sortedSpanStatusCounts = [...spanStatusCounts.entries()]
+    .map(([status, count]) => ({ status, count }))
+    .sort((a, b) => b.count - a.count || a.status.localeCompare(b.status));
+
+  return {
+    traceIds: sortedTraceIds,
+    providerLinks: sortedLinks,
+    spanStatusCounts: sortedSpanStatusCounts,
+  };
+}
+
 export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: TaskDetailPanelProps) {
   const run = task?.latest_run ?? null;
   const runCommands = run?.commands_run ?? [];
   const artifacts = React.useMemo(() => artifactRows(run), [run]);
+  const traceObservability = React.useMemo(() => extractTraceObservability(task), [task]);
   const sortedTimeline = React.useMemo(() => {
     if (!task?.timeline) return [];
     return [...task.timeline].sort((a, b) => {
@@ -117,6 +329,10 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
       return (a.event_type || '').localeCompare(b.event_type || '');
     });
   }, [task?.timeline]);
+  const hasTraceObservability =
+    traceObservability.traceIds.length > 0 ||
+    traceObservability.providerLinks.length > 0 ||
+    traceObservability.spanStatusCounts.length > 0;
 
   if (!task && !loading && !error) {
     return null;
@@ -262,6 +478,57 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
               )
             ) : (
               <p className="task-detail-muted">No run metadata available yet.</p>
+            )}
+          </section>
+
+          <section className="task-detail-section">
+            <h4>Trace Observability</h4>
+            {hasTraceObservability ? (
+              <>
+                {traceObservability.traceIds.length > 0 ? (
+                  <div className="task-detail-group">
+                    <h5>Trace IDs</h5>
+                    <ul className="task-trace-list">
+                      {traceObservability.traceIds.map((traceId) => (
+                        <li key={traceId}>
+                          <code>{traceId}</code>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {traceObservability.providerLinks.length > 0 ? (
+                  <div className="task-detail-group">
+                    <h5>Provider Deep Links</h5>
+                    <ul className="task-trace-list">
+                      {traceObservability.providerLinks.map((link) => (
+                        <li key={link.url}>
+                          <strong>{link.provider}</strong>{' '}
+                          <a href={link.url} target="_blank" rel="noreferrer">
+                            {link.url}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {traceObservability.spanStatusCounts.length > 0 ? (
+                  <div className="task-detail-group">
+                    <h5>Span Status Summary</h5>
+                    <ul className="task-trace-list">
+                      {traceObservability.spanStatusCounts.map((entry) => (
+                        <li key={`${entry.status}-${entry.count}`}>
+                          <strong>{formatLabel(entry.status)}:</strong> {entry.count}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <p className="task-detail-muted">No trace metadata available yet.</p>
             )}
           </section>
 

@@ -743,6 +743,18 @@ button {
   font-size: 0.85rem;
 }
 
+.task-trace-list {
+  margin: 0;
+  padding-left: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.task-trace-list code {
+  word-break: break-all;
+}
+
 .task-detail-muted {
   color: var(--color-text-muted);
   font-size: 0.9rem;
