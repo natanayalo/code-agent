@@ -1214,6 +1214,27 @@ button {
   gap: var(--spacing-sm);
 }
 
+.knowledge-load-more {
+  margin-top: var(--spacing-sm);
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.75);
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+}
+
+.knowledge-load-more:hover:not(:disabled) {
+  border-color: rgba(56, 189, 248, 0.55);
+  color: var(--color-text-primary);
+}
+
+.knowledge-load-more:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .knowledge-entry {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;

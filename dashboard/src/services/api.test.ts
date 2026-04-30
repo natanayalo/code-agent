@@ -225,7 +225,7 @@ describe('api service', () => {
       expect(result).toEqual(mockEntries);
     });
 
-    it('listPersonalMemory supports no-filter listing and non-array fallback', async () => {
+    it('listPersonalMemory includes pagination params and handles non-array fallback', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -233,10 +233,12 @@ describe('api service', () => {
         json: async () => ({ not: 'array' }),
       });
 
-      const result = await api.listPersonalMemory();
+      const result = await api.listPersonalMemory('u-2', 25, 50);
       const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain('/knowledge-base/personal');
-      expect(url).not.toContain('user_id=');
+      expect(url).toContain('/knowledge-base/personal?');
+      expect(url).toContain('user_id=u-2');
+      expect(url).toContain('limit=25');
+      expect(url).toContain('offset=50');
       expect(result).toEqual([]);
     });
 
@@ -326,6 +328,23 @@ describe('api service', () => {
       expect(url).toContain('/knowledge-base/project');
       expect(url).not.toContain('repo_url=');
       expect(result).toEqual(mockEntries);
+    });
+
+    it('listProjectMemory includes optional repo and pagination filters', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ([]),
+      });
+
+      await api.listProjectMemory('https://repo', 10, 20);
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/project?');
+      expect(url).toContain('repo_url=https%3A%2F%2Frepo');
+      expect(url).toContain('limit=10');
+      expect(url).toContain('offset=20');
     });
 
     it('listProjectMemory catch block rethrows error', async () => {

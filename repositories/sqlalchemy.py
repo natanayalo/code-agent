@@ -1091,7 +1091,7 @@ class PersonalMemoryRepository:
         statement = (
             select(PersonalMemory)
             .where(PersonalMemory.user_id == user_id)
-            .order_by(PersonalMemory.created_at.desc())
+            .order_by(PersonalMemory.created_at.desc(), PersonalMemory.id.desc())
         )
         return list(self.session.scalars(statement))
 
@@ -1105,7 +1105,11 @@ class PersonalMemoryRepository:
         statement = select(PersonalMemory)
         if user_id is not None:
             statement = statement.where(PersonalMemory.user_id == user_id)
-        statement = statement.order_by(PersonalMemory.created_at.desc()).limit(limit).offset(offset)
+        statement = (
+            statement.order_by(PersonalMemory.created_at.desc(), PersonalMemory.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         return list(self.session.scalars(statement))
 
     def upsert(
@@ -1174,7 +1178,7 @@ class ProjectMemoryRepository:
         statement = (
             select(ProjectMemory)
             .where(ProjectMemory.repo_url == repo_url)
-            .order_by(ProjectMemory.created_at.desc())
+            .order_by(ProjectMemory.created_at.desc(), ProjectMemory.id.desc())
         )
         return list(self.session.scalars(statement))
 
@@ -1188,7 +1192,11 @@ class ProjectMemoryRepository:
         statement = select(ProjectMemory)
         if repo_url is not None:
             statement = statement.where(ProjectMemory.repo_url == repo_url)
-        statement = statement.order_by(ProjectMemory.created_at.desc()).limit(limit).offset(offset)
+        statement = (
+            statement.order_by(ProjectMemory.created_at.desc(), ProjectMemory.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         return list(self.session.scalars(statement))
 
     def upsert(

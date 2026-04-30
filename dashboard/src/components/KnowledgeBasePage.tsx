@@ -6,6 +6,7 @@ import { DashboardLayout } from './layout/DashboardLayout';
 import { PersonalMemorySnapshot, ProjectMemorySnapshot } from '../types/memory';
 
 const KNOWLEDGE_BASE_REFETCH_INTERVAL_MS = 30000;
+const KNOWLEDGE_BASE_PAGE_SIZE = 50;
 
 function parseMemoryValue(raw: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(raw);
@@ -49,6 +50,8 @@ export function KnowledgeBasePage() {
   const [personalRequiresVerification, setPersonalRequiresVerification] = React.useState(true);
   const [personalError, setPersonalError] = React.useState<string | null>(null);
   const [personalSaving, setPersonalSaving] = React.useState(false);
+  const [personalDeletingEntryId, setPersonalDeletingEntryId] = React.useState<string | null>(null);
+  const [personalLimit, setPersonalLimit] = React.useState(KNOWLEDGE_BASE_PAGE_SIZE);
 
   const [projectRepoUrl, setProjectRepoUrl] = React.useState('');
   const [projectMemoryKey, setProjectMemoryKey] = React.useState('');
@@ -59,31 +62,45 @@ export function KnowledgeBasePage() {
   const [projectRequiresVerification, setProjectRequiresVerification] = React.useState(true);
   const [projectError, setProjectError] = React.useState<string | null>(null);
   const [projectSaving, setProjectSaving] = React.useState(false);
+  const [projectDeletingEntryId, setProjectDeletingEntryId] = React.useState<string | null>(null);
+  const [projectLimit, setProjectLimit] = React.useState(KNOWLEDGE_BASE_PAGE_SIZE);
+
+  const personalUserFilter = personalUserId.trim();
+  const personalQueryEnabled = personalUserFilter.length > 0;
+
+  React.useEffect(() => {
+    setPersonalLimit(KNOWLEDGE_BASE_PAGE_SIZE);
+  }, [personalUserFilter]);
 
   const {
     data: personalEntries = [],
-    isLoading: personalLoading,
+    isFetching: personalFetching,
     error: personalLoadError,
     refetch: refetchPersonal,
   } = useQuery({
-    queryKey: ['knowledge-base', 'personal'],
-    queryFn: () => api.listPersonalMemory(),
+    queryKey: ['knowledge-base', 'personal', personalUserFilter, personalLimit],
+    queryFn: () => api.listPersonalMemory(personalUserFilter, personalLimit, 0),
+    enabled: personalQueryEnabled,
     refetchInterval: KNOWLEDGE_BASE_REFETCH_INTERVAL_MS,
   });
 
   const {
     data: projectEntries = [],
     isLoading: projectLoading,
+    isFetching: projectFetching,
     error: projectLoadError,
     refetch: refetchProject,
   } = useQuery({
-    queryKey: ['knowledge-base', 'project'],
-    queryFn: () => api.listProjectMemory(),
+    queryKey: ['knowledge-base', 'project', projectLimit],
+    queryFn: () => api.listProjectMemory(undefined, projectLimit, 0),
     refetchInterval: KNOWLEDGE_BASE_REFETCH_INTERVAL_MS,
   });
 
-  const isLoading = personalLoading || projectLoading;
-  const loadError = personalLoadError || projectLoadError;
+  const isLoading = projectLoading;
+  const loadError = projectLoadError;
+  const personalQueryError = personalQueryEnabled ? (personalLoadError as Error | null) : null;
+  const personalHasMore = personalQueryEnabled && personalEntries.length >= personalLimit;
+  const projectHasMore = projectEntries.length >= projectLimit;
 
   const handleSavePersonal = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -134,20 +151,34 @@ export function KnowledgeBasePage() {
   };
 
   const handleDeletePersonal = async (entry: PersonalMemorySnapshot) => {
+    if (!window.confirm(`Delete personal memory "${entry.memory_key}" for user "${entry.user_id}"?`)) {
+      return;
+    }
+
+    setPersonalDeletingEntryId(entry.memory_id);
     try {
       await api.deletePersonalMemory(entry.user_id, entry.memory_key);
       await refetchPersonal();
     } catch (error) {
       setPersonalError((error as Error).message);
+    } finally {
+      setPersonalDeletingEntryId(null);
     }
   };
 
   const handleDeleteProject = async (entry: ProjectMemorySnapshot) => {
+    if (!window.confirm(`Delete project memory "${entry.memory_key}" for repo "${entry.repo_url}"?`)) {
+      return;
+    }
+
+    setProjectDeletingEntryId(entry.memory_id);
     try {
       await api.deleteProjectMemory(entry.repo_url, entry.memory_key);
       await refetchProject();
     } catch (error) {
       setProjectError((error as Error).message);
+    } finally {
+      setProjectDeletingEntryId(null);
     }
   };
 
@@ -159,7 +190,9 @@ export function KnowledgeBasePage() {
           <p>{(loadError as Error).message}</p>
           <button
             onClick={() => {
-              refetchPersonal();
+              if (personalQueryEnabled) {
+                refetchPersonal();
+              }
               refetchProject();
             }}
             className="btn-primary"
@@ -256,7 +289,13 @@ export function KnowledgeBasePage() {
             </form>
 
             <div className="knowledge-list">
-              {personalEntries.length === 0 ? (
+              {personalQueryError ? (
+                <p className="card-error-text">{personalQueryError.message}</p>
+              ) : !personalQueryEnabled ? (
+                <p className="session-context-muted">
+                  Enter a personal user ID above to load entries.
+                </p>
+              ) : personalEntries.length === 0 ? (
                 <p className="session-context-muted">No personal entries found.</p>
               ) : (
                 personalEntries.map((entry) => (
@@ -271,6 +310,8 @@ export function KnowledgeBasePage() {
                         type="button"
                         onClick={() => handleDeletePersonal(entry)}
                         title="Delete entry"
+                        aria-label={`Delete personal memory ${entry.memory_key}`}
+                        disabled={personalDeletingEntryId === entry.memory_id}
                       >
                         <Trash2 size={14} />
                       </button>
@@ -285,6 +326,16 @@ export function KnowledgeBasePage() {
                 ))
               )}
             </div>
+            {personalHasMore ? (
+              <button
+                type="button"
+                className="knowledge-load-more"
+                onClick={() => setPersonalLimit((current) => current + KNOWLEDGE_BASE_PAGE_SIZE)}
+                disabled={personalFetching}
+              >
+                {personalFetching ? 'Loading...' : 'Load More Personal Entries'}
+              </button>
+            ) : null}
           </section>
 
           <section className="card knowledge-section">
@@ -371,6 +422,8 @@ export function KnowledgeBasePage() {
                         type="button"
                         onClick={() => handleDeleteProject(entry)}
                         title="Delete entry"
+                        aria-label={`Delete project memory ${entry.memory_key}`}
+                        disabled={projectDeletingEntryId === entry.memory_id}
                       >
                         <Trash2 size={14} />
                       </button>
@@ -385,6 +438,16 @@ export function KnowledgeBasePage() {
                 ))
               )}
             </div>
+            {projectHasMore ? (
+              <button
+                type="button"
+                className="knowledge-load-more"
+                onClick={() => setProjectLimit((current) => current + KNOWLEDGE_BASE_PAGE_SIZE)}
+                disabled={projectFetching}
+              >
+                {projectFetching ? 'Loading...' : 'Load More Project Entries'}
+              </button>
+            ) : null}
           </section>
         </div>
       )}

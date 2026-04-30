@@ -118,6 +118,12 @@ def test_personal_memory_endpoints_support_crud(client: TestClient) -> None:
     assert list_after_delete.json() == []
 
 
+def test_personal_memory_list_requires_user_id_filter(client: TestClient) -> None:
+    """Personal memory listing should require an explicit user_id."""
+    response = client.get("/knowledge-base/personal")
+    assert response.status_code == 422
+
+
 def test_project_memory_endpoints_support_crud(client: TestClient) -> None:
     """Project memory should support list, upsert, and delete over API."""
     repo_url = "https://github.com/natanayalo/code-agent"

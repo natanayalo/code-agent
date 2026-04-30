@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { KnowledgeBasePage } from './KnowledgeBasePage';
 import { api } from '../services/api';
 
@@ -38,6 +38,11 @@ function renderKnowledgeBasePage() {
 describe('KnowledgeBasePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('confirm', vi.fn(() => true));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('renders loading state', () => {
@@ -84,6 +89,7 @@ describe('KnowledgeBasePage', () => {
     renderKnowledgeBasePage();
 
     expect(await screen.findByRole('heading', { name: /Knowledge Base/i })).toBeInTheDocument();
+    fireEvent.change(await screen.findByLabelText('Personal User ID'), { target: { value: 'user-1' } });
     expect(await screen.findByText('communication_style')).toBeInTheDocument();
     expect(await screen.findByText('build_command')).toBeInTheDocument();
   });
@@ -178,8 +184,7 @@ describe('KnowledgeBasePage', () => {
     renderKnowledgeBasePage();
 
     await screen.findByText('remove_me');
-    const deleteButtons = screen.getAllByTitle('Delete entry');
-    fireEvent.click(deleteButtons[0]);
+    fireEvent.click(screen.getByLabelText('Delete project memory remove_me'));
 
     await waitFor(() => {
       expect(api.deleteProjectMemory).toHaveBeenCalledWith(
@@ -189,9 +194,9 @@ describe('KnowledgeBasePage', () => {
     });
   });
 
-  it('renders load error and retries both queries', async () => {
-    vi.mocked(api.listPersonalMemory).mockRejectedValue(new Error('personal failed'));
-    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+  it('renders load error and retries project query', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockRejectedValue(new Error('project failed'));
 
     renderKnowledgeBasePage();
 
@@ -199,9 +204,9 @@ describe('KnowledgeBasePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
 
     await waitFor(() => {
-      expect(api.listPersonalMemory).toHaveBeenCalledTimes(2);
       expect(api.listProjectMemory).toHaveBeenCalledTimes(2);
     });
+    expect(api.listPersonalMemory).not.toHaveBeenCalled();
   });
 
   it('submits project memory payload and handles empty optional values', async () => {
@@ -305,8 +310,11 @@ describe('KnowledgeBasePage', () => {
 
     renderKnowledgeBasePage();
 
+    fireEvent.change(await screen.findByLabelText('Personal User ID'), {
+      target: { value: 'user-delete' },
+    });
     await screen.findByText('remove_personal');
-    fireEvent.click(screen.getByTitle('Delete entry'));
+    fireEvent.click(screen.getByLabelText('Delete personal memory remove_personal'));
 
     await waitFor(() => {
       expect(api.deletePersonalMemory).toHaveBeenCalledWith('user-delete', 'remove_personal');
@@ -335,8 +343,82 @@ describe('KnowledgeBasePage', () => {
     renderKnowledgeBasePage();
 
     await screen.findByText('cannot-delete');
-    fireEvent.click(screen.getByTitle('Delete entry'));
+    fireEvent.click(screen.getByLabelText('Delete project memory cannot-delete'));
 
     expect(await screen.findByText('delete failed')).toBeInTheDocument();
+  });
+
+  it('does not delete when confirmation is cancelled', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([
+      {
+        memory_id: 'pj-confirm',
+        repo_url: 'https://github.com/natanayalo/code-agent',
+        memory_key: 'confirm-me',
+        value: { stale: true },
+        confidence: 0.5,
+        scope: 'repo',
+        source: null,
+        last_verified_at: null,
+        requires_verification: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    vi.mocked(api.deleteProjectMemory).mockResolvedValue();
+    vi.stubGlobal('confirm', vi.fn(() => false));
+
+    renderKnowledgeBasePage();
+
+    await screen.findByText('confirm-me');
+    fireEvent.click(screen.getByLabelText('Delete project memory confirm-me'));
+
+    expect(api.deleteProjectMemory).not.toHaveBeenCalled();
+  });
+
+  it('requires a personal user id before loading personal entries', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    expect(
+      await screen.findByText('Enter a personal user ID above to load entries.')
+    ).toBeInTheDocument();
+    expect(api.listPersonalMemory).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Personal User ID'), { target: { value: 'user-filter' } });
+
+    await waitFor(() => {
+      expect(api.listPersonalMemory).toHaveBeenCalledWith('user-filter', 50, 0);
+    });
+  });
+
+  it('loads more project entries with pagination controls', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockImplementation(async (_repoUrl, limit) =>
+      Array.from({ length: limit ?? 0 }, (_, index) => ({
+        memory_id: `pj-${limit}-${index}`,
+        repo_url: 'https://github.com/natanayalo/code-agent',
+        memory_key: `entry-${index}`,
+        value: { index },
+        confidence: 1,
+        scope: 'repo',
+        source: null,
+        last_verified_at: null,
+        requires_verification: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }))
+    );
+
+    renderKnowledgeBasePage();
+
+    expect(await screen.findByRole('button', { name: 'Load More Project Entries' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Load More Project Entries' }));
+
+    await waitFor(() => {
+      expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 100, 0);
+    });
   });
 });

@@ -22,12 +22,12 @@ router = APIRouter(
 
 @router.get("/personal", response_model=list[PersonalMemorySnapshot])
 def list_personal_memory(
-    user_id: str | None = Query(default=None, min_length=1),
+    user_id: str = Query(min_length=1),
     limit: int = Query(100, ge=1, le=200),
     offset: int = Query(0, ge=0),
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> list[PersonalMemorySnapshot]:
-    """List personal skeptical-memory entries."""
+    """List personal skeptical-memory entries for one user."""
     return task_service.list_personal_memory(user_id=user_id, limit=limit, offset=offset)
 
 

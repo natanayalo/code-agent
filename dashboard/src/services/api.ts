@@ -106,10 +106,20 @@ export const api = {
     }
   },
 
-  async listPersonalMemory(userId?: string): Promise<PersonalMemorySnapshot[]> {
+  async listPersonalMemory(
+    userId: string,
+    limit?: number,
+    offset?: number,
+  ): Promise<PersonalMemorySnapshot[]> {
     try {
-      const query = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
-      const data = await fetchWithAuth(`/knowledge-base/personal${query}`);
+      const query = new URLSearchParams({ user_id: userId });
+      if (typeof limit === 'number') {
+        query.set('limit', String(limit));
+      }
+      if (typeof offset === 'number') {
+        query.set('offset', String(offset));
+      }
+      const data = await fetchWithAuth(`/knowledge-base/personal?${query.toString()}`);
       return Array.isArray(data) ? data : [];
     } catch (error) {
       console.warn('Failed to fetch personal memory from API', error);
@@ -146,10 +156,26 @@ export const api = {
     }
   },
 
-  async listProjectMemory(repoUrl?: string): Promise<ProjectMemorySnapshot[]> {
+  async listProjectMemory(
+    repoUrl?: string,
+    limit?: number,
+    offset?: number,
+  ): Promise<ProjectMemorySnapshot[]> {
     try {
-      const query = repoUrl ? `?repo_url=${encodeURIComponent(repoUrl)}` : '';
-      const data = await fetchWithAuth(`/knowledge-base/project${query}`);
+      const query = new URLSearchParams();
+      if (repoUrl) {
+        query.set('repo_url', repoUrl);
+      }
+      if (typeof limit === 'number') {
+        query.set('limit', String(limit));
+      }
+      if (typeof offset === 'number') {
+        query.set('offset', String(offset));
+      }
+      const queryString = query.toString();
+      const data = await fetchWithAuth(
+        `/knowledge-base/project${queryString.length > 0 ? `?${queryString}` : ''}`
+      );
       return Array.isArray(data) ? data : [];
     } catch (error) {
       console.warn('Failed to fetch project memory from API', error);
