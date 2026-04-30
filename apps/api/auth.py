@@ -15,7 +15,8 @@ import jwt
 class RequestProto(Protocol):
     """Minimal protocol for objects with headers (like FastAPI Request)."""
 
-    headers: Mapping[str, str]
+    @property
+    def headers(self) -> Mapping[str, str]: ...
 
 
 logger = logging.getLogger(__name__)
