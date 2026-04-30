@@ -23,7 +23,7 @@ class SystemConfig:
         environ = env if env is not None else os.environ
         image = environ.get("CODE_AGENT_SANDBOX_IMAGE", "").strip() or DEFAULT_SANDBOX_IMAGE
         workspace_root = environ.get("CODE_AGENT_WORKSPACE_ROOT", "").strip() or str(
-            default_workspace_root()
+            default_workspace_root(environ)
         )
 
         return cls(

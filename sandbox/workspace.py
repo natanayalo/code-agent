@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
@@ -98,9 +99,10 @@ def _build_workspace_id(task_id: str) -> str:
     return f"workspace-{_slugify_task_id(task_id)}-{uuid4().hex[:8]}"
 
 
-def default_workspace_root() -> Path:
+def default_workspace_root(env: Mapping[str, str] | None = None) -> Path:
     """Return the default workspace root, honoring an environment override."""
-    configured_root = os.environ.get(DEFAULT_WORKSPACE_ROOT_ENV_VAR)
+    environ = env if env is not None else os.environ
+    configured_root = environ.get(DEFAULT_WORKSPACE_ROOT_ENV_VAR)
     configured_root = configured_root.strip() if configured_root is not None else ""
     if configured_root:
         return Path(configured_root).expanduser()
@@ -109,7 +111,7 @@ def default_workspace_root() -> Path:
     if callable(getuid):
         workspace_owner = f"uid-{getuid()}"
     else:
-        username = os.environ.get("USER") or os.environ.get("USERNAME")
+        username = environ.get("USER") or environ.get("USERNAME")
         if username:
             workspace_owner = f"user-{_slugify_workspace_owner(username)}"
         else:

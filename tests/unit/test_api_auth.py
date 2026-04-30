@@ -80,6 +80,10 @@ def test_is_cookie_secure_logic() -> None:
     mock_request.headers = {"X-Forwarded-Proto": "http"}
     assert config.is_cookie_secure(mock_request) is False
 
+    # 5b. Header key should be matched case-insensitively
+    mock_request.headers = {"x-forwarded-proto": "https"}
+    assert config.is_cookie_secure(mock_request) is True
+
     # 6. Direct scheme check
     mock_request.url.scheme = "https"
     mock_request.headers = {}

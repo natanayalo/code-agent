@@ -78,7 +78,10 @@ class ApiAuthConfig:
             # Trust X-Forwarded-Proto case-insensitively if present
             # Handle comma-separated values (common in multi-proxy setups)
             headers = getattr(request, "headers", {})
-            proto = headers.get("X-Forwarded-Proto", "")
+            proto = next(
+                (value for key, value in headers.items() if key.lower() == "x-forwarded-proto"),
+                "",
+            )
             if any(p.strip().lower() == "https" for p in proto.split(",")):
                 return True
 
