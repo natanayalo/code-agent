@@ -32,8 +32,6 @@ export const getCategoryThemeClass = (category: string | null | undefined): stri
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '-');
 
-  // For now, all categories use the neutral badge style.
-  // The normalized value can be used here for dynamic class mapping in the future.
-  void normalized;
-  return 'badge badge-neutral';
+  // Return the base badge classes plus a category-specific class for CSS overrides
+  return `badge badge-neutral category-${normalized}`;
 };

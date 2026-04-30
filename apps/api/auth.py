@@ -98,7 +98,7 @@ def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) -> 
         shared_secret=_clean_secret(env.get(API_SHARED_SECRET_ENV_VAR)),
         telegram_webhook_secret=_clean_secret(env.get(TELEGRAM_WEBHOOK_SECRET_ENV_VAR)),
         allowed_origins=allowed_origins,
-        cookie_secure=cookie_secure_val.lower() in ("true", "1") if cookie_secure_val else False,
+        cookie_secure=bool(cookie_secure_override),
         cookie_secure_override=cookie_secure_override,
         force_https=force_https,
     )
