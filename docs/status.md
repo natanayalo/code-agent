@@ -62,7 +62,7 @@ Granular tasks for the active and upcoming milestones:
 - [x] T-138: implement detailed task view (timeline, logs, artifacts) (#137)
 - [x] T-139: implement "Replay with Overrides" modal/form in the dashboard (#138)
 - [x] T-143: implement API & UI for Session Working Context (Goal/Risks/Decisions) (#140)
-- [ ] T-144: implement API & UI for Knowledge Base (Skeptical Memory) management
+- [x] T-144: implement API & UI for Knowledge Base (Skeptical Memory) management (#141)
 - [ ] T-145: implement API & UI for Tool Inventory and Sandbox status
 - [ ] T-153: add trace visibility to task detail UI (trace IDs, provider deep-links, basic span status summary)
 
