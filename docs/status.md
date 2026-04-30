@@ -68,6 +68,7 @@ Granular tasks for the active and upcoming milestones:
 
 ### Observability Follow-up: OpenTelemetry Integration
 - [x] T-150: enable LangSmith OTEL auto-tracing and verify graph/node visibility (#144)
+- [ ] T-154: persist OTEL/LangSmith trace metadata (trace IDs, deep-link URLs, span status summary) into run/timeline payloads for dashboard Trace Observability
 - [ ] T-151: add manual spans for TaskExecutionService, worker runtime, sandbox/shell, review, and PR/CI stages
 - [ ] T-152: add OTEL collector fan-out/export path for LangSmith, Langfuse, and Phoenix
 
