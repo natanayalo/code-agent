@@ -52,19 +52,17 @@ class ApiAuthConfig:
     telegram_webhook_secret: str | None = None
     allowed_origins: list[str] = field(default_factory=list)
     cookie_secure: bool = False
+    cookie_secure_override: bool | None = None
+    force_https: bool = False
 
     def is_cookie_secure(self, request: RequestProto | None = None) -> bool:
         """Determine if cookies should be marked Secure based on config and request."""
         # 1. Explicit override via CODE_AGENT_COOKIE_SECURE always wins
-        if os.environ.get(COOKIE_SECURE_ENV_VAR) is not None:
-            return self.cookie_secure
+        if self.cookie_secure_override is not None:
+            return self.cookie_secure_override
 
-        # 2. Force HTTPS override via environment variables
-        force_https = (
-            os.environ.get(API_FORCE_HTTPS_ENV_VAR, "").lower() == "true"
-            or os.environ.get("FORCE_HTTPS", "false").lower() == "true"
-        )
-        if force_https:
+        # 2. Force HTTPS override (resolved at load time)
+        if self.force_https:
             return True
 
         # 3. Pragmatic default: trust X-Forwarded-Proto case-insensitively if present
@@ -79,20 +77,30 @@ class ApiAuthConfig:
 
 def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) -> ApiAuthConfig:
     """Load inbound API authentication settings from environment variables."""
-    resolved_env = os.environ if environ is None else environ
+    env = environ if environ is not None else os.environ
 
-    allowed_origins_str = resolved_env.get(ALLOWED_ORIGINS_ENV_VAR, "")
+    allowed_origins_str = env.get(ALLOWED_ORIGINS_ENV_VAR, "")
     allowed_origins = [
         o.strip().rstrip("/").lower() for o in allowed_origins_str.split(",") if o.strip()
     ]
 
-    cookie_secure = resolved_env.get(COOKIE_SECURE_ENV_VAR, "0") == "1"
+    # Resolve overrides
+    cookie_secure_val = env.get(COOKIE_SECURE_ENV_VAR)
+    cookie_secure_override = None
+    if cookie_secure_val is not None:
+        cookie_secure_override = cookie_secure_val.lower() in ("true", "1")
+
+    force_https = env.get(API_FORCE_HTTPS_ENV_VAR, "").lower() in ("true", "1") or env.get(
+        "FORCE_HTTPS", "false"
+    ).lower() in ("true", "1")
 
     return ApiAuthConfig(
-        shared_secret=_clean_secret(resolved_env.get(API_SHARED_SECRET_ENV_VAR)),
-        telegram_webhook_secret=_clean_secret(resolved_env.get(TELEGRAM_WEBHOOK_SECRET_ENV_VAR)),
+        shared_secret=_clean_secret(env.get(API_SHARED_SECRET_ENV_VAR)),
+        telegram_webhook_secret=_clean_secret(env.get(TELEGRAM_WEBHOOK_SECRET_ENV_VAR)),
         allowed_origins=allowed_origins,
-        cookie_secure=cookie_secure,
+        cookie_secure=cookie_secure_val.lower() in ("true", "1") if cookie_secure_val else False,
+        cookie_secure_override=cookie_secure_override,
+        force_https=force_https,
     )
 
 
