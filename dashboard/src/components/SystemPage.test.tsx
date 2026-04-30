@@ -70,7 +70,7 @@ describe('SystemPage', () => {
 
     // Verify table structure
     expect(screen.getByRole('table', { name: 'Tool Inventory' })).toBeInTheDocument();
-    expect(screen.getByText('shell')).toBeInTheDocument();
+    expect(screen.getByText('Shell')).toBeInTheDocument();
   });
 
   it('renders error states when API fails', async () => {

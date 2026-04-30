@@ -4,6 +4,7 @@ import { Server, Wrench, Shield, HardDrive, AlertTriangle } from 'lucide-react';
 import { DashboardLayout } from './layout/DashboardLayout';
 import { api } from '../services/api';
 import { getPermissionStyle, getNetworkStyle } from '../utils/styleHelpers';
+import { formatLabel } from '../utils/formatters';
 
 export function SystemPage() {
   const { data: tools, isLoading: toolsLoading, error: toolsError } = useQuery({
@@ -81,7 +82,7 @@ export function SystemPage() {
                         <td style={{ padding: '0.75rem 1rem', fontFamily: 'monospace', color: 'var(--color-accent-secondary)' }}>{tool.name}</td>
                         <td style={{ padding: '0.75rem 1rem' }}>
                           <span style={{ background: 'var(--color-background)', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.85rem' }}>
-                            {tool.capability_category}
+                            {formatLabel(tool.capability_category)}
                           </span>
                         </td>
                         <td style={{ padding: '0.75rem 1rem' }}>
@@ -90,10 +91,10 @@ export function SystemPage() {
                             color: getPermissionStyle(tool.required_permission).color
                           }}>
                             {getPermissionStyle(tool.required_permission).showShield && <Shield size={14} />}
-                            {tool.required_permission}
+                            {formatLabel(tool.required_permission)}
                           </span>
                         </td>
-                        <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-secondary)' }}>{tool.side_effect_level}</td>
+                        <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-secondary)' }}>{formatLabel(tool.side_effect_level)}</td>
                         <td style={{ padding: '0.75rem 1rem', color: getNetworkStyle(tool.network_required).color }}>
                           {getNetworkStyle(tool.network_required).label}
                         </td>

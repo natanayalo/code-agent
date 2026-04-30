@@ -59,14 +59,19 @@ class ApiAuthConfig:
         if os.environ.get(COOKIE_SECURE_ENV_VAR) is not None:
             return self.cookie_secure
 
-        # 2. Force HTTPS override via environment variable
-        if os.environ.get(API_FORCE_HTTPS_ENV_VAR, "").lower() == "true":
+        # 2. Force HTTPS override via environment variables
+        force_https = (
+            os.environ.get(API_FORCE_HTTPS_ENV_VAR, "").lower() == "true"
+            or os.environ.get("FORCE_HTTPS", "false").lower() == "true"
+        )
+        if force_https:
             return True
 
         # 3. Pragmatic default: trust X-Forwarded-Proto case-insensitively if present
+        # Handle comma-separated values (common in multi-proxy setups)
         if request:
-            proto = request.headers.get("X-Forwarded-Proto", "").lower()
-            if proto == "https":
+            proto = request.headers.get("X-Forwarded-Proto", "")
+            if any(p.strip().lower() == "https" for p in proto.split(",")):
                 return True
 
         return self.cookie_secure
