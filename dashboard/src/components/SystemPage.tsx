@@ -30,7 +30,7 @@ export function SystemPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        <div className="system-section-container">
           <section className="dashboard-card">
             <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
               <HardDrive size={20} color="var(--color-accent-primary)" />
@@ -65,15 +65,15 @@ export function SystemPage() {
                 <AlertTriangle size={16} /> Failed to load tool inventory.
               </div>
             ) : tools && tools.length > 0 ? (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }} aria-label="Tool Inventory">
+              <div className="inventory-table-container">
+                <table className="inventory-table" aria-label="Tool Inventory">
                   <thead>
-                    <tr style={{ borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                      <th style={{ padding: '0.75rem 1rem', fontWeight: 500 }}>Name</th>
-                      <th style={{ padding: '0.75rem 1rem', fontWeight: 500 }}>Category</th>
-                      <th style={{ padding: '0.75rem 1rem', fontWeight: 500 }}>Permission</th>
-                      <th style={{ padding: '0.75rem 1rem', fontWeight: 500 }}>Side Effects</th>
-                      <th style={{ padding: '0.75rem 1rem', fontWeight: 500 }}>Network</th>
+                    <tr className="inventory-table-tr" style={{ color: 'var(--color-text-secondary)' }}>
+                      <th className="inventory-table-th">Name</th>
+                      <th className="inventory-table-th">Category</th>
+                      <th className="inventory-table-th">Permission</th>
+                      <th className="inventory-table-th">Side Effects</th>
+                      <th className="inventory-table-th">Network</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -81,24 +81,21 @@ export function SystemPage() {
                       const permissionStyle = getPermissionStyle(tool.required_permission);
                       const networkStyle = getNetworkStyle(tool.network_required);
                       return (
-                        <tr key={tool.name + "-" + index} style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-                          <td style={{ padding: '0.75rem 1rem', fontFamily: 'monospace', color: 'var(--color-accent-secondary)' }}>{tool.name}</td>
-                          <td style={{ padding: '0.75rem 1rem' }}>
+                        <tr key={tool.name + "-" + index} className="inventory-table-tr">
+                          <td className="inventory-table-td inventory-table-name">{tool.name}</td>
+                          <td className="inventory-table-td">
                             <span className={getCategoryThemeClass(tool.capability_category)}>
                               {formatLabel(tool.capability_category)}
                             </span>
                           </td>
-                          <td style={{ padding: '0.75rem 1rem' }}>
-                            <span style={{
-                              display: 'inline-flex', alignItems: 'center', gap: '0.25rem',
-                              color: permissionStyle.color
-                            }}>
+                          <td className="inventory-table-td">
+                            <span className="permission-cell" style={{ color: permissionStyle.color }}>
                               {permissionStyle.showShield && <Shield size={14} />}
                               {formatLabel(tool.required_permission)}
                             </span>
                           </td>
-                          <td style={{ padding: '0.75rem 1rem', color: 'var(--color-text-secondary)' }}>{formatLabel(tool.side_effect_level)}</td>
-                          <td style={{ padding: '0.75rem 1rem', color: networkStyle.color }}>
+                          <td className="inventory-table-td" style={{ color: 'var(--color-text-secondary)' }}>{formatLabel(tool.side_effect_level)}</td>
+                          <td className="inventory-table-td" style={{ color: networkStyle.color }}>
                             {networkStyle.label}
                           </td>
                         </tr>
@@ -108,7 +105,7 @@ export function SystemPage() {
                 </table>
               </div>
             ) : (
-              <div style={{ color: 'var(--color-text-secondary)', padding: '1rem', textAlign: 'center' }}>
+              <div className="empty-state">
                 No tools registered.
               </div>
             )}
