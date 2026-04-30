@@ -68,6 +68,7 @@ def test_is_cookie_secure_logic() -> None:
     config = ApiAuthConfig()
 
     mock_request = MagicMock()
+    mock_request.url.scheme = "http"
     mock_request.headers = {"X-Forwarded-Proto": "https"}
     assert config.is_cookie_secure(mock_request) is True
 
@@ -77,7 +78,13 @@ def test_is_cookie_secure_logic() -> None:
     mock_request.headers = {"X-Forwarded-Proto": "http"}
     assert config.is_cookie_secure(mock_request) is False
 
-    # 6. Case insensitivity
+    # 6. Direct scheme check
+    mock_request.url.scheme = "https"
+    mock_request.headers = {}
+    assert config.is_cookie_secure(mock_request) is True
+
+    # 7. Case insensitivity
+    mock_request.url.scheme = "http"
     mock_request.headers = {"X-Forwarded-Proto": "hTtPs"}
     assert config.is_cookie_secure(mock_request) is True
 

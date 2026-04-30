@@ -18,6 +18,9 @@ class RequestProto(Protocol):
     @property
     def headers(self) -> Mapping[str, str]: ...
 
+    @property
+    def url(self) -> Any: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +68,14 @@ class ApiAuthConfig:
         if self.force_https:
             return True
 
-        # 3. Pragmatic default: trust X-Forwarded-Proto case-insensitively if present
-        # Handle comma-separated values (common in multi-proxy setups)
+        # 3. Pragmatic default: trust request scheme or X-Forwarded-Proto
         if request:
+            # Check direct scheme first
+            if getattr(request.url, "scheme", None) == "https":
+                return True
+
+            # Trust X-Forwarded-Proto case-insensitively if present
+            # Handle comma-separated values (common in multi-proxy setups)
             proto = request.headers.get("X-Forwarded-Proto", "")
             if any(p.strip().lower() == "https" for p in proto.split(",")):
                 return True
