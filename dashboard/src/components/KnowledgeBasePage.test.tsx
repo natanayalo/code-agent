@@ -139,6 +139,15 @@ describe('KnowledgeBasePage', () => {
       confidence: 0.25,
       requires_verification: false,
     });
+    expect(screen.getByLabelText('Personal User ID')).toHaveValue('');
+    expect(screen.getByLabelText('Personal Memory Key')).toHaveValue('');
+    expect(screen.getByLabelText('Personal Memory Value (JSON object)')).toHaveValue('{\n  \n}');
+    expect(screen.getByLabelText('Personal Source')).toHaveValue('');
+    expect(screen.getByLabelText('Personal Scope')).toHaveValue('');
+    expect(Number((screen.getByLabelText('Personal Confidence (0.0-1.0)') as HTMLInputElement).value)).toBe(
+      1
+    );
+    expect(screen.getAllByLabelText('Requires verification')[0]).toBeChecked();
   });
 
   it('shows validation error for non-object JSON values', async () => {
@@ -258,6 +267,15 @@ describe('KnowledgeBasePage', () => {
       confidence: 1,
       requires_verification: false,
     });
+    expect(screen.getByLabelText('Project Repository URL')).toHaveValue('');
+    expect(screen.getByLabelText('Project Memory Key')).toHaveValue('');
+    expect(screen.getByLabelText('Project Memory Value (JSON object)')).toHaveValue('{\n  \n}');
+    expect(screen.getByLabelText('Project Source')).toHaveValue('');
+    expect(screen.getByLabelText('Project Scope')).toHaveValue('');
+    expect(Number((screen.getByLabelText('Project Confidence (0.0-1.0)') as HTMLInputElement).value)).toBe(
+      1
+    );
+    expect(screen.getAllByLabelText('Requires verification')[1]).toBeChecked();
   });
 
   it('validates project confidence range', async () => {
@@ -408,9 +426,9 @@ describe('KnowledgeBasePage', () => {
 
   it('loads more project entries with pagination controls', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
-    vi.mocked(api.listProjectMemory).mockImplementation(async (_repoUrl, limit) =>
+    vi.mocked(api.listProjectMemory).mockImplementation(async (_repoUrl, limit, offset) =>
       Array.from({ length: limit ?? 0 }, (_, index) => ({
-        memory_id: `pj-${limit}-${index}`,
+        memory_id: `pj-${offset}-${index}`,
         repo_url: 'https://github.com/natanayalo/code-agent',
         memory_key: `entry-${index}`,
         value: { index },
@@ -430,15 +448,15 @@ describe('KnowledgeBasePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Load More Project Entries' }));
 
     await waitFor(() => {
-      expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 100, 0);
+      expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 50, 50);
     });
   });
 
   it('caps project pagination at backend limit', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
-    vi.mocked(api.listProjectMemory).mockImplementation(async (_repoUrl, limit) =>
+    vi.mocked(api.listProjectMemory).mockImplementation(async (_repoUrl, limit, offset) =>
       Array.from({ length: limit ?? 0 }, (_, index) => ({
-        memory_id: `pj-cap-${limit}-${index}`,
+        memory_id: `pj-cap-${offset}-${index}`,
         repo_url: 'https://github.com/natanayalo/code-agent',
         memory_key: `cap-${index}`,
         value: { index },
@@ -454,14 +472,14 @@ describe('KnowledgeBasePage', () => {
 
     renderKnowledgeBasePage();
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Load More Project Entries' })); // 0 -> 50
+    await waitFor(() => expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 50, 50));
+
     fireEvent.click(await screen.findByRole('button', { name: 'Load More Project Entries' })); // 50 -> 100
-    await waitFor(() => expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 100, 0));
+    await waitFor(() => expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 50, 100));
 
     fireEvent.click(await screen.findByRole('button', { name: 'Load More Project Entries' })); // 100 -> 150
-    await waitFor(() => expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 150, 0));
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Load More Project Entries' })); // 150 -> 200
-    await waitFor(() => expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 200, 0));
+    await waitFor(() => expect(api.listProjectMemory).toHaveBeenCalledWith(undefined, 50, 150));
 
     await waitFor(() => {
       expect(

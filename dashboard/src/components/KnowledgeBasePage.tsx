@@ -1,5 +1,5 @@
 import React from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { BookOpen, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import { DashboardLayout } from './layout/DashboardLayout';
@@ -9,6 +9,7 @@ const KNOWLEDGE_BASE_REFETCH_INTERVAL_MS = 30000;
 const KNOWLEDGE_BASE_PAGE_SIZE = 50;
 const KNOWLEDGE_BASE_MAX_LIMIT = 200;
 const PERSONAL_FILTER_DEBOUNCE_MS = 300;
+const DEFAULT_MEMORY_VALUE_JSON = '{\n  \n}';
 
 function parseMemoryValue(raw: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(raw);
@@ -45,7 +46,7 @@ function formatTimestamp(value: string | null | undefined): string {
 export function KnowledgeBasePage() {
   const [personalUserId, setPersonalUserId] = React.useState('');
   const [personalMemoryKey, setPersonalMemoryKey] = React.useState('');
-  const [personalValueJson, setPersonalValueJson] = React.useState('{\n  \n}');
+  const [personalValueJson, setPersonalValueJson] = React.useState(DEFAULT_MEMORY_VALUE_JSON);
   const [personalSource, setPersonalSource] = React.useState('');
   const [personalScope, setPersonalScope] = React.useState('');
   const [personalConfidence, setPersonalConfidence] = React.useState('1.0');
@@ -53,12 +54,11 @@ export function KnowledgeBasePage() {
   const [personalError, setPersonalError] = React.useState<string | null>(null);
   const [personalSaving, setPersonalSaving] = React.useState(false);
   const [personalDeletingEntryId, setPersonalDeletingEntryId] = React.useState<string | null>(null);
-  const [personalLimit, setPersonalLimit] = React.useState(KNOWLEDGE_BASE_PAGE_SIZE);
   const [personalUserFilter, setPersonalUserFilter] = React.useState('');
 
   const [projectRepoUrl, setProjectRepoUrl] = React.useState('');
   const [projectMemoryKey, setProjectMemoryKey] = React.useState('');
-  const [projectValueJson, setProjectValueJson] = React.useState('{\n  \n}');
+  const [projectValueJson, setProjectValueJson] = React.useState(DEFAULT_MEMORY_VALUE_JSON);
   const [projectSource, setProjectSource] = React.useState('');
   const [projectScope, setProjectScope] = React.useState('');
   const [projectConfidence, setProjectConfidence] = React.useState('1.0');
@@ -66,7 +66,6 @@ export function KnowledgeBasePage() {
   const [projectError, setProjectError] = React.useState<string | null>(null);
   const [projectSaving, setProjectSaving] = React.useState(false);
   const [projectDeletingEntryId, setProjectDeletingEntryId] = React.useState<string | null>(null);
-  const [projectLimit, setProjectLimit] = React.useState(KNOWLEDGE_BASE_PAGE_SIZE);
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -77,44 +76,86 @@ export function KnowledgeBasePage() {
 
   const personalQueryEnabled = personalUserFilter.length > 0;
 
-  React.useEffect(() => {
-    setPersonalLimit(KNOWLEDGE_BASE_PAGE_SIZE);
-  }, [personalUserFilter]);
+  const resetPersonalForm = React.useCallback(() => {
+    setPersonalUserId('');
+    setPersonalMemoryKey('');
+    setPersonalValueJson(DEFAULT_MEMORY_VALUE_JSON);
+    setPersonalSource('');
+    setPersonalScope('');
+    setPersonalConfidence('1.0');
+    setPersonalRequiresVerification(true);
+  }, []);
+
+  const resetProjectForm = React.useCallback(() => {
+    setProjectRepoUrl('');
+    setProjectMemoryKey('');
+    setProjectValueJson(DEFAULT_MEMORY_VALUE_JSON);
+    setProjectSource('');
+    setProjectScope('');
+    setProjectConfidence('1.0');
+    setProjectRequiresVerification(true);
+  }, []);
 
   const {
-    data: personalEntries = [],
+    data: personalData,
     isLoading: personalLoading,
-    isFetching: personalFetching,
+    isFetchingNextPage: personalFetchingNextPage,
+    hasNextPage: personalHasNextPage,
     error: personalLoadError,
     refetch: refetchPersonal,
-  } = useQuery({
-    queryKey: ['knowledge-base', 'personal', personalUserFilter, personalLimit],
-    queryFn: () => api.listPersonalMemory(personalUserFilter, personalLimit, 0),
+    fetchNextPage: fetchNextPersonalPage,
+  } = useInfiniteQuery({
+    queryKey: ['knowledge-base', 'personal', personalUserFilter],
+    queryFn: ({ pageParam = 0 }) =>
+      api.listPersonalMemory(personalUserFilter, KNOWLEDGE_BASE_PAGE_SIZE, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loadedCount = allPages.reduce((count, page) => count + page.length, 0);
+      if (lastPage.length < KNOWLEDGE_BASE_PAGE_SIZE || loadedCount >= KNOWLEDGE_BASE_MAX_LIMIT) {
+        return undefined;
+      }
+      return loadedCount;
+    },
     enabled: personalQueryEnabled,
     refetchInterval: KNOWLEDGE_BASE_REFETCH_INTERVAL_MS,
   });
+  const personalEntries = React.useMemo(
+    () => personalData?.pages.flatMap((page) => page) ?? [],
+    [personalData]
+  );
 
   const {
-    data: projectEntries = [],
+    data: projectData,
     isLoading: projectLoading,
-    isFetching: projectFetching,
+    isFetchingNextPage: projectFetchingNextPage,
+    hasNextPage: projectHasNextPage,
     error: projectLoadError,
     refetch: refetchProject,
-  } = useQuery({
-    queryKey: ['knowledge-base', 'project', projectLimit],
-    queryFn: () => api.listProjectMemory(undefined, projectLimit, 0),
+    fetchNextPage: fetchNextProjectPage,
+  } = useInfiniteQuery({
+    queryKey: ['knowledge-base', 'project'],
+    queryFn: ({ pageParam = 0 }) =>
+      api.listProjectMemory(undefined, KNOWLEDGE_BASE_PAGE_SIZE, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loadedCount = allPages.reduce((count, page) => count + page.length, 0);
+      if (lastPage.length < KNOWLEDGE_BASE_PAGE_SIZE || loadedCount >= KNOWLEDGE_BASE_MAX_LIMIT) {
+        return undefined;
+      }
+      return loadedCount;
+    },
     refetchInterval: KNOWLEDGE_BASE_REFETCH_INTERVAL_MS,
   });
+  const projectEntries = React.useMemo(
+    () => projectData?.pages.flatMap((page) => page) ?? [],
+    [projectData]
+  );
 
   const isLoading = projectLoading || (personalQueryEnabled && personalLoading);
   const personalQueryError = personalQueryEnabled ? (personalLoadError as Error | null) : null;
   const projectQueryError = projectLoadError as Error | null;
-  const personalHasMore =
-    personalQueryEnabled &&
-    personalEntries.length >= personalLimit &&
-    personalLimit < KNOWLEDGE_BASE_MAX_LIMIT;
-  const projectHasMore =
-    projectEntries.length >= projectLimit && projectLimit < KNOWLEDGE_BASE_MAX_LIMIT;
+  const personalHasMore = personalQueryEnabled && Boolean(personalHasNextPage);
+  const projectHasMore = Boolean(projectHasNextPage);
 
   const handleSavePersonal = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -130,8 +171,7 @@ export function KnowledgeBasePage() {
         confidence: parseConfidence(personalConfidence),
         requires_verification: personalRequiresVerification,
       });
-      setPersonalMemoryKey('');
-      setPersonalValueJson('{\n  \n}');
+      resetPersonalForm();
       await refetchPersonal();
     } catch (error) {
       setPersonalError((error as Error).message);
@@ -154,8 +194,7 @@ export function KnowledgeBasePage() {
         confidence: parseConfidence(projectConfidence),
         requires_verification: projectRequiresVerification,
       });
-      setProjectMemoryKey('');
-      setProjectValueJson('{\n  \n}');
+      resetProjectForm();
       await refetchProject();
     } catch (error) {
       setProjectError((error as Error).message);
@@ -326,14 +365,10 @@ export function KnowledgeBasePage() {
               <button
                 type="button"
                 className="knowledge-load-more"
-                onClick={() =>
-                  setPersonalLimit((current) =>
-                    Math.min(current + KNOWLEDGE_BASE_PAGE_SIZE, KNOWLEDGE_BASE_MAX_LIMIT)
-                  )
-                }
-                disabled={personalFetching}
+                onClick={() => fetchNextPersonalPage()}
+                disabled={personalFetchingNextPage}
               >
-                {personalFetching ? 'Loading...' : 'Load More Personal Entries'}
+                {personalFetchingNextPage ? 'Loading...' : 'Load More Personal Entries'}
               </button>
             ) : null}
           </section>
@@ -454,14 +489,10 @@ export function KnowledgeBasePage() {
               <button
                 type="button"
                 className="knowledge-load-more"
-                onClick={() =>
-                  setProjectLimit((current) =>
-                    Math.min(current + KNOWLEDGE_BASE_PAGE_SIZE, KNOWLEDGE_BASE_MAX_LIMIT)
-                  )
-                }
-                disabled={projectFetching}
+                onClick={() => fetchNextProjectPage()}
+                disabled={projectFetchingNextPage}
               >
-                {projectFetching ? 'Loading...' : 'Load More Project Entries'}
+                {projectFetchingNextPage ? 'Loading...' : 'Load More Project Entries'}
               </button>
             ) : null}
           </section>
