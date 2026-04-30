@@ -506,8 +506,14 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                     <ul className="task-trace-list">
                       {traceObservability.providerLinks.map((link) => (
                         <li key={link.url}>
-                          <strong>{link.provider}</strong>{' '}
-                          <a href={link.url} target="_blank" rel="noopener noreferrer">
+                          <strong className="task-trace-provider">{link.provider}</strong>
+                          <a
+                            className="task-trace-url"
+                            href={link.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={link.url}
+                          >
                             {link.url}
                           </a>
                         </li>

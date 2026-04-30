@@ -751,8 +751,24 @@ button {
   gap: var(--spacing-xs);
 }
 
+.task-trace-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+
+.task-trace-provider {
+  flex: 0 0 auto;
+}
+
+.task-trace-url,
 .task-trace-list code {
-  word-break: break-all;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-detail-muted {
