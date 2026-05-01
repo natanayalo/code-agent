@@ -93,7 +93,9 @@ curl http://127.0.0.1:8000/ready
 
 ### Trace observability (Phoenix + OpenInference)
 
-Run self-hosted Phoenix locally:
+If you use `scripts/up.sh` and set `CODE_AGENT_ENABLE_TRACING=1`, Phoenix is started automatically.
+
+To start Phoenix manually (for example, if the rest of the stack is already running):
 
 ```bash
 docker compose --profile observability up -d phoenix

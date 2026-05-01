@@ -76,6 +76,11 @@ Run local/self-hosted Phoenix:
 docker compose --profile observability up -d phoenix
 ```
 
+Note:
+
+- `scripts/up.sh` starts `phoenix` automatically when `CODE_AGENT_ENABLE_TRACING=1`.
+- Use the command above when the stack is already up and you only need to add observability.
+
 Phoenix UI and OTLP endpoints:
 
 - UI: `http://localhost:6006`
