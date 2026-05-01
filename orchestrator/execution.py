@@ -61,7 +61,7 @@ from repositories import (
 )
 from tools import coerce_permission_level
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
-from tools.tracing import start_optional_span
+from tools.tracing import set_span_error_status, start_optional_span
 from workers import ArtifactReference, Worker, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -643,6 +643,11 @@ def _execution_task_span_attributes(
     }
 
 
+def _mark_span_error_from_exception(span: Any, exc: BaseException) -> None:
+    """Record an explicit span error status for handled exceptions."""
+    set_span_error_status(span, description=f"{type(exc).__name__}: {exc}")
+
+
 def _deep_merge(
     target: dict[str, Any],
     source: dict[str, Any],
@@ -1221,7 +1226,7 @@ class TaskExecutionService:
                 channel=persisted.channel,
                 attempt_count=persisted.attempt_count,
             ),
-        ):
+        ) as span:
             try:
                 state = await self._run_orchestrator(submission, persisted)
                 finished_at = utc_now()
@@ -1232,7 +1237,8 @@ class TaskExecutionService:
                     started_at=started_at,
                     finished_at=finished_at,
                 )
-            except Exception:
+            except Exception as exc:
+                _mark_span_error_from_exception(span, exc)
                 logger.exception(
                     "Task execution failed before the final outcome was fully persisted",
                     extra={
@@ -1333,7 +1339,7 @@ class TaskExecutionService:
                 ),
                 "code_agent.worker_id": worker_id,
             },
-        ):
+        ) as span:
             try:
                 state = await self._run_orchestrator(submission, persisted)
                 finished_at = utc_now()
@@ -1375,6 +1381,7 @@ class TaskExecutionService:
                             worker_id=worker_id,
                         )
             except Exception as exc:
+                _mark_span_error_from_exception(span, exc)
                 logger.exception(
                     "Task execution failed before the final outcome was fully persisted",
                     extra={

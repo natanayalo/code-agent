@@ -162,7 +162,7 @@ async def test_review_result_span_includes_session_id(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_review_result_handles_worker_failure_gracefully():
+async def test_review_result_handles_worker_failure_gracefully(monkeypatch):
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "demo"},
@@ -191,12 +191,21 @@ async def test_review_result_handles_worker_failure_gracefully():
     mock_reviewer = AsyncMock()
     mock_reviewer.run.side_effect = Exception("API error")
 
+    span_error_descriptions: list[str | None] = []
+
+    def fake_set_span_error_status(span, *, description: str | None = None) -> None:
+        del span
+        span_error_descriptions.append(description)
+
+    monkeypatch.setattr(review_module, "set_span_error_status", fake_set_span_error_status)
+
     worker_factory = {"gemini": mock_reviewer}
 
     res = await review_result(state, worker_factory=worker_factory)
 
     assert res["current_step"] == "review_result"
     assert "review" not in res
+    assert span_error_descriptions == ["Exception: API error"]
 
 
 @pytest.mark.anyio

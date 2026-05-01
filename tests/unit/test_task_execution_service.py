@@ -1543,6 +1543,59 @@ async def test_submit_task_emits_failed_notification_when_snapshot_reload_fails(
     )
 
 
+@pytest.mark.anyio
+async def test_submit_task_marks_span_error_when_execution_fails(monkeypatch) -> None:
+    """Handled submit-task failures should explicitly mark the span as errored."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(task_text="trace handled error")
+    persisted = execution_module._PersistedTaskContext(
+        user_id="user-1",
+        session_id="session-1",
+        channel="http",
+        external_thread_id="thread-1",
+        task_id="task-1",
+        attempt_count=0,
+    )
+
+    async def run_blocking(func, /, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    async def fake_run_orchestrator(
+        _submission: execution_module.TaskSubmission,
+        _persisted: execution_module._PersistedTaskContext,
+    ) -> OrchestratorState:
+        raise RuntimeError("orchestrator boom")
+
+    span_error_descriptions: list[str | None] = []
+
+    def fake_set_span_error_status(span, *, description: str | None = None) -> None:
+        del span
+        span_error_descriptions.append(description)
+
+    monkeypatch.setattr(service, "_run_blocking", run_blocking)
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_mark_task_in_progress", lambda *, task_id: None)
+    monkeypatch.setattr(service, "_mark_task_failed", lambda *, task_id: None)
+    monkeypatch.setattr(service, "get_task", lambda task_id: None)
+    monkeypatch.setattr(service, "_log_task_outcome", lambda task_snapshot: None)
+    monkeypatch.setattr(execution_module, "set_span_error_status", fake_set_span_error_status)
+
+    await service.submit_task(submission, persisted)
+
+    assert span_error_descriptions == ["RuntimeError: orchestrator boom"]
+
+
 def test_persist_execution_outcome_creates_error_worker_run_without_result() -> None:
     """Missing worker results should still leave an error worker-run record for observability."""
     engine = create_engine_from_url(
@@ -2485,6 +2538,55 @@ def test_run_queued_task_requeues_failed_result_when_retries_remain(monkeypatch)
         assert task.next_attempt_at is not None
         assert task.lease_owner is None
         assert task.lease_expires_at is None
+
+
+def test_run_queued_task_marks_span_error_when_execution_fails(monkeypatch) -> None:
+    """Handled queued-task failures should explicitly mark the span as errored."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    notifier = _RecordingProgressNotifier()
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+        progress_notifier=notifier,
+    )
+    snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="queued span error",
+            repo_url="https://github.com/natanayalo/code-agent",
+        )
+    )
+    claim = service.claim_next_task(worker_id="worker-a", lease_seconds=45)
+    assert claim is not None
+
+    async def fake_run_orchestrator(
+        _submission: execution_module.TaskSubmission,
+        _persisted: execution_module.TaskSnapshot,
+    ) -> OrchestratorState:
+        raise RuntimeError("queued boom")
+
+    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
+        return None
+
+    span_error_descriptions: list[str | None] = []
+
+    def fake_set_span_error_status(span, *, description: str | None = None) -> None:
+        del span
+        span_error_descriptions.append(description)
+
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(execution_module, "set_span_error_status", fake_set_span_error_status)
+
+    asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
+
+    assert span_error_descriptions == ["RuntimeError: queued boom"]
+    assert [event.phase for event in notifier.events] == ["started", "running", "failed"]
 
 
 def test_heartbeat_task_lease_uses_configured_duration(monkeypatch) -> None:

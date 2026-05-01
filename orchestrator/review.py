@@ -11,7 +11,7 @@ from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
 from orchestrator.state import OrchestratorState
-from tools.tracing import start_optional_span
+from tools.tracing import set_span_error_status, start_optional_span
 from workers import Worker, WorkerRequest
 from workers.prompt import build_review_prompt
 from workers.review import ReviewFinding, ReviewResult, SuppressedReviewFinding
@@ -521,8 +521,9 @@ async def review_result(
                 span.set_attribute("code_agent.review.parse_status", "timed_out")
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("Independent review pass failed unexpectedly.")
+            set_span_error_status(span, description=f"{type(exc).__name__}: {exc}")
             if span is not None:
                 span.set_attribute("code_agent.review.parse_status", "error")
 
