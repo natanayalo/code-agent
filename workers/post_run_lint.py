@@ -13,7 +13,11 @@ from typing import Any
 
 from sandbox import DockerShellSessionError
 from sandbox.session import DockerShellCommandResult
-from tools.tracing import start_optional_span
+from tools.tracing import (
+    OPENINFERENCE_SPAN_KIND,
+    OPENINFERENCE_SPAN_KIND_CHAIN,
+    start_optional_span,
+)
 from workers.base import ArtifactReference, WorkerCommand
 from workers.cli_runtime import (
     CliRuntimeExecutionResult,
@@ -324,6 +328,7 @@ def run_post_run_lint(
         tracer_name="workers.post_run_lint",
         span_name="worker.post_run_lint",
         attributes={
+            OPENINFERENCE_SPAN_KIND: OPENINFERENCE_SPAN_KIND_CHAIN,
             "code_agent.timeout_seconds": timeout_seconds,
             "code_agent.files_changed_count": len(files_changed),
         },

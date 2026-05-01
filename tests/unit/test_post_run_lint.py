@@ -235,6 +235,7 @@ def test_run_post_run_lint_emits_manual_span(monkeypatch, tmp_path: Path) -> Non
     assert result["status"] == "skipped"
     assert span_events
     assert span_events[0]["name"] == "worker.post_run_lint"
+    assert span_events[0]["attributes"]["openinference.span.kind"] == "CHAIN"
     assert span_events[0]["attributes"]["code_agent.files_changed_count"] == 1
     assert span_events[0]["set_attributes"]["code_agent.commands_detected_count"] == 0
 

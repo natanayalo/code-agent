@@ -315,6 +315,7 @@ def test_run_cli_runtime_loop_emits_iteration_spans(monkeypatch) -> None:
     assert execution.status == "success"
     assert len(span_events) == 2
     assert span_events[0]["name"] == "worker.cli_runtime.iteration"
+    assert span_events[0]["attributes"]["openinference.span.kind"] == "AGENT"
     assert span_events[0]["attributes"]["code_agent.iteration"] == 1
     assert span_events[0]["set_attributes"]["code_agent.step_kind"] == "tool_call"
 

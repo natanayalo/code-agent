@@ -98,7 +98,7 @@ def _load_tracing_dependencies() -> _TracingDependencies | None:
         from opentelemetry.sdk.resources import Resource  # type: ignore[import-not-found]
         from opentelemetry.sdk.trace import TracerProvider  # type: ignore[import-not-found]
         from opentelemetry.sdk.trace.export import (  # type: ignore[import-not-found]
-            BatchSpanProcessor,
+            SimpleSpanProcessor,
         )
     except ImportError:
         return None
@@ -107,9 +107,10 @@ def _load_tracing_dependencies() -> _TracingDependencies | None:
         trace_api=trace_api,
         resource_cls=Resource,
         tracer_provider_cls=TracerProvider,
-        batch_span_processor_cls=BatchSpanProcessor,
+        batch_span_processor_cls=SimpleSpanProcessor,
         otlp_exporter_cls=OTLPSpanExporter,
         langchain_instrumentor_cls=LangChainInstrumentor,
+        # We'll use these directly in configure
     )
 
 
@@ -164,6 +165,18 @@ def configure_tracing_from_env(
         tracer_provider.add_span_processor(deps.batch_span_processor_cls(otlp_exporter))
 
         deps.trace_api.set_tracer_provider(tracer_provider)
+
+        try:
+            from opentelemetry.propagate import set_global_textmap  # type: ignore[import-not-found]
+            from opentelemetry.trace.propagation.tracecontext import (  # type: ignore[import-not-found]
+                TraceContextTextMapPropagator,
+            )
+
+            set_global_textmap(TraceContextTextMapPropagator())
+        except ImportError:
+            logger.warning(
+                "Could not set global TraceContextTextMapPropagator; context propagation may fail."
+            )
 
         instrumentor = deps.langchain_instrumentor_cls()
         try:

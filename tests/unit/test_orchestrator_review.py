@@ -157,6 +157,7 @@ async def test_review_result_span_includes_session_id(monkeypatch):
     assert span_records[0]["span_name"] == "orchestrator.review.independent_pass"
     attributes = span_records[0]["attributes"]
     assert isinstance(attributes, dict)
+    assert attributes["openinference.span.kind"] == "CHAIN"
     assert attributes["code_agent.task_id"] == "task-123"
     assert attributes["code_agent.session_id"] == "session-123"
 

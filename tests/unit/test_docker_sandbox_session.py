@@ -279,6 +279,7 @@ def test_shell_session_execute_emits_manual_span(monkeypatch, tmp_path: Path) ->
     assert result.exit_code == 0
     assert span_events
     assert span_events[0]["name"] == "sandbox.shell.execute"
+    assert span_events[0]["attributes"]["openinference.span.kind"] == "TOOL"
     assert (
         span_events[0]["attributes"]["code_agent.workspace_id"] == container.workspace.workspace_id
     )

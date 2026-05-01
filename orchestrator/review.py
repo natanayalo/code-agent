@@ -11,7 +11,12 @@ from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
 from orchestrator.state import OrchestratorState
-from tools.tracing import set_span_error_status, start_optional_span
+from tools.tracing import (
+    OPENINFERENCE_SPAN_KIND,
+    OPENINFERENCE_SPAN_KIND_CHAIN,
+    set_span_error_status,
+    start_optional_span,
+)
 from workers import Worker, WorkerRequest
 from workers.prompt import build_review_prompt
 from workers.review import ReviewFinding, ReviewResult, SuppressedReviewFinding
@@ -459,6 +464,7 @@ async def review_result(
         tracer_name="orchestrator.review",
         span_name="orchestrator.review.independent_pass",
         attributes={
+            OPENINFERENCE_SPAN_KIND: OPENINFERENCE_SPAN_KIND_CHAIN,
             "code_agent.task_id": state.task.task_id,
             "code_agent.session_id": state.session.session_id if state.session else None,
             "code_agent.reviewer_type": reviewer_type,

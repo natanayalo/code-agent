@@ -18,7 +18,11 @@ from sandbox.policy import PathPolicy
 from sandbox.redact import SecretRedactor
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
 from sandbox.workspace import SandboxArtifact, SandboxModel, _mask_url_credentials
-from tools.tracing import start_optional_span
+from tools.tracing import (
+    OPENINFERENCE_SPAN_KIND,
+    OPENINFERENCE_SPAN_KIND_TOOL,
+    start_optional_span,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +285,7 @@ class DockerShellSession:
             tracer_name="sandbox.session",
             span_name="sandbox.shell.execute",
             attributes={
+                OPENINFERENCE_SPAN_KIND: OPENINFERENCE_SPAN_KIND_TOOL,
                 "code_agent.workspace_id": self.container.workspace.workspace_id,
                 "code_agent.task_id": self.container.workspace.task_id,
                 "code_agent.timeout_seconds": timeout_seconds,

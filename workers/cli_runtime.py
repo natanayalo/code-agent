@@ -44,7 +44,12 @@ from tools.numeric import (
     coerce_non_negative_int_like,
     coerce_positive_int_like,
 )
-from tools.tracing import set_span_error_status, start_optional_span
+from tools.tracing import (
+    OPENINFERENCE_SPAN_KIND,
+    OPENINFERENCE_SPAN_KIND_AGENT,
+    set_span_error_status,
+    start_optional_span,
+)
 from workers.base import WorkerCommand
 
 logger = logging.getLogger(__name__)
@@ -1234,6 +1239,7 @@ def run_cli_runtime_loop(
                 tracer_name="workers.cli_runtime",
                 span_name="worker.cli_runtime.iteration",
                 attributes={
+                    OPENINFERENCE_SPAN_KIND: OPENINFERENCE_SPAN_KIND_AGENT,
                     "code_agent.iteration": iteration,
                     "code_agent.max_iterations": settings.max_iterations,
                     "code_agent.model_name": model_name,

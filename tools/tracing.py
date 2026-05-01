@@ -7,6 +7,11 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
+OPENINFERENCE_SPAN_KIND = "openinference.span.kind"
+OPENINFERENCE_SPAN_KIND_AGENT = "AGENT"
+OPENINFERENCE_SPAN_KIND_CHAIN = "CHAIN"
+OPENINFERENCE_SPAN_KIND_TOOL = "TOOL"
+
 _UNSET_OTEL_TRACE = object()
 _CACHED_OTEL_TRACE: Any | object = _UNSET_OTEL_TRACE
 _CACHED_OTEL_MODULE: Any | object = _UNSET_OTEL_TRACE
@@ -77,3 +82,43 @@ def set_span_error_status(span: Any, *, description: str | None = None) -> None:
         set_status(status_cls(error_code))
     else:
         set_status(status_cls(error_code, description=description))
+
+
+def get_current_traceparent() -> str | None:
+    """Return the current OTEL traceparent string for manual propagation."""
+    otel_trace = _get_otel_trace()
+    if otel_trace is None:
+        return None
+    try:
+        from opentelemetry import propagate  # type: ignore[import-not-found]
+
+        carrier: dict[str, str] = {}
+        propagate.inject(carrier)
+        return carrier.get("traceparent")
+    except Exception:
+        return None
+
+
+@contextmanager
+def use_traceparent(traceparent: str | None) -> Iterator[None]:
+    """Inject a traceparent into the current OTEL context for the duration of the block."""
+    otel_trace = _get_otel_trace()
+    if otel_trace is None or not traceparent:
+        yield
+        return
+    try:
+        from opentelemetry import context  # type: ignore[import-not-found]
+        from opentelemetry.trace.propagation.tracecontext import (  # type: ignore[import-not-found]
+            TraceContextTextMapPropagator,
+        )
+
+        # Ensure we strip quotes if the string came from a JSON-serialized source
+        clean_traceparent = traceparent.strip('"') if traceparent else None
+        ctx = TraceContextTextMapPropagator().extract({"traceparent": clean_traceparent})
+        token = context.attach(ctx)
+        try:
+            yield
+        finally:
+            context.detach(token)
+    except Exception:
+        yield

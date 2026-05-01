@@ -1068,6 +1068,7 @@ async def test_await_worker_with_timeout_emits_manual_span(monkeypatch):
     assert hint == "worker result received"
     assert span_events
     assert span_events[0]["name"] == "orchestrator.await_worker_result"
+    assert span_events[0]["attributes"]["openinference.span.kind"] == "CHAIN"
     assert span_events[0]["attributes"]["code_agent.worker_type"] == "codex"
     assert span_events[0]["set_attributes"]["code_agent.worker_result_status"] == "success"
     assert "code_agent.worker_failure_kind" not in span_events[0]["set_attributes"]
@@ -1154,6 +1155,7 @@ async def test_await_worker_with_timeout_sets_failure_kind_when_present(monkeypa
     assert result.status == "error"
     assert hint == "worker result received"
     assert span_events
+    assert span_events[0]["attributes"]["openinference.span.kind"] == "CHAIN"
     assert span_events[0]["set_attributes"]["code_agent.worker_result_status"] == "error"
     assert span_events[0]["set_attributes"]["code_agent.worker_failure_kind"] == "tool_runtime"
     assert len(span_events[0]["statuses"]) == 1

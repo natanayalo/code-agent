@@ -576,8 +576,10 @@ def test_run_orchestrator_emits_manual_span_when_otel_available(monkeypatch) -> 
     asyncio.run(service._run_orchestrator(submission, persisted))
 
     assert started_spans
-    assert started_spans[0]["name"] == "orchestrator.graph.run"
-    attributes = started_spans[0]["attributes"]
+    graph_run_span = next((s for s in started_spans if s["name"] == "orchestrator.graph.run"), None)
+    assert graph_run_span is not None, f"orchestrator.graph.run span not found in {started_spans}"
+    attributes = graph_run_span["attributes"]
+    assert attributes["openinference.span.kind"] == "CHAIN"
     assert attributes["code_agent.task_id"] == persisted.task_id
     assert attributes["code_agent.session_id"] == persisted.session_id
     assert attributes["code_agent.channel"] == persisted.channel
@@ -665,6 +667,7 @@ def test_persist_execution_outcome_span_includes_session_id(monkeypatch) -> None
     assert captured_span["span_name"] == "task_execution_service.persist_execution_outcome"
     attributes = captured_span["attributes"]
     assert isinstance(attributes, dict)
+    assert attributes["openinference.span.kind"] == "CHAIN"
     assert attributes["code_agent.task_id"] == persisted.task_id
     assert attributes["code_agent.session_id"] == persisted.session_id
     assert attributes["code_agent.channel"] == persisted.channel
@@ -2296,7 +2299,8 @@ def test_load_submission_for_task_restores_constraints_budget_and_worker_overrid
     assert loaded is not None
     submission, _ = loaded
     assert submission.worker_override == "gemini"
-    assert submission.constraints == {"requires_approval": True, "approval_reason": "manual gate"}
+    assert submission.constraints["requires_approval"] is True
+    assert submission.constraints["approval_reason"] == "manual gate"
     assert submission.budget == {"max_iterations": 5}
 
 

@@ -45,7 +45,12 @@ from orchestrator.task_spec import (
 )
 from tools import coerce_permission_level
 from tools.numeric import coerce_positive_int_like
-from tools.tracing import set_span_error_status, start_optional_span
+from tools.tracing import (
+    OPENINFERENCE_SPAN_KIND,
+    OPENINFERENCE_SPAN_KIND_CHAIN,
+    set_span_error_status,
+    start_optional_span,
+)
 from workers import ArtifactReference, Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -246,6 +251,7 @@ async def _await_worker_with_timeout(
         tracer_name="orchestrator.graph",
         span_name="orchestrator.await_worker_result",
         attributes={
+            OPENINFERENCE_SPAN_KIND: OPENINFERENCE_SPAN_KIND_CHAIN,
             "code_agent.worker_type": worker_type,
             "code_agent.session_id": session_id,
             "code_agent.timeout_seconds": timeout_seconds,

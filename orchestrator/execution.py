@@ -61,7 +61,14 @@ from repositories import (
 )
 from tools import coerce_permission_level
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
-from tools.tracing import set_span_error_status, start_optional_span
+from tools.tracing import (
+    OPENINFERENCE_SPAN_KIND,
+    OPENINFERENCE_SPAN_KIND_CHAIN,
+    get_current_traceparent,
+    set_span_error_status,
+    start_optional_span,
+    use_traceparent,
+)
 from workers import ArtifactReference, Worker, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -636,6 +643,7 @@ def _execution_task_span_attributes(
 ) -> dict[str, Any]:
     """Build shared correlation attributes for execution-path spans."""
     return {
+        OPENINFERENCE_SPAN_KIND: OPENINFERENCE_SPAN_KIND_CHAIN,
         "code_agent.task_id": task_id,
         "code_agent.session_id": session_id,
         "code_agent.channel": channel,
@@ -1173,28 +1181,37 @@ class TaskExecutionService:
         delivery_key: DeliveryKey | None = None,
     ) -> CreateTaskOutcome:
         """Persist a task request or return the previously created task for a duplicate delivery."""
-        if delivery_key is not None and delivery_key.channel != submission.session.channel:
-            raise ValueError(
-                "delivery_key.channel must match submission.session.channel for dedupe."
+        with start_optional_span(
+            tracer_name="orchestrator.execution",
+            span_name="task_execution_service.create_task_outcome",
+            attributes={
+                "code_agent.session_id": submission.session.channel
+                + ":"
+                + submission.session.external_thread_id,
+            },
+        ):
+            if delivery_key is not None and delivery_key.channel != submission.session.channel:
+                raise ValueError(
+                    "delivery_key.channel must match submission.session.channel for dedupe."
+                )
+            persisted, duplicate_task_id = self._persist_submission(
+                submission,
+                status=TaskStatus.PENDING,
+                max_attempts=self.default_task_max_attempts,
+                delivery_key=delivery_key,
             )
-        persisted, duplicate_task_id = self._persist_submission(
-            submission,
-            status=TaskStatus.PENDING,
-            max_attempts=self.default_task_max_attempts,
-            delivery_key=delivery_key,
-        )
-        task_id = duplicate_task_id or (persisted.task_id if persisted is not None else None)
-        if task_id is None:
-            raise RuntimeError("Task persistence did not produce a task id.")
+            task_id = duplicate_task_id or (persisted.task_id if persisted is not None else None)
+            if task_id is None:
+                raise RuntimeError("Task persistence did not produce a task id.")
 
-        task_snapshot = self.get_task(task_id)
-        if task_snapshot is None:
-            raise RuntimeError(f"Persisted task '{task_id}' could not be reloaded.")
-        return CreateTaskOutcome(
-            task_snapshot=task_snapshot,
-            persisted=persisted,
-            duplicate=duplicate_task_id is not None,
-        )
+            task_snapshot = self.get_task(task_id)
+            if task_snapshot is None:
+                raise RuntimeError(f"Persisted task '{task_id}' could not be reloaded.")
+            return CreateTaskOutcome(
+                task_snapshot=task_snapshot,
+                persisted=persisted,
+                duplicate=duplicate_task_id is not None,
+            )
 
     async def submit_task(
         self,
@@ -1327,81 +1344,88 @@ class TaskExecutionService:
                 "worker_id": worker_id,
             },
         )
-        with start_optional_span(
-            tracer_name="orchestrator.execution",
-            span_name="task_execution_service.run_queued_task",
-            attributes={
-                **_execution_task_span_attributes(
-                    task_id=persisted.task_id,
-                    session_id=persisted.session_id,
-                    channel=persisted.channel,
-                    attempt_count=persisted.attempt_count,
-                ),
-                "code_agent.worker_id": worker_id,
-            },
-        ) as span:
-            try:
-                state = await self._run_orchestrator(submission, persisted)
-                finished_at = utc_now()
-                if state.result is not None and state.result.status == "success":
-                    await self._run_blocking(
-                        self._persist_execution_outcome,
+        traceparent = submission.constraints.get("traceparent")
+        if traceparent:
+            logger.info(f"Resuming trace context from traceparent: {traceparent}")
+        with use_traceparent(traceparent):
+            with start_optional_span(
+                tracer_name="orchestrator.execution",
+                span_name="task_execution_service.run_queued_task",
+                attributes={
+                    **_execution_task_span_attributes(
                         task_id=persisted.task_id,
-                        state=state,
-                        started_at=started_at,
-                        finished_at=finished_at,
-                        force_task_status=TaskStatus.COMPLETED,
-                    )
-                    await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
-                else:
-                    terminal_failure = _requires_manual_follow_up(state)
-                    terminal_status = _terminal_follow_up_status(
-                        state=state,
-                        terminal_failure=terminal_failure,
-                    )
-                    await self._run_blocking(
-                        self._persist_execution_outcome,
-                        task_id=persisted.task_id,
-                        state=state,
-                        started_at=started_at,
-                        finished_at=finished_at,
-                        force_task_status=terminal_status,
-                    )
-                    if terminal_failure:
+                        session_id=persisted.session_id,
+                        channel=persisted.channel,
+                        attempt_count=persisted.attempt_count,
+                    ),
+                    "code_agent.worker_id": worker_id,
+                    "code_agent.trace_resumed": traceparent is not None,
+                },
+            ) as span:
+                try:
+                    state = await self._run_orchestrator(submission, persisted)
+                    finished_at = utc_now()
+                    if state.result is not None and state.result.status == "success":
                         await self._run_blocking(
-                            self._release_task_terminal_failure,
+                            self._persist_execution_outcome,
                             task_id=persisted.task_id,
-                            worker_id=worker_id,
-                            status=terminal_status,
+                            state=state,
+                            started_at=started_at,
+                            finished_at=finished_at,
+                            force_task_status=TaskStatus.COMPLETED,
+                        )
+                        await self._run_blocking(
+                            self._release_task_success, task_id=persisted.task_id
                         )
                     else:
-                        await self._run_blocking(
-                            self._release_task_failure,
-                            task_id=persisted.task_id,
-                            worker_id=worker_id,
+                        terminal_failure = _requires_manual_follow_up(state)
+                        terminal_status = _terminal_follow_up_status(
+                            state=state,
+                            terminal_failure=terminal_failure,
                         )
-            except Exception as exc:
-                _mark_span_error_from_exception(span, exc)
-                logger.exception(
-                    "Task execution failed before the final outcome was fully persisted",
-                    extra={
-                        "session_id": persisted.session_id,
-                        "task_id": persisted.task_id,
-                        "worker_id": worker_id,
-                    },
-                )
-                await self._run_blocking(
-                    self._record_task_attempt_error,
-                    task_id=persisted.task_id,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-                await self._run_blocking(
-                    self._release_task_failure,
-                    task_id=persisted.task_id,
-                    worker_id=worker_id,
-                )
-            finally:
-                heartbeat_task.cancel()
+                        await self._run_blocking(
+                            self._persist_execution_outcome,
+                            task_id=persisted.task_id,
+                            state=state,
+                            started_at=started_at,
+                            finished_at=finished_at,
+                            force_task_status=terminal_status,
+                        )
+                        if terminal_failure:
+                            await self._run_blocking(
+                                self._release_task_terminal_failure,
+                                task_id=persisted.task_id,
+                                worker_id=worker_id,
+                                status=terminal_status,
+                            )
+                        else:
+                            await self._run_blocking(
+                                self._release_task_failure,
+                                task_id=persisted.task_id,
+                                worker_id=worker_id,
+                            )
+                except Exception as exc:
+                    _mark_span_error_from_exception(span, exc)
+                    logger.exception(
+                        "Task execution failed before the final outcome was fully persisted",
+                        extra={
+                            "session_id": persisted.session_id,
+                            "task_id": persisted.task_id,
+                            "worker_id": worker_id,
+                        },
+                    )
+                    await self._run_blocking(
+                        self._record_task_attempt_error,
+                        task_id=persisted.task_id,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
+                    await self._run_blocking(
+                        self._release_task_failure,
+                        task_id=persisted.task_id,
+                        worker_id=worker_id,
+                    )
+                finally:
+                    heartbeat_task.cancel()
                 await asyncio.gather(heartbeat_task, return_exceptions=True)
 
             task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
@@ -2129,9 +2153,13 @@ class TaskExecutionService:
                 constraints={
                     **sanitized_constraints,
                     "tools": submission.tools,
+                    "traceparent": get_current_traceparent(),
                 }
                 if submission.tools is not None
-                else dict(sanitized_constraints),
+                else {
+                    **sanitized_constraints,
+                    "traceparent": get_current_traceparent(),
+                },
                 secrets_encrypted=self.is_secret_encryption_active(),
                 status=status,
                 max_attempts=max(1, max_attempts),

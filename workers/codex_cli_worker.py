@@ -35,6 +35,10 @@ from tools import (
     UnknownToolError,
     granted_permission_from_constraints,
 )
+from tools.tracing import (
+    get_current_traceparent,
+    use_traceparent,
+)
 from workers.base import ArtifactReference, Worker, WorkerRequest, WorkerResult
 from workers.cli_runtime import (
     CliRuntimeAdapter,
@@ -266,6 +270,7 @@ class CodexCliWorker(Worker):
                 request,
                 cancel_token=cancel_event.is_set,
                 system_prompt_override=system_prompt,
+                traceparent=get_current_traceparent(),
             ),
         )
         try:
@@ -543,9 +548,11 @@ class CodexCliWorker(Worker):
         request: WorkerRequest,
         cancel_token: Callable[[], bool] | None = None,
         system_prompt_override: str | None = None,
+        traceparent: str | None = None,
     ) -> WorkerResult:
         """Provision a workspace, run the CLI runtime, and return a typed result."""
-        invalid_request_result = self._validate_request(request)
+        with use_traceparent(traceparent):
+            invalid_request_result = self._validate_request(request)
         if invalid_request_result is not None:
             return invalid_request_result
         repo_url = request.repo_url
