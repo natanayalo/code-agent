@@ -897,6 +897,28 @@ def _completion_progress_phase(task_snapshot: TaskSnapshot) -> ProgressPhase:
     return "failed"
 
 
+def _start_optional_span(
+    *,
+    tracer_name: str,
+    span_name: str,
+    attributes: Mapping[str, Any] | None = None,
+) -> Any:
+    """Return an OTEL span context manager when tracing deps are available."""
+    span_cm: Any = nullcontext()
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+        span_cm = otel_trace.get_tracer(tracer_name).start_as_current_span(
+            span_name,
+            attributes={
+                key: value for key, value in (attributes or {}).items() if value is not None
+            },
+        )
+    except ImportError:
+        span_cm = nullcontext()
+    return span_cm
+
+
 def _workspace_id_from_artifacts(artifacts: list[ArtifactReference]) -> str | None:
     """Infer the workspace id from the retained workspace artifact path."""
     for artifact in artifacts:
@@ -1195,62 +1217,73 @@ class TaskExecutionService:
                 "start_timestamp": started_at.isoformat(),
             },
         )
-
-        try:
-            state = await self._run_orchestrator(submission, persisted)
-            finished_at = utc_now()
-            await self._run_blocking(
-                self._persist_execution_outcome,
-                task_id=persisted.task_id,
-                state=state,
-                started_at=started_at,
-                finished_at=finished_at,
-            )
-        except Exception:
-            logger.exception(
-                "Task execution failed before the final outcome was fully persisted",
-                extra={
-                    "session_id": persisted.session_id,
-                    "task_id": persisted.task_id,
-                },
-            )
-            await self._run_blocking(self._mark_task_failed, task_id=persisted.task_id)
-            task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
-            if task_snapshot is None:
-                logger.error(
-                    "Failed to reload task snapshot after marking a background task as failed",
+        with _start_optional_span(
+            tracer_name="orchestrator.execution",
+            span_name="task_execution_service.submit_task",
+            attributes={
+                "code_agent.task_id": persisted.task_id,
+                "code_agent.session_id": persisted.session_id,
+                "code_agent.channel": persisted.channel,
+                "code_agent.attempt_count": persisted.attempt_count,
+            },
+        ):
+            try:
+                state = await self._run_orchestrator(submission, persisted)
+                finished_at = utc_now()
+                await self._run_blocking(
+                    self._persist_execution_outcome,
+                    task_id=persisted.task_id,
+                    state=state,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                )
+            except Exception:
+                logger.exception(
+                    "Task execution failed before the final outcome was fully persisted",
                     extra={
                         "session_id": persisted.session_id,
                         "task_id": persisted.task_id,
                     },
                 )
+                await self._run_blocking(self._mark_task_failed, task_id=persisted.task_id)
+                task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
+                if task_snapshot is None:
+                    logger.error(
+                        "Failed to reload task snapshot after marking a background task as failed",
+                        extra={
+                            "session_id": persisted.session_id,
+                            "task_id": persisted.task_id,
+                        },
+                    )
+                    await self._emit_progress(
+                        submission,
+                        persisted,
+                        phase="failed",
+                        summary=(
+                            "Task execution failed and the final snapshot could " "not be reloaded."
+                        ),
+                    )
+                    return None
+                self._log_task_outcome(task_snapshot)
                 await self._emit_progress(
                     submission,
                     persisted,
                     phase="failed",
-                    summary="Task execution failed and the final snapshot could not be reloaded.",
+                    summary=self._task_summary(task_snapshot),
                 )
                 return None
+
+            task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
+            if task_snapshot is None:
+                raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
             self._log_task_outcome(task_snapshot)
             await self._emit_progress(
                 submission,
                 persisted,
-                phase="failed",
+                phase=_completion_progress_phase(task_snapshot),
                 summary=self._task_summary(task_snapshot),
             )
             return None
-
-        task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
-        if task_snapshot is None:
-            raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
-        self._log_task_outcome(task_snapshot)
-        await self._emit_progress(
-            submission,
-            persisted,
-            phase=_completion_progress_phase(task_snapshot),
-            summary=self._task_summary(task_snapshot),
-        )
-        return None
 
     async def run_queued_task(
         self,
@@ -1293,80 +1326,91 @@ class TaskExecutionService:
                 "worker_id": worker_id,
             },
         )
-        try:
-            state = await self._run_orchestrator(submission, persisted)
-            finished_at = utc_now()
-            if state.result is not None and state.result.status == "success":
-                await self._run_blocking(
-                    self._persist_execution_outcome,
-                    task_id=persisted.task_id,
-                    state=state,
-                    started_at=started_at,
-                    finished_at=finished_at,
-                    force_task_status=TaskStatus.COMPLETED,
-                )
-                await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
-            else:
-                terminal_failure = _requires_manual_follow_up(state)
-                terminal_status = _terminal_follow_up_status(
-                    state=state,
-                    terminal_failure=terminal_failure,
-                )
-                await self._run_blocking(
-                    self._persist_execution_outcome,
-                    task_id=persisted.task_id,
-                    state=state,
-                    started_at=started_at,
-                    finished_at=finished_at,
-                    force_task_status=terminal_status,
-                )
-                if terminal_failure:
+        with _start_optional_span(
+            tracer_name="orchestrator.execution",
+            span_name="task_execution_service.run_queued_task",
+            attributes={
+                "code_agent.task_id": persisted.task_id,
+                "code_agent.session_id": persisted.session_id,
+                "code_agent.channel": persisted.channel,
+                "code_agent.attempt_count": persisted.attempt_count,
+                "code_agent.worker_id": worker_id,
+            },
+        ):
+            try:
+                state = await self._run_orchestrator(submission, persisted)
+                finished_at = utc_now()
+                if state.result is not None and state.result.status == "success":
                     await self._run_blocking(
-                        self._release_task_terminal_failure,
+                        self._persist_execution_outcome,
                         task_id=persisted.task_id,
-                        worker_id=worker_id,
-                        status=terminal_status,
+                        state=state,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        force_task_status=TaskStatus.COMPLETED,
                     )
+                    await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
                 else:
-                    await self._run_blocking(
-                        self._release_task_failure,
-                        task_id=persisted.task_id,
-                        worker_id=worker_id,
+                    terminal_failure = _requires_manual_follow_up(state)
+                    terminal_status = _terminal_follow_up_status(
+                        state=state,
+                        terminal_failure=terminal_failure,
                     )
-        except Exception as exc:
-            logger.exception(
-                "Task execution failed before the final outcome was fully persisted",
-                extra={
-                    "session_id": persisted.session_id,
-                    "task_id": persisted.task_id,
-                    "worker_id": worker_id,
-                },
-            )
-            await self._run_blocking(
-                self._record_task_attempt_error,
-                task_id=persisted.task_id,
-                error=f"{type(exc).__name__}: {exc}",
-            )
-            await self._run_blocking(
-                self._release_task_failure,
-                task_id=persisted.task_id,
-                worker_id=worker_id,
-            )
-        finally:
-            heartbeat_task.cancel()
-            await asyncio.gather(heartbeat_task, return_exceptions=True)
+                    await self._run_blocking(
+                        self._persist_execution_outcome,
+                        task_id=persisted.task_id,
+                        state=state,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        force_task_status=terminal_status,
+                    )
+                    if terminal_failure:
+                        await self._run_blocking(
+                            self._release_task_terminal_failure,
+                            task_id=persisted.task_id,
+                            worker_id=worker_id,
+                            status=terminal_status,
+                        )
+                    else:
+                        await self._run_blocking(
+                            self._release_task_failure,
+                            task_id=persisted.task_id,
+                            worker_id=worker_id,
+                        )
+            except Exception as exc:
+                logger.exception(
+                    "Task execution failed before the final outcome was fully persisted",
+                    extra={
+                        "session_id": persisted.session_id,
+                        "task_id": persisted.task_id,
+                        "worker_id": worker_id,
+                    },
+                )
+                await self._run_blocking(
+                    self._record_task_attempt_error,
+                    task_id=persisted.task_id,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                await self._run_blocking(
+                    self._release_task_failure,
+                    task_id=persisted.task_id,
+                    worker_id=worker_id,
+                )
+            finally:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
 
-        task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
-        if task_snapshot is None:
-            raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
-        self._log_task_outcome(task_snapshot)
-        await self._emit_progress(
-            submission,
-            persisted,
-            phase=_completion_progress_phase(task_snapshot),
-            summary=self._task_summary(task_snapshot),
-        )
-        return None
+            task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
+            if task_snapshot is None:
+                raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
+            self._log_task_outcome(task_snapshot)
+            await self._emit_progress(
+                submission,
+                persisted,
+                phase=_completion_progress_phase(task_snapshot),
+                summary=self._task_summary(task_snapshot),
+            )
+            return None
 
     async def _heartbeat_loop(
         self,
@@ -2220,23 +2264,16 @@ class TaskExecutionService:
             budget=submission.budget,
         )
 
-        span_cm: Any = nullcontext()
-        try:
-            from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
-
-            span_cm = otel_trace.get_tracer("orchestrator.execution").start_as_current_span(
-                "orchestrator.graph.run",
-                attributes={
-                    "code_agent.task_id": persisted.task_id,
-                    "code_agent.session_id": persisted.session_id,
-                    "code_agent.attempt_count": persisted.attempt_count,
-                    "code_agent.channel": persisted.channel,
-                },
-            )
-        except ImportError:
-            span_cm = nullcontext()
-
-        with span_cm:
+        with _start_optional_span(
+            tracer_name="orchestrator.execution",
+            span_name="orchestrator.graph.run",
+            attributes={
+                "code_agent.task_id": persisted.task_id,
+                "code_agent.session_id": persisted.session_id,
+                "code_agent.attempt_count": persisted.attempt_count,
+                "code_agent.channel": persisted.channel,
+            },
+        ):
             raw_output = await self.graph.ainvoke(
                 {
                     "session": SessionRef(
@@ -2449,157 +2486,177 @@ class TaskExecutionService:
         force_task_status: TaskStatus | None = None,
     ) -> None:
         """Persist route, task status, worker-run metadata, and artifacts."""
-        logger.info(
-            "Persisting execution outcome",
-            extra={
-                "task_id": task_id,
-                "approval_required": state.approval.required,
-                "approval_status": state.approval.status,
-                "timeline_count": len(state.timeline_events),
-            },
-        )
-        retention_expires_at = (
-            finished_at + timedelta(seconds=self.retention_seconds)
-            if self.retention_seconds is not None
-            else None
-        )
-        with session_scope(self.session_factory) as session:
-            task_repo = TaskRepository(session)
-            interaction_repo = HumanInteractionRepository(session)
-            worker_run_repo = WorkerRunRepository(session)
-            artifact_repo = ArtifactRepository(session)
-
-            task = task_repo.get(task_id)
-            if task is None:
-                raise RuntimeError(f"Task '{task_id}' disappeared while persisting execution.")
-
-            if state.route.chosen_worker is not None and state.route.route_reason is not None:
-                task.chosen_worker = cast(WorkerType, state.route.chosen_worker)
-                task.route_reason = state.route.route_reason
-
-            if state.task_spec is not None:
-                task.task_spec = state.task_spec.model_dump(mode="json")
-            if isinstance(task.task_spec, Mapping):
-                interaction_repo.sync_task_spec_flags(task_id=task_id, task_spec=task.task_spec)
-
-            task.status = cast(TaskStatus, force_task_status or _task_status_from_result(state))
-
-            approval = state.approval
-            if approval.required:
-                # If approval is required, we always want to reflect its current status
-                # in the task constraints so the dashboard can show the banner.
-                approval_status = approval.status
-                if approval_status in {"pending", "approved", "rejected"}:
-                    constraints = dict(task.constraints or {})
-                    constraints["approval"] = _approval_constraints_payload(
-                        status=approval_status,
-                        approval_type=approval.approval_type,
-                        reason=approval.reason,
-                        resume_token=approval.resume_token,
-                        updated_at=finished_at,
-                        source="orchestrator",
-                        approved=(
-                            True
-                            if approval_status == "approved"
-                            else False
-                            if approval_status == "rejected"
-                            else None
-                        ),
-                    )
-                    task.constraints = constraints
-
-            result = state.result
-            artifacts = result.artifacts if result is not None else []
-            artifact_index = [artifact.model_dump(mode="json") for artifact in artifacts]
-            review_sources = (
-                (
-                    result.review_result if result is not None else None,
-                    ArtifactType.REVIEW_RESULT.value,
+        with _start_optional_span(
+            tracer_name="orchestrator.execution",
+            span_name="task_execution_service.persist_execution_outcome",
+            attributes={
+                "code_agent.task_id": task_id,
+                "code_agent.task_status": (
+                    (force_task_status or _task_status_from_result(state)).value
                 ),
-                (state.review, ArtifactType.INDEPENDENT_REVIEW_RESULT.value),
+                "code_agent.approval_required": state.approval.required,
+                "code_agent.approval_status": state.approval.status,
+                "code_agent.timeline_count": len(state.timeline_events),
+            },
+        ):
+            logger.info(
+                "Persisting execution outcome",
+                extra={
+                    "task_id": task_id,
+                    "approval_required": state.approval.required,
+                    "approval_status": state.approval.status,
+                    "timeline_count": len(state.timeline_events),
+                },
             )
-            review_artifact_entries: list[tuple[str, dict[str, Any]]] = []
-            for review_payload, review_artifact_type in review_sources:
-                review_entry = _review_result_artifact_entry(
-                    review_payload,
-                    artifact_type=review_artifact_type,
+            retention_expires_at = (
+                finished_at + timedelta(seconds=self.retention_seconds)
+                if self.retention_seconds is not None
+                else None
+            )
+            with session_scope(self.session_factory) as session:
+                task_repo = TaskRepository(session)
+                interaction_repo = HumanInteractionRepository(session)
+                worker_run_repo = WorkerRunRepository(session)
+                artifact_repo = ArtifactRepository(session)
+
+                task = task_repo.get(task_id)
+                if task is None:
+                    raise RuntimeError(f"Task '{task_id}' disappeared while persisting execution.")
+
+                if state.route.chosen_worker is not None and state.route.route_reason is not None:
+                    task.chosen_worker = cast(WorkerType, state.route.chosen_worker)
+                    task.route_reason = state.route.route_reason
+
+                if state.task_spec is not None:
+                    task.task_spec = state.task_spec.model_dump(mode="json")
+                if isinstance(task.task_spec, Mapping):
+                    interaction_repo.sync_task_spec_flags(task_id=task_id, task_spec=task.task_spec)
+
+                task.status = cast(TaskStatus, force_task_status or _task_status_from_result(state))
+
+                approval = state.approval
+                if approval.required:
+                    # If approval is required, we always want to reflect its current status
+                    # in the task constraints so the dashboard can show the banner.
+                    approval_status = approval.status
+                    if approval_status in {"pending", "approved", "rejected"}:
+                        constraints = dict(task.constraints or {})
+                        constraints["approval"] = _approval_constraints_payload(
+                            status=approval_status,
+                            approval_type=approval.approval_type,
+                            reason=approval.reason,
+                            resume_token=approval.resume_token,
+                            updated_at=finished_at,
+                            source="orchestrator",
+                            approved=(
+                                True
+                                if approval_status == "approved"
+                                else False
+                                if approval_status == "rejected"
+                                else None
+                            ),
+                        )
+                        task.constraints = constraints
+
+                result = state.result
+                artifacts = result.artifacts if result is not None else []
+                artifact_index = [artifact.model_dump(mode="json") for artifact in artifacts]
+                review_sources = (
+                    (
+                        result.review_result if result is not None else None,
+                        ArtifactType.REVIEW_RESULT.value,
+                    ),
+                    (state.review, ArtifactType.INDEPENDENT_REVIEW_RESULT.value),
                 )
-                if review_entry is None:
-                    continue
-                artifact_index.append(review_entry)
-                review_artifact_entries.append((review_artifact_type, review_entry))
-            worker_type = _worker_type_for_persistence(state)
-            worker_run = worker_run_repo.create(
-                task_id=task_id,
-                session_id=state.session.session_id if state.session is not None else None,
-                worker_type=worker_type,
-                workspace_id=_workspace_id_from_artifacts(artifacts),
-                started_at=started_at,
-                finished_at=finished_at,
-                status=_worker_run_status_from_result(state),
-                summary=result.summary if result is not None else "Worker did not return a result.",
-                requested_permission=result.requested_permission if result is not None else None,
-                budget_usage=result.budget_usage if result is not None else None,
-                verifier_outcome=_serialize_verification_report(state.verification),
-                commands_run=[
-                    command.model_dump(mode="json")
-                    for command in (result.commands_run if result is not None else [])
-                ],
-                files_changed_count=len(result.files_changed) if result is not None else 0,
-                files_changed=result.files_changed if result is not None else [],
-                artifact_index=artifact_index,
-                retention_expires_at=retention_expires_at,
-            )
-
-            # Use the state-side marker of already-persisted events to avoid redundant DB queries
-            # This marker is initialized from the DB at the start of the task execution attempt.
-            persisted_count = state.timeline_persisted_count
-
-            current_attempt_events = []
-            for e in reversed(state.timeline_events):
-                if e.attempt_number != state.attempt_count:
-                    break
-                current_attempt_events.append(e)
-            current_attempt_events.reverse()
-
-            # Filter for events that have not been persisted yet
-            # Since sequence_number is 0-indexed, skip already persisted events
-            new_events = [e for e in current_attempt_events if e.sequence_number >= persisted_count]
-
-            if new_events:
-                timeline_repo = TaskTimelineRepository(session)
-                timeline_repo.create_batch(
+                review_artifact_entries: list[tuple[str, dict[str, Any]]] = []
+                for review_payload, review_artifact_type in review_sources:
+                    review_entry = _review_result_artifact_entry(
+                        review_payload,
+                        artifact_type=review_artifact_type,
+                    )
+                    if review_entry is None:
+                        continue
+                    artifact_index.append(review_entry)
+                    review_artifact_entries.append((review_artifact_type, review_entry))
+                worker_type = _worker_type_for_persistence(state)
+                worker_run = worker_run_repo.create(
                     task_id=task_id,
-                    events=[e.model_dump() for e in new_events],
+                    session_id=state.session.session_id if state.session is not None else None,
+                    worker_type=worker_type,
+                    workspace_id=_workspace_id_from_artifacts(artifacts),
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    status=_worker_run_status_from_result(state),
+                    summary=(
+                        result.summary if result is not None else "Worker did not return a result."
+                    ),
+                    requested_permission=result.requested_permission
+                    if result is not None
+                    else None,
+                    budget_usage=(result.budget_usage if result is not None else None),
+                    verifier_outcome=_serialize_verification_report(state.verification),
+                    commands_run=[
+                        command.model_dump(mode="json")
+                        for command in (result.commands_run if result is not None else [])
+                    ],
+                    files_changed_count=len(result.files_changed) if result is not None else 0,
+                    files_changed=result.files_changed if result is not None else [],
+                    artifact_index=artifact_index,
+                    retention_expires_at=retention_expires_at,
                 )
 
-            if state.session is not None and state.session_state_update is not None:
-                session_state_repo = SessionStateRepository(session)
-                session_state_repo.upsert(
-                    session_id=state.session.session_id,
-                    **state.session_state_update.model_dump(exclude_none=True),
-                )
+                # Use the state-side marker of already-persisted events to avoid redundant DB
+                # queries. This marker is initialized from the DB at the start of the task
+                # execution attempt.
+                persisted_count = state.timeline_persisted_count
 
-            for artifact in artifacts:
-                artifact_type = _artifact_type_for_persistence(artifact)
-                if artifact_type is None:
-                    continue
-                artifact_repo.create(
-                    run_id=worker_run.id,
-                    artifact_type=artifact_type,
-                    name=artifact.name,
-                    uri=artifact.uri,
-                )
-            for review_artifact_type, review_entry in review_artifact_entries:
-                artifact_repo.create(
-                    run_id=worker_run.id,
-                    artifact_type=review_artifact_type,
-                    name=review_entry["name"],
-                    uri=review_entry["uri"],
-                    artifact_metadata=review_entry["artifact_metadata"],
-                )
+                current_attempt_events = []
+                for e in reversed(state.timeline_events):
+                    if e.attempt_number != state.attempt_count:
+                        break
+                    current_attempt_events.append(e)
+                current_attempt_events.reverse()
 
-        self._prune_retained_runs(now=finished_at)
+                # Filter for events that have not been persisted yet since sequence_number
+                # is 0-indexed.
+                new_events = [
+                    e for e in current_attempt_events if e.sequence_number >= persisted_count
+                ]
+
+                if new_events:
+                    timeline_repo = TaskTimelineRepository(session)
+                    timeline_repo.create_batch(
+                        task_id=task_id,
+                        events=[e.model_dump() for e in new_events],
+                    )
+
+                if state.session is not None and state.session_state_update is not None:
+                    session_state_repo = SessionStateRepository(session)
+                    session_state_repo.upsert(
+                        session_id=state.session.session_id,
+                        **state.session_state_update.model_dump(exclude_none=True),
+                    )
+
+                for artifact in artifacts:
+                    artifact_type = _artifact_type_for_persistence(artifact)
+                    if artifact_type is None:
+                        continue
+                    artifact_repo.create(
+                        run_id=worker_run.id,
+                        artifact_type=artifact_type,
+                        name=artifact.name,
+                        uri=artifact.uri,
+                    )
+                for review_artifact_type, review_entry in review_artifact_entries:
+                    artifact_repo.create(
+                        run_id=worker_run.id,
+                        artifact_type=review_artifact_type,
+                        name=review_entry["name"],
+                        uri=review_entry["uri"],
+                        artifact_metadata=review_entry["artifact_metadata"],
+                    )
+
+            self._prune_retained_runs(now=finished_at)
 
     def _log_task_outcome(self, task_snapshot: TaskSnapshot) -> None:
         """Emit the structured task-run log required for execution-path tracing."""

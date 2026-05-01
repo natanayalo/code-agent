@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from sandbox import DockerShellCommandResult, DockerShellSessionError
 from tools import (
@@ -254,6 +256,67 @@ def test_run_cli_runtime_loop_completes_a_multi_turn_sequence() -> None:
     assert any(message.role == "tool" for message in execution.messages)
     assert "Tool call: execute_bash" in execution.messages[1].content
     assert "Exit code: 0" in execution.messages[2].content
+
+
+def test_run_cli_runtime_loop_emits_iteration_spans(monkeypatch) -> None:
+    """Each adapter iteration should emit a manual runtime span when OTEL is available."""
+    span_events: list[dict[str, object]] = []
+
+    class _FakeSpan:
+        def __init__(self, name: str, attributes: dict[str, object] | None) -> None:
+            self.name = name
+            self.attributes = dict(attributes or {})
+            self.set_attributes: dict[str, object] = {}
+
+        def __enter__(self):
+            span_events.append(
+                {
+                    "name": self.name,
+                    "attributes": self.attributes,
+                    "set_attributes": self.set_attributes,
+                }
+            )
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            del exc_type, exc, tb
+            return False
+
+        def set_attribute(self, key: str, value: object) -> None:
+            self.set_attributes[key] = value
+
+    class _FakeTracer:
+        def start_as_current_span(self, name: str, attributes: dict[str, object] | None = None):
+            return _FakeSpan(name, attributes)
+
+    class _FakeTraceApi:
+        def get_tracer(self, name: str):
+            assert name == "workers.cli_runtime"
+            return _FakeTracer()
+
+    monkeypatch.setitem(sys.modules, "opentelemetry", SimpleNamespace(trace=_FakeTraceApi()))
+
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pwd"),
+            CliRuntimeStep(kind="final", final_output="done"),
+        ]
+    )
+    session = _FakeSession({"pwd": _command_result("pwd", output="/workspace/repo\n")})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=3, worker_timeout_seconds=30),
+        model_name="gpt-5.4",
+    )
+
+    assert execution.status == "success"
+    assert len(span_events) == 2
+    assert span_events[0]["name"] == "worker.cli_runtime.iteration"
+    assert span_events[0]["attributes"]["code_agent.iteration"] == 1
+    assert span_events[0]["set_attributes"]["code_agent.step_kind"] == "tool_call"
 
 
 def test_run_cli_runtime_loop_rejects_tool_call_payload_returned_as_final_output() -> None:

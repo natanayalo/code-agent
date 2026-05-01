@@ -8,6 +8,7 @@ import re
 import shlex
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import nullcontext
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal, Protocol
@@ -1104,6 +1105,28 @@ def _budget_exceeded_result(
     )
 
 
+def _start_optional_span(
+    *,
+    tracer_name: str,
+    span_name: str,
+    attributes: Mapping[str, Any] | None = None,
+) -> Any:
+    """Return an OTEL span context manager when tracing deps are available."""
+    span_cm: Any = nullcontext()
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+        span_cm = otel_trace.get_tracer(tracer_name).start_as_current_span(
+            span_name,
+            attributes={
+                key: value for key, value in (attributes or {}).items() if value is not None
+            },
+        )
+    except ImportError:
+        span_cm = nullcontext()
+    return span_cm
+
+
 def run_cli_runtime_loop(
     adapter: CliRuntimeAdapter,
     session: ShellSessionProtocol,
@@ -1229,32 +1252,49 @@ def run_cli_runtime_loop(
             )
 
         try:
-            messages_for_adapter, preflight_error = _preflight_messages_for_adapter(
-                messages,
-                settings=settings,
-                model_name=model_name,
-                iteration=iteration,
-            )
-            if preflight_error is not None:
-                _update_budget_ledger(
-                    budget_ledger,
-                    started_at=started_at,
-                    clock=clock,
-                    iterations_used=iteration,
+            with _start_optional_span(
+                tracer_name="workers.cli_runtime",
+                span_name="worker.cli_runtime.iteration",
+                attributes={
+                    "code_agent.iteration": iteration,
+                    "code_agent.max_iterations": settings.max_iterations,
+                    "code_agent.model_name": model_name,
+                },
+            ) as span:
+                messages_for_adapter, preflight_error = _preflight_messages_for_adapter(
+                    messages,
+                    settings=settings,
+                    model_name=model_name,
+                    iteration=iteration,
                 )
-                return CliRuntimeExecutionResult(
-                    status="failure",
-                    summary=preflight_error,
-                    stop_reason="context_window",
-                    commands_run=commands_run,
-                    messages=messages,
-                    budget_ledger=budget_ledger,
+                if preflight_error is not None:
+                    if span is not None:
+                        span.set_attribute("code_agent.preflight_status", "context_window")
+                    _update_budget_ledger(
+                        budget_ledger,
+                        started_at=started_at,
+                        clock=clock,
+                        iterations_used=iteration,
+                    )
+                    return CliRuntimeExecutionResult(
+                        status="failure",
+                        summary=preflight_error,
+                        stop_reason="context_window",
+                        commands_run=commands_run,
+                        messages=messages,
+                        budget_ledger=budget_ledger,
+                    )
+                step = adapter.next_step(
+                    tuple(messages_for_adapter),
+                    system_prompt=system_prompt,
+                    working_directory=working_directory,
                 )
-            step = adapter.next_step(
-                tuple(messages_for_adapter),
-                system_prompt=system_prompt,
-                working_directory=working_directory,
-            )
+                if span is not None:
+                    span.set_attribute("code_agent.step_kind", step.kind)
+                    span.set_attribute(
+                        "code_agent.step_tool_name",
+                        step.tool_name if step.tool_name is not None else "",
+                    )
         except Exception as exc:
             logger.exception("CLI runtime adapter failed", extra={"iteration": iteration})
             _update_budget_ledger(

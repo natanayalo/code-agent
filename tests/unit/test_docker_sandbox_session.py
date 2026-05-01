@@ -5,7 +5,9 @@ from __future__ import annotations
 import io
 import shlex
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -230,6 +232,57 @@ def test_shell_session_preserves_environment_and_working_directory(tmp_path: Pat
     assert second.output == "hello\n"
     assert third.output.strip() == str(tmp_path)
     assert fourth.output == "done\n"
+
+
+def test_shell_session_execute_emits_manual_span(monkeypatch, tmp_path: Path) -> None:
+    """Shell command execution should emit a manual OTEL span when available."""
+    container = _container_handle(tmp_path)
+    span_events: list[dict[str, object]] = []
+
+    class _FakeSpan:
+        def __init__(self, name: str, attributes: dict[str, object] | None) -> None:
+            self.name = name
+            self.attributes = dict(attributes or {})
+            self.set_attributes: dict[str, object] = {}
+
+        def __enter__(self):
+            span_events.append(
+                {
+                    "name": self.name,
+                    "attributes": self.attributes,
+                    "set_attributes": self.set_attributes,
+                }
+            )
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            del exc_type, exc, tb
+            return False
+
+        def set_attribute(self, key: str, value: object) -> None:
+            self.set_attributes[key] = value
+
+    class _FakeTracer:
+        def start_as_current_span(self, name: str, attributes: dict[str, object] | None = None):
+            return _FakeSpan(name, attributes)
+
+    class _FakeTraceApi:
+        def get_tracer(self, name: str):
+            assert name == "sandbox.session"
+            return _FakeTracer()
+
+    monkeypatch.setitem(sys.modules, "opentelemetry", SimpleNamespace(trace=_FakeTraceApi()))
+
+    with DockerShellSession(container, process_factory=_local_shell_process_factory) as session:
+        result = session.execute("printf 'hello\\n'")
+
+    assert result.exit_code == 0
+    assert span_events
+    assert span_events[0]["name"] == "sandbox.shell.execute"
+    assert (
+        span_events[0]["attributes"]["code_agent.workspace_id"] == container.workspace.workspace_id
+    )
+    assert span_events[0]["set_attributes"]["code_agent.exit_code"] == 0
 
 
 def test_shell_session_handles_command_ending_with_trailing_backslash(tmp_path: Path) -> None:

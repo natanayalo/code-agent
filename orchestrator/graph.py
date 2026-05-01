@@ -7,6 +7,7 @@ import base64
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import nullcontext
 from typing import Any, Literal
 
 from langchain_core.runnables import RunnableLambda
@@ -228,6 +229,28 @@ async def _settle_cancelled_worker_task(
     return None
 
 
+def _start_optional_span(
+    *,
+    tracer_name: str,
+    span_name: str,
+    attributes: Mapping[str, Any] | None = None,
+) -> Any:
+    """Return an OTEL span context manager when tracing deps are available."""
+    span_cm: Any = nullcontext()
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+        span_cm = otel_trace.get_tracer(tracer_name).start_as_current_span(
+            span_name,
+            attributes={
+                key: value for key, value in (attributes or {}).items() if value is not None
+            },
+        )
+    except ImportError:
+        span_cm = nullcontext()
+    return span_cm
+
+
 async def _await_worker_with_timeout(
     worker: Worker,
     request: WorkerRequest,
@@ -241,59 +264,81 @@ async def _await_worker_with_timeout(
     async def run_worker() -> WorkerResult:
         return await worker.run(request)
 
-    worker_task: asyncio.Task[WorkerResult] = asyncio.create_task(run_worker())
-    try:
-        result = await asyncio.wait_for(asyncio.shield(worker_task), timeout=timeout_seconds)
-    except TimeoutError:
-        logger.warning(
-            "Worker execution exceeded the orchestrator timeout envelope",
-            extra={
-                "session_id": session_id,
-                "worker_type": worker_type,
-                "timeout_seconds": timeout_seconds,
-            },
-        )
-        partial_result = await _settle_cancelled_worker_task(
-            worker_task,
-            worker_type=worker_type,
-            session_id=session_id,
-        )
-        if partial_result is not None:
-            return (
-                partial_result,
-                (f"worker timed out but yielded partial state after {timeout_seconds}s"),
+    with _start_optional_span(
+        tracer_name="orchestrator.graph",
+        span_name="orchestrator.await_worker_result",
+        attributes={
+            "code_agent.worker_type": worker_type,
+            "code_agent.session_id": session_id,
+            "code_agent.timeout_seconds": timeout_seconds,
+        },
+    ) as span:
+        worker_task: asyncio.Task[WorkerResult] = asyncio.create_task(run_worker())
+
+        def _complete(result: WorkerResult, hint: str) -> tuple[WorkerResult, str]:
+            if span is not None:
+                span.set_attribute("code_agent.worker_result_status", result.status)
+                span.set_attribute(
+                    "code_agent.worker_failure_kind",
+                    result.failure_kind if result.failure_kind is not None else "",
+                )
+                span.set_attribute("code_agent.worker_result_hint", hint)
+            return result, hint
+
+        try:
+            result = await asyncio.wait_for(asyncio.shield(worker_task), timeout=timeout_seconds)
+        except TimeoutError:
+            logger.warning(
+                "Worker execution exceeded the orchestrator timeout envelope",
+                extra={
+                    "session_id": session_id,
+                    "worker_type": worker_type,
+                    "timeout_seconds": timeout_seconds,
+                },
             )
-
-        return _timed_out_worker_result(
-            timeout_seconds
-        ), f"worker timed out after {timeout_seconds}s"
-    except asyncio.CancelledError:
-        logger.warning(
-            "Worker execution was cancelled at the orchestrator boundary",
-            extra={
-                "session_id": session_id,
-                "worker_type": worker_type,
-            },
-        )
-        partial_result = await _settle_cancelled_worker_task(
-            worker_task,
-            worker_type=worker_type,
-            session_id=session_id,
-        )
-        if partial_result is not None:
-            return partial_result, "worker execution cancelled but yielded partial state"
-
-        return _cancelled_worker_result(), "worker execution cancelled"
-    except Exception as exc:
-        logger.exception(
-            "Worker execution crashed unexpectedly at the orchestrator boundary",
-            extra={
-                "session_id": session_id,
-                "worker_type": worker_type,
-            },
-        )
-        return _unexpected_worker_error_result(exc), "worker crashed unexpectedly"
-    return result, "worker result received"
+            partial_result = await _settle_cancelled_worker_task(
+                worker_task,
+                worker_type=worker_type,
+                session_id=session_id,
+            )
+            if partial_result is not None:
+                return _complete(
+                    partial_result,
+                    f"worker timed out but yielded partial state after {timeout_seconds}s",
+                )
+            return _complete(
+                _timed_out_worker_result(timeout_seconds),
+                f"worker timed out after {timeout_seconds}s",
+            )
+        except asyncio.CancelledError:
+            logger.warning(
+                "Worker execution was cancelled at the orchestrator boundary",
+                extra={
+                    "session_id": session_id,
+                    "worker_type": worker_type,
+                },
+            )
+            partial_result = await _settle_cancelled_worker_task(
+                worker_task,
+                worker_type=worker_type,
+                session_id=session_id,
+            )
+            if partial_result is not None:
+                return _complete(
+                    partial_result,
+                    "worker execution cancelled but yielded partial state",
+                )
+            return _complete(_cancelled_worker_result(), "worker execution cancelled")
+        except Exception as exc:
+            logger.exception(
+                "Worker execution crashed unexpectedly at the orchestrator boundary",
+                extra={
+                    "session_id": session_id,
+                    "worker_type": worker_type,
+                },
+            )
+            return _complete(_unexpected_worker_error_result(exc), "worker crashed unexpectedly")
+        return _complete(result, "worker result received")
 
 
 def _ensure_state(state: OrchestratorState | dict[str, Any]) -> OrchestratorState:

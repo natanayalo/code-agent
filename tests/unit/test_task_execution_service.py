@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
+import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -516,6 +518,67 @@ def test_run_orchestrator_applies_effective_budget_policy_to_payload(monkeypatch
     assert task_payload["budget"]["max_iterations"] == 20
     assert task_payload["budget"]["worker_timeout_seconds"] == 180
     assert task_payload["budget"]["max_tool_calls"] == 100
+
+
+def test_run_orchestrator_emits_manual_span_when_otel_available(monkeypatch) -> None:
+    """Graph execution should create an explicit OTEL span when tracing is installed."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    fake_graph = _FakeGraph()
+    monkeypatch.setattr(
+        execution_module,
+        "build_orchestrator_graph",
+        lambda *, worker, gemini_worker=None, **kwargs: fake_graph,
+    )
+
+    started_spans: list[dict[str, object]] = []
+
+    class _FakeSpan:
+        def __init__(self, name: str, attributes: dict[str, object] | None) -> None:
+            self.name = name
+            self.attributes = dict(attributes or {})
+
+        def __enter__(self) -> _FakeSpan:
+            started_spans.append({"name": self.name, "attributes": self.attributes})
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            del exc_type, exc, tb
+            return False
+
+    class _FakeTracer:
+        def start_as_current_span(
+            self, name: str, attributes: dict[str, object] | None = None
+        ) -> _FakeSpan:
+            return _FakeSpan(name, attributes)
+
+    class _FakeTraceApi:
+        def get_tracer(self, name: str) -> _FakeTracer:
+            assert name == "orchestrator.execution"
+            return _FakeTracer()
+
+    monkeypatch.setitem(sys.modules, "opentelemetry", SimpleNamespace(trace=_FakeTraceApi()))
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(task_text="Trace graph run")
+    _, persisted = service.create_task(submission)
+
+    asyncio.run(service._run_orchestrator(submission, persisted))
+
+    assert started_spans
+    assert started_spans[0]["name"] == "orchestrator.graph.run"
+    attributes = started_spans[0]["attributes"]
+    assert attributes["code_agent.task_id"] == persisted.task_id
+    assert attributes["code_agent.session_id"] == persisted.session_id
 
 
 def test_load_submission_for_task_recovers_secrets() -> None:

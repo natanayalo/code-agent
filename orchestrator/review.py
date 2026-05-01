@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Mapping
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -37,6 +38,28 @@ REPAIR_PASSES_USED_CONSTRAINT = "independent_review_repair_passes_used"
 REPAIR_MAX_PASSES_CONSTRAINT = "independent_review_max_repair_passes"
 SKIP_INDEPENDENT_REVIEW_CONSTRAINT = "skip_independent_review"
 ENABLE_REPAIR_HANDOFF_CONSTRAINT = "independent_review_enable_repair_handoff"
+
+
+def _start_optional_span(
+    *,
+    tracer_name: str,
+    span_name: str,
+    attributes: Mapping[str, Any] | None = None,
+) -> Any:
+    """Return an OTEL span context manager when tracing deps are available."""
+    span_cm: Any = nullcontext()
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+        span_cm = otel_trace.get_tracer(tracer_name).start_as_current_span(
+            span_name,
+            attributes={
+                key: value for key, value in (attributes or {}).items() if value is not None
+            },
+        )
+    except ImportError:
+        span_cm = nullcontext()
+    return span_cm
 
 
 def _coerce_positive_int_like(value: object) -> int | None:
@@ -453,46 +476,75 @@ async def review_result(
         tools=state.task.tools,
     )
 
-    try:
-        # We use the system_prompt override to perform a single-shot review
-        review_run_result = await asyncio.wait_for(
-            worker.run(review_request, system_prompt=review_prompt),
-            timeout=_resolve_review_timeout_seconds(state),
-        )
-        if review_run_result.status != "success":
-            logger.warning(
-                "Independent review worker returned non-success status: %s",
-                review_run_result.status,
+    review_timeout_seconds = _resolve_review_timeout_seconds(state)
+    with _start_optional_span(
+        tracer_name="orchestrator.review",
+        span_name="orchestrator.review.independent_pass",
+        attributes={
+            "code_agent.task_id": state.task.task_id,
+            "code_agent.reviewer_type": reviewer_type,
+            "code_agent.timeout_seconds": review_timeout_seconds,
+        },
+    ) as span:
+        try:
+            # We use the system_prompt override to perform a single-shot review.
+            review_run_result = await asyncio.wait_for(
+                worker.run(review_request, system_prompt=review_prompt),
+                timeout=review_timeout_seconds,
             )
-
-        # 5. Parse findings
-        parsed_review = parse_review_result(review_run_result.summary or "")
-        if parsed_review is None:
-            logger.warning("Independent review output could not be parsed into ReviewResult.")
-        if parsed_review:
-            # Inject the correct reviewer kind if parser missed it
-            if parsed_review.reviewer_kind != "independent_reviewer":
-                parsed_review = parsed_review.model_copy(
-                    update={"reviewer_kind": "independent_reviewer"}
+            if span is not None:
+                span.set_attribute("code_agent.review.worker_status", review_run_result.status)
+            if review_run_result.status != "success":
+                logger.warning(
+                    "Independent review worker returned non-success status: %s",
+                    review_run_result.status,
                 )
-            parsed_review = _apply_independent_review_suppression(
-                parsed_review,
-                constraints=state.task.constraints,
-            )
-            repair_update = _repair_handoff_update(state, parsed_review)
-            if repair_update is not None:
-                return repair_update
 
-            return {
-                "current_step": "review_result",
-                "review": parsed_review.model_dump(),
-                "progress_updates": [*state.progress_updates, "independent review completed"],
-            }
-    except TimeoutError:
-        logger.warning("Independent review pass timed out and was skipped.")
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.exception("Independent review pass failed unexpectedly.")
+            # 5. Parse findings.
+            parsed_review = parse_review_result(review_run_result.summary or "")
+            if parsed_review is None:
+                logger.warning("Independent review output could not be parsed into ReviewResult.")
+                if span is not None:
+                    span.set_attribute("code_agent.review.parse_status", "unparseable")
+            if parsed_review:
+                # Inject the correct reviewer kind if parser missed it.
+                if parsed_review.reviewer_kind != "independent_reviewer":
+                    parsed_review = parsed_review.model_copy(
+                        update={"reviewer_kind": "independent_reviewer"}
+                    )
+                parsed_review = _apply_independent_review_suppression(
+                    parsed_review,
+                    constraints=state.task.constraints,
+                )
+                if span is not None:
+                    span.set_attribute("code_agent.review.parse_status", "parsed")
+                    span.set_attribute("code_agent.review.outcome", parsed_review.outcome)
+                    span.set_attribute(
+                        "code_agent.review.findings_count",
+                        len(parsed_review.findings),
+                    )
+                    span.set_attribute(
+                        "code_agent.review.suppressed_findings_count",
+                        len(parsed_review.suppressed_findings),
+                    )
+                repair_update = _repair_handoff_update(state, parsed_review)
+                if repair_update is not None:
+                    return repair_update
+
+                return {
+                    "current_step": "review_result",
+                    "review": parsed_review.model_dump(),
+                    "progress_updates": [*state.progress_updates, "independent review completed"],
+                }
+        except TimeoutError:
+            logger.warning("Independent review pass timed out and was skipped.")
+            if span is not None:
+                span.set_attribute("code_agent.review.parse_status", "timed_out")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Independent review pass failed unexpectedly.")
+            if span is not None:
+                span.set_attribute("code_agent.review.parse_status", "error")
 
     return {"current_step": "review_result"}

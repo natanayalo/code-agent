@@ -1,6 +1,8 @@
 """Unit tests for the orchestrator graph internals."""
 
 import asyncio
+import sys
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -986,6 +988,69 @@ async def test_await_worker_with_timeout_partial_result():
     assert res.summary == "partial state flushed"
     assert res.commands_run[0].command == "echo 1"
     assert hint == "worker timed out but yielded partial state after 1s"
+
+
+@pytest.mark.anyio
+async def test_await_worker_with_timeout_emits_manual_span(monkeypatch):
+    """Await worker path should emit a manual span with result attributes."""
+    from orchestrator.graph import _await_worker_with_timeout
+    from workers.base import Worker
+
+    span_events: list[dict[str, object]] = []
+
+    class _FakeSpan:
+        def __init__(self, name: str, attributes: dict[str, object] | None) -> None:
+            self.name = name
+            self.attributes = dict(attributes or {})
+            self.set_attributes: dict[str, object] = {}
+
+        def __enter__(self):
+            span_events.append(
+                {
+                    "name": self.name,
+                    "attributes": self.attributes,
+                    "set_attributes": self.set_attributes,
+                }
+            )
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            del exc_type, exc, tb
+            return False
+
+        def set_attribute(self, key: str, value: object) -> None:
+            self.set_attributes[key] = value
+
+    class _FakeTracer:
+        def start_as_current_span(self, name: str, attributes: dict[str, object] | None = None):
+            return _FakeSpan(name, attributes)
+
+    class _FakeTraceApi:
+        def get_tracer(self, name: str) -> _FakeTracer:
+            assert name == "orchestrator.graph"
+            return _FakeTracer()
+
+    monkeypatch.setitem(sys.modules, "opentelemetry", SimpleNamespace(trace=_FakeTraceApi()))
+
+    class _FastWorker(Worker):
+        async def run(self, request):
+            del request
+            return WorkerResult(status="success", summary="ok")
+
+    result, hint = await _await_worker_with_timeout(
+        _FastWorker(),
+        request=WorkerRequest(session_id="session-1", task_text="task"),
+        worker_type="codex",
+        session_id="session-1",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "success"
+    assert hint == "worker result received"
+    assert span_events
+    assert span_events[0]["name"] == "orchestrator.await_worker_result"
+    assert span_events[0]["attributes"]["code_agent.worker_type"] == "codex"
+    assert span_events[0]["set_attributes"]["code_agent.worker_result_status"] == "success"
 
 
 def test_verify_result_passed():

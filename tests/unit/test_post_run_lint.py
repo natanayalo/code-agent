@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -182,6 +183,60 @@ def test_run_post_run_lint_skips_when_no_command_detected(tmp_path: Path) -> Non
         "artifacts": [],
     }
     assert session.calls == []
+
+
+def test_run_post_run_lint_emits_manual_span(monkeypatch, tmp_path: Path) -> None:
+    """Post-run lint should emit an OTEL span when tracing deps are installed."""
+    session = _FakeSession({})
+    span_events: list[dict[str, object]] = []
+
+    class _FakeSpan:
+        def __init__(self, name: str, attributes: dict[str, object] | None) -> None:
+            self.name = name
+            self.attributes = dict(attributes or {})
+            self.set_attributes: dict[str, object] = {}
+
+        def __enter__(self):
+            span_events.append(
+                {
+                    "name": self.name,
+                    "attributes": self.attributes,
+                    "set_attributes": self.set_attributes,
+                }
+            )
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            del exc_type, exc, tb
+            return False
+
+        def set_attribute(self, key: str, value: object) -> None:
+            self.set_attributes[key] = value
+
+    class _FakeTracer:
+        def start_as_current_span(self, name: str, attributes: dict[str, object] | None = None):
+            return _FakeSpan(name, attributes)
+
+    class _FakeTraceApi:
+        def get_tracer(self, name: str):
+            assert name == "workers.post_run_lint"
+            return _FakeTracer()
+
+    monkeypatch.setitem(sys.modules, "opentelemetry", SimpleNamespace(trace=_FakeTraceApi()))
+
+    result = run_post_run_lint(
+        session=session,
+        repo_path_for_detection=tmp_path,
+        repo_working_directory=tmp_path,
+        files_changed=["README.md"],
+        timeout_seconds=3,
+    )
+
+    assert result["status"] == "skipped"
+    assert span_events
+    assert span_events[0]["name"] == "worker.post_run_lint"
+    assert span_events[0]["attributes"]["code_agent.files_changed_count"] == 1
+    assert span_events[0]["set_attributes"]["code_agent.commands_detected_count"] == 0
 
 
 def test_merge_post_run_lint_results_combines_metadata_across_passes() -> None:

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shlex
 import tomllib
 from collections.abc import Sequence
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,29 @@ from workers.cli_runtime import (
 
 _DEFAULT_FALLBACK_TEMPLATE_KEY = "{files}"
 _MAKEFILE_CANDIDATES = ("GNUmakefile", "makefile", "Makefile")
+logger = logging.getLogger(__name__)
+
+
+def _start_optional_span(
+    *,
+    tracer_name: str,
+    span_name: str,
+    attributes: dict[str, Any] | None = None,
+) -> Any:
+    """Return an OTEL span context manager when tracing deps are available."""
+    span_cm: Any = nullcontext()
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+        span_cm = otel_trace.get_tracer(tracer_name).start_as_current_span(
+            span_name,
+            attributes={
+                key: value for key, value in (attributes or {}).items() if value is not None
+            },
+        )
+    except ImportError:
+        span_cm = nullcontext()
+    return span_cm
 
 
 def _collect_changed_files_with_fallback(
@@ -317,54 +342,75 @@ def run_post_run_lint(
     fallback_command_template: str | None = None,
 ) -> dict[str, Any]:
     """Run scoped post-run lint/format commands and return verification metadata."""
-    commands = detect_post_run_lint_commands(
-        repo_path=repo_path_for_detection,
-        files_changed=files_changed,
-        fallback_command_template=fallback_command_template,
-    )
-    if not commands:
-        return {
-            "ran": False,
-            "status": "skipped",
-            "reason": "no_detected_lint_or_format_command",
-            "commands": [],
-            "errors": [],
-            "artifacts": [],
-        }
-
-    executed_commands: list[WorkerCommand] = []
-    artifact_refs: list[ArtifactReference] = []
-    errors: list[str] = []
-
-    for index, command in enumerate(commands):
-        scoped_command = f"cd {shlex.quote(str(repo_working_directory))} && {command}"
-        try:
-            result = session.execute(scoped_command, timeout_seconds=timeout_seconds)
-        except DockerShellSessionError as exc:
-            errors.append(f"post-run lint command failed to execute: {command}: {exc}")
-            continue
-
-        executed_commands.append(
-            WorkerCommand(
-                command=command,
-                exit_code=result.exit_code,
-                duration_seconds=result.duration_seconds,
-                stdout_artifact_uri=_stream_artifact_uri(result, stream_name="stdout"),
-                stderr_artifact_uri=_stream_artifact_uri(result, stream_name="stderr"),
-            )
+    with _start_optional_span(
+        tracer_name="workers.post_run_lint",
+        span_name="worker.post_run_lint",
+        attributes={
+            "code_agent.timeout_seconds": timeout_seconds,
+            "code_agent.files_changed_count": len(files_changed),
+        },
+    ) as span:
+        commands = detect_post_run_lint_commands(
+            repo_path=repo_path_for_detection,
+            files_changed=files_changed,
+            fallback_command_template=fallback_command_template,
         )
-        artifact_refs.extend(_artifact_references(result, command_index=index))
-        if result.exit_code != 0:
-            errors.append(f"`{command}` exited with status {result.exit_code}")
+        if span is not None:
+            span.set_attribute("code_agent.commands_detected_count", len(commands))
+        if not commands:
+            return {
+                "ran": False,
+                "status": "skipped",
+                "reason": "no_detected_lint_or_format_command",
+                "commands": [],
+                "errors": [],
+                "artifacts": [],
+            }
 
-    return {
-        "ran": True,
-        "status": "warning" if errors else "passed",
-        "reason": None,
-        "commands": [command.model_dump(mode="json") for command in executed_commands],
-        "errors": errors,
-        "artifacts": [artifact.model_dump(mode="json") for artifact in artifact_refs],
-    }
+        executed_commands: list[WorkerCommand] = []
+        artifact_refs: list[ArtifactReference] = []
+        errors: list[str] = []
+
+        for index, command in enumerate(commands):
+            scoped_command = f"cd {shlex.quote(str(repo_working_directory))} && {command}"
+            try:
+                result = session.execute(scoped_command, timeout_seconds=timeout_seconds)
+            except DockerShellSessionError as exc:
+                logger.warning(
+                    "Post-run lint command failed before completion",
+                    extra={"command": command},
+                )
+                errors.append(f"post-run lint command failed to execute: {command}: {exc}")
+                continue
+
+            executed_commands.append(
+                WorkerCommand(
+                    command=command,
+                    exit_code=result.exit_code,
+                    duration_seconds=result.duration_seconds,
+                    stdout_artifact_uri=_stream_artifact_uri(result, stream_name="stdout"),
+                    stderr_artifact_uri=_stream_artifact_uri(result, stream_name="stderr"),
+                )
+            )
+            artifact_refs.extend(_artifact_references(result, command_index=index))
+            if result.exit_code != 0:
+                errors.append(f"`{command}` exited with status {result.exit_code}")
+
+        if span is not None:
+            span.set_attribute("code_agent.commands_executed_count", len(executed_commands))
+            span.set_attribute("code_agent.errors_count", len(errors))
+            span.set_attribute(
+                "code_agent.lint_status",
+                "warning" if errors else "passed",
+            )
+        return {
+            "ran": True,
+            "status": "warning" if errors else "passed",
+            "reason": None,
+            "commands": [command.model_dump(mode="json") for command in executed_commands],
+            "errors": errors,
+            "artifacts": [artifact.model_dump(mode="json") for artifact in artifact_refs],
+        }
 
 
 def apply_post_run_lint_format(
