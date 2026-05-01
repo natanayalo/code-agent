@@ -45,7 +45,7 @@ from orchestrator.task_spec import (
 )
 from tools import coerce_permission_level
 from tools.numeric import coerce_positive_int_like
-from tools.tracing import start_optional_span
+from tools.tracing import set_span_error_status, start_optional_span
 from workers import ArtifactReference, Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -259,6 +259,8 @@ async def _await_worker_with_timeout(
                 if result.failure_kind is not None:
                     span.set_attribute("code_agent.worker_failure_kind", result.failure_kind)
                 span.set_attribute("code_agent.worker_result_hint", hint)
+                if result.status != "success":
+                    set_span_error_status(span, description=hint)
             return result, hint
 
         try:

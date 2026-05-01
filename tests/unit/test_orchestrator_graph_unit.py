@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
+import tools.tracing as tracing_module
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.graph import (
     _build_worker_request,
@@ -1003,6 +1004,7 @@ async def test_await_worker_with_timeout_emits_manual_span(monkeypatch):
             self.name = name
             self.attributes = dict(attributes or {})
             self.set_attributes: dict[str, object] = {}
+            self.statuses: list[object] = []
 
         def __enter__(self):
             span_events.append(
@@ -1010,6 +1012,7 @@ async def test_await_worker_with_timeout_emits_manual_span(monkeypatch):
                     "name": self.name,
                     "attributes": self.attributes,
                     "set_attributes": self.set_attributes,
+                    "statuses": self.statuses,
                 }
             )
             return self
@@ -1021,15 +1024,31 @@ async def test_await_worker_with_timeout_emits_manual_span(monkeypatch):
         def set_attribute(self, key: str, value: object) -> None:
             self.set_attributes[key] = value
 
+        def set_status(self, status: object) -> None:
+            self.statuses.append(status)
+
     class _FakeTracer:
         def start_as_current_span(self, name: str, attributes: dict[str, object] | None = None):
             return _FakeSpan(name, attributes)
 
+    class _FakeStatusCode:
+        ERROR = "error"
+
+    class _FakeStatus:
+        def __init__(self, code: str, description: str | None = None) -> None:
+            self.code = code
+            self.description = description
+
     class _FakeTraceApi:
+        StatusCode = _FakeStatusCode
+        Status = _FakeStatus
+
         def get_tracer(self, name: str) -> _FakeTracer:
             assert name == "orchestrator.graph"
             return _FakeTracer()
 
+    monkeypatch.setattr(tracing_module, "_CACHED_OTEL_TRACE", tracing_module._UNSET_OTEL_TRACE)
+    monkeypatch.setattr(tracing_module, "_CACHED_OTEL_MODULE", tracing_module._UNSET_OTEL_TRACE)
     monkeypatch.setitem(sys.modules, "opentelemetry", SimpleNamespace(trace=_FakeTraceApi()))
 
     class _FastWorker(Worker):
@@ -1052,6 +1071,7 @@ async def test_await_worker_with_timeout_emits_manual_span(monkeypatch):
     assert span_events[0]["attributes"]["code_agent.worker_type"] == "codex"
     assert span_events[0]["set_attributes"]["code_agent.worker_result_status"] == "success"
     assert "code_agent.worker_failure_kind" not in span_events[0]["set_attributes"]
+    assert span_events[0]["statuses"] == []
 
 
 @pytest.mark.anyio
@@ -1067,6 +1087,7 @@ async def test_await_worker_with_timeout_sets_failure_kind_when_present(monkeypa
             self.name = name
             self.attributes = dict(attributes or {})
             self.set_attributes: dict[str, object] = {}
+            self.statuses: list[object] = []
 
         def __enter__(self):
             span_events.append(
@@ -1074,6 +1095,7 @@ async def test_await_worker_with_timeout_sets_failure_kind_when_present(monkeypa
                     "name": self.name,
                     "attributes": self.attributes,
                     "set_attributes": self.set_attributes,
+                    "statuses": self.statuses,
                 }
             )
             return self
@@ -1085,15 +1107,31 @@ async def test_await_worker_with_timeout_sets_failure_kind_when_present(monkeypa
         def set_attribute(self, key: str, value: object) -> None:
             self.set_attributes[key] = value
 
+        def set_status(self, status: object) -> None:
+            self.statuses.append(status)
+
     class _FakeTracer:
         def start_as_current_span(self, name: str, attributes: dict[str, object] | None = None):
             return _FakeSpan(name, attributes)
 
+    class _FakeStatusCode:
+        ERROR = "error"
+
+    class _FakeStatus:
+        def __init__(self, code: str, description: str | None = None) -> None:
+            self.code = code
+            self.description = description
+
     class _FakeTraceApi:
+        StatusCode = _FakeStatusCode
+        Status = _FakeStatus
+
         def get_tracer(self, name: str) -> _FakeTracer:
             assert name == "orchestrator.graph"
             return _FakeTracer()
 
+    monkeypatch.setattr(tracing_module, "_CACHED_OTEL_TRACE", tracing_module._UNSET_OTEL_TRACE)
+    monkeypatch.setattr(tracing_module, "_CACHED_OTEL_MODULE", tracing_module._UNSET_OTEL_TRACE)
     monkeypatch.setitem(sys.modules, "opentelemetry", SimpleNamespace(trace=_FakeTraceApi()))
 
     class _FailingWorker(Worker):
@@ -1118,6 +1156,11 @@ async def test_await_worker_with_timeout_sets_failure_kind_when_present(monkeypa
     assert span_events
     assert span_events[0]["set_attributes"]["code_agent.worker_result_status"] == "error"
     assert span_events[0]["set_attributes"]["code_agent.worker_failure_kind"] == "tool_runtime"
+    assert len(span_events[0]["statuses"]) == 1
+    status = span_events[0]["statuses"][0]
+    assert isinstance(status, _FakeStatus)
+    assert status.code == _FakeStatusCode.ERROR
+    assert status.description == "worker result received"
 
 
 def test_verify_result_passed():
