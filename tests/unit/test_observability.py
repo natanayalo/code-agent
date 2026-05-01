@@ -159,11 +159,6 @@ def test_configure_tracing_from_env_bootstraps_otel_and_openinference(
         trace_api=fake_trace,
         propagate_api=fake_propagate,
         resource_cls=_FakeResource,
-        tracer_provider_cls=_FakeTracerProvider,
-        batch_span_processor_cls=_FakeBatchSpanProcessor,
-        simple_span_processor_cls=_FakeSimpleSpanProcessor,
-        otlp_exporter_cls=_FakeOTLPSpanExporter,
-        langchain_instrumentor_cls=_FakeLangChainInstrumentor,
         register_fn=fake_register,
         trace_context_propagator_cls=_FakeTraceContextPropagator,
     )
@@ -237,11 +232,6 @@ def test_configure_tracing_from_env_is_idempotent(monkeypatch: pytest.MonkeyPatc
             trace_api=_TraceAPI(),
             propagate_api=_TraceAPI(),  # reuse for mock
             resource_cls=_Resource,
-            tracer_provider_cls=_Provider,
-            batch_span_processor_cls=_BatchProcessor,
-            simple_span_processor_cls=_BatchProcessor,  # reuse
-            otlp_exporter_cls=_Exporter,
-            langchain_instrumentor_cls=_Instrumentor,
             register_fn=lambda **kwargs: _Provider(resource=_Resource({})),
             trace_context_propagator_cls=lambda: None,
         )
@@ -262,31 +252,22 @@ def test_configure_tracing_from_env_is_idempotent(monkeypatch: pytest.MonkeyPatc
     assert load_calls == ["called"]
 
 
-def test_configure_tracing_from_env_adds_simple_processor_for_api_only(
+def test_configure_tracing_from_env_passes_correct_batch_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """API should get SimpleSpanProcessor for immediate export, Worker should not."""
-    processor_added = []
+    """API should use batch=False, Worker should use batch=True."""
+    register_calls = []
 
-    class _Provider:
-        def __init__(self, **kwargs):
-            self.processors = []
-
-        def add_span_processor(self, processor: object) -> None:
-            self.processors.append(processor)
-            processor_added.append(processor)
+    def _fake_register(**kwargs):
+        register_calls.append(kwargs)
+        return type("MockProvider", (), {"add_span_processor": lambda *a: None})
 
     def _loader():
         return observability_module._TracingDependencies(
-            trace_api=None,
+            trace_api=type("Mock", (), {"set_global_textmap": lambda *a: None}),
             propagate_api=type("Mock", (), {"set_global_textmap": lambda *a: None}),
-            resource_cls=None,
-            tracer_provider_cls=_Provider,
-            batch_span_processor_cls=type("Batch", (), {}),
-            simple_span_processor_cls=type("Simple", (), {"__init__": lambda self, exp: None}),
-            otlp_exporter_cls=lambda **kw: None,
-            langchain_instrumentor_cls=None,
-            register_fn=lambda **kw: _Provider(),
+            resource_cls=type("MockResource", (), {"create": lambda *a: None}),
+            register_fn=_fake_register,
             trace_context_propagator_cls=lambda: None,
         )
 
@@ -297,13 +278,12 @@ def test_configure_tracing_from_env_adds_simple_processor_for_api_only(
         service_name="code-agent-api",
         environ={observability_module.ENABLE_TRACING_ENV_VAR: "1"},
     )
-    assert any(p.__class__.__name__ == "Simple" for p in processor_added)
+    assert register_calls[-1]["batch"] is False
 
     # Worker case (reset state first)
     monkeypatch.setattr(observability_module, "_bootstrap_complete", False)
-    processor_added.clear()
     observability_module.configure_tracing_from_env(
         service_name="code-agent-worker",
         environ={observability_module.ENABLE_TRACING_ENV_VAR: "1"},
     )
-    assert not any(p.__class__.__name__ == "Simple" for p in processor_added)
+    assert register_calls[-1]["batch"] is True
