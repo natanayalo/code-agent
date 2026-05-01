@@ -2490,6 +2490,8 @@ class TaskExecutionService:
                 **_execution_task_span_attributes(
                     task_id=task_id,
                     session_id=(state.session.session_id if state.session is not None else None),
+                    channel=(state.session.channel if state.session is not None else None),
+                    attempt_count=state.attempt_count,
                 ),
                 "code_agent.task_status": (
                     (force_task_status or _task_status_from_result(state)).value

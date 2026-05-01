@@ -1051,6 +1051,73 @@ async def test_await_worker_with_timeout_emits_manual_span(monkeypatch):
     assert span_events[0]["name"] == "orchestrator.await_worker_result"
     assert span_events[0]["attributes"]["code_agent.worker_type"] == "codex"
     assert span_events[0]["set_attributes"]["code_agent.worker_result_status"] == "success"
+    assert "code_agent.worker_failure_kind" not in span_events[0]["set_attributes"]
+
+
+@pytest.mark.anyio
+async def test_await_worker_with_timeout_sets_failure_kind_when_present(monkeypatch):
+    """Await worker span should include failure_kind only when worker supplies one."""
+    from orchestrator.graph import _await_worker_with_timeout
+    from workers.base import Worker
+
+    span_events: list[dict[str, object]] = []
+
+    class _FakeSpan:
+        def __init__(self, name: str, attributes: dict[str, object] | None) -> None:
+            self.name = name
+            self.attributes = dict(attributes or {})
+            self.set_attributes: dict[str, object] = {}
+
+        def __enter__(self):
+            span_events.append(
+                {
+                    "name": self.name,
+                    "attributes": self.attributes,
+                    "set_attributes": self.set_attributes,
+                }
+            )
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            del exc_type, exc, tb
+            return False
+
+        def set_attribute(self, key: str, value: object) -> None:
+            self.set_attributes[key] = value
+
+    class _FakeTracer:
+        def start_as_current_span(self, name: str, attributes: dict[str, object] | None = None):
+            return _FakeSpan(name, attributes)
+
+    class _FakeTraceApi:
+        def get_tracer(self, name: str) -> _FakeTracer:
+            assert name == "orchestrator.graph"
+            return _FakeTracer()
+
+    monkeypatch.setitem(sys.modules, "opentelemetry", SimpleNamespace(trace=_FakeTraceApi()))
+
+    class _FailingWorker(Worker):
+        async def run(self, request):
+            del request
+            return WorkerResult(
+                status="error",
+                failure_kind="tool_runtime",
+                summary="failed",
+            )
+
+    result, hint = await _await_worker_with_timeout(
+        _FailingWorker(),
+        request=WorkerRequest(session_id="session-1", task_text="task"),
+        worker_type="codex",
+        session_id="session-1",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "error"
+    assert hint == "worker result received"
+    assert span_events
+    assert span_events[0]["set_attributes"]["code_agent.worker_result_status"] == "error"
+    assert span_events[0]["set_attributes"]["code_agent.worker_failure_kind"] == "tool_runtime"
 
 
 def test_verify_result_passed():

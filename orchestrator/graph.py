@@ -256,10 +256,8 @@ async def _await_worker_with_timeout(
         def _complete(result: WorkerResult, hint: str) -> tuple[WorkerResult, str]:
             if span is not None:
                 span.set_attribute("code_agent.worker_result_status", result.status)
-                span.set_attribute(
-                    "code_agent.worker_failure_kind",
-                    result.failure_kind if result.failure_kind is not None else "",
-                )
+                if result.failure_kind is not None:
+                    span.set_attribute("code_agent.worker_failure_kind", result.failure_kind)
                 span.set_attribute("code_agent.worker_result_hint", hint)
             return result, hint
 

@@ -620,6 +620,7 @@ def test_persist_execution_outcome_span_includes_session_id(monkeypatch) -> None
 
     state = OrchestratorState(
         current_step="persist_memory",
+        attempt_count=3,
         session=SessionRef(
             session_id=persisted.session_id,
             user_id=persisted.user_id,
@@ -664,6 +665,8 @@ def test_persist_execution_outcome_span_includes_session_id(monkeypatch) -> None
     assert isinstance(attributes, dict)
     assert attributes["code_agent.task_id"] == persisted.task_id
     assert attributes["code_agent.session_id"] == persisted.session_id
+    assert attributes["code_agent.channel"] == persisted.channel
+    assert attributes["code_agent.attempt_count"] == 3
 
 
 def test_load_submission_for_task_recovers_secrets() -> None:
