@@ -319,6 +319,62 @@ def test_run_cli_runtime_loop_emits_iteration_spans(monkeypatch) -> None:
     assert span_events[0]["set_attributes"]["code_agent.step_kind"] == "tool_call"
 
 
+def test_run_cli_runtime_loop_marks_iteration_span_error_on_adapter_exception(monkeypatch) -> None:
+    """Adapter exceptions should explicitly mark the active iteration span as errored."""
+    captured: dict[str, object | None] = {}
+    started_spans: list[object] = []
+
+    class _FakeSpan:
+        def __enter__(self):
+            started_spans.append(self)
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            del exc_type, exc, tb
+            return False
+
+    class _FakeTracer:
+        def start_as_current_span(self, name: str, attributes: dict[str, object] | None = None):
+            del name, attributes
+            return _FakeSpan()
+
+    class _FakeTraceApi:
+        def get_tracer(self, name: str):
+            assert name == "workers.cli_runtime"
+            return _FakeTracer()
+
+    class _RaisingAdapter:
+        def next_step(
+            self,
+            messages: list[CliRuntimeMessage],
+            *,
+            system_prompt: str | None = None,
+            prompt_override: str | None = None,
+            working_directory: Path | None = None,
+        ) -> CliRuntimeStep:
+            del messages, system_prompt, prompt_override, working_directory
+            raise RuntimeError("adapter blew up")
+
+    def _fake_set_span_error_status(span, *, description: str | None = None) -> None:
+        captured["span"] = span
+        captured["description"] = description
+
+    monkeypatch.setitem(sys.modules, "opentelemetry", SimpleNamespace(trace=_FakeTraceApi()))
+    monkeypatch.setattr("workers.cli_runtime.set_span_error_status", _fake_set_span_error_status)
+
+    execution = run_cli_runtime_loop(
+        _RaisingAdapter(),
+        _FakeSession({}),
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=1, worker_timeout_seconds=30),
+    )
+
+    assert execution.status == "error"
+    assert execution.stop_reason == "adapter_error"
+    assert captured["span"] is started_spans[0]
+    assert captured["description"] == "RuntimeError: adapter blew up"
+
+
 def test_run_cli_runtime_loop_rejects_tool_call_payload_returned_as_final_output() -> None:
     """Malformed adapter finals that contain tool_call JSON should fail as adapter errors."""
     adapter = _ScriptedAdapter(

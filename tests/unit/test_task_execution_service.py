@@ -580,6 +580,8 @@ def test_run_orchestrator_emits_manual_span_when_otel_available(monkeypatch) -> 
     attributes = started_spans[0]["attributes"]
     assert attributes["code_agent.task_id"] == persisted.task_id
     assert attributes["code_agent.session_id"] == persisted.session_id
+    assert attributes["code_agent.channel"] == persisted.channel
+    assert attributes["code_agent.attempt_count"] == persisted.attempt_count
 
 
 def test_persist_execution_outcome_span_includes_session_id(monkeypatch) -> None:

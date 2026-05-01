@@ -44,7 +44,7 @@ from tools.numeric import (
     coerce_non_negative_int_like,
     coerce_positive_int_like,
 )
-from tools.tracing import start_optional_span
+from tools.tracing import set_span_error_status, start_optional_span
 from workers.base import WorkerCommand
 
 logger = logging.getLogger(__name__)
@@ -1239,40 +1239,47 @@ def run_cli_runtime_loop(
                     "code_agent.model_name": model_name,
                 },
             ) as span:
-                messages_for_adapter, preflight_error = _preflight_messages_for_adapter(
-                    messages,
-                    settings=settings,
-                    model_name=model_name,
-                    iteration=iteration,
-                )
-                if preflight_error is not None:
+                try:
+                    messages_for_adapter, preflight_error = _preflight_messages_for_adapter(
+                        messages,
+                        settings=settings,
+                        model_name=model_name,
+                        iteration=iteration,
+                    )
+                    if preflight_error is not None:
+                        if span is not None:
+                            span.set_attribute("code_agent.preflight_status", "context_window")
+                        _update_budget_ledger(
+                            budget_ledger,
+                            started_at=started_at,
+                            clock=clock,
+                            iterations_used=iteration,
+                        )
+                        return CliRuntimeExecutionResult(
+                            status="failure",
+                            summary=preflight_error,
+                            stop_reason="context_window",
+                            commands_run=commands_run,
+                            messages=messages,
+                            budget_ledger=budget_ledger,
+                        )
+                    step = adapter.next_step(
+                        tuple(messages_for_adapter),
+                        system_prompt=system_prompt,
+                        working_directory=working_directory,
+                    )
                     if span is not None:
-                        span.set_attribute("code_agent.preflight_status", "context_window")
-                    _update_budget_ledger(
-                        budget_ledger,
-                        started_at=started_at,
-                        clock=clock,
-                        iterations_used=iteration,
+                        span.set_attribute("code_agent.step_kind", step.kind)
+                        span.set_attribute(
+                            "code_agent.step_tool_name",
+                            step.tool_name if step.tool_name is not None else "",
+                        )
+                except Exception as exc:
+                    set_span_error_status(
+                        span,
+                        description=f"{type(exc).__name__}: {exc}",
                     )
-                    return CliRuntimeExecutionResult(
-                        status="failure",
-                        summary=preflight_error,
-                        stop_reason="context_window",
-                        commands_run=commands_run,
-                        messages=messages,
-                        budget_ledger=budget_ledger,
-                    )
-                step = adapter.next_step(
-                    tuple(messages_for_adapter),
-                    system_prompt=system_prompt,
-                    working_directory=working_directory,
-                )
-                if span is not None:
-                    span.set_attribute("code_agent.step_kind", step.kind)
-                    span.set_attribute(
-                        "code_agent.step_tool_name",
-                        step.tool_name if step.tool_name is not None else "",
-                    )
+                    raise
         except Exception as exc:
             logger.exception("CLI runtime adapter failed", extra={"iteration": iteration})
             _update_budget_ledger(

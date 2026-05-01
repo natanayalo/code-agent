@@ -2271,12 +2271,12 @@ class TaskExecutionService:
         with start_optional_span(
             tracer_name="orchestrator.execution",
             span_name="orchestrator.graph.run",
-            attributes={
-                "code_agent.task_id": persisted.task_id,
-                "code_agent.session_id": persisted.session_id,
-                "code_agent.attempt_count": persisted.attempt_count,
-                "code_agent.channel": persisted.channel,
-            },
+            attributes=_execution_task_span_attributes(
+                task_id=persisted.task_id,
+                session_id=persisted.session_id,
+                attempt_count=persisted.attempt_count,
+                channel=persisted.channel,
+            ),
         ):
             raw_output = await self.graph.ainvoke(
                 {
