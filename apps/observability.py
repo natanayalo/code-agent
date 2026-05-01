@@ -37,11 +37,15 @@ class TracingBootstrapResult:
 @dataclass(frozen=True)
 class _TracingDependencies:
     trace_api: Any
+    propagate_api: Any
     resource_cls: Any
     tracer_provider_cls: Any
     batch_span_processor_cls: Any
+    simple_span_processor_cls: Any
     otlp_exporter_cls: Any
     langchain_instrumentor_cls: Any
+    register_fn: Any
+    trace_context_propagator_cls: Any
 
 
 def _is_enabled(value: str | None) -> bool:
@@ -91,6 +95,7 @@ def _load_tracing_dependencies() -> _TracingDependencies | None:
         from openinference.instrumentation.langchain import (  # type: ignore[import-not-found]
             LangChainInstrumentor,
         )
+        from opentelemetry import propagate as propagate_api  # type: ignore[import-not-found]
         from opentelemetry import trace as trace_api  # type: ignore[import-not-found]
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # type: ignore[import-not-found]
             OTLPSpanExporter,
@@ -99,17 +104,26 @@ def _load_tracing_dependencies() -> _TracingDependencies | None:
         from opentelemetry.sdk.trace import TracerProvider  # type: ignore[import-not-found]
         from opentelemetry.sdk.trace.export import (  # type: ignore[import-not-found]
             BatchSpanProcessor,
+            SimpleSpanProcessor,
         )
+        from opentelemetry.trace.propagation.tracecontext import (  # type: ignore[import-not-found]
+            TraceContextTextMapPropagator,
+        )
+        from phoenix.otel import register as register_fn  # type: ignore[import-not-found]
     except ImportError:
         return None
 
     return _TracingDependencies(
         trace_api=trace_api,
+        propagate_api=propagate_api,
         resource_cls=Resource,
         tracer_provider_cls=TracerProvider,
         batch_span_processor_cls=BatchSpanProcessor,
+        simple_span_processor_cls=SimpleSpanProcessor,
         otlp_exporter_cls=OTLPSpanExporter,
         langchain_instrumentor_cls=LangChainInstrumentor,
+        register_fn=register_fn,
+        trace_context_propagator_cls=TraceContextTextMapPropagator,
     )
 
 
@@ -152,24 +166,23 @@ def configure_tracing_from_env(
                 otlp_endpoint=otlp_endpoint,
             )
 
-        resource = deps.resource_cls.create(
-            {
-                "service.name": service_name,
-                "service.version": "0.1.0",
-                "openinference.project.name": project_name,
-            }
+        # Use phoenix.otel.register() for simplified bootstrap and auto-instrumentation.
+        # This handles TracerProvider, Resource, and common instrumentors (LangChain, etc.)
+        tracer_provider = deps.register_fn(
+            project_name=project_name,
+            endpoint=otlp_endpoint,
+            auto_instrument=True,
         )
-        tracer_provider = deps.tracer_provider_cls(resource=resource)
-        otlp_exporter = deps.otlp_exporter_cls(endpoint=otlp_endpoint)
-        tracer_provider.add_span_processor(deps.batch_span_processor_cls(otlp_exporter))
 
-        deps.trace_api.set_tracer_provider(tracer_provider)
+        # Ensure TraceContextTextMapPropagator is the global propagator for cross-service linkage.
+        deps.propagate_api.set_global_textmap(deps.trace_context_propagator_cls())
 
-        instrumentor = deps.langchain_instrumentor_cls()
-        try:
-            instrumentor.instrument(tracer_provider=tracer_provider)
-        except TypeError:
-            instrumentor.instrument()
+        # Preserving granular control: API requires SimpleSpanProcessor for immediate export.
+        # Worker continues using BatchSpanProcessor (usually the default in register()).
+        if service_name == "code-agent-api":
+            otlp_exporter = deps.otlp_exporter_cls(endpoint=otlp_endpoint)
+            tracer_provider.add_span_processor(deps.simple_span_processor_cls(otlp_exporter))
+            logger.debug("Added SimpleSpanProcessor for API service immediate export.")
 
         _bootstrap_complete = True
 

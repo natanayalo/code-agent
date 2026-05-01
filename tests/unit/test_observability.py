@@ -115,6 +115,10 @@ def test_configure_tracing_from_env_bootstraps_otel_and_openinference(
         def __init__(self, exporter: _FakeOTLPSpanExporter) -> None:
             self.exporter = exporter
 
+    class _FakeSimpleSpanProcessor:
+        def __init__(self, exporter: _FakeOTLPSpanExporter) -> None:
+            self.exporter = exporter
+
     class _FakeLangChainInstrumentor:
         instances: list[_FakeLangChainInstrumentor] = []
 
@@ -125,14 +129,43 @@ def test_configure_tracing_from_env_bootstraps_otel_and_openinference(
         def instrument(self, tracer_provider: object | None = None) -> None:
             self.calls.append(tracer_provider)
 
+    class _FakePropagateAPI:
+        def __init__(self) -> None:
+            self.propagators: list[object] = []
+
+        def set_global_textmap(self, propagator: object) -> None:
+            self.propagators.append(propagator)
+
+    class _FakeTraceContextPropagator:
+        pass
+
     fake_trace = _FakeTraceAPI()
+    fake_propagate = _FakePropagateAPI()
+
+    register_calls = []
+
+    def fake_register(**kwargs):
+        register_calls.append(kwargs)
+        return _FakeTracerProvider(
+            resource=_FakeResource.create(
+                {
+                    "service.name": "code-agent-api",
+                    "openinference.project.name": kwargs.get("project_name"),
+                }
+            )
+        )
+
     fake_dependencies = observability_module._TracingDependencies(
         trace_api=fake_trace,
+        propagate_api=fake_propagate,
         resource_cls=_FakeResource,
         tracer_provider_cls=_FakeTracerProvider,
         batch_span_processor_cls=_FakeBatchSpanProcessor,
+        simple_span_processor_cls=_FakeSimpleSpanProcessor,
         otlp_exporter_cls=_FakeOTLPSpanExporter,
         langchain_instrumentor_cls=_FakeLangChainInstrumentor,
+        register_fn=fake_register,
+        trace_context_propagator_cls=_FakeTraceContextPropagator,
     )
     monkeypatch.setattr(
         observability_module, "_load_tracing_dependencies", lambda: fake_dependencies
@@ -150,17 +183,14 @@ def test_configure_tracing_from_env_bootstraps_otel_and_openinference(
     assert result.enabled is True
     assert result.configured is True
     assert result.reason == "configured"
-    assert fake_trace.providers
 
-    provider = fake_trace.providers[0]
-    assert isinstance(provider, _FakeTracerProvider)
-    assert provider.resource.attrs["service.name"] == "code-agent-api"
-    assert provider.resource.attrs["openinference.project.name"] == "agent-dev"
-    assert provider.processors
-    processor = provider.processors[0]
-    assert isinstance(processor, _FakeBatchSpanProcessor)
-    assert processor.exporter.endpoint == "http://phoenix:6006/v1/traces"
-    assert _FakeLangChainInstrumentor.instances[0].calls == [provider]
+    assert len(fake_propagate.propagators) == 1
+    assert isinstance(fake_propagate.propagators[0], _FakeTraceContextPropagator)
+
+    assert len(register_calls) == 1
+    assert register_calls[0]["project_name"] == "agent-dev"
+    assert register_calls[0]["endpoint"] == "http://phoenix:6006/v1/traces"
+    assert register_calls[0]["auto_instrument"] is True
 
 
 def test_configure_tracing_from_env_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -168,6 +198,9 @@ def test_configure_tracing_from_env_is_idempotent(monkeypatch: pytest.MonkeyPatc
     load_calls: list[str] = []
 
     class _TraceAPI:
+        def set_global_textmap(self, _propagator: object) -> None:
+            return None
+
         def set_tracer_provider(self, _provider: object) -> None:
             return None
 
@@ -202,11 +235,15 @@ def test_configure_tracing_from_env_is_idempotent(monkeypatch: pytest.MonkeyPatc
         load_calls.append("called")
         return observability_module._TracingDependencies(
             trace_api=_TraceAPI(),
+            propagate_api=_TraceAPI(),  # reuse for mock
             resource_cls=_Resource,
             tracer_provider_cls=_Provider,
             batch_span_processor_cls=_BatchProcessor,
+            simple_span_processor_cls=_BatchProcessor,  # reuse
             otlp_exporter_cls=_Exporter,
             langchain_instrumentor_cls=_Instrumentor,
+            register_fn=lambda **kwargs: _Provider(resource=_Resource({})),
+            trace_context_propagator_cls=lambda: None,
         )
 
     monkeypatch.setattr(observability_module, "_load_tracing_dependencies", _loader)
@@ -225,61 +262,48 @@ def test_configure_tracing_from_env_is_idempotent(monkeypatch: pytest.MonkeyPatc
     assert load_calls == ["called"]
 
 
-def test_configure_tracing_from_env_supports_instrumentor_without_provider_kwarg(
+def test_configure_tracing_from_env_adds_simple_processor_for_api_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Bootstrap should fall back when instrumentor does not accept tracer_provider kwarg."""
-
-    class _TraceAPI:
-        def set_tracer_provider(self, _provider: object) -> None:
-            return None
-
-    @dataclass
-    class _Resource:
-        attrs: dict[str, str]
-
-        @classmethod
-        def create(cls, attrs: dict[str, str]) -> _Resource:
-            return cls(attrs)
+    """API should get SimpleSpanProcessor for immediate export, Worker should not."""
+    processor_added = []
 
     class _Provider:
-        def __init__(self, *, resource: _Resource) -> None:
-            self.resource = resource
+        def __init__(self, **kwargs):
+            self.processors = []
 
-        def add_span_processor(self, _processor: object) -> None:
-            return None
+        def add_span_processor(self, processor: object) -> None:
+            self.processors.append(processor)
+            processor_added.append(processor)
 
-    class _Exporter:
-        def __init__(self, *, endpoint: str) -> None:
-            self.endpoint = endpoint
-
-    class _BatchProcessor:
-        def __init__(self, _exporter: _Exporter) -> None:
-            return None
-
-    class _InstrumentorWithoutKwarg:
-        calls = 0
-
-        def instrument(self) -> None:
-            self.__class__.calls += 1
-
-    monkeypatch.setattr(
-        observability_module,
-        "_load_tracing_dependencies",
-        lambda: observability_module._TracingDependencies(
-            trace_api=_TraceAPI(),
-            resource_cls=_Resource,
+    def _loader():
+        return observability_module._TracingDependencies(
+            trace_api=None,
+            propagate_api=type("Mock", (), {"set_global_textmap": lambda *a: None}),
+            resource_cls=None,
             tracer_provider_cls=_Provider,
-            batch_span_processor_cls=_BatchProcessor,
-            otlp_exporter_cls=_Exporter,
-            langchain_instrumentor_cls=_InstrumentorWithoutKwarg,
-        ),
-    )
+            batch_span_processor_cls=type("Batch", (), {}),
+            simple_span_processor_cls=type("Simple", (), {"__init__": lambda self, exp: None}),
+            otlp_exporter_cls=lambda **kw: None,
+            langchain_instrumentor_cls=None,
+            register_fn=lambda **kw: _Provider(),
+            trace_context_propagator_cls=lambda: None,
+        )
 
-    result = observability_module.configure_tracing_from_env(
+    monkeypatch.setattr(observability_module, "_load_tracing_dependencies", _loader)
+
+    # API case
+    observability_module.configure_tracing_from_env(
         service_name="code-agent-api",
-        environ={observability_module.ENABLE_TRACING_ENV_VAR: "true"},
+        environ={observability_module.ENABLE_TRACING_ENV_VAR: "1"},
     )
+    assert any(p.__class__.__name__ == "Simple" for p in processor_added)
 
-    assert result.configured is True
-    assert _InstrumentorWithoutKwarg.calls == 1
+    # Worker case (reset state first)
+    monkeypatch.setattr(observability_module, "_bootstrap_complete", False)
+    processor_added.clear()
+    observability_module.configure_tracing_from_env(
+        service_name="code-agent-worker",
+        environ={observability_module.ENABLE_TRACING_ENV_VAR: "1"},
+    )
+    assert not any(p.__class__.__name__ == "Simple" for p in processor_added)
