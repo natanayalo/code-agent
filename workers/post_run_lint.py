@@ -8,12 +8,12 @@ import re
 import shlex
 import tomllib
 from collections.abc import Sequence
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
 from sandbox import DockerShellSessionError
 from sandbox.session import DockerShellCommandResult
+from tools.tracing import start_optional_span
 from workers.base import ArtifactReference, WorkerCommand
 from workers.cli_runtime import (
     CliRuntimeExecutionResult,
@@ -25,28 +25,6 @@ from workers.cli_runtime import (
 _DEFAULT_FALLBACK_TEMPLATE_KEY = "{files}"
 _MAKEFILE_CANDIDATES = ("GNUmakefile", "makefile", "Makefile")
 logger = logging.getLogger(__name__)
-
-
-def _start_optional_span(
-    *,
-    tracer_name: str,
-    span_name: str,
-    attributes: dict[str, Any] | None = None,
-) -> Any:
-    """Return an OTEL span context manager when tracing deps are available."""
-    span_cm: Any = nullcontext()
-    try:
-        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
-
-        span_cm = otel_trace.get_tracer(tracer_name).start_as_current_span(
-            span_name,
-            attributes={
-                key: value for key, value in (attributes or {}).items() if value is not None
-            },
-        )
-    except ImportError:
-        span_cm = nullcontext()
-    return span_cm
 
 
 def _collect_changed_files_with_fallback(
@@ -342,7 +320,7 @@ def run_post_run_lint(
     fallback_command_template: str | None = None,
 ) -> dict[str, Any]:
     """Run scoped post-run lint/format commands and return verification metadata."""
-    with _start_optional_span(
+    with start_optional_span(
         tracer_name="workers.post_run_lint",
         span_name="worker.post_run_lint",
         attributes={

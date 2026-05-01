@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Mapping
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
 from orchestrator.state import OrchestratorState
+from tools.tracing import start_optional_span
 from workers import Worker, WorkerRequest
 from workers.prompt import build_review_prompt
 from workers.review import ReviewFinding, ReviewResult, SuppressedReviewFinding
@@ -38,28 +38,6 @@ REPAIR_PASSES_USED_CONSTRAINT = "independent_review_repair_passes_used"
 REPAIR_MAX_PASSES_CONSTRAINT = "independent_review_max_repair_passes"
 SKIP_INDEPENDENT_REVIEW_CONSTRAINT = "skip_independent_review"
 ENABLE_REPAIR_HANDOFF_CONSTRAINT = "independent_review_enable_repair_handoff"
-
-
-def _start_optional_span(
-    *,
-    tracer_name: str,
-    span_name: str,
-    attributes: Mapping[str, Any] | None = None,
-) -> Any:
-    """Return an OTEL span context manager when tracing deps are available."""
-    span_cm: Any = nullcontext()
-    try:
-        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
-
-        span_cm = otel_trace.get_tracer(tracer_name).start_as_current_span(
-            span_name,
-            attributes={
-                key: value for key, value in (attributes or {}).items() if value is not None
-            },
-        )
-    except ImportError:
-        span_cm = nullcontext()
-    return span_cm
 
 
 def _coerce_positive_int_like(value: object) -> int | None:
@@ -477,7 +455,7 @@ async def review_result(
     )
 
     review_timeout_seconds = _resolve_review_timeout_seconds(state)
-    with _start_optional_span(
+    with start_optional_span(
         tracer_name="orchestrator.review",
         span_name="orchestrator.review.independent_pass",
         attributes={

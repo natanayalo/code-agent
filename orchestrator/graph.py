@@ -7,7 +7,6 @@ import base64
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from contextlib import nullcontext
 from typing import Any, Literal
 
 from langchain_core.runnables import RunnableLambda
@@ -46,6 +45,7 @@ from orchestrator.task_spec import (
 )
 from tools import coerce_permission_level
 from tools.numeric import coerce_positive_int_like
+from tools.tracing import start_optional_span
 from workers import ArtifactReference, Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -229,28 +229,6 @@ async def _settle_cancelled_worker_task(
     return None
 
 
-def _start_optional_span(
-    *,
-    tracer_name: str,
-    span_name: str,
-    attributes: Mapping[str, Any] | None = None,
-) -> Any:
-    """Return an OTEL span context manager when tracing deps are available."""
-    span_cm: Any = nullcontext()
-    try:
-        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
-
-        span_cm = otel_trace.get_tracer(tracer_name).start_as_current_span(
-            span_name,
-            attributes={
-                key: value for key, value in (attributes or {}).items() if value is not None
-            },
-        )
-    except ImportError:
-        span_cm = nullcontext()
-    return span_cm
-
-
 async def _await_worker_with_timeout(
     worker: Worker,
     request: WorkerRequest,
@@ -264,7 +242,7 @@ async def _await_worker_with_timeout(
     async def run_worker() -> WorkerResult:
         return await worker.run(request)
 
-    with _start_optional_span(
+    with start_optional_span(
         tracer_name="orchestrator.graph",
         span_name="orchestrator.await_worker_result",
         attributes={

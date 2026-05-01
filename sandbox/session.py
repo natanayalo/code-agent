@@ -6,9 +6,8 @@ import logging
 import shlex
 import subprocess
 import threading
-from contextlib import nullcontext
 from time import perf_counter
-from typing import IO, Any, Protocol
+from typing import IO, Protocol
 from uuid import uuid4
 
 from pydantic import Field
@@ -19,6 +18,7 @@ from sandbox.policy import PathPolicy
 from sandbox.redact import SecretRedactor
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
 from sandbox.workspace import SandboxArtifact, SandboxModel, _mask_url_credentials
+from tools.tracing import start_optional_span
 
 logger = logging.getLogger(__name__)
 
@@ -42,28 +42,6 @@ class DockerShellCommandResult(SandboxModel):
 
 class DockerShellSessionError(RuntimeError):
     """Raised when a persistent shell session fails."""
-
-
-def _start_optional_span(
-    *,
-    tracer_name: str,
-    span_name: str,
-    attributes: dict[str, Any] | None = None,
-) -> Any:
-    """Return an OTEL span context manager when tracing deps are available."""
-    span_cm: Any = nullcontext()
-    try:
-        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
-
-        span_cm = otel_trace.get_tracer(tracer_name).start_as_current_span(
-            span_name,
-            attributes={
-                key: value for key, value in (attributes or {}).items() if value is not None
-            },
-        )
-    except ImportError:
-        span_cm = nullcontext()
-    return span_cm
 
 
 def _wrap_command_for_persistent_shell(command: str, *, marker: str) -> bytes:
@@ -299,7 +277,7 @@ class DockerShellSession:
                         f"Command may touch a denied path ({denied}): "
                         f"{self.redactor.redact(command)}"
                     )
-        with _start_optional_span(
+        with start_optional_span(
             tracer_name="sandbox.session",
             span_name="sandbox.shell.execute",
             attributes={

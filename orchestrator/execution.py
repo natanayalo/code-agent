@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from contextlib import AbstractAsyncContextManager, nullcontext
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
@@ -61,6 +61,7 @@ from repositories import (
 )
 from tools import coerce_permission_level
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
+from tools.tracing import start_optional_span
 from workers import ArtifactReference, Worker, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -897,28 +898,6 @@ def _completion_progress_phase(task_snapshot: TaskSnapshot) -> ProgressPhase:
     return "failed"
 
 
-def _start_optional_span(
-    *,
-    tracer_name: str,
-    span_name: str,
-    attributes: Mapping[str, Any] | None = None,
-) -> Any:
-    """Return an OTEL span context manager when tracing deps are available."""
-    span_cm: Any = nullcontext()
-    try:
-        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
-
-        span_cm = otel_trace.get_tracer(tracer_name).start_as_current_span(
-            span_name,
-            attributes={
-                key: value for key, value in (attributes or {}).items() if value is not None
-            },
-        )
-    except ImportError:
-        span_cm = nullcontext()
-    return span_cm
-
-
 def _workspace_id_from_artifacts(artifacts: list[ArtifactReference]) -> str | None:
     """Infer the workspace id from the retained workspace artifact path."""
     for artifact in artifacts:
@@ -1217,7 +1196,7 @@ class TaskExecutionService:
                 "start_timestamp": started_at.isoformat(),
             },
         )
-        with _start_optional_span(
+        with start_optional_span(
             tracer_name="orchestrator.execution",
             span_name="task_execution_service.submit_task",
             attributes={
@@ -1326,7 +1305,7 @@ class TaskExecutionService:
                 "worker_id": worker_id,
             },
         )
-        with _start_optional_span(
+        with start_optional_span(
             tracer_name="orchestrator.execution",
             span_name="task_execution_service.run_queued_task",
             attributes={
@@ -2264,7 +2243,7 @@ class TaskExecutionService:
             budget=submission.budget,
         )
 
-        with _start_optional_span(
+        with start_optional_span(
             tracer_name="orchestrator.execution",
             span_name="orchestrator.graph.run",
             attributes={
@@ -2486,7 +2465,7 @@ class TaskExecutionService:
         force_task_status: TaskStatus | None = None,
     ) -> None:
         """Persist route, task status, worker-run metadata, and artifacts."""
-        with _start_optional_span(
+        with start_optional_span(
             tracer_name="orchestrator.execution",
             span_name="task_execution_service.persist_execution_outcome",
             attributes={
