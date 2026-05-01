@@ -627,6 +627,22 @@ class TaskReplayResult:
     detail: str | None = None
 
 
+def _execution_task_span_attributes(
+    *,
+    task_id: str,
+    session_id: str | None,
+    channel: str | None = None,
+    attempt_count: int | None = None,
+) -> dict[str, Any]:
+    """Build shared correlation attributes for execution-path spans."""
+    return {
+        "code_agent.task_id": task_id,
+        "code_agent.session_id": session_id,
+        "code_agent.channel": channel,
+        "code_agent.attempt_count": attempt_count,
+    }
+
+
 def _deep_merge(
     target: dict[str, Any],
     source: dict[str, Any],
@@ -1199,12 +1215,12 @@ class TaskExecutionService:
         with start_optional_span(
             tracer_name="orchestrator.execution",
             span_name="task_execution_service.submit_task",
-            attributes={
-                "code_agent.task_id": persisted.task_id,
-                "code_agent.session_id": persisted.session_id,
-                "code_agent.channel": persisted.channel,
-                "code_agent.attempt_count": persisted.attempt_count,
-            },
+            attributes=_execution_task_span_attributes(
+                task_id=persisted.task_id,
+                session_id=persisted.session_id,
+                channel=persisted.channel,
+                attempt_count=persisted.attempt_count,
+            ),
         ):
             try:
                 state = await self._run_orchestrator(submission, persisted)
@@ -1309,10 +1325,12 @@ class TaskExecutionService:
             tracer_name="orchestrator.execution",
             span_name="task_execution_service.run_queued_task",
             attributes={
-                "code_agent.task_id": persisted.task_id,
-                "code_agent.session_id": persisted.session_id,
-                "code_agent.channel": persisted.channel,
-                "code_agent.attempt_count": persisted.attempt_count,
+                **_execution_task_span_attributes(
+                    task_id=persisted.task_id,
+                    session_id=persisted.session_id,
+                    channel=persisted.channel,
+                    attempt_count=persisted.attempt_count,
+                ),
                 "code_agent.worker_id": worker_id,
             },
         ):
@@ -2469,7 +2487,10 @@ class TaskExecutionService:
             tracer_name="orchestrator.execution",
             span_name="task_execution_service.persist_execution_outcome",
             attributes={
-                "code_agent.task_id": task_id,
+                **_execution_task_span_attributes(
+                    task_id=task_id,
+                    session_id=(state.session.session_id if state.session is not None else None),
+                ),
                 "code_agent.task_status": (
                     (force_task_status or _task_status_from_result(state)).value
                 ),

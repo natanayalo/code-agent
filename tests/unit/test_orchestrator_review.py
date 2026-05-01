@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -96,6 +97,68 @@ async def test_review_result_runs_and_parses_findings():
     assert "system_prompt" in kwargs
     assert "## Review Task" in kwargs["system_prompt"]
     assert "Reviewer kind: independent_reviewer" in kwargs["system_prompt"]
+
+
+@pytest.mark.anyio
+async def test_review_result_span_includes_session_id(monkeypatch):
+    state = OrchestratorState.model_validate(
+        {
+            "session": {
+                "session_id": "session-123",
+                "user_id": "user-123",
+                "channel": "telegram",
+                "external_thread_id": "thread-123",
+                "active_task_id": "task-123",
+                "status": "active",
+            },
+            "task": {"task_text": "add a feature", "task_id": "task-123"},
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "added feature"},
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+
+    span_records: list[dict[str, object]] = []
+
+    @contextmanager
+    def _fake_start_optional_span(
+        *,
+        tracer_name: str,
+        span_name: str,
+        attributes: dict[str, object] | None = None,
+    ):
+        span_records.append(
+            {
+                "tracer_name": tracer_name,
+                "span_name": span_name,
+                "attributes": dict(attributes or {}),
+            }
+        )
+        yield None
+
+    monkeypatch.setattr(review_module, "start_optional_span", _fake_start_optional_span)
+
+    mock_reviewer = AsyncMock()
+    review_payload = {
+        "summary": "Review complete",
+        "confidence": 0.9,
+        "outcome": "no_findings",
+        "findings": [],
+    }
+    mock_reviewer.run.return_value = WorkerResult(
+        status="success", summary=f"```json\n{json.dumps(review_payload)}\n```"
+    )
+
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert span_records
+    assert span_records[0]["tracer_name"] == "orchestrator.review"
+    assert span_records[0]["span_name"] == "orchestrator.review.independent_pass"
+    attributes = span_records[0]["attributes"]
+    assert isinstance(attributes, dict)
+    assert attributes["code_agent.task_id"] == "task-123"
+    assert attributes["code_agent.session_id"] == "session-123"
 
 
 @pytest.mark.anyio

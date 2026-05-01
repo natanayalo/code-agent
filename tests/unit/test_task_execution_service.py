@@ -7,6 +7,7 @@ import logging
 import socket
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -577,6 +578,90 @@ def test_run_orchestrator_emits_manual_span_when_otel_available(monkeypatch) -> 
     assert started_spans
     assert started_spans[0]["name"] == "orchestrator.graph.run"
     attributes = started_spans[0]["attributes"]
+    assert attributes["code_agent.task_id"] == persisted.task_id
+    assert attributes["code_agent.session_id"] == persisted.session_id
+
+
+def test_persist_execution_outcome_span_includes_session_id(monkeypatch) -> None:
+    """Execution outcome span should include session correlation attributes."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Persist with span correlation",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+    _, persisted = service.create_task(submission)
+
+    captured_span: dict[str, object] = {}
+
+    @contextmanager
+    def _fake_start_optional_span(
+        *,
+        tracer_name: str,
+        span_name: str,
+        attributes: dict[str, object] | None = None,
+    ):
+        captured_span["tracer_name"] = tracer_name
+        captured_span["span_name"] = span_name
+        captured_span["attributes"] = dict(attributes or {})
+        yield None
+
+    monkeypatch.setattr(execution_module, "start_optional_span", _fake_start_optional_span)
+
+    state = OrchestratorState(
+        current_step="persist_memory",
+        session=SessionRef(
+            session_id=persisted.session_id,
+            user_id=persisted.user_id,
+            channel=persisted.channel,
+            external_thread_id=persisted.external_thread_id,
+            active_task_id=persisted.task_id,
+            status="active",
+        ),
+        task=TaskRequest(
+            task_id=persisted.task_id,
+            task_text=submission.task_text,
+            repo_url=submission.repo_url,
+            branch=submission.branch,
+            priority=submission.priority,
+            worker_override=submission.worker_override,
+            constraints=dict(submission.constraints),
+            budget=dict(submission.budget),
+        ),
+        normalized_task_text=submission.task_text,
+        task_kind="implementation",
+        memory=MemoryContext(),
+        route=RouteDecision(
+            chosen_worker="codex",
+            route_reason="cheap_mechanical_change",
+            override_applied=False,
+        ),
+        approval=ApprovalCheckpoint(),
+        dispatch=WorkerDispatch(worker_type="codex"),
+        result=WorkerResult(status="success", summary="ok"),
+    )
+
+    service._persist_execution_outcome(
+        task_id=persisted.task_id,
+        state=state,
+        started_at=datetime.now(),
+        finished_at=datetime.now(),
+    )
+
+    assert captured_span["tracer_name"] == "orchestrator.execution"
+    assert captured_span["span_name"] == "task_execution_service.persist_execution_outcome"
+    attributes = captured_span["attributes"]
+    assert isinstance(attributes, dict)
     assert attributes["code_agent.task_id"] == persisted.task_id
     assert attributes["code_agent.session_id"] == persisted.session_id
 

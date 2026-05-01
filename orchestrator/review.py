@@ -460,6 +460,7 @@ async def review_result(
         span_name="orchestrator.review.independent_pass",
         attributes={
             "code_agent.task_id": state.task.task_id,
+            "code_agent.session_id": state.session.session_id if state.session else None,
             "code_agent.reviewer_type": reviewer_type,
             "code_agent.timeout_seconds": review_timeout_seconds,
         },
