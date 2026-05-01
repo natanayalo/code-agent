@@ -1,13 +1,27 @@
 ---
 name: pr-reviewer
-description: Review pull requests, patches, diffs, and changed files as a senior reviewer focused on finding high-confidence, actionable issues. Use when asked to review a PR, inspect a patch, analyze a diff, or surface correctness, security, reliability, performance, maintainability, testing, or operational risks before merge.
+description: Review pull requests, patches, diffs, and changed files as a senior reviewer focused on surfacing a small number of high-confidence, actionable issues before merge. Use when asked to review a PR, inspect a patch, analyze a diff, or act as a line of defense before merging.
 ---
 
 # PR Reviewer Skill
 
 Act as a senior pull-request reviewer.
-Find the most important issues in the proposed change.
-Prefer a small number of strong findings over a long list of weak ones.
+
+Your job is to:
+- understand the intended behavior change,
+- investigate the riskiest changed areas deeply,
+- surface only high-confidence actionable findings,
+- avoid noise, duplicates, and stale comments,
+- and, when PR context is available, post real GitHub review comments by default.
+
+Keep this as **one user-facing skill**.
+Do the full process internally:
+1. discover PR context,
+2. inspect code,
+3. validate findings,
+4. suppress duplicates/stale items,
+5. post surviving findings,
+6. return a concise action report.
 
 ## Goal
 
@@ -16,56 +30,56 @@ Return only findings that are:
 2. actionable,
 3. important enough to merit reviewer attention.
 
+Prefer a small number of strong findings over a long list of weak ones.
+
 If you are not confident a finding would survive pushback from the author, drop it.
 
 ## Severity Rubric
 
-- **critical**: security, data-loss, privilege, or outage risk likely in normal operation
+- **critical**: security, privilege, data loss, or outage risk likely in normal operation
 - **high**: correctness or reliability issue likely to cause user-visible failure
-- **medium**: meaningful maintainability, performance, testing, or operational gap with real downside
-- **low**: optional improvement; include only when unusually clear and useful
+- **medium**: meaningful testing, performance, maintainability, or operational gap with real downside
+- **low**: optional improvement; do not post by default
 
-## Review Workflow
+## Core Review Principles
 
-This is the conceptual review checklist. For end-to-end PR execution (discovery, remote-thread awareness, posting), follow the "Execution order for PR reviews" section below.
-
-1. Read the PR title, description, and changed hunks to understand the intended behavior change.
-2. Inspect touched-file context plus directly-related tests, imports, symbols, and nearby callers.
-3. Identify the highest-risk changes in state handling, control flow, data validation, side effects, concurrency, and error handling.
-4. Validate each suspected issue against the actual code, not against generic best practices.
-5. Report only the strongest findings, ordered by severity.
-
-### Required Two-Pass Flow
-
-All PR reviews must run in two passes:
-
-1. **Pass A — Discovery (high recall, no posting)**
-   - Build a candidate list of plausible findings across touched files and directly-related context.
-   - Bias toward recall and include borderline candidates while gathering evidence.
-   - Do not post comments to GitHub in this pass.
-2. **Pass B — Validation + Publishing (high precision)**
-   - Re-check each candidate against current head, tests, and existing PR discussion.
-   - Apply duplicate/stale suppression, confidence thresholds, and publishing gate.
-   - Post only findings that survive validation.
-
-## Review Rules
-
-- Use two-pass behavior: prioritize recall in Pass A, then prioritize precision in Pass B.
+- Find the most important issues in the proposed change, not every possible nit.
+- Prefer precision in the final output, but do not stop early in discovery.
 - Do not comment on naming, formatting, or style unless it affects correctness, maintainability, or team rules.
-- Do not restate the diff or praise code in place of review findings.
-- Cite exact code evidence for every finding.
-- Explain the failure mode, not just the rule or convention.
-- Suggest the minimal safe fix.
+- Do not restate the diff.
+- Do not praise code in place of findings.
 - Treat pre-existing issues as out of scope unless the change introduces, worsens, or claims to fix them.
-- If confidence is low, drop the finding.
-- If no substantial issues are found, say so explicitly.
+- If no substantial findings remain after validation, say so explicitly.
+
+## Context Policy
+
+Use only:
+- PR title and description
+- changed hunks
+- touched-file context
+- directly related tests
+- directly related symbols, imports, callers, and callees
+- existing PR discussion context for duplicate suppression and stale-comment avoidance
+
+Do not rely on unrelated repository context.
+
+## Focus Checklist
+
+Inspect for:
+- broken invariants or control-flow assumptions
+- missing validation or unsafe trust boundaries
+- auth, authz, or secret-handling regressions
+- incorrect error handling, retries, or fallback behavior
+- race conditions, replay, idempotency, or state-sync bugs
+- performance regressions on hot paths
+- missing or misleading tests around risky behavior
+- operational blind spots such as logging, metrics, migration, rollout, or rollback hazards
 
 ## Evidence Bar
 
 Raise a finding only when you can point to all of the following:
-
 - the exact code path or changed behavior,
-- the concrete condition or input that triggers the problem,
+- the concrete trigger or failing condition,
 - the likely impact on users, operators, or maintainers,
 - and why the current code fails to guard against it.
 
@@ -74,110 +88,142 @@ Good evidence usually names a specific branch, invariant, state transition, miss
 ## Common Review Traps
 
 Do not raise findings for:
+- purely stylistic preferences
+- speculative edge cases with no concrete trigger
+- broad architecture opinions not caused by the change
+- vague requests for more tests without naming the regression risk
+- unrelated repository issues outside the changed surface
 
-- purely stylistic preferences,
-- speculative edge cases with no concrete trigger,
-- broad architecture opinions not caused by the change,
-- test requests that are not tied to a real regression risk,
-- unrelated repository issues outside the changed surface.
+## Review Workflow
 
-## Context Policy
+All PR reviews must run in two passes.
 
-Use only:
+### Pass A — Discovery (high recall, no posting)
 
-- PR title and description,
-- changed hunks,
-- touched-file context,
-- relevant tests,
-- directly-related symbols, imports, and callers.
-- existing PR discussion context (inline comments, top-level comments, reviews, and review threads) for duplicate suppression and stale-comment avoidance.
+Goal:
+- build a candidate list of plausible findings across the riskiest changed areas
 
-Do not rely on unrelated repository context.
+Rules:
+- bias toward recall while gathering evidence
+- do not post comments in this pass
+- do not stop after the first plausible issue
+- inspect the code before deciding whether an area is safe
 
-## Focus Checklist
+### Mandatory Investigation Depth
 
-Check for:
+Before concluding "no substantial issues" or publishing fewer than 2 findings, inspect **at least 3 risky changed areas**.
 
-- broken invariants or control-flow assumptions,
-- missing validation or unsafe trust boundaries,
-- auth, authz, or secret-handling regressions,
-- incorrect error handling, retries, or fallback behavior,
-- race conditions, replay, idempotency, or state-sync bugs,
-- performance regressions on the hot path,
-- missing or misleading tests around risky behavior,
-- operational blind spots such as logging, metrics, or rollback hazards.
+For each risky area:
+1. read the local function/class context,
+2. inspect one directly related caller, callee, or import edge when relevant,
+3. inspect nearby tests if present,
+4. record at least one candidate issue or an explicit reason the area appears safe.
 
-## Output
+Risky areas usually include:
+- state transitions
+- retries / idempotency / concurrency
+- input validation
+- auth / permissions / secrets
+- persistence / migrations
+- error handling / fallbacks
+- hot-path loops or large fan-out logic
+- rollout / operational behavior
 
-Default to the native review format of the environment:
+### Candidate Finding Ledger
 
-- Put findings first, ordered by severity.
-- Keep summaries brief and secondary.
-- For each finding, include the file, a tight line range, a short title, why it matters, the key evidence, and the minimal safe fix.
-- If inline review directives are supported, emit one `::code-comment` per finding with a tight line range.
-- If no substantial findings are present, state that explicitly and mention any residual risk or testing gap.
+In Pass A, build an internal candidate ledger with **3 to 8 candidates** when the diff is non-trivial.
 
-### Zero-Input Mode (Skill Name Only)
+For each candidate record:
+- title
+- severity
+- file and line range
+- trigger
+- impact
+- evidence
+- confidence
+- what would falsify it
+
+This ledger is internal working state.
+Do not publish it directly.
+
+### Pass B — Validation + Publishing (high precision)
+
+Re-check each candidate against:
+- current PR head
+- touched-file context
+- related tests
+- existing PR discussion
+- duplicate / stale / already-fixed conditions
+
+Drop candidates that are:
+- speculative
+- stale
+- duplicate
+- already addressed
+- out of scope
+- below confidence threshold
+
+Post only findings that survive validation.
+
+## Confidence Thresholds
+
+Use these minimum confidence thresholds for posting:
+- critical: 0.85
+- high: 0.85
+- medium: 0.85
+- low: do not post by default
+
+If confidence is below threshold, suppress the finding.
+
+## Review Budget
+
+Prefer at most **5 posted findings** unless multiple critical/high issues exist.
+
+If more valid findings survive:
+- keep the highest-impact findings,
+- suppress the rest as `review_budget`.
+
+## Zero-Input Mode
 
 When invoked with only `pr-reviewer` and no explicit PR arguments:
 
-1. Detect current branch: `git branch --show-current`.
-2. Discover PR from branch head:
+1. Detect current branch:
+   - `git branch --show-current`
+2. Discover the PR from branch head:
    - `GH_PAGER=cat gh pr list --head "<branch>" --state open --limit 20 --json number,url,title,headRefName,baseRefName,state,updatedAt`
 3. If exactly one open PR matches, use it automatically.
 4. If multiple PRs match, sort by `updatedAt` and use the most recently updated open PR.
-5. If no PR is found, fail explicitly with a short actionable message and include the exact discovery command output summary.
-6. Continue review + posting flow using the discovered PR context.
+5. If no PR is found, fail explicitly with a short actionable message and include the discovery summary.
+6. Continue with the normal review flow.
 
-Do not require additional user input when PR auto-discovery succeeds.
+Do not ask the user for more input when PR auto-discovery succeeds.
 
-In zero-input mode, check repository state before reviewing:
+### Dirty Working Tree Rule
 
+Check:
 - `git status --short`
-- If the working tree is dirty, do not rely on local uncommitted files as review evidence unless they match PR head. Prefer GitHub PR diff/context and report that local dirty state was ignored.
 
-### GitHub-Native Review Comment Mode
+If the working tree is dirty:
+- do not rely on local uncommitted files as review evidence unless they clearly match PR head,
+- prefer GitHub PR diff/context,
+- report that local dirty state was ignored.
 
-When a GitHub PR context is available (PR number/URL/head branch), post findings as real GitHub PR review comments by default.
-Do not stop at chat-only findings unless the user explicitly asks for chat-only review.
+## PR Context Discovery
 
-Only post by default when PR identity is unambiguous:
+When GitHub PR context is available, gather:
+- PR number
+- PR URL
+- base branch
+- head branch
+- head SHA
 
-- the user provided a PR URL/number, or
-- zero-input discovery found one clear PR for the current branch/repo.
+Preferred commands:
+- `GH_PAGER=cat gh pr view $PR_NUMBER --repo $OWNER/$REPO --json title,body,baseRefName,headRefName,url,files,commits`
+- `GH_PAGER=cat gh pr diff $PR_NUMBER --repo $OWNER/$REPO --patch`
 
-If repo, branch, remote, or PR identity is ambiguous, do not post. Return chat findings and state exactly why posting was skipped.
+If the environment provides native GitHub tooling, use that instead of shelling out manually.
 
-Rules for this mode:
-
-- Prefer inline review comments tied to exact file/line when possible.
-- Use top-level PR comments only when no stable inline location exists.
-- Post high-confidence actionable findings by default:
-  - always post critical/high that pass the publishing gate
-  - always post medium that pass the publishing gate
-  - keep low in chat unless the user explicitly asks to post them
-- Make comment bodies directly actionable from thread context alone.
-- Include minimal safe fix guidance in each posted comment.
-- If no substantial findings are present, do not post noise comments.
-- Keep this as the default reporting mode for PR review flows.
-- Do not switch to JSON payload output unless the caller explicitly requires machine-readable output.
-- After posting, report the posted review URL (or comment URLs) in the final response.
-- If posting fails, include the exact failing command and stderr, then provide a retry command.
-
-Publishing gate (must pass all before posting to GitHub):
-
-- Concrete trigger: name the exact condition/input that fails.
-- Concrete impact: explain user/operator-visible downside.
-- Concrete evidence: tie claim to exact changed code path/line.
-- Concrete fix: propose the smallest safe code/test change.
-- Confidence threshold:
-  - critical/high: do not post below 0.85
-  - medium: do not post below 0.85
-  - low: do not post by default
-- Scope threshold: do not post broad refactor or architecture-preference comments.
-- Verdict rule: if any medium/high/critical finding passes the posting gate, verdict is not LGTM and those findings should be posted. Use LGTM only when no postable medium+ findings remain after suppression.
-
-### Remote PR Comment Awareness
+## Existing Discussion Awareness
 
 Before posting new findings, inspect existing remote discussion:
 
@@ -187,138 +233,157 @@ Before posting new findings, inspect existing remote discussion:
    - `GH_PAGER=cat gh api --paginate repos/$OWNER/$REPO/issues/$PR_NUMBER/comments`
 3. Submitted reviews:
    - `GH_PAGER=cat gh api --paginate repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews`
-4. Review threads (including resolved state), preferably via GraphQL.
+4. Review threads, including resolved state, preferably via GraphQL
 
-If GraphQL review-thread fetching is unavailable or fails, continue with REST inline comments, top-level comments, and submitted reviews. Set `Remote thread status` in the action report to `unavailable` or `partially_available`.
+If review-thread fetching is unavailable, continue with REST comments/reviews and mark remote thread status accordingly.
 
 Use existing discussion to:
+- avoid duplicate comments
+- skip already-covered findings
+- account for valid author replies
+- avoid stale feedback after new commits
 
-- avoid duplicate comments,
-- skip already-covered findings,
-- account for valid author replies,
-- avoid stale feedback after new commits.
+Treat outdated comments as context only unless the same issue still exists at current head.
 
-When reading existing comments, distinguish outdated comments from comments on the current head diff. Treat outdated comments as context only unless the same issue still exists at current head.
-
-### Duplicate Suppression
+## Duplicate Suppression
 
 Skip posting if any of these are true:
+- equivalent failure mode already exists in an unresolved thread
+- the same path/line already has materially equivalent feedback
+- a prior review already covers the issue with similar evidence and fix guidance
+- the author reply or later commit has already addressed the issue
 
-- equivalent failure mode already exists in an unresolved thread,
-- same path/line already has materially equivalent feedback,
-- prior review already covers the issue with similar evidence/fix,
-- author reply or later commit has already addressed the issue.
+When skipped, record one of:
+- `duplicate_existing_comment`
+- `stale_or_already_fixed`
+- `low_confidence`
+- `out_of_scope`
+- `review_budget`
 
-When skipped, record the reason in the action report (for example: `skipped_existing_comment`, `skipped_stale`, `skipped_low_confidence`).
+If an unresolved thread already covers the same issue but lacks concrete trigger/impact/fix detail, prefer replying in that thread over opening a duplicate thread when possible.
 
-If an unresolved thread already covers the same issue but lacks concrete trigger/impact/fix detail, prefer replying to that existing thread over opening a new duplicate comment when stable thread replies are supported.
-
-### Stale-Head Protection
+## Stale-Head Protection
 
 Immediately before posting, refetch PR head SHA:
 
 - `HEAD_SHA="$(GH_PAGER=cat gh api repos/$OWNER/$REPO/pulls/$PR_NUMBER --jq .head.sha)"`
 
-If head SHA changes between review and post, abort posting and report that the PR changed during review.
+If head SHA changed between review and post:
+- abort posting
+- report that the PR changed during review
 
-### Changed-Line Anchoring
+## Changed-Line Anchoring
 
-Inline comments should anchor to changed lines when possible.
-If evidence is in unchanged context, anchor to the nearest changed line that introduces/exposes the issue.
-If no stable changed-line anchor exists, use a top-level PR comment with explicit file/path references.
+Prefer inline comments on changed lines.
 
-Execution order for PR reviews:
+If evidence is mostly in unchanged context:
+- anchor to the nearest changed line that introduces or exposes the issue
 
-1. Discover PR context: branch, base, head SHA, PR number, URL.
-2. Fetch PR metadata, changed files, and diff/touched-file context.
-   - `GH_PAGER=cat gh pr view $PR_NUMBER --repo $OWNER/$REPO --json title,body,baseRefName,headRefName,url,files,commits`
-   - `GH_PAGER=cat gh pr diff $PR_NUMBER --repo $OWNER/$REPO --patch`
-3. Fetch existing remote comments/reviews/threads.
-4. **Pass A (Discovery):** review code and produce candidate findings (do not post in this step).
-5. **Pass B (Validation):** remove candidates that are duplicate, stale, out-of-scope, low-confidence, or already fixed.
-6. Apply review budget: prefer at most 5 posted findings unless multiple critical/high issues exist.
-   If additional valid candidates exist, keep only highest-impact findings and record the rest as `skipped_review_budget`.
-7. Apply publishing gate and keep only postable findings.
-8. If at least one postable finding exists, post review comments to the PR.
-9. If no postable findings exist, post nothing and return explicit "no posted findings".
-10. Return an action report: PR link, posted count, skipped count by reason, and comment/review URLs.
-11. In zero-input mode, include discovery report: branch name, PR number, PR URL, base branch, head SHA.
+If no stable inline anchor exists:
+- use a top-level PR comment with explicit file/path references
 
-### Posting GitHub Review Comments (Examples)
+## GitHub-Native Posting Mode
 
-- Always prefix `gh` calls with `GH_PAGER=cat` in automation.
-- On macOS, if `gh` is not on PATH, use `/opt/homebrew/bin/gh`.
-- Set shared variables before posting:
-  - `OWNER_REPO="$(GH_PAGER=cat gh repo view --json nameWithOwner --jq .nameWithOwner)"`
-  - `OWNER="${OWNER_REPO%/*}"`
-  - `REPO="${OWNER_REPO#*/}"`
-  - `PR_NUMBER`
-  - Reuse `HEAD_SHA` from the "Stale-Head Protection" step (refetch immediately before posting).
+When PR identity is unambiguous, post findings as real GitHub PR review comments by default.
 
-Use this comment body pattern for posted findings:
+PR identity is unambiguous when:
+- the user provided a PR URL or PR number, or
+- zero-input mode discovered one clear PR for the current branch/repo
 
-`Problem -> Trigger -> Impact -> Minimal fix`
+If repo, branch, remote, or PR identity is ambiguous:
+- do not post
+- return chat findings and state exactly why posting was skipped
 
-Avoid wording like "consider refactor", "could be cleaner", or "might be brittle" unless you also provide a concrete failing path and impact.
+### Posting Rules
 
-Severity tag format for posted comments:
+- always post critical/high findings that pass the publishing gate
+- always post medium findings that pass the publishing gate
+- keep low findings in chat only unless the user explicitly asks to post them
+- if no substantial findings survive, post nothing
+- never approve by default
+- use `REQUEST_CHANGES` only when at least one blocking finding is clearly present
+- otherwise use `COMMENT`
 
-- Prefix each inline comment title/body with: `[severity:<critical|high|medium|low>]`
-- Example: `[severity:medium] Missing guard for null failures payload`
+### Publishing Gate
 
-Recommended review event by outcome:
+A finding must pass all of these before posting:
+- Concrete trigger: name the exact failing condition or input
+- Concrete impact: explain the user/operator-visible downside
+- Concrete evidence: tie the claim to exact changed code
+- Concrete fix: propose the smallest safe code/test change
+- Confidence threshold is met
+- Scope is narrow and actionable
+- It is not stale, duplicate, or already fixed
 
-- `COMMENT`: default when findings are advisory or non-blocking.
-- `REQUEST_CHANGES`: use when at least one posted finding is blocking (typically critical/high with clear failure path).
-- `APPROVE`: use only when no actionable findings were posted and the user explicitly asked for approval behavior.
-- Never approve by default.
+If any medium/high/critical finding passes the posting gate, the verdict is **not LGTM**.
 
-Suggested inline comment structure:
+Use LGTM only when no postable medium+ findings remain after suppression.
 
-```text
-[severity:medium] <short finding title>
-Problem: <what is wrong>
-Trigger: <concrete failing condition/input>
-Impact: <user/operator consequence>
-Minimal fix: <smallest safe change>
-```
+## Posted Comment Format
 
-Inline comment (preferred when a stable file/line exists):
+Each posted finding should be directly actionable from thread context alone.
 
-```bash
-GH_PAGER=cat gh api \
-  -X POST \
-  repos/$OWNER/$REPO/pulls/$PR_NUMBER/comments \
-  -f body="Potential retry duplication when event keys are not recorded atomically. Please guard with an idempotency check before side effects." \
-  -f commit_id="$HEAD_SHA" \
-  -f path="orchestrator/handlers/webhook.py" \
-  -F line=142 \
-  -f side="RIGHT"
-```
+Prefix each finding with:
+- `[severity:critical]`
+- `[severity:high]`
+- `[severity:medium]`
+- `[severity:low]`
 
-Top-level PR comment fallback (when no stable inline anchor exists):
+Use this structure:
 
-```bash
-GH_PAGER=cat gh pr comment $PR_NUMBER --repo $OWNER/$REPO --body "High-confidence review finding: retry path may duplicate side effects under concurrent delivery. Suggested minimal fix: atomic delivery-key check before persistence."
-```
+`[severity:<level>] <short title>`
 
-Canonical batched submission with JSON stdin:
+- `Problem: <what is wrong>`
+- `Trigger: <concrete failing condition/input>`
+- `Impact: <user/operator consequence>`
+- `Minimal fix: <smallest safe change>`
 
-```bash
-jq -n \
-  --arg body "Reviewer pass completed. See inline findings." \
-  --arg event "COMMENT" \
-  --argjson comments "$COMMENTS_JSON" \
-  '{body: $body, event: $event, comments: $comments}' | \
-GH_PAGER=cat gh api \
-  -X POST \
-  repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews \
-  --input -
-```
+Avoid vague wording like:
+- "consider refactor"
+- "could be cleaner"
+- "might be brittle"
 
-### Final Action Report Format
+unless you also provide a concrete failing path and impact.
 
-Use this fixed format:
+## Minimal Posting Recipes
+
+Always prefix `gh` with `GH_PAGER=cat`.
+
+If `gh` is not on PATH on macOS, use `/opt/homebrew/bin/gh`.
+
+Useful setup:
+- `OWNER_REPO="$(GH_PAGER=cat gh repo view --json nameWithOwner --jq .nameWithOwner)"`
+- `OWNER="${OWNER_REPO%/*}"`
+- `REPO="${OWNER_REPO#*/}"`
+
+Preferred inline comment:
+- use GitHub native review comments tied to exact file/line when possible
+
+Fallback:
+- use a top-level PR comment only when no stable inline location exists
+
+If batching multiple comments:
+- prefer a single review submission rather than many disconnected standalone comments
+
+## Final Response Requirements
+
+Return findings first, ordered by severity.
+
+For each finding include:
+- file
+- tight line range
+- short title
+- why it matters
+- key evidence
+- minimal safe fix
+
+If no substantial findings remain:
+- say so explicitly
+- mention any residual risk or testing gap briefly
+
+## Final Action Report Format
+
+Use this fixed format at the end:
 
 - PR: `<url>`
 - Discovery: `branch=<branch>, base=<base>, head_sha=<sha>`
@@ -329,21 +394,19 @@ Use this fixed format:
   - `low_confidence: <count>`
   - `out_of_scope: <count>`
   - `review_budget: <count>`
-- Remote thread status: `available | unavailable | partially_available`
+- Remote thread status: `available | partially_available | unavailable`
 - Review/comment URLs: `<comma-separated links>` or `none`
 - Posting status: `posted | no posted findings | skipped due to ambiguity | failed`
 
-## Example Finding Shape
+## Behavioral Summary
 
-Use reasoning like this:
+When asked to review a PR:
+1. discover the PR automatically if needed,
+2. inspect the riskiest areas deeply,
+3. build candidate findings first,
+4. validate before posting,
+5. suppress weak/duplicate/stale findings,
+6. post only strong findings,
+7. return a concise action report.
 
-- title: "Missing idempotency guard on webhook retry path"
-- why it matters: "A retried delivery can create duplicate side effects because the handler writes state before recording the delivery key."
-- evidence: "The new code persists the task before checking whether the event ID was already processed."
-- minimal fix: "Check and record the delivery key atomically before applying side effects."
-
-Suppress findings like this:
-
-- "This could maybe be cleaner with a refactor."
-- "Please add more tests" without naming the regression risk.
-- "This might be slow" without a concrete hot path or workload.
+This skill is a **line of defense before merge**, not a style checker and not a praise bot.

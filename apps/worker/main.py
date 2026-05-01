@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from apps.api.progress import create_outbound_http_clients
 from apps.api.task_service_factory import build_task_service_from_env
+from apps.observability import configure_tracing_from_env
 from apps.runtime import (
     RUN_WORKER_ENV_VAR,
     should_run_worker,
@@ -45,6 +46,8 @@ async def run_worker_forever() -> None:
         raise RuntimeError(
             f"Worker runtime is disabled for this process. Set {RUN_WORKER_ENV_VAR}=1 to enable it."
         )
+
+    configure_tracing_from_env(service_name="code-agent-worker")
 
     outbound_http_clients = create_outbound_http_clients()
     try:

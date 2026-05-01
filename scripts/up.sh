@@ -21,6 +21,12 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
+is_enabled() {
+  local value="${1:-}"
+  value="$(echo "$value" | tr '[:upper:]' '[:lower:]')"
+  [ "$value" = "1" ] || [ "$value" = "true" ] || [ "$value" = "yes" ] || [ "$value" = "on" ]
+}
+
 # shellcheck source=/dev/null
 set -a
 # shellcheck disable=SC1090,SC1091
@@ -76,8 +82,14 @@ mkdir -p "$CODE_AGENT_WORKSPACE_ROOT"
 echo "[run-production-like] Using shared workspace root: $CODE_AGENT_WORKSPACE_ROOT"
 echo "[run-production-like] Codex sandbox mode: $CODE_AGENT_CODEX_SANDBOX"
 
-echo "[run-production-like] Starting postgres + migration + api + worker"
-docker compose --env-file "$ENV_FILE" up -d --build postgres migrate api worker
+if is_enabled "${CODE_AGENT_ENABLE_TRACING:-0}"; then
+  echo "[run-production-like] Tracing enabled (CODE_AGENT_ENABLE_TRACING=1); starting phoenix too"
+  echo "[run-production-like] Starting postgres + migration + api + worker + phoenix"
+  docker compose --profile observability --env-file "$ENV_FILE" up -d --build postgres migrate api worker phoenix
+else
+  echo "[run-production-like] Starting postgres + migration + api + worker"
+  docker compose --env-file "$ENV_FILE" up -d --build postgres migrate api worker
+fi
 
 api_container_id="$(docker compose --env-file "$ENV_FILE" ps -q api)"
 if [ -z "$api_container_id" ]; then

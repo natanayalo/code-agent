@@ -92,3 +92,32 @@ def test_postgres_service_has_healthcheck_and_port_mapping(
         "CMD-SHELL",
         expected_healthcheck,
     ]
+
+
+def test_compose_includes_optional_phoenix_observability_service(
+    compose_config: dict[str, Any],
+) -> None:
+    """Phoenix should be available as an opt-in local observability sidecar."""
+    phoenix_service = compose_config["services"]["phoenix"]
+
+    assert phoenix_service["image"] == "arizephoenix/phoenix:latest"
+    assert "observability" in phoenix_service["profiles"]
+    assert "6006:6006" in phoenix_service["ports"]
+    assert "4317:4317" in phoenix_service["ports"]
+
+
+def test_api_and_worker_expose_tracing_env_overrides(compose_config: dict[str, Any]) -> None:
+    """API and worker services should wire tracing env vars for OTLP export."""
+    api_env = compose_config["services"]["api"]["environment"]
+    worker_env = compose_config["services"]["worker"]["environment"]
+
+    assert api_env["CODE_AGENT_ENABLE_TRACING"] == "${CODE_AGENT_ENABLE_TRACING:-0}"
+    assert (
+        api_env["CODE_AGENT_TRACING_OTLP_ENDPOINT"]
+        == "${CODE_AGENT_TRACING_OTLP_ENDPOINT:-http://phoenix:6006/v1/traces}"
+    )
+    assert worker_env["CODE_AGENT_ENABLE_TRACING"] == "${CODE_AGENT_ENABLE_TRACING:-0}"
+    assert (
+        worker_env["CODE_AGENT_TRACING_OTLP_ENDPOINT"]
+        == "${CODE_AGENT_TRACING_OTLP_ENDPOINT:-http://phoenix:6006/v1/traces}"
+    )
