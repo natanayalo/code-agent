@@ -68,7 +68,7 @@ Granular tasks for the active and upcoming milestones:
 
 ### Observability Follow-up: OpenTelemetry Integration
 - [x] T-150: implement Phoenix OSS local/self-hosted (non-SaaS) + OpenInference tracing for LangGraph/orchestrator flow and verify graph/node visibility end-to-end (#145)
-- [x] T-151: add manual spans for TaskExecutionService, worker runtime, sandbox/shell, review, and PR/CI stages where OpenInference auto-instrumentation is insufficient
+- [x] T-151: add manual spans for TaskExecutionService, worker runtime, sandbox/shell, review, and PR/CI stages where OpenInference auto-instrumentation is insufficient (#146)
 - [ ] T-152: connect persisted OTEL/OpenInference trace metadata to the dashboard Trace Observability UI (trace IDs, deep links, span status summary) from local/self-hosted Phoenix traces
 
 ### Milestone 17: Worker Profile Strategy
