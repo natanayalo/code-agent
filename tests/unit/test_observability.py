@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -12,6 +13,33 @@ from apps import observability as observability_module
 @pytest.fixture(autouse=True)
 def _reset_bootstrap_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(observability_module, "_bootstrap_complete", False)
+
+
+@pytest.fixture
+def mock_otel(monkeypatch):
+    class _FakePropagateAPI:
+        def __init__(self):
+            self.inject = MagicMock()
+            self.extract = MagicMock()
+            self.set_global_textmap = MagicMock()
+
+    class _FakeTraceAPI:
+        def __init__(self):
+            self.set_span_in_context = MagicMock()
+
+    fake_propagate = _FakePropagateAPI()
+    fake_trace = _FakeTraceAPI()
+
+    fake_deps = observability_module._TracingDependencies(
+        trace_api=fake_trace,
+        propagate_api=fake_propagate,
+        resource_cls=MagicMock(),
+        register_fn=MagicMock(),
+        trace_context_propagator_cls=MagicMock(),
+    )
+
+    monkeypatch.setattr(observability_module, "_load_tracing_dependencies", lambda: fake_deps)
+    return fake_deps
 
 
 def test_resolve_otel_tracing_endpoint_uses_explicit_override_first() -> None:
@@ -287,3 +315,33 @@ def test_configure_tracing_from_env_passes_correct_batch_mode(
         environ={observability_module.ENABLE_TRACING_ENV_VAR: "1"},
     )
     assert register_calls[-1]["batch"] is True
+
+
+def test_capture_restore_trace_context(mock_otel):
+    """Verify that trace context can be captured into a dict and restored."""
+    deps = observability_module._load_tracing_dependencies()
+
+    # Mock inject to set a dummy traceparent
+    def mock_inject(carrier, context=None):
+        carrier["traceparent"] = "00-test-trace-id-test-span-id-01"
+
+    deps.propagate_api.inject.side_effect = mock_inject
+    deps.propagate_api.extract.return_value = "mock-token"
+
+    # 1. Capture
+    context = observability_module.capture_trace_context()
+    assert context == {"traceparent": "00-test-trace-id-test-span-id-01"}
+    deps.propagate_api.inject.assert_called_once()
+
+    # 2. Restore
+    with patch("opentelemetry.context.attach") as mock_attach:
+        token = observability_module.restore_trace_context(context)
+        deps.propagate_api.extract.assert_called_once_with(carrier=context)
+        mock_attach.assert_called_once_with("mock-token")
+        assert token == mock_attach.return_value
+
+
+def test_restore_trace_context_noop():
+    """Verify that restore_trace_context handles empty input gracefully."""
+    assert observability_module.restore_trace_context(None) is None
+    assert observability_module.restore_trace_context({}) is None

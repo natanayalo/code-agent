@@ -271,6 +271,7 @@ class TaskRepository:
         next_attempt_at: datetime | None = None,
         chosen_worker: str | None = None,
         route_reason: str | None = None,
+        trace_context: dict[str, str] | None = None,
     ) -> Task:
         task = Task(
             session_id=session_id,
@@ -290,6 +291,7 @@ class TaskRepository:
             next_attempt_at=next_attempt_at,
             chosen_worker=chosen_worker,
             route_reason=route_reason,
+            trace_context=trace_context or {},
         )
         self.session.add(task)
         self.session.flush()

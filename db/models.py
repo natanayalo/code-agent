@@ -247,6 +247,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     chosen_worker: Mapped[WorkerType | None] = mapped_column(WORKER_TYPE_ENUM, nullable=True)
     route_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    trace_context: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
 
     session: Mapped[Session] = relationship(back_populates="tasks")
     worker_runs: Mapped[list[WorkerRun]] = relationship(back_populates="task")

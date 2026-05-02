@@ -380,11 +380,39 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
             )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=request_messages,
-                response_format={"type": "json_object"},
-            )
+            from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+            from apps.observability import set_span_input_output
+
+            tracer = otel_trace.get_tracer("workers.openrouter")
+            span_cm = tracer.start_as_current_span("openrouter.chat")
+        except (ImportError, Exception):
+            from contextlib import nullcontext
+
+            span_cm = nullcontext()
+
+        try:
+            with span_cm:
+                set_span_input_output(input_data=request_messages, kind="LLM")
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=request_messages,
+                    response_format={"type": "json_object"},
+                )
+                from typing import Any
+
+                output_val: Any = (
+                    response.model_dump() if hasattr(response, "model_dump") else response
+                )
+                try:
+                    if response.choices and response.choices[0].message.content:
+                        try:
+                            output_val = json.loads(response.choices[0].message.content)
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            output_val = response.choices[0].message.content
+                except (AttributeError, IndexError):
+                    pass
+                set_span_input_output(input_data=None, output_data=output_val)
         except Exception as exc:  # pragma: no cover - exercised via unit tests with stubs
             raise RuntimeError(f"OpenRouter adapter request failed: {exc}") from exc
 

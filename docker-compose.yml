@@ -52,6 +52,8 @@ services:
       CODE_AGENT_ENABLE_TRACING: ${CODE_AGENT_ENABLE_TRACING:-0}
       CODE_AGENT_TRACING_PROJECT: ${CODE_AGENT_TRACING_PROJECT:-code-agent-local}
       CODE_AGENT_TRACING_OTLP_ENDPOINT: ${CODE_AGENT_TRACING_OTLP_ENDPOINT:-http://phoenix:6006/v1/traces}
+      PHOENIX_PROJECT_NAME: ${CODE_AGENT_TRACING_PROJECT_NAME:-code-agent-local}
+      OTEL_RESOURCE_ATTRIBUTES: "openinference.project.name=${CODE_AGENT_TRACING_PROJECT_NAME:-code-agent-local},service.name=code-agent-api"
       DATABASE_HOST: ${DATABASE_HOST:-postgres}
       DATABASE_PORT: ${DATABASE_PORT:-5432}
       POSTGRES_DB: ${POSTGRES_DB?Please set POSTGRES_DB in .env}
@@ -102,6 +104,8 @@ services:
       CODE_AGENT_ENABLE_TRACING: ${CODE_AGENT_ENABLE_TRACING:-0}
       CODE_AGENT_TRACING_PROJECT: ${CODE_AGENT_TRACING_PROJECT:-code-agent-local}
       CODE_AGENT_TRACING_OTLP_ENDPOINT: ${CODE_AGENT_TRACING_OTLP_ENDPOINT:-http://phoenix:6006/v1/traces}
+      PHOENIX_PROJECT_NAME: ${CODE_AGENT_TRACING_PROJECT_NAME:-code-agent-local}
+      OTEL_RESOURCE_ATTRIBUTES: "openinference.project.name=${CODE_AGENT_TRACING_PROJECT_NAME:-code-agent-local},service.name=code-agent-worker"
     depends_on:
       postgres:
         condition: service_healthy

@@ -271,21 +271,48 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         )
 
         try:
+            from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+            from apps.observability import set_span_input_output
+
+            tracer = otel_trace.get_tracer("workers.gemini")
+            span_cm = tracer.start_as_current_span("gemini.chat")
+        except (ImportError, Exception):
+            from contextlib import nullcontext
+
+            span_cm = nullcontext()
+
+        try:
             execution_cwd = (
                 self.working_directory if override_prompt is not None else working_directory
             )
-            completed = subprocess.run(
-                command,
-                input=prompt,
-                capture_output=True,
-                text=True,
-                # Keep self-review (prompt_override) subprocesses out of the workspace repo
-                # to prevent side-effect edits that bypass runtime command capture.
-                # For normal runtime turns, use the worker-provided workspace cwd.
-                cwd=execution_cwd,
-                env=self.env,
-                timeout=self.request_timeout_seconds,
-            )
+            with span_cm:
+                set_span_input_output(input_data=prompt, kind="LLM")
+                completed = subprocess.run(
+                    command,
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    # Keep self-review (prompt_override) subprocesses out of the workspace repo
+                    # to prevent side-effect edits that bypass runtime command capture.
+                    # For normal runtime turns, use the worker-provided workspace cwd.
+                    cwd=execution_cwd,
+                    env=self.env,
+                    timeout=self.request_timeout_seconds,
+                )
+                output_val = completed.stdout
+                try:
+                    data = json.loads(completed.stdout)
+                    if isinstance(data, dict) and "response" in data:
+                        try:
+                            # Try to parse the inner response if it's stringified JSON
+                            inner = json.loads(data["response"])
+                            output_val = inner
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            output_val = data["response"]
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
+                set_span_input_output(input_data=None, output_data=output_val)
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(
                 f"Gemini CLI adapter timed out after {self.request_timeout_seconds}s."

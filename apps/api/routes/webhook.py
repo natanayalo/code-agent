@@ -118,13 +118,45 @@ def receive_webhook(
     to the same ``TaskExecutionService`` used by the direct ``/tasks`` path so
     all execution, persistence, and observability behaviour is shared.
     """
-    submission = _to_task_submission(payload)
-    outcome = task_service.create_task_outcome(
-        submission,
-        delivery_key=(
-            DeliveryKey(channel=submission.session.channel, delivery_id=payload.delivery_id)
-            if payload.delivery_id is not None
-            else None
-        ),
-    )
-    return outcome.task_snapshot
+    from contextlib import nullcontext
+
+    from apps.observability import set_span_input_output
+
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+        tracer = otel_trace.get_tracer("api.webhook")
+        span_cm = tracer.start_as_current_span("api.webhook")
+    except (ImportError, Exception):
+        span_cm = nullcontext()
+
+    with span_cm:
+        set_span_input_output(input_data=payload.model_dump(), kind="AGENT")
+
+        submission = _to_task_submission(payload)
+
+        # We will link the session ID after creating the outcome
+
+        outcome = task_service.create_task_outcome(
+            submission,
+            delivery_key=(
+                DeliveryKey(channel=submission.session.channel, delivery_id=payload.delivery_id)
+                if payload.delivery_id is not None
+                else None
+            ),
+        )
+
+        try:
+            from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+            otel_trace.get_current_span().set_attribute(
+                "session.id", outcome.task_snapshot.session_id
+            )
+        except Exception:
+            pass
+
+        set_span_input_output(
+            input_data=None, output_data=outcome.task_snapshot.model_dump(), kind="AGENT"
+        )
+
+        return outcome.task_snapshot

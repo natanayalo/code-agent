@@ -1116,14 +1116,40 @@ def build_await_result_node(
                 f"worker unavailable: {worker_type or 'unknown'}",
             )
         else:
-            request = _build_worker_request(state)
-            result, progress_message = await _await_worker_with_timeout(
-                bound_worker,
-                request,
-                worker_type=worker_type or "unknown",
-                session_id=request.session_id,
-                timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+            from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+            from apps.observability import set_span_input_output
+
+            tracer = otel_trace.get_tracer("orchestrator.graph")
+
+            from openinference.instrumentation.langchain import (  # type: ignore[import-not-found]
+                get_current_span,
             )
+            from opentelemetry.trace import set_span_in_context  # type: ignore[import-not-found]
+
+            request = _build_worker_request(state)
+
+            # Explicitly find the current LangChain/LangGraph span to ensure correct parenting
+            parent_lc_span = get_current_span()
+            parent_context = set_span_in_context(parent_lc_span) if parent_lc_span else None
+
+            with tracer.start_as_current_span(
+                "worker.execute",
+                context=parent_context,
+                attributes={"openinference.span.kind": "AGENT"},
+            ) as span:
+                span.set_attribute("worker.type", worker_type or "unknown")
+                set_span_input_output(input_data=request.model_dump(), kind="AGENT")
+                result, progress_message = await _await_worker_with_timeout(
+                    bound_worker,
+                    request,
+                    worker_type=worker_type or "unknown",
+                    session_id=request.session_id,
+                    timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                )
+                set_span_input_output(
+                    input_data=None, output_data=result.model_dump(), kind="AGENT"
+                )
             progress_updates = _progress_update(state, progress_message)
         return {
             "current_step": "await_result",
@@ -1611,7 +1637,7 @@ def build_orchestrator_graph(
     builder.add_edge("plan_task", "generate_task_spec")
     builder.add_conditional_edges(
         "generate_task_spec",
-        RunnableLambda(_route_after_generate_task_spec),
+        _route_after_generate_task_spec,
         {
             "load_memory": "load_memory",
             "summarize_result": "summarize_result",
@@ -1621,7 +1647,7 @@ def build_orchestrator_graph(
     builder.add_edge("choose_worker", "check_approval")
     builder.add_conditional_edges(
         "check_approval",
-        RunnableLambda(_route_after_check_approval),
+        _route_after_check_approval,
         {
             "await_approval": "await_approval",
             "dispatch_job": "dispatch_job",
@@ -1629,7 +1655,7 @@ def build_orchestrator_graph(
     )
     builder.add_conditional_edges(
         "await_approval",
-        RunnableLambda(_route_after_await_approval),
+        _route_after_await_approval,
         {
             "dispatch_job": "dispatch_job",
             "summarize_result": "summarize_result",
@@ -1638,7 +1664,7 @@ def build_orchestrator_graph(
     builder.add_edge("dispatch_job", "await_result")
     builder.add_conditional_edges(
         "await_result",
-        RunnableLambda(_route_after_await_result),
+        _route_after_await_result,
         {
             "await_permission_escalation": "await_permission_escalation",
             "verify_result": "verify_result",
@@ -1646,7 +1672,7 @@ def build_orchestrator_graph(
     )
     builder.add_conditional_edges(
         "await_permission_escalation",
-        RunnableLambda(_route_after_await_permission_escalation),
+        _route_after_await_permission_escalation,
         {
             "dispatch_job": "dispatch_job",
             "verify_result": "verify_result",
@@ -1655,7 +1681,7 @@ def build_orchestrator_graph(
     builder.add_edge("verify_result", "review_result")
     builder.add_conditional_edges(
         "review_result",
-        RunnableLambda(_route_after_review_result),
+        _route_after_review_result,
         {
             "dispatch_job": "dispatch_job",
             "summarize_result": "summarize_result",

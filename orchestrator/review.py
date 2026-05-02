@@ -453,12 +453,39 @@ async def review_result(
         tools=state.task.tools,
     )
 
+    from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+    from apps.observability import set_span_input_output
+
+    tracer = otel_trace.get_tracer("orchestrator.review")
+
     try:
-        # We use the system_prompt override to perform a single-shot review
-        review_run_result = await asyncio.wait_for(
-            worker.run(review_request, system_prompt=review_prompt),
-            timeout=_resolve_review_timeout_seconds(state),
+        from openinference.instrumentation.langchain import (  # type: ignore[import-not-found]
+            get_current_span,
         )
+        from opentelemetry.trace import set_span_in_context  # type: ignore[import-not-found]
+
+        # 4. Run the review pass
+        # Explicitly find the current LangChain/LangGraph span to ensure correct parenting
+        parent_lc_span = get_current_span()
+        parent_context = set_span_in_context(parent_lc_span) if parent_lc_span else None
+
+        with tracer.start_as_current_span(
+            "worker.execute",
+            context=parent_context,
+            attributes={"openinference.span.kind": "AGENT"},
+        ) as span:
+            span.set_attribute("worker.type", reviewer_type)
+            set_span_input_output(input_data=review_request.model_dump(), kind="AGENT")
+
+            # We use the system_prompt override to perform a single-shot review
+            review_run_result = await asyncio.wait_for(
+                worker.run(review_request, system_prompt=review_prompt),
+                timeout=_resolve_review_timeout_seconds(state),
+            )
+            set_span_input_output(
+                input_data=None, output_data=review_run_result.model_dump(), kind="AGENT"
+            )
         if review_run_result.status != "success":
             logger.warning(
                 "Independent review worker returned non-success status: %s",
