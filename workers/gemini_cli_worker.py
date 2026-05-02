@@ -259,15 +259,30 @@ class GeminiCliWorker(Worker):
         """Provision a workspace, run the CLI loop, and return a typed result."""
         cancel_event = threading.Event()
         loop = asyncio.get_running_loop()
-        future = loop.run_in_executor(
-            None,
-            partial(
+        try:
+            from opentelemetry import context as context_api  # type: ignore[import-not-found]
+
+            current_context = context_api.get_current()
+
+            def run_fn() -> WorkerResult:
+                token = context_api.attach(current_context)
+                try:
+                    return self._run_sync(
+                        request,
+                        cancel_token=cancel_event.is_set,
+                        system_prompt_override=system_prompt,
+                    )
+                finally:
+                    context_api.detach(token)
+        except ImportError:
+            run_fn = partial(
                 self._run_sync,
                 request,
                 cancel_token=cancel_event.is_set,
                 system_prompt_override=system_prompt,
-            ),
-        )
+            )
+
+        future = loop.run_in_executor(None, run_fn)
         try:
             return await asyncio.shield(future)
         except asyncio.CancelledError:

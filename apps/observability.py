@@ -37,11 +37,10 @@ class TracingBootstrapResult:
 @dataclass(frozen=True)
 class _TracingDependencies:
     trace_api: Any
+    propagate_api: Any
     resource_cls: Any
-    tracer_provider_cls: Any
-    batch_span_processor_cls: Any
-    otlp_exporter_cls: Any
-    langchain_instrumentor_cls: Any
+    register_fn: Any
+    trace_context_propagator_cls: Any
 
 
 def _is_enabled(value: str | None) -> bool:
@@ -88,28 +87,22 @@ def resolve_tracing_project_name(environ: Mapping[str, str]) -> str:
 
 def _load_tracing_dependencies() -> _TracingDependencies | None:
     try:
-        from openinference.instrumentation.langchain import (  # type: ignore[import-not-found]
-            LangChainInstrumentor,
-        )
+        from opentelemetry import propagate as propagate_api  # type: ignore[import-not-found]
         from opentelemetry import trace as trace_api  # type: ignore[import-not-found]
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # type: ignore[import-not-found]
-            OTLPSpanExporter,
-        )
         from opentelemetry.sdk.resources import Resource  # type: ignore[import-not-found]
-        from opentelemetry.sdk.trace import TracerProvider  # type: ignore[import-not-found]
-        from opentelemetry.sdk.trace.export import (  # type: ignore[import-not-found]
-            BatchSpanProcessor,
+        from opentelemetry.trace.propagation.tracecontext import (  # type: ignore[import-not-found]
+            TraceContextTextMapPropagator,
         )
+        from phoenix.otel import register as register_fn  # type: ignore[import-not-found]
     except ImportError:
         return None
 
     return _TracingDependencies(
         trace_api=trace_api,
+        propagate_api=propagate_api,
         resource_cls=Resource,
-        tracer_provider_cls=TracerProvider,
-        batch_span_processor_cls=BatchSpanProcessor,
-        otlp_exporter_cls=OTLPSpanExporter,
-        langchain_instrumentor_cls=LangChainInstrumentor,
+        register_fn=register_fn,
+        trace_context_propagator_cls=TraceContextTextMapPropagator,
     )
 
 
@@ -152,6 +145,7 @@ def configure_tracing_from_env(
                 otlp_endpoint=otlp_endpoint,
             )
 
+        # Create a resource to preserve the logical service name.
         resource = deps.resource_cls.create(
             {
                 "service.name": service_name,
@@ -159,17 +153,31 @@ def configure_tracing_from_env(
                 "openinference.project.name": project_name,
             }
         )
-        tracer_provider = deps.tracer_provider_cls(resource=resource)
-        otlp_exporter = deps.otlp_exporter_cls(endpoint=otlp_endpoint)
-        tracer_provider.add_span_processor(deps.batch_span_processor_cls(otlp_exporter))
 
-        deps.trace_api.set_tracer_provider(tracer_provider)
+        # Use phoenix.otel.register() for simplified bootstrap and auto-instrumentation.
+        # batch=False (default) uses SimpleSpanProcessor (ideal for API immediate export).
+        # batch=True uses BatchSpanProcessor (ideal for Worker performance).
+        deps.register_fn(
+            project_name=project_name,
+            endpoint=otlp_endpoint,
+            resource=resource,
+            batch=(service_name != "code-agent-api"),
+            auto_instrument=True,
+        )
 
-        instrumentor = deps.langchain_instrumentor_cls()
+        # Explicitly instrument LangChain to ensure OpenInference kinds are set
         try:
-            instrumentor.instrument(tracer_provider=tracer_provider)
-        except TypeError:
-            instrumentor.instrument()
+            from openinference.instrumentation.langchain import (  # type: ignore[import-not-found]
+                LangChainInstrumentor,
+            )
+
+            if not LangChainInstrumentor().is_instrumented_by_opentelemetry:
+                LangChainInstrumentor().instrument()
+        except Exception:
+            pass
+
+        # Ensure TraceContextTextMapPropagator is the global propagator for cross-service linkage.
+        deps.propagate_api.set_global_textmap(deps.trace_context_propagator_cls())
 
         _bootstrap_complete = True
 
@@ -188,3 +196,82 @@ def configure_tracing_from_env(
         project_name=project_name,
         otlp_endpoint=otlp_endpoint,
     )
+
+
+def capture_trace_context() -> dict[str, str]:
+    """Capture the current OpenTelemetry trace context into a serializable dict."""
+    deps = _load_tracing_dependencies()
+    if deps is None:
+        return {}
+
+    from opentelemetry import context as context_api  # type: ignore[import-not-found]
+
+    carrier: dict[str, str] = {}
+    deps.propagate_api.inject(carrier, context=context_api.get_current())
+    return carrier
+
+
+def restore_trace_context(context: dict[str, str] | None) -> Any:
+    """Restore an OpenTelemetry trace context from a serializable dict.
+
+    Returns a token that should be detached later if used in a context manager,
+    or None if tracing is disabled.
+    """
+    if not context:
+        return None
+
+    deps = _load_tracing_dependencies()
+    if deps is None:
+        return None
+
+    from opentelemetry import context as context_api  # type: ignore[import-not-found]
+
+    token = deps.propagate_api.extract(carrier=context)
+    return context_api.attach(token)
+
+
+def set_span_input_output(
+    input_data: Any,
+    output_data: Any = None,
+    kind: str | None = None,
+) -> None:
+    """Set OpenInference input/output/kind attributes on the current span."""
+    import json
+
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+        span = otel_trace.get_current_span()
+        if not span.is_recording():
+            return
+
+        if kind is not None:
+            try:
+                from openinference.semconv.trace import (  # type: ignore[import-not-found]
+                    SpanAttributes,
+                )
+
+                span_kind_attr = SpanAttributes.OPENINFERENCE_SPAN_KIND
+            except ImportError:
+                span_kind_attr = "openinference.span.kind"
+
+            span.set_attribute(span_kind_attr, kind)
+
+        if input_data is not None:
+            if isinstance(input_data, dict | list):
+                input_str = json.dumps(input_data, default=str)
+            else:
+                input_str = str(input_data)
+            span.set_attribute("input.value", input_str)
+            span.set_attribute("input.mime_type", "application/json")
+
+        if output_data is not None:
+            if isinstance(output_data, dict | list):
+                output_str = json.dumps(output_data, default=str)
+            else:
+                output_str = str(output_data)
+            span.set_attribute("output.value", output_str)
+            span.set_attribute("output.mime_type", "application/json")
+    except (ImportError, Exception):
+        # Fail safe if tracing is not configured or JSON fails
+        pass

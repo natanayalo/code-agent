@@ -12,6 +12,7 @@ from typing import Protocol
 
 from pydantic import Field
 
+from apps.observability import capture_trace_context
 from sandbox.audit import capture_audit_artifacts
 from sandbox.container import build_container_name
 from sandbox.policy import PathPolicy
@@ -165,7 +166,15 @@ def _build_docker_run_command(
 
     if not request.network_enabled:
         command.extend(["--network", "none"])
-    for key, value in sorted(request.environment.items()):
+
+    # Inject TRACEPARENT from the current context if available, enabling
+    # unified tracing across service/sandbox boundaries.
+    effective_env = dict(request.environment)
+    trace_context = capture_trace_context()
+    if "traceparent" in trace_context:
+        effective_env.setdefault("TRACEPARENT", trace_context["traceparent"])
+
+    for key, value in sorted(effective_env.items()):
         command.extend(["--env", f"{key}={value}"])
     command.append(image)
     command.extend(request.command)

@@ -252,24 +252,40 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
                 )
 
             try:
-                completed = subprocess.run(
-                    self._build_command(
-                        output_schema_path=schema_path,
-                        output_message_path=output_message_path,
-                        working_directory=working_directory,
-                    ),
-                    input=prompt,
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                    timeout=self.request_timeout_seconds,
-                    env=self.env,
-                )
-            except subprocess.TimeoutExpired as exc:
-                raise RuntimeError(
-                    "Codex CLI adapter timed out after "
-                    f"{self.request_timeout_seconds}s while selecting the next runtime step."
-                ) from exc
+                from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+                from apps.observability import set_span_input_output
+
+                tracer = otel_trace.get_tracer("workers.codex")
+                span_cm = tracer.start_as_current_span("codex.exec")
+            except (ImportError, Exception):
+                from contextlib import nullcontext
+
+                span_cm = nullcontext()
+
+            try:
+                with span_cm:
+                    set_span_input_output(input_data=prompt, kind="LLM")
+                    try:
+                        completed = subprocess.run(
+                            self._build_command(
+                                output_schema_path=schema_path,
+                                output_message_path=output_message_path,
+                                working_directory=working_directory,
+                            ),
+                            input=prompt,
+                            text=True,
+                            capture_output=True,
+                            check=False,
+                            timeout=self.request_timeout_seconds,
+                            env=self.env,
+                        )
+                        set_span_input_output(input_data=None, output_data=completed.stdout)
+                    except subprocess.TimeoutExpired as exc:
+                        raise RuntimeError(
+                            "Codex CLI adapter timed out after "
+                            f"{self.request_timeout_seconds}s while selecting the next runtime step."  # noqa: E501
+                        ) from exc
             except OSError as exc:
                 raise RuntimeError(
                     f"Codex CLI adapter could not start `{self.executable}`: {exc}"

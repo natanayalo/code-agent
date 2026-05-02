@@ -13,9 +13,8 @@ from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import AbstractAsyncContextManager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from functools import partial
 from pathlib import Path
 from threading import Lock
 from typing import Any, Literal, Protocol, cast
@@ -24,11 +23,13 @@ from uuid import uuid4
 
 from anyio import to_thread
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from opentelemetry import context as context_api  # type: ignore[import-not-found]
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
+from apps.observability import capture_trace_context, restore_trace_context
 from db.base import utc_now
 from db.enums import (
     ArtifactType,
@@ -558,6 +559,7 @@ class _PersistedTaskContext:
     task_id: str
     attempt_count: int
     task_spec: dict[str, Any] | None = None
+    trace_context: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -1269,6 +1271,7 @@ class TaskExecutionService:
             return None
 
         submission, persisted = loaded
+        restore_trace_context(persisted.trace_context)
         await self._emit_progress(submission, persisted, phase="started")
         await self._emit_progress(submission, persisted, phase="running")
 
@@ -2067,6 +2070,7 @@ class TaskExecutionService:
                 )
             session_repo.touch(session_id=conversation_session.id, seen_at=now)
 
+            trace_context = capture_trace_context()
             task = task_repo.create(
                 session_id=conversation_session.id,
                 task_text=submission.task_text,
@@ -2077,6 +2081,7 @@ class TaskExecutionService:
                 budget=dict(submission.budget),
                 secrets=dict(submission.secrets),
                 task_spec=task_spec,
+                trace_context=trace_context,
                 # Store tools in constraints to avoid a schema migration for now
                 constraints={
                     **sanitized_constraints,
@@ -2225,8 +2230,11 @@ class TaskExecutionService:
             from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
 
             span_cm = otel_trace.get_tracer("orchestrator.execution").start_as_current_span(
-                "orchestrator.graph.run",
+                f"orchestrator.graph.run (Attempt {persisted.attempt_count})"
+                if persisted.attempt_count > 1
+                else "orchestrator.graph.run",
                 attributes={
+                    "openinference.span.kind": "AGENT",
                     "code_agent.task_id": persisted.task_id,
                     "code_agent.session_id": persisted.session_id,
                     "code_agent.attempt_count": persisted.attempt_count,
@@ -2236,39 +2244,47 @@ class TaskExecutionService:
         except ImportError:
             span_cm = nullcontext()
 
+        from apps.observability import set_span_input_output
+
+        graph_input = {
+            "session": SessionRef(
+                session_id=persisted.session_id,
+                user_id=persisted.user_id,
+                channel=persisted.channel,
+                external_thread_id=persisted.external_thread_id,
+                active_task_id=persisted.task_id,
+                status="active",
+            ).model_dump(),
+            "task": {
+                "task_id": persisted.task_id,
+                "task_text": submission.task_text,
+                "repo_url": submission.repo_url,
+                "branch": submission.branch,
+                "priority": submission.priority,
+                "worker_override": (
+                    submission.worker_override.value
+                    if submission.worker_override is not None
+                    else None
+                ),
+                "constraints": dict(submission.constraints),
+                "budget": effective_budget,
+                "secrets": dict(submission.secrets),
+                "tools": submission.tools,
+            },
+            "task_spec": persisted.task_spec,
+            "attempt_count": persisted.attempt_count,
+            "timeline_persisted_count": initial_persisted_count,
+        }
+
         with span_cm:
-            raw_output = await self.graph.ainvoke(
-                {
-                    "session": SessionRef(
-                        session_id=persisted.session_id,
-                        user_id=persisted.user_id,
-                        channel=persisted.channel,
-                        external_thread_id=persisted.external_thread_id,
-                        active_task_id=persisted.task_id,
-                        status="active",
-                    ).model_dump(),
-                    "task": {
-                        "task_id": persisted.task_id,
-                        "task_text": submission.task_text,
-                        "repo_url": submission.repo_url,
-                        "branch": submission.branch,
-                        "priority": submission.priority,
-                        "worker_override": (
-                            submission.worker_override.value
-                            if submission.worker_override is not None
-                            else None
-                        ),
-                        "constraints": dict(submission.constraints),
-                        "budget": effective_budget,
-                        "secrets": dict(submission.secrets),
-                        "tools": submission.tools,
-                    },
-                    "task_spec": persisted.task_spec,
-                    "attempt_count": persisted.attempt_count,
-                    "timeline_persisted_count": initial_persisted_count,
-                },
-                config=config,
-            )
+            set_span_input_output(input_data=graph_input, kind="AGENT")
+            current_span = otel_trace.get_current_span()
+            current_span.set_attribute("openinference.span.kind", "AGENT")
+            current_span.set_attribute("session.id", persisted.session_id)
+
+            raw_output = await self.graph.ainvoke(graph_input, config=config)
+            set_span_input_output(input_data=None, output_data=raw_output, kind="AGENT")
+
         normalized_output = _normalize_orchestrator_graph_output(raw_output)
         return OrchestratorState.model_validate(normalized_output)
 
@@ -2320,6 +2336,7 @@ class TaskExecutionService:
                 task_id=task.id,
                 attempt_count=task.attempt_count,
                 task_spec=dict(task.task_spec) if isinstance(task.task_spec, dict) else None,
+                trace_context=dict(task.trace_context or {}),
             )
             return submission, persisted
 
@@ -2387,8 +2404,19 @@ class TaskExecutionService:
         *args: Any,
         **kwargs: Any,
     ) -> Any:
-        """Run a synchronous persistence operation in a worker thread."""
-        return await to_thread.run_sync(partial(func, *args, **kwargs))
+        """Run a synchronous persistence operation in a worker thread, propagating trace context."""
+        ctx = capture_trace_context()
+
+        def _wrapped_with_context() -> Any:
+            token = restore_trace_context(ctx)
+            try:
+                return func(*args, **kwargs)
+            finally:
+                if token is not None:
+                    context_api.detach(token)
+
+        _wrapped_with_context.func = func  # type: ignore[attr-defined]
+        return await to_thread.run_sync(_wrapped_with_context)
 
     def _create_or_get_user(
         self,
