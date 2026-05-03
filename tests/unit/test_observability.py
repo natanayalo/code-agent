@@ -668,3 +668,34 @@ def test_set_span_input_output_uses_text_mime_for_plain_scalars() -> None:
     assert span.attributes["input.mime_type"] == "text/plain"
     assert span.attributes["output.value"] == "42"
     assert span.attributes["output.mime_type"] == "text/plain"
+
+
+def test_set_span_input_output_handles_tuples_and_mappings() -> None:
+    """Tuples and Mappings (non-dict) should also be serialized as JSON."""
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.attributes: dict[str, object] = {}
+
+        def is_recording(self) -> bool:
+            return True
+
+        def set_attribute(self, key: str, value: object) -> None:
+            self.attributes[key] = value
+
+    span = _FakeSpan()
+
+    from collections import UserDict
+
+    custom_mapping = UserDict({"foo": "bar"})
+
+    with patch("opentelemetry.trace.get_current_span", return_value=span):
+        observability_module.set_span_input_output(
+            input_data=(1, 2, 3),
+            output_data=custom_mapping,
+        )
+
+    assert span.attributes["input.value"] == "[1, 2, 3]"
+    assert span.attributes["input.mime_type"] == "application/json"
+    assert span.attributes["output.value"] == '{"foo": "bar"}'
+    assert span.attributes["output.mime_type"] == "application/json"

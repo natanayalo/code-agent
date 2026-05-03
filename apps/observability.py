@@ -257,8 +257,10 @@ def detach_trace_context(token: Any) -> None:
         from opentelemetry import context as context_api  # type: ignore[import-not-found]
 
         context_api.detach(token)
-    except (ImportError, Exception):
+    except ImportError:
         pass
+    except (RuntimeError, AttributeError):
+        logger.debug("Failed to detach OpenTelemetry context", exc_info=True)
 
 
 @contextmanager
@@ -318,8 +320,9 @@ def _serialize_span_payload(payload: Any) -> tuple[str, str]:
     """Serialize payloads for OpenInference input/output span attributes."""
     import json
 
-    if isinstance(payload, dict | list):
-        return json.dumps(payload, default=str), "application/json"
+    if isinstance(payload, Mapping | list | tuple):
+        actual_payload = dict(payload) if isinstance(payload, Mapping) else payload
+        return json.dumps(actual_payload, default=str), "application/json"
     return str(payload), "text/plain"
 
 
