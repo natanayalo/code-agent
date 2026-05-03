@@ -791,9 +791,7 @@ def _summarize_graph_span_input(graph_input: Mapping[str, Any]) -> dict[str, Any
         "channel": session_payload.get("channel"),
         "branch": task_payload.get("branch"),
         "task_type": task_spec_payload.get("task_type"),
-        "execution_mode": task_payload.get("constraints", {}).get("execution_mode")
-        if isinstance(task_payload.get("constraints"), Mapping)
-        else None,
+        "execution_mode": task_payload.get("constraints", {}).get("execution_mode"),
         "max_iterations": budget.get("max_iterations"),
     }
     return {key: value for key, value in summary.items() if value is not None}

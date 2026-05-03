@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import logging
 import os
 from collections.abc import Callable, Iterator, Mapping
@@ -35,6 +36,8 @@ TRACE_CONTEXT_ENV_KEYS: Final[dict[str, str]] = {
     "tracestate": "TRACESTATE",
     "baggage": "BAGGAGE",
 }
+IMMEDIATE_EXPORT_SERVICES: Final[frozenset[str]] = frozenset({"code-agent-api"})
+DEFAULT_SERVICE_VERSION: Final[str] = "0.1.0-dev"
 
 _bootstrap_lock = Lock()
 _bootstrap_complete = False
@@ -161,10 +164,15 @@ def configure_tracing_from_env(
             )
 
         # Create a resource to preserve the logical service name.
+        try:
+            service_version = importlib.metadata.version("code-agent")
+        except importlib.metadata.PackageNotFoundError:
+            service_version = DEFAULT_SERVICE_VERSION
+
         resource = deps.resource_cls.create(
             {
                 "service.name": service_name,
-                "service.version": "0.1.0",
+                "service.version": service_version,
                 "openinference.project.name": project_name,
             }
         )
@@ -176,7 +184,7 @@ def configure_tracing_from_env(
             project_name=project_name,
             endpoint=otlp_endpoint,
             resource=resource,
-            batch=(service_name != "code-agent-api"),
+            batch=(service_name not in IMMEDIATE_EXPORT_SERVICES),
             auto_instrument=True,
         )
 
