@@ -1085,17 +1085,32 @@ def _update_budget_ledger(
         ledger.iterations_used = max(ledger.iterations_used, iterations_used)
 
 
-def _budget_exceeded_result(
+def _finalize_execution_result(
     *,
+    status: Literal["success", "failure", "error"],
     summary: str,
+    stop_reason: Literal[
+        "final_answer",
+        "max_iterations",
+        "stalled_in_inspection",
+        "exploration_exhausted",
+        "no_progress_before_budget",
+        "worker_timeout",
+        "budget_exceeded",
+        "context_window",
+        "permission_required",
+        "shell_error",
+        "adapter_error",
+    ],
     started_at: float,
     clock: Callable[[], float],
     iteration: int,
     budget_ledger: CliRuntimeBudgetLedger,
     commands_run: list[WorkerCommand],
     messages: list[CliRuntimeMessage],
+    permission_decision: ToolPermissionDecision | None = None,
 ) -> CliRuntimeExecutionResult:
-    """Build a consistent runtime result for budget-limit failures."""
+    """Build a consistent runtime result and refresh the budget ledger."""
     _update_budget_ledger(
         budget_ledger,
         started_at=started_at,
@@ -1103,12 +1118,13 @@ def _budget_exceeded_result(
         iterations_used=iteration,
     )
     return CliRuntimeExecutionResult(
-        status="failure",
+        status=status,
         summary=summary,
-        stop_reason="budget_exceeded",
+        stop_reason=stop_reason,
         commands_run=commands_run,
         messages=messages,
         budget_ledger=budget_ledger,
+        permission_decision=permission_decision,
     )
 
 
@@ -1166,26 +1182,32 @@ def run_cli_runtime_loop(
             )
 
             if cancel_token is not None and cancel_token():
-                return CliRuntimeExecutionResult(
+                return _finalize_execution_result(
                     status="error",
                     summary="CLI runtime loop was cancelled by the orchestrator timeout.",
                     stop_reason="worker_timeout",
+                    started_at=started_at,
+                    clock=clock,
+                    iteration=iteration - 1,
+                    budget_ledger=budget_ledger,
                     commands_run=commands_run,
                     messages=messages,
-                    budget_ledger=budget_ledger,
                 )
 
             if clock() - started_at >= settings.worker_timeout_seconds:
-                return CliRuntimeExecutionResult(
+                return _finalize_execution_result(
                     status="failure",
                     summary=(
                         "CLI runtime exceeded its worker timeout "
                         f"({settings.worker_timeout_seconds}s) before reaching a final answer."
                     ),
                     stop_reason="worker_timeout",
+                    started_at=started_at,
+                    clock=clock,
+                    iteration=iteration - 1,
+                    budget_ledger=budget_ledger,
                     commands_run=commands_run,
                     messages=messages,
-                    budget_ledger=budget_ledger,
                 )
 
             if (
@@ -1212,44 +1234,38 @@ def run_cli_runtime_loop(
                 ):
                     pass
                 else:
-                    _update_budget_ledger(
-                        budget_ledger,
-                        started_at=started_at,
-                        clock=clock,
-                        iterations_used=iteration,
-                    )
-                    return CliRuntimeExecutionResult(
+                    return _finalize_execution_result(
                         status="failure",
                         summary=(
                             "CLI runtime exhausted its exploration-phase budget "
                             "before producing a plan, concrete edit, or final answer."
                         ),
                         stop_reason="exploration_exhausted",
+                        started_at=started_at,
+                        clock=clock,
+                        iteration=iteration,
+                        budget_ledger=budget_ledger,
                         commands_run=commands_run,
                         messages=messages,
-                        budget_ledger=budget_ledger,
                     )
             if (
                 settings.max_execution_iterations is not None
                 and first_execution_iteration is not None
                 and (iteration - first_execution_iteration + 1) > settings.max_execution_iterations
             ):
-                _update_budget_ledger(
-                    budget_ledger,
-                    started_at=started_at,
-                    clock=clock,
-                    iterations_used=iteration,
-                )
-                return CliRuntimeExecutionResult(
+                return _finalize_execution_result(
                     status="failure",
                     summary=(
                         "CLI runtime exhausted its execution-phase budget "
                         f"({settings.max_execution_iterations}) before reaching a final answer."
                     ),
                     stop_reason="budget_exceeded",
+                    started_at=started_at,
+                    clock=clock,
+                    iteration=iteration,
+                    budget_ledger=budget_ledger,
                     commands_run=commands_run,
                     messages=messages,
-                    budget_ledger=budget_ledger,
                 )
 
             try:
@@ -1260,19 +1276,16 @@ def run_cli_runtime_loop(
                     iteration=iteration,
                 )
                 if preflight_error is not None:
-                    _update_budget_ledger(
-                        budget_ledger,
-                        started_at=started_at,
-                        clock=clock,
-                        iterations_used=iteration,
-                    )
-                    return CliRuntimeExecutionResult(
+                    return _finalize_execution_result(
                         status="failure",
                         summary=preflight_error,
                         stop_reason="context_window",
+                        started_at=started_at,
+                        clock=clock,
+                        iteration=iteration,
+                        budget_ledger=budget_ledger,
                         commands_run=commands_run,
                         messages=messages,
-                        budget_ledger=budget_ledger,
                     )
                 step = adapter.next_step(
                     tuple(messages_for_adapter),
@@ -1281,19 +1294,16 @@ def run_cli_runtime_loop(
                 )
             except Exception as exc:
                 logger.exception("CLI runtime adapter failed", extra={"iteration": iteration})
-                _update_budget_ledger(
-                    budget_ledger,
-                    started_at=started_at,
-                    clock=clock,
-                    iterations_used=iteration,
-                )
-                return CliRuntimeExecutionResult(
+                return _finalize_execution_result(
                     status="error",
                     summary=f"CLI runtime adapter failed at iteration {iteration}: {exc}",
                     stop_reason="adapter_error",
+                    started_at=started_at,
+                    clock=clock,
+                    iteration=iteration,
+                    budget_ledger=budget_ledger,
                     commands_run=commands_run,
                     messages=messages,
-                    budget_ledger=budget_ledger,
                 )
 
             if step.kind == "final":
@@ -1306,36 +1316,30 @@ def run_cli_runtime_loop(
                 if (parsed_step is not None and parsed_step.kind == "tool_call") or (
                     parsed_step is None and _looks_like_tool_call_payload_text(final_output)
                 ):
-                    _update_budget_ledger(
-                        budget_ledger,
-                        started_at=started_at,
-                        clock=clock,
-                        iterations_used=iteration,
-                    )
-                    return CliRuntimeExecutionResult(
+                    return _finalize_execution_result(
                         status="error",
                         summary=(
                             "CLI runtime adapter returned a tool_call payload as final output "
                             f"at iteration {iteration}."
                         ),
                         stop_reason="adapter_error",
+                        started_at=started_at,
+                        clock=clock,
+                        iteration=iteration,
+                        budget_ledger=budget_ledger,
                         commands_run=commands_run,
                         messages=messages,
-                        budget_ledger=budget_ledger,
                     )
-                _update_budget_ledger(
-                    budget_ledger,
-                    started_at=started_at,
-                    clock=clock,
-                    iterations_used=iteration,
-                )
-                return CliRuntimeExecutionResult(
+                return _finalize_execution_result(
                     status="success",
                     summary=final_output,
                     stop_reason="final_answer",
+                    started_at=started_at,
+                    clock=clock,
+                    iteration=iteration,
+                    budget_ledger=budget_ledger,
                     commands_run=commands_run,
                     messages=messages,
-                    budget_ledger=budget_ledger,
                 )
 
             assert step.tool_name is not None  # Validated by CliRuntimeStep.
@@ -1348,11 +1352,13 @@ def run_cli_runtime_loop(
                         settings.max_tool_calls is not None
                         and budget_ledger.tool_calls_used >= settings.max_tool_calls
                     ):
-                        return _budget_exceeded_result(
+                        return _finalize_execution_result(
+                            status="failure",
                             summary=(
                                 "CLI runtime exceeded its tool-call budget "
                                 f"({settings.max_tool_calls}) before handling `{requested_tool_name}`."  # noqa: E501
                             ),
+                            stop_reason="budget_exceeded",
                             started_at=started_at,
                             clock=clock,
                             iteration=iteration,
@@ -1372,19 +1378,16 @@ def run_cli_runtime_loop(
                         )
                     )
                     continue
-                _update_budget_ledger(
-                    budget_ledger,
-                    started_at=started_at,
-                    clock=clock,
-                    iterations_used=iteration,
-                )
-                return CliRuntimeExecutionResult(
+                return _finalize_execution_result(
                     status="error",
                     summary=f"CLI runtime adapter requested an unknown tool: {exc}",
                     stop_reason="adapter_error",
+                    started_at=started_at,
+                    clock=clock,
+                    iteration=iteration,
+                    budget_ledger=budget_ledger,
                     commands_run=commands_run,
                     messages=messages,
-                    budget_ledger=budget_ledger,
                 )
 
             assert step.tool_input is not None  # Validated by CliRuntimeStep.
@@ -1395,11 +1398,13 @@ def run_cli_runtime_loop(
                     settings.max_tool_calls is not None
                     and budget_ledger.tool_calls_used >= settings.max_tool_calls
                 ):
-                    return _budget_exceeded_result(
+                    return _finalize_execution_result(
+                        status="failure",
                         summary=(
                             "CLI runtime exceeded its tool-call budget "
                             f"({settings.max_tool_calls}) before handling `{tool.name}` input."
                         ),
+                        stop_reason="budget_exceeded",
                         started_at=started_at,
                         clock=clock,
                         iteration=iteration,
@@ -1422,19 +1427,16 @@ def run_cli_runtime_loop(
                 )
                 if tool.name == STR_REPLACE_EDITOR_TOOL_NAME:
                     continue
-                _update_budget_ledger(
-                    budget_ledger,
-                    started_at=started_at,
-                    clock=clock,
-                    iterations_used=iteration,
-                )
-                return CliRuntimeExecutionResult(
+                return _finalize_execution_result(
                     status="error",
                     summary=f"CLI runtime adapter provided invalid input for `{tool.name}`: {exc}",
                     stop_reason="adapter_error",
+                    started_at=started_at,
+                    clock=clock,
+                    iteration=iteration,
+                    budget_ledger=budget_ledger,
                     commands_run=commands_run,
                     messages=messages,
-                    budget_ledger=budget_ledger,
                 )
             permission_decision = resolve_bash_command_permission(
                 command,
@@ -1442,13 +1444,7 @@ def run_cli_runtime_loop(
                 granted_permission=granted_permission,
             )
             if not permission_decision.allowed:
-                _update_budget_ledger(
-                    budget_ledger,
-                    started_at=started_at,
-                    clock=clock,
-                    iterations_used=iteration,
-                )
-                return CliRuntimeExecutionResult(
+                return _finalize_execution_result(
                     status="failure",
                     summary=(
                         "CLI runtime needs higher permission before executing "
@@ -1457,9 +1453,12 @@ def run_cli_runtime_loop(
                         f"{permission_decision.reason}"
                     ),
                     stop_reason="permission_required",
+                    started_at=started_at,
+                    clock=clock,
+                    iteration=iteration,
+                    budget_ledger=budget_ledger,
                     commands_run=commands_run,
                     messages=messages,
-                    budget_ledger=budget_ledger,
                     permission_decision=permission_decision,
                 )
 
@@ -1471,11 +1470,13 @@ def run_cli_runtime_loop(
                 settings.max_tool_calls is not None
                 and budget_ledger.tool_calls_used >= settings.max_tool_calls
             ):
-                return _budget_exceeded_result(
+                return _finalize_execution_result(
+                    status="failure",
                     summary=(
                         "CLI runtime exceeded its tool-call budget "
                         f"({settings.max_tool_calls}) before executing `{tool.name}`."
                     ),
+                    stop_reason="budget_exceeded",
                     started_at=started_at,
                     clock=clock,
                     iteration=iteration,
@@ -1487,11 +1488,13 @@ def run_cli_runtime_loop(
                 settings.max_shell_commands is not None
                 and budget_ledger.shell_commands_used >= settings.max_shell_commands
             ):
-                return _budget_exceeded_result(
+                return _finalize_execution_result(
+                    status="failure",
                     summary=(
                         "CLI runtime exceeded its shell-command budget "
                         f"({settings.max_shell_commands}) before executing `{command}`."
                     ),
+                    stop_reason="budget_exceeded",
                     started_at=started_at,
                     clock=clock,
                     iteration=iteration,
@@ -1504,11 +1507,13 @@ def run_cli_runtime_loop(
                 and is_retry
                 and previous_failures > settings.max_retries
             ):
-                return _budget_exceeded_result(
+                return _finalize_execution_result(
+                    status="failure",
                     summary=(
                         "CLI runtime exceeded its retry budget "
                         f"({settings.max_retries}) while retrying `{command}`."
                     ),
+                    stop_reason="budget_exceeded",
                     started_at=started_at,
                     clock=clock,
                     iteration=iteration,
@@ -1544,22 +1549,19 @@ def run_cli_runtime_loop(
                     )
                     set_span_input_output(input_data=None, output_data=shell_result.output)
                 except DockerShellSessionError as exc:
-                    _update_budget_ledger(
-                        budget_ledger,
-                        started_at=started_at,
-                        clock=clock,
-                        iterations_used=iteration,
-                    )
-                    return CliRuntimeExecutionResult(
+                    return _finalize_execution_result(
                         status="error",
                         summary=(
                             f"CLI runtime failed while executing `{tool.name}` "
                             f"at iteration {iteration}: {exc}"
                         ),
                         stop_reason="shell_error",
+                        started_at=started_at,
+                        clock=clock,
+                        iteration=iteration,
+                        budget_ledger=budget_ledger,
                         commands_run=commands_run,
                         messages=messages,
-                        budget_ledger=budget_ledger,
                     )
 
                 budget_ledger.shell_commands_used += 1

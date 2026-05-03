@@ -1609,7 +1609,7 @@ def test_run_cli_runtime_loop_stops_at_the_worker_timeout() -> None:
         ]
     )
     session = _FakeSession({"pwd": _command_result("pwd", output="/workspace/repo\n")})
-    clock_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0])
+    clock_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 2.0])
 
     execution = run_cli_runtime_loop(
         adapter,
