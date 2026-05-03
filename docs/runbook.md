@@ -64,6 +64,10 @@ Relevant environment controls:
 
 `code-agent` can emit OpenTelemetry/OpenInference traces for LangGraph/orchestrator runs.
 
+Manual operations:
+
+- [tracing_manual.md](tracing_manual.md)
+
 Enable tracing env vars:
 
 - `CODE_AGENT_ENABLE_TRACING=1`
@@ -111,6 +115,7 @@ Core endpoints:
 Ingress protection:
 
 - `/tasks` and `/webhook` require shared-secret auth (`CODE_AGENT_API_SHARED_SECRET`)
+- webhook operation manual: [webhook_manual.md](webhook_manual.md)
 
 ## 6) Common Failure Debugging
 

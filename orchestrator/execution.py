@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from contextlib import AbstractAsyncContextManager, nullcontext
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -23,13 +23,22 @@ from uuid import uuid4
 
 from anyio import to_thread
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from opentelemetry import context as context_api  # type: ignore[import-not-found]
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
-from apps.observability import capture_trace_context, restore_trace_context
+from apps.observability import (
+    SESSION_ID_ATTRIBUTE,
+    SPAN_KIND_AGENT,
+    bind_current_trace_context,
+    capture_trace_context,
+    set_current_span_attribute,
+    set_span_input_output,
+    start_optional_span,
+    with_restored_trace_context,
+    with_span_kind,
+)
 from db.base import utc_now
 from db.enums import (
     ArtifactType,
@@ -764,6 +773,64 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
     return summary
 
 
+def _summarize_graph_span_input(graph_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Build a compact graph span input payload to avoid emitting full task state."""
+    task = graph_input.get("task")
+    session = graph_input.get("session")
+    task_spec = graph_input.get("task_spec")
+
+    task_payload = task if isinstance(task, Mapping) else {}
+    session_payload = session if isinstance(session, Mapping) else {}
+    task_spec_payload = task_spec if isinstance(task_spec, Mapping) else {}
+    budget_payload = task_payload.get("budget")
+    budget = budget_payload if isinstance(budget_payload, Mapping) else {}
+
+    summary: dict[str, Any] = {
+        "task_id": task_payload.get("task_id"),
+        "attempt_count": graph_input.get("attempt_count"),
+        "channel": session_payload.get("channel"),
+        "branch": task_payload.get("branch"),
+        "task_type": task_spec_payload.get("task_type"),
+        "execution_mode": task_payload.get("constraints", {}).get("execution_mode")
+        if isinstance(task_payload.get("constraints"), Mapping)
+        else None,
+        "max_iterations": budget.get("max_iterations"),
+    }
+    return {key: value for key, value in summary.items() if value is not None}
+
+
+def _summarize_graph_span_output(raw_output: object) -> dict[str, Any]:
+    """Build a compact graph span output payload to avoid large span attributes."""
+    if isinstance(raw_output, BaseModel):
+        payload: Mapping[str, Any] = raw_output.model_dump(mode="json")
+    elif isinstance(raw_output, Mapping):
+        payload = raw_output
+    else:
+        return {"output_type": type(raw_output).__name__}
+
+    result = payload.get("result")
+    review = payload.get("review")
+    verification = payload.get("verification")
+    errors = payload.get("errors")
+
+    result_payload = result if isinstance(result, Mapping) else {}
+    review_payload = review if isinstance(review, Mapping) else {}
+    verification_payload = verification if isinstance(verification, Mapping) else {}
+
+    summary: dict[str, Any] = {
+        "current_step": payload.get("current_step"),
+        "attempt_count": payload.get("attempt_count"),
+        "timeline_persisted_count": payload.get("timeline_persisted_count"),
+        "repair_handoff_requested": payload.get("repair_handoff_requested"),
+        "result_status": result_payload.get("status"),
+        "review_outcome": review_payload.get("outcome"),
+        "verification_status": verification_payload.get("status"),
+        "error_count": len(errors) if isinstance(errors, list) else None,
+    }
+    compact = {key: value for key, value in summary.items() if value is not None}
+    return compact or {"output_type": "mapping"}
+
+
 def _normalize_orchestrator_graph_output(raw_output: object) -> object:
     """Strip transport-only interrupt keys and map unresolved interrupts to failure output."""
 
@@ -1271,104 +1338,104 @@ class TaskExecutionService:
             return None
 
         submission, persisted = loaded
-        restore_trace_context(persisted.trace_context)
-        await self._emit_progress(submission, persisted, phase="started")
-        await self._emit_progress(submission, persisted, phase="running")
+        with with_restored_trace_context(persisted.trace_context):
+            await self._emit_progress(submission, persisted, phase="started")
+            await self._emit_progress(submission, persisted, phase="running")
 
-        heartbeat_task = asyncio.create_task(
-            self._heartbeat_loop(
-                task_id=task_id,
-                worker_id=worker_id,
-                lease_seconds=lease_seconds,
-            ),
-            name=f"task-heartbeat-{task_id}",
-        )
-        started_at = utc_now()
-        logger.info(
-            "Starting execution-path task run",
-            extra={
-                "session_id": persisted.session_id,
-                "task_id": persisted.task_id,
-                "chosen_worker": None,
-                "route_reason": None,
-                "workspace_id": None,
-                "start_timestamp": started_at.isoformat(),
-                "worker_id": worker_id,
-            },
-        )
-        try:
-            state = await self._run_orchestrator(submission, persisted)
-            finished_at = utc_now()
-            if state.result is not None and state.result.status == "success":
-                await self._run_blocking(
-                    self._persist_execution_outcome,
-                    task_id=persisted.task_id,
-                    state=state,
-                    started_at=started_at,
-                    finished_at=finished_at,
-                    force_task_status=TaskStatus.COMPLETED,
-                )
-                await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
-            else:
-                terminal_failure = _requires_manual_follow_up(state)
-                terminal_status = _terminal_follow_up_status(
-                    state=state,
-                    terminal_failure=terminal_failure,
-                )
-                await self._run_blocking(
-                    self._persist_execution_outcome,
-                    task_id=persisted.task_id,
-                    state=state,
-                    started_at=started_at,
-                    finished_at=finished_at,
-                    force_task_status=terminal_status,
-                )
-                if terminal_failure:
-                    await self._run_blocking(
-                        self._release_task_terminal_failure,
-                        task_id=persisted.task_id,
-                        worker_id=worker_id,
-                        status=terminal_status,
-                    )
-                else:
-                    await self._run_blocking(
-                        self._release_task_failure,
-                        task_id=persisted.task_id,
-                        worker_id=worker_id,
-                    )
-        except Exception as exc:
-            logger.exception(
-                "Task execution failed before the final outcome was fully persisted",
+            heartbeat_task = asyncio.create_task(
+                self._heartbeat_loop(
+                    task_id=task_id,
+                    worker_id=worker_id,
+                    lease_seconds=lease_seconds,
+                ),
+                name=f"task-heartbeat-{task_id}",
+            )
+            started_at = utc_now()
+            logger.info(
+                "Starting execution-path task run",
                 extra={
                     "session_id": persisted.session_id,
                     "task_id": persisted.task_id,
+                    "chosen_worker": None,
+                    "route_reason": None,
+                    "workspace_id": None,
+                    "start_timestamp": started_at.isoformat(),
                     "worker_id": worker_id,
                 },
             )
-            await self._run_blocking(
-                self._record_task_attempt_error,
-                task_id=persisted.task_id,
-                error=f"{type(exc).__name__}: {exc}",
-            )
-            await self._run_blocking(
-                self._release_task_failure,
-                task_id=persisted.task_id,
-                worker_id=worker_id,
-            )
-        finally:
-            heartbeat_task.cancel()
-            await asyncio.gather(heartbeat_task, return_exceptions=True)
+            try:
+                state = await self._run_orchestrator(submission, persisted)
+                finished_at = utc_now()
+                if state.result is not None and state.result.status == "success":
+                    await self._run_blocking(
+                        self._persist_execution_outcome,
+                        task_id=persisted.task_id,
+                        state=state,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        force_task_status=TaskStatus.COMPLETED,
+                    )
+                    await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
+                else:
+                    terminal_failure = _requires_manual_follow_up(state)
+                    terminal_status = _terminal_follow_up_status(
+                        state=state,
+                        terminal_failure=terminal_failure,
+                    )
+                    await self._run_blocking(
+                        self._persist_execution_outcome,
+                        task_id=persisted.task_id,
+                        state=state,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        force_task_status=terminal_status,
+                    )
+                    if terminal_failure:
+                        await self._run_blocking(
+                            self._release_task_terminal_failure,
+                            task_id=persisted.task_id,
+                            worker_id=worker_id,
+                            status=terminal_status,
+                        )
+                    else:
+                        await self._run_blocking(
+                            self._release_task_failure,
+                            task_id=persisted.task_id,
+                            worker_id=worker_id,
+                        )
+            except Exception as exc:
+                logger.exception(
+                    "Task execution failed before the final outcome was fully persisted",
+                    extra={
+                        "session_id": persisted.session_id,
+                        "task_id": persisted.task_id,
+                        "worker_id": worker_id,
+                    },
+                )
+                await self._run_blocking(
+                    self._record_task_attempt_error,
+                    task_id=persisted.task_id,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                await self._run_blocking(
+                    self._release_task_failure,
+                    task_id=persisted.task_id,
+                    worker_id=worker_id,
+                )
+            finally:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
 
-        task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
-        if task_snapshot is None:
-            raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
-        self._log_task_outcome(task_snapshot)
-        await self._emit_progress(
-            submission,
-            persisted,
-            phase=_completion_progress_phase(task_snapshot),
-            summary=self._task_summary(task_snapshot),
-        )
+            task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
+            if task_snapshot is None:
+                raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
+            self._log_task_outcome(task_snapshot)
+            await self._emit_progress(
+                submission,
+                persisted,
+                phase=_completion_progress_phase(task_snapshot),
+                summary=self._task_summary(task_snapshot),
+            )
         return None
 
     async def _heartbeat_loop(
@@ -2225,26 +2292,23 @@ class TaskExecutionService:
             budget=submission.budget,
         )
 
-        span_cm: Any = nullcontext()
-        try:
-            from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
-
-            span_cm = otel_trace.get_tracer("orchestrator.execution").start_as_current_span(
+        span_cm = start_optional_span(
+            tracer_name="orchestrator.execution",
+            span_name=(
                 f"orchestrator.graph.run (Attempt {persisted.attempt_count})"
                 if persisted.attempt_count > 1
-                else "orchestrator.graph.run",
+                else "orchestrator.graph.run"
+            ),
+            attributes=with_span_kind(
+                SPAN_KIND_AGENT,
                 attributes={
-                    "openinference.span.kind": "AGENT",
                     "code_agent.task_id": persisted.task_id,
                     "code_agent.session_id": persisted.session_id,
                     "code_agent.attempt_count": persisted.attempt_count,
                     "code_agent.channel": persisted.channel,
                 },
-            )
-        except ImportError:
-            span_cm = nullcontext()
-
-        from apps.observability import set_span_input_output
+            ),
+        )
 
         graph_input = {
             "session": SessionRef(
@@ -2277,13 +2341,14 @@ class TaskExecutionService:
         }
 
         with span_cm:
-            set_span_input_output(input_data=graph_input, kind="AGENT")
-            current_span = otel_trace.get_current_span()
-            current_span.set_attribute("openinference.span.kind", "AGENT")
-            current_span.set_attribute("session.id", persisted.session_id)
+            set_span_input_output(input_data=_summarize_graph_span_input(graph_input))
+            set_current_span_attribute(SESSION_ID_ATTRIBUTE, persisted.session_id)
 
             raw_output = await self.graph.ainvoke(graph_input, config=config)
-            set_span_input_output(input_data=None, output_data=raw_output, kind="AGENT")
+            set_span_input_output(
+                input_data=None,
+                output_data=_summarize_graph_span_output(raw_output),
+            )
 
         normalized_output = _normalize_orchestrator_graph_output(raw_output)
         return OrchestratorState.model_validate(normalized_output)
@@ -2405,18 +2470,12 @@ class TaskExecutionService:
         **kwargs: Any,
     ) -> Any:
         """Run a synchronous persistence operation in a worker thread, propagating trace context."""
-        ctx = capture_trace_context()
 
-        def _wrapped_with_context() -> Any:
-            token = restore_trace_context(ctx)
-            try:
-                return func(*args, **kwargs)
-            finally:
-                if token is not None:
-                    context_api.detach(token)
+        def _invoke() -> Any:
+            return func(*args, **kwargs)
 
-        _wrapped_with_context.func = func  # type: ignore[attr-defined]
-        return await to_thread.run_sync(_wrapped_with_context)
+        wrapped = bind_current_trace_context(_invoke, original_func=func)
+        return await to_thread.run_sync(wrapped)
 
     def _create_or_get_user(
         self,

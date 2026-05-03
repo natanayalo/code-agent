@@ -12,7 +12,7 @@ from typing import Protocol
 
 from pydantic import Field
 
-from apps.observability import capture_trace_context
+from apps.observability import inject_w3c_trace_context_env
 from sandbox.audit import capture_audit_artifacts
 from sandbox.container import build_container_name
 from sandbox.policy import PathPolicy
@@ -167,12 +167,9 @@ def _build_docker_run_command(
     if not request.network_enabled:
         command.extend(["--network", "none"])
 
-    # Inject TRACEPARENT from the current context if available, enabling
+    # Inject W3C trace context from the current context if available, enabling
     # unified tracing across service/sandbox boundaries.
-    effective_env = dict(request.environment)
-    trace_context = capture_trace_context()
-    if "traceparent" in trace_context:
-        effective_env.setdefault("TRACEPARENT", trace_context["traceparent"])
+    effective_env = inject_w3c_trace_context_env(request.environment)
 
     for key, value in sorted(effective_env.items()):
         command.extend(["--env", f"{key}={value}"])

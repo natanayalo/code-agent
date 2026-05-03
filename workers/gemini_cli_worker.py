@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
-import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import Protocol
 
@@ -35,6 +32,7 @@ from tools import (
     UnknownToolError,
     granted_permission_from_constraints,
 )
+from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import ArtifactReference, Worker, WorkerRequest, WorkerResult
 from workers.cli_runtime import (
     CliRuntimeAdapter,
@@ -257,40 +255,15 @@ class GeminiCliWorker(Worker):
         self, request: WorkerRequest, *, system_prompt: str | None = None
     ) -> WorkerResult:
         """Provision a workspace, run the CLI loop, and return a typed result."""
-        cancel_event = threading.Event()
-        loop = asyncio.get_running_loop()
-        try:
-            from opentelemetry import context as context_api  # type: ignore[import-not-found]
 
-            current_context = context_api.get_current()
-
-            def run_fn() -> WorkerResult:
-                token = context_api.attach(current_context)
-                try:
-                    return self._run_sync(
-                        request,
-                        cancel_token=cancel_event.is_set,
-                        system_prompt_override=system_prompt,
-                    )
-                finally:
-                    context_api.detach(token)
-        except ImportError:
-            run_fn = partial(
-                self._run_sync,
+        def _run_sync(cancel_requested: Callable[[], bool]) -> WorkerResult:
+            return self._run_sync(
                 request,
-                cancel_token=cancel_event.is_set,
+                cancel_token=cancel_requested,
                 system_prompt_override=system_prompt,
             )
 
-        future = loop.run_in_executor(None, run_fn)
-        try:
-            return await asyncio.shield(future)
-        except asyncio.CancelledError:
-            cancel_event.set()
-            try:
-                return await asyncio.wait_for(asyncio.shield(future), timeout=10.0)
-            except TimeoutError as exc:
-                raise asyncio.CancelledError("Graceful shutdown of sync worker timed out.") from exc
+        return await run_sync_with_cancellable_executor(_run_sync)
 
     def _cleanup_workspace(
         self,

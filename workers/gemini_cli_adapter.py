@@ -12,7 +12,24 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final
 
+from workers.adapter_parsing import final_cli_runtime_step, parse_cli_runtime_step_or_final
+from workers.adapter_prompts import (
+    DEFAULT_RAW_JSON_ONLY_RULE,
+    DEFAULT_STRICT_KIND_RULE,
+    DEFAULT_TOOL_INPUT_ENCODE_RULE,
+    GEMINI_ADAPTER_IDENTITY_LINE,
+    build_final_example_json,
+    build_runtime_transcript_prompt,
+    build_tool_call_example_json,
+    json_only_response_line,
+)
+from workers.adapter_utils import (
+    coerce_positive_int,
+    normalize_prompt_override,
+    truncate_detail_keep_tail,
+)
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
+from workers.llm_tracing import set_llm_span_output, with_llm_span
 from workers.prompt import build_runtime_adapter_tool_guidance_lines
 from workers.subprocess_env import build_gemini_subprocess_env
 
@@ -27,47 +44,6 @@ GEMINI_TIMEOUT_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TIMEOUT_SECONDS"
 logger = logging.getLogger(__name__)
 
 
-def _coerce_positive_int(value: object, *, default: int) -> int:
-    """Parse a positive integer override or fall back to the default."""
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int):
-        return value if value > 0 else default
-    if isinstance(value, float):
-        try:
-            parsed = int(value)
-        except (OverflowError, ValueError):
-            return default
-        return parsed if parsed > 0 else default
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return default
-        try:
-            parsed = int(float(stripped))
-        except (OverflowError, ValueError):
-            return default
-        return parsed if parsed > 0 else default
-    return default
-
-
-def _truncate_detail(text: str, *, max_characters: int = _DETAIL_PREVIEW_CHARACTERS) -> str:
-    """Render bounded stderr/stdout details for adapter failures."""
-    stripped = text.strip()
-    if not stripped:
-        return "<empty>"
-    if len(stripped) <= max_characters:
-        return stripped
-    return f"[truncated]...{stripped[-max_characters:].lstrip()}"
-
-
-def _message_heading(message: CliRuntimeMessage, *, index: int) -> str:
-    """Render a compact transcript heading for one runtime message."""
-    if message.role == "tool":
-        return f"### Message {index} ({message.role}:{message.tool_name})"
-    return f"### Message {index} ({message.role})"
-
-
 def _build_adapter_prompt(
     messages: Sequence[CliRuntimeMessage],
     *,
@@ -75,55 +51,23 @@ def _build_adapter_prompt(
 ) -> str:
     """Build the prompt sent to the Gemini CLI for one runtime turn."""
     tool_guidance_lines = build_runtime_adapter_tool_guidance_lines(system_prompt=system_prompt)
-    lines = [
-        "You are the Gemini runtime adapter for a bounded coding worker.",
-        (
-            "Read the transcript below and return exactly one JSON object "
-            "with no surrounding text, no markdown fences, and no explanation."
-        ),
-        "Choose one of two actions:",
-        CliRuntimeStep(
-            kind="tool_call",
-            tool_name="<registered tool name>",
+    return build_runtime_transcript_prompt(
+        identity_line=GEMINI_ADAPTER_IDENTITY_LINE,
+        response_instruction_line=json_only_response_line(include_transcript_reference=True),
+        tool_call_example=build_tool_call_example_json(
             tool_input=(
                 '<tool input as a single escaped string, e.g. "ls -la" or '
                 '"{\\"op\\":\\"status\\"}" >'
-            ),
-            final_output=None,
-        ).model_dump_json(),
-        CliRuntimeStep(
-            kind="final",
-            final_output="<final summary for the user>",
-            tool_name=None,
-            tool_input=None,
-        ).model_dump_json(),
-        "Rules:",
-        "- `kind` must be EXACTLY 'tool_call' or 'final'. NEVER use other values like 'tool_code'.",
-        "- Use only tool names listed in the system prompt's Available Tools section.",
-        "- `tool_input` MUST be a string. If the tool expects JSON, you must encode "
-        "that JSON as a string inside the tool_input field.",
-        *tool_guidance_lines,
-        "- If the transcript already contains enough information to finish, return `final`.",
-        "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
-        "- Return ONLY a raw JSON object. No markdown fences, no extra explanation.",
-    ]
-    if system_prompt is not None and system_prompt.strip():
-        lines.extend(
-            [
-                "",
-                "## Worker System Prompt",
-                system_prompt.strip(),
-            ]
-        )
-    lines.extend(
-        [
-            "",
-            "## Runtime Transcript",
-        ]
+            )
+        ),
+        final_example=build_final_example_json(),
+        tool_guidance_lines=tool_guidance_lines,
+        messages=messages,
+        system_prompt=system_prompt,
+        json_output_rule=DEFAULT_RAW_JSON_ONLY_RULE,
+        tool_input_rule=DEFAULT_TOOL_INPUT_ENCODE_RULE,
+        pre_rules_lines=(DEFAULT_STRICT_KIND_RULE,),
     )
-    for index, message in enumerate(messages, start=1):
-        lines.extend((_message_heading(message, index=index), message.content, ""))
-    return "\n".join(lines).rstrip()
 
 
 def _extract_json(text: str) -> str:
@@ -171,7 +115,10 @@ def _extract_json(text: str) -> str:
             return candidate
         except ValueError:
             search_from = end + 1
-    raise RuntimeError(f"No JSON object found in Gemini CLI response: {_truncate_detail(stripped)}")
+    raise RuntimeError(
+        "No JSON object found in Gemini CLI response: "
+        f"{truncate_detail_keep_tail(stripped, max_characters=_DETAIL_PREVIEW_CHARACTERS)}"
+    )
 
 
 def _coerce_step_payload(parsed: object) -> dict[str, object] | None:
@@ -211,7 +158,7 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         resolved_env = os.environ if env is None else env
         self.executable = executable
         self.model = model.strip() if model is not None and model.strip() else None
-        self.request_timeout_seconds = _coerce_positive_int(
+        self.request_timeout_seconds = coerce_positive_int(
             request_timeout_seconds, default=DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS
         )
         self.working_directory = Path(working_directory or tempfile.gettempdir()).expanduser()
@@ -227,7 +174,7 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         return cls(
             executable=resolved_env.get(GEMINI_EXECUTABLE_ENV_VAR, DEFAULT_GEMINI_EXECUTABLE),
             model=resolved_env.get(GEMINI_MODEL_ENV_VAR),
-            request_timeout_seconds=_coerce_positive_int(
+            request_timeout_seconds=coerce_positive_int(
                 resolved_env.get(GEMINI_TIMEOUT_ENV_VAR),
                 default=DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS,
             ),
@@ -251,9 +198,7 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         working_directory: Path | None = None,  # noqa: ARG002 — context only, not used by CLI
     ) -> CliRuntimeStep:
         """Ask the Gemini CLI for the next runtime step."""
-        override_prompt = (
-            prompt_override.strip() if prompt_override and prompt_override.strip() else None
-        )
+        override_prompt = normalize_prompt_override(prompt_override)
         prompt = (
             override_prompt
             if override_prompt is not None
@@ -271,23 +216,14 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         )
 
         try:
-            from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
-
-            from apps.observability import set_span_input_output
-
-            tracer = otel_trace.get_tracer("workers.gemini")
-            span_cm = tracer.start_as_current_span("gemini.chat")
-        except (ImportError, Exception):
-            from contextlib import nullcontext
-
-            span_cm = nullcontext()
-
-        try:
             execution_cwd = (
                 self.working_directory if override_prompt is not None else working_directory
             )
-            with span_cm:
-                set_span_input_output(input_data=prompt, kind="LLM")
+            with with_llm_span(
+                tracer_name="workers.gemini",
+                span_name="gemini.chat",
+                input_data=prompt,
+            ):
                 completed = subprocess.run(
                     command,
                     input=prompt,
@@ -312,7 +248,7 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                             output_val = data["response"]
                 except (json.JSONDecodeError, TypeError, ValueError):
                     pass
-                set_span_input_output(input_data=None, output_data=output_val)
+                set_llm_span_output(output_val)
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(
                 f"Gemini CLI adapter timed out after {self.request_timeout_seconds}s."
@@ -322,11 +258,20 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 f"Gemini CLI adapter could not start `{self.executable}`: {exc}"
             ) from exc
 
+        stderr_preview = truncate_detail_keep_tail(
+            completed.stderr,
+            max_characters=_DETAIL_PREVIEW_CHARACTERS,
+        )
+        stdout_preview = truncate_detail_keep_tail(
+            completed.stdout,
+            max_characters=_DETAIL_PREVIEW_CHARACTERS,
+        )
+
         if completed.returncode != 0:
             raise RuntimeError(
                 "Gemini CLI adapter failed with exit code "
-                f"{completed.returncode}. stderr: {_truncate_detail(completed.stderr)} "
-                f"stdout: {_truncate_detail(completed.stdout)}"
+                f"{completed.returncode}. stderr: {stderr_preview} "
+                f"stdout: {stdout_preview}"
             )
 
         raw_output = completed.stdout
@@ -351,21 +296,8 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 if normalized is not None:
                     raw_json = json.dumps(normalized)
             except (RuntimeError, json.JSONDecodeError):
-                return CliRuntimeStep(
-                    kind="final",
-                    final_output=raw_output,
-                    tool_name=None,
-                    tool_input=None,
-                )
-            try:
-                return CliRuntimeStep.model_validate_json(raw_json)
-            except Exception:
-                return CliRuntimeStep(
-                    kind="final",
-                    final_output=raw_json,
-                    tool_name=None,
-                    tool_input=None,
-                )
+                return final_cli_runtime_step(raw_output)
+            return parse_cli_runtime_step_or_final(raw_json)
 
         try:
             raw_json = _extract_json(raw_output)
@@ -375,21 +307,8 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 raw_json = json.dumps(normalized)
         except (RuntimeError, json.JSONDecodeError):
             # If we can't extract or parse JSON, treat the entire output as final_output.
-            return CliRuntimeStep(
-                kind="final",
-                final_output=raw_output,
-                tool_name=None,
-                tool_input=None,
-            )
+            return final_cli_runtime_step(raw_output)
 
-        try:
-            return CliRuntimeStep.model_validate_json(raw_json)
-        except Exception:
-            # Fall back to a 'final' step if the JSON is valid but not a CliRuntimeStep.
-            # This allows parsing one-shot review results or mis-shaped outputs gracefully.
-            return CliRuntimeStep(
-                kind="final",
-                final_output=raw_json,
-                tool_name=None,
-                tool_input=None,
-            )
+        # Fall back to a 'final' step if the JSON is valid but not a CliRuntimeStep.
+        # This allows parsing one-shot review results or mis-shaped outputs gracefully.
+        return parse_cli_runtime_step_or_final(raw_json)

@@ -118,20 +118,23 @@ def receive_webhook(
     to the same ``TaskExecutionService`` used by the direct ``/tasks`` path so
     all execution, persistence, and observability behaviour is shared.
     """
-    from contextlib import nullcontext
+    from apps.observability import (
+        SESSION_ID_ATTRIBUTE,
+        SPAN_KIND_AGENT,
+        set_current_span_attribute,
+        set_span_input_output,
+        start_optional_span,
+        with_span_kind,
+    )
 
-    from apps.observability import set_span_input_output
-
-    try:
-        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
-
-        tracer = otel_trace.get_tracer("api.webhook")
-        span_cm = tracer.start_as_current_span("api.webhook")
-    except (ImportError, Exception):
-        span_cm = nullcontext()
+    span_cm = start_optional_span(
+        tracer_name="api.webhook",
+        span_name="api.webhook",
+        attributes=with_span_kind(SPAN_KIND_AGENT),
+    )
 
     with span_cm:
-        set_span_input_output(input_data=payload.model_dump(), kind="AGENT")
+        set_span_input_output(input_data=payload.model_dump())
 
         submission = _to_task_submission(payload)
 
@@ -146,17 +149,8 @@ def receive_webhook(
             ),
         )
 
-        try:
-            from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+        set_current_span_attribute(SESSION_ID_ATTRIBUTE, outcome.task_snapshot.session_id)
 
-            otel_trace.get_current_span().set_attribute(
-                "session.id", outcome.task_snapshot.session_id
-            )
-        except Exception:
-            pass
-
-        set_span_input_output(
-            input_data=None, output_data=outcome.task_snapshot.model_dump(), kind="AGENT"
-        )
+        set_span_input_output(input_data=None, output_data=outcome.task_snapshot.model_dump())
 
         return outcome.task_snapshot

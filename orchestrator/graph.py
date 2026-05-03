@@ -1116,40 +1116,14 @@ def build_await_result_node(
                 f"worker unavailable: {worker_type or 'unknown'}",
             )
         else:
-            from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
-
-            from apps.observability import set_span_input_output
-
-            tracer = otel_trace.get_tracer("orchestrator.graph")
-
-            from openinference.instrumentation.langchain import (  # type: ignore[import-not-found]
-                get_current_span,
-            )
-            from opentelemetry.trace import set_span_in_context  # type: ignore[import-not-found]
-
             request = _build_worker_request(state)
-
-            # Explicitly find the current LangChain/LangGraph span to ensure correct parenting
-            parent_lc_span = get_current_span()
-            parent_context = set_span_in_context(parent_lc_span) if parent_lc_span else None
-
-            with tracer.start_as_current_span(
-                "worker.execute",
-                context=parent_context,
-                attributes={"openinference.span.kind": "AGENT"},
-            ) as span:
-                span.set_attribute("worker.type", worker_type or "unknown")
-                set_span_input_output(input_data=request.model_dump(), kind="AGENT")
-                result, progress_message = await _await_worker_with_timeout(
-                    bound_worker,
-                    request,
-                    worker_type=worker_type or "unknown",
-                    session_id=request.session_id,
-                    timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
-                )
-                set_span_input_output(
-                    input_data=None, output_data=result.model_dump(), kind="AGENT"
-                )
+            result, progress_message = await _await_worker_with_timeout(
+                bound_worker,
+                request,
+                worker_type=worker_type or "unknown",
+                session_id=request.session_id,
+                timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+            )
             progress_updates = _progress_update(state, progress_message)
         return {
             "current_step": "await_result",

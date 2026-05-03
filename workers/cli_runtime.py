@@ -12,10 +12,16 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal, Protocol
 
-from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from apps.observability import set_span_input_output
+from apps.observability import (
+    SPAN_KIND_AGENT,
+    SPAN_KIND_TOOL,
+    set_optional_span_attribute,
+    set_span_input_output,
+    start_optional_span,
+    with_span_kind,
+)
 from sandbox import DockerShellCommandResult, DockerShellSessionError
 from tools import (
     DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS,
@@ -1135,22 +1141,22 @@ def run_cli_runtime_loop(
     recent_iteration_signals: list[dict[str, Any]] = []
     stall_correction_injected_at: int | None = None
 
-    tracer = otel_trace.get_tracer("workers.cli_runtime")
-
     for iteration in range(1, settings.max_iterations + 1):
         turn_name = f"Turn {iteration}"
         if model_name:
             turn_name = f"{model_name} Turn {iteration}"
 
-        with tracer.start_as_current_span(
-            turn_name, attributes={"openinference.span.kind": "AGENT"}
+        with start_optional_span(
+            tracer_name="workers.cli_runtime",
+            span_name=turn_name,
+            attributes=with_span_kind(SPAN_KIND_AGENT),
         ) as turn_span:
-            # Set Phoenix span kind to CHAIN (blue circle) and attach input
+            # Attach turn input to the current span for request/response visibility.
             last_msg_content = messages[-1].content if messages else "Task started"
-            set_span_input_output(input_data=last_msg_content, kind="AGENT")
-            turn_span.set_attribute("iteration", iteration)
+            set_span_input_output(input_data=last_msg_content)
+            set_optional_span_attribute(turn_span, "iteration", iteration)
             if model_name:
-                turn_span.set_attribute("model", model_name)
+                set_optional_span_attribute(turn_span, "model", model_name)
 
             _update_budget_ledger(
                 budget_ledger,
@@ -1518,17 +1524,14 @@ def run_cli_runtime_loop(
                 CliRuntimeMessage(role="assistant", content=_tool_call_transcript(tool, command))
             )
 
-            # Record turn output as the tool call being made
-            set_span_input_output(
-                input_data=None, output_data=f"Executing {tool.name}: {command}", kind="AGENT"
-            )
-
-            with tracer.start_as_current_span(
-                f"tool.{tool.name}", attributes={"openinference.span.kind": "TOOL"}
+            with start_optional_span(
+                tracer_name="workers.cli_runtime",
+                span_name=f"tool.{tool.name}",
+                attributes=with_span_kind(SPAN_KIND_TOOL),
             ) as span:
-                span.set_attribute("tool.name", tool.name)
-                span.set_attribute("tool.input", command)
-                set_span_input_output(input_data=command, kind="TOOL")
+                set_optional_span_attribute(span, "tool.name", tool.name)
+                set_optional_span_attribute(span, "tool.input", command)
+                set_span_input_output(input_data=command)
                 try:
                     shell_result = session.execute(
                         command,
@@ -1539,9 +1542,7 @@ def run_cli_runtime_loop(
                             clock=clock,
                         ),
                     )
-                    set_span_input_output(
-                        input_data=None, output_data=shell_result.output, kind="TOOL"
-                    )
+                    set_span_input_output(input_data=None, output_data=shell_result.output)
                 except DockerShellSessionError as exc:
                     _update_budget_ledger(
                         budget_ledger,
@@ -1659,7 +1660,6 @@ def run_cli_runtime_loop(
                     iterations_used=iteration,
                 )
                 if commands_with_writes == 0:
-                    set_span_input_output(input_data=None, output_data="Stalled (no writes)")
                     return CliRuntimeExecutionResult(
                         status="failure",
                         summary=(
@@ -1671,7 +1671,6 @@ def run_cli_runtime_loop(
                         messages=messages,
                         budget_ledger=budget_ledger,
                     )
-                set_span_input_output(input_data=None, output_data="Stalled (repeated inspection)")
                 return CliRuntimeExecutionResult(
                     status="failure",
                     summary=(

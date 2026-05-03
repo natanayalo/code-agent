@@ -11,9 +11,7 @@ from workers.cli_runtime import CliRuntimeMessage
 from workers.gemini_cli_adapter import (
     GeminiCliRuntimeAdapter,
     _build_adapter_prompt,
-    _coerce_positive_int,
     _extract_json,
-    _truncate_detail,
 )
 
 
@@ -513,63 +511,6 @@ class TestBuildAdapterPrompt:
         assert "## Worker System Prompt" in prompt
         assert "Reviewer instructions" in prompt
         assert "Choose one of two actions:" in prompt
-
-
-class TestCoercePositiveInt:
-    def test_bool_returns_default(self) -> None:
-        assert _coerce_positive_int(True, default=5) == 5  # noqa: FBT003
-
-    def test_positive_int_returned_as_is(self) -> None:
-        assert _coerce_positive_int(42, default=5) == 42
-
-    def test_zero_int_returns_default(self) -> None:
-        assert _coerce_positive_int(0, default=5) == 5
-
-    def test_negative_int_returns_default(self) -> None:
-        assert _coerce_positive_int(-3, default=5) == 5
-
-    def test_positive_float_returns_truncated_int(self) -> None:
-        assert _coerce_positive_int(30.9, default=5) == 30
-
-    def test_zero_float_returns_default(self) -> None:
-        assert _coerce_positive_int(0.0, default=5) == 5
-
-    def test_string_integer_parsed(self) -> None:
-        assert _coerce_positive_int("60", default=5) == 60
-
-    def test_empty_string_returns_default(self) -> None:
-        assert _coerce_positive_int("", default=5) == 5
-
-    def test_whitespace_string_returns_default(self) -> None:
-        assert _coerce_positive_int("  ", default=5) == 5
-
-    def test_non_numeric_string_returns_default(self) -> None:
-        assert _coerce_positive_int("abc", default=5) == 5
-
-    def test_zero_string_returns_default(self) -> None:
-        assert _coerce_positive_int("0", default=5) == 5
-
-    def test_none_returns_default(self) -> None:
-        assert _coerce_positive_int(None, default=5) == 5
-
-    def test_list_returns_default(self) -> None:
-        assert _coerce_positive_int([], default=5) == 5
-
-
-class TestTruncateDetail:
-    def test_empty_string_returns_placeholder(self) -> None:
-        assert _truncate_detail("") == "<empty>"
-
-    def test_whitespace_only_returns_placeholder(self) -> None:
-        assert _truncate_detail("   ") == "<empty>"
-
-    def test_short_string_returned_as_is(self) -> None:
-        assert _truncate_detail("hello") == "hello"
-
-    def test_long_string_is_truncated(self) -> None:
-        long_text = "x" * 2000
-        result = _truncate_detail(long_text)
-        assert result.startswith("[truncated]")
 
 
 def test_gemini_adapter_extracts_response_field_from_json(monkeypatch) -> None:

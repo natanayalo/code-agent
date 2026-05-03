@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import logging
 import socket
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -518,6 +520,48 @@ def test_run_orchestrator_applies_effective_budget_policy_to_payload(monkeypatch
     assert task_payload["budget"]["max_tool_calls"] == 100
 
 
+def test_run_orchestrator_handles_missing_opentelemetry_import(monkeypatch) -> None:
+    """Orchestrator execution should stay functional when optional OTel import is unavailable."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    fake_graph = _FakeGraph()
+    monkeypatch.setattr(
+        execution_module,
+        "build_orchestrator_graph",
+        lambda *, worker, gemini_worker=None, **kwargs: fake_graph,
+    )
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Run without opentelemetry dependency",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+
+    _, persisted = service.create_task(submission)
+    real_import = builtins.__import__
+
+    def _import_without_otel(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "opentelemetry":
+            raise ImportError("opentelemetry unavailable")
+        return real_import(name, globals, locals, fromlist, level)
+
+    with patch("builtins.__import__", side_effect=_import_without_otel):
+        state = asyncio.run(service._run_orchestrator(submission, persisted))
+
+    assert state.result is not None
+    assert state.result.status == "success"
+    assert len(fake_graph.calls) == 1
+
+
 def test_load_submission_for_task_recovers_secrets() -> None:
     """The submission reconstruction logic must restore secrets from the persisted Task record."""
     engine = create_engine_from_url(
@@ -619,6 +663,63 @@ def test_normalize_orchestrator_output_converts_interrupts_to_failure_result() -
     assert state.result.requested_permission == "dangerous_shell"
     assert "permission escalation approval" in (state.result.summary or "")
     assert "orchestrator interrupted awaiting manual approval" in state.errors
+
+
+def test_summarize_graph_span_input_emits_compact_context() -> None:
+    """Graph span input summary should retain only stable routing/execution identifiers."""
+    graph_input = {
+        "session": {
+            "session_id": "sess-1",
+            "channel": "webhook:test",
+        },
+        "task": {
+            "task_id": "task-1",
+            "branch": "task/branch",
+            "constraints": {"execution_mode": "unattended"},
+            "budget": {"max_iterations": 3},
+        },
+        "task_spec": {"task_type": "refactor"},
+        "attempt_count": 2,
+    }
+
+    summary = execution_module._summarize_graph_span_input(graph_input)
+
+    assert summary == {
+        "task_id": "task-1",
+        "attempt_count": 2,
+        "channel": "webhook:test",
+        "branch": "task/branch",
+        "task_type": "refactor",
+        "execution_mode": "unattended",
+        "max_iterations": 3,
+    }
+
+
+def test_summarize_graph_span_output_emits_compact_result_status() -> None:
+    """Graph span output summary should avoid dumping full orchestration payload."""
+    raw_output = {
+        "current_step": "persist_memory",
+        "attempt_count": 2,
+        "timeline_persisted_count": 12,
+        "repair_handoff_requested": False,
+        "result": {"status": "success"},
+        "review": {"outcome": "no_findings"},
+        "verification": {"status": "warning"},
+        "errors": ["foo", "bar"],
+    }
+
+    summary = execution_module._summarize_graph_span_output(raw_output)
+
+    assert summary == {
+        "current_step": "persist_memory",
+        "attempt_count": 2,
+        "timeline_persisted_count": 12,
+        "repair_handoff_requested": False,
+        "result_status": "success",
+        "review_outcome": "no_findings",
+        "verification_status": "warning",
+        "error_count": 2,
+    }
 
 
 def test_normalize_orchestrator_output_canonicalizes_requested_permission() -> None:
@@ -2334,6 +2435,66 @@ def test_run_queued_task_requeues_failed_result_when_retries_remain(monkeypatch)
         assert task.next_attempt_at is not None
         assert task.lease_owner is None
         assert task.lease_expires_at is None
+
+
+def test_run_queued_task_wraps_execution_in_restored_trace_context(monkeypatch) -> None:
+    """Queued runs should always execute within the restored trace context scope."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="fails but detaches trace context",
+            repo_url="https://github.com/natanayalo/code-agent",
+        )
+    )
+    claim = service.claim_next_task(worker_id="worker-a", lease_seconds=45)
+    assert claim is not None
+
+    async def fake_run_orchestrator(
+        _submission: execution_module.TaskSubmission,
+        _persisted: execution_module.TaskSnapshot,
+    ) -> OrchestratorState:
+        raise RuntimeError("boom")
+
+    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
+        return None
+
+    async def run_blocking(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    captured_contexts: list[dict[str, str] | None] = []
+    scope_events = {"entered": 0, "exited": 0}
+
+    @contextmanager
+    def fake_restored_trace_context(context: dict[str, str] | None):
+        captured_contexts.append(context)
+        scope_events["entered"] += 1
+        try:
+            yield
+        finally:
+            scope_events["exited"] += 1
+
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_run_blocking", run_blocking)
+    monkeypatch.setattr(
+        execution_module,
+        "with_restored_trace_context",
+        fake_restored_trace_context,
+    )
+
+    asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
+    assert len(captured_contexts) == 1
+    assert scope_events == {"entered": 1, "exited": 1}
 
 
 def test_heartbeat_task_lease_uses_configured_duration(monkeypatch) -> None:
