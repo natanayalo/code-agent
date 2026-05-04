@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 
 from sandbox import DockerShellCommandResult, DockerShellSessionError
@@ -212,6 +213,32 @@ def test_run_cli_runtime_loop_uses_tool_client_timeout_and_metadata() -> None:
         failed_command_attempts={},
         wall_clock_seconds=execution.budget_ledger.wall_clock_seconds,
     )
+
+
+def test_run_cli_runtime_loop_handles_noop_span_context(monkeypatch) -> None:
+    """Runtime loop should remain functional when span contexts are no-ops."""
+    monkeypatch.setattr(
+        "workers.cli_runtime.start_optional_span",
+        lambda **_kwargs: nullcontext(),
+    )
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(kind="tool_call", tool_name="execute_bash", tool_input="pwd"),
+            CliRuntimeStep(kind="final", final_output="Done."),
+        ]
+    )
+    session = _FakeSession({"pwd": _command_result("pwd", output="/workspace/repo\n")})
+
+    execution = run_cli_runtime_loop(
+        adapter,
+        session,
+        system_prompt="System prompt",
+        settings=CliRuntimeSettings(max_iterations=2, worker_timeout_seconds=30),
+    )
+
+    assert execution.status == "success"
+    assert execution.stop_reason == "final_answer"
+    assert [command.command for command in execution.commands_run] == ["pwd"]
 
 
 def test_run_cli_runtime_loop_completes_a_multi_turn_sequence() -> None:
@@ -1582,7 +1609,7 @@ def test_run_cli_runtime_loop_stops_at_the_worker_timeout() -> None:
         ]
     )
     session = _FakeSession({"pwd": _command_result("pwd", output="/workspace/repo\n")})
-    clock_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0])
+    clock_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 2.0])
 
     execution = run_cli_runtime_loop(
         adapter,

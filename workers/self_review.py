@@ -8,8 +8,14 @@ import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
+from apps.observability import (
+    SPAN_KIND_AGENT,
+    set_span_input_output,
+    start_optional_span,
+    with_span_kind,
+)
 from tools import ToolPermissionLevel, ToolRegistry
 from tools.numeric import coerce_non_negative_int_like
 from workers.base import ArtifactReference, WorkerCommand
@@ -25,6 +31,8 @@ from workers.markdown import markdown_fence_for_content
 from workers.post_run_lint import merge_post_run_lint_results
 from workers.prompt import build_review_prompt
 from workers.review import ReviewResult
+
+TRACER_NAME: Final[str] = "workers.self_review"
 
 DEFAULT_SELF_REVIEW_MAX_FIX_ITERATIONS = 2
 DEFAULT_SELF_REVIEW_DIFF_MAX_CHARACTERS = 12000
@@ -292,11 +300,28 @@ def run_shared_self_review_fix_loop(
         )
 
         try:
-            review_step = runtime_adapter.next_step(
-                (),
-                prompt_override=review_prompt,
-                working_directory=repo_path,
-            )
+            turn_name = f"Turn {review_attempt + 1} (Self-Review)"
+            if model_name:
+                turn_name = f"{model_name} Turn {review_attempt + 1} (Self-Review)"
+
+            with start_optional_span(
+                tracer_name=TRACER_NAME,
+                span_name=turn_name,
+                attributes=with_span_kind(SPAN_KIND_AGENT),
+            ):
+                set_span_input_output(input_data=review_prompt)
+                review_step = runtime_adapter.next_step(
+                    (),
+                    prompt_override=review_prompt,
+                    working_directory=repo_path,
+                )
+                if review_step.kind == "final" and review_step.final_output:
+                    set_span_input_output(input_data=None, output_data=review_step.final_output)
+                elif review_step.kind == "tool_call":
+                    set_span_input_output(
+                        input_data=None,
+                        output_data=f"Executing {review_step.tool_name}",
+                    )
         except Exception as exc:
             if adapter_failure_log_message and adapter_failure_logger is not None:
                 adapter_failure_logger.warning(adapter_failure_log_message, exc_info=exc)

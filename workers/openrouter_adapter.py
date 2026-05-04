@@ -16,7 +16,29 @@ from workers.adapter_messages import (
     build_role_native_transcript,
     serialize_openai_compatible_messages,
 )
+from workers.adapter_parsing import final_cli_runtime_step, parse_cli_runtime_step_or_final
+from workers.adapter_prompts import (
+    DEFAULT_RAW_JSON_ONLY_RULE,
+    OPENROUTER_ADAPTER_IDENTITY_LINE,
+    build_final_example_json,
+    build_override_system_instructions,
+    build_role_native_system_instructions,
+    build_runtime_transcript_prompt,
+    build_tool_call_example_json,
+    json_only_response_line,
+)
+from workers.adapter_utils import (
+    coerce_bool,
+    coerce_positive_int,
+    normalize_prompt_override,
+    truncate_detail_keep_head,
+)
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
+from workers.llm_tracing import (
+    normalize_llm_output,
+    set_llm_span_output,
+    with_llm_span,
+)
 from workers.prompt import build_runtime_adapter_tool_guidance_lines
 
 DEFAULT_OPENROUTER_BASE_URL: Final[str] = "https://openrouter.ai/api/v1"
@@ -32,60 +54,7 @@ OPENROUTER_TIMEOUT_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_TIMEOUT_SECONDS"
 OPENROUTER_HTTP_REFERER_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_HTTP_REFERER"
 OPENROUTER_X_TITLE_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_X_TITLE"
 OPENROUTER_ROLE_NATIVE_MESSAGES_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_ROLE_NATIVE_MESSAGES"
-
-
-def _coerce_positive_int(value: object, *, default: int) -> int:
-    """Parse a positive integer override or fall back to the default."""
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int):
-        return value if value > 0 else default
-    if isinstance(value, float):
-        try:
-            parsed = int(value)
-        except (OverflowError, ValueError):
-            return default
-        return parsed if parsed > 0 else default
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return default
-        try:
-            parsed = int(float(stripped))
-        except (OverflowError, ValueError):
-            return default
-        return parsed if parsed > 0 else default
-    return default
-
-
-def _truncate_detail(text: str, *, max_characters: int = _DETAIL_PREVIEW_CHARACTERS) -> str:
-    """Render bounded response details for adapter failures."""
-    stripped = text.strip()
-    if not stripped:
-        return "<empty>"
-    if len(stripped) <= max_characters:
-        return stripped
-    return f"{stripped[:max_characters]}...[truncated]"
-
-
-def _coerce_bool(value: object, *, default: bool) -> bool:
-    """Parse boolean-like values and fall back to the provided default."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "yes", "on"}:
-            return True
-        if normalized in {"0", "false", "no", "off"}:
-            return False
-    return default
-
-
-def _message_heading(message: CliRuntimeMessage, *, index: int) -> str:
-    """Render a compact transcript heading for one runtime message."""
-    if message.role == "tool":
-        return f"### Message {index} ({message.role}:{message.tool_name})"
-    return f"### Message {index} ({message.role})"
+TRACER_NAME: Final[str] = "workers.openrouter"
 
 
 def _build_adapter_prompt(
@@ -95,121 +64,31 @@ def _build_adapter_prompt(
 ) -> str:
     """Build the prompt sent to OpenRouter for one runtime turn."""
     tool_guidance_lines = build_runtime_adapter_tool_guidance_lines(system_prompt=system_prompt)
-    lines = [
-        "You are the OpenRouter runtime adapter for a bounded coding worker.",
-        (
-            "Read the transcript below and return exactly one JSON object "
-            "with no surrounding text, no markdown fences, and no explanation."
-        ),
-        "Choose one of two actions:",
-        CliRuntimeStep(
-            kind="tool_call",
-            tool_name="<registered tool name>",
-            tool_input="<tool input string>",
-            final_output=None,
-        ).model_dump_json(),
-        CliRuntimeStep(
-            kind="final",
-            final_output="<final summary for the user>",
-            tool_name=None,
-            tool_input=None,
-        ).model_dump_json(),
-        "Rules:",
-        "- Use only tool names listed in the system prompt's Available Tools section.",
-        "- `tool_input` MUST be a string. If the tool expects JSON, encode that JSON as a string.",
-        *tool_guidance_lines,
-        "- If the transcript already contains enough information to finish, return `final`.",
-        "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
-        "- Return ONLY a raw JSON object. No markdown fences, no extra explanation.",
-    ]
-    if system_prompt is not None and system_prompt.strip():
-        lines.extend(
-            [
-                "",
-                "## Worker System Prompt",
-                system_prompt.strip(),
-            ]
-        )
-    lines.extend(
-        [
-            "",
-            "## Runtime Transcript",
-        ]
+    return build_runtime_transcript_prompt(
+        identity_line=OPENROUTER_ADAPTER_IDENTITY_LINE,
+        response_instruction_line=json_only_response_line(include_transcript_reference=True),
+        tool_call_example=build_tool_call_example_json(),
+        final_example=build_final_example_json(),
+        tool_guidance_lines=tool_guidance_lines,
+        messages=messages,
+        system_prompt=system_prompt,
+        json_output_rule=DEFAULT_RAW_JSON_ONLY_RULE,
+        content_transform=_message_content_to_text,
     )
-    for index, message in enumerate(messages, start=1):
-        lines.extend(
-            (
-                _message_heading(message, index=index),
-                _message_content_to_text(message.content),
-                "",
-            )
-        )
-    return "\n".join(lines).rstrip()
 
 
 def _build_role_native_instructions(*, system_prompt: str | None = None) -> str:
     """Build adapter protocol instructions for role-native chat payloads."""
     tool_guidance_lines = build_runtime_adapter_tool_guidance_lines(system_prompt=system_prompt)
-    lines = [
-        "You are the OpenRouter runtime adapter for a bounded coding worker.",
-        (
-            "Return exactly one JSON object with no surrounding text, "
-            "no markdown fences, and no explanation."
-        ),
-        "Choose one of two actions.",
-        "Examples:",
-        "Example tool_call:",
-        CliRuntimeStep(
-            kind="tool_call",
-            tool_name="<registered tool name>",
-            tool_input="<tool input string>",
-            final_output=None,
-        ).model_dump_json(exclude_none=True),
-        "Example final:",
-        CliRuntimeStep(
-            kind="final",
-            final_output="<final summary for the user>",
-            tool_name=None,
-            tool_input=None,
-        ).model_dump_json(exclude_none=True),
-        "Rules:",
-        "- Use only tool names listed in the system prompt's Available Tools section.",
-        "- `tool_input` MUST be a string. If the tool expects JSON, encode that JSON as a string.",
-        *tool_guidance_lines,
-        "- If the transcript already contains enough information to finish, return `final`.",
-        "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
-        "- Return ONLY a raw JSON object. No markdown fences, no extra explanation.",
-    ]
-    if system_prompt is not None and system_prompt.strip():
-        lines.extend(
-            [
-                "",
-                "## Worker System Prompt",
-                system_prompt.strip(),
-            ]
-        )
-    return "\n".join(lines)
-
-
-def _build_override_system_instructions(*, system_prompt: str | None = None) -> str:
-    """Build override-safe system instructions that still enforce JSON-only output."""
-    lines = [
-        "You are the OpenRouter runtime adapter for a bounded coding worker.",
-        (
-            "Return exactly one JSON object with no surrounding text, "
-            "no markdown fences, and no explanation."
-        ),
-        "Follow the user message instructions for the expected JSON schema and fields.",
-    ]
-    if system_prompt is not None and system_prompt.strip():
-        lines.extend(
-            [
-                "",
-                "## Worker System Prompt",
-                system_prompt.strip(),
-            ]
-        )
-    return "\n".join(lines)
+    return build_role_native_system_instructions(
+        identity_line=OPENROUTER_ADAPTER_IDENTITY_LINE,
+        json_only_response_line=json_only_response_line(include_transcript_reference=False),
+        tool_call_example=build_tool_call_example_json(exclude_none=True),
+        final_example=build_final_example_json(exclude_none=True),
+        tool_guidance_lines=tool_guidance_lines,
+        system_prompt=system_prompt,
+        json_output_rule=DEFAULT_RAW_JSON_ONLY_RULE,
+    )
 
 
 def _build_role_native_request_messages(
@@ -283,7 +162,7 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         self.api_key = api_key_stripped
         self.model = model.strip() if model.strip() else DEFAULT_OPENROUTER_MODEL
         self.base_url = base_url
-        self.request_timeout_seconds = _coerce_positive_int(
+        self.request_timeout_seconds = coerce_positive_int(
             request_timeout_seconds,
             default=DEFAULT_OPENROUTER_REQUEST_TIMEOUT_SECONDS,
         )
@@ -316,7 +195,7 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         return cls(
             api_key=api_key,
             model=resolved_env.get(OPENROUTER_MODEL_ENV_VAR, DEFAULT_OPENROUTER_MODEL),
-            request_timeout_seconds=_coerce_positive_int(
+            request_timeout_seconds=coerce_positive_int(
                 resolved_env.get(OPENROUTER_TIMEOUT_ENV_VAR),
                 default=DEFAULT_OPENROUTER_REQUEST_TIMEOUT_SECONDS,
             ),
@@ -325,7 +204,7 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
                 DEFAULT_OPENROUTER_HTTP_REFERER,
             ),
             x_title=resolved_env.get(OPENROUTER_X_TITLE_ENV_VAR, DEFAULT_OPENROUTER_X_TITLE),
-            use_role_native_messages=_coerce_bool(
+            use_role_native_messages=coerce_bool(
                 resolved_env.get(OPENROUTER_ROLE_NATIVE_MESSAGES_ENV_VAR),
                 default=False,
             ),
@@ -340,9 +219,7 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         working_directory: Path | None = None,  # noqa: ARG002 - kept for interface symmetry
     ) -> CliRuntimeStep:
         """Ask OpenRouter for the next runtime step."""
-        override_prompt = (
-            prompt_override.strip() if prompt_override and prompt_override.strip() else None
-        )
+        override_prompt = normalize_prompt_override(prompt_override)
         request_messages: list[ChatCompletionMessageParam]
         if override_prompt is not None:
             if self.use_role_native_messages:
@@ -351,8 +228,16 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
                     [
                         {
                             "role": "system",
-                            "content": _build_override_system_instructions(
-                                system_prompt=system_prompt
+                            "content": build_override_system_instructions(
+                                identity_line=OPENROUTER_ADAPTER_IDENTITY_LINE,
+                                json_only_response_line=json_only_response_line(
+                                    include_transcript_reference=False
+                                ),
+                                follow_user_rule=(
+                                    "Follow the user message instructions for the expected JSON "
+                                    "schema and fields."
+                                ),
+                                system_prompt=system_prompt,
                             ),
                         },
                         {"role": "user", "content": override_prompt},
@@ -380,11 +265,35 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
             )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=request_messages,
-                response_format={"type": "json_object"},
-            )
+            with with_llm_span(
+                tracer_name=TRACER_NAME,
+                span_name="openrouter.chat",
+                input_data=request_messages,
+            ):
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=request_messages,
+                    response_format={"type": "json_object"},
+                )
+                from typing import Any
+
+                content: str | None = None
+                try:
+                    if response.choices:
+                        content = getattr(response.choices[0].message, "content", None)
+                except (AttributeError, IndexError):
+                    pass
+                # Extract trace payload: use content if available, otherwise dump the model
+                trace_payload: Any = content
+                if trace_payload is None:
+                    if hasattr(response, "model_dump"):
+                        trace_payload = response.model_dump()
+                    else:
+                        trace_payload = (
+                            vars(response) if hasattr(response, "__dict__") else str(response)
+                        )
+
+                set_llm_span_output(normalize_llm_output(trace_payload))
         except Exception as exc:  # pragma: no cover - exercised via unit tests with stubs
             raise RuntimeError(f"OpenRouter adapter request failed: {exc}") from exc
 
@@ -401,15 +310,7 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         if not raw_json:
             raise RuntimeError("OpenRouter adapter returned an empty response body.")
         if override_prompt is not None:
-            try:
-                return CliRuntimeStep.model_validate_json(raw_json)
-            except Exception:
-                return CliRuntimeStep(
-                    kind="final",
-                    final_output=raw_json,
-                    tool_name=None,
-                    tool_input=None,
-                )
+            return parse_cli_runtime_step_or_final(raw_json)
         try:
             return CliRuntimeStep.model_validate_json(raw_json)
         except Exception as exc:
@@ -420,13 +321,9 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
             except Exception:
                 parsed_payload = None
             if isinstance(parsed_payload, dict):
-                return CliRuntimeStep(
-                    kind="final",
-                    final_output=raw_json,
-                    tool_name=None,
-                    tool_input=None,
-                )
+                return final_cli_runtime_step(raw_json)
             raise RuntimeError(
                 "OpenRouter adapter returned a response that did not match "
-                f"CliRuntimeStep: {_truncate_detail(raw_json)}"
+                "CliRuntimeStep: "
+                f"{truncate_detail_keep_head(raw_json, max_characters=_DETAIL_PREVIEW_CHARACTERS)}"
             ) from exc

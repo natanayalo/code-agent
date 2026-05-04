@@ -12,7 +12,6 @@ from workers.openrouter_adapter import (
     _build_adapter_prompt,
     _build_role_native_instructions,
     _build_role_native_request_messages,
-    _coerce_bool,
     _message_content_to_text,
 )
 
@@ -458,16 +457,6 @@ def test_build_role_native_request_messages_serializes_tool_transcript_entries()
         "role": "user",
         "content": "Tool result (search_dir):\n2 matches",
     }
-
-
-def test_coerce_bool_parses_supported_values() -> None:
-    """Boolean parser should accept common env-style truthy/falsy strings."""
-    assert _coerce_bool(True, default=False) is True
-    assert _coerce_bool("true", default=False) is True
-    assert _coerce_bool(" YES ", default=False) is True
-    assert _coerce_bool("0", default=True) is False
-    assert _coerce_bool("off", default=True) is False
-    assert _coerce_bool("unknown", default=True) is True
 
 
 def test_build_role_native_instructions_labels_json_examples() -> None:

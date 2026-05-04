@@ -1,0 +1,68 @@
+"""Shared low-level utility helpers for runtime adapters."""
+
+from __future__ import annotations
+
+
+def coerce_positive_int(value: object, *, default: int) -> int:
+    """Parse a positive integer override or fall back to the default."""
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value if value > 0 else default
+    if isinstance(value, float):
+        try:
+            parsed = int(value)
+        except (OverflowError, ValueError):
+            return default
+        return parsed if parsed > 0 else default
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return default
+        try:
+            parsed = int(float(stripped))
+        except (OverflowError, ValueError):
+            return default
+        return parsed if parsed > 0 else default
+    return default
+
+
+def coerce_bool(value: object, *, default: bool) -> bool:
+    """Parse boolean-like values and fall back to the provided default."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
+def normalize_prompt_override(prompt_override: str | None) -> str | None:
+    """Normalize optional prompt overrides, returning None for blank input."""
+    if prompt_override is None:
+        return None
+    normalized = prompt_override.strip()
+    return normalized if normalized else None
+
+
+def truncate_detail_keep_tail(text: str, *, max_characters: int) -> str:
+    """Render bounded text keeping the trailing suffix for context."""
+    stripped = text.strip()
+    if not stripped:
+        return "<empty>"
+    if len(stripped) <= max_characters:
+        return stripped
+    return f"[truncated]...{stripped[-max_characters:].lstrip()}"
+
+
+def truncate_detail_keep_head(text: str, *, max_characters: int) -> str:
+    """Render bounded text keeping the leading prefix for context."""
+    stripped = text.strip()
+    if not stripped:
+        return "<empty>"
+    if len(stripped) <= max_characters:
+        return stripped
+    return f"{stripped[:max_characters]}...[truncated]"

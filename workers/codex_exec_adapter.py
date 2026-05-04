@@ -10,7 +10,21 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final
 
+from workers.adapter_parsing import parse_cli_runtime_step_or_final
+from workers.adapter_prompts import (
+    CODEX_ADAPTER_IDENTITY_LINE,
+    CODEX_SCHEMA_RESPONSE_LINE,
+    build_final_example_json,
+    build_runtime_transcript_prompt,
+    build_tool_call_example_json,
+)
+from workers.adapter_utils import (
+    coerce_positive_int,
+    normalize_prompt_override,
+    truncate_detail_keep_tail,
+)
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
+from workers.llm_tracing import set_llm_span_output, with_llm_span
 from workers.prompt import build_runtime_adapter_tool_guidance_lines
 from workers.subprocess_env import build_codex_subprocess_env
 
@@ -24,47 +38,7 @@ CODEX_MODEL_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_MODEL"
 CODEX_PROFILE_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_PROFILE"
 CODEX_TIMEOUT_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TIMEOUT_SECONDS"
 CODEX_SANDBOX_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_SANDBOX"
-
-
-def _coerce_positive_int(value: object, *, default: int) -> int:
-    """Parse a positive integer override or fall back to the default."""
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, int):
-        return value if value > 0 else default
-    if isinstance(value, float):
-        try:
-            parsed = int(value)
-        except (OverflowError, ValueError):
-            return default
-        return parsed if parsed > 0 else default
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return default
-        try:
-            parsed = int(float(stripped))
-        except (OverflowError, ValueError):
-            return default
-        return parsed if parsed > 0 else default
-    return default
-
-
-def _truncate_detail(text: str, *, max_characters: int = _DETAIL_PREVIEW_CHARACTERS) -> str:
-    """Render bounded stderr/stdout details for adapter failures."""
-    stripped = text.strip()
-    if not stripped:
-        return "<empty>"
-    if len(stripped) <= max_characters:
-        return stripped
-    return f"[truncated]...{stripped[-max_characters:].lstrip()}"
-
-
-def _message_heading(message: CliRuntimeMessage, *, index: int) -> str:
-    """Render a compact transcript heading for one runtime message."""
-    if message.role == "tool":
-        return f"### Message {index} ({message.role}:{message.tool_name})"
-    return f"### Message {index} ({message.role})"
+TRACER_NAME: Final[str] = "workers.codex"
 
 
 def _build_adapter_prompt(
@@ -74,46 +48,16 @@ def _build_adapter_prompt(
 ) -> str:
     """Build the single-shot prompt sent to `codex exec` for one runtime turn."""
     tool_guidance_lines = build_runtime_adapter_tool_guidance_lines(system_prompt=system_prompt)
-    lines = [
-        "You are the Codex runtime adapter for a bounded coding worker.",
-        (
-            "Read the transcript below and return exactly one JSON object "
-            "matching the provided schema."
-        ),
-        "Choose one of two actions:",
-        (
-            '- {"kind":"tool_call","tool_name":"<registered tool name>",'
-            '"tool_input":"<tool input string>","final_output":null}'
-        ),
-        (
-            '- {"kind":"final","final_output":"<final summary for the user>",'
-            '"tool_name":null,"tool_input":null}'
-        ),
-        "Rules:",
-        "- Use only tool names listed in the system prompt's Available Tools section.",
-        "- `tool_input` MUST be a string. If the tool expects JSON, encode that JSON as a string.",
-        *tool_guidance_lines,
-        "- If the transcript already contains enough information to finish, return `final`.",
-        "- If the latest tool result failed, adapt to that failure instead of repeating blindly.",
-        "- Do not wrap the JSON in Markdown or add any extra prose.",
-    ]
-    if system_prompt is not None and system_prompt.strip():
-        lines.extend(
-            [
-                "",
-                "## Worker System Prompt",
-                system_prompt.strip(),
-            ]
-        )
-    lines.extend(
-        [
-            "",
-            "## Runtime Transcript",
-        ]
+    return build_runtime_transcript_prompt(
+        identity_line=CODEX_ADAPTER_IDENTITY_LINE,
+        response_instruction_line=CODEX_SCHEMA_RESPONSE_LINE,
+        tool_call_example=f"- {build_tool_call_example_json()}",
+        final_example=f"- {build_final_example_json()}",
+        tool_guidance_lines=tool_guidance_lines,
+        messages=messages,
+        system_prompt=system_prompt,
+        json_output_rule="- Do not wrap the JSON in Markdown or add any extra prose.",
     )
-    for index, message in enumerate(messages, start=1):
-        lines.extend((_message_heading(message, index=index), message.content, ""))
-    return "\n".join(lines).rstrip()
 
 
 def _codex_output_schema() -> dict[str, object]:
@@ -160,7 +104,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         self.model = model.strip() if model is not None and model.strip() else None
         self.profile = profile.strip() if profile is not None and profile.strip() else None
         self.sandbox_mode = sandbox_mode.strip() or DEFAULT_CODEX_SANDBOX_MODE
-        self.request_timeout_seconds = _coerce_positive_int(
+        self.request_timeout_seconds = coerce_positive_int(
             request_timeout_seconds, default=DEFAULT_CODEX_REQUEST_TIMEOUT_SECONDS
         )
         self.working_directory = Path(working_directory or tempfile.gettempdir()).expanduser()
@@ -183,7 +127,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
             model=resolved_env.get(CODEX_MODEL_ENV_VAR),
             profile=resolved_env.get(CODEX_PROFILE_ENV_VAR),
             sandbox_mode=resolved_env.get(CODEX_SANDBOX_ENV_VAR, DEFAULT_CODEX_SANDBOX_MODE),
-            request_timeout_seconds=_coerce_positive_int(
+            request_timeout_seconds=coerce_positive_int(
                 resolved_env.get(CODEX_TIMEOUT_ENV_VAR),
                 default=DEFAULT_CODEX_REQUEST_TIMEOUT_SECONDS,
             ),
@@ -232,9 +176,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         working_directory: Path | None = None,
     ) -> CliRuntimeStep:
         """Ask the Codex CLI for the next runtime step."""
-        override_prompt = (
-            prompt_override.strip() if prompt_override and prompt_override.strip() else None
-        )
+        override_prompt = normalize_prompt_override(prompt_override)
         prompt = (
             override_prompt
             if override_prompt is not None
@@ -252,49 +194,65 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
                 )
 
             try:
-                completed = subprocess.run(
-                    self._build_command(
-                        output_schema_path=schema_path,
-                        output_message_path=output_message_path,
-                        working_directory=working_directory,
-                    ),
-                    input=prompt,
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                    timeout=self.request_timeout_seconds,
-                    env=self.env,
-                )
-            except subprocess.TimeoutExpired as exc:
-                raise RuntimeError(
-                    "Codex CLI adapter timed out after "
-                    f"{self.request_timeout_seconds}s while selecting the next runtime step."
-                ) from exc
+                with with_llm_span(
+                    tracer_name=TRACER_NAME,
+                    span_name="codex.exec",
+                    input_data=prompt,
+                ):
+                    try:
+                        completed = subprocess.run(
+                            self._build_command(
+                                output_schema_path=schema_path,
+                                output_message_path=output_message_path,
+                                working_directory=working_directory,
+                            ),
+                            input=prompt,
+                            text=True,
+                            capture_output=True,
+                            check=False,
+                            timeout=self.request_timeout_seconds,
+                            env=self.env,
+                        )
+                        set_llm_span_output(completed.stdout)
+                    except subprocess.TimeoutExpired as exc:
+                        raise RuntimeError(
+                            "Codex CLI adapter timed out after "
+                            f"{self.request_timeout_seconds}s while selecting the next runtime step."  # noqa: E501
+                        ) from exc
             except OSError as exc:
                 raise RuntimeError(
                     f"Codex CLI adapter could not start `{self.executable}`: {exc}"
                 ) from exc
 
+            stderr_preview = truncate_detail_keep_tail(
+                completed.stderr,
+                max_characters=_DETAIL_PREVIEW_CHARACTERS,
+            )
+            stdout_preview = truncate_detail_keep_tail(
+                completed.stdout,
+                max_characters=_DETAIL_PREVIEW_CHARACTERS,
+            )
+
             if completed.returncode != 0:
                 raise RuntimeError(
                     "Codex CLI adapter failed with exit code "
-                    f"{completed.returncode}. stderr: {_truncate_detail(completed.stderr)} "
-                    f"stdout: {_truncate_detail(completed.stdout)}"
+                    f"{completed.returncode}. stderr: {stderr_preview} "
+                    f"stdout: {stdout_preview}"
                 )
 
             if not output_message_path.exists():
                 raise RuntimeError(
                     "Codex CLI adapter completed without writing the final message file. "
-                    f"stdout: {_truncate_detail(completed.stdout)} "
-                    f"stderr: {_truncate_detail(completed.stderr)}"
+                    f"stdout: {stdout_preview} "
+                    f"stderr: {stderr_preview}"
                 )
 
             raw_output = output_message_path.read_text(encoding="utf-8").strip()
             if not raw_output:
                 raise RuntimeError(
                     "Codex CLI adapter wrote an empty final message file. "
-                    f"stdout: {_truncate_detail(completed.stdout)} "
-                    f"stderr: {_truncate_detail(completed.stderr)}"
+                    f"stdout: {stdout_preview} "
+                    f"stderr: {stderr_preview}"
                 )
 
             try:
@@ -305,25 +263,5 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
             except json.JSONDecodeError:
                 pass
 
-            if override_prompt is not None:
-                try:
-                    return CliRuntimeStep.model_validate_json(raw_output)
-                except Exception:
-                    return CliRuntimeStep(
-                        kind="final",
-                        final_output=raw_output,
-                        tool_name=None,
-                        tool_input=None,
-                    )
-
-            try:
-                return CliRuntimeStep.model_validate_json(raw_output)
-            except Exception:
-                # Fall back to a 'final' step if the message is valid but not a CliRuntimeStep.
-                # This allows parsing one-shot review results or mis-shaped outputs gracefully.
-                return CliRuntimeStep(
-                    kind="final",
-                    final_output=raw_output,
-                    tool_name=None,
-                    tool_input=None,
-                )
+            # Fall back to a 'final' step if the payload does not validate as CliRuntimeStep.
+            return parse_cli_runtime_step_or_final(raw_output)

@@ -213,6 +213,34 @@ def test_build_docker_run_command_skips_user_mapping_on_windows(
     ]
 
 
+def test_build_docker_run_command_injects_full_w3c_trace_env(tmp_path: Path) -> None:
+    """Trace env emitted by observability helper should flow into docker run args."""
+    request = DockerSandboxCommand(
+        workspace=_workspace_handle(tmp_path),
+        command=["echo", "trace"],
+        environment={"PYTHONUNBUFFERED": "1"},
+    )
+
+    with patch(
+        "sandbox.runner.inject_w3c_trace_context_env",
+        return_value={
+            "PYTHONUNBUFFERED": "1",
+            "TRACEPARENT": "00-11111111111111111111111111111111-2222222222222222-01",
+            "TRACESTATE": "vendor=value",
+            "BAGGAGE": "session.id=abc",
+        },
+    ):
+        command = _build_docker_run_command(request, image="alpine")
+
+    env_values = [
+        command[index + 1] for index, token in enumerate(command[:-1]) if token == "--env"
+    ]
+    assert "PYTHONUNBUFFERED=1" in env_values
+    assert "TRACEPARENT=00-11111111111111111111111111111111-2222222222222222-01" in env_values
+    assert "TRACESTATE=vendor=value" in env_values
+    assert "BAGGAGE=session.id=abc" in env_values
+
+
 # ---------------------------------------------------------------------------
 # DockerSandboxRunner.run (uses injected command_runner)
 # ---------------------------------------------------------------------------

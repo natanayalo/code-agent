@@ -1611,7 +1611,7 @@ def build_orchestrator_graph(
     builder.add_edge("plan_task", "generate_task_spec")
     builder.add_conditional_edges(
         "generate_task_spec",
-        RunnableLambda(_route_after_generate_task_spec),
+        _route_after_generate_task_spec,
         {
             "load_memory": "load_memory",
             "summarize_result": "summarize_result",
@@ -1621,7 +1621,7 @@ def build_orchestrator_graph(
     builder.add_edge("choose_worker", "check_approval")
     builder.add_conditional_edges(
         "check_approval",
-        RunnableLambda(_route_after_check_approval),
+        _route_after_check_approval,
         {
             "await_approval": "await_approval",
             "dispatch_job": "dispatch_job",
@@ -1629,7 +1629,7 @@ def build_orchestrator_graph(
     )
     builder.add_conditional_edges(
         "await_approval",
-        RunnableLambda(_route_after_await_approval),
+        _route_after_await_approval,
         {
             "dispatch_job": "dispatch_job",
             "summarize_result": "summarize_result",
@@ -1638,7 +1638,7 @@ def build_orchestrator_graph(
     builder.add_edge("dispatch_job", "await_result")
     builder.add_conditional_edges(
         "await_result",
-        RunnableLambda(_route_after_await_result),
+        _route_after_await_result,
         {
             "await_permission_escalation": "await_permission_escalation",
             "verify_result": "verify_result",
@@ -1646,7 +1646,7 @@ def build_orchestrator_graph(
     )
     builder.add_conditional_edges(
         "await_permission_escalation",
-        RunnableLambda(_route_after_await_permission_escalation),
+        _route_after_await_permission_escalation,
         {
             "dispatch_job": "dispatch_job",
             "verify_result": "verify_result",
@@ -1655,7 +1655,7 @@ def build_orchestrator_graph(
     builder.add_edge("verify_result", "review_result")
     builder.add_conditional_edges(
         "review_result",
-        RunnableLambda(_route_after_review_result),
+        _route_after_review_result,
         {
             "dispatch_job": "dispatch_job",
             "summarize_result": "summarize_result",

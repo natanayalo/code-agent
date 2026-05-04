@@ -72,3 +72,9 @@ def test_model_metadata_defines_task_spec_column_type() -> None:
     """TaskSpec generation needs an inspectable JSON contract on tasks."""
     column_type = Base.metadata.tables["tasks"].c["task_spec"].type
     assert isinstance(column_type, JSON)
+
+
+def test_model_metadata_defines_trace_context_column_type() -> None:
+    """Distributed tracing needs a serializable JSON contract on tasks."""
+    column_type = Base.metadata.tables["tasks"].c["trace_context"].type
+    assert isinstance(column_type, JSON)

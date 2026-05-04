@@ -118,13 +118,39 @@ def receive_webhook(
     to the same ``TaskExecutionService`` used by the direct ``/tasks`` path so
     all execution, persistence, and observability behaviour is shared.
     """
-    submission = _to_task_submission(payload)
-    outcome = task_service.create_task_outcome(
-        submission,
-        delivery_key=(
-            DeliveryKey(channel=submission.session.channel, delivery_id=payload.delivery_id)
-            if payload.delivery_id is not None
-            else None
-        ),
+    from apps.observability import (
+        SESSION_ID_ATTRIBUTE,
+        SPAN_KIND_AGENT,
+        set_current_span_attribute,
+        set_span_input_output,
+        start_optional_span,
+        with_span_kind,
     )
-    return outcome.task_snapshot
+
+    span_cm = start_optional_span(
+        tracer_name="api.webhook",
+        span_name="api.webhook",
+        attributes=with_span_kind(SPAN_KIND_AGENT),
+    )
+
+    with span_cm:
+        set_span_input_output(input_data=payload.model_dump())
+
+        submission = _to_task_submission(payload)
+
+        # We will link the session ID after creating the outcome
+
+        outcome = task_service.create_task_outcome(
+            submission,
+            delivery_key=(
+                DeliveryKey(channel=submission.session.channel, delivery_id=payload.delivery_id)
+                if payload.delivery_id is not None
+                else None
+            ),
+        )
+
+        set_current_span_attribute(SESSION_ID_ATTRIBUTE, outcome.task_snapshot.session_id)
+
+        set_span_input_output(input_data=None, output_data=outcome.task_snapshot.model_dump())
+
+        return outcome.task_snapshot

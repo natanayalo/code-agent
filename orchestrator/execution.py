@@ -12,10 +12,9 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from contextlib import AbstractAsyncContextManager, nullcontext
-from dataclasses import dataclass
+from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from functools import partial
 from pathlib import Path
 from threading import Lock
 from typing import Any, Literal, Protocol, cast
@@ -29,6 +28,17 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
+from apps.observability import (
+    SESSION_ID_ATTRIBUTE,
+    SPAN_KIND_AGENT,
+    bind_current_trace_context,
+    capture_trace_context,
+    set_current_span_attribute,
+    set_span_input_output,
+    start_optional_span,
+    with_restored_trace_context,
+    with_span_kind,
+)
 from db.base import utc_now
 from db.enums import (
     ArtifactType,
@@ -558,6 +568,7 @@ class _PersistedTaskContext:
     task_id: str
     attempt_count: int
     task_spec: dict[str, Any] | None = None
+    trace_context: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -760,6 +771,61 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
     if reason:
         summary = f"{summary} {reason}"
     return summary
+
+
+def _extract_graph_payload(data: Any) -> Mapping[str, Any]:
+    """Safely extract a mapping payload from a graph state object or model."""
+    if isinstance(data, BaseModel):
+        return data.model_dump(mode="json")
+    if isinstance(data, Mapping):
+        return data
+    return {}
+
+
+def _summarize_graph_span_input(graph_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Build a compact graph span input payload to avoid emitting full task state."""
+    task = _extract_graph_payload(graph_input.get("task"))
+    session = _extract_graph_payload(graph_input.get("session"))
+    task_spec = _extract_graph_payload(graph_input.get("task_spec"))
+    budget = _extract_graph_payload(task.get("budget"))
+
+    summary: dict[str, Any] = {
+        "task_id": task.get("task_id"),
+        "attempt_count": graph_input.get("attempt_count"),
+        "channel": session.get("channel"),
+        "branch": task.get("branch"),
+        "task_type": task_spec.get("task_type"),
+        "execution_mode": task.get("constraints", {}).get("execution_mode")
+        if isinstance(task.get("constraints"), Mapping)
+        else None,
+        "max_iterations": budget.get("max_iterations"),
+    }
+    return {key: value for key, value in summary.items() if value is not None}
+
+
+def _summarize_graph_span_output(raw_output: object) -> dict[str, Any]:
+    """Build a compact graph span output payload to avoid large span attributes."""
+    payload = _extract_graph_payload(raw_output)
+    if not payload and not isinstance(raw_output, Mapping | BaseModel):
+        return {"output_type": type(raw_output).__name__}
+
+    result = _extract_graph_payload(payload.get("result"))
+    review = _extract_graph_payload(payload.get("review"))
+    verification = _extract_graph_payload(payload.get("verification"))
+
+    summary: dict[str, Any] = {
+        "current_step": payload.get("current_step"),
+        "attempt_count": payload.get("attempt_count"),
+        "timeline_persisted_count": payload.get("timeline_persisted_count"),
+        "repair_handoff_requested": payload.get("repair_handoff_requested"),
+        "result_status": result.get("status"),
+        "review_outcome": review.get("outcome"),
+        "verification_status": verification.get("status"),
+        "error_count": (
+            len(payload.get("errors", [])) if isinstance(payload.get("errors"), list) else None
+        ),
+    }
+    return {key: value for key, value in summary.items() if value is not None}
 
 
 def _normalize_orchestrator_graph_output(raw_output: object) -> object:
@@ -1269,103 +1335,104 @@ class TaskExecutionService:
             return None
 
         submission, persisted = loaded
-        await self._emit_progress(submission, persisted, phase="started")
-        await self._emit_progress(submission, persisted, phase="running")
+        with with_restored_trace_context(persisted.trace_context):
+            await self._emit_progress(submission, persisted, phase="started")
+            await self._emit_progress(submission, persisted, phase="running")
 
-        heartbeat_task = asyncio.create_task(
-            self._heartbeat_loop(
-                task_id=task_id,
-                worker_id=worker_id,
-                lease_seconds=lease_seconds,
-            ),
-            name=f"task-heartbeat-{task_id}",
-        )
-        started_at = utc_now()
-        logger.info(
-            "Starting execution-path task run",
-            extra={
-                "session_id": persisted.session_id,
-                "task_id": persisted.task_id,
-                "chosen_worker": None,
-                "route_reason": None,
-                "workspace_id": None,
-                "start_timestamp": started_at.isoformat(),
-                "worker_id": worker_id,
-            },
-        )
-        try:
-            state = await self._run_orchestrator(submission, persisted)
-            finished_at = utc_now()
-            if state.result is not None and state.result.status == "success":
-                await self._run_blocking(
-                    self._persist_execution_outcome,
-                    task_id=persisted.task_id,
-                    state=state,
-                    started_at=started_at,
-                    finished_at=finished_at,
-                    force_task_status=TaskStatus.COMPLETED,
-                )
-                await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
-            else:
-                terminal_failure = _requires_manual_follow_up(state)
-                terminal_status = _terminal_follow_up_status(
-                    state=state,
-                    terminal_failure=terminal_failure,
-                )
-                await self._run_blocking(
-                    self._persist_execution_outcome,
-                    task_id=persisted.task_id,
-                    state=state,
-                    started_at=started_at,
-                    finished_at=finished_at,
-                    force_task_status=terminal_status,
-                )
-                if terminal_failure:
-                    await self._run_blocking(
-                        self._release_task_terminal_failure,
-                        task_id=persisted.task_id,
-                        worker_id=worker_id,
-                        status=terminal_status,
-                    )
-                else:
-                    await self._run_blocking(
-                        self._release_task_failure,
-                        task_id=persisted.task_id,
-                        worker_id=worker_id,
-                    )
-        except Exception as exc:
-            logger.exception(
-                "Task execution failed before the final outcome was fully persisted",
+            heartbeat_task = asyncio.create_task(
+                self._heartbeat_loop(
+                    task_id=task_id,
+                    worker_id=worker_id,
+                    lease_seconds=lease_seconds,
+                ),
+                name=f"task-heartbeat-{task_id}",
+            )
+            started_at = utc_now()
+            logger.info(
+                "Starting execution-path task run",
                 extra={
                     "session_id": persisted.session_id,
                     "task_id": persisted.task_id,
+                    "chosen_worker": None,
+                    "route_reason": None,
+                    "workspace_id": None,
+                    "start_timestamp": started_at.isoformat(),
                     "worker_id": worker_id,
                 },
             )
-            await self._run_blocking(
-                self._record_task_attempt_error,
-                task_id=persisted.task_id,
-                error=f"{type(exc).__name__}: {exc}",
-            )
-            await self._run_blocking(
-                self._release_task_failure,
-                task_id=persisted.task_id,
-                worker_id=worker_id,
-            )
-        finally:
-            heartbeat_task.cancel()
-            await asyncio.gather(heartbeat_task, return_exceptions=True)
+            try:
+                state = await self._run_orchestrator(submission, persisted)
+                finished_at = utc_now()
+                if state.result is not None and state.result.status == "success":
+                    await self._run_blocking(
+                        self._persist_execution_outcome,
+                        task_id=persisted.task_id,
+                        state=state,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        force_task_status=TaskStatus.COMPLETED,
+                    )
+                    await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
+                else:
+                    terminal_failure = _requires_manual_follow_up(state)
+                    terminal_status = _terminal_follow_up_status(
+                        state=state,
+                        terminal_failure=terminal_failure,
+                    )
+                    await self._run_blocking(
+                        self._persist_execution_outcome,
+                        task_id=persisted.task_id,
+                        state=state,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        force_task_status=terminal_status,
+                    )
+                    if terminal_failure:
+                        await self._run_blocking(
+                            self._release_task_terminal_failure,
+                            task_id=persisted.task_id,
+                            worker_id=worker_id,
+                            status=terminal_status,
+                        )
+                    else:
+                        await self._run_blocking(
+                            self._release_task_failure,
+                            task_id=persisted.task_id,
+                            worker_id=worker_id,
+                        )
+            except Exception as exc:
+                logger.exception(
+                    "Task execution failed before the final outcome was fully persisted",
+                    extra={
+                        "session_id": persisted.session_id,
+                        "task_id": persisted.task_id,
+                        "worker_id": worker_id,
+                    },
+                )
+                await self._run_blocking(
+                    self._record_task_attempt_error,
+                    task_id=persisted.task_id,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                await self._run_blocking(
+                    self._release_task_failure,
+                    task_id=persisted.task_id,
+                    worker_id=worker_id,
+                )
+            finally:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
 
-        task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
-        if task_snapshot is None:
-            raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
-        self._log_task_outcome(task_snapshot)
-        await self._emit_progress(
-            submission,
-            persisted,
-            phase=_completion_progress_phase(task_snapshot),
-            summary=self._task_summary(task_snapshot),
-        )
+            task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
+            if task_snapshot is None:
+                raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
+            self._log_task_outcome(task_snapshot)
+            await self._emit_progress(
+                submission,
+                persisted,
+                phase=_completion_progress_phase(task_snapshot),
+                summary=self._task_summary(task_snapshot),
+            )
         return None
 
     async def _heartbeat_loop(
@@ -2067,6 +2134,7 @@ class TaskExecutionService:
                 )
             session_repo.touch(session_id=conversation_session.id, seen_at=now)
 
+            trace_context = capture_trace_context()
             task = task_repo.create(
                 session_id=conversation_session.id,
                 task_text=submission.task_text,
@@ -2077,6 +2145,7 @@ class TaskExecutionService:
                 budget=dict(submission.budget),
                 secrets=dict(submission.secrets),
                 task_spec=task_spec,
+                trace_context=trace_context,
                 # Store tools in constraints to avoid a schema migration for now
                 constraints={
                     **sanitized_constraints,
@@ -2220,55 +2289,64 @@ class TaskExecutionService:
             budget=submission.budget,
         )
 
-        span_cm: Any = nullcontext()
-        try:
-            from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
-
-            span_cm = otel_trace.get_tracer("orchestrator.execution").start_as_current_span(
-                "orchestrator.graph.run",
+        span_cm = start_optional_span(
+            tracer_name="orchestrator.execution",
+            span_name=(
+                f"orchestrator.graph.run (Attempt {persisted.attempt_count})"
+                if persisted.attempt_count > 1
+                else "orchestrator.graph.run"
+            ),
+            attributes=with_span_kind(
+                SPAN_KIND_AGENT,
                 attributes={
                     "code_agent.task_id": persisted.task_id,
                     "code_agent.session_id": persisted.session_id,
                     "code_agent.attempt_count": persisted.attempt_count,
                     "code_agent.channel": persisted.channel,
                 },
-            )
-        except ImportError:
-            span_cm = nullcontext()
+            ),
+        )
+
+        graph_input = {
+            "session": SessionRef(
+                session_id=persisted.session_id,
+                user_id=persisted.user_id,
+                channel=persisted.channel,
+                external_thread_id=persisted.external_thread_id,
+                active_task_id=persisted.task_id,
+                status="active",
+            ).model_dump(),
+            "task": {
+                "task_id": persisted.task_id,
+                "task_text": submission.task_text,
+                "repo_url": submission.repo_url,
+                "branch": submission.branch,
+                "priority": submission.priority,
+                "worker_override": (
+                    submission.worker_override.value
+                    if submission.worker_override is not None
+                    else None
+                ),
+                "constraints": dict(submission.constraints),
+                "budget": effective_budget,
+                "secrets": dict(submission.secrets),
+                "tools": submission.tools,
+            },
+            "task_spec": persisted.task_spec,
+            "attempt_count": persisted.attempt_count,
+            "timeline_persisted_count": initial_persisted_count,
+        }
 
         with span_cm:
-            raw_output = await self.graph.ainvoke(
-                {
-                    "session": SessionRef(
-                        session_id=persisted.session_id,
-                        user_id=persisted.user_id,
-                        channel=persisted.channel,
-                        external_thread_id=persisted.external_thread_id,
-                        active_task_id=persisted.task_id,
-                        status="active",
-                    ).model_dump(),
-                    "task": {
-                        "task_id": persisted.task_id,
-                        "task_text": submission.task_text,
-                        "repo_url": submission.repo_url,
-                        "branch": submission.branch,
-                        "priority": submission.priority,
-                        "worker_override": (
-                            submission.worker_override.value
-                            if submission.worker_override is not None
-                            else None
-                        ),
-                        "constraints": dict(submission.constraints),
-                        "budget": effective_budget,
-                        "secrets": dict(submission.secrets),
-                        "tools": submission.tools,
-                    },
-                    "task_spec": persisted.task_spec,
-                    "attempt_count": persisted.attempt_count,
-                    "timeline_persisted_count": initial_persisted_count,
-                },
-                config=config,
+            set_span_input_output(input_data=_summarize_graph_span_input(graph_input))
+            set_current_span_attribute(SESSION_ID_ATTRIBUTE, persisted.session_id)
+
+            raw_output = await self.graph.ainvoke(graph_input, config=config)
+            set_span_input_output(
+                input_data=None,
+                output_data=_summarize_graph_span_output(raw_output),
             )
+
         normalized_output = _normalize_orchestrator_graph_output(raw_output)
         return OrchestratorState.model_validate(normalized_output)
 
@@ -2320,6 +2398,7 @@ class TaskExecutionService:
                 task_id=task.id,
                 attempt_count=task.attempt_count,
                 task_spec=dict(task.task_spec) if isinstance(task.task_spec, dict) else None,
+                trace_context=dict(task.trace_context or {}),
             )
             return submission, persisted
 
@@ -2387,8 +2466,13 @@ class TaskExecutionService:
         *args: Any,
         **kwargs: Any,
     ) -> Any:
-        """Run a synchronous persistence operation in a worker thread."""
-        return await to_thread.run_sync(partial(func, *args, **kwargs))
+        """Run a synchronous persistence operation in a worker thread, propagating trace context."""
+
+        def _invoke() -> Any:
+            return func(*args, **kwargs)
+
+        wrapped = bind_current_trace_context(_invoke, original_func=func)
+        return await to_thread.run_sync(wrapped)
 
     def _create_or_get_user(
         self,
