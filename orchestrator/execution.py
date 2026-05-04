@@ -816,12 +816,14 @@ def _summarize_graph_span_output(raw_output: object) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "current_step": payload.get("current_step"),
         "attempt_count": payload.get("attempt_count"),
-        "status": result.get("status") or review.get("status"),
-        "failure_kind": result.get("failure_kind"),
+        "timeline_persisted_count": payload.get("timeline_persisted_count"),
+        "repair_handoff_requested": payload.get("repair_handoff_requested"),
+        "result_status": result.get("status"),
+        "review_outcome": review.get("outcome"),
         "verification_status": verification.get("status"),
-        "errors_count": len(payload.get("errors", []))
-        if isinstance(payload.get("errors"), list)
-        else 0,
+        "error_count": (
+            len(payload.get("errors", [])) if isinstance(payload.get("errors"), list) else None
+        ),
     }
     return {key: value for key, value in summary.items() if value is not None}
 
