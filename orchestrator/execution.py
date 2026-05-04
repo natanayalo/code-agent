@@ -1301,7 +1301,8 @@ class TaskExecutionService:
                     task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
                     if task_snapshot is None:
                         logger.error(
-                            "Failed to reload task snapshot after marking a task as failed",
+                            "Failed to reload task snapshot after marking a "
+                            "background task as failed",
                             extra={
                                 "session_id": persisted.session_id,
                                 "task_id": persisted.task_id,
@@ -1311,7 +1312,10 @@ class TaskExecutionService:
                             submission,
                             persisted,
                             phase="failed",
-                            summary="Task execution failed and snapshot reload failed.",
+                            summary=(
+                                "Task execution failed and the final snapshot "
+                                "could not be reloaded."
+                            ),
                         )
                         return None
                     self._log_task_outcome(task_snapshot)
