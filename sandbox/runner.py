@@ -16,7 +16,9 @@ from apps.observability import (
     OPENINFERENCE_SPAN_KIND_ATTRIBUTE,
     SPAN_KIND_TOOL,
     inject_w3c_trace_context_env,
+    record_span_exception,
     set_span_input_output,
+    set_span_status,
     start_optional_span,
 )
 from sandbox.audit import capture_audit_artifacts
@@ -382,18 +384,28 @@ class DockerSandboxRunner:
             span_name=span_name,
             attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
         ):
-            set_span_input_output(
-                input_data=sanitize_command(shlex.join(request.command), redactor)
-            )
-            completed = self._command_runner(
-                docker_command,
-                timeout=request.timeout_seconds,
-                redactor=redactor,
-            )
-            set_span_input_output(
-                input_data=None,
-                output_data=redactor.redact(completed.stdout) if redactor else completed.stdout,
-            )
+            try:
+                set_span_input_output(
+                    input_data=sanitize_command(shlex.join(request.command), redactor)
+                )
+                completed = self._command_runner(
+                    docker_command,
+                    timeout=request.timeout_seconds,
+                    redactor=redactor,
+                )
+                if completed.returncode != 0:
+                    set_span_status(
+                        "ERROR", f"Command failed with exit code {completed.returncode}"
+                    )
+                set_span_input_output(
+                    input_data=None,
+                    output_data=redactor.redact(completed.stdout) if redactor else completed.stdout,
+                )
+            except (RuntimeError, OSError) as exc:
+                logger.debug(f"Command execution failed: {exc}", exc_info=True)
+                record_span_exception(exc)
+                set_span_status("ERROR", str(exc))
+                raise
         duration_seconds = perf_counter() - started_at
 
         redacted_stdout = redactor.redact(completed.stdout) if redactor else completed.stdout
