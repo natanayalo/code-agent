@@ -1288,7 +1288,10 @@ class TaskExecutionService:
                         finished_at=finished_at,
                     )
                     self._update_span_status_from_state(state)
-                except Exception:
+                except (RuntimeError, AttributeError) as exc:
+                    logger.debug(f"Task submission failed: {exc}", exc_info=True)
+                    record_span_exception(exc)
+                    set_span_status("ERROR", str(exc))
                     logger.exception(
                         "Task execution failed before the final outcome was fully persisted",
                         extra={
