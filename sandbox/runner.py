@@ -12,7 +12,13 @@ from typing import Protocol
 
 from pydantic import Field
 
-from apps.observability import inject_w3c_trace_context_env
+from apps.observability import (
+    OPENINFERENCE_SPAN_KIND_ATTRIBUTE,
+    SPAN_KIND_TOOL,
+    inject_w3c_trace_context_env,
+    set_span_input_output,
+    start_optional_span,
+)
 from sandbox.audit import capture_audit_artifacts
 from sandbox.container import build_container_name
 from sandbox.policy import PathPolicy
@@ -367,11 +373,19 @@ class DockerSandboxRunner:
         )
 
         started_at = perf_counter()
-        completed = self._command_runner(
-            docker_command,
-            timeout=request.timeout_seconds,
-            redactor=redactor,
-        )
+        span_name = f"sandbox.run: {request.command[0]}"
+        with start_optional_span(
+            tracer_name="sandbox.runner",
+            span_name=span_name,
+            attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
+        ):
+            set_span_input_output(input_data=shlex.join(request.command))
+            completed = self._command_runner(
+                docker_command,
+                timeout=request.timeout_seconds,
+                redactor=redactor,
+            )
+            set_span_input_output(input_data=None, output_data=completed.stdout)
         duration_seconds = perf_counter() - started_at
 
         redacted_stdout = redactor.redact(completed.stdout) if redactor else completed.stdout
