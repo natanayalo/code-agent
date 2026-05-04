@@ -25,8 +25,12 @@ from apps.observability import (
 from sandbox.audit import capture_audit_artifacts
 from sandbox.container import DockerSandboxContainer
 from sandbox.policy import PathPolicy
-from sandbox.redact import SecretRedactor, sanitize_command
-from sandbox.redact import mask_url_credentials as _mask_url_credentials
+from sandbox.redact import (
+    SecretRedactor,
+    mask_url_credentials,
+    redact_and_truncate_output,
+    sanitize_command,
+)
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
 from sandbox.workspace import SandboxArtifact, SandboxModel
 
@@ -182,7 +186,7 @@ def _default_shell_process_factory(command: list[str]) -> subprocess.Popen[bytes
             stderr=subprocess.STDOUT,
         )
     except OSError as exc:
-        cmd_str = _mask_url_credentials(shlex.join(command))
+        cmd_str = mask_url_credentials(shlex.join(command))
         raise DockerShellSessionError(
             f"Failed to start persistent shell session ({cmd_str}): {exc}"
         ) from exc
@@ -396,7 +400,10 @@ class DockerShellSession:
                     else:
                         set_span_status(STATUS_OK)
 
-                    set_span_input_output(input_data=None, output_data=output)
+                    set_span_input_output(
+                        input_data=None,
+                        output_data=redact_and_truncate_output(output, self.redactor),
+                    )
                 except (DockerShellSessionError, RuntimeError, OSError) as exc:
                     logger.debug(f"Persistent shell session failed: {exc}", exc_info=True)
                     record_span_exception(exc)

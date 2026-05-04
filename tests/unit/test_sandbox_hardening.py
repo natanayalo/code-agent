@@ -7,6 +7,7 @@ from sandbox.redact import (
     SecretRedactor,
     construct_sandbox_output,
     mask_url_credentials,
+    redact_and_truncate_output,
     sanitize_command,
 )
 
@@ -95,3 +96,11 @@ def test_construct_sandbox_output_redacts_both():
     assert "https://****@github.com" in output
     assert "my-secret" not in output
     assert "[REDACTED]" in output
+
+
+def test_redact_and_truncate_output_truncates():
+    text = "a" * 100
+    truncated = redact_and_truncate_output(text, limit_chars=10)
+    assert len(truncated) > 10
+    assert truncated.startswith("aaaaaaaaaa")
+    assert "TRUNCATED" in truncated

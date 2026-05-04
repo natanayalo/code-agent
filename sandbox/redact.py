@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import re
+from typing import Final
+
+REDACTED_OUTPUT_LIMIT: Final[int] = 32768
 
 
 class SecretRedactor:
@@ -39,18 +42,34 @@ def sanitize_command(command: str, redactor: SecretRedactor | None) -> str:
     return redactor.redact(sanitized)
 
 
+def redact_and_truncate_output(
+    text: str,
+    redactor: SecretRedactor | None = None,
+    limit_chars: int = REDACTED_OUTPUT_LIMIT,
+) -> str:
+    """Redact secrets and truncate text for safe logging and tracing."""
+    if not text:
+        return ""
+    sanitized = mask_url_credentials(text)
+    if redactor:
+        sanitized = redactor.redact(sanitized)
+
+    if len(sanitized) > limit_chars:
+        return (
+            sanitized[:limit_chars] + f"\n\n[TRUNCATED: Output exceeded {limit_chars} characters]"
+        )
+    return sanitized
+
+
 def construct_sandbox_output(
     stdout: str,
     stderr: str,
     redactor: SecretRedactor | None = None,
-    limit_chars: int = 32768,
+    limit_chars: int = REDACTED_OUTPUT_LIMIT,
 ) -> str:
     """Construct a redacted summary of sandbox command output."""
-    out = mask_url_credentials(stdout or "")
-    err = mask_url_credentials(stderr or "")
-    if redactor:
-        out = redactor.redact(out)
-        err = redactor.redact(err)
+    out = stdout or ""
+    err = stderr or ""
 
     if not out and not err:
         return ""
@@ -62,6 +81,4 @@ def construct_sandbox_output(
     else:
         result = f"{out}\n--- stderr ---\n{err}"
 
-    if len(result) > limit_chars:
-        return result[:limit_chars] + f"\n\n[TRUNCATED: Output exceeded {limit_chars} characters]"
-    return result
+    return redact_and_truncate_output(result, redactor=redactor, limit_chars=limit_chars)
