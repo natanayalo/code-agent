@@ -21,7 +21,7 @@ from apps.observability import (
 from sandbox.audit import capture_audit_artifacts
 from sandbox.container import DockerSandboxContainer
 from sandbox.policy import PathPolicy
-from sandbox.redact import SecretRedactor
+from sandbox.redact import SecretRedactor, sanitize_command
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
 from sandbox.workspace import SandboxArtifact, SandboxModel, _mask_url_credentials
 
@@ -304,7 +304,7 @@ class DockerShellSession:
                 span_name=span_name,
                 attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
             ):
-                set_span_input_output(input_data=command)
+                set_span_input_output(input_data=sanitize_command(command, self.redactor))
                 try:
                     self._stdin.write(wrapped_command)
                     self._stdin.flush()
@@ -348,7 +348,7 @@ class DockerShellSession:
                     detail = f" Partial output:\n{output}" if output else ""
                     raise DockerShellSessionError(
                         f"Persistent shell session command timed out after {timeout_seconds}s: "
-                        f"{command}{detail}"
+                        f"{sanitize_command(command, self.redactor)}{detail}"
                     )
 
                 if error_holder:
@@ -367,13 +367,15 @@ class DockerShellSession:
                 if limit_exceeded.is_set():
                     raise DockerShellSessionError(
                         f"Persistent shell session output limit exceeded "
-                        f"({self.output_limit_bytes} bytes) for command: {command}"
+                        f"({self.output_limit_bytes} bytes) for command: "
+                        f"{sanitize_command(command, self.redactor)}"
                     )
                 if not stream.marker_seen or stream.exit_code is None:
                     self._terminate_process()
                     raise DockerShellSessionError(
-                        f"Persistent shell session terminated before returning an exit code for "
-                        f"command: {command}\nPartial output:\n{output}"
+                        "Persistent shell session terminated before returning an exit code for "
+                        f"command: {sanitize_command(command, self.redactor)}\n"
+                        f"Partial output:\n{output}"
                     )
 
                 set_span_input_output(input_data=None, output_data=output)

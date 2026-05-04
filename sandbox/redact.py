@@ -24,3 +24,10 @@ class SecretRedactor:
         if not self._pattern or not text:
             return text
         return self._pattern.sub("[REDACTED]", text)
+
+
+def sanitize_command(command: str, redactor: SecretRedactor | None) -> str:
+    """Redact secrets from a command string for safe logging and tracing."""
+    if not redactor:
+        return command
+    return redactor.redact(command)

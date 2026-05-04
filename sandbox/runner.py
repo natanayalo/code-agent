@@ -22,7 +22,7 @@ from apps.observability import (
 from sandbox.audit import capture_audit_artifacts
 from sandbox.container import build_container_name
 from sandbox.policy import PathPolicy
-from sandbox.redact import SecretRedactor
+from sandbox.redact import SecretRedactor, sanitize_command
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
 from sandbox.workspace import (
     SandboxArtifact,
@@ -379,7 +379,9 @@ class DockerSandboxRunner:
             span_name=span_name,
             attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
         ):
-            set_span_input_output(input_data=shlex.join(request.command))
+            set_span_input_output(
+                input_data=sanitize_command(shlex.join(request.command), redactor)
+            )
             completed = self._command_runner(
                 docker_command,
                 timeout=request.timeout_seconds,
