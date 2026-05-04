@@ -17,7 +17,6 @@ from apps.observability import (
     SPAN_KIND_TOOL,
     STATUS_ERROR,
     STATUS_OK,
-    record_span_exception,
     set_span_input_output,
     set_span_status,
     start_optional_span,
@@ -404,10 +403,8 @@ class DockerShellSession:
                         input_data=None,
                         output_data=redact_and_truncate_output(output, self.redactor),
                     )
-                except (DockerShellSessionError, RuntimeError, OSError) as exc:
-                    logger.debug(f"Persistent shell session failed: {exc}", exc_info=True)
-                    record_span_exception(exc)
-                    set_span_status(STATUS_ERROR, str(exc))
+                except (DockerShellSessionError, RuntimeError, OSError):
+                    self._terminate_process()
                     raise
             duration_seconds = perf_counter() - started_at
 

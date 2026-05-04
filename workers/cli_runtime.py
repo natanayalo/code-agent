@@ -20,7 +20,6 @@ from apps.observability import (
     SPAN_KIND_TOOL,
     STATUS_ERROR,
     STATUS_OK,
-    record_span_exception,
     set_optional_span_attribute,
     set_span_input_output,
     set_span_status,
@@ -1523,7 +1522,6 @@ def run_cli_runtime_loop(
                             STATUS_ERROR, f"Command failed with exit code {shell_result.exit_code}"
                         )
                 except DockerShellSessionError as exc:
-                    record_span_exception(exc)
                     return _finalize_execution_result(
                         context,
                         status="error",
