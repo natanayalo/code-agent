@@ -1341,7 +1341,8 @@ class TaskExecutionService:
                     phase=_completion_progress_phase(task_snapshot),
                     summary=self._task_summary(task_snapshot),
                 )
-            except Exception as exc:
+            except (RuntimeError, AttributeError) as exc:
+                logger.debug(f"Task submission failed: {exc}", exc_info=True)
                 record_span_exception(exc)
                 set_span_status("ERROR", str(exc))
                 raise
