@@ -24,13 +24,19 @@ from apps.observability import (
 from sandbox.audit import capture_audit_artifacts
 from sandbox.container import build_container_name
 from sandbox.policy import PathPolicy
-from sandbox.redact import SecretRedactor, construct_sandbox_output, sanitize_command
+from sandbox.redact import (
+    SecretRedactor,
+    construct_sandbox_output,
+    sanitize_command,
+)
+from sandbox.redact import (
+    mask_url_credentials as _mask_url_credentials,
+)
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
 from sandbox.workspace import (
     SandboxArtifact,
     SandboxModel,
     WorkspaceHandle,
-    _mask_url_credentials,
 )
 
 SANDBOX_RUN_SPAN_PREFIX: Final = "sandbox.run"

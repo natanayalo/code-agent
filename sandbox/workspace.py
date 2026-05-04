@@ -16,6 +16,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from sandbox.redact import mask_url_credentials as _mask_url_credentials
+
 logger = logging.getLogger(__name__)
 
 
@@ -87,11 +89,6 @@ def _slugify_workspace_owner(value: str) -> str:
     """Normalize a workspace owner component for the default path."""
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug[:48] or "task"
-
-
-def _mask_url_credentials(text: str) -> str:
-    """Mask credentials in repository URLs to prevent leaking secrets."""
-    return re.sub(r"://[^/ ]+@", "://****@", text)
 
 
 def _build_workspace_id(task_id: str) -> str:

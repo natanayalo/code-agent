@@ -26,11 +26,17 @@ class SecretRedactor:
         return self._pattern.sub("[REDACTED]", text)
 
 
+def mask_url_credentials(text: str) -> str:
+    """Mask credentials in repository URLs to prevent leaking secrets."""
+    return re.sub(r"://[^/ ]+@", "://****@", text)
+
+
 def sanitize_command(command: str, redactor: SecretRedactor | None) -> str:
     """Redact secrets from a command string for safe logging and tracing."""
+    sanitized = mask_url_credentials(command)
     if not redactor:
-        return command
-    return redactor.redact(command)
+        return sanitized
+    return redactor.redact(sanitized)
 
 
 def construct_sandbox_output(
@@ -40,8 +46,8 @@ def construct_sandbox_output(
     limit_chars: int = 32768,
 ) -> str:
     """Construct a redacted summary of sandbox command output."""
-    out = stdout or ""
-    err = stderr or ""
+    out = mask_url_credentials(stdout or "")
+    err = mask_url_credentials(stderr or "")
     if redactor:
         out = redactor.redact(out)
         err = redactor.redact(err)

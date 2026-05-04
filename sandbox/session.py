@@ -24,8 +24,9 @@ from sandbox.audit import capture_audit_artifacts
 from sandbox.container import DockerSandboxContainer
 from sandbox.policy import PathPolicy
 from sandbox.redact import SecretRedactor, sanitize_command
+from sandbox.redact import mask_url_credentials as _mask_url_credentials
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
-from sandbox.workspace import SandboxArtifact, SandboxModel, _mask_url_credentials
+from sandbox.workspace import SandboxArtifact, SandboxModel
 
 logger = logging.getLogger(__name__)
 SHELL_EXECUTE_SPAN_PREFIX: Final = "shell.execute"
