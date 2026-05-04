@@ -740,7 +740,9 @@ def test_set_span_status_invokes_otel_set_status() -> None:
     # Mocking Status for the test
     with patch("opentelemetry.trace.Status") as mock_status_cls:
         with patch("opentelemetry.trace.get_current_span", return_value=span):
-            observability_module.set_span_status("ERROR", "something went wrong")
+            observability_module.set_span_status(
+                observability_module.STATUS_ERROR, "something went wrong"
+            )
 
     assert span.status is not None
     mock_status_cls.assert_called_once()

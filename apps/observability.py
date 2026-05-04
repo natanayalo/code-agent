@@ -31,6 +31,9 @@ SPAN_KIND_AGENT: Final[str] = "AGENT"
 SPAN_KIND_CHAIN: Final[str] = "CHAIN"
 SPAN_KIND_LLM: Final[str] = "LLM"
 SPAN_KIND_TOOL: Final[str] = "TOOL"
+STATUS_OK: Final[str] = "OK"
+STATUS_ERROR: Final[str] = "ERROR"
+STATUS_UNSET: Final[str] = "UNSET"
 TRACE_CONTEXT_ENV_KEYS: Final[dict[str, str]] = {
     "traceparent": "TRACEPARENT",
     "tracestate": "TRACESTATE",

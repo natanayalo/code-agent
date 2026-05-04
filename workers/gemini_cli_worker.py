@@ -11,6 +11,8 @@ from typing import Protocol
 
 from apps.observability import (
     SPAN_KIND_AGENT,
+    STATUS_ERROR,
+    STATUS_OK,
     record_span_exception,
     set_span_status,
     start_optional_span,
@@ -279,13 +281,13 @@ class GeminiCliWorker(Worker):
             try:
                 result = await run_sync_with_cancellable_executor(_run_sync)
                 if result.status == "success":
-                    set_span_status("OK")
+                    set_span_status(STATUS_OK)
                 else:
-                    set_span_status("ERROR", result.summary)
+                    set_span_status(STATUS_ERROR, result.summary)
                 return result
             except Exception as exc:
                 record_span_exception(exc)
-                set_span_status("ERROR", str(exc))
+                set_span_status(STATUS_ERROR, str(exc))
                 raise
 
     def _cleanup_workspace(

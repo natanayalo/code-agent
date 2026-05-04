@@ -8,6 +8,8 @@ from typing import Any
 
 from apps.observability import (
     SPAN_KIND_LLM,
+    STATUS_ERROR,
+    STATUS_OK,
     record_span_exception,
     set_span_input_output,
     set_span_status,
@@ -33,10 +35,10 @@ def with_llm_span(
         set_span_input_output(input_data=input_data)
         try:
             yield
-            set_span_status("OK")
+            set_span_status(STATUS_OK)
         except Exception as exc:
             record_span_exception(exc)
-            set_span_status("ERROR", str(exc))
+            set_span_status(STATUS_ERROR, str(exc))
             raise
 
 

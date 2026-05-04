@@ -15,6 +15,8 @@ from pydantic import Field
 from apps.observability import (
     OPENINFERENCE_SPAN_KIND_ATTRIBUTE,
     SPAN_KIND_TOOL,
+    STATUS_ERROR,
+    STATUS_OK,
     inject_w3c_trace_context_env,
     record_span_exception,
     set_span_input_output,
@@ -401,8 +403,10 @@ class DockerSandboxRunner:
                 )
                 if completed.returncode != 0:
                     set_span_status(
-                        "ERROR", f"Command failed with exit code {completed.returncode}"
+                        STATUS_ERROR, f"Command failed with exit code {completed.returncode}"
                     )
+                else:
+                    set_span_status(STATUS_OK)
                 set_span_input_output(
                     input_data=None,
                     output_data=construct_sandbox_output(
@@ -412,7 +416,7 @@ class DockerSandboxRunner:
             except (RuntimeError, OSError) as exc:
                 logger.debug(f"Command execution failed: {exc}", exc_info=True)
                 record_span_exception(exc)
-                set_span_status("ERROR", str(exc))
+                set_span_status(STATUS_ERROR, str(exc))
                 raise
         duration_seconds = perf_counter() - started_at
 

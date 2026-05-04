@@ -15,6 +15,8 @@ from pydantic import Field
 from apps.observability import (
     OPENINFERENCE_SPAN_KIND_ATTRIBUTE,
     SPAN_KIND_TOOL,
+    STATUS_ERROR,
+    STATUS_OK,
     record_span_exception,
     set_span_input_output,
     set_span_status,
@@ -389,16 +391,16 @@ class DockerShellSession:
 
                     if stream.exit_code != 0:
                         set_span_status(
-                            "ERROR", f"Command failed with exit code {stream.exit_code}"
+                            STATUS_ERROR, f"Command failed with exit code {stream.exit_code}"
                         )
                     else:
-                        set_span_status("OK")
+                        set_span_status(STATUS_OK)
 
                     set_span_input_output(input_data=None, output_data=output)
                 except (DockerShellSessionError, RuntimeError, OSError) as exc:
                     logger.debug(f"Persistent shell session failed: {exc}", exc_info=True)
                     record_span_exception(exc)
-                    set_span_status("ERROR", str(exc))
+                    set_span_status(STATUS_ERROR, str(exc))
                     raise
             duration_seconds = perf_counter() - started_at
 
