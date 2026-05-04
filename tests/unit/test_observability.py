@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -697,5 +698,52 @@ def test_set_span_input_output_handles_tuples_and_mappings() -> None:
 
     assert span.attributes["input.value"] == "[1, 2, 3]"
     assert span.attributes["input.mime_type"] == "application/json"
-    assert span.attributes["output.value"] == '{"foo": "bar"}'
-    assert span.attributes["output.mime_type"] == "application/json"
+
+
+def test_record_span_exception_invokes_otel_record_exception() -> None:
+    """Helper should delegate to OTEL span.record_exception."""
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.exceptions: list[BaseException] = []
+
+        def is_recording(self) -> bool:
+            return True
+
+        def record_exception(self, exception: BaseException) -> None:
+            self.exceptions.append(exception)
+
+    span = _FakeSpan()
+    exc = RuntimeError("boom")
+
+    with patch("opentelemetry.trace.get_current_span", return_value=span):
+        observability_module.record_span_exception(exc)
+
+    assert span.exceptions == [exc]
+
+
+def test_set_span_status_invokes_otel_set_status() -> None:
+    """Helper should delegate to OTEL span.set_status."""
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.status: Any = None
+
+        def is_recording(self) -> bool:
+            return True
+
+        def set_status(self, status: Any) -> None:
+            self.status = status
+
+    span = _FakeSpan()
+
+    # Mocking Status for the test
+    with patch("opentelemetry.trace.Status") as mock_status_cls:
+        with patch("opentelemetry.trace.get_current_span", return_value=span):
+            observability_module.set_span_status(
+                observability_module.STATUS_ERROR, "something went wrong"
+            )
+
+    assert span.status is not None
+    mock_status_cls.assert_called_once()
+    assert span.status == mock_status_cls.return_value

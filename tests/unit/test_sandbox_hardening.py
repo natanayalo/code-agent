@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from sandbox.policy import PathPolicy
-from sandbox.redact import SecretRedactor
+from sandbox.redact import (
+    SecretRedactor,
+    construct_sandbox_output,
+    mask_url_credentials,
+    redact_and_truncate_output,
+    sanitize_command,
+)
 
 
 def test_secret_redactor_basic():
@@ -62,3 +68,39 @@ def test_path_policy_robustness():
     # Correctly denied
     assert policy.check_path("/workspace/.git/config") is False
     assert policy.check_path("/workspace/.git") is False
+
+
+def test_mask_url_credentials():
+    assert mask_url_credentials("https://user:pass@github.com") == "https://****@github.com"
+    assert (
+        mask_url_credentials("git clone https://user:pass@github.com/repo.git")
+        == "git clone https://****@github.com/repo.git"
+    )
+    assert mask_url_credentials("plain text") == "plain text"
+
+
+def test_sanitize_command_redacts_both():
+    redactor = SecretRedactor(["my-secret"])
+    cmd = "git clone https://user:pass@github.com/repo.git && echo my-secret"
+    sanitized = sanitize_command(cmd, redactor)
+    assert "https://****@github.com" in sanitized
+    assert "my-secret" not in sanitized
+    assert "[REDACTED]" in sanitized
+
+
+def test_construct_sandbox_output_redacts_both():
+    redactor = SecretRedactor(["my-secret"])
+    stdout = "cloning https://user:pass@github.com/repo.git"
+    stderr = "failed with my-secret"
+    output = construct_sandbox_output(stdout, stderr, redactor)
+    assert "https://****@github.com" in output
+    assert "my-secret" not in output
+    assert "[REDACTED]" in output
+
+
+def test_redact_and_truncate_output_truncates():
+    text = "a" * 100
+    truncated = redact_and_truncate_output(text, limit_chars=10)
+    assert len(truncated) > 10
+    assert truncated.startswith("aaaaaaaaaa")
+    assert "TRUNCATED" in truncated

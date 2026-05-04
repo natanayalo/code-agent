@@ -10,7 +10,8 @@ from typing import Protocol
 
 from pydantic import Field
 
-from sandbox.workspace import SandboxModel, WorkspaceHandle, _mask_url_credentials
+from sandbox.redact import mask_url_credentials as _mask_url_credentials
+from sandbox.workspace import SandboxModel, WorkspaceHandle
 
 logger = logging.getLogger(__name__)
 

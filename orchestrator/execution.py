@@ -31,10 +31,14 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 from apps.observability import (
     SESSION_ID_ATTRIBUTE,
     SPAN_KIND_AGENT,
+    STATUS_ERROR,
     bind_current_trace_context,
     capture_trace_context,
+    record_span_exception,
     set_current_span_attribute,
     set_span_input_output,
+    set_span_status,
+    set_span_status_from_outcome,
     start_optional_span,
     with_restored_trace_context,
     with_span_kind,
@@ -1246,76 +1250,93 @@ class TaskExecutionService:
         persisted: _PersistedTaskContext,
     ) -> None:
         """Legacy direct execution entrypoint kept for compatibility/tests."""
-        await self._run_blocking(self._mark_task_in_progress, task_id=persisted.task_id)
-        await self._emit_progress(submission, persisted, phase="started")
-        await self._emit_progress(submission, persisted, phase="running")
-        started_at = utc_now()
-        logger.info(
-            "Starting execution-path task run",
-            extra={
-                "session_id": persisted.session_id,
-                "task_id": persisted.task_id,
-                "chosen_worker": None,
-                "route_reason": None,
-                "workspace_id": None,
-                "start_timestamp": started_at.isoformat(),
-            },
+        span_cm = start_optional_span(
+            tracer_name="orchestrator.execution",
+            span_name="TaskExecutionService.submit_task",
+            attributes=with_span_kind(
+                SPAN_KIND_AGENT,
+                attributes={
+                    "code_agent.task_id": persisted.task_id,
+                    "code_agent.session_id": persisted.session_id,
+                },
+            ),
         )
-
-        try:
-            state = await self._run_orchestrator(submission, persisted)
-            finished_at = utc_now()
-            await self._run_blocking(
-                self._persist_execution_outcome,
-                task_id=persisted.task_id,
-                state=state,
-                started_at=started_at,
-                finished_at=finished_at,
-            )
-        except Exception:
-            logger.exception(
-                "Task execution failed before the final outcome was fully persisted",
+        with span_cm:
+            await self._run_blocking(self._mark_task_in_progress, task_id=persisted.task_id)
+            await self._emit_progress(submission, persisted, phase="started")
+            await self._emit_progress(submission, persisted, phase="running")
+            started_at = utc_now()
+            logger.info(
+                "Starting execution-path task run",
                 extra={
                     "session_id": persisted.session_id,
                     "task_id": persisted.task_id,
+                    "chosen_worker": None,
+                    "route_reason": None,
+                    "workspace_id": None,
+                    "start_timestamp": started_at.isoformat(),
                 },
             )
-            await self._run_blocking(self._mark_task_failed, task_id=persisted.task_id)
-            task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
-            if task_snapshot is None:
-                logger.error(
-                    "Failed to reload task snapshot after marking a background task as failed",
+
+            try:
+                state = await self._run_orchestrator(submission, persisted)
+                finished_at = utc_now()
+                await self._run_blocking(
+                    self._persist_execution_outcome,
+                    task_id=persisted.task_id,
+                    state=state,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                )
+                self._update_span_status_from_state(state)
+            except Exception as exc:
+                self._record_execution_span_error(exc)
+                logger.exception(
+                    "Task execution failed before the final outcome was fully persisted",
                     extra={
                         "session_id": persisted.session_id,
                         "task_id": persisted.task_id,
                     },
                 )
+                await self._run_blocking(self._mark_task_failed, task_id=persisted.task_id)
+                task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
+                if task_snapshot is None:
+                    logger.error(
+                        "Failed to reload task snapshot after marking a "
+                        "background task as failed",
+                        extra={
+                            "session_id": persisted.session_id,
+                            "task_id": persisted.task_id,
+                        },
+                    )
+                    await self._emit_progress(
+                        submission,
+                        persisted,
+                        phase="failed",
+                        summary=(
+                            "Task execution failed and the final snapshot " "could not be reloaded."
+                        ),
+                    )
+                    return None
+                self._log_task_outcome(task_snapshot)
                 await self._emit_progress(
                     submission,
                     persisted,
                     phase="failed",
-                    summary="Task execution failed and the final snapshot could not be reloaded.",
+                    summary=self._task_summary(task_snapshot),
                 )
                 return None
+
+            task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
+            if task_snapshot is None:
+                raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
             self._log_task_outcome(task_snapshot)
             await self._emit_progress(
                 submission,
                 persisted,
-                phase="failed",
+                phase=_completion_progress_phase(task_snapshot),
                 summary=self._task_summary(task_snapshot),
             )
-            return None
-
-        task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
-        if task_snapshot is None:
-            raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
-        self._log_task_outcome(task_snapshot)
-        await self._emit_progress(
-            submission,
-            persisted,
-            phase=_completion_progress_phase(task_snapshot),
-            summary=self._task_summary(task_snapshot),
-        )
         return None
 
     async def run_queued_task(
@@ -1336,104 +1357,138 @@ class TaskExecutionService:
 
         submission, persisted = loaded
         with with_restored_trace_context(persisted.trace_context):
-            await self._emit_progress(submission, persisted, phase="started")
-            await self._emit_progress(submission, persisted, phase="running")
-
-            heartbeat_task = asyncio.create_task(
-                self._heartbeat_loop(
-                    task_id=task_id,
-                    worker_id=worker_id,
-                    lease_seconds=lease_seconds,
+            span_cm = start_optional_span(
+                tracer_name="orchestrator.execution",
+                span_name="TaskExecutionService.run_queued_task",
+                attributes=with_span_kind(
+                    SPAN_KIND_AGENT,
+                    attributes={
+                        "code_agent.task_id": persisted.task_id,
+                        "code_agent.session_id": persisted.session_id,
+                        "code_agent.worker_id": worker_id,
+                    },
                 ),
-                name=f"task-heartbeat-{task_id}",
             )
-            started_at = utc_now()
-            logger.info(
-                "Starting execution-path task run",
-                extra={
-                    "session_id": persisted.session_id,
-                    "task_id": persisted.task_id,
-                    "chosen_worker": None,
-                    "route_reason": None,
-                    "workspace_id": None,
-                    "start_timestamp": started_at.isoformat(),
-                    "worker_id": worker_id,
-                },
-            )
-            try:
-                state = await self._run_orchestrator(submission, persisted)
-                finished_at = utc_now()
-                if state.result is not None and state.result.status == "success":
-                    await self._run_blocking(
-                        self._persist_execution_outcome,
-                        task_id=persisted.task_id,
-                        state=state,
-                        started_at=started_at,
-                        finished_at=finished_at,
-                        force_task_status=TaskStatus.COMPLETED,
-                    )
-                    await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
-                else:
-                    terminal_failure = _requires_manual_follow_up(state)
-                    terminal_status = _terminal_follow_up_status(
-                        state=state,
-                        terminal_failure=terminal_failure,
-                    )
-                    await self._run_blocking(
-                        self._persist_execution_outcome,
-                        task_id=persisted.task_id,
-                        state=state,
-                        started_at=started_at,
-                        finished_at=finished_at,
-                        force_task_status=terminal_status,
-                    )
-                    if terminal_failure:
-                        await self._run_blocking(
-                            self._release_task_terminal_failure,
-                            task_id=persisted.task_id,
-                            worker_id=worker_id,
-                            status=terminal_status,
-                        )
-                    else:
-                        await self._run_blocking(
-                            self._release_task_failure,
-                            task_id=persisted.task_id,
-                            worker_id=worker_id,
-                        )
-            except Exception as exc:
-                logger.exception(
-                    "Task execution failed before the final outcome was fully persisted",
+            with span_cm:
+                await self._emit_progress(submission, persisted, phase="started")
+                await self._emit_progress(submission, persisted, phase="running")
+
+                heartbeat_task = asyncio.create_task(
+                    self._heartbeat_loop(
+                        task_id=task_id,
+                        worker_id=worker_id,
+                        lease_seconds=lease_seconds,
+                    ),
+                    name=f"task-heartbeat-{task_id}",
+                )
+                started_at = utc_now()
+                logger.info(
+                    "Starting execution-path task run",
                     extra={
                         "session_id": persisted.session_id,
                         "task_id": persisted.task_id,
+                        "chosen_worker": None,
+                        "route_reason": None,
+                        "workspace_id": None,
+                        "start_timestamp": started_at.isoformat(),
                         "worker_id": worker_id,
                     },
                 )
-                await self._run_blocking(
-                    self._record_task_attempt_error,
-                    task_id=persisted.task_id,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
-                await self._run_blocking(
-                    self._release_task_failure,
-                    task_id=persisted.task_id,
-                    worker_id=worker_id,
-                )
-            finally:
-                heartbeat_task.cancel()
-                await asyncio.gather(heartbeat_task, return_exceptions=True)
+                try:
+                    state = await self._run_orchestrator(submission, persisted)
+                    finished_at = utc_now()
 
-            task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
-            if task_snapshot is None:
-                raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
-            self._log_task_outcome(task_snapshot)
-            await self._emit_progress(
-                submission,
-                persisted,
-                phase=_completion_progress_phase(task_snapshot),
-                summary=self._task_summary(task_snapshot),
-            )
+                    self._update_span_status_from_state(state)
+
+                    if state.result is not None and state.result.status == "success":
+                        await self._run_blocking(
+                            self._persist_execution_outcome,
+                            task_id=persisted.task_id,
+                            state=state,
+                            started_at=started_at,
+                            finished_at=finished_at,
+                            force_task_status=TaskStatus.COMPLETED,
+                        )
+                        await self._run_blocking(
+                            self._release_task_success, task_id=persisted.task_id
+                        )
+                    else:
+                        terminal_failure = _requires_manual_follow_up(state)
+                        terminal_status = _terminal_follow_up_status(
+                            state=state,
+                            terminal_failure=terminal_failure,
+                        )
+                        await self._run_blocking(
+                            self._persist_execution_outcome,
+                            task_id=persisted.task_id,
+                            state=state,
+                            started_at=started_at,
+                            finished_at=finished_at,
+                            force_task_status=terminal_status,
+                        )
+                        if terminal_failure:
+                            await self._run_blocking(
+                                self._release_task_terminal_failure,
+                                task_id=persisted.task_id,
+                                worker_id=worker_id,
+                                status=terminal_status,
+                            )
+                        else:
+                            await self._run_blocking(
+                                self._release_task_failure,
+                                task_id=persisted.task_id,
+                                worker_id=worker_id,
+                            )
+                except Exception as exc:
+                    self._record_execution_span_error(exc)
+                    logger.exception(
+                        "Task execution failed before the final outcome was fully persisted",
+                        extra={
+                            "session_id": persisted.session_id,
+                            "task_id": persisted.task_id,
+                            "worker_id": worker_id,
+                        },
+                    )
+                    await self._run_blocking(
+                        self._record_task_attempt_error,
+                        task_id=persisted.task_id,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
+                    await self._run_blocking(
+                        self._release_task_failure,
+                        task_id=persisted.task_id,
+                        worker_id=worker_id,
+                    )
+                finally:
+                    heartbeat_task.cancel()
+                    await asyncio.gather(heartbeat_task, return_exceptions=True)
+
+                task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
+                if task_snapshot is None:
+                    raise RuntimeError(
+                        f"Persisted task '{persisted.task_id}' could not be reloaded."
+                    )
+                self._log_task_outcome(task_snapshot)
+                await self._emit_progress(
+                    submission,
+                    persisted,
+                    phase=_completion_progress_phase(task_snapshot),
+                    summary=self._task_summary(task_snapshot),
+                )
         return None
+
+    def _update_span_status_from_state(self, state: OrchestratorState) -> None:
+        """Update the current span status based on the orchestrator state outcomes."""
+        if state.errors:
+            set_span_status(STATUS_ERROR, state.errors[0])
+        elif state.result is not None:
+            set_span_status_from_outcome(state.result.status, state.result.summary)
+
+    def _record_execution_span_error(self, exc: Exception) -> None:
+        """Log and record a span error for a task execution failure."""
+        logger.debug(f"Task execution failed: {exc}", exc_info=True)
+        record_span_exception(exc)
+        set_span_status(STATUS_ERROR, str(exc))
 
     async def _heartbeat_loop(
         self,

@@ -8,22 +8,41 @@ import shlex
 import subprocess
 import threading
 from time import perf_counter
-from typing import Protocol
+from typing import Final, Protocol
 
 from pydantic import Field
 
-from apps.observability import inject_w3c_trace_context_env
+from apps.observability import (
+    OPENINFERENCE_SPAN_KIND_ATTRIBUTE,
+    SPAN_KIND_TOOL,
+    STATUS_ERROR,
+    STATUS_OK,
+    inject_w3c_trace_context_env,
+    record_span_exception,
+    set_span_input_output,
+    set_span_status,
+    start_optional_span,
+)
 from sandbox.audit import capture_audit_artifacts
 from sandbox.container import build_container_name
 from sandbox.policy import PathPolicy
-from sandbox.redact import SecretRedactor
+from sandbox.redact import (
+    SecretRedactor,
+    construct_sandbox_output,
+    redact_and_truncate_output,
+    sanitize_command,
+)
+from sandbox.redact import (
+    mask_url_credentials as _mask_url_credentials,
+)
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
 from sandbox.workspace import (
     SandboxArtifact,
     SandboxModel,
     WorkspaceHandle,
-    _mask_url_credentials,
 )
+
+SANDBOX_RUN_SPAN_PREFIX: Final = "sandbox.run"
 
 logger = logging.getLogger(__name__)
 
@@ -367,11 +386,39 @@ class DockerSandboxRunner:
         )
 
         started_at = perf_counter()
-        completed = self._command_runner(
-            docker_command,
-            timeout=request.timeout_seconds,
-            redactor=redactor,
-        )
+        cmd_name = sanitize_command(request.command[0], redactor)
+        span_name = f"{SANDBOX_RUN_SPAN_PREFIX}: {cmd_name}"
+        with start_optional_span(
+            tracer_name="sandbox.runner",
+            span_name=span_name,
+            attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
+        ):
+            try:
+                set_span_input_output(
+                    input_data=redact_and_truncate_output(shlex.join(request.command), redactor)
+                )
+                completed = self._command_runner(
+                    docker_command,
+                    timeout=request.timeout_seconds,
+                    redactor=redactor,
+                )
+                if completed.returncode != 0:
+                    set_span_status(
+                        STATUS_ERROR, f"Command failed with exit code {completed.returncode}"
+                    )
+                else:
+                    set_span_status(STATUS_OK)
+                set_span_input_output(
+                    input_data=None,
+                    output_data=construct_sandbox_output(
+                        completed.stdout, completed.stderr, redactor
+                    ),
+                )
+            except (RuntimeError, OSError) as exc:
+                logger.debug(f"Command execution failed: {exc}", exc_info=True)
+                record_span_exception(exc)
+                set_span_status(STATUS_ERROR, str(exc))
+                raise
         duration_seconds = perf_counter() - started_at
 
         redacted_stdout = redactor.redact(completed.stdout) if redactor else completed.stdout

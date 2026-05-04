@@ -18,8 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from apps.observability import (
     SPAN_KIND_AGENT,
     SPAN_KIND_TOOL,
+    STATUS_ERROR,
+    STATUS_OK,
     set_optional_span_attribute,
     set_span_input_output,
+    set_span_status,
+    set_span_status_from_outcome,
     start_optional_span,
     with_span_kind,
 )
@@ -1127,6 +1131,7 @@ def _finalize_execution_result(
         clock=context.clock,
         iterations_used=iteration,
     )
+    set_span_status_from_outcome(status, summary)
     return CliRuntimeExecutionResult(
         status=status,
         summary=summary,
@@ -1510,6 +1515,12 @@ def run_cli_runtime_loop(
                         ),
                     )
                     set_span_input_output(input_data=None, output_data=shell_result.output)
+                    if shell_result.exit_code == 0:
+                        set_span_status(STATUS_OK)
+                    else:
+                        set_span_status(
+                            STATUS_ERROR, f"Command failed with exit code {shell_result.exit_code}"
+                        )
                 except DockerShellSessionError as exc:
                     return _finalize_execution_result(
                         context,
@@ -1607,11 +1618,13 @@ def run_cli_runtime_loop(
                         )
                     )
                     stall_correction_injected_at = iteration
+                    set_span_status(STATUS_OK)
                     continue
                 if (
                     stall_correction_injected_at is not None
                     and iteration - stall_correction_injected_at <= settings.stall_correction_turns
                 ):
+                    set_span_status(STATUS_OK)
                     continue
                 _update_budget_ledger(
                     budget_ledger,
@@ -1642,6 +1655,7 @@ def run_cli_runtime_loop(
                     messages=messages,
                     budget_ledger=budget_ledger,
                 )
+            set_span_status(STATUS_OK)
 
     exhausted_without_progress = commands_run and commands_with_writes == 0
     return CliRuntimeExecutionResult(

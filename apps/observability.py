@@ -31,6 +31,9 @@ SPAN_KIND_AGENT: Final[str] = "AGENT"
 SPAN_KIND_CHAIN: Final[str] = "CHAIN"
 SPAN_KIND_LLM: Final[str] = "LLM"
 SPAN_KIND_TOOL: Final[str] = "TOOL"
+STATUS_OK: Final[str] = "OK"
+STATUS_ERROR: Final[str] = "ERROR"
+STATUS_UNSET: Final[str] = "UNSET"
 TRACE_CONTEXT_ENV_KEYS: Final[dict[str, str]] = {
     "traceparent": "TRACEPARENT",
     "tracestate": "TRACESTATE",
@@ -385,3 +388,46 @@ def set_current_span_attribute(key: str, value: Any) -> None:
         set_optional_span_attribute(span, key, value)
     except (ImportError, Exception):
         pass
+
+
+def record_span_exception(exc: Exception) -> None:
+    """Record an exception on the current span when tracing is available."""
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+        span = otel_trace.get_current_span()
+        if span.is_recording():
+            span.record_exception(exc)
+    except (ImportError, Exception):
+        pass
+
+
+def set_span_status(status_code: Any, description: str | None = None) -> None:
+    """Set the status of the current span when tracing is available."""
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+
+        span = otel_trace.get_current_span()
+        if span.is_recording():
+            if isinstance(status_code, str):
+                # Map string to StatusCode enum
+                status_code = getattr(
+                    otel_trace.StatusCode, status_code.upper(), otel_trace.StatusCode.UNSET
+                )
+
+            # If we don't have a Status object yet, create one
+            # We check for .status_code attribute which is standard on OTEL Status objects
+            if not hasattr(status_code, "status_code"):
+                status_code = otel_trace.Status(status_code, description)
+
+            span.set_status(status_code)
+    except (ImportError, Exception):
+        pass
+
+
+def set_span_status_from_outcome(status: str, summary: str | None = None) -> None:
+    """Set span status based on a standard outcome status (success/error/failure)."""
+    if status == "success":
+        set_span_status(STATUS_OK)
+    else:
+        set_span_status(STATUS_ERROR, summary)

@@ -7,19 +7,34 @@ import shlex
 import subprocess
 import threading
 from time import perf_counter
-from typing import IO, Protocol
+from typing import IO, Final, Protocol
 from uuid import uuid4
 
 from pydantic import Field
 
+from apps.observability import (
+    OPENINFERENCE_SPAN_KIND_ATTRIBUTE,
+    SPAN_KIND_TOOL,
+    STATUS_ERROR,
+    STATUS_OK,
+    set_span_input_output,
+    set_span_status,
+    start_optional_span,
+)
 from sandbox.audit import capture_audit_artifacts
 from sandbox.container import DockerSandboxContainer
 from sandbox.policy import PathPolicy
-from sandbox.redact import SecretRedactor
+from sandbox.redact import (
+    SecretRedactor,
+    mask_url_credentials,
+    redact_and_truncate_output,
+    sanitize_command,
+)
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
-from sandbox.workspace import SandboxArtifact, SandboxModel, _mask_url_credentials
+from sandbox.workspace import SandboxArtifact, SandboxModel
 
 logger = logging.getLogger(__name__)
+SHELL_EXECUTE_SPAN_PREFIX: Final = "shell.execute"
 
 
 class ShellProcessFactory(Protocol):
@@ -170,7 +185,7 @@ def _default_shell_process_factory(command: list[str]) -> subprocess.Popen[bytes
             stderr=subprocess.STDOUT,
         )
     except OSError as exc:
-        cmd_str = _mask_url_credentials(shlex.join(command))
+        cmd_str = mask_url_credentials(shlex.join(command))
         raise DockerShellSessionError(
             f"Failed to start persistent shell session ({cmd_str}): {exc}"
         ) from exc
@@ -292,76 +307,107 @@ class DockerShellSession:
             wrapped_command = _wrap_command_for_persistent_shell(command, marker=marker)
 
             started_at = perf_counter()
-            try:
-                self._stdin.write(wrapped_command)
-                self._stdin.flush()
-            except (BrokenPipeError, OSError) as exc:
-                self._terminate_process()
-                raise DockerShellSessionError(
-                    f"Persistent shell session failed while sending command: {exc}"
-                ) from exc
+            sanitized_cmd = sanitize_command(command, self.redactor)
+            cmd_parts = sanitized_cmd.split()
+            cmd_name = cmd_parts[0] if cmd_parts else "empty"
+            span_name = f"{SHELL_EXECUTE_SPAN_PREFIX}: {cmd_name}"
 
-            output_buf = bytearray()
-            limit_exceeded = threading.Event()
-
-            def kill_on_limit() -> None:
-                limit_exceeded.set()
-                self._terminate_process()
-
-            error_holder: list[BaseException] = []
-
-            def read_output() -> None:
+            with start_optional_span(
+                tracer_name="sandbox.session",
+                span_name=span_name,
+                attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
+            ):
                 try:
-                    output_buf.extend(
-                        read_stream_bounded(
-                            stream,
-                            self.output_limit_bytes,
-                            on_limit=kill_on_limit,
-                        )
+                    set_span_input_output(
+                        input_data=redact_and_truncate_output(sanitized_cmd, self.redactor)
                     )
-                except BaseException as exc:  # pragma: no cover - defensive thread handoff
-                    error_holder.append(exc)
+                    try:
+                        self._stdin.write(wrapped_command)
+                        self._stdin.flush()
+                    except (BrokenPipeError, OSError) as exc:
+                        self._terminate_process()
+                        raise DockerShellSessionError(
+                            f"Persistent shell session failed while sending command: {exc}"
+                        ) from exc
 
-            reader_thread = threading.Thread(target=read_output, daemon=True)
-            reader_thread.start()
-            reader_thread.join(timeout_seconds)
+                    output_buf = bytearray()
+                    limit_exceeded = threading.Event()
 
-            if reader_thread.is_alive():
-                self._terminate_process()
-                reader_thread.join()
-                output = decode_bounded(output_buf, self.output_limit_bytes).strip()
-                # Redact partial output
-                output = self.redactor.redact(output)
-                detail = f" Partial output:\n{output}" if output else ""
-                raise DockerShellSessionError(
-                    f"Persistent shell session command timed out after {timeout_seconds}s: "
-                    f"{command}{detail}"
-                )
+                    def kill_on_limit() -> None:
+                        limit_exceeded.set()
+                        self._terminate_process()
 
-            if error_holder:
-                first_error = error_holder[0]
-                if isinstance(first_error, DockerShellSessionError):
-                    raise first_error
-                raise DockerShellSessionError(
-                    f"Persistent shell session failed while reading command output: {first_error}"
-                ) from first_error
+                    error_holder: list[BaseException] = []
 
-            output = decode_bounded(output_buf, self.output_limit_bytes)
-            # Redact output
-            output = self.redactor.redact(output)
+                    def read_output() -> None:
+                        try:
+                            output_buf.extend(
+                                read_stream_bounded(
+                                    stream,
+                                    self.output_limit_bytes,
+                                    on_limit=kill_on_limit,
+                                )
+                            )
+                        except BaseException as exc:  # pragma: no cover - defensive thread handoff
+                            error_holder.append(exc)
 
-            if limit_exceeded.is_set():
-                raise DockerShellSessionError(
-                    f"Persistent shell session output limit exceeded "
-                    f"({self.output_limit_bytes} bytes) for command: {command}"
-                )
-            if not stream.marker_seen or stream.exit_code is None:
-                self._terminate_process()
-                raise DockerShellSessionError(
-                    f"Persistent shell session terminated before returning an exit code for "
-                    f"command: {command}\nPartial output:\n{output}"
-                )
+                    reader_thread = threading.Thread(target=read_output, daemon=True)
+                    reader_thread.start()
+                    reader_thread.join(timeout_seconds)
 
+                    if reader_thread.is_alive():
+                        self._terminate_process()
+                        reader_thread.join()
+                        output = decode_bounded(output_buf, self.output_limit_bytes).strip()
+                        # Redact partial output
+                        output = self.redactor.redact(output)
+                        detail = f" Partial output:\n{output}" if output else ""
+                        raise DockerShellSessionError(
+                            f"Persistent shell session command timed out after {timeout_seconds}s: "
+                            f"{sanitize_command(command, self.redactor)}{detail}"
+                        )
+
+                    if error_holder:
+                        first_error = error_holder[0]
+                        if isinstance(first_error, DockerShellSessionError):
+                            raise first_error
+                        raise DockerShellSessionError(
+                            "Persistent shell session failed while reading command output: "
+                            f"{first_error}"
+                        ) from first_error
+
+                    output = decode_bounded(output_buf, self.output_limit_bytes)
+                    # Redact output
+                    output = self.redactor.redact(output)
+
+                    if limit_exceeded.is_set():
+                        raise DockerShellSessionError(
+                            f"Persistent shell session output limit exceeded "
+                            f"({self.output_limit_bytes} bytes) for command: "
+                            f"{sanitize_command(command, self.redactor)}"
+                        )
+                    if not stream.marker_seen or stream.exit_code is None:
+                        self._terminate_process()
+                        raise DockerShellSessionError(
+                            "Persistent shell session terminated before returning an exit code for "
+                            f"command: {sanitize_command(command, self.redactor)}\n"
+                            f"Partial output:\n{output}"
+                        )
+
+                    if stream.exit_code != 0:
+                        set_span_status(
+                            STATUS_ERROR, f"Command failed with exit code {stream.exit_code}"
+                        )
+                    else:
+                        set_span_status(STATUS_OK)
+
+                    set_span_input_output(
+                        input_data=None,
+                        output_data=redact_and_truncate_output(output, self.redactor),
+                    )
+                except (DockerShellSessionError, RuntimeError, OSError):
+                    self._terminate_process()
+                    raise
             duration_seconds = perf_counter() - started_at
 
             files_changed: list[str] = []
