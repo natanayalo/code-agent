@@ -29,7 +29,11 @@ from workers.adapter_utils import (
     truncate_detail_keep_tail,
 )
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
-from workers.llm_tracing import set_llm_span_output, with_llm_span
+from workers.llm_tracing import (
+    normalize_llm_output,
+    set_llm_span_output,
+    with_llm_span,
+)
 from workers.prompt import build_runtime_adapter_tool_guidance_lines
 from workers.subprocess_env import build_gemini_subprocess_env
 
@@ -237,19 +241,7 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                     env=self.env,
                     timeout=self.request_timeout_seconds,
                 )
-                output_val = completed.stdout
-                try:
-                    data = json.loads(completed.stdout)
-                    if isinstance(data, dict) and "response" in data:
-                        try:
-                            # Try to parse the inner response if it's stringified JSON
-                            inner = json.loads(data["response"])
-                            output_val = inner
-                        except (json.JSONDecodeError, TypeError, ValueError):
-                            output_val = data["response"]
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    pass
-                set_llm_span_output(output_val)
+                set_llm_span_output(normalize_llm_output(completed.stdout))
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(
                 f"Gemini CLI adapter timed out after {self.request_timeout_seconds}s."

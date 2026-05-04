@@ -34,3 +34,26 @@ def with_llm_span(
 def set_llm_span_output(output_data: Any) -> None:
     """Record the output payload for the current active LLM span."""
     set_span_input_output(input_data=None, output_data=output_data)
+
+
+def normalize_llm_output(output: Any) -> Any:
+    """Unwrap structured LLM responses into plain text or normalized JSON for tracing."""
+    import json
+
+    if not isinstance(output, str):
+        return output
+
+    try:
+        data = json.loads(output)
+        if isinstance(data, dict) and "response" in data:
+            val = data["response"]
+            # If the inner response is stringified JSON, unwrap it again for visibility
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    return val
+            return val
+        return data
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return output

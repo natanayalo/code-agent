@@ -34,7 +34,11 @@ from workers.adapter_utils import (
     truncate_detail_keep_head,
 )
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
-from workers.llm_tracing import set_llm_span_output, with_llm_span
+from workers.llm_tracing import (
+    normalize_llm_output,
+    set_llm_span_output,
+    with_llm_span,
+)
 from workers.prompt import build_runtime_adapter_tool_guidance_lines
 
 DEFAULT_OPENROUTER_BASE_URL: Final[str] = "https://openrouter.ai/api/v1"
@@ -273,18 +277,23 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
                 )
                 from typing import Any
 
-                output_val: Any = (
-                    response.model_dump() if hasattr(response, "model_dump") else response
-                )
+                content: str | None = None
                 try:
-                    if response.choices and response.choices[0].message.content:
-                        try:
-                            output_val = json.loads(response.choices[0].message.content)
-                        except (json.JSONDecodeError, TypeError, ValueError):
-                            output_val = response.choices[0].message.content
+                    if response.choices:
+                        content = getattr(response.choices[0].message, "content", None)
                 except (AttributeError, IndexError):
                     pass
-                set_llm_span_output(output_val)
+                # Extract trace payload: use content if available, otherwise dump the model
+                trace_payload: Any = content
+                if trace_payload is None:
+                    if hasattr(response, "model_dump"):
+                        trace_payload = response.model_dump()
+                    else:
+                        trace_payload = (
+                            vars(response) if hasattr(response, "__dict__") else str(response)
+                        )
+
+                set_llm_span_output(normalize_llm_output(trace_payload))
         except Exception as exc:  # pragma: no cover - exercised via unit tests with stubs
             raise RuntimeError(f"OpenRouter adapter request failed: {exc}") from exc
 

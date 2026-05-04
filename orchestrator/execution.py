@@ -773,25 +773,31 @@ def _interrupt_summary(payloads: list[dict[str, Any]]) -> str:
     return summary
 
 
+def _extract_graph_payload(data: Any) -> Mapping[str, Any]:
+    """Safely extract a mapping payload from a graph state object or model."""
+    if isinstance(data, BaseModel):
+        return data.model_dump(mode="json")
+    if isinstance(data, Mapping):
+        return data
+    return {}
+
+
 def _summarize_graph_span_input(graph_input: Mapping[str, Any]) -> dict[str, Any]:
     """Build a compact graph span input payload to avoid emitting full task state."""
-    task = graph_input.get("task")
-    session = graph_input.get("session")
-    task_spec = graph_input.get("task_spec")
-
-    task_payload = task if isinstance(task, Mapping) else {}
-    session_payload = session if isinstance(session, Mapping) else {}
-    task_spec_payload = task_spec if isinstance(task_spec, Mapping) else {}
-    budget_payload = task_payload.get("budget")
-    budget = budget_payload if isinstance(budget_payload, Mapping) else {}
+    task = _extract_graph_payload(graph_input.get("task"))
+    session = _extract_graph_payload(graph_input.get("session"))
+    task_spec = _extract_graph_payload(graph_input.get("task_spec"))
+    budget = _extract_graph_payload(task.get("budget"))
 
     summary: dict[str, Any] = {
-        "task_id": task_payload.get("task_id"),
+        "task_id": task.get("task_id"),
         "attempt_count": graph_input.get("attempt_count"),
-        "channel": session_payload.get("channel"),
-        "branch": task_payload.get("branch"),
-        "task_type": task_spec_payload.get("task_type"),
-        "execution_mode": task_payload.get("constraints", {}).get("execution_mode"),
+        "channel": session.get("channel"),
+        "branch": task.get("branch"),
+        "task_type": task_spec.get("task_type"),
+        "execution_mode": task.get("constraints", {}).get("execution_mode")
+        if isinstance(task.get("constraints"), Mapping)
+        else None,
         "max_iterations": budget.get("max_iterations"),
     }
     return {key: value for key, value in summary.items() if value is not None}
@@ -799,34 +805,25 @@ def _summarize_graph_span_input(graph_input: Mapping[str, Any]) -> dict[str, Any
 
 def _summarize_graph_span_output(raw_output: object) -> dict[str, Any]:
     """Build a compact graph span output payload to avoid large span attributes."""
-    if isinstance(raw_output, BaseModel):
-        payload: Mapping[str, Any] = raw_output.model_dump(mode="json")
-    elif isinstance(raw_output, Mapping):
-        payload = raw_output
-    else:
+    payload = _extract_graph_payload(raw_output)
+    if not payload and not isinstance(raw_output, Mapping | BaseModel):
         return {"output_type": type(raw_output).__name__}
 
-    result = payload.get("result")
-    review = payload.get("review")
-    verification = payload.get("verification")
-    errors = payload.get("errors")
-
-    result_payload = result if isinstance(result, Mapping) else {}
-    review_payload = review if isinstance(review, Mapping) else {}
-    verification_payload = verification if isinstance(verification, Mapping) else {}
+    result = _extract_graph_payload(payload.get("result"))
+    review = _extract_graph_payload(payload.get("review"))
+    verification = _extract_graph_payload(payload.get("verification"))
 
     summary: dict[str, Any] = {
         "current_step": payload.get("current_step"),
         "attempt_count": payload.get("attempt_count"),
-        "timeline_persisted_count": payload.get("timeline_persisted_count"),
-        "repair_handoff_requested": payload.get("repair_handoff_requested"),
-        "result_status": result_payload.get("status"),
-        "review_outcome": review_payload.get("outcome"),
-        "verification_status": verification_payload.get("status"),
-        "error_count": len(errors) if isinstance(errors, list) else None,
+        "status": result.get("status") or review.get("status"),
+        "failure_kind": result.get("failure_kind"),
+        "verification_status": verification.get("status"),
+        "errors_count": len(payload.get("errors", []))
+        if isinstance(payload.get("errors"), list)
+        else 0,
     }
-    compact = {key: value for key, value in summary.items() if value is not None}
-    return compact or {"output_type": "mapping"}
+    return {key: value for key, value in summary.items() if value is not None}
 
 
 def _normalize_orchestrator_graph_output(raw_output: object) -> object:
