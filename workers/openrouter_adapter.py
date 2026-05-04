@@ -50,6 +50,7 @@ OPENROUTER_TIMEOUT_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_TIMEOUT_SECONDS"
 OPENROUTER_HTTP_REFERER_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_HTTP_REFERER"
 OPENROUTER_X_TITLE_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_X_TITLE"
 OPENROUTER_ROLE_NATIVE_MESSAGES_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_ROLE_NATIVE_MESSAGES"
+TRACER_NAME: Final[str] = "workers.openrouter"
 
 
 def _build_adapter_prompt(
@@ -261,7 +262,7 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
 
         try:
             with with_llm_span(
-                tracer_name="workers.openrouter",
+                tracer_name=TRACER_NAME,
                 span_name="openrouter.chat",
                 input_data=request_messages,
             ):

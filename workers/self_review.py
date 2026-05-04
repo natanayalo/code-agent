@@ -8,7 +8,7 @@ import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from apps.observability import (
     SPAN_KIND_AGENT,
@@ -31,6 +31,8 @@ from workers.markdown import markdown_fence_for_content
 from workers.post_run_lint import merge_post_run_lint_results
 from workers.prompt import build_review_prompt
 from workers.review import ReviewResult
+
+TRACER_NAME: Final[str] = "workers.self_review"
 
 DEFAULT_SELF_REVIEW_MAX_FIX_ITERATIONS = 2
 DEFAULT_SELF_REVIEW_DIFF_MAX_CHARACTERS = 12000
@@ -303,7 +305,7 @@ def run_shared_self_review_fix_loop(
                 turn_name = f"{model_name} Turn {review_attempt + 1} (Self-Review)"
 
             with start_optional_span(
-                tracer_name="workers.self_review",
+                tracer_name=TRACER_NAME,
                 span_name=turn_name,
                 attributes=with_span_kind(SPAN_KIND_AGENT),
             ):

@@ -38,6 +38,7 @@ CODEX_MODEL_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_MODEL"
 CODEX_PROFILE_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_PROFILE"
 CODEX_TIMEOUT_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TIMEOUT_SECONDS"
 CODEX_SANDBOX_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_SANDBOX"
+TRACER_NAME: Final[str] = "workers.codex"
 
 
 def _build_adapter_prompt(
@@ -194,7 +195,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
 
             try:
                 with with_llm_span(
-                    tracer_name="workers.codex",
+                    tracer_name=TRACER_NAME,
                     span_name="codex.exec",
                     input_data=prompt,
                 ):

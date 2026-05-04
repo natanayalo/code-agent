@@ -10,7 +10,7 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Literal, Protocol
+from typing import Any, Final, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -55,6 +55,8 @@ from tools.numeric import (
 from workers.base import WorkerCommand
 
 logger = logging.getLogger(__name__)
+
+TRACER_NAME: Final[str] = "workers.cli_runtime"
 
 DEFAULT_MAX_ITERATIONS = 8
 DEFAULT_WORKER_TIMEOUT_SECONDS = 300
@@ -1163,7 +1165,7 @@ def run_cli_runtime_loop(
             turn_name = f"{model_name} Turn {iteration}"
 
         with start_optional_span(
-            tracer_name="workers.cli_runtime",
+            tracer_name=TRACER_NAME,
             span_name=turn_name,
             attributes=with_span_kind(SPAN_KIND_AGENT),
         ) as turn_span:
@@ -1530,7 +1532,7 @@ def run_cli_runtime_loop(
             )
 
             with start_optional_span(
-                tracer_name="workers.cli_runtime",
+                tracer_name=TRACER_NAME,
                 span_name=f"tool.{tool.name}",
                 attributes=with_span_kind(SPAN_KIND_TOOL),
             ) as span:

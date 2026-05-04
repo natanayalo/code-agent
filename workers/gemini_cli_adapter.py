@@ -40,6 +40,7 @@ _DETAIL_PREVIEW_CHARACTERS: Final[int] = 1200
 GEMINI_EXECUTABLE_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_CLI_BIN"
 GEMINI_MODEL_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_MODEL"
 GEMINI_TIMEOUT_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TIMEOUT_SECONDS"
+TRACER_NAME: Final[str] = "workers.gemini"
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +221,7 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 self.working_directory if override_prompt is not None else working_directory
             )
             with with_llm_span(
-                tracer_name="workers.gemini",
+                tracer_name=TRACER_NAME,
                 span_name="gemini.chat",
                 input_data=prompt,
             ):
