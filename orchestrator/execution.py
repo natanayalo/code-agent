@@ -32,13 +32,13 @@ from apps.observability import (
     SESSION_ID_ATTRIBUTE,
     SPAN_KIND_AGENT,
     STATUS_ERROR,
-    STATUS_OK,
     bind_current_trace_context,
     capture_trace_context,
     record_span_exception,
     set_current_span_attribute,
     set_span_input_output,
     set_span_status,
+    set_span_status_from_outcome,
     start_optional_span,
     with_restored_trace_context,
     with_span_kind,
@@ -1489,10 +1489,7 @@ class TaskExecutionService:
         if state.errors:
             set_span_status(STATUS_ERROR, state.errors[0])
         elif state.result is not None:
-            if state.result.status in ("error", "failure"):
-                set_span_status(STATUS_ERROR, state.result.summary)
-            elif state.result.status == "success":
-                set_span_status(STATUS_OK)
+            set_span_status_from_outcome(state.result.status, state.result.summary)
 
     def _record_execution_span_error(self, exc: Exception) -> None:
         """Log and record a span error for a task execution failure."""

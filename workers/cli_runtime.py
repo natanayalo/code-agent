@@ -24,6 +24,7 @@ from apps.observability import (
     set_optional_span_attribute,
     set_span_input_output,
     set_span_status,
+    set_span_status_from_outcome,
     start_optional_span,
     with_span_kind,
 )
@@ -1131,10 +1132,7 @@ def _finalize_execution_result(
         clock=context.clock,
         iterations_used=iteration,
     )
-    if status == "success":
-        set_span_status(STATUS_OK)
-    else:
-        set_span_status(STATUS_ERROR, summary)
+    set_span_status_from_outcome(status, summary)
     return CliRuntimeExecutionResult(
         status=status,
         summary=summary,

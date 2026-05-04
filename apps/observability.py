@@ -423,3 +423,11 @@ def set_span_status(status_code: Any, description: str | None = None) -> None:
             span.set_status(status_code)
     except (ImportError, Exception):
         pass
+
+
+def set_span_status_from_outcome(status: str, summary: str | None = None) -> None:
+    """Set span status based on a standard outcome status (success/error/failure)."""
+    if status == "success":
+        set_span_status(STATUS_OK)
+    else:
+        set_span_status(STATUS_ERROR, summary)
