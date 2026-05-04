@@ -69,7 +69,7 @@ def test_independent_review_flow_e2e():
         "task": {
             "task_text": "Update main.py",
             "repo_url": "https://github.com/example/repo",
-            "branch": "main",
+            "branch": "master",
         }
     }
 

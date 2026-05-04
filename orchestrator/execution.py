@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 import copy
 import ipaddress
+import json
 import logging
+import os
 import shutil
 import socket
+import urllib.parse
+import urllib.request
 from collections.abc import Callable, Mapping
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +19,7 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 from typing import Any, Literal, Protocol, cast
@@ -517,6 +522,8 @@ class TaskSummarySnapshot(ExecutionModel):
     approval_status: Literal["pending", "approved", "rejected", "not_required"] | None = None
     approval_type: str | None = None
     approval_reason: str | None = None
+    trace_id: str | None = None
+    trace_url: str | None = None
 
 
 class HumanInteractionSnapshot(ExecutionModel):
@@ -1073,6 +1080,81 @@ def _approval_constraints_payload(
     if approved is not None:
         payload["approved"] = approved
     return payload
+
+
+def _get_trace_id_from_context(context: dict[str, str] | None) -> str | None:
+    """Extract the 32-char hex trace ID from a W3C traceparent context."""
+    if not context:
+        return None
+    # Look for W3C traceparent (standard in OTEL)
+    traceparent = context.get("traceparent")
+    if not traceparent:
+        return None
+    # format: version-traceid-parentid-flags
+    parts = traceparent.split("-")
+    if len(parts) >= 2:
+        return parts[1]
+    return None
+
+
+@lru_cache(maxsize=10)
+def _get_project_id(api_base_url: str, project_name: str) -> str:
+    """Resolve the Phoenix project ID (UUID) from its name via the REST API."""
+    try:
+        # Phoenix API endpoint for project details
+        url = f"{api_base_url}/v1/projects/{project_name}"
+        with urllib.request.urlopen(url, timeout=1) as response:
+            data = json.loads(response.read().decode())
+            return data["data"]["id"]
+    except Exception:
+        # Fallback to the name if the API is unreachable or the project doesn't exist
+        return project_name
+
+
+def _get_phoenix_url(trace_id: str | None) -> str | None:
+    """Generate a browser-accessible Phoenix deep link for a given trace ID."""
+    if not trace_id:
+        return None
+
+    # T-152: Ensure the dashboard can link to local Phoenix traces.
+    enable_tracing = os.environ.get("CODE_AGENT_ENABLE_TRACING", "").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if not enable_tracing:
+        return None
+
+    # Resolve the collector endpoint to infer the UI host
+    collector_endpoint = os.environ.get("PHOENIX_COLLECTOR_ENDPOINT") or os.environ.get(
+        "CODE_AGENT_TRACING_OTLP_ENDPOINT"
+    )
+
+    project_name = os.environ.get("CODE_AGENT_TRACING_PROJECT") or "code-agent"
+
+    if collector_endpoint:
+        try:
+            parsed = urlparse(collector_endpoint)
+            # Phoenix API is usually at the same host as the collector, sans /v1/traces
+            api_base_url = f"{parsed.scheme}://{parsed.netloc}"
+            project_id = _get_project_id(api_base_url, project_name)
+
+            netloc = parsed.netloc
+            # If it's the internal service name, swap it for localhost for the browser
+            if netloc.startswith("phoenix:"):
+                netloc = netloc.replace("phoenix:", "localhost:", 1)
+            elif netloc == "phoenix":
+                netloc = "localhost:6006"
+
+            # Phoenix UI puts traces at /projects/<id>/traces/<id>
+            return f"{parsed.scheme}://{netloc}/projects/{project_id}/traces/{trace_id}"
+        except Exception:
+            # Fallback if URL parsing fails
+            pass
+
+    # Default fallback for local dev
+    return f"http://localhost:6006/projects/{project_name}/traces/{trace_id}"
 
 
 class TaskExecutionService:
@@ -1778,6 +1860,7 @@ class TaskExecutionService:
             approval_type = approval_checkpoint.get("approval_type")
             approval_reason = approval_checkpoint.get("reason")
 
+        trace_id = _get_trace_id_from_context(task.trace_context)
         return TaskSummarySnapshot(
             task_id=task.id,
             session_id=task.session_id,
@@ -1798,6 +1881,8 @@ class TaskExecutionService:
             approval_status=approval_status,  # type: ignore[arg-type]
             approval_type=approval_type,
             approval_reason=approval_reason,
+            trace_id=trace_id,
+            trace_url=_get_phoenix_url(trace_id),
         )
 
     @staticmethod

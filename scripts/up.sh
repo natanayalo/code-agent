@@ -84,11 +84,11 @@ echo "[run-production-like] Codex sandbox mode: $CODE_AGENT_CODEX_SANDBOX"
 
 if is_enabled "${CODE_AGENT_ENABLE_TRACING:-0}"; then
   echo "[run-production-like] Tracing enabled (CODE_AGENT_ENABLE_TRACING=1); starting phoenix too"
-  echo "[run-production-like] Starting postgres + migration + api + worker + phoenix"
-  docker compose --profile observability --env-file "$ENV_FILE" up -d --build postgres migrate api worker phoenix
+  echo "[run-production-like] Starting postgres + migration + api + worker + phoenix + dashboard"
+  docker compose --profile observability --env-file "$ENV_FILE" up -d --build postgres migrate api worker phoenix dashboard
 else
-  echo "[run-production-like] Starting postgres + migration + api + worker"
-  docker compose --env-file "$ENV_FILE" up -d --build postgres migrate api worker
+  echo "[run-production-like] Starting postgres + migration + api + worker + dashboard"
+  docker compose --env-file "$ENV_FILE" up -d --build postgres migrate api worker dashboard
 fi
 
 api_container_id="$(docker compose --env-file "$ENV_FILE" ps -q api)"
@@ -114,6 +114,7 @@ if [ "$api_health" != "healthy" ]; then
 fi
 curl -fsS http://127.0.0.1:8000/health >/dev/null
 echo "[run-production-like] API is healthy at http://127.0.0.1:8000"
+echo "[run-production-like] Dashboard is available at http://localhost:3000"
 echo "[run-production-like] Services running:"
 docker compose --env-file "$ENV_FILE" ps
 

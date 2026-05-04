@@ -23,7 +23,7 @@ curl -sS -X POST "http://127.0.0.1:8000/webhook" \
   -d '{
     "task_text": "List top-level files.",
     "repo_url": "https://github.com/natanayalo/code-agent",
-    "branch": "main",
+    "branch": "master",
     "source": "manual"
   }'
 ```

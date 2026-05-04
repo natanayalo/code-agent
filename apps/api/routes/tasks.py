@@ -5,6 +5,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from apps.api.dependencies import get_task_service, require_any_valid_auth
+from apps.observability import (
+    SPAN_KIND_AGENT,
+    set_span_input_output,
+    start_optional_span,
+    with_span_kind,
+)
 from db.enums import TaskStatus
 from orchestrator.execution import (
     TaskApprovalDecision,
@@ -24,8 +30,14 @@ def submit_task(
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> TaskSnapshot:
     """Create a task, enqueue it for worker pickup, and return the pollable snapshot."""
-    task_snapshot, _ = task_service.create_task(payload)
-    return task_snapshot
+    with start_optional_span(
+        tracer_name="api.tasks",
+        span_name="api.tasks.submit",
+        attributes=with_span_kind(SPAN_KIND_AGENT),
+    ):
+        set_span_input_output(input_data=payload.model_dump())
+        task_snapshot, _ = task_service.create_task(payload)
+        return task_snapshot
 
 
 @router.get("", response_model=list[TaskSummarySnapshot])
