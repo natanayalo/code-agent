@@ -1262,88 +1262,81 @@ class TaskExecutionService:
             ),
         )
         with span_cm:
+            await self._run_blocking(self._mark_task_in_progress, task_id=persisted.task_id)
+            await self._emit_progress(submission, persisted, phase="started")
+            await self._emit_progress(submission, persisted, phase="running")
+            started_at = utc_now()
+            logger.info(
+                "Starting execution-path task run",
+                extra={
+                    "session_id": persisted.session_id,
+                    "task_id": persisted.task_id,
+                    "chosen_worker": None,
+                    "route_reason": None,
+                    "workspace_id": None,
+                    "start_timestamp": started_at.isoformat(),
+                },
+            )
+
             try:
-                await self._run_blocking(self._mark_task_in_progress, task_id=persisted.task_id)
-                await self._emit_progress(submission, persisted, phase="started")
-                await self._emit_progress(submission, persisted, phase="running")
-                started_at = utc_now()
-                logger.info(
-                    "Starting execution-path task run",
+                state = await self._run_orchestrator(submission, persisted)
+                finished_at = utc_now()
+                await self._run_blocking(
+                    self._persist_execution_outcome,
+                    task_id=persisted.task_id,
+                    state=state,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                )
+                self._update_span_status_from_state(state)
+            except Exception as exc:
+                self._record_execution_span_error(exc)
+                logger.exception(
+                    "Task execution failed before the final outcome was fully persisted",
                     extra={
                         "session_id": persisted.session_id,
                         "task_id": persisted.task_id,
-                        "chosen_worker": None,
-                        "route_reason": None,
-                        "workspace_id": None,
-                        "start_timestamp": started_at.isoformat(),
                     },
                 )
-
-                try:
-                    state = await self._run_orchestrator(submission, persisted)
-                    finished_at = utc_now()
-                    await self._run_blocking(
-                        self._persist_execution_outcome,
-                        task_id=persisted.task_id,
-                        state=state,
-                        started_at=started_at,
-                        finished_at=finished_at,
-                    )
-                    self._update_span_status_from_state(state)
-                except Exception as exc:
-                    self._record_execution_span_error(exc)
-                    logger.exception(
-                        "Task execution failed before the final outcome was fully persisted",
+                await self._run_blocking(self._mark_task_failed, task_id=persisted.task_id)
+                task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
+                if task_snapshot is None:
+                    logger.error(
+                        "Failed to reload task snapshot after marking a "
+                        "background task as failed",
                         extra={
                             "session_id": persisted.session_id,
                             "task_id": persisted.task_id,
                         },
                     )
-                    await self._run_blocking(self._mark_task_failed, task_id=persisted.task_id)
-                    task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
-                    if task_snapshot is None:
-                        logger.error(
-                            "Failed to reload task snapshot after marking a "
-                            "background task as failed",
-                            extra={
-                                "session_id": persisted.session_id,
-                                "task_id": persisted.task_id,
-                            },
-                        )
-                        await self._emit_progress(
-                            submission,
-                            persisted,
-                            phase="failed",
-                            summary=(
-                                "Task execution failed and the final snapshot "
-                                "could not be reloaded."
-                            ),
-                        )
-                        return None
-                    self._log_task_outcome(task_snapshot)
                     await self._emit_progress(
                         submission,
                         persisted,
                         phase="failed",
-                        summary=self._task_summary(task_snapshot),
+                        summary=(
+                            "Task execution failed and the final snapshot " "could not be reloaded."
+                        ),
                     )
                     return None
-
-                task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
-                if task_snapshot is None:
-                    raise RuntimeError(
-                        f"Persisted task '{persisted.task_id}' could not be reloaded."
-                    )
                 self._log_task_outcome(task_snapshot)
                 await self._emit_progress(
                     submission,
                     persisted,
-                    phase=_completion_progress_phase(task_snapshot),
+                    phase="failed",
                     summary=self._task_summary(task_snapshot),
                 )
-            except Exception as exc:
-                self._record_execution_span_error(exc)
-                raise
+                return None
+
+            task_snapshot = await self._run_blocking(self.get_task, persisted.task_id)
+            if task_snapshot is None:
+                raise RuntimeError(f"Persisted task '{persisted.task_id}' could not be reloaded.")
+            self._log_task_outcome(task_snapshot)
+            await self._emit_progress(
+                submission,
+                persisted,
+                phase=_completion_progress_phase(task_snapshot),
+                summary=self._task_summary(task_snapshot),
+            )
         return None
 
     async def run_queued_task(

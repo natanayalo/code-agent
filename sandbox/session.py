@@ -318,7 +318,9 @@ class DockerShellSession:
                 attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
             ):
                 try:
-                    set_span_input_output(input_data=sanitized_cmd)
+                    set_span_input_output(
+                        input_data=redact_and_truncate_output(sanitized_cmd, self.redactor)
+                    )
                     try:
                         self._stdin.write(wrapped_command)
                         self._stdin.flush()

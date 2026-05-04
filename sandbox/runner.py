@@ -29,6 +29,7 @@ from sandbox.policy import PathPolicy
 from sandbox.redact import (
     SecretRedactor,
     construct_sandbox_output,
+    redact_and_truncate_output,
     sanitize_command,
 )
 from sandbox.redact import (
@@ -394,7 +395,7 @@ class DockerSandboxRunner:
         ):
             try:
                 set_span_input_output(
-                    input_data=sanitize_command(shlex.join(request.command), redactor)
+                    input_data=redact_and_truncate_output(shlex.join(request.command), redactor)
                 )
                 completed = self._command_runner(
                     docker_command,
