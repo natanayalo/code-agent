@@ -7,7 +7,7 @@ import shlex
 import subprocess
 import threading
 from time import perf_counter
-from typing import IO, Protocol
+from typing import IO, Final, Protocol
 from uuid import uuid4
 
 from pydantic import Field
@@ -26,6 +26,7 @@ from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_b
 from sandbox.workspace import SandboxArtifact, SandboxModel, _mask_url_credentials
 
 logger = logging.getLogger(__name__)
+SHELL_EXECUTE_SPAN_PREFIX: Final = "shell.execute"
 
 
 class ShellProcessFactory(Protocol):
@@ -298,13 +299,17 @@ class DockerShellSession:
             wrapped_command = _wrap_command_for_persistent_shell(command, marker=marker)
 
             started_at = perf_counter()
-            span_name = f"shell.execute: {command.split()[0] if command.split() else 'empty'}"
+            sanitized_cmd = sanitize_command(command, self.redactor)
+            cmd_parts = sanitized_cmd.split()
+            cmd_name = cmd_parts[0] if cmd_parts else "empty"
+            span_name = f"{SHELL_EXECUTE_SPAN_PREFIX}: {cmd_name}"
+
             with start_optional_span(
                 tracer_name="sandbox.session",
                 span_name=span_name,
                 attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
             ):
-                set_span_input_output(input_data=sanitize_command(command, self.redactor))
+                set_span_input_output(input_data=sanitized_cmd)
                 try:
                     self._stdin.write(wrapped_command)
                     self._stdin.flush()

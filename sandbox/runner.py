@@ -8,7 +8,7 @@ import shlex
 import subprocess
 import threading
 from time import perf_counter
-from typing import Protocol
+from typing import Final, Protocol
 
 from pydantic import Field
 
@@ -30,6 +30,8 @@ from sandbox.workspace import (
     WorkspaceHandle,
     _mask_url_credentials,
 )
+
+SANDBOX_RUN_SPAN_PREFIX: Final = "sandbox.run"
 
 logger = logging.getLogger(__name__)
 
@@ -373,7 +375,8 @@ class DockerSandboxRunner:
         )
 
         started_at = perf_counter()
-        span_name = f"sandbox.run: {request.command[0]}"
+        cmd_name = sanitize_command(request.command[0], redactor)
+        span_name = f"{SANDBOX_RUN_SPAN_PREFIX}: {cmd_name}"
         with start_optional_span(
             tracer_name="sandbox.runner",
             span_name=span_name,
@@ -387,7 +390,10 @@ class DockerSandboxRunner:
                 timeout=request.timeout_seconds,
                 redactor=redactor,
             )
-            set_span_input_output(input_data=None, output_data=completed.stdout)
+            set_span_input_output(
+                input_data=None,
+                output_data=redactor.redact(completed.stdout) if redactor else completed.stdout,
+            )
         duration_seconds = perf_counter() - started_at
 
         redacted_stdout = redactor.redact(completed.stdout) if redactor else completed.stdout
