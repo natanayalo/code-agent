@@ -1288,10 +1288,8 @@ class TaskExecutionService:
                         finished_at=finished_at,
                     )
                     self._update_span_status_from_state(state)
-                except (RuntimeError, AttributeError) as exc:
-                    logger.debug(f"Task submission failed: {exc}", exc_info=True)
-                    record_span_exception(exc)
-                    set_span_status("ERROR", str(exc))
+                except Exception as exc:
+                    self._record_execution_span_error(exc)
                     logger.exception(
                         "Task execution failed before the final outcome was fully persisted",
                         extra={
@@ -1341,10 +1339,8 @@ class TaskExecutionService:
                     phase=_completion_progress_phase(task_snapshot),
                     summary=self._task_summary(task_snapshot),
                 )
-            except (RuntimeError, AttributeError) as exc:
-                logger.debug(f"Task submission failed: {exc}", exc_info=True)
-                record_span_exception(exc)
-                set_span_status("ERROR", str(exc))
+            except Exception as exc:
+                self._record_execution_span_error(exc)
                 raise
         return None
 
@@ -1449,8 +1445,7 @@ class TaskExecutionService:
                                 worker_id=worker_id,
                             )
                 except Exception as exc:
-                    record_span_exception(exc)
-                    set_span_status("ERROR", str(exc))
+                    self._record_execution_span_error(exc)
                     logger.exception(
                         "Task execution failed before the final outcome was fully persisted",
                         extra={
@@ -1496,6 +1491,12 @@ class TaskExecutionService:
                 set_span_status("ERROR", state.result.summary)
             elif state.result.status == "success":
                 set_span_status("OK")
+
+    def _record_execution_span_error(self, exc: Exception) -> None:
+        """Log and record a span error for a task execution failure."""
+        logger.debug(f"Task execution failed: {exc}", exc_info=True)
+        record_span_exception(exc)
+        set_span_status("ERROR", str(exc))
 
     async def _heartbeat_loop(
         self,
