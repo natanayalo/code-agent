@@ -8,7 +8,9 @@ from typing import Any
 
 from apps.observability import (
     SPAN_KIND_LLM,
+    record_span_exception,
     set_span_input_output,
+    set_span_status,
     start_optional_span,
     with_span_kind,
 )
@@ -22,13 +24,20 @@ def with_llm_span(
     input_data: Any,
 ) -> Iterator[None]:
     """Trace an LLM adapter turn and capture input payload attributes."""
+
     with start_optional_span(
         tracer_name=tracer_name,
         span_name=span_name,
         attributes=with_span_kind(SPAN_KIND_LLM),
     ):
         set_span_input_output(input_data=input_data)
-        yield
+        try:
+            yield
+            set_span_status("OK")
+        except Exception as exc:
+            record_span_exception(exc)
+            set_span_status("ERROR", str(exc))
+            raise
 
 
 def set_llm_span_output(output_data: Any) -> None:

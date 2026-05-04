@@ -1491,8 +1491,11 @@ class TaskExecutionService:
         """Update the current span status based on the orchestrator state outcomes."""
         if state.errors:
             set_span_status("ERROR", state.errors[0])
-        elif state.result is not None and state.result.status in ("error", "failure"):
-            set_span_status("ERROR", state.result.summary)
+        elif state.result is not None:
+            if state.result.status in ("error", "failure"):
+                set_span_status("ERROR", state.result.summary)
+            elif state.result.status == "success":
+                set_span_status("OK")
 
     async def _heartbeat_loop(
         self,

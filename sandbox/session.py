@@ -390,6 +390,8 @@ class DockerShellSession:
                         set_span_status(
                             "ERROR", f"Command failed with exit code {stream.exit_code}"
                         )
+                    else:
+                        set_span_status("OK")
 
                     set_span_input_output(input_data=None, output_data=output)
                 except (DockerShellSessionError, RuntimeError, OSError) as exc:

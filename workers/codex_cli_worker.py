@@ -9,6 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from apps.observability import (
+    SPAN_KIND_AGENT,
+    record_span_exception,
+    set_span_status,
+    start_optional_span,
+    with_span_kind,
+)
 from sandbox import (
     DockerSandboxContainer,
     DockerSandboxContainerError,
@@ -256,14 +263,30 @@ class CodexCliWorker(Worker):
     ) -> WorkerResult:
         """Provision a workspace, run the CLI loop, and return a typed result."""
 
-        def _run_sync(cancel_requested: Callable[[], bool]) -> WorkerResult:
-            return self._run_sync(
-                request,
-                cancel_token=cancel_requested,
-                system_prompt_override=system_prompt,
-            )
+        with start_optional_span(
+            tracer_name="workers.codex_cli_worker",
+            span_name="CodexCliWorker.run",
+            attributes=with_span_kind(SPAN_KIND_AGENT),
+        ):
 
-        return await run_sync_with_cancellable_executor(_run_sync)
+            def _run_sync(cancel_requested: Callable[[], bool]) -> WorkerResult:
+                return self._run_sync(
+                    request,
+                    cancel_token=cancel_requested,
+                    system_prompt_override=system_prompt,
+                )
+
+            try:
+                result = await run_sync_with_cancellable_executor(_run_sync)
+                if result.status == "success":
+                    set_span_status("OK")
+                else:
+                    set_span_status("ERROR", result.summary)
+                return result
+            except Exception as exc:
+                record_span_exception(exc)
+                set_span_status("ERROR", str(exc))
+                raise
 
     def _cleanup_workspace(
         self,
