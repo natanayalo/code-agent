@@ -34,7 +34,10 @@ def sanitize_command(command: str, redactor: SecretRedactor | None) -> str:
 
 
 def construct_sandbox_output(
-    stdout: str, stderr: str, redactor: SecretRedactor | None = None
+    stdout: str,
+    stderr: str,
+    redactor: SecretRedactor | None = None,
+    limit_chars: int = 32768,
 ) -> str:
     """Construct a redacted summary of sandbox command output."""
     out = stdout or ""
@@ -45,8 +48,14 @@ def construct_sandbox_output(
 
     if not out and not err:
         return ""
+
     if not err:
-        return out
-    if not out:
-        return f"--- stderr ---\n{err}"
-    return f"{out}\n--- stderr ---\n{err}"
+        result = out
+    elif not out:
+        result = f"--- stderr ---\n{err}"
+    else:
+        result = f"{out}\n--- stderr ---\n{err}"
+
+    if len(result) > limit_chars:
+        return result[:limit_chars] + f"\n\n[TRUNCATED: Output exceeded {limit_chars} characters]"
+    return result
