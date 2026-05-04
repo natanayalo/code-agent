@@ -24,7 +24,7 @@ from apps.observability import (
 from sandbox.audit import capture_audit_artifacts
 from sandbox.container import build_container_name
 from sandbox.policy import PathPolicy
-from sandbox.redact import SecretRedactor, sanitize_command
+from sandbox.redact import SecretRedactor, construct_sandbox_output, sanitize_command
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
 from sandbox.workspace import (
     SandboxArtifact,
@@ -399,7 +399,9 @@ class DockerSandboxRunner:
                     )
                 set_span_input_output(
                     input_data=None,
-                    output_data=redactor.redact(completed.stdout) if redactor else completed.stdout,
+                    output_data=construct_sandbox_output(
+                        completed.stdout, completed.stderr, redactor
+                    ),
                 )
             except (RuntimeError, OSError) as exc:
                 logger.debug(f"Command execution failed: {exc}", exc_info=True)

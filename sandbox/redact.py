@@ -31,3 +31,22 @@ def sanitize_command(command: str, redactor: SecretRedactor | None) -> str:
     if not redactor:
         return command
     return redactor.redact(command)
+
+
+def construct_sandbox_output(
+    stdout: str, stderr: str, redactor: SecretRedactor | None = None
+) -> str:
+    """Construct a redacted summary of sandbox command output."""
+    out = stdout or ""
+    err = stderr or ""
+    if redactor:
+        out = redactor.redact(out)
+        err = redactor.redact(err)
+
+    if not out and not err:
+        return ""
+    if not err:
+        return out
+    if not out:
+        return f"--- stderr ---\n{err}"
+    return f"{out}\n--- stderr ---\n{err}"
