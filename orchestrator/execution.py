@@ -1287,8 +1287,7 @@ class TaskExecutionService:
                         started_at=started_at,
                         finished_at=finished_at,
                     )
-                    if state.errors:
-                        set_span_status("ERROR", state.errors[0])
+                    self._update_span_status_from_state(state)
                 except Exception:
                     logger.exception(
                         "Task execution failed before the final outcome was fully persisted",
@@ -1404,9 +1403,7 @@ class TaskExecutionService:
                     state = await self._run_orchestrator(submission, persisted)
                     finished_at = utc_now()
 
-                    if state.result is not None:
-                        if state.result.status in ("error", "failure"):
-                            set_span_status("ERROR", state.result.summary)
+                    self._update_span_status_from_state(state)
 
                     if state.result is not None and state.result.status == "success":
                         await self._run_blocking(
@@ -1485,6 +1482,13 @@ class TaskExecutionService:
                     summary=self._task_summary(task_snapshot),
                 )
         return None
+
+    def _update_span_status_from_state(self, state: OrchestratorState) -> None:
+        """Update the current span status based on the orchestrator state outcomes."""
+        if state.errors:
+            set_span_status("ERROR", state.errors[0])
+        elif state.result is not None and state.result.status in ("error", "failure"):
+            set_span_status("ERROR", state.result.summary)
 
     async def _heartbeat_loop(
         self,
