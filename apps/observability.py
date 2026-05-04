@@ -41,6 +41,12 @@ DEFAULT_SERVICE_VERSION: Final[str] = "0.1.0-dev"
 
 _bootstrap_lock = Lock()
 _bootstrap_complete = False
+
+try:
+    _version = importlib.metadata.version("code-agent")
+except importlib.metadata.PackageNotFoundError:
+    _version = DEFAULT_SERVICE_VERSION
+_SERVICE_VERSION: Final[str] = _version
 T = TypeVar("T")
 
 
@@ -164,10 +170,7 @@ def configure_tracing_from_env(
             )
 
         # Create a resource to preserve the logical service name.
-        try:
-            service_version = importlib.metadata.version("code-agent")
-        except importlib.metadata.PackageNotFoundError:
-            service_version = DEFAULT_SERVICE_VERSION
+        service_version = _SERVICE_VERSION
 
         resource = deps.resource_cls.create(
             {
