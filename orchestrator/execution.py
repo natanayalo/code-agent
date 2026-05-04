@@ -10,6 +10,7 @@ import logging
 import os
 import shutil
 import socket
+import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
@@ -1106,8 +1107,9 @@ def _get_project_id(api_base_url: str, project_name: str) -> str:
         with urllib.request.urlopen(url, timeout=1) as response:
             data = json.loads(response.read().decode())
             return data["data"]["id"]
-    except Exception:
+    except (urllib.error.URLError, ValueError, KeyError, TypeError) as e:
         # Fallback to the name if the API is unreachable or the project doesn't exist
+        logger.debug("Failed to resolve Phoenix project ID for '%s': %s", project_name, e)
         return project_name
 
 
@@ -1149,8 +1151,9 @@ def _get_phoenix_url(trace_id: str | None) -> str | None:
 
             # Phoenix UI puts traces at /projects/<id>/traces/<id>
             return f"{parsed.scheme}://{netloc}/projects/{project_id}/traces/{trace_id}"
-        except Exception:
-            # Fallback if URL parsing fails
+        except (ValueError, urllib.error.URLError) as e:
+            # Fallback if URL parsing or project resolution fails
+            logger.debug("Failed to generate custom Phoenix deep link: %s", e)
             pass
 
     # Default fallback for local dev
