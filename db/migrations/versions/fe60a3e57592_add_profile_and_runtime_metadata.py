@@ -9,6 +9,13 @@ branch_labels = None
 depends_on = None
 
 
+# NOTE: The following indices and constraints already exist in the migration history
+# and should not be re-added here:
+# - ix_tasks_next_attempt_at (added in 20260414_0008)
+# - ix_tasks_lease_expires_at (added in 20260414_0008)
+# - uq_task_timeline_events_task_attempt_seq (added in 20260416_0011)
+
+
 def upgrade() -> None:
     runtime_mode_enum = sa.Enum(
         "native_agent",
