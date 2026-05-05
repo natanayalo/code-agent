@@ -2,60 +2,101 @@
 
 from __future__ import annotations
 
-import subprocess
+from unittest.mock import AsyncMock
+
+import pytest
 
 import orchestrator.verification as verification_module
+from db.enums import WorkerRuntimeMode
 from orchestrator.state import OrchestratorState
+from workers import WorkerResult
 
 
-def _state_with_workspace(tmp_path, *, verification_commands: list[str]) -> OrchestratorState:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / "README.md").write_text("demo\n", encoding="utf-8")
+def _state() -> OrchestratorState:
     return OrchestratorState.model_validate(
         {
-            "task": {"task_text": "demo"},
-            "task_spec": {"goal": "demo", "verification_commands": verification_commands},
+            "session": {
+                "session_id": "session-1",
+                "user_id": "user-1",
+                "channel": "http",
+                "external_thread_id": "thread-1",
+            },
+            "task": {
+                "task_text": "Fix verifier behavior",
+                "repo_url": "https://example.com/repo.git",
+                "branch": "main",
+                "constraints": {},
+                "budget": {"independent_verifier_timeout_seconds": 90},
+            },
+            "task_spec": {
+                "goal": "Fix verifier behavior",
+                "verification_commands": [
+                    ".venv/bin/pytest tests/unit/test_orchestrator_graph_unit.py"
+                ],
+            },
+            "memory": {"personal": [], "project": [], "session": {}},
+            "dispatch": {"worker_type": "codex"},
             "result": {
                 "status": "success",
-                "artifacts": [
-                    {
-                        "name": "workspace",
-                        "uri": workspace.as_uri(),
-                        "artifact_type": "workspace",
-                    }
-                ],
+                "summary": "Worker completed and updated verification logic.",
+                "files_changed": ["orchestrator/verification.py"],
             },
         }
     )
 
 
-def test_run_independent_verifier_reports_timeout_as_timeout(tmp_path, monkeypatch) -> None:
-    state = _state_with_workspace(tmp_path, verification_commands=["ls"])
-
-    def _raise_timeout(*args, **kwargs):  # noqa: ANN002, ANN003
-        command = args[0] if args else kwargs.get("command", "unknown")
-        timeout_seconds = kwargs.get("timeout_seconds", 0)
-        raise subprocess.TimeoutExpired(cmd=command, timeout=timeout_seconds)
-
-    monkeypatch.setattr(verification_module, "_run_command", _raise_timeout)
-
-    status, summary = verification_module.run_independent_verifier(state)
-
-    assert status == "failed"
-    assert "timed out" in summary
-    assert "failed unexpectedly" not in summary
-
-
-def test_run_command_returns_bounded_output_preview(tmp_path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-
-    returncode, detail = verification_module._run_command(  # noqa: SLF001
-        "python -c \"print('x' * 20000)\"",
-        workspace_path=workspace,
-        timeout_seconds=5,
+@pytest.mark.anyio
+async def test_run_independent_verifier_uses_native_read_only_request() -> None:
+    state = _state()
+    mock_worker = AsyncMock()
+    mock_worker.run.return_value = WorkerResult(
+        status="success",
+        summary='{"status":"passed","summary":"all checks passed"}',
     )
 
-    assert returncode == 0
-    assert len(detail) <= verification_module.DEFAULT_INDEPENDENT_VERIFIER_OUTPUT_PREVIEW_BYTES
+    status, summary = await verification_module.run_independent_verifier(
+        state,
+        worker_factory={"codex": mock_worker},
+    )
+
+    assert status == "passed"
+    assert summary == "all checks passed"
+
+    args, kwargs = mock_worker.run.call_args
+    request = args[0]
+    assert request.constraints["read_only"] is True
+    assert request.runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
+    assert request.budget["worker_timeout_seconds"] == 90
+    assert "system_prompt" in kwargs
+    assert "strict read-only mode" in kwargs["system_prompt"]
+
+
+@pytest.mark.anyio
+async def test_run_independent_verifier_parses_fenced_json_summary() -> None:
+    state = _state()
+    mock_worker = AsyncMock()
+    mock_worker.run.return_value = WorkerResult(
+        status="success",
+        summary='```json\n{"status":"warning","summary":"could not run full suite"}\n```',
+    )
+
+    status, summary = await verification_module.run_independent_verifier(
+        state,
+        worker_factory={"gemini": mock_worker},
+    )
+
+    assert status == "warning"
+    assert summary == "could not run full suite"
+
+
+@pytest.mark.anyio
+async def test_run_independent_verifier_reports_warning_when_worker_missing() -> None:
+    state = _state()
+
+    status, summary = await verification_module.run_independent_verifier(
+        state,
+        worker_factory={},
+    )
+
+    assert status == "warning"
+    assert "no verifier worker configured" in summary

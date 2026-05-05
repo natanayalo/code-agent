@@ -1604,6 +1604,7 @@ def verify_result(
     state_input: OrchestratorState,
     *,
     enable_independent_verifier: bool = False,
+    independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = None,
 ) -> dict[str, Any]:
     """Perform deterministic checks on the worker output before summarization."""
     state = _ensure_state(state_input)
@@ -1724,7 +1725,15 @@ def verify_result(
 
     # 6. Optional independent verifier execution (T-158)
     if enable_independent_verifier:
-        independent_status, independent_summary = run_independent_verifier(state)
+        independent_status: Literal["passed", "failed", "warning"]
+        independent_summary: str
+        if independent_verifier_outcome is None:
+            independent_status = "warning"
+            independent_summary = (
+                "Independent verifier enabled, but no verifier outcome was attached."
+            )
+        else:
+            independent_status, independent_summary = independent_verifier_outcome
         items.append(
             VerificationReportItem(
                 label="independent_verifier",
@@ -1891,14 +1900,28 @@ def build_review_result_node(
 def build_verify_result_node(
     *,
     enable_independent_verifier: bool = False,
-) -> Callable[[OrchestratorState], dict[str, Any]]:
+    worker: Worker | None = None,
+    gemini_worker: Worker | None = None,
+    openrouter_worker: Worker | None = None,
+) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the verification node with optional independent verifier execution."""
 
-    def verify_result_node(state_input: OrchestratorState) -> dict[str, Any]:
+    configured_workers = _configured_workers(worker, gemini_worker, openrouter_worker)
+
+    async def verify_result_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
+        independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = (
+            None
+        )
+        if enable_independent_verifier:
+            independent_verifier_outcome = await run_independent_verifier(
+                state,
+                worker_factory=configured_workers,
+            )
         return verify_result(
             state,
             enable_independent_verifier=enable_independent_verifier,
+            independent_verifier_outcome=independent_verifier_outcome,
         )
 
     return verify_result_node
@@ -1958,6 +1981,9 @@ def build_orchestrator_graph(
         RunnableLambda(
             build_verify_result_node(
                 enable_independent_verifier=enable_independent_verifier,
+                worker=worker,
+                gemini_worker=gemini_worker,
+                openrouter_worker=openrouter_worker,
             )
         ),
     )

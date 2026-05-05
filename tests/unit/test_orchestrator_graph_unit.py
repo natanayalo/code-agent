@@ -1266,7 +1266,11 @@ def test_verify_result_runs_independent_verifier_when_enabled(tmp_path: Path) ->
         }
     )
 
-    res = verify_result(state, enable_independent_verifier=True)
+    res = verify_result(
+        state,
+        enable_independent_verifier=True,
+        independent_verifier_outcome=("passed", "independent verification passed"),
+    )
 
     independent_check = next(
         item for item in res["verification"]["items"] if item["label"] == "independent_verifier"
@@ -1299,7 +1303,11 @@ def test_verify_result_fails_when_independent_verifier_command_fails(tmp_path: P
         }
     )
 
-    res = verify_result(state, enable_independent_verifier=True)
+    res = verify_result(
+        state,
+        enable_independent_verifier=True,
+        independent_verifier_outcome=("failed", "independent verification failed"),
+    )
 
     independent_check = next(
         item for item in res["verification"]["items"] if item["label"] == "independent_verifier"
@@ -1333,7 +1341,11 @@ def test_verify_result_warns_when_independent_verifier_command_is_unsafe(tmp_pat
         }
     )
 
-    res = verify_result(state, enable_independent_verifier=True)
+    res = verify_result(
+        state,
+        enable_independent_verifier=True,
+        independent_verifier_outcome=("warning", "independent verifier warned"),
+    )
 
     independent_check = next(
         item for item in res["verification"]["items"] if item["label"] == "independent_verifier"

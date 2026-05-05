@@ -591,17 +591,20 @@ class GeminiCliWorker(Worker):
     def _build_native_command(
         self,
         *,
+        request: WorkerRequest,
         runtime_mode: WorkerRuntimeMode,
     ) -> list[str]:
         """Build a one-shot Gemini headless command for native-agent mode."""
         executable = getattr(self.runtime_adapter, "executable", "gemini")
         model = getattr(self.runtime_adapter, "model", None)
+        read_only_requested = bool(request.constraints.get("read_only"))
+        approval_mode = "plan" if read_only_requested else DEFAULT_GEMINI_NATIVE_APPROVAL_MODE
         command = [
             executable,
             "--output-format",
             "json",
             "--approval-mode",
-            DEFAULT_GEMINI_NATIVE_APPROVAL_MODE,
+            approval_mode,
         ]
         if model:
             command.extend(["--model", str(model)])
@@ -746,7 +749,10 @@ class GeminiCliWorker(Worker):
             )
         )
         prompt = self._build_native_prompt(system_prompt=system_prompt, request=request)
-        command = self._build_native_command(runtime_mode=runtime_mode)
+        command = self._build_native_command(
+            request=request,
+            runtime_mode=runtime_mode,
+        )
         native_result = run_native_agent(
             NativeAgentRunRequest(
                 command=command,
