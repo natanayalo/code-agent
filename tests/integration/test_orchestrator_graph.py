@@ -442,7 +442,8 @@ def test_orchestrator_graph_worker_override_respects_profile_opt_in() -> None:
     assert state.result is not None
     assert state.result.status == "error"
     assert (
-        state.result.summary == "No worker profile is configured for worker route 'openrouter'. "
+        state.result.summary
+        == "No routable worker profile is available for worker route 'openrouter'. "
         "Configured profiles: codex-native-executor."
     )
     assert worker.requests == []

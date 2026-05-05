@@ -665,7 +665,7 @@ def _worker_route_missing_profile_result(
     return WorkerResult(
         status="error",
         summary=(
-            f"No worker profile is configured for worker route '{selected_worker}'. "
+            f"No routable worker profile is available for worker route '{selected_worker}'. "
             f"Configured profiles: {configured_profiles_text}."
         ),
         failure_kind="provider_error",
