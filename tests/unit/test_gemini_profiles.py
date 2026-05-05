@@ -1,13 +1,15 @@
-import os
+from apps.api.task_service_factory import (
+    GEMINI_NATIVE_PLANNER_PROFILE,
+    GEMINI_NATIVE_REVIEWER_PROFILE,
+    _build_default_worker_profiles,
+)
 
-from apps.api.task_service_factory import _build_default_worker_profiles
 
-
-def test_gemini_specialized_profiles_enabled():
+def test_gemini_specialized_profiles_enabled(monkeypatch):
     """Verify that specialized Gemini profiles are created when native_agent mode is active."""
     # Setup environment for native_agent mode
-    os.environ["CODE_AGENT_WORKER_PROFILES_ENABLED"] = "true"
-    os.environ["GEMINI_RUNTIME_MODE"] = "native_agent"
+    monkeypatch.setenv("CODE_AGENT_WORKER_PROFILES_ENABLED", "true")
+    monkeypatch.setenv("GEMINI_RUNTIME_MODE", "native_agent")
 
     profiles = _build_default_worker_profiles(
         include_gemini=True,
@@ -16,17 +18,17 @@ def test_gemini_specialized_profiles_enabled():
         gemini_runtime_mode="native_agent",
     )
 
-    assert "gemini-native-planner" in profiles
-    assert "gemini-native-reviewer" in profiles
+    assert GEMINI_NATIVE_PLANNER_PROFILE in profiles
+    assert GEMINI_NATIVE_REVIEWER_PROFILE in profiles
 
-    planner = profiles["gemini-native-planner"]
+    planner = profiles[GEMINI_NATIVE_PLANNER_PROFILE]
     assert planner.worker_type == "gemini"
-    assert planner.runtime_mode == "native_agent"
+    assert planner.runtime_mode == "planner_only"
     assert "planning" in planner.capability_tags
 
-    reviewer = profiles["gemini-native-reviewer"]
+    reviewer = profiles[GEMINI_NATIVE_REVIEWER_PROFILE]
     assert reviewer.worker_type == "gemini"
-    assert reviewer.runtime_mode == "native_agent"
+    assert reviewer.runtime_mode == "reviewer_only"
     assert "review" in reviewer.capability_tags
 
 
@@ -39,5 +41,5 @@ def test_gemini_specialized_profiles_disabled_in_tool_loop():
         gemini_runtime_mode="tool_loop",
     )
 
-    assert "gemini-native-planner" not in profiles
-    assert "gemini-native-reviewer" not in profiles
+    assert GEMINI_NATIVE_PLANNER_PROFILE not in profiles
+    assert GEMINI_NATIVE_REVIEWER_PROFILE not in profiles

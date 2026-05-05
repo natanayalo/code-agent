@@ -15,6 +15,7 @@ from apps.api.progress import (
     WebhookCallbackProgressNotifier,
 )
 from apps.runtime import coerce_positive_int_env as _coerce_positive_int
+from db.enums import WorkerRuntimeMode
 from orchestrator.execution import ProgressNotifier, TaskExecutionService
 from repositories import create_engine_from_url, create_session_factory
 from sandbox import DockerSandboxContainerManager
@@ -27,7 +28,6 @@ from workers import (
     OpenRouterCliRuntimeAdapter,
     OpenRouterCliWorker,
     WorkerProfile,
-    WorkerRuntimeMode,
     WorkerType,
 )
 from workers.gemini_cli_adapter import (
@@ -57,6 +57,10 @@ CODEX_RUNTIME_MODE_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_RUNTIME_MODE"
 GEMINI_RUNTIME_MODE_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_RUNTIME_MODE"
 OPENROUTER_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_ENABLED"
 
+# Default profile names
+GEMINI_NATIVE_PLANNER_PROFILE: Final[str] = "gemini-native-planner"
+GEMINI_NATIVE_REVIEWER_PROFILE: Final[str] = "gemini-native-reviewer"
+
 
 def _is_enabled(value: str | None) -> bool:
     """Interpret common truthy environment values."""
@@ -74,10 +78,14 @@ def _coerce_runtime_mode(
     if value is None:
         return default
     normalized = value.strip().lower()
-    if normalized == "native_agent":
-        return "native_agent"
-    if normalized == "tool_loop":
-        return "tool_loop"
+    if normalized == WorkerRuntimeMode.NATIVE_AGENT.value:
+        return WorkerRuntimeMode.NATIVE_AGENT
+    if normalized == WorkerRuntimeMode.TOOL_LOOP.value:
+        return WorkerRuntimeMode.TOOL_LOOP
+    if normalized == WorkerRuntimeMode.PLANNER_ONLY.value:
+        return WorkerRuntimeMode.PLANNER_ONLY
+    if normalized == WorkerRuntimeMode.REVIEWER_ONLY.value:
+        return WorkerRuntimeMode.REVIEWER_ONLY
     return default
 
 
@@ -95,7 +103,7 @@ def _build_default_worker_profiles(
         """Helper to add standard and read-only profiles for a worker."""
         profile_name = (
             f"{worker_type}-native-executor"
-            if runtime_mode == "native_agent"
+            if runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
             else f"{worker_type}-tool-loop-executor"
         )
         # Standard profile
@@ -126,21 +134,21 @@ def _build_default_worker_profiles(
     if include_gemini:
         _add_profiles("gemini", gemini_runtime_mode)
         # Add specialized profiles for Gemini (T-142)
-        if gemini_runtime_mode == "native_agent":
-            profiles["gemini-native-planner"] = WorkerProfile(
-                name="gemini-native-planner",
+        if gemini_runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
+            profiles[GEMINI_NATIVE_PLANNER_PROFILE] = WorkerProfile(
+                name=GEMINI_NATIVE_PLANNER_PROFILE,
                 worker_type="gemini",
-                runtime_mode="native_agent",
+                runtime_mode=WorkerRuntimeMode.PLANNER_ONLY,
                 capability_tags=["planning"],
                 supported_delivery_modes=["workspace", "branch", "draft_pr"],
                 permission_profile="workspace_write",
                 mutation_policy="patch_allowed",
                 self_review_policy="on_failure",
             )
-            profiles["gemini-native-reviewer"] = WorkerProfile(
-                name="gemini-native-reviewer",
+            profiles[GEMINI_NATIVE_REVIEWER_PROFILE] = WorkerProfile(
+                name=GEMINI_NATIVE_REVIEWER_PROFILE,
                 worker_type="gemini",
-                runtime_mode="native_agent",
+                runtime_mode=WorkerRuntimeMode.REVIEWER_ONLY,
                 capability_tags=["review"],
                 supported_delivery_modes=["workspace", "branch", "draft_pr"],
                 permission_profile="workspace_write",
@@ -152,7 +160,7 @@ def _build_default_worker_profiles(
         profiles["openrouter-tool-loop-legacy"] = WorkerProfile(
             name="openrouter-tool-loop-legacy",
             worker_type="openrouter",
-            runtime_mode="tool_loop",
+            runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
             capability_tags=["execution"],
             supported_delivery_modes=["workspace"],
             permission_profile="workspace_write",
@@ -253,11 +261,11 @@ def build_task_service_from_env(
             ),
             codex_runtime_mode=_coerce_runtime_mode(
                 resolved_env.get(CODEX_RUNTIME_MODE_ENV_VAR),
-                default="tool_loop",
+                default=WorkerRuntimeMode.TOOL_LOOP,
             ),
             gemini_runtime_mode=_coerce_runtime_mode(
                 resolved_env.get(GEMINI_RUNTIME_MODE_ENV_VAR),
-                default="tool_loop",
+                default=WorkerRuntimeMode.TOOL_LOOP,
             ),
         )
     if outbound_http_clients is None:
