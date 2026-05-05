@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -32,7 +32,9 @@ FailureKind = Literal[
 ]
 
 WorkerType = Literal["gemini", "codex", "openrouter"]
-SUPPORTED_WORKER_TYPES: tuple[WorkerType, ...] = ("gemini", "openrouter", "codex")
+# Ordered by escalation preference in routing fallbacks:
+# quality-first, then balanced, then low-cost.
+SUPPORTED_WORKER_TYPES: Final[tuple[WorkerType, ...]] = ("gemini", "openrouter", "codex")
 WorkerRuntimeMode = Literal["native_agent", "tool_loop", "planner_only", "reviewer_only"]
 WorkerCapabilityTag = Literal["planning", "execution", "review", "routing", "scout"]
 WorkerPermissionProfile = Literal[
