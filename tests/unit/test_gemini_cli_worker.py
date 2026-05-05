@@ -665,7 +665,11 @@ def test_gemini_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path)
     assert command[command.index("--output-format") + 1] == "json"
     assert "--approval-mode" in command
     assert command[command.index("--approval-mode") + 1] == "default"
+    assert "--prompt" not in command
     assert "--sandbox" in command
+    native_request = run_native.call_args.args[0]
+    assert "## Native Execution Task" in native_request.prompt
+    assert "Apply a small native worker change" in native_request.prompt
     assert result.artifacts[0].name == "workspace"
 
 
@@ -697,3 +701,33 @@ def test_gemini_cli_worker_rejects_non_execution_runtime_modes(tmp_path: Path) -
     assert result.failure_kind == "provider_error"
     assert "does not support runtime mode" in (result.summary or "")
     assert workspace_manager.cleanup_requests == [(workspace, False)]
+
+
+def test_gemini_cli_worker_runtime_error_is_mapped_to_workspace_error(tmp_path: Path) -> None:
+    """RuntimeError from setup/runtime phases should map to structured worker errors."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(container)
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+        session_factory=lambda _, **__: _FakeSession({}),
+    )
+
+    with patch.object(worker, "_setup_runtime_phase", side_effect=RuntimeError("adapter exploded")):
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-runtime-error",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="trigger runtime error",
+                )
+            )
+        )
+
+    assert result.status == "error"
+    assert "adapter exploded" in (result.summary or "")
+    assert result.next_action_hint == "inspect_worker_configuration"

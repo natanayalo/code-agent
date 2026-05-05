@@ -591,7 +591,6 @@ class GeminiCliWorker(Worker):
     def _build_native_command(
         self,
         *,
-        prompt: str,
         runtime_mode: WorkerRuntimeMode,
     ) -> list[str]:
         """Build a one-shot Gemini headless command for native-agent mode."""
@@ -599,8 +598,6 @@ class GeminiCliWorker(Worker):
         model = getattr(self.runtime_adapter, "model", None)
         command = [
             executable,
-            "--prompt",
-            prompt,
             "--output-format",
             "json",
             "--approval-mode",
@@ -749,12 +746,12 @@ class GeminiCliWorker(Worker):
             )
         )
         prompt = self._build_native_prompt(system_prompt=system_prompt, request=request)
-        command = self._build_native_command(prompt=prompt, runtime_mode=runtime_mode)
+        command = self._build_native_command(runtime_mode=runtime_mode)
         native_result = run_native_agent(
             NativeAgentRunRequest(
                 command=command,
-                # Prompt is provided through --prompt to force Gemini headless mode.
-                prompt="",
+                # Prompt is sent via stdin to avoid command-line length limits.
+                prompt=prompt,
                 repo_path=workspace.repo_path,
                 workspace_path=workspace.workspace_path,
                 timeout_seconds=runtime_settings.worker_timeout_seconds,
@@ -894,6 +891,7 @@ class GeminiCliWorker(Worker):
             DockerSandboxContainerError,
             DockerShellSessionError,
             OSError,
+            RuntimeError,
             UnknownToolError,
         ) as exc:
             result = _workspace_error_result(
