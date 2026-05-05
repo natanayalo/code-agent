@@ -7,6 +7,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+import workers.native_agent_runner as native_runner
 from workers.native_agent_runner import NativeAgentRunRequest, run_native_agent
 
 
@@ -200,3 +201,86 @@ time.sleep(2)
     assert len(result.artifacts) == 2
     assert result.artifacts[0].name == "native-agent-stdout"
     assert result.artifacts[1].name == "native-agent-stderr"
+
+
+def test_native_agent_runner_truncates_stdout_fallback_summary(tmp_path: Path) -> None:
+    """Long stdout fallback summaries should be bounded to prevent payload bloat."""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+    long_stdout = "x" * (native_runner.DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS + 250)
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-long-stdout.py",
+        f"""#!/usr/bin/env python3
+print("{long_stdout}")
+""",
+    )
+
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+
+    assert result.status == "success"
+    assert result.final_message is not None
+    assert result.final_message.startswith("[stdout truncated for summary]")
+    assert len(result.final_message) <= (
+        len("[stdout truncated for summary]\n")
+        + native_runner.DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS
+    )
+    assert result.final_message.endswith(
+        "x" * native_runner.DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS
+    )
+
+
+def test_read_final_message_is_bounded(tmp_path: Path) -> None:
+    """Final message parsing should cap file reads to a fixed safety budget."""
+    final_message_path = tmp_path / "final-message.txt"
+    oversized = "a" * (native_runner.DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS + 120)
+    final_message_path.write_text(oversized, encoding="utf-8")
+
+    parsed = native_runner._read_final_message(final_message_path)
+
+    assert parsed is not None
+    assert parsed.endswith("[final message truncated for safety]")
+    assert len(parsed) < len(oversized)
+
+
+def test_native_agent_runner_returns_structured_error_on_artifact_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Artifact copy/write errors should not crash the caller."""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-success.py",
+        """#!/usr/bin/env python3
+print("ok")
+""",
+    )
+
+    def _raise_artifact_error(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(native_runner, "_write_artifact", _raise_artifact_error)
+
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+
+    assert result.status == "error"
+    assert "failed while collecting artifacts" in result.summary
+    assert "disk full" in result.summary
