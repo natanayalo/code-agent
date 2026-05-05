@@ -48,7 +48,7 @@ Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17: Native Agent Worker Runtime Profiles
 - [ ] T-159: add bounded continuation/repair after verifier failure
-- [ ] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance
+- [ ] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance (planner-style reasoning should default to native read-only execution mode/profile)
 - [ ] T-161: update observability/artifact persistence for runtime mode, profile, CLI stdout/stderr/events, final message, diff, changed files, and verifier result
 - [ ] T-162: deprecate operation-selector mode for Codex/Gemini while keeping `CliRuntimeLoop` for raw chat/OpenRouter compatibility
 
