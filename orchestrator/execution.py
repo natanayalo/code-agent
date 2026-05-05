@@ -58,6 +58,7 @@ from db.enums import (
     HumanInteractionStatus,
     TaskStatus,
     WorkerRunStatus,
+    WorkerRuntimeMode,
     WorkerType,
 )
 from db.models import HumanInteraction, PersonalMemory, ProjectMemory, Task, User, WorkerRun
@@ -396,6 +397,8 @@ class WorkerRunSnapshot(ExecutionModel):
     run_id: str
     session_id: str | None = None
     worker_type: str
+    worker_profile: str | None = None
+    runtime_mode: str | None = None
     workspace_id: str | None = None
     status: str
     started_at: datetime
@@ -515,6 +518,8 @@ class TaskSummarySnapshot(ExecutionModel):
     branch: str | None = None
     priority: int = 0
     chosen_worker: str | None = None
+    chosen_profile: str | None = None
+    runtime_mode: str | None = None
     route_reason: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -1833,6 +1838,8 @@ class TaskExecutionService:
                 run_id=latest_run_obj.id,
                 session_id=latest_run_obj.session_id,
                 worker_type=_enum_value(latest_run_obj.worker_type) or "unknown",
+                worker_profile=latest_run_obj.worker_profile,
+                runtime_mode=_enum_value(latest_run_obj.runtime_mode),
                 workspace_id=latest_run_obj.workspace_id,
                 status=_enum_value(latest_run_obj.status) or WorkerRunStatus.ERROR.value,
                 started_at=latest_run_obj.started_at,
@@ -1935,6 +1942,8 @@ class TaskExecutionService:
             branch=task.branch,
             priority=task.priority,
             chosen_worker=_enum_value(task.chosen_worker),
+            chosen_profile=task.chosen_profile,
+            runtime_mode=_enum_value(task.runtime_mode),
             route_reason=task.route_reason,
             created_at=task.created_at,
             updated_at=task.updated_at,
@@ -2764,6 +2773,8 @@ class TaskExecutionService:
 
             if state.route.chosen_worker is not None and state.route.route_reason is not None:
                 task.chosen_worker = cast(WorkerType, state.route.chosen_worker)
+                task.chosen_profile = state.route.chosen_profile
+                task.runtime_mode = cast(WorkerRuntimeMode | None, state.route.runtime_mode)
                 task.route_reason = state.route.route_reason
 
             if state.task_spec is not None:
@@ -2838,6 +2849,8 @@ class TaskExecutionService:
                 files_changed=result.files_changed if result is not None else [],
                 artifact_index=artifact_index,
                 retention_expires_at=retention_expires_at,
+                worker_profile=state.route.chosen_profile,
+                runtime_mode=state.route.runtime_mode,
             )
 
             # Use the state-side marker of already-persisted events to avoid redundant DB queries

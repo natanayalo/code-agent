@@ -19,6 +19,7 @@ from db.enums import (
     TaskStatus,
     TimelineEventType,
     WorkerRunStatus,
+    WorkerRuntimeMode,
     WorkerType,
 )
 from db.models import (
@@ -270,6 +271,8 @@ class TaskRepository:
         max_attempts: int = 3,
         next_attempt_at: datetime | None = None,
         chosen_worker: str | None = None,
+        chosen_profile: str | None = None,
+        runtime_mode: str | WorkerRuntimeMode | None = None,
         route_reason: str | None = None,
         trace_context: dict[str, str] | None = None,
     ) -> Task:
@@ -290,6 +293,8 @@ class TaskRepository:
             max_attempts=max_attempts,
             next_attempt_at=next_attempt_at,
             chosen_worker=chosen_worker,
+            chosen_profile=chosen_profile,
+            runtime_mode=cast(WorkerRuntimeMode | None, runtime_mode),
             route_reason=route_reason,
             trace_context=trace_context or {},
         )
@@ -446,6 +451,8 @@ class TaskRepository:
         *,
         task_id: str,
         chosen_worker: str | WorkerType,
+        chosen_profile: str | None = None,
+        runtime_mode: str | WorkerRuntimeMode | None = None,
         route_reason: str,
     ) -> Task | None:
         task = self.get(task_id)
@@ -453,6 +460,8 @@ class TaskRepository:
             return None
 
         task.chosen_worker = cast(WorkerType | None, chosen_worker)
+        task.chosen_profile = chosen_profile
+        task.runtime_mode = cast(WorkerRuntimeMode | None, runtime_mode)
         task.route_reason = route_reason
         self.session.flush()
         return task
@@ -907,6 +916,8 @@ class WorkerRunRepository:
         files_changed: list[str] | None = None,
         artifact_index: list[dict[str, Any]] | None = None,
         retention_expires_at: datetime | None = None,
+        worker_profile: str | None = None,
+        runtime_mode: str | WorkerRuntimeMode | None = None,
     ) -> WorkerRun:
         worker_run = WorkerRun(
             task_id=task_id,
@@ -916,6 +927,8 @@ class WorkerRunRepository:
             started_at=started_at,
             finished_at=finished_at,
             status=status,
+            worker_profile=worker_profile,
+            runtime_mode=cast(WorkerRuntimeMode | None, runtime_mode),
             summary=summary,
             requested_permission=requested_permission,
             budget_usage=budget_usage,
