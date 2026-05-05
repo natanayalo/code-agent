@@ -378,7 +378,7 @@ def test_orchestrator_graph_errors_when_selected_profile_is_unavailable() -> Non
     assert state.result.status == "error"
     assert (
         state.result.summary
-        == "No worker profile is configured for route 'openrouter-tool-loop-legacy'. "
+        == "No routable worker profile is available for route 'openrouter-tool-loop-legacy'. "
         "Configured profiles: codex-native-executor."
     )
     assert state.result.next_action_hint == "configure_requested_worker_profile"
@@ -447,6 +447,70 @@ def test_orchestrator_graph_worker_override_respects_profile_opt_in() -> None:
     )
     assert worker.requests == []
     assert openrouter_worker.requests == []
+
+
+def test_orchestrator_graph_profile_override_incompatible_with_constraints() -> None:
+    """Incompatible profile overrides should report a profile-specific routing error."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=["workers/codex_worker.py"],
+            test_results=[{"name": "unexpected-worker-call", "status": "passed"}],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary=None,
+        )
+    )
+    graph = build_orchestrator_graph(
+        worker=worker,
+        enable_worker_profiles=True,
+        worker_profiles={
+            "codex-native-executor": WorkerProfile(
+                name="codex-native-executor",
+                worker_type="codex",
+                runtime_mode="native_agent",
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                mutation_policy="patch_allowed",
+            ),
+            "codex-read-only-executor": WorkerProfile(
+                name="codex-read-only-executor",
+                worker_type="codex",
+                runtime_mode="native_agent",
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace"],
+                mutation_policy="read_only",
+            ),
+        },
+    )
+
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": "Run task with read-only constraint and explicit codex profile",
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                    "worker_profile_override": "codex-native-executor",
+                    "constraints": {"read_only": True},
+                }
+            }
+        )
+    )
+    state = OrchestratorState.model_validate(raw_output)
+
+    assert state.route.chosen_profile == "codex-native-executor"
+    assert state.route.route_reason == "runtime_unavailable"
+    assert state.result is not None
+    assert state.result.status == "error"
+    assert (
+        state.result.summary
+        == "No routable worker profile is available for route 'codex-native-executor'. "
+        "Configured profiles: codex-native-executor, codex-read-only-executor."
+    )
+    assert state.result.next_action_hint == "configure_requested_worker_profile"
+    assert worker.requests == []
 
 
 def test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly(

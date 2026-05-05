@@ -642,7 +642,7 @@ def _unconfigured_worker_profile_result(
     return WorkerResult(
         status="error",
         summary=(
-            f"No worker profile is configured for route '{profile_name}'. "
+            f"No routable worker profile is available for route '{profile_name}'. "
             f"Configured profiles: {configured_profiles_text}."
         ),
         failure_kind="provider_error",
@@ -1339,14 +1339,23 @@ def build_await_result_node(
             progress_message = f"worker profile unavailable: {requested_profile}"
             progress_updates = _progress_update(state, progress_message)
         elif state.route.route_reason == "runtime_unavailable":
-            if configured_profile_names and requested_profile is None:
-                result = _worker_route_missing_profile_result(
-                    worker_type,
-                    configured_profiles=configured_profile_names,
-                )
-                progress_message = (
-                    f"no routable profile available for worker: {worker_type or 'unknown'}"
-                )
+            if configured_profile_names:
+                if requested_profile is None:
+                    result = _worker_route_missing_profile_result(
+                        worker_type,
+                        configured_profiles=configured_profile_names,
+                    )
+                    progress_message = (
+                        f"no routable profile available for worker: {worker_type or 'unknown'}"
+                    )
+                else:
+                    result = _unconfigured_worker_profile_result(
+                        requested_profile,
+                        configured_profiles=configured_profile_names,
+                    )
+                    progress_message = (
+                        f"worker profile unavailable or incompatible: {requested_profile}"
+                    )
             else:
                 result = _unconfigured_worker_result(
                     worker_type,
