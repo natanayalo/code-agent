@@ -59,10 +59,17 @@ Active worker/runtime implementations:
 
 Before routing, the orchestrator builds and persists a TaskSpec so workers, APIs, and operator views share an inspectable task contract. When worker profiles are enabled, routing resolves through a capability matrix and pins dispatch to one concrete `WorkerProfile` (`worker_type`, `runtime_mode`, capability tags, permission/mutation policy, and delivery-mode support).
 
+Profile-aware routing toggle and mapping:
+
+- Enable profile-aware routing with `CODE_AGENT_WORKER_PROFILES_ENABLED=1` (wired in API bootstrap).
+- Runtime mode defaults/overrides come from `CODE_AGENT_CODEX_RUNTIME_MODE` and `CODE_AGENT_GEMINI_RUNTIME_MODE`.
+- OpenRouter legacy execution profile is added only when OpenRouter is configured and `CODE_AGENT_OPENROUTER_ENABLED=1`.
+- Execution routing then filters profiles by worker availability, execution capability tag, read-only vs patch-allowed mutation policy, and delivery-mode compatibility before selecting a concrete profile.
+
 Current default profile matrix:
 
-- **Codex execution**: `codex-native-executor` or `codex-tool-loop-executor` (plus read-only variants)
-- **Gemini execution**: `gemini-native-executor` or `gemini-tool-loop-executor` (plus read-only variants)
+- **Codex execution**: `codex-native-executor` or `codex-tool-loop-executor` with explicit read-only variants `codex-native-executor-read-only` and `codex-tool-loop-executor-read-only`
+- **Gemini execution**: `gemini-native-executor` or `gemini-tool-loop-executor` with explicit read-only variants `gemini-native-executor-read-only` and `gemini-tool-loop-executor-read-only`
 - **Gemini specialist profiles** (native mode): `gemini-native-planner` and `gemini-native-reviewer`
 - **OpenRouter legacy execution**: `openrouter-tool-loop-legacy` (explicit opt-in only)
 
