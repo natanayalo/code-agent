@@ -28,6 +28,7 @@ from workers import (
     OpenRouterCliWorker,
     WorkerProfile,
     WorkerRuntimeMode,
+    WorkerType,
 )
 from workers.gemini_cli_adapter import (
     GEMINI_EXECUTABLE_ENV_VAR,
@@ -80,6 +81,44 @@ def _coerce_runtime_mode(
     return default
 
 
+def _create_worker_profiles(
+    worker_type: WorkerType,
+    runtime_mode: WorkerRuntimeMode,
+) -> dict[str, WorkerProfile]:
+    """Create standard and read-only profiles for a given worker."""
+    profile_name = (
+        f"{worker_type}-native-executor"
+        if runtime_mode == "native_agent"
+        else f"{worker_type}-tool-loop-executor"
+    )
+
+    base_profile_data = {
+        "worker_type": worker_type,
+        "runtime_mode": runtime_mode,
+        "capability_tags": ["execution"],
+        "supported_delivery_modes": ["workspace", "branch", "draft_pr"],
+        "self_review_policy": "on_failure",
+    }
+
+    profiles = {
+        profile_name: WorkerProfile(
+            **base_profile_data,  # type: ignore[arg-type]
+            name=profile_name,
+            permission_profile="workspace_write",
+            mutation_policy="patch_allowed",
+        )
+    }
+
+    read_only_profile_name = f"{profile_name}-read-only"
+    profiles[read_only_profile_name] = WorkerProfile(
+        **base_profile_data,  # type: ignore[arg-type]
+        name=read_only_profile_name,
+        permission_profile="read_only",
+        mutation_policy="read_only",
+    )
+    return profiles
+
+
 def _build_default_worker_profiles(
     *,
     include_gemini: bool,
@@ -88,63 +127,11 @@ def _build_default_worker_profiles(
     gemini_runtime_mode: WorkerRuntimeMode,
 ) -> dict[str, WorkerProfile]:
     """Build the default executable profile map for routing decisions."""
-    codex_profile_name = (
-        "codex-native-executor"
-        if codex_runtime_mode == "native_agent"
-        else "codex-tool-loop-executor"
-    )
-    profiles: dict[str, WorkerProfile] = {
-        codex_profile_name: WorkerProfile(
-            name=codex_profile_name,
-            worker_type="codex",
-            runtime_mode=codex_runtime_mode,
-            capability_tags=["execution"],
-            supported_delivery_modes=["workspace", "branch", "draft_pr"],
-            permission_profile="workspace_write",
-            mutation_policy="patch_allowed",
-            self_review_policy="on_failure",
-        )
-    }
-
-    codex_read_only_profile_name = f"{codex_profile_name}-read-only"
-    profiles[codex_read_only_profile_name] = WorkerProfile(
-        name=codex_read_only_profile_name,
-        worker_type="codex",
-        runtime_mode=codex_runtime_mode,
-        capability_tags=["execution"],
-        supported_delivery_modes=["workspace", "branch", "draft_pr"],
-        permission_profile="read_only",
-        mutation_policy="read_only",
-        self_review_policy="on_failure",
-    )
+    profiles: dict[str, WorkerProfile] = {}
+    profiles.update(_create_worker_profiles("codex", codex_runtime_mode))
 
     if include_gemini:
-        gemini_profile_name = (
-            "gemini-native-executor"
-            if gemini_runtime_mode == "native_agent"
-            else "gemini-tool-loop-executor"
-        )
-        profiles[gemini_profile_name] = WorkerProfile(
-            name=gemini_profile_name,
-            worker_type="gemini",
-            runtime_mode=gemini_runtime_mode,
-            capability_tags=["execution"],
-            supported_delivery_modes=["workspace", "branch", "draft_pr"],
-            permission_profile="workspace_write",
-            mutation_policy="patch_allowed",
-            self_review_policy="on_failure",
-        )
-        gemini_read_only_profile_name = f"{gemini_profile_name}-read-only"
-        profiles[gemini_read_only_profile_name] = WorkerProfile(
-            name=gemini_read_only_profile_name,
-            worker_type="gemini",
-            runtime_mode=gemini_runtime_mode,
-            capability_tags=["execution"],
-            supported_delivery_modes=["workspace", "branch", "draft_pr"],
-            permission_profile="read_only",
-            mutation_policy="read_only",
-            self_review_policy="on_failure",
-        )
+        profiles.update(_create_worker_profiles("gemini", gemini_runtime_mode))
 
     if include_openrouter:
         profiles["openrouter-tool-loop-legacy"] = WorkerProfile(

@@ -1345,18 +1345,7 @@ def build_await_result_node(
         state = _ensure_state(state_input)
         worker_type = state.dispatch.worker_type or state.route.chosen_worker
         requested_profile = state.dispatch.worker_profile or state.route.chosen_profile
-        if (
-            requested_profile is not None
-            and configured_profile_names
-            and requested_profile not in configured_profile_names
-        ):
-            result = _unconfigured_worker_profile_result(
-                requested_profile,
-                configured_profiles=configured_profile_names,
-            )
-            progress_message = f"worker profile unavailable: {requested_profile}"
-            progress_updates = _progress_update(state, progress_message)
-        elif state.route.route_reason == "runtime_unavailable":
+        if state.route.route_reason == "runtime_unavailable":
             if configured_profile_names:
                 if requested_profile is None:
                     result = _worker_route_missing_profile_result(
