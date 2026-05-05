@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
+from db.enums import WorkerRuntimeMode
 from sandbox import (
     DockerSandboxContainer,
     DockerSandboxContainerRequest,
@@ -21,6 +22,7 @@ from tools import DEFAULT_TOOL_REGISTRY, ToolRegistry
 from workers import CodexCliWorker, ReviewResult, WorkerRequest
 from workers.base import ArtifactReference
 from workers.cli_runtime import CliRuntimeMessage, CliRuntimeStep
+from workers.native_agent_runner import NativeAgentRunResult
 
 
 class _FakeWorkspaceManager:
@@ -1005,3 +1007,162 @@ def test_codex_cli_worker_allows_opt_out_of_self_review(tmp_path: Path) -> None:
     assert result.status == "success"
     assert result.review_result is None
     assert result.budget_usage is not None
+
+
+def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) -> None:
+    """Codex native mode should invoke one-shot runner and skip tool-loop container setup."""
+    adapter = _ScriptedAdapter([])
+    # Regression guard: adapter defaults must not force native mode into read-only.
+    adapter.sandbox_mode = "read-only"
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-native-mode",
+        image="python:3.12-slim",
+    )
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(container)
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+        native_event_capture_enabled=True,
+    )
+    native_result = NativeAgentRunResult(
+        status="success",
+        summary="Native command completed.",
+        command="codex exec --json -",
+        exit_code=0,
+        duration_seconds=1.7,
+        timed_out=False,
+        final_message="Native run complete.",
+        diff_text="diff --git a/note.txt b/note.txt",
+        files_changed=["note.txt"],
+        artifacts=[
+            ArtifactReference(
+                name="native-agent-stdout",
+                uri=(tmp_path / "stdout.txt").as_uri(),
+                artifact_type="log",
+            )
+        ],
+        stdout='{"event":"turn.completed"}\n',
+        stderr="",
+    )
+
+    with patch(
+        "workers.codex_cli_worker.run_native_agent",
+        return_value=native_result,
+    ) as run_native:
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-native-mode",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Apply a small native worker change",
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                )
+            )
+        )
+
+    assert result.status == "success"
+    assert result.summary == "Native run complete."
+    assert result.files_changed == ["note.txt"]
+    assert result.diff_text == "diff --git a/note.txt b/note.txt"
+    assert result.budget_usage is not None
+    assert result.budget_usage["runtime_mode"] == "native_agent"
+    assert result.commands_run[0].command.startswith("codex exec")
+    assert container_manager.start_requests == []
+    assert container_manager.stop_requests == []
+    assert workspace_manager.cleanup_requests == [(workspace, True)]
+    command = run_native.call_args.args[0].command
+    assert command[0:2] == ["codex", "exec"]
+    assert command[command.index("--sandbox") + 1] == "workspace-write"
+    assert "--json" in command
+    assert result.artifacts[0].name == "workspace"
+
+
+def test_codex_cli_worker_rejects_non_execution_runtime_modes(tmp_path: Path) -> None:
+    """Planner/reviewer runtime modes should fail fast for Codex execution worker."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-unsupported-mode",
+        image="python:3.12-slim",
+    )
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(container)
+    worker = CodexCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-bad-runtime",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Do not execute",
+                runtime_mode=WorkerRuntimeMode.PLANNER_ONLY,
+            )
+        )
+    )
+
+    assert result.status == "failure"
+    assert result.failure_kind == "provider_error"
+    assert "does not support runtime mode" in (result.summary or "")
+    assert workspace_manager.cleanup_requests == [(workspace, False)]
+
+
+def test_codex_cli_worker_native_mode_honors_read_only_constraint(tmp_path: Path) -> None:
+    """Native mode should force read-only sandbox when the task constraint requires it."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-native-read-only",
+        image="python:3.12-slim",
+    )
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(container)
+    worker = CodexCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+        native_sandbox_mode="workspace-write",
+    )
+    native_result = NativeAgentRunResult(
+        status="success",
+        summary="Native command completed.",
+        command="codex exec -",
+        exit_code=0,
+        duration_seconds=0.9,
+        timed_out=False,
+        final_message="Native read-only run complete.",
+        artifacts=[],
+        files_changed=[],
+        stdout="",
+        stderr="",
+    )
+
+    with patch(
+        "workers.codex_cli_worker.run_native_agent",
+        return_value=native_result,
+    ) as run_native:
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-native-read-only",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Inspect only",
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                    constraints={"read_only": True},
+                )
+            )
+        )
+
+    command = run_native.call_args.args[0].command
+    assert result.status == "success"
+    assert command[command.index("--sandbox") + 1] == "read-only"

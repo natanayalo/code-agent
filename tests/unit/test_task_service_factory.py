@@ -118,6 +118,7 @@ def test_build_task_service_from_env_builds_a_codex_cli_worker(tmp_path: Path) -
         assert service is not None
         assert isinstance(service.worker, CodexCliWorker)
         assert isinstance(service.worker.runtime_adapter, CodexExecCliRuntimeAdapter)
+        assert service.worker.default_runtime_mode == "native_agent"
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
@@ -125,7 +126,7 @@ def test_build_task_service_from_env_builds_a_codex_cli_worker(tmp_path: Path) -
 def test_build_task_service_from_env_enables_profile_routing_with_defaults(
     tmp_path: Path,
 ) -> None:
-    """Profile-aware mode should attach codex-tool-loop defaults when explicitly enabled."""
+    """Profile-aware mode should attach codex-native defaults when explicitly enabled."""
     database_path = tmp_path / "code-agent.db"
     outbound_http_clients = create_outbound_http_clients()
     service = build_task_service_from_env(
@@ -140,11 +141,11 @@ def test_build_task_service_from_env_enables_profile_routing_with_defaults(
     try:
         assert service is not None
         assert service.enable_worker_profiles is True
-        assert "codex-tool-loop-executor" in service.worker_profiles
-        assert service.worker_profiles["codex-tool-loop-executor"].runtime_mode == "tool_loop"
-        assert "codex-tool-loop-executor-read-only" in service.worker_profiles
+        assert "codex-native-executor" in service.worker_profiles
+        assert service.worker_profiles["codex-native-executor"].runtime_mode == "native_agent"
+        assert "codex-native-executor-read-only" in service.worker_profiles
         assert (
-            service.worker_profiles["codex-tool-loop-executor-read-only"].mutation_policy
+            service.worker_profiles["codex-native-executor-read-only"].mutation_policy
             == "read_only"
         )
         assert "openrouter-tool-loop-legacy" not in service.worker_profiles
@@ -162,7 +163,7 @@ def test_build_task_service_from_env_respects_runtime_mode_overrides(
         {
             "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
             "CODE_AGENT_WORKER_PROFILES_ENABLED": "true",
-            "CODE_AGENT_CODEX_RUNTIME_MODE": "native_agent",
+            "CODE_AGENT_CODEX_RUNTIME_MODE": "tool_loop",
             "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
         },
         outbound_http_clients=outbound_http_clients,
@@ -170,9 +171,10 @@ def test_build_task_service_from_env_respects_runtime_mode_overrides(
 
     try:
         assert service is not None
-        assert "codex-native-executor" in service.worker_profiles
-        assert service.worker_profiles["codex-native-executor"].runtime_mode == "native_agent"
-        assert "codex-native-executor-read-only" in service.worker_profiles
+        assert "codex-tool-loop-executor" in service.worker_profiles
+        assert service.worker_profiles["codex-tool-loop-executor"].runtime_mode == "tool_loop"
+        assert "codex-tool-loop-executor-read-only" in service.worker_profiles
+        assert service.worker.default_runtime_mode == "tool_loop"
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 

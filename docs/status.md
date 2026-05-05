@@ -50,7 +50,6 @@ Active focus:
 Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17: Native Agent Worker Runtime Profiles
-- [ ] T-155: convert Codex worker to native-agent default behind `CODE_AGENT_CODEX_RUNTIME_MODE`
 - [ ] T-156: convert Gemini worker to native-agent default behind `CODE_AGENT_GEMINI_RUNTIME_MODE`
 - [ ] T-157: add a clarification gate before worker routing/dispatch when TaskSpec requires clarification
 - [ ] T-158: add an independent verifier execution stage with read-only/default-safe behavior
@@ -60,6 +59,7 @@ Granular tasks for the active and upcoming milestones:
 - [ ] T-162: deprecate operation-selector mode for Codex/Gemini while keeping `CliRuntimeLoop` for raw chat/OpenRouter compatibility
 
 ### Milestone 17 Done (Published)
+- [x] T-155: convert Codex worker to native-agent default behind `CODE_AGENT_CODEX_RUNTIME_MODE` ([#160](https://github.com/natanayalo/code-agent/pull/160))
 - [x] T-154: add a native agent runner abstraction for one-shot CLI task-packet execution, final message capture, diff/files/artifact collection, and timeout/error handling ([#159](https://github.com/natanayalo/code-agent/pull/159))
 - [x] T-140: define `WorkerRuntimeMode`, `WorkerProfile`, capability tags, and permission-profile vocabulary ([#154](https://github.com/natanayalo/code-agent/pull/154))
 - [x] T-141: replace heuristic worker routing with profile-aware selection logic in the orchestrator ([#155](https://github.com/natanayalo/code-agent/pull/155))
