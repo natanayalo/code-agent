@@ -472,6 +472,8 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         budget=dict(state.task.budget),
         secrets=dict(state.task.secrets),
         tools=state.task.tools,
+        worker_profile=state.dispatch.worker_profile or state.route.chosen_profile,
+        runtime_mode=state.dispatch.runtime_mode or state.route.runtime_mode,
     )
 
 
@@ -1079,6 +1081,8 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
     assert worker_type is not None, "choose_worker must set route.chosen_worker before dispatch."
     dispatch = WorkerDispatch(
         worker_type=worker_type,
+        worker_profile=state.route.chosen_profile,
+        runtime_mode=state.route.runtime_mode,
     )
     return {
         "current_step": "dispatch_job",
