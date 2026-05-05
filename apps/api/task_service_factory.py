@@ -26,6 +26,9 @@ from workers import (
     GeminiCliWorker,
     OpenRouterCliRuntimeAdapter,
     OpenRouterCliWorker,
+    WorkerProfile,
+    WorkerRuntimeMode,
+    WorkerType,
 )
 from workers.gemini_cli_adapter import (
     GEMINI_EXECUTABLE_ENV_VAR,
@@ -49,6 +52,10 @@ TELEGRAM_API_BASE_URL_ENV_VAR: Final[str] = "CODE_AGENT_TELEGRAM_API_BASE_URL"
 CHECKPOINT_DB_PATH_ENV_VAR: Final[str] = "CODE_AGENT_CHECKPOINT_DB_PATH"
 WORKSPACE_ROOT_ENV_VAR: Final[str] = "CODE_AGENT_WORKSPACE_ROOT"
 SANDBOX_IMAGE_ENV_VAR: Final[str] = "CODE_AGENT_SANDBOX_IMAGE"
+WORKER_PROFILES_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_WORKER_PROFILES_ENABLED"
+CODEX_RUNTIME_MODE_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_RUNTIME_MODE"
+GEMINI_RUNTIME_MODE_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_RUNTIME_MODE"
+OPENROUTER_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_ENABLED"
 
 
 def _is_enabled(value: str | None) -> bool:
@@ -56,6 +63,83 @@ def _is_enabled(value: str | None) -> bool:
     if value is None:
         return False
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _coerce_runtime_mode(
+    value: str | None,
+    *,
+    default: WorkerRuntimeMode,
+) -> WorkerRuntimeMode:
+    """Parse supported runtime mode overrides with a safe default."""
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized == "native_agent":
+        return "native_agent"
+    if normalized == "tool_loop":
+        return "tool_loop"
+    return default
+
+
+def _build_default_worker_profiles(
+    *,
+    include_gemini: bool,
+    include_openrouter: bool,
+    codex_runtime_mode: WorkerRuntimeMode,
+    gemini_runtime_mode: WorkerRuntimeMode,
+) -> dict[str, WorkerProfile]:
+    """Build the default executable profile map for routing decisions."""
+    profiles: dict[str, WorkerProfile] = {}
+
+    def _add_profiles(worker_type: WorkerType, runtime_mode: WorkerRuntimeMode) -> None:
+        """Helper to add standard and read-only profiles for a worker."""
+        profile_name = (
+            f"{worker_type}-native-executor"
+            if runtime_mode == "native_agent"
+            else f"{worker_type}-tool-loop-executor"
+        )
+        # Standard profile
+        profiles[profile_name] = WorkerProfile(
+            name=profile_name,
+            worker_type=worker_type,
+            runtime_mode=runtime_mode,
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            permission_profile="workspace_write",
+            mutation_policy="patch_allowed",
+            self_review_policy="on_failure",
+        )
+        # Read-only profile
+        ro_name = f"{profile_name}-read-only"
+        profiles[ro_name] = WorkerProfile(
+            name=ro_name,
+            worker_type=worker_type,
+            runtime_mode=runtime_mode,
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            permission_profile="read_only",
+            mutation_policy="read_only",
+            self_review_policy="on_failure",
+        )
+
+    _add_profiles("codex", codex_runtime_mode)
+
+    if include_gemini:
+        _add_profiles("gemini", gemini_runtime_mode)
+
+    if include_openrouter:
+        profiles["openrouter-tool-loop-legacy"] = WorkerProfile(
+            name="openrouter-tool-loop-legacy",
+            worker_type="openrouter",
+            runtime_mode="tool_loop",
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace"],
+            permission_profile="workspace_write",
+            mutation_policy="patch_allowed",
+            self_review_policy="on_failure",
+        )
+
+    return profiles
 
 
 def _database_url_from_env(environ: Mapping[str, str]) -> str | None:
@@ -137,6 +221,24 @@ def build_task_service_from_env(
             runtime_adapter=OpenRouterCliRuntimeAdapter.from_env(resolved_env),
             container_manager=container_manager,
         )
+    enable_worker_profiles = _is_enabled(resolved_env.get(WORKER_PROFILES_ENABLED_ENV_VAR))
+    worker_profiles: dict[str, WorkerProfile] | None = None
+    if enable_worker_profiles:
+        worker_profiles = _build_default_worker_profiles(
+            include_gemini=gemini_worker is not None,
+            include_openrouter=(
+                openrouter_worker is not None
+                and _is_enabled(resolved_env.get(OPENROUTER_ENABLED_ENV_VAR))
+            ),
+            codex_runtime_mode=_coerce_runtime_mode(
+                resolved_env.get(CODEX_RUNTIME_MODE_ENV_VAR),
+                default="tool_loop",
+            ),
+            gemini_runtime_mode=_coerce_runtime_mode(
+                resolved_env.get(GEMINI_RUNTIME_MODE_ENV_VAR),
+                default="tool_loop",
+            ),
+        )
     if outbound_http_clients is None:
         raise RuntimeError(
             "Task service bootstrap requires shared outbound HTTP clients for notifier delivery."
@@ -166,6 +268,8 @@ def build_task_service_from_env(
         worker=codex_worker,
         gemini_worker=gemini_worker,
         openrouter_worker=openrouter_worker,
+        worker_profiles=worker_profiles,
+        enable_worker_profiles=enable_worker_profiles,
         progress_notifier=CompositeProgressNotifier(progress_notifiers),
         default_task_max_attempts=_coerce_positive_int(
             resolved_env.get(DEFAULT_TASK_MAX_ATTEMPTS_ENV_VAR),

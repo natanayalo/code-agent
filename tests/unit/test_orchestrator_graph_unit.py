@@ -27,7 +27,7 @@ from orchestrator.graph import (
 )
 from orchestrator.state import OrchestratorState
 from orchestrator.task_spec import is_destructive_task
-from workers import WorkerRequest, WorkerResult
+from workers import WorkerProfile, WorkerRequest, WorkerResult
 
 
 def test_ensure_state_from_dict():
@@ -361,6 +361,40 @@ _CODEX_ONLY: frozenset[str] = frozenset({"codex"})
 _GEMINI_ONLY: frozenset[str] = frozenset({"gemini"})
 _OPENROUTER_ONLY: frozenset[str] = frozenset({"openrouter"})
 
+_PROFILED_CODEX_GEMINI: dict[str, WorkerProfile] = {
+    "codex-native-executor": WorkerProfile(
+        name="codex-native-executor",
+        worker_type="codex",
+        runtime_mode="native_agent",
+        capability_tags=["execution"],
+        supported_delivery_modes=["workspace", "branch", "draft_pr"],
+    ),
+    "gemini-native-executor": WorkerProfile(
+        name="gemini-native-executor",
+        worker_type="gemini",
+        runtime_mode="native_agent",
+        capability_tags=["execution"],
+        supported_delivery_modes=["workspace", "branch", "draft_pr"],
+    ),
+}
+
+_PROFILED_CODEX_OPENROUTER: dict[str, WorkerProfile] = {
+    "codex-native-executor": WorkerProfile(
+        name="codex-native-executor",
+        worker_type="codex",
+        runtime_mode="native_agent",
+        capability_tags=["execution"],
+        supported_delivery_modes=["workspace", "branch", "draft_pr"],
+    ),
+    "openrouter-tool-loop-legacy": WorkerProfile(
+        name="openrouter-tool-loop-legacy",
+        worker_type="openrouter",
+        runtime_mode="tool_loop",
+        capability_tags=["execution"],
+        supported_delivery_modes=["workspace"],
+    ),
+}
+
 
 def test_compute_route_override_available():
     """T-072: manual override is honoured when the worker is available."""
@@ -392,6 +426,75 @@ def test_compute_route_codex_override_available():
     route = _compute_route_decision(state, _ALL_WORKERS)
     assert route.chosen_worker == "codex"
     assert route.route_reason == "manual_override"
+
+
+def test_compute_route_profile_aware_selects_native_default_for_codex() -> None:
+    """Profile-aware routing should attach codex native profile metadata by default."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "add helper"}, "task_kind": "implementation"}
+    )
+    route = _compute_route_decision(
+        state,
+        _ALL_WORKERS,
+        available_profiles=_PROFILED_CODEX_GEMINI,
+    )
+
+    assert route.chosen_worker == "codex"
+    assert route.chosen_profile == "codex-native-executor"
+    assert route.runtime_mode == "native_agent"
+    assert route.route_reason == "cheap_mechanical_change"
+
+
+def test_compute_route_profile_override_unavailable_fails_explicitly() -> None:
+    """Unavailable profile overrides should fail explicitly rather than silently falling back."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "run with openrouter profile",
+                "worker_profile_override": "openrouter-tool-loop-legacy",
+            }
+        }
+    )
+    route = _compute_route_decision(
+        state,
+        frozenset({"codex", "gemini"}),
+        available_profiles=_PROFILED_CODEX_GEMINI,
+    )
+
+    assert route.chosen_worker is None
+    assert route.chosen_profile == "openrouter-tool-loop-legacy"
+    assert route.runtime_mode is None
+    assert route.route_reason == "runtime_unavailable"
+    assert route.override_applied is True
+
+
+def test_compute_route_profile_aware_openrouter_requires_legacy_opt_in() -> None:
+    """OpenRouter should only participate in fallback routing when its profile is configured."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "demo", "budget": {"prefer_high_quality": True}}}
+    )
+
+    without_openrouter = _compute_route_decision(
+        state,
+        frozenset({"codex", "openrouter"}),
+        available_profiles={
+            "codex-native-executor": _PROFILED_CODEX_OPENROUTER["codex-native-executor"]
+        },
+    )
+    with_openrouter = _compute_route_decision(
+        state,
+        frozenset({"codex", "openrouter"}),
+        available_profiles=_PROFILED_CODEX_OPENROUTER,
+    )
+
+    assert without_openrouter.chosen_worker == "codex"
+    assert without_openrouter.chosen_profile == "codex-native-executor"
+    assert without_openrouter.route_reason == "preferred_unavailable"
+
+    assert with_openrouter.chosen_worker == "openrouter"
+    assert with_openrouter.chosen_profile == "openrouter-tool-loop-legacy"
+    assert with_openrouter.runtime_mode == "tool_loop"
+    assert with_openrouter.route_reason == "preferred_unavailable"
 
 
 def test_compute_route_budget_prefer_high_quality():
@@ -1142,3 +1245,55 @@ def test_verify_result_marks_post_run_lint_skip_as_passed() -> None:
     )
     assert lint_check["status"] == "passed"
     assert "skipped" in lint_check["message"]
+
+
+def test_compute_route_profile_aware_filters_read_only_when_mutations_allowed() -> None:
+    """Read-only profiles should be filtered out when the task allows mutations."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "fix helper"}, "task_kind": "implementation"}
+    )
+    # Only a read-only profile is available for codex.
+    profiles = {
+        "codex-read-only": WorkerProfile(
+            name="codex-read-only",
+            worker_type="codex",
+            runtime_mode="tool_loop",
+            mutation_policy="read_only",
+            capability_tags=["execution"],
+        )
+    }
+    route = _compute_route_decision(
+        state,
+        frozenset({"codex"}),
+        available_profiles=profiles,
+    )
+
+    # Should NOT select the read-only profile because task is NOT read-only.
+    assert route.chosen_worker == "codex"
+    assert route.chosen_profile is None
+    assert route.route_reason == "runtime_unavailable"
+
+
+def test_compute_route_profile_aware_selects_read_only_when_constrained() -> None:
+    """Read-only profiles should be selected when the task is constrained to read-only."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "investigate code", "constraints": {"read_only": True}}}
+    )
+    profiles = {
+        "codex-read-only": WorkerProfile(
+            name="codex-read-only",
+            worker_type="codex",
+            runtime_mode="tool_loop",
+            mutation_policy="read_only",
+            capability_tags=["execution"],
+        )
+    }
+    route = _compute_route_decision(
+        state,
+        frozenset({"codex"}),
+        available_profiles=profiles,
+    )
+
+    assert route.chosen_worker == "codex"
+    assert route.chosen_profile == "codex-read-only"
+    assert route.route_reason == "cheap_mechanical_change"

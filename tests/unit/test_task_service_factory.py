@@ -122,6 +122,61 @@ def test_build_task_service_from_env_builds_a_codex_cli_worker(tmp_path: Path) -
         _close_outbound_http_clients(outbound_http_clients)
 
 
+def test_build_task_service_from_env_enables_profile_routing_with_defaults(
+    tmp_path: Path,
+) -> None:
+    """Profile-aware mode should attach codex-tool-loop defaults when explicitly enabled."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_WORKER_PROFILES_ENABLED": "1",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert service.enable_worker_profiles is True
+        assert "codex-tool-loop-executor" in service.worker_profiles
+        assert service.worker_profiles["codex-tool-loop-executor"].runtime_mode == "tool_loop"
+        assert "codex-tool-loop-executor-read-only" in service.worker_profiles
+        assert (
+            service.worker_profiles["codex-tool-loop-executor-read-only"].mutation_policy
+            == "read_only"
+        )
+        assert "openrouter-tool-loop-legacy" not in service.worker_profiles
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
+def test_build_task_service_from_env_respects_runtime_mode_overrides(
+    tmp_path: Path,
+) -> None:
+    """Bootstrap should respect environment-driven runtime mode overrides for profiles."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_WORKER_PROFILES_ENABLED": "true",
+            "CODE_AGENT_CODEX_RUNTIME_MODE": "native_agent",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert "codex-native-executor" in service.worker_profiles
+        assert service.worker_profiles["codex-native-executor"].runtime_mode == "native_agent"
+        assert "codex-native-executor-read-only" in service.worker_profiles
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
 def test_build_task_service_from_env_applies_sandbox_image_override(tmp_path: Path) -> None:
     """Configured sandbox image should become the default image for worker containers."""
     database_path = tmp_path / "code-agent.db"
@@ -216,6 +271,55 @@ def test_build_task_service_from_env_builds_openrouter_worker_when_configured(
         assert isinstance(service.openrouter_worker, OpenRouterCliWorker)
     finally:
         _close_outbound_http_clients(outbound_http_clients)
+
+
+def test_build_task_service_from_env_openrouter_profile_requires_opt_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OpenRouter worker can be configured, but profile routing should require explicit opt-in."""
+    database_path = tmp_path / "code-agent.db"
+    monkeypatch.setattr(
+        "workers.openrouter_adapter.OpenAI",
+        lambda **_: SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **__: None))
+        ),
+    )
+    outbound_http_clients = create_outbound_http_clients()
+    service_without_opt_in = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_WORKER_PROFILES_ENABLED": "true",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+            "OPENROUTER_API_KEY": "test-openrouter-key",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service_without_opt_in is not None
+        assert isinstance(service_without_opt_in.openrouter_worker, OpenRouterCliWorker)
+        assert "openrouter-tool-loop-legacy" not in service_without_opt_in.worker_profiles
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+    outbound_http_clients_opt_in = create_outbound_http_clients()
+    service_with_opt_in = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_WORKER_PROFILES_ENABLED": "true",
+            "CODE_AGENT_OPENROUTER_ENABLED": "true",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+            "OPENROUTER_API_KEY": "test-openrouter-key",
+        },
+        outbound_http_clients=outbound_http_clients_opt_in,
+    )
+
+    try:
+        assert service_with_opt_in is not None
+        assert isinstance(service_with_opt_in.openrouter_worker, OpenRouterCliWorker)
+        assert "openrouter-tool-loop-legacy" in service_with_opt_in.worker_profiles
+    finally:
+        _close_outbound_http_clients(outbound_http_clients_opt_in)
 
 
 def test_build_task_service_from_env_adds_telegram_progress_notifier_when_token_present(
