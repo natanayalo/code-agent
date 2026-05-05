@@ -295,6 +295,17 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             return None
         return WorkerType(value)
 
+    @validates("runtime_mode")
+    def _coerce_runtime_mode(
+        self,
+        _key: str,
+        value: WorkerRuntimeMode | str | None,
+    ) -> WorkerRuntimeMode | None:
+        """Normalize assigned runtime modes to the canonical enum."""
+        if value is None:
+            return None
+        return WorkerRuntimeMode(value)
+
 
 class WorkerRun(UUIDPrimaryKeyMixin, Base):
     """A single worker execution attempt for a task."""
@@ -355,6 +366,17 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
         """Normalize assigned worker-run statuses to the canonical enum."""
 
         return WorkerRunStatus(value)
+
+    @validates("runtime_mode")
+    def _coerce_runtime_mode(
+        self,
+        _key: str,
+        value: WorkerRuntimeMode | str | None,
+    ) -> WorkerRuntimeMode | None:
+        """Normalize assigned runtime modes to the canonical enum."""
+        if value is None:
+            return None
+        return WorkerRuntimeMode(value)
 
 
 class Artifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):
