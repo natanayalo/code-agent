@@ -8,10 +8,9 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from workers import WorkerResult
+from workers import WorkerResult, WorkerRuntimeMode, WorkerType
 from workers.review import ReviewResult
 
-WorkerType = Literal["gemini", "codex", "openrouter"]
 # Ordered by escalation preference in routing fallbacks:
 # quality-first, then balanced, then low-cost.
 SUPPORTED_WORKER_TYPES: tuple[WorkerType, ...] = ("gemini", "openrouter", "codex")
@@ -68,6 +67,7 @@ class TaskRequest(OrchestratorModel):
     branch: str | None = None
     priority: int = Field(default=0, ge=0)
     worker_override: WorkerType | None = None
+    worker_profile_override: str | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
@@ -93,6 +93,8 @@ class RouteDecision(OrchestratorModel):
     """Worker routing outcome for the current task."""
 
     chosen_worker: WorkerType | None = None
+    chosen_profile: str | None = None
+    runtime_mode: WorkerRuntimeMode | None = None
     route_reason: str | None = None
     override_applied: bool = False
 
@@ -163,6 +165,8 @@ class WorkerDispatch(OrchestratorModel):
 
     run_id: str | None = None
     worker_type: WorkerType | None = None
+    worker_profile: str | None = None
+    runtime_mode: WorkerRuntimeMode | None = None
     workspace_id: str | None = None
 
 

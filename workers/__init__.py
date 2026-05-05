@@ -5,9 +5,17 @@ from workers.base import (
     FailureKind,
     TestResult,
     Worker,
+    WorkerCapabilityTag,
     WorkerCommand,
+    WorkerDeliveryMode,
+    WorkerMutationPolicy,
+    WorkerPermissionProfile,
+    WorkerProfile,
     WorkerRequest,
     WorkerResult,
+    WorkerRuntimeMode,
+    WorkerSelfReviewPolicy,
+    WorkerType,
 )
 from workers.codex_cli_worker import CodexCliWorker
 from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter
@@ -30,7 +38,15 @@ __all__ = [
     "ReviewResult",
     "TestResult",
     "Worker",
+    "WorkerCapabilityTag",
     "WorkerCommand",
+    "WorkerDeliveryMode",
+    "WorkerMutationPolicy",
+    "WorkerPermissionProfile",
+    "WorkerProfile",
     "WorkerRequest",
     "WorkerResult",
+    "WorkerRuntimeMode",
+    "WorkerSelfReviewPolicy",
+    "WorkerType",
 ]

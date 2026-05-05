@@ -6,9 +6,9 @@ Phase 1: clarity and control.
 
 Active focus:
 
-- Milestone A (TaskSpec foundation and human workflow)
-- Milestone 16 (operator dashboard/PWA)
-- preparation for Milestone 17 (worker mode/runtime profile strategy)
+- Milestone 17 (native agent worker runtime profiles)
+- migration planning for Codex/Gemini native-agent execution
+- preserving TaskSpec, HumanInteraction, dashboard, and verification governance around worker autonomy
 
 ## Current Capabilities
 
@@ -22,60 +22,47 @@ Active focus:
 - skeptical memory + compact session state persistence
 - operational controls: task replay, approval decision endpoint, progress callbacks, and metrics
 - generated TaskSpec contract for task goal/risk/type/delivery policy before worker routing
+- dashboard visibility for TaskSpec, interactions, timeline events, logs, artifacts, replay controls, traces, memory, and tool inventory
 
 ## Open Risks
 
 - operator inspection/control still relies on API + logs more than dedicated UI
-- TaskSpec can surface clarification/permission needs, but generic HumanInteraction states are not first-class yet
+- TaskSpec can surface clarification/permission needs and sync HumanInteraction rows, but the graph does not yet halt on clarification before worker dispatch
 - PR-native delivery is represented as desired delivery metadata only; branch/PR creation is still a future slice
-- runtime profile strategy (planner/executor/reviewer/scout defaults) is not yet fully codified
+- Codex/Gemini still run through the shared operation-selector `CliRuntimeLoop`, which can waste budget on repeated JSON tool-call turns instead of using native coding-agent loops
+- runtime profile strategy, runtime mode defaults, and capability matrix are not yet implemented
+- native-agent runs may initially have coarser command-level audit unless CLI event streams are captured and normalized
+- OpenRouter remains useful for eval/raw-chat experiments but should be isolated as legacy tool-loop mode during the migration
 - autonomy/reflection work is not yet separated into a bounded scout lane
 - worker runtime internals still contain hotspot complexity despite recent decomposition progress
 
 ## Next Priorities
 
-1. complete TaskSpec + HumanInteraction foundation before expanding worker autonomy
-2. implement Milestone 16 detailed dashboard views around TaskSpec, timeline, logs, artifacts, replay controls
-3. implement Milestone 17 worker profile + capability matrix + policy/config mapping
-4. add PR-native delivery fields and GitHub branch/draft-PR integration
-5. introduce evals before adding more scout/autonomy behavior
+1. implement Milestone 17 worker runtime/profile contracts and profile-aware routing
+2. add a native-agent runner abstraction with fake-binary tests before changing real worker defaults
+3. convert Codex, then Gemini, to native-agent mode behind rollback flags
+4. add clarification dispatch gating and independent verifier/repair flow
+5. isolate OpenRouter as opt-in legacy tool-loop mode
+6. add evals for native-agent parity, operation-selector regression prevention, verifier failures, and artifact observability
+7. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
-### Milestone A: TaskSpec and Human Workflow Foundation
-- [x] T-146: add TaskSpec model, persistence, deterministic generation, API visibility, and focused tests
-- [x] T-147: add HumanInteraction model for clarification, permission, review, merge, and blocked-help states (#134)
-- [x] T-148: map TaskSpec clarification/permission flags into resumable HumanInteraction records (#135)
-- [x] T-149: show TaskSpec and pending interactions in dashboard task detail/operator inbox
-
-### Milestone 16: Operator UX (Dashboard/PWA)
-- [x] T-130: design PWA frontend architecture and choose tech stack (React/Vite) (#114)
-- [x] T-131: implement API endpoints for task/session listing and detailed view
-- [x] T-132: build core dashboard layout with task status board
-- [x] T-133: implement comprehensive test suite and CI (90% coverage)
-- [x] T-134: implement approval/rejection UI components in the dashboard
-- [x] T-135: implement task replay control (unchanged) in the dashboard (#115)
-- [x] T-136: implement secure dashboard authentication (HttpOnly cookies/OIDC)
-- [x] T-137: implement dashboard routing and pages for Sessions/Metrics (backend support exists)
-- [x] T-138: implement detailed task view (timeline, logs, artifacts) (#137)
-- [x] T-139: implement "Replay with Overrides" modal/form in the dashboard (#138)
-- [x] T-143: implement API & UI for Session Working Context (Goal/Risks/Decisions) (#140)
-- [x] T-144: implement API & UI for Knowledge Base (Skeptical Memory) management (#141)
-- [x] T-145: implement API & UI for Tool Inventory and Sandbox status
-- [x] T-153: add trace visibility to task detail UI (trace IDs, provider deep-links, basic span status summary) (#143)
-
-### Observability Follow-up: OpenTelemetry Integration
-- [x] T-150: implement Phoenix OSS local/self-hosted (non-SaaS) + OpenInference tracing for LangGraph/orchestrator flow and verify graph/node visibility end-to-end (#145)
-- [x] T-150.5: migrate observability bootstrap to `phoenix.otel.register()` for simplified maintenance while preserving surgical span processor control (API vs Worker) and DB-based trace linkage (#147)
-- [x] T-151: add manual spans for TaskExecutionService, orchestrator nodes, and sandbox/shell; ensure logical failures (e.g. worker error results) are explicitly recorded as span error events and statuses (PR/CI stages deferred). (#148)
-- [x] T-152: connect persisted OTEL/OpenInference trace metadata to the dashboard Trace Observability UI (trace IDs, deep links, span status summary) from local/self-hosted Phoenix traces
-
-### Milestone 17: Worker Profile Strategy
-- [ ] T-140: define `WorkerProfile` Pydantic model and capability matrix
-- [ ] T-141: implement profile-based worker selection logic in the orchestrator
-- [ ] T-142: map existing workers (Gemini, Codex, OpenRouter) to capabilities (Planning, Coding, Reviewing)
+### Milestone 17: Native Agent Worker Runtime Profiles
+- [ ] T-140: define `WorkerRuntimeMode`, `WorkerProfile`, capability tags, and permission-profile vocabulary
+- [ ] T-141: replace heuristic worker routing with profile-aware selection logic in the orchestrator
+- [ ] T-142: map existing workers to Codex native executor, Gemini native planner/reviewer/executor, and OpenRouter legacy tool-loop profiles
+- [ ] T-154: add a native agent runner abstraction for one-shot CLI task-packet execution, final message capture, diff/files/artifact collection, and timeout/error handling
+- [ ] T-155: convert Codex worker to native-agent default behind `CODE_AGENT_CODEX_RUNTIME_MODE`
+- [ ] T-156: convert Gemini worker to native-agent default behind `CODE_AGENT_GEMINI_RUNTIME_MODE`
+- [ ] T-157: add a clarification gate before worker routing/dispatch when TaskSpec requires clarification
+- [ ] T-158: add an independent verifier execution stage with read-only/default-safe behavior
+- [ ] T-159: add bounded continuation/repair after verifier failure
+- [ ] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance
+- [ ] T-161: update observability/artifact persistence for runtime mode, profile, CLI stdout/stderr/events, final message, diff, changed files, and verifier result
+- [ ] T-162: deprecate operation-selector mode for Codex/Gemini while keeping `CliRuntimeLoop` for raw chat/OpenRouter compatibility
 
 ## Recent Completed Milestones
 
@@ -85,3 +72,5 @@ Granular tasks for the active and upcoming milestones:
 - Milestone 13 (remainder): hardening controls including auth/safety/budget/retention (T-100 to T-105)
 - Milestone 14 baseline: planning/context/review intelligence slices (T-106, T-108 to T-112, T-114 to T-128)
 - Milestone 15: product identity and documentation refresh
+- Milestone A (TaskSpec foundation and human workflow)
+- Milestone 16: operator UX (dashboard/PWA) + observability (OTEL/OpenInference tracing & traces in dashboard) + working context/memory/tool inventory UIs

@@ -31,6 +31,20 @@ FailureKind = Literal[
     "unknown",
 ]
 
+WorkerType = Literal["gemini", "codex", "openrouter"]
+WorkerRuntimeMode = Literal["native_agent", "tool_loop", "planner_only", "reviewer_only"]
+WorkerCapabilityTag = Literal["planning", "execution", "review", "routing", "scout"]
+WorkerPermissionProfile = Literal[
+    "read_only",
+    "workspace_write",
+    "dangerous_shell",
+    "networked_write",
+    "git_push_or_deploy",
+]
+WorkerMutationPolicy = Literal["read_only", "patch_allowed"]
+WorkerSelfReviewPolicy = Literal["never", "on_failure", "always"]
+WorkerDeliveryMode = Literal["summary", "workspace", "branch", "draft_pr"]
+
 
 class WorkerRequest(WorkerModel):
     """Normalized task input passed from the orchestrator to a worker."""
@@ -46,6 +60,29 @@ class WorkerRequest(WorkerModel):
     tools: list[str] | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
+    worker_profile: str | None = None
+    runtime_mode: WorkerRuntimeMode | None = None
+
+
+class WorkerProfile(WorkerModel):
+    """Typed profile contract used for worker runtime selection and policy."""
+
+    name: str = Field(min_length=1)
+    worker_type: WorkerType
+    runtime_mode: WorkerRuntimeMode
+    capability_tags: list[WorkerCapabilityTag] = Field(default_factory=list)
+    default_budget: dict[str, Any] = Field(default_factory=dict)
+    permission_profile: WorkerPermissionProfile = "workspace_write"
+    mutation_policy: WorkerMutationPolicy = "patch_allowed"
+    self_review_policy: WorkerSelfReviewPolicy = "on_failure"
+    supported_delivery_modes: list[WorkerDeliveryMode] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _normalize_profile_lists(self) -> WorkerProfile:
+        self.capability_tags = sorted(set(self.capability_tags))
+        self.supported_delivery_modes = sorted(set(self.supported_delivery_modes))
+        return self
 
 
 class WorkerCommand(WorkerModel):

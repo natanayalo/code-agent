@@ -56,6 +56,7 @@ def test_orchestrator_state_supports_nested_workflow_data() -> None:
             "repo_url": "https://github.com/natanayalo/code-agent",
             "branch": "master",
             "worker_override": "codex",
+            "worker_profile_override": "codex-native-executor",
         },
         task_spec={
             "goal": "Route to codex",
@@ -82,6 +83,8 @@ def test_orchestrator_state_supports_nested_workflow_data() -> None:
         },
         route={
             "chosen_worker": "codex",
+            "chosen_profile": "codex-native-executor",
+            "runtime_mode": "native_agent",
             "route_reason": "manual_override",
             "override_applied": True,
         },
@@ -95,6 +98,8 @@ def test_orchestrator_state_supports_nested_workflow_data() -> None:
         dispatch={
             "run_id": "run-1",
             "worker_type": "codex",
+            "worker_profile": "codex-native-executor",
+            "runtime_mode": "native_agent",
             "workspace_id": "workspace-1",
         },
         result={
@@ -127,6 +132,8 @@ def test_orchestrator_state_supports_nested_workflow_data() -> None:
     assert state.session is not None
     assert state.session.channel == "telegram"
     assert state.route.chosen_worker == "codex"
+    assert state.route.chosen_profile == "codex-native-executor"
+    assert state.route.runtime_mode == "native_agent"
     assert state.approval.status == "approved"
     assert state.result is not None
     assert state.result.commands_run[0].command == "pytest"
