@@ -1117,6 +1117,16 @@ def _compute_profile_route_decision(
         chosen_worker: WorkerType | None = None
         known_profile = available_profiles.get(requested_profile)
         if known_profile is not None:
+            # If the profile exists but is not in routable_profiles, it means it
+            # was filtered out by constraints (e.g. read_only mismatch).
+            if requested_profile not in routable_profiles:
+                return RouteDecision(
+                    chosen_worker=known_profile.worker_type,
+                    chosen_profile=requested_profile,
+                    runtime_mode=None,
+                    route_reason="incompatible_profile",
+                    override_applied=True,
+                )
             chosen_worker = known_profile.worker_type
         else:
             # The requested profile is completely unknown, so we can't infer a worker type.
@@ -1343,7 +1353,7 @@ def build_await_result_node(
         state = _ensure_state(state_input)
         worker_type = state.dispatch.worker_type or state.route.chosen_worker
         requested_profile = state.dispatch.worker_profile or state.route.chosen_profile
-        if state.route.route_reason == "runtime_unavailable":
+        if state.route.route_reason in ("runtime_unavailable", "incompatible_profile"):
             if configured_profile_names:
                 if requested_profile is None:
                     result = _worker_route_missing_profile_result(

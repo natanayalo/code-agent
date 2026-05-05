@@ -98,25 +98,28 @@ def _build_default_worker_profiles(
             if runtime_mode == "native_agent"
             else f"{worker_type}-tool-loop-executor"
         )
-        base_data = {
-            "worker_type": worker_type,
-            "runtime_mode": runtime_mode,
-            "capability_tags": ["execution"],
-            "supported_delivery_modes": ["workspace", "branch", "draft_pr"],
-            "self_review_policy": "on_failure",
-        }
+        # Standard profile
         profiles[profile_name] = WorkerProfile(
-            **base_data,  # type: ignore[arg-type]
             name=profile_name,
+            worker_type=worker_type,
+            runtime_mode=runtime_mode,
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
             permission_profile="workspace_write",
             mutation_policy="patch_allowed",
+            self_review_policy="on_failure",
         )
+        # Read-only profile
         ro_name = f"{profile_name}-read-only"
         profiles[ro_name] = WorkerProfile(
-            **base_data,  # type: ignore[arg-type]
             name=ro_name,
+            worker_type=worker_type,
+            runtime_mode=runtime_mode,
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
             permission_profile="read_only",
             mutation_policy="read_only",
+            self_review_policy="on_failure",
         )
 
     _add_profiles("codex", codex_runtime_mode)

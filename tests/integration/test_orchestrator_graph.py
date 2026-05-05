@@ -502,7 +502,7 @@ def test_orchestrator_graph_profile_override_incompatible_with_constraints() -> 
     state = OrchestratorState.model_validate(raw_output)
 
     assert state.route.chosen_profile == "codex-native-executor"
-    assert state.route.route_reason == "runtime_unavailable"
+    assert state.route.route_reason == "incompatible_profile"
     assert state.result is not None
     assert state.result.status == "failure"
     assert (
