@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+from db.enums import WorkerRuntimeMode
 from sandbox import (
     DockerSandboxContainer,
     DockerSandboxContainerRequest,
@@ -20,6 +21,7 @@ from workers import GeminiCliWorker, WorkerRequest
 from workers.base import ArtifactReference
 from workers.cli_runtime import CliRuntimeMessage, CliRuntimeSettings, CliRuntimeStep
 from workers.gemini_cli_worker import _workspace_task_id
+from workers.native_agent_runner import NativeAgentRunResult
 
 
 class _FakeWorkspaceManager:
@@ -597,3 +599,135 @@ def test_gemini_cli_worker_self_review_exhausts_budget(tmp_path: Path) -> None:
 
     assert result.status == "failure"
     assert "exhausted its remaining budget" in (result.summary or "")
+
+
+def test_gemini_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) -> None:
+    """Gemini native mode should invoke one-shot runner and skip tool-loop container setup."""
+    adapter = _ScriptedAdapter([])
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(container)
+    worker = GeminiCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+    )
+    native_result = NativeAgentRunResult(
+        status="success",
+        summary="Native command completed.",
+        command="gemini --prompt 'task' --output-format json",
+        exit_code=0,
+        duration_seconds=1.4,
+        timed_out=False,
+        final_message=None,
+        diff_text="diff --git a/note.txt b/note.txt",
+        files_changed=["note.txt"],
+        artifacts=[
+            ArtifactReference(
+                name="native-agent-stdout",
+                uri=(tmp_path / "stdout.txt").as_uri(),
+                artifact_type="log",
+            )
+        ],
+        stdout='{"response":"Native run complete.","stats":{}}',
+        stderr="",
+    )
+
+    with patch(
+        "workers.gemini_cli_worker.run_native_agent",
+        return_value=native_result,
+    ) as run_native:
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-native-mode",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Apply a small native worker change",
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                )
+            )
+        )
+
+    assert result.status == "success"
+    assert result.summary == "Native run complete."
+    assert result.files_changed == ["note.txt"]
+    assert result.diff_text == "diff --git a/note.txt b/note.txt"
+    assert result.budget_usage is not None
+    assert result.budget_usage["runtime_mode"] == "native_agent"
+    assert result.commands_run[0].command.startswith("gemini")
+    assert container_manager.start_requests == []
+    assert container_manager.stop_requests == []
+    assert workspace_manager.cleanup_requests == [(workspace, True)]
+    command = run_native.call_args.args[0].command
+    assert "--output-format" in command
+    assert command[command.index("--output-format") + 1] == "json"
+    assert "--approval-mode" in command
+    assert command[command.index("--approval-mode") + 1] == "default"
+    assert "--prompt" not in command
+    assert "--sandbox" in command
+    native_request = run_native.call_args.args[0]
+    assert "## Native Execution Task" in native_request.prompt
+    assert "Apply a small native worker change" in native_request.prompt
+    assert result.artifacts[0].name == "workspace"
+
+
+def test_gemini_cli_worker_rejects_non_execution_runtime_modes(tmp_path: Path) -> None:
+    """Planner/reviewer runtime modes should fail fast for Gemini execution worker."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(container)
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+    )
+
+    result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                session_id="session-bad-runtime",
+                repo_url="https://example.com/repo.git",
+                branch="main",
+                task_text="Do not execute",
+                runtime_mode=WorkerRuntimeMode.PLANNER_ONLY,
+            )
+        )
+    )
+
+    assert result.status == "failure"
+    assert result.failure_kind == "provider_error"
+    assert "does not support runtime mode" in (result.summary or "")
+    assert workspace_manager.cleanup_requests == [(workspace, False)]
+
+
+def test_gemini_cli_worker_runtime_error_is_mapped_to_workspace_error(tmp_path: Path) -> None:
+    """RuntimeError from setup/runtime phases should map to structured worker errors."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(container)
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+        session_factory=lambda _, **__: _FakeSession({}),
+    )
+
+    with patch.object(worker, "_setup_runtime_phase", side_effect=RuntimeError("adapter exploded")):
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-runtime-error",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="trigger runtime error",
+                )
+            )
+        )
+
+    assert result.status == "error"
+    assert "adapter exploded" in (result.summary or "")
+    assert result.next_action_hint == "inspect_worker_configuration"

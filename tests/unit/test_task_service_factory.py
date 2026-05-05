@@ -243,6 +243,36 @@ def test_build_task_service_from_env_builds_gemini_worker_when_configured(tmp_pa
     try:
         assert service is not None
         assert isinstance(service.gemini_worker, GeminiCliWorker)
+        assert service.gemini_worker.default_runtime_mode == "native_agent"
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
+def test_build_task_service_from_env_respects_gemini_runtime_mode_override(
+    tmp_path: Path,
+) -> None:
+    """Gemini runtime mode override should keep rollback to tool_loop available."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_WORKER_PROFILES_ENABLED": "true",
+            "CODE_AGENT_GEMINI_CLI_BIN": "/usr/local/bin/gemini",
+            "CODE_AGENT_GEMINI_RUNTIME_MODE": "tool_loop",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert isinstance(service.gemini_worker, GeminiCliWorker)
+        assert service.gemini_worker.default_runtime_mode == "tool_loop"
+        assert "gemini-tool-loop-executor" in service.worker_profiles
+        assert "gemini-tool-loop-executor-read-only" in service.worker_profiles
+        assert "gemini-native-planner" not in service.worker_profiles
+        assert "gemini-native-reviewer" not in service.worker_profiles
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
