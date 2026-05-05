@@ -38,7 +38,7 @@ Active focus:
 
 ## Next Priorities
 
-1. add independent verifier execution and bounded repair flow (T-158 to T-159)
+1. add independent verifier execution and bounded repair flow (T-159)
 2. isolate OpenRouter as opt-in legacy tool-loop mode and add native-agent parity/eval coverage (T-160 to T-162)
 3. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
 
