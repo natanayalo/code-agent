@@ -1102,6 +1102,7 @@ def _get_trace_id_from_context(context: dict[str, str] | None) -> str | None:
 
 
 # T-152: Global cache for Phoenix project ID to avoid redundant network calls during serialization
+PHOENIX_API_TIMEOUT: Final[float] = 2.0
 _PHOENIX_PROJECT_ID_CACHE: str | None = None
 _PHOENIX_LAST_FAILURE: float = 0
 _PHOENIX_FAILURE_TTL: Final[float] = 60.0  # 1 minute
@@ -1127,7 +1128,7 @@ def _get_project_id(api_base_url: str, project_name: str) -> str:
         try:
             # Phoenix API endpoint for project details
             url = f"{api_base_url}/v1/projects/{urllib.parse.quote(project_name)}"
-            with urllib.request.urlopen(url, timeout=0.5) as response:
+            with urllib.request.urlopen(url, timeout=PHOENIX_API_TIMEOUT) as response:
                 data = json.loads(response.read().decode())
                 _PHOENIX_PROJECT_ID_CACHE = data["data"]["id"]
         except (urllib.error.URLError, ValueError, KeyError, TypeError, TimeoutError) as e:
