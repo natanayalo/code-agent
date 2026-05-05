@@ -1117,7 +1117,7 @@ def _get_project_id(api_base_url: str, project_name: str) -> str:
 
         try:
             # Phoenix API endpoint for project details
-            url = f"{api_base_url}/v1/projects/{project_name}"
+            url = f"{api_base_url}/v1/projects/{urllib.parse.quote(project_name)}"
             with urllib.request.urlopen(url, timeout=0.5) as response:
                 data = json.loads(response.read().decode())
                 _PHOENIX_PROJECT_ID_CACHE = data["data"]["id"]
