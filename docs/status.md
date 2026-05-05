@@ -30,7 +30,7 @@ Active focus:
 - TaskSpec can surface clarification/permission needs and sync HumanInteraction rows, but the graph does not yet halt on clarification before worker dispatch
 - PR-native delivery is represented as desired delivery metadata only; branch/PR creation is still a future slice
 - Codex/Gemini still run through the shared operation-selector `CliRuntimeLoop`, which can waste budget on repeated JSON tool-call turns instead of using native coding-agent loops
-- runtime profile strategy, runtime mode defaults, and capability matrix are not yet implemented
+- profile-aware routing, runtime defaults, and capability mapping are not yet fully implemented
 - native-agent runs may initially have coarser command-level audit unless CLI event streams are captured and normalized
 - OpenRouter remains useful for eval/raw-chat experiments but should be isolated as legacy tool-loop mode during the migration
 - autonomy/reflection work is not yet separated into a bounded scout lane
@@ -38,12 +38,12 @@ Active focus:
 
 ## Next Priorities
 
-1. implement Milestone 17 worker runtime/profile contracts and profile-aware routing
-2. add a native-agent runner abstraction with fake-binary tests before changing real worker defaults
-3. convert Codex, then Gemini, to native-agent mode behind rollback flags
-4. add clarification dispatch gating and independent verifier/repair flow
-5. isolate OpenRouter as opt-in legacy tool-loop mode
-6. add evals for native-agent parity, operation-selector regression prevention, verifier failures, and artifact observability
+1. map existing workers into the capability matrix and expose selected profile/runtime metadata (T-142)
+2. replace heuristic worker routing with profile-aware selection logic (T-141)
+3. add a native-agent runner abstraction with fake-binary tests before changing real worker defaults (T-154)
+4. convert Codex, then Gemini, to native-agent mode behind rollback flags (T-155, T-156)
+5. add clarification dispatch gating and independent verifier/repair flow (T-157 to T-159)
+6. isolate OpenRouter as opt-in legacy tool-loop mode and add native-agent parity/eval coverage (T-160 to T-162)
 7. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
 
 ## Current Backlog
@@ -51,7 +51,6 @@ Active focus:
 Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17: Native Agent Worker Runtime Profiles
-- [ ] T-140: define `WorkerRuntimeMode`, `WorkerProfile`, capability tags, and permission-profile vocabulary
 - [ ] T-141: replace heuristic worker routing with profile-aware selection logic in the orchestrator
 - [ ] T-142: map existing workers to Codex native executor, Gemini native planner/reviewer/executor, and OpenRouter legacy tool-loop profiles
 - [ ] T-154: add a native agent runner abstraction for one-shot CLI task-packet execution, final message capture, diff/files/artifact collection, and timeout/error handling
@@ -63,6 +62,9 @@ Granular tasks for the active and upcoming milestones:
 - [ ] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance
 - [ ] T-161: update observability/artifact persistence for runtime mode, profile, CLI stdout/stderr/events, final message, diff, changed files, and verifier result
 - [ ] T-162: deprecate operation-selector mode for Codex/Gemini while keeping `CliRuntimeLoop` for raw chat/OpenRouter compatibility
+
+### Milestone 17 Done (Published)
+- [x] T-140: define `WorkerRuntimeMode`, `WorkerProfile`, capability tags, and permission-profile vocabulary ([#154](https://github.com/natanayalo/code-agent/pull/154))
 
 ## Recent Completed Milestones
 
