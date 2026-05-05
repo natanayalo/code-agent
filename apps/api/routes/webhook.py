@@ -134,7 +134,7 @@ def receive_webhook(
     )
 
     with span_cm:
-        set_span_input_output(input_data=payload.model_dump())
+        set_span_input_output(input_data=payload.model_dump(exclude={"secrets"}))
 
         submission = _to_task_submission(payload)
 

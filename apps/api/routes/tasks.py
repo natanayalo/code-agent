@@ -35,7 +35,7 @@ def submit_task(
         span_name="api.tasks.submit",
         attributes=with_span_kind(SPAN_KIND_AGENT),
     ):
-        set_span_input_output(input_data=payload.model_dump())
+        set_span_input_output(input_data=payload.model_dump(exclude={"secrets"}))
         task_snapshot, _ = task_service.create_task(payload)
         return task_snapshot
 

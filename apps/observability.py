@@ -27,6 +27,7 @@ INPUT_VALUE_ATTRIBUTE: Final[str] = "input.value"
 INPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "input.mime_type"
 OUTPUT_VALUE_ATTRIBUTE: Final[str] = "output.value"
 OUTPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "output.mime_type"
+MAX_SPAN_ATTRIBUTE_LENGTH: Final[int] = 12000
 SPAN_KIND_AGENT: Final[str] = "AGENT"
 SPAN_KIND_CHAIN: Final[str] = "CHAIN"
 SPAN_KIND_LLM: Final[str] = "LLM"
@@ -339,8 +340,18 @@ def _serialize_span_payload(payload: Any) -> tuple[str, str]:
 
     if isinstance(payload, Mapping | list | tuple):
         actual_payload = dict(payload) if isinstance(payload, Mapping) else payload
-        return json.dumps(actual_payload, default=str), "application/json"
-    return str(payload), "text/plain"
+        serialized = json.dumps(actual_payload, default=str)
+        mime_type = "application/json"
+    else:
+        serialized = str(payload)
+        mime_type = "text/plain"
+
+    if len(serialized) > MAX_SPAN_ATTRIBUTE_LENGTH:
+        # Simple truncation with a marker
+        truncated = serialized[:MAX_SPAN_ATTRIBUTE_LENGTH]
+        return f"{truncated}\n... (truncated to {MAX_SPAN_ATTRIBUTE_LENGTH} chars)", mime_type
+
+    return serialized, mime_type
 
 
 def set_span_input_output(

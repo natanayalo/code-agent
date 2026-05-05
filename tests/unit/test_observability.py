@@ -700,6 +700,31 @@ def test_set_span_input_output_handles_tuples_and_mappings() -> None:
     assert span.attributes["input.mime_type"] == "application/json"
 
 
+def test_set_span_input_output_truncates_long_payloads() -> None:
+    """Payloads exceeding MAX_SPAN_ATTRIBUTE_LENGTH should be truncated with a marker."""
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.attributes: dict[str, object] = {}
+
+        def is_recording(self) -> bool:
+            return True
+
+        def set_attribute(self, key: str, value: object) -> None:
+            self.attributes[key] = value
+
+    span = _FakeSpan()
+    long_payload = "a" * (observability_module.MAX_SPAN_ATTRIBUTE_LENGTH + 100)
+
+    with patch("opentelemetry.trace.get_current_span", return_value=span):
+        observability_module.set_span_input_output(input_data=long_payload)
+
+    val = span.attributes["input.value"]
+    assert len(val) > observability_module.MAX_SPAN_ATTRIBUTE_LENGTH
+    assert "... (truncated to 12000 chars)" in val
+    assert val.startswith("a" * observability_module.MAX_SPAN_ATTRIBUTE_LENGTH)
+
+
 def test_record_span_exception_invokes_otel_record_exception() -> None:
     """Helper should delegate to OTEL span.record_exception."""
 

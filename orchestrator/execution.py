@@ -10,6 +10,7 @@ import logging
 import os
 import shutil
 import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Final, Literal, Protocol, cast
 from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
@@ -1102,18 +1103,26 @@ def _get_trace_id_from_context(context: dict[str, str] | None) -> str | None:
 
 # T-152: Global cache for Phoenix project ID to avoid redundant network calls during serialization
 _PHOENIX_PROJECT_ID_CACHE: str | None = None
+_PHOENIX_LAST_FAILURE: float = 0
+_PHOENIX_FAILURE_TTL: Final[float] = 60.0  # 1 minute
 _PHOENIX_PROJECT_ID_LOCK = Lock()
 
 
 def _get_project_id(api_base_url: str, project_name: str) -> str:
     """Resolve the Phoenix project ID (UUID) from its name via the REST API."""
-    global _PHOENIX_PROJECT_ID_CACHE
+    global _PHOENIX_PROJECT_ID_CACHE, _PHOENIX_LAST_FAILURE
     if _PHOENIX_PROJECT_ID_CACHE:
         return _PHOENIX_PROJECT_ID_CACHE
+
+    # If resolution failed recently, return the fallback name immediately to avoid blocking
+    if time.time() - _PHOENIX_LAST_FAILURE < _PHOENIX_FAILURE_TTL:
+        return project_name
 
     with _PHOENIX_PROJECT_ID_LOCK:
         if _PHOENIX_PROJECT_ID_CACHE:
             return _PHOENIX_PROJECT_ID_CACHE
+        if time.time() - _PHOENIX_LAST_FAILURE < _PHOENIX_FAILURE_TTL:
+            return project_name
 
         try:
             # Phoenix API endpoint for project details
@@ -1122,9 +1131,12 @@ def _get_project_id(api_base_url: str, project_name: str) -> str:
                 data = json.loads(response.read().decode())
                 _PHOENIX_PROJECT_ID_CACHE = data["data"]["id"]
         except (TimeoutError, urllib.error.URLError, ValueError, KeyError, TypeError) as e:
-            # Fallback to the name if the API is unreachable or the project doesn't exist
+            # Fallback to the name if the API is unreachable or the project doesn't exist.
+            # Record failure time to implement a TTL before the next retry, preventing
+            # performance degradation during task listing.
             logger.debug("Failed to resolve Phoenix project ID for '%s': %s", project_name, e)
-            _PHOENIX_PROJECT_ID_CACHE = project_name
+            _PHOENIX_LAST_FAILURE = time.time()
+            return project_name
 
         return _PHOENIX_PROJECT_ID_CACHE or project_name
 
