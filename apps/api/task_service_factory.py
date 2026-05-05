@@ -257,7 +257,7 @@ def build_task_service_from_env(
     )
     gemini_runtime_mode = _coerce_execution_runtime_mode(
         resolved_env.get(GEMINI_RUNTIME_MODE_ENV_VAR),
-        default=WorkerRuntimeMode.TOOL_LOOP,
+        default=WorkerRuntimeMode.NATIVE_AGENT,
         worker_name="Gemini",
     )
 
@@ -282,6 +282,7 @@ def build_task_service_from_env(
         gemini_worker = GeminiCliWorker(
             runtime_adapter=GeminiCliRuntimeAdapter.from_env(resolved_env),
             container_manager=container_manager,
+            default_runtime_mode=gemini_runtime_mode,
         )
     if resolved_env.get(OPENROUTER_API_KEY_ENV_VAR):
         openrouter_worker = OpenRouterCliWorker(
