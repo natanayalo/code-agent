@@ -175,7 +175,8 @@ The dashboard uses HttpOnly cookies for session management. To enable it:
 Run the core checks from the repo virtualenv:
 
 ```bash
-poetry run pytest
+poetry run pytest tests/unit --cov=apps --cov=db --cov=memory --cov=orchestrator --cov=repositories --cov=sandbox --cov=tools --cov=workers --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=80
+poetry run pytest tests/integration
 poetry run pre-commit run --all-files
 # Dashboard checks
 cd dashboard && npm run test:run

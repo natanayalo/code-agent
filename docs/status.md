@@ -23,6 +23,8 @@ Active focus:
 - operational controls: task replay, approval decision endpoint, progress callbacks, and metrics
 - generated TaskSpec contract for task goal/risk/type/delivery policy before worker routing
 - dashboard visibility for TaskSpec, interactions, timeline events, logs, artifacts, replay controls, traces, memory, and tool inventory
+- CI now measures Python coverage from `tests/unit` only and runs `tests/integration` as a separate pass
+- pre-commit Ruff checks application code for non-top-level imports while preserving a few intentional lazy imports in guarded modules
 
 ## Open Risks
 

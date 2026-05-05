@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 if TYPE_CHECKING:
-    from tools.mcp import McpToolClient
+    from tools.mcp import McpToolClient  # noqa: PLC0415 - type-only import
 
 
 class ToolModel(BaseModel):
@@ -86,7 +86,7 @@ class ToolRegistry(ToolModel):
     @cached_property
     def mcp_client(self) -> McpToolClient:
         """Build and cache the MCP-ready client for this immutable registry."""
-        from tools.mcp import McpToolClient
+        from tools.mcp import McpToolClient  # noqa: PLC0415 - avoid circular import
 
         return McpToolClient.from_registry(self)
 

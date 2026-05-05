@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -49,8 +50,6 @@ def set_llm_span_output(output_data: Any) -> None:
 
 def normalize_llm_output(output: Any) -> Any:
     """Unwrap structured LLM responses into plain text or normalized JSON for tracing."""
-    import json
-
     if not isinstance(output, str):
         return output
 

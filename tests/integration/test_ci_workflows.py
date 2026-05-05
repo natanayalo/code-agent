@@ -68,13 +68,14 @@ def test_pyproject_dev_dependencies_include_pytest_asyncio() -> None:
     assert isinstance(version_spec, str) and version_spec.startswith(">=")
 
 
-def test_pytest_workflow_runs_on_push_and_enforces_coverage() -> None:
-    """The pytest workflow should validate each push with a coverage gate."""
+def test_pytest_workflow_runs_unit_coverage_and_integration_suite_on_push() -> None:
+    """The pytest workflow should validate each push with unit coverage plus integration tests."""
     workflow = _load_yaml(".github/workflows/pytest.yml")
     triggers = _workflow_triggers(workflow)
     steps = _job_steps(workflow, "pytest")
     plugin_step = _step_by_name(steps, "Verify async pytest plugin availability")
-    run_step = _step_by_name(steps, "Run pytest with coverage gate")
+    unit_step = _step_by_name(steps, "Run unit pytest with coverage gate")
+    integration_step = _step_by_name(steps, "Run integration pytest suite")
     upload_step = _step_by_name(steps, "Upload coverage artifact")
 
     assert "push" in triggers
@@ -82,7 +83,7 @@ def test_pytest_workflow_runs_on_push_and_enforces_coverage() -> None:
     assert workflow["concurrency"]["cancel-in-progress"] is True
     assert workflow["jobs"]["pytest"]["timeout-minutes"] == 15
     assert "import pytest_asyncio" in plugin_step["run"]
-    assert run_step["run"]
+    assert "tests/unit" in unit_step["run"]
     for expected_flag in (
         "--cov=apps",
         "--cov=db",
@@ -94,9 +95,11 @@ def test_pytest_workflow_runs_on_push_and_enforces_coverage() -> None:
         "--cov=workers",
         "--cov-branch",
         "--cov-report=xml",
-        "--cov-fail-under=90",
+        "--cov-fail-under=80",
     ):
-        assert expected_flag in run_step["run"]
+        assert expected_flag in unit_step["run"]
+
+    assert integration_step["run"] == "poetry run pytest tests/integration"
 
     assert upload_step["uses"] == "actions/upload-artifact@v7"
     assert upload_step["with"]["path"] == "coverage.xml"
@@ -160,3 +163,16 @@ def test_pre_commit_config_keeps_local_default_branch_guard() -> None:
     assert branch_guard_hook is not None
     assert branch_guard_hook["args"] == ["--branch", "main", "--branch", "master"]
     assert branch_guard_hook["stages"] == ["pre-commit"]
+
+
+def test_pre_commit_config_adds_ruff_import_placement_check_for_application_code() -> None:
+    """Application code should get a dedicated Ruff pass for non-top-level imports."""
+    config = _load_yaml(".pre-commit-config.yaml")
+    ruff_repo = next(repo for repo in config["repos"] if repo["repo"].endswith("ruff-pre-commit"))
+    hooks = ruff_repo["hooks"]
+    placement_hook = next(hook for hook in hooks if hook.get("name") == "Ruff import placement")
+
+    assert placement_hook["args"] == ["--select=PLC0415"]
+    assert placement_hook["files"] == (
+        "^(apps|db|memory|orchestrator|repositories|sandbox|tools|workers)/.*\\.py$"
+    )

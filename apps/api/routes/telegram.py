@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -127,8 +128,6 @@ def _to_task_submission(msg: TelegramMessage, text: str) -> TaskSubmission:
     )
 
     # T-044: Allow a default repo URL for Telegram tasks via environment variable.
-    import os
-
     default_repo = os.environ.get("CODE_AGENT_TELEGRAM_DEFAULT_REPO_URL")
 
     return TaskSubmission(

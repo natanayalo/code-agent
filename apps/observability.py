@@ -1,5 +1,7 @@
 """OpenTelemetry/OpenInference tracing bootstrap for app runtimes."""
 
+# ruff: noqa: PLC0415
+
 from __future__ import annotations
 
 import importlib.metadata

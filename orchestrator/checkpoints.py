@@ -1,5 +1,7 @@
 """Checkpoint helpers for durable orchestrator graph execution."""
 
+# ruff: noqa: PLC0415
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
