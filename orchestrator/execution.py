@@ -1130,7 +1130,7 @@ def _get_project_id(api_base_url: str, project_name: str) -> str:
             with urllib.request.urlopen(url, timeout=0.5) as response:
                 data = json.loads(response.read().decode())
                 _PHOENIX_PROJECT_ID_CACHE = data["data"]["id"]
-        except (TimeoutError, urllib.error.URLError, ValueError, KeyError, TypeError) as e:
+        except (urllib.error.URLError, ValueError, KeyError, TypeError) as e:
             # Fallback to the name if the API is unreachable or the project doesn't exist.
             # Record failure time to implement a TTL before the next retry, preventing
             # performance degradation during task listing.
@@ -1141,12 +1141,33 @@ def _get_project_id(api_base_url: str, project_name: str) -> str:
         return _PHOENIX_PROJECT_ID_CACHE or project_name
 
 
+# T-152: Global cache for tracing configuration to avoid redundant env lookups
+_TRACING_CONFIG_CACHE: tuple[bool, str | None, str] | None = None
+_TRACING_CONFIG_LOCK = Lock()
+
+
 def _get_tracing_config() -> tuple[bool, str | None, str]:
     """Helper to fetch tracing config once per process."""
-    enabled = is_tracing_enabled()
-    collector_endpoint = resolve_otel_tracing_endpoint(os.environ)
-    project_name = resolve_tracing_project_name(os.environ)
-    return enabled, collector_endpoint, project_name
+    global _TRACING_CONFIG_CACHE
+    if _TRACING_CONFIG_CACHE is not None:
+        return _TRACING_CONFIG_CACHE
+
+    with _TRACING_CONFIG_LOCK:
+        if _TRACING_CONFIG_CACHE is not None:
+            return _TRACING_CONFIG_CACHE
+
+        enabled = is_tracing_enabled()
+        collector_endpoint = resolve_otel_tracing_endpoint(os.environ)
+        project_name = resolve_tracing_project_name(os.environ)
+        _TRACING_CONFIG_CACHE = (enabled, collector_endpoint, project_name)
+        return _TRACING_CONFIG_CACHE
+
+
+def _clear_tracing_config_cache() -> None:
+    """Internal helper for tests to reset configuration state."""
+    global _TRACING_CONFIG_CACHE
+    with _TRACING_CONFIG_LOCK:
+        _TRACING_CONFIG_CACHE = None
 
 
 def _get_phoenix_url(trace_id: str | None) -> str | None:

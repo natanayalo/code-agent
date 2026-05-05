@@ -2991,6 +2991,7 @@ def test_map_task_to_summary_includes_trace_metadata(monkeypatch) -> None:
     )
 
     # Enable tracing for URL generation
+    execution_module._clear_tracing_config_cache()
     monkeypatch.setenv("CODE_AGENT_ENABLE_TRACING", "1")
     monkeypatch.setenv("CODE_AGENT_TRACING_OTLP_ENDPOINT", "http://phoenix:6006/v1/traces")
 
@@ -3035,6 +3036,7 @@ def test_map_task_to_summary_omits_trace_metadata_when_disabled(monkeypatch) -> 
         worker=_StaticWorker(),
     )
 
+    execution_module._clear_tracing_config_cache()
     monkeypatch.setenv("CODE_AGENT_ENABLE_TRACING", "0")
 
     with session_scope(session_factory) as session:
