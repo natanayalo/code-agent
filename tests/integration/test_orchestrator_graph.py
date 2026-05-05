@@ -664,6 +664,44 @@ def test_orchestrator_graph_stops_when_approval_is_rejected(tmp_path: Path) -> N
     asyncio.run(scenario())
 
 
+def test_orchestrator_graph_halts_when_clarification_is_required() -> None:
+    """Clarification-gated TaskSpecs should stop before worker selection and dispatch."""
+    worker = UnexpectedWorker("worker should not run while clarification is pending.")
+    graph = build_orchestrator_graph(worker=worker)
+
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": "fix it",
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                }
+            }
+        )
+    )
+
+    state = OrchestratorState.model_validate(raw_output)
+
+    assert state.current_step == "persist_memory"
+    assert state.task_spec is not None
+    assert state.task_spec.requires_clarification is True
+    assert state.route.chosen_worker is None
+    assert state.dispatch.worker_type is None
+    assert state.result is not None
+    assert state.result.status == "failure"
+    assert "pending clarification" in (state.result.summary or "")
+    assert state.result.next_action_hint == "await_manual_follow_up"
+    assert state.progress_updates == [
+        "task ingested",
+        "task classified as implementation",
+        "planning skipped: task is straightforward",
+        "clarification required before execution",
+        "result summarized and session state updated",
+        "memory persistence queued",
+    ]
+
+
 def test_orchestrator_graph_returns_a_structured_timeout_result() -> None:
     """The outer orchestrator timeout should fail safely instead of hanging forever."""
     worker = SlowWorker(delay_seconds=5)

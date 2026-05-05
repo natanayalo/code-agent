@@ -44,7 +44,7 @@ def test_generate_task_spec_halts_on_policy_violation(monkeypatch):
 
 
 def test_route_after_generate_task_spec_with_policy_violation():
-    """Verify that the router correctly routes to summarize_result on policy violations."""
+    """Verify that the router correctly routes to summarize_result on early gates."""
     # Case: Policy violation error exists
     state = OrchestratorState(
         task=TaskRequest(task_id="t", task_text="t", repo_url="r", branch="b"),
@@ -57,3 +57,54 @@ def test_route_after_generate_task_spec_with_policy_violation():
         task=TaskRequest(task_id="t", task_text="t", repo_url="r", branch="b"), errors=[]
     )
     assert _route_after_generate_task_spec(state) == "load_memory"
+
+    # Case: Clarification-required TaskSpec should halt before worker routing.
+    clarification_state = OrchestratorState(
+        task=TaskRequest(task_id="t", task_text="fix it", repo_url="r", branch="b"),
+        task_spec=TaskSpec(
+            goal="fix it",
+            task_type="investigation",
+            risk_level="low",
+            delivery_mode="workspace",
+            forbidden_actions=["hardcode_secrets"],
+            requires_clarification=True,
+            clarification_questions=["What exact failure should be fixed?"],
+        ),
+    )
+    assert _route_after_generate_task_spec(clarification_state) == "summarize_result"
+
+
+def test_generate_task_spec_halts_on_clarification_requirement(monkeypatch):
+    """Clarification-required TaskSpecs should pause before worker dispatch."""
+    clarification_spec = TaskSpec(
+        goal="fix it",
+        task_type="investigation",
+        risk_level="low",
+        delivery_mode="workspace",
+        forbidden_actions=["hardcode_secrets"],
+        requires_clarification=True,
+        clarification_questions=["What exact failure should be fixed?"],
+        requires_permission=False,
+    )
+    monkeypatch.setattr(
+        "orchestrator.graph.build_task_spec_for_request",
+        MagicMock(return_value=clarification_spec),
+    )
+
+    state = OrchestratorState(
+        task=TaskRequest(
+            task_id="test-task",
+            task_text="fix it",
+            repo_url="http://github.com/test/test",
+            branch="main",
+        )
+    )
+
+    response = generate_task_spec(state)
+
+    result = response["result"]
+    assert isinstance(result, WorkerResult)
+    assert result.status == "failure"
+    assert "pending clarification" in (result.summary or "")
+    assert result.next_action_hint == "await_manual_follow_up"
+    assert "task_spec_requires_clarification" in response["errors"]

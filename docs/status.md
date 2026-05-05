@@ -29,7 +29,6 @@ Active focus:
 ## Open Risks
 
 - operator inspection/control still relies on API + logs more than dedicated UI
-- TaskSpec can surface clarification/permission needs and sync HumanInteraction rows, but the graph does not yet halt on clarification before worker dispatch
 - PR-native delivery is represented as desired delivery metadata only; branch/PR creation is still a future slice
 - Codex/Gemini now support native-agent defaults behind rollback flags, but deeper verifier/repair integration is still in progress
 - native-agent runs may initially have coarser command-level audit unless CLI event streams are captured and normalized
@@ -39,7 +38,7 @@ Active focus:
 
 ## Next Priorities
 
-1. add clarification dispatch gating and independent verifier/repair flow (T-157 to T-159)
+1. add independent verifier execution and bounded repair flow (T-158 to T-159)
 2. isolate OpenRouter as opt-in legacy tool-loop mode and add native-agent parity/eval coverage (T-160 to T-162)
 3. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
 
@@ -48,7 +47,6 @@ Active focus:
 Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17: Native Agent Worker Runtime Profiles
-- [ ] T-157: add a clarification gate before worker routing/dispatch when TaskSpec requires clarification
 - [ ] T-158: add an independent verifier execution stage with read-only/default-safe behavior
 - [ ] T-159: add bounded continuation/repair after verifier failure
 - [ ] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance
@@ -56,6 +54,7 @@ Granular tasks for the active and upcoming milestones:
 - [ ] T-162: deprecate operation-selector mode for Codex/Gemini while keeping `CliRuntimeLoop` for raw chat/OpenRouter compatibility
 
 ### Milestone 17 Done (Published)
+- [x] T-157: add a clarification gate before worker routing/dispatch when TaskSpec requires clarification ([#162](https://github.com/natanayalo/code-agent/pull/162))
 - [x] T-156: convert Gemini worker to native-agent default behind `CODE_AGENT_GEMINI_RUNTIME_MODE` ([#161](https://github.com/natanayalo/code-agent/pull/161))
 - [x] T-155: convert Codex worker to native-agent default behind `CODE_AGENT_CODEX_RUNTIME_MODE` ([#160](https://github.com/natanayalo/code-agent/pull/160))
 - [x] T-154: add a native agent runner abstraction for one-shot CLI task-packet execution, final message capture, diff/files/artifact collection, and timeout/error handling ([#159](https://github.com/natanayalo/code-agent/pull/159))
