@@ -43,6 +43,15 @@ class HumanInteractionStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class WorkerRuntimeMode(StrEnum):
+    """Supported worker runtime execution modes."""
+
+    NATIVE_AGENT = "native_agent"
+    TOOL_LOOP = "tool_loop"
+    PLANNER_ONLY = "planner_only"
+    REVIEWER_ONLY = "reviewer_only"
+
+
 class WorkerType(StrEnum):
     """Supported worker identifiers stored in persistence."""
 

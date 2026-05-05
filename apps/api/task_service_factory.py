@@ -123,9 +123,30 @@ def _build_default_worker_profiles(
         )
 
     _add_profiles("codex", codex_runtime_mode)
-
     if include_gemini:
         _add_profiles("gemini", gemini_runtime_mode)
+        # Add specialized profiles for Gemini (T-142)
+        if gemini_runtime_mode == "native_agent":
+            profiles["gemini-native-planner"] = WorkerProfile(
+                name="gemini-native-planner",
+                worker_type="gemini",
+                runtime_mode="native_agent",
+                capability_tags=["planning"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                permission_profile="workspace_write",
+                mutation_policy="patch_allowed",
+                self_review_policy="on_failure",
+            )
+            profiles["gemini-native-reviewer"] = WorkerProfile(
+                name="gemini-native-reviewer",
+                worker_type="gemini",
+                runtime_mode="native_agent",
+                capability_tags=["review"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                permission_profile="workspace_write",
+                mutation_policy="patch_allowed",
+                self_review_policy="on_failure",
+            )
 
     if include_openrouter:
         profiles["openrouter-tool-loop-legacy"] = WorkerProfile(

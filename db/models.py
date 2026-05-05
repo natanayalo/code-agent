@@ -32,6 +32,7 @@ from db.enums import (
     TaskStatus,
     TimelineEventType,
     WorkerRunStatus,
+    WorkerRuntimeMode,
     WorkerType,
     build_sql_enum,
 )
@@ -48,6 +49,7 @@ HUMAN_INTERACTION_TYPE_ENUM = build_sql_enum(HumanInteractionType, name="human_i
 HUMAN_INTERACTION_STATUS_ENUM = build_sql_enum(
     HumanInteractionStatus, name="human_interaction_status"
 )
+WORKER_RUNTIME_MODE_ENUM = build_sql_enum(WorkerRuntimeMode, name="worker_runtime_mode")
 
 
 class EncryptedJSON(TypeDecorator):
@@ -238,14 +240,20 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, index=True)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
-    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     lease_owner: Mapped[str | None] = mapped_column(String(255), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime(timezone=True), nullable=True, index=True
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     chosen_worker: Mapped[WorkerType | None] = mapped_column(WORKER_TYPE_ENUM, nullable=True)
+    chosen_profile: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    runtime_mode: Mapped[WorkerRuntimeMode | None] = mapped_column(
+        WORKER_RUNTIME_MODE_ENUM, nullable=True
+    )
     route_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     trace_context: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
 
@@ -315,6 +323,10 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
         DateTime(timezone=True), nullable=True, index=True
     )
     status: Mapped[WorkerRunStatus] = mapped_column(WORKER_RUN_STATUS_ENUM, nullable=False)
+    worker_profile: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    runtime_mode: Mapped[WorkerRuntimeMode | None] = mapped_column(
+        WORKER_RUNTIME_MODE_ENUM, nullable=True
+    )
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     requested_permission: Mapped[str | None] = mapped_column(String(64), nullable=True)
     budget_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
@@ -469,6 +481,14 @@ class TaskTimelineEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A granular event in a task's lifecycle (T-090)."""
 
     __tablename__ = "task_timeline_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "task_id",
+            "attempt_number",
+            "sequence_number",
+            name="uq_task_timeline_events_task_attempt_seq",
+        ),
+    )
 
     task_id: Mapped[str] = mapped_column(
         ForeignKey("tasks.id", ondelete="CASCADE"),
