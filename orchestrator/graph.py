@@ -1100,19 +1100,23 @@ def _compute_profile_route_decision(
                 reason="manual_profile_override",
                 override_applied=True,
             )
+
+        # Intent was a specific profile, but it is not routable.
+        # Capture the worker type from available profiles if possible for better error reporting.
+        chosen_worker: WorkerType | None = None
         known_profile = available_profiles.get(requested_profile)
         if known_profile is not None:
-            return _route_for_profile(
-                known_profile,
-                reason="runtime_unavailable",
-                override_applied=True,
+            chosen_worker = known_profile.worker_type
+        else:
+            # Fallback to legacy selection among routable workers if profile is totally unknown
+            fallback = _compute_legacy_route_decision(
+                state,
+                frozenset({p.worker_type for p in routable_profiles.values()}),
             )
-        fallback = _compute_legacy_route_decision(
-            state,
-            frozenset({p.worker_type for p in routable_profiles.values()}),
-        )
+            chosen_worker = fallback.chosen_worker
+
         return RouteDecision(
-            chosen_worker=fallback.chosen_worker,
+            chosen_worker=chosen_worker,
             chosen_profile=requested_profile,
             runtime_mode=None,
             route_reason="runtime_unavailable",
