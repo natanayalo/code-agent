@@ -40,18 +40,16 @@ Active focus:
 
 ## Next Priorities
 
-1. add a native-agent runner abstraction with fake-binary tests before changing real worker defaults (T-154)
-2. convert Codex, then Gemini, to native-agent mode behind rollback flags (T-155, T-156)
-3. add clarification dispatch gating and independent verifier/repair flow (T-157 to T-159)
-4. isolate OpenRouter as opt-in legacy tool-loop mode and add native-agent parity/eval coverage (T-160 to T-162)
-5. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
+1. convert Codex, then Gemini, to native-agent mode behind rollback flags (T-155, T-156)
+2. add clarification dispatch gating and independent verifier/repair flow (T-157 to T-159)
+3. isolate OpenRouter as opt-in legacy tool-loop mode and add native-agent parity/eval coverage (T-160 to T-162)
+4. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17: Native Agent Worker Runtime Profiles
-- [ ] T-154: add a native agent runner abstraction for one-shot CLI task-packet execution, final message capture, diff/files/artifact collection, and timeout/error handling
 - [ ] T-155: convert Codex worker to native-agent default behind `CODE_AGENT_CODEX_RUNTIME_MODE`
 - [ ] T-156: convert Gemini worker to native-agent default behind `CODE_AGENT_GEMINI_RUNTIME_MODE`
 - [ ] T-157: add a clarification gate before worker routing/dispatch when TaskSpec requires clarification
@@ -62,6 +60,7 @@ Granular tasks for the active and upcoming milestones:
 - [ ] T-162: deprecate operation-selector mode for Codex/Gemini while keeping `CliRuntimeLoop` for raw chat/OpenRouter compatibility
 
 ### Milestone 17 Done (Published)
+- [x] T-154: add a native agent runner abstraction for one-shot CLI task-packet execution, final message capture, diff/files/artifact collection, and timeout/error handling ([#159](https://github.com/natanayalo/code-agent/pull/159))
 - [x] T-140: define `WorkerRuntimeMode`, `WorkerProfile`, capability tags, and permission-profile vocabulary ([#154](https://github.com/natanayalo/code-agent/pull/154))
 - [x] T-141: replace heuristic worker routing with profile-aware selection logic in the orchestrator ([#155](https://github.com/natanayalo/code-agent/pull/155))
 - [x] T-142: map existing workers to Codex native executor, Gemini native planner/reviewer/executor, and OpenRouter legacy tool-loop profiles ([#158](https://github.com/natanayalo/code-agent/pull/158))
