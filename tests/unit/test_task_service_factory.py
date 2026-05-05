@@ -122,10 +122,10 @@ def test_build_task_service_from_env_builds_a_codex_cli_worker(tmp_path: Path) -
         _close_outbound_http_clients(outbound_http_clients)
 
 
-def test_build_task_service_from_env_enables_profile_routing_with_native_defaults(
+def test_build_task_service_from_env_enables_profile_routing_with_defaults(
     tmp_path: Path,
 ) -> None:
-    """Profile-aware mode should attach codex-native defaults when explicitly enabled."""
+    """Profile-aware mode should attach codex-tool-loop defaults when explicitly enabled."""
     database_path = tmp_path / "code-agent.db"
     outbound_http_clients = create_outbound_http_clients()
     service = build_task_service_from_env(
@@ -140,9 +140,39 @@ def test_build_task_service_from_env_enables_profile_routing_with_native_default
     try:
         assert service is not None
         assert service.enable_worker_profiles is True
+        assert "codex-tool-loop-executor" in service.worker_profiles
+        assert service.worker_profiles["codex-tool-loop-executor"].runtime_mode == "tool_loop"
+        assert "codex-tool-loop-executor-read-only" in service.worker_profiles
+        assert (
+            service.worker_profiles["codex-tool-loop-executor-read-only"].mutation_policy
+            == "read_only"
+        )
+        assert "openrouter-tool-loop-legacy" not in service.worker_profiles
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
+def test_build_task_service_from_env_respects_runtime_mode_overrides(
+    tmp_path: Path,
+) -> None:
+    """Bootstrap should respect environment-driven runtime mode overrides for profiles."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_WORKER_PROFILES_ENABLED": "true",
+            "CODE_AGENT_CODEX_RUNTIME_MODE": "native_agent",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
         assert "codex-native-executor" in service.worker_profiles
         assert service.worker_profiles["codex-native-executor"].runtime_mode == "native_agent"
-        assert "openrouter-tool-loop-legacy" not in service.worker_profiles
+        assert "codex-native-executor-read-only" in service.worker_profiles
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
