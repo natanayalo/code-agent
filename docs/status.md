@@ -47,7 +47,7 @@ Active focus:
 Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17: Native Agent Worker Runtime Profiles
-- [ ] T-158: add an independent verifier execution stage with read-only/default-safe behavior (baseline slice in progress: flag-gated command verifier now executes read-only/default-safe checks from TaskSpec in retained workspaces; follow-ups remain for verifier-profile execution path and verifier artifacts)
+- [ ] T-158: add an independent verifier execution stage with read-only/default-safe behavior (baseline slice in progress via [#163](https://github.com/natanayalo/code-agent/pull/163): flag-gated command verifier now executes read-only/default-safe checks from TaskSpec in retained workspaces; follow-ups remain for verifier-profile execution path and verifier artifacts)
 - [ ] T-159: add bounded continuation/repair after verifier failure
 - [ ] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance
 - [ ] T-161: update observability/artifact persistence for runtime mode, profile, CLI stdout/stderr/events, final message, diff, changed files, and verifier result
