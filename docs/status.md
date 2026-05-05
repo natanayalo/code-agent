@@ -47,13 +47,13 @@ Active focus:
 Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17: Native Agent Worker Runtime Profiles
-- [ ] T-158: add an independent verifier execution stage with read-only/default-safe behavior (baseline slice in progress via [#163](https://github.com/natanayalo/code-agent/pull/163): flag-gated command verifier now executes read-only/default-safe checks from TaskSpec in retained workspaces; follow-ups remain for verifier-profile execution path and verifier artifacts)
 - [ ] T-159: add bounded continuation/repair after verifier failure
 - [ ] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance
 - [ ] T-161: update observability/artifact persistence for runtime mode, profile, CLI stdout/stderr/events, final message, diff, changed files, and verifier result
 - [ ] T-162: deprecate operation-selector mode for Codex/Gemini while keeping `CliRuntimeLoop` for raw chat/OpenRouter compatibility
 
 ### Milestone 17 Done (Published)
+- [x] T-158: add an independent verifier execution stage with read-only/default-safe behavior ([#163](https://github.com/natanayalo/code-agent/pull/163))
 - [x] T-157: add a clarification gate before worker routing/dispatch when TaskSpec requires clarification ([#162](https://github.com/natanayalo/code-agent/pull/162))
 - [x] T-156: convert Gemini worker to native-agent default behind `CODE_AGENT_GEMINI_RUNTIME_MODE` ([#161](https://github.com/natanayalo/code-agent/pull/161))
 - [x] T-155: convert Codex worker to native-agent default behind `CODE_AGENT_CODEX_RUNTIME_MODE` ([#160](https://github.com/natanayalo/code-agent/pull/160))
