@@ -106,6 +106,18 @@ def _build_default_worker_profiles(
         )
     }
 
+    codex_read_only_profile_name = f"{codex_profile_name}-read-only"
+    profiles[codex_read_only_profile_name] = WorkerProfile(
+        name=codex_read_only_profile_name,
+        worker_type="codex",
+        runtime_mode=codex_runtime_mode,
+        capability_tags=["execution"],
+        supported_delivery_modes=["workspace", "branch", "draft_pr"],
+        permission_profile="read_only",
+        mutation_policy="read_only",
+        self_review_policy="on_failure",
+    )
+
     if include_gemini:
         gemini_profile_name = (
             "gemini-native-executor"
@@ -120,6 +132,17 @@ def _build_default_worker_profiles(
             supported_delivery_modes=["workspace", "branch", "draft_pr"],
             permission_profile="workspace_write",
             mutation_policy="patch_allowed",
+            self_review_policy="on_failure",
+        )
+        gemini_read_only_profile_name = f"{gemini_profile_name}-read-only"
+        profiles[gemini_read_only_profile_name] = WorkerProfile(
+            name=gemini_read_only_profile_name,
+            worker_type="gemini",
+            runtime_mode=gemini_runtime_mode,
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            permission_profile="read_only",
+            mutation_policy="read_only",
             self_review_policy="on_failure",
         )
 
@@ -228,11 +251,11 @@ def build_task_service_from_env(
             ),
             codex_runtime_mode=_coerce_runtime_mode(
                 resolved_env.get(CODEX_RUNTIME_MODE_ENV_VAR),
-                default="native_agent",
+                default="tool_loop",
             ),
             gemini_runtime_mode=_coerce_runtime_mode(
                 resolved_env.get(GEMINI_RUNTIME_MODE_ENV_VAR),
-                default="native_agent",
+                default="tool_loop",
             ),
         )
     if outbound_http_clients is None:

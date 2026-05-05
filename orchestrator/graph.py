@@ -7,7 +7,7 @@ import base64
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -550,14 +550,18 @@ def _select_default_profile_for_worker(
 def _routable_execution_profiles(
     state: OrchestratorState,
     profiles: Mapping[str, WorkerProfile],
+    available_workers: frozenset[str],
 ) -> dict[str, WorkerProfile]:
     """Filter configured profiles to those compatible with the task request."""
+    SUPPORTED_RUNTIME_MODES: Final = {"native_agent", "tool_loop"}
     delivery_mode = state.task_spec.delivery_mode if state.task_spec is not None else None
     requires_read_only = bool(state.task.constraints.get("read_only"))
 
     selected: dict[str, WorkerProfile] = {}
     for name, profile in profiles.items():
-        if profile.runtime_mode not in {"native_agent", "tool_loop"}:
+        if profile.worker_type not in available_workers:
+            continue
+        if profile.runtime_mode not in SUPPORTED_RUNTIME_MODES:
             continue
         if profile.capability_tags and "execution" not in profile.capability_tags:
             continue
@@ -1084,7 +1088,7 @@ def _compute_profile_route_decision(
     available_profiles: Mapping[str, WorkerProfile],
 ) -> RouteDecision:
     """Compute routing through configured worker profiles."""
-    routable_profiles = _routable_execution_profiles(state, available_profiles)
+    routable_profiles = _routable_execution_profiles(state, available_profiles, available_workers)
 
     profile_override = state.task.worker_profile_override
     if isinstance(profile_override, str) and profile_override.strip():
