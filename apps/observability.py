@@ -72,7 +72,10 @@ class _TracingDependencies:
     trace_context_propagator_cls: Any
 
 
-def _is_enabled(value: str | None) -> bool:
+def is_tracing_enabled(environ: Mapping[str, str] | None = None) -> bool:
+    """Check if tracing is explicitly enabled in the environment."""
+    env = os.environ if environ is None else environ
+    value = env.get(ENABLE_TRACING_ENV_VAR)
     if value is None:
         return False
     return value.strip().lower() in {"1", "true", "yes", "on"}
@@ -140,7 +143,7 @@ def configure_tracing_from_env(
 ) -> TracingBootstrapResult:
     """Bootstrap OTEL + OpenInference tracing when explicitly enabled."""
     resolved_env = os.environ if environ is None else environ
-    if not _is_enabled(resolved_env.get(ENABLE_TRACING_ENV_VAR)):
+    if not is_tracing_enabled(resolved_env):
         return TracingBootstrapResult(enabled=False, configured=False, reason="disabled")
 
     project_name = resolve_tracing_project_name(resolved_env)

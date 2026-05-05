@@ -39,7 +39,10 @@ from apps.observability import (
     STATUS_ERROR,
     bind_current_trace_context,
     capture_trace_context,
+    is_tracing_enabled,
     record_span_exception,
+    resolve_otel_tracing_endpoint,
+    resolve_tracing_project_name,
     set_current_span_attribute,
     set_span_input_output,
     set_span_status,
@@ -1128,17 +1131,10 @@ def _get_project_id(api_base_url: str, project_name: str) -> str:
 
 def _get_tracing_config() -> tuple[bool, str | None, str]:
     """Helper to fetch tracing config once per process."""
-    enable_tracing = os.environ.get("CODE_AGENT_ENABLE_TRACING", "").lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    collector_endpoint = os.environ.get("PHOENIX_COLLECTOR_ENDPOINT") or os.environ.get(
-        "CODE_AGENT_TRACING_OTLP_ENDPOINT"
-    )
-    project_name = os.environ.get("CODE_AGENT_TRACING_PROJECT") or "code-agent"
-    return enable_tracing, collector_endpoint, project_name
+    enabled = is_tracing_enabled()
+    collector_endpoint = resolve_otel_tracing_endpoint(os.environ)
+    project_name = resolve_tracing_project_name(os.environ)
+    return enabled, collector_endpoint, project_name
 
 
 def _get_phoenix_url(trace_id: str | None) -> str | None:
