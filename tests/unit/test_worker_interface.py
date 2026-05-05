@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from workers import WorkerProfile, WorkerRequest, WorkerResult
+from workers import SUPPORTED_WORKER_TYPES, WorkerProfile, WorkerRequest, WorkerResult
 
 
 def test_worker_request_supports_contract_fields() -> None:
@@ -99,3 +99,22 @@ def test_worker_profile_rejects_unknown_runtime_modes() -> None:
             worker_type="codex",
             runtime_mode="interactive",
         )
+
+
+def test_worker_profile_normalizes_duplicate_list_entries() -> None:
+    """Profile lists should normalize once at validation time."""
+    profile = WorkerProfile(
+        name="normalized-profile",
+        worker_type="codex",
+        runtime_mode="native_agent",
+        capability_tags=["execution", "planning", "execution"],
+        supported_delivery_modes=["workspace", "draft_pr", "workspace"],
+    )
+
+    assert profile.capability_tags == ["execution", "planning"]
+    assert profile.supported_delivery_modes == ["draft_pr", "workspace"]
+
+
+def test_supported_worker_types_contract_order() -> None:
+    """Fallback order should be declared in one shared contract constant."""
+    assert SUPPORTED_WORKER_TYPES == ("gemini", "openrouter", "codex")

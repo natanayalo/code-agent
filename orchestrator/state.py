@@ -8,12 +8,20 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from workers import WorkerDeliveryMode, WorkerResult, WorkerRuntimeMode, WorkerType
+from workers import (
+    SUPPORTED_WORKER_TYPES as WORKER_SUPPORTED_TYPES,
+)
+from workers import (
+    WorkerDeliveryMode,
+    WorkerResult,
+    WorkerRuntimeMode,
+    WorkerType,
+)
 from workers.review import ReviewResult
 
-# Ordered by escalation preference in routing fallbacks:
-# quality-first, then balanced, then low-cost.
-SUPPORTED_WORKER_TYPES: tuple[WorkerType, ...] = ("gemini", "openrouter", "codex")
+# Re-export worker fallback order for orchestrator callers that import from this module.
+SUPPORTED_WORKER_TYPES: tuple[WorkerType, ...] = WORKER_SUPPORTED_TYPES
+
 MemoryCategory = Literal["personal", "project"]
 VerificationFailureKind = Literal[
     "test_regression",

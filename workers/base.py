@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from workers.review import ReviewResult
 
@@ -32,6 +32,7 @@ FailureKind = Literal[
 ]
 
 WorkerType = Literal["gemini", "codex", "openrouter"]
+SUPPORTED_WORKER_TYPES: tuple[WorkerType, ...] = ("gemini", "openrouter", "codex")
 WorkerRuntimeMode = Literal["native_agent", "tool_loop", "planner_only", "reviewer_only"]
 WorkerCapabilityTag = Literal["planning", "execution", "review", "routing", "scout"]
 WorkerPermissionProfile = Literal[
@@ -78,11 +79,14 @@ class WorkerProfile(WorkerModel):
     supported_delivery_modes: list[WorkerDeliveryMode] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @model_validator(mode="after")
-    def _normalize_profile_lists(self) -> WorkerProfile:
-        self.capability_tags = sorted(set(self.capability_tags))
-        self.supported_delivery_modes = sorted(set(self.supported_delivery_modes))
-        return self
+    @field_validator("capability_tags", "supported_delivery_modes", mode="before")
+    @classmethod
+    def _normalize_profile_lists(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, list | tuple | set):
+            return sorted(set(value))
+        return value
 
 
 class WorkerCommand(WorkerModel):

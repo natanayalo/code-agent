@@ -1,6 +1,7 @@
 """Worker package boundary."""
 
 from workers.base import (
+    SUPPORTED_WORKER_TYPES,
     ArtifactReference,
     FailureKind,
     TestResult,
@@ -36,6 +37,7 @@ __all__ = [
     "OpenRouterCliWorker",
     "ReviewFinding",
     "ReviewResult",
+    "SUPPORTED_WORKER_TYPES",
     "TestResult",
     "Worker",
     "WorkerCapabilityTag",
