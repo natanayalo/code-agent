@@ -20,7 +20,6 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 from typing import Any, Literal, Protocol, cast
@@ -1098,19 +1097,48 @@ def _get_trace_id_from_context(context: dict[str, str] | None) -> str | None:
     return None
 
 
-@lru_cache(maxsize=10)
+# T-152: Global cache for Phoenix project ID to avoid redundant network calls during serialization
+_PHOENIX_PROJECT_ID_CACHE: str | None = None
+_PHOENIX_PROJECT_ID_LOCK = Lock()
+
+
 def _get_project_id(api_base_url: str, project_name: str) -> str:
     """Resolve the Phoenix project ID (UUID) from its name via the REST API."""
-    try:
-        # Phoenix API endpoint for project details
-        url = f"{api_base_url}/v1/projects/{project_name}"
-        with urllib.request.urlopen(url, timeout=1) as response:
-            data = json.loads(response.read().decode())
-            return data["data"]["id"]
-    except (urllib.error.URLError, ValueError, KeyError, TypeError) as e:
-        # Fallback to the name if the API is unreachable or the project doesn't exist
-        logger.debug("Failed to resolve Phoenix project ID for '%s': %s", project_name, e)
-        return project_name
+    global _PHOENIX_PROJECT_ID_CACHE
+    if _PHOENIX_PROJECT_ID_CACHE:
+        return _PHOENIX_PROJECT_ID_CACHE
+
+    with _PHOENIX_PROJECT_ID_LOCK:
+        if _PHOENIX_PROJECT_ID_CACHE:
+            return _PHOENIX_PROJECT_ID_CACHE
+
+        try:
+            # Phoenix API endpoint for project details
+            url = f"{api_base_url}/v1/projects/{project_name}"
+            with urllib.request.urlopen(url, timeout=0.5) as response:
+                data = json.loads(response.read().decode())
+                _PHOENIX_PROJECT_ID_CACHE = data["data"]["id"]
+        except (TimeoutError, urllib.error.URLError, ValueError, KeyError, TypeError) as e:
+            # Fallback to the name if the API is unreachable or the project doesn't exist
+            logger.debug("Failed to resolve Phoenix project ID for '%s': %s", project_name, e)
+            _PHOENIX_PROJECT_ID_CACHE = project_name
+
+        return _PHOENIX_PROJECT_ID_CACHE or project_name
+
+
+def _get_tracing_config() -> tuple[bool, str | None, str]:
+    """Helper to fetch tracing config once per process."""
+    enable_tracing = os.environ.get("CODE_AGENT_ENABLE_TRACING", "").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    collector_endpoint = os.environ.get("PHOENIX_COLLECTOR_ENDPOINT") or os.environ.get(
+        "CODE_AGENT_TRACING_OTLP_ENDPOINT"
+    )
+    project_name = os.environ.get("CODE_AGENT_TRACING_PROJECT") or "code-agent"
+    return enable_tracing, collector_endpoint, project_name
 
 
 def _get_phoenix_url(trace_id: str | None) -> str | None:
@@ -1118,46 +1146,32 @@ def _get_phoenix_url(trace_id: str | None) -> str | None:
     if not trace_id:
         return None
 
-    # T-152: Ensure the dashboard can link to local Phoenix traces.
-    enable_tracing = os.environ.get("CODE_AGENT_ENABLE_TRACING", "").lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    enable_tracing, collector_endpoint, project_name = _get_tracing_config()
     if not enable_tracing:
         return None
 
-    # Resolve the collector endpoint to infer the UI host
-    collector_endpoint = os.environ.get("PHOENIX_COLLECTOR_ENDPOINT") or os.environ.get(
-        "CODE_AGENT_TRACING_OTLP_ENDPOINT"
-    )
+    if not collector_endpoint:
+        return f"http://localhost:6006/projects/{project_name}/traces/{trace_id}"
 
-    project_name = os.environ.get("CODE_AGENT_TRACING_PROJECT") or "code-agent"
+    try:
+        parsed = urlparse(collector_endpoint)
+        # Phoenix API is usually at the same host as the collector, sans /v1/traces
+        api_base_url = f"{parsed.scheme}://{parsed.netloc}"
+        project_id = _get_project_id(api_base_url, project_name)
 
-    if collector_endpoint:
-        try:
-            parsed = urlparse(collector_endpoint)
-            # Phoenix API is usually at the same host as the collector, sans /v1/traces
-            api_base_url = f"{parsed.scheme}://{parsed.netloc}"
-            project_id = _get_project_id(api_base_url, project_name)
+        netloc = parsed.netloc
+        # If it's the internal service name, swap it for localhost for the browser
+        if netloc.startswith("phoenix:"):
+            netloc = netloc.replace("phoenix:", "localhost:", 1)
+        elif netloc == "phoenix":
+            netloc = "localhost:6006"
 
-            netloc = parsed.netloc
-            # If it's the internal service name, swap it for localhost for the browser
-            if netloc.startswith("phoenix:"):
-                netloc = netloc.replace("phoenix:", "localhost:", 1)
-            elif netloc == "phoenix":
-                netloc = "localhost:6006"
-
-            # Phoenix UI puts traces at /projects/<id>/traces/<id>
-            return f"{parsed.scheme}://{netloc}/projects/{project_id}/traces/{trace_id}"
-        except (ValueError, urllib.error.URLError) as e:
-            # Fallback if URL parsing or project resolution fails
-            logger.debug("Failed to generate custom Phoenix deep link: %s", e)
-            pass
-
-    # Default fallback for local dev
-    return f"http://localhost:6006/projects/{project_name}/traces/{trace_id}"
+        # Phoenix UI puts traces at /projects/<id>/traces/<id>
+        return f"{parsed.scheme}://{netloc}/projects/{project_id}/traces/{trace_id}"
+    except (ValueError, urllib.error.URLError) as e:
+        # Fallback if URL parsing or project resolution fails
+        logger.debug("Failed to generate custom Phoenix deep link: %s", e)
+        return f"http://localhost:6006/projects/{project_name}/traces/{trace_id}"
 
 
 class TaskExecutionService:
