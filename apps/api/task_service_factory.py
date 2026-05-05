@@ -30,6 +30,7 @@ from workers import (
     WorkerProfile,
     WorkerType,
 )
+from workers.codex_exec_adapter import CODEX_SANDBOX_ENV_VAR
 from workers.gemini_cli_adapter import (
     GEMINI_EXECUTABLE_ENV_VAR,
     GEMINI_MODEL_ENV_VAR,
@@ -56,6 +57,9 @@ WORKER_PROFILES_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_WORKER_PROFILES_ENABLE
 CODEX_RUNTIME_MODE_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_RUNTIME_MODE"
 GEMINI_RUNTIME_MODE_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_RUNTIME_MODE"
 OPENROUTER_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_ENABLED"
+NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: Final[str] = (
+    "CODE_AGENT_NATIVE_AGENT_EVENT_CAPTURE_ENABLED"
+)
 
 # Default profile names
 GEMINI_NATIVE_PLANNER_PROFILE: Final[str] = "gemini-native-planner"
@@ -87,6 +91,22 @@ def _coerce_runtime_mode(
             f"Invalid worker runtime mode: '{value}'. "
             f"Expected one of: {', '.join([m.value for m in WorkerRuntimeMode])}"
         )
+
+
+def _coerce_execution_runtime_mode(
+    value: str | None,
+    *,
+    default: WorkerRuntimeMode,
+    worker_name: str,
+) -> WorkerRuntimeMode:
+    """Parse runtime modes and restrict worker execution modes to native/tool-loop."""
+    runtime_mode = _coerce_runtime_mode(value, default=default)
+    if runtime_mode not in {WorkerRuntimeMode.NATIVE_AGENT, WorkerRuntimeMode.TOOL_LOOP}:
+        raise ValueError(
+            f"Invalid {worker_name} runtime mode: '{runtime_mode.value}'. "
+            "Supported values are: native_agent, tool_loop."
+        )
+    return runtime_mode
 
 
 def _build_default_worker_profiles(
@@ -230,10 +250,28 @@ def build_task_service_from_env(
         if resolved_sandbox_image
         else DockerSandboxContainerManager()
     )
+    codex_runtime_mode = _coerce_execution_runtime_mode(
+        resolved_env.get(CODEX_RUNTIME_MODE_ENV_VAR),
+        default=WorkerRuntimeMode.NATIVE_AGENT,
+        worker_name="Codex",
+    )
+    gemini_runtime_mode = _coerce_execution_runtime_mode(
+        resolved_env.get(GEMINI_RUNTIME_MODE_ENV_VAR),
+        default=WorkerRuntimeMode.TOOL_LOOP,
+        worker_name="Gemini",
+    )
 
     codex_worker = CodexCliWorker(
         runtime_adapter=CodexExecCliRuntimeAdapter.from_env(resolved_env),
         container_manager=container_manager,
+        default_runtime_mode=codex_runtime_mode,
+        native_sandbox_mode=resolved_env.get(
+            CODEX_SANDBOX_ENV_VAR,
+            "workspace-write",
+        ),
+        native_event_capture_enabled=_is_enabled(
+            resolved_env.get(NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR)
+        ),
     )
     gemini_worker: GeminiCliWorker | None = None
     openrouter_worker: OpenRouterCliWorker | None = None
@@ -259,14 +297,8 @@ def build_task_service_from_env(
                 openrouter_worker is not None
                 and _is_enabled(resolved_env.get(OPENROUTER_ENABLED_ENV_VAR))
             ),
-            codex_runtime_mode=_coerce_runtime_mode(
-                resolved_env.get(CODEX_RUNTIME_MODE_ENV_VAR),
-                default=WorkerRuntimeMode.TOOL_LOOP,
-            ),
-            gemini_runtime_mode=_coerce_runtime_mode(
-                resolved_env.get(GEMINI_RUNTIME_MODE_ENV_VAR),
-                default=WorkerRuntimeMode.TOOL_LOOP,
-            ),
+            codex_runtime_mode=codex_runtime_mode,
+            gemini_runtime_mode=gemini_runtime_mode,
         )
     if outbound_http_clients is None:
         raise RuntimeError(
