@@ -1085,8 +1085,6 @@ def _compute_profile_route_decision(
 ) -> RouteDecision:
     """Compute routing through configured worker profiles."""
     routable_profiles = _routable_execution_profiles(state, available_profiles)
-    if not routable_profiles:
-        return _compute_legacy_route_decision(state, available_workers)
 
     profile_override = state.task.worker_profile_override
     if isinstance(profile_override, str) and profile_override.strip():
