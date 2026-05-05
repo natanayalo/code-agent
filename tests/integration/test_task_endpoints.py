@@ -233,13 +233,12 @@ def test_task_endpoints_expose_profile_and_runtime_metadata_when_profile_routing
         task_service=TaskExecutionService(
             session_factory=session_factory,
             worker=worker,
-            checkpoint_path="test_checkpoints.sqlite",
             enable_worker_profiles=True,
             worker_profiles={
                 "codex-native-executor": WorkerProfile(
                     name="codex-native-executor",
                     worker_type="codex",
-                    runtime_mode="native_agent",
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
                     capability_tags=["execution"],
                     supported_delivery_modes=["workspace", "branch", "draft_pr"],
                     permission_profile="workspace_write",
