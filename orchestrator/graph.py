@@ -539,11 +539,7 @@ def _select_default_profile_for_worker(
         for profile in profiles.values()
         if profile.worker_type == worker_type
         and profile.runtime_mode in {"native_agent", "tool_loop"}
-        and (
-            not profile.capability_tags
-            or "execution" in profile.capability_tags
-            or "routing" in profile.capability_tags
-        )
+        and (not profile.capability_tags or "execution" in profile.capability_tags)
     ]
     if not candidates:
         return None
@@ -1348,7 +1344,9 @@ def build_await_result_node(
                     worker_type,
                     configured_profiles=configured_profile_names,
                 )
-                progress_message = f"worker profile unavailable: {worker_type or 'unknown'}"
+                progress_message = (
+                    f"no routable profile available for worker: {worker_type or 'unknown'}"
+                )
             else:
                 result = _unconfigured_worker_result(
                     worker_type,
