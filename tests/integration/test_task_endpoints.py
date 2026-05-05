@@ -18,7 +18,7 @@ from apps.api.auth import (
 )
 from apps.api.main import create_app
 from db.base import Base
-from db.enums import ArtifactType, TaskStatus, WorkerRunStatus
+from db.enums import ArtifactType, TaskStatus, WorkerRunStatus, WorkerRuntimeMode
 from orchestrator.execution import TaskExecutionService
 from repositories import (
     ArtifactRepository,
@@ -28,7 +28,7 @@ from repositories import (
     create_session_factory,
     session_scope,
 )
-from workers import Worker, WorkerRequest, WorkerResult
+from workers import Worker, WorkerProfile, WorkerRequest, WorkerResult
 
 
 class StaticWorker(Worker):
@@ -209,6 +209,97 @@ def test_submit_task_persists_execution_path_and_allows_polling(
         artifacts = artifact_repo.list_by_run(worker_run.id)
         assert len(artifacts) == 1
         assert artifacts[0].artifact_type is ArtifactType.WORKSPACE
+
+
+def test_task_endpoints_expose_profile_and_runtime_metadata_when_profile_routing_is_enabled(
+    session_factory,
+) -> None:
+    """Profile-aware routing should surface selected profile/runtime on task and run snapshots."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="Applied minimal change with profiled routing metadata.",
+            files_changed=["note.txt"],
+            artifacts=[
+                {
+                    "name": "workspace",
+                    "uri": "/tmp/workspace-task-profiled-1",
+                    "artifact_type": "workspace",
+                }
+            ],
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(
+            session_factory=session_factory,
+            worker=worker,
+            checkpoint_path="test_checkpoints.sqlite",
+            enable_worker_profiles=True,
+            worker_profiles={
+                "codex-native-executor": WorkerProfile(
+                    name="codex-native-executor",
+                    worker_type="codex",
+                    runtime_mode="native_agent",
+                    capability_tags=["execution"],
+                    supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                    permission_profile="workspace_write",
+                    mutation_policy="patch_allowed",
+                    self_review_policy="on_failure",
+                )
+            },
+        ),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+    )
+    app.state.test_worker = worker
+
+    with TestClient(app) as profiled_client:
+        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        response = profiled_client.post(
+            "/tasks",
+            json={
+                "task_text": "Apply a profiled codex native task",
+                "repo_url": "https://github.com/natanayalo/code-agent",
+                "session": {
+                    "channel": "http",
+                    "external_user_id": "http:test-user-profiled",
+                    "external_thread_id": "thread-profiled",
+                },
+            },
+        )
+
+        assert response.status_code == 202
+        task_id = response.json()["task_id"]
+        _run_one_queued_task(profiled_client)
+
+        get_response = profiled_client.get(f"/tasks/{task_id}")
+        assert get_response.status_code == 200
+        payload = get_response.json()
+        latest_run = payload["latest_run"]
+
+        assert payload["chosen_worker"] == "codex"
+        assert payload["chosen_profile"] == "codex-native-executor"
+        assert payload["runtime_mode"] == "native_agent"
+        assert latest_run["worker_type"] == "codex"
+        assert latest_run["worker_profile"] == "codex-native-executor"
+        assert latest_run["runtime_mode"] == "native_agent"
+        assert len(worker.requests) == 1
+        assert worker.requests[0].worker_profile == "codex-native-executor"
+        assert worker.requests[0].runtime_mode == "native_agent"
+
+        with session_scope(session_factory) as session:
+            task_repo = TaskRepository(session)
+            worker_run_repo = WorkerRunRepository(session)
+
+            task = task_repo.get(task_id)
+            assert task is not None
+            assert task.chosen_profile == "codex-native-executor"
+            assert task.runtime_mode is WorkerRuntimeMode.NATIVE_AGENT
+
+            worker_runs = worker_run_repo.list_by_task(task_id)
+            assert len(worker_runs) == 1
+            worker_run = worker_runs[0]
+            assert worker_run.worker_profile == "codex-native-executor"
+            assert worker_run.runtime_mode is WorkerRuntimeMode.NATIVE_AGENT
 
 
 def test_queued_task_requires_approval_before_worker_dispatch(client: TestClient) -> None:

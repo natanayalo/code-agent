@@ -57,13 +57,16 @@ Active worker/runtime implementations:
 
 ### Worker Routing Policy (Current)
 
-Before routing, the orchestrator builds and persists a TaskSpec so workers, APIs, and operator views share an inspectable task contract. Until the full profile-based strategy (Milestone 17) is implemented, the platform uses a simplified routing heuristic:
+Before routing, the orchestrator builds and persists a TaskSpec so workers, APIs, and operator views share an inspectable task contract. When worker profiles are enabled, routing resolves through a capability matrix and pins dispatch to one concrete `WorkerProfile` (`worker_type`, `runtime_mode`, capability tags, permission/mutation policy, and delivery-mode support).
 
-- **Codex Worker**: Default for straightforward coding tasks, documentation updates, and small-scale refactors.
-- **Gemini Worker**: Used for complex tasks requiring high-level reasoning, architectural changes, or multi-step cognitive loops.
-- **OpenRouter Worker**: Used for model evaluation and as a fallback for specific model capabilities not covered by the primary workers.
+Current default profile matrix:
 
-The routing decision is currently made by the orchestrator based on task complexity hints or manual operator overrides.
+- **Codex execution**: `codex-native-executor` or `codex-tool-loop-executor` (plus read-only variants)
+- **Gemini execution**: `gemini-native-executor` or `gemini-tool-loop-executor` (plus read-only variants)
+- **Gemini specialist profiles** (native mode): `gemini-native-planner` and `gemini-native-reviewer`
+- **OpenRouter legacy execution**: `openrouter-tool-loop-legacy` (explicit opt-in only)
+
+The selected worker/profile/runtime metadata is persisted on task and worker-run records and returned in task snapshots for operator and dashboard inspection.
 
 ## 3) Sandbox + Tool Layer
 
