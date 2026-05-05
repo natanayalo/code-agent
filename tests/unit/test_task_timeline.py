@@ -50,6 +50,7 @@ def test_task_timeline_repository_creates_and_lists_events(session_factory) -> N
             event_type=TimelineEventType.TASK_INGESTED,
             message="Task received.",
             created_at=t1,
+            sequence_number=0,
         )
 
         timeline_repo.create(
@@ -57,6 +58,7 @@ def test_task_timeline_repository_creates_and_lists_events(session_factory) -> N
             event_type=TimelineEventType.WORKER_SELECTED,
             message="Worker chosen.",
             payload={"worker": "codex"},
+            sequence_number=1,
         )
 
         # 10. Verify listing
