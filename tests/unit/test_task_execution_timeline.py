@@ -15,7 +15,11 @@ from orchestrator import (
     WorkerResult,
 )
 from orchestrator.execution import TaskExecutionService
+from orchestrator.state import TaskTimelineEventState
 from repositories import (
+    SessionRepository,
+    TaskRepository,
+    UserRepository,
     create_engine_from_url,
     create_session_factory,
     session_scope,
@@ -82,8 +86,6 @@ def test_persist_execution_outcome_saves_timeline(session_factory, service) -> N
 
     # We need a real task in the DB for FK constraints
     with session_scope(session_factory) as session:
-        from repositories import SessionRepository, TaskRepository, UserRepository
-
         user = UserRepository(session).create(external_user_id="user-1")
         conv = SessionRepository(session).create(
             user_id=user.id, channel="http", external_thread_id="thread-1"
@@ -143,8 +145,6 @@ def test_persist_execution_outcome_deduplicates_events(session_factory, service)
 
     # 1. Setup task and initial state
     with session_scope(session_factory) as session:
-        from repositories import SessionRepository, TaskRepository, UserRepository
-
         user = UserRepository(session).create(external_user_id="user-1")
         conv = SessionRepository(session).create(
             user_id=user.id, channel="http", external_thread_id="thread-resume"
@@ -183,8 +183,6 @@ def test_persist_execution_outcome_deduplicates_events(session_factory, service)
     )
 
     # 3. Simulate resume: state has old events + new ones
-    from orchestrator.state import TaskTimelineEventState
-
     state.timeline_events.append(
         TaskTimelineEventState(
             event_type=TimelineEventType.WORKER_SELECTED,
@@ -212,12 +210,9 @@ def test_persist_execution_outcome_deduplicates_events(session_factory, service)
 def test_persist_execution_outcome_deduplicates_retry_attempts(session_factory, service) -> None:
     """The execution service must deduplicate correctly across multiple retry attempts."""
     now = utc_now()
-    from orchestrator.state import TaskTimelineEventState
 
     # 1. Setup task
     with session_scope(session_factory) as session:
-        from repositories import SessionRepository, TaskRepository, UserRepository
-
         user = UserRepository(session).create(external_user_id="user-1")
         conv = SessionRepository(session).create(
             user_id=user.id, channel="http", external_thread_id="thread-retry"

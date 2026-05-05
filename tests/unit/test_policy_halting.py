@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from orchestrator.graph import generate_task_spec
+from orchestrator.graph import _route_after_generate_task_spec, generate_task_spec
 from orchestrator.state import OrchestratorState, TaskRequest, TaskSpec
 from workers import WorkerResult
 
@@ -45,8 +45,6 @@ def test_generate_task_spec_halts_on_policy_violation(monkeypatch):
 
 def test_route_after_generate_task_spec_with_policy_violation():
     """Verify that the router correctly routes to summarize_result on policy violations."""
-    from orchestrator.graph import _route_after_generate_task_spec
-
     # Case: Policy violation error exists
     state = OrchestratorState(
         task=TaskRequest(task_id="t", task_text="t", repo_url="r", branch="b"),

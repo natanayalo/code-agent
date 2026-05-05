@@ -7,6 +7,7 @@ import pytest
 
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.graph import (
+    _await_worker_with_timeout,
     _build_worker_request,
     _classify_task_kind,
     _coerce_approval_decision,
@@ -20,6 +21,7 @@ from orchestrator.graph import (
     await_permission_escalation,
     build_choose_worker_node,
     choose_worker,
+    dispatch_job,
     generate_task_spec,
     plan_task,
     summarize_result,
@@ -27,7 +29,7 @@ from orchestrator.graph import (
 )
 from orchestrator.state import OrchestratorState
 from orchestrator.task_spec import is_destructive_task
-from workers import WorkerProfile, WorkerRequest, WorkerResult
+from workers import Worker, WorkerProfile, WorkerRequest, WorkerResult
 
 
 def test_ensure_state_from_dict():
@@ -940,8 +942,6 @@ def test_create_in_memory_checkpointer():
 
 def test_dispatch_job_preserves_attempt_count():
     """dispatch_job must preserve attempt_count (it is managed externally)."""
-    from orchestrator.graph import dispatch_job
-
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "demo"},
@@ -956,8 +956,6 @@ def test_dispatch_job_preserves_attempt_count():
 
 def test_dispatch_job_preserves_attempt_count_on_retry():
     """attempt_count remains constant throughout a single graph invocation."""
-    from orchestrator.graph import dispatch_job
-
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "demo"},
@@ -971,8 +969,6 @@ def test_dispatch_job_preserves_attempt_count_on_retry():
 
 
 def test_dispatch_job_includes_route_profile_metadata() -> None:
-    from orchestrator.graph import dispatch_job
-
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "demo"},
@@ -1088,9 +1084,6 @@ def test_await_permission_escalation_invalid_permission():
 
 @pytest.mark.anyio
 async def test_await_worker_with_timeout_partial_result():
-    from orchestrator.graph import _await_worker_with_timeout
-    from workers.base import Worker
-
     class SlowWorker(Worker):
         async def run(self, request):
             try:

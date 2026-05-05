@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,7 +18,8 @@ from sandbox import (
 from tools import DEFAULT_TOOL_REGISTRY
 from workers import GeminiCliWorker, WorkerRequest
 from workers.base import ArtifactReference
-from workers.cli_runtime import CliRuntimeMessage, CliRuntimeStep
+from workers.cli_runtime import CliRuntimeMessage, CliRuntimeSettings, CliRuntimeStep
+from workers.gemini_cli_worker import _workspace_task_id
 
 
 class _FakeWorkspaceManager:
@@ -221,8 +223,6 @@ def test_gemini_cli_worker_errors_when_workspace_provisioning_fails(tmp_path: Pa
 
 def test_gemini_cli_worker_workspace_task_id_uses_gemini_prefix(tmp_path: Path) -> None:
     """Workspace task IDs should carry the gemini-cli prefix."""
-    from workers.gemini_cli_worker import _workspace_task_id
-
     request = WorkerRequest(task_text="build the feature", repo_url="https://example.com/repo")
     task_id = _workspace_task_id(request)
     assert task_id.startswith("gemini-cli-")
@@ -230,8 +230,6 @@ def test_gemini_cli_worker_workspace_task_id_uses_gemini_prefix(tmp_path: Path) 
 
 def test_gemini_cli_worker_uses_session_id_in_workspace_task_id() -> None:
     """When session_id is present it should be used over task_text for the workspace ID."""
-    from workers.gemini_cli_worker import _workspace_task_id
-
     request = WorkerRequest(
         task_text="build the feature",
         session_id="session-abc-123",
@@ -299,7 +297,6 @@ def test_gemini_cli_worker_self_review_with_findings(tmp_path: Path) -> None:
             )
         }
     )
-    import json
 
     findings_json = json.dumps(
         {
@@ -440,7 +437,6 @@ def test_gemini_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_path:
             )
         }
     )
-    import json
 
     findings_json = json.dumps(
         {
@@ -554,7 +550,6 @@ def test_gemini_cli_worker_self_review_exhausts_budget(tmp_path: Path) -> None:
             )
         }
     )
-    import json
 
     findings_json = json.dumps(
         {
@@ -587,8 +582,6 @@ def test_gemini_cli_worker_self_review_exhausts_budget(tmp_path: Path) -> None:
             # but budget is 0 so it won't even call the adapter for fix loop!
         ]
     )
-    from workers.cli_runtime import CliRuntimeSettings
-
     worker = GeminiCliWorker(
         runtime_adapter=adapter,
         workspace_manager=_FakeWorkspaceManager(workspace),

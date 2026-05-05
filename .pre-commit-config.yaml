@@ -61,7 +61,6 @@ repos:
       - id: ruff
         name: Ruff import placement
         args: [--select=PLC0415]
-        files: ^(apps|db|memory|orchestrator|repositories|sandbox|tools|workers)/.*\.py$
       - id: ruff-format
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.8.0

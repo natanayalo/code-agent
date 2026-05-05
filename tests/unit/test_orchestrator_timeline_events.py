@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from db.enums import TimelineEventType
 from orchestrator.graph import (
+    _timeline_events,
     build_choose_worker_node,
     check_approval,
     classify_task,
@@ -15,7 +16,7 @@ from orchestrator.graph import (
     summarize_result,
     verify_result,
 )
-from orchestrator.state import OrchestratorState
+from orchestrator.state import OrchestratorState, TaskTimelineEventState
 
 
 def test_ingest_task_emits_event():
@@ -124,8 +125,6 @@ def test_summarize_result_emits_event():
 
 def test_timeline_sequence_stability():
     """Events must have monotonic sequence numbers even when emitted in the same step."""
-    from orchestrator.graph import _timeline_events
-
     state = OrchestratorState.model_validate({"task": {"task_text": "hello"}})
     # Batch emission
     res = _timeline_events(
@@ -146,9 +145,6 @@ def test_timeline_sequence_stability():
 
 def test_timeline_sequence_incorporates_persisted_count():
     """Sequence numbers must incorporate timeline_persisted_count for monotonic resumes."""
-    from orchestrator.graph import _timeline_events
-    from orchestrator.state import TaskTimelineEventState
-
     state = OrchestratorState.model_validate(
         {
             "task": {"task_id": "t1", "task_text": "demo"},
@@ -173,9 +169,6 @@ def test_timeline_sequence_incorporates_persisted_count():
 
 def test_timeline_sequence_increments_across_calls():
     """Sequence numbers must increment based on existing events in the list."""
-    from orchestrator.graph import _timeline_events
-    from orchestrator.state import TaskTimelineEventState
-
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "hello"},

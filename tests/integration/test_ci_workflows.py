@@ -165,14 +165,12 @@ def test_pre_commit_config_keeps_local_default_branch_guard() -> None:
     assert branch_guard_hook["stages"] == ["pre-commit"]
 
 
-def test_pre_commit_config_adds_ruff_import_placement_check_for_application_code() -> None:
-    """Application code should get a dedicated Ruff pass for non-top-level imports."""
+def test_pre_commit_config_adds_ruff_import_placement_check_repo_wide() -> None:
+    """Repo Python files should get a dedicated Ruff pass for non-top-level imports."""
     config = _load_yaml(".pre-commit-config.yaml")
     ruff_repo = next(repo for repo in config["repos"] if repo["repo"].endswith("ruff-pre-commit"))
     hooks = ruff_repo["hooks"]
     placement_hook = next(hook for hook in hooks if hook.get("name") == "Ruff import placement")
 
     assert placement_hook["args"] == ["--select=PLC0415"]
-    assert placement_hook["files"] == (
-        "^(apps|db|memory|orchestrator|repositories|sandbox|tools|workers)/.*\\.py$"
-    )
+    assert placement_hook.get("files") is None

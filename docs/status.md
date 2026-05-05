@@ -24,7 +24,7 @@ Active focus:
 - generated TaskSpec contract for task goal/risk/type/delivery policy before worker routing
 - dashboard visibility for TaskSpec, interactions, timeline events, logs, artifacts, replay controls, traces, memory, and tool inventory
 - CI now measures Python coverage from `tests/unit` only and runs `tests/integration` as a separate pass
-- pre-commit Ruff checks application code for non-top-level imports while preserving a few intentional lazy imports in guarded modules
+- pre-commit Ruff checks repo Python files for non-top-level imports while preserving a few intentional lazy imports in guarded modules
 
 ## Open Risks
 

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import time
 from pathlib import Path
 from unittest.mock import patch
 
 from sandbox import (
     DockerSandboxContainer,
+    DockerSandboxContainerError,
     DockerSandboxContainerRequest,
     DockerShellCommandResult,
     WorkspaceCleanupPolicy,
@@ -17,7 +20,14 @@ from sandbox import (
 from tools import DEFAULT_TOOL_REGISTRY
 from workers import OpenRouterCliWorker, WorkerRequest
 from workers.base import ArtifactReference
-from workers.cli_runtime import CliRuntimeMessage, CliRuntimeStep
+from workers.cli_runtime import (
+    CliRuntimeBudgetLedger,
+    CliRuntimeExecutionResult,
+    CliRuntimeMessage,
+    CliRuntimeSettings,
+    CliRuntimeStep,
+)
+from workers.openrouter_cli_worker import _next_action_hint, _workspace_task_id
 
 
 class _FakeWorkspaceManager:
@@ -223,8 +233,6 @@ def test_openrouter_cli_worker_errors_when_workspace_provisioning_fails(tmp_path
 
 def test_openrouter_cli_worker_workspace_task_id_uses_openrouter_prefix(tmp_path: Path) -> None:
     """Workspace task IDs should carry the openrouter-cli prefix."""
-    from workers.openrouter_cli_worker import _workspace_task_id
-
     request = WorkerRequest(task_text="build the feature", repo_url="https://example.com/repo")
     task_id = _workspace_task_id(request)
     assert task_id.startswith("openrouter-cli-")
@@ -232,8 +240,6 @@ def test_openrouter_cli_worker_workspace_task_id_uses_openrouter_prefix(tmp_path
 
 def test_openrouter_cli_worker_uses_session_id_in_workspace_task_id() -> None:
     """When session_id is present it should be used over task_text for the workspace ID."""
-    from workers.openrouter_cli_worker import _workspace_task_id
-
     request = WorkerRequest(
         task_text="build the feature",
         session_id="session-abc-123",
@@ -301,8 +307,6 @@ def test_openrouter_cli_worker_self_review_with_findings(tmp_path: Path) -> None
             )
         }
     )
-    import json
-
     findings_json = json.dumps(
         {
             "summary": "found issues",
@@ -379,8 +383,6 @@ def test_openrouter_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_p
             )
         }
     )
-    import json
-
     findings_json = json.dumps(
         {
             "summary": "found issues",
@@ -493,8 +495,6 @@ def test_openrouter_cli_worker_self_review_exhausts_budget(tmp_path: Path) -> No
             )
         }
     )
-    import json
-
     findings_json = json.dumps(
         {
             "summary": "found issues",
@@ -526,8 +526,6 @@ def test_openrouter_cli_worker_self_review_exhausts_budget(tmp_path: Path) -> No
             # but budget is 0 so it won't even call the adapter for fix loop!
         ]
     )
-    from workers.cli_runtime import CliRuntimeSettings
-
     worker = OpenRouterCliWorker(
         runtime_adapter=adapter,
         workspace_manager=_FakeWorkspaceManager(workspace),
@@ -546,9 +544,6 @@ def test_openrouter_cli_worker_self_review_exhausts_budget(tmp_path: Path) -> No
 
 
 def test_openrouter_next_action_hint() -> None:
-    from workers.cli_runtime import CliRuntimeBudgetLedger, CliRuntimeExecutionResult
-    from workers.openrouter_cli_worker import _next_action_hint
-
     def make_exec(stop_reason):
         return CliRuntimeExecutionResult(
             status="failure",
@@ -571,9 +566,6 @@ def test_openrouter_next_action_hint() -> None:
 
 
 def test_openrouter_cleanup_workspace_error(tmp_path, caplog) -> None:
-    from sandbox import WorkspaceManagerError
-    from workers.openrouter_cli_worker import OpenRouterCliWorker, WorkerRequest
-
     class _ErrorWorkspaceManager:
         def cleanup_workspace(self, workspace, *, succeeded):
             raise WorkspaceManagerError("fail")
@@ -595,9 +587,6 @@ def test_openrouter_cleanup_workspace_error(tmp_path, caplog) -> None:
 
 
 def test_openrouter_stop_container_error(tmp_path, caplog) -> None:
-    from sandbox import DockerSandboxContainerError
-    from workers.openrouter_cli_worker import OpenRouterCliWorker
-
     class _ErrorContainerManager:
         def stop(self, container):
             raise DockerSandboxContainerError("stop fail")
@@ -613,8 +602,6 @@ def test_openrouter_stop_container_error(tmp_path, caplog) -> None:
 
 
 def test_openrouter_close_session_error(caplog) -> None:
-    from workers.openrouter_cli_worker import OpenRouterCliWorker
-
     class _ErrorSession:
         def close(self):
             raise OSError("close fail")
@@ -627,9 +614,6 @@ def test_openrouter_close_session_error(caplog) -> None:
 
 
 def test_openrouter_run_sync_container_start_error(tmp_path) -> None:
-    from sandbox import DockerSandboxContainerError
-    from workers.openrouter_cli_worker import OpenRouterCliWorker
-
     workspace = _make_workspace(tmp_path)
 
     class _ErrorContainerManager:
@@ -672,16 +656,10 @@ def test_openrouter_run_sync_stops_container_when_setup_fails_after_start(tmp_pa
 
 
 def test_openrouter_run_cancellation(tmp_path) -> None:
-    import asyncio
-
-    from workers.openrouter_cli_worker import OpenRouterCliWorker
-
     workspace = _make_workspace(tmp_path)
 
     class _HangingWorkspaceManager:
         def create_workspace(self, request):
-            import time
-
             time.sleep(0.5)
             return workspace
 

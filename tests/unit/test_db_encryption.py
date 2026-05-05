@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import Column, Integer
 from sqlalchemy.orm import declarative_base
 
@@ -80,8 +80,6 @@ def test_encrypted_json_handles_decryption_failure_gracefully() -> None:
         decorator_b = EncryptedJSON()
         # This will fail decryption and log a SECURITY CRITICAL error.
         with patch("db.models.logger.critical") as mock_critical:
-            from cryptography.fernet import InvalidToken
-
             with pytest.raises(InvalidToken):
                 decorator_b.process_result_value(encrypted_val, None)
             mock_critical.assert_called_once()

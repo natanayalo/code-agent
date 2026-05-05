@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -168,13 +169,11 @@ def test_create_workspace_raises_on_existing_directory(
 ) -> None:
     manager = WorkspaceManager(tmp_path)
 
-    import sandbox.workspace
-
     def mock_build_workspace_id(task_id: str) -> str:
         return "workspace-collision"
 
     manager._command_runner = lambda cmd, **kwargs: None
-    monkeypatch.setattr(sandbox.workspace, "_build_workspace_id", mock_build_workspace_id)
+    monkeypatch.setattr(workspace_module, "_build_workspace_id", mock_build_workspace_id)
 
     (tmp_path / "workspace-collision").mkdir()
 
@@ -236,8 +235,6 @@ def test_cleanup_workspace_handles_os_error(
 
     workspace = manager.create_workspace(WorkspaceRequest(task_id="test", repo_url="http://fake"))
 
-    import shutil
-
     def mock_rmtree(path, **kwargs):
         raise OSError("Permission denied")
 
@@ -264,7 +261,6 @@ def test_cleanup_workspace_succeeds_when_already_deleted(tmp_path: Path) -> None
     manager._command_runner = lambda cmd, **kwargs: None
 
     workspace = manager.create_workspace(WorkspaceRequest(task_id="test", repo_url="http://fake"))
-    import shutil
 
     shutil.rmtree(workspace.workspace_path)
 

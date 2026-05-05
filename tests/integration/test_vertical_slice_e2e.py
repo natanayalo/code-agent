@@ -9,9 +9,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
-from db.models import Task, WorkerRun
-from orchestrator.execution import TaskExecutionService
-from repositories import create_engine_from_url, create_session_factory
+from db.models import Base, Task, WorkerRun
+from orchestrator.execution import TaskExecutionService, TaskSubmission
+from repositories import create_engine_from_url, create_session_factory, session_scope
+from sandbox import DockerShellCommandResult, DockerShellSession
 from workers import CodexCliWorker
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeStep
 
@@ -57,8 +58,6 @@ def session_factory(tmp_path: Path):
     engine = create_engine_from_url(f"sqlite:///{database_path}")
     # Note: For real integration, we'd run migrations.
     # For this E2E test, we'll manually create tables
-    from db.models import Base
-
     Base.metadata.create_all(engine)
 
     factory = create_session_factory(engine)
@@ -91,8 +90,6 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path):
             ),
         ]
     )
-
-    from sandbox import DockerShellCommandResult, DockerShellSession
 
     class _GitMockingSession:
         def __init__(self, container, *, secrets=None):
@@ -139,8 +136,6 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path):
     task_text = "Create hello.txt in the dummy repo"
     repo_url = f"file://{repo_path.resolve()}"
 
-    from orchestrator.execution import TaskSubmission
-
     submission = TaskSubmission(task_text=task_text, repo_url=repo_url, branch="master")
 
     # Create the task first
@@ -153,8 +148,6 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path):
     await service.submit_task(submission, persisted)
 
     # 3. Wait for the task to complete
-    from repositories.session import session_scope
-
     MAX_WAIT = 30
     elapsed = 0
     while elapsed < MAX_WAIT:

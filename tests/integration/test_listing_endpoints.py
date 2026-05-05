@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +12,8 @@ from sqlalchemy.pool import StaticPool
 from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
 from db.base import Base
+from db.enums import TaskStatus, WorkerRunStatus, WorkerType
+from db.models import Task, WorkerRun
 from orchestrator.execution import TaskExecutionService
 from repositories import (
     SessionStateRepository,
@@ -255,11 +258,6 @@ def test_list_tasks_includes_approval_context(client: TestClient, session_factor
     """GET /tasks should include approval status, type, reason, and requested permission (T-134)."""
     with session_scope(session_factory) as session:
         # Create a task with approval constraints
-        from datetime import datetime
-
-        from db.enums import TaskStatus, WorkerRunStatus, WorkerType
-        from db.models import Task, WorkerRun
-
         task = Task(
             session_id="session-1",
             task_text="approval test task",
