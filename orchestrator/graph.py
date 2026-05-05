@@ -841,6 +841,8 @@ def generate_task_spec(state_input: OrchestratorState) -> dict[str, Any]:
     progress_message = "task spec generated"
     if policy_violations:
         progress_message = "task spec generated with policy warnings"
+    elif task_spec.requires_clarification:
+        progress_message = "clarification required before execution"
 
     response: dict[str, Any] = {
         "current_step": "generate_task_spec",
@@ -874,14 +876,40 @@ def generate_task_spec(state_input: OrchestratorState) -> dict[str, Any]:
             artifacts=[],
             next_action_hint="halt_policy_violation",
         )
+    elif task_spec.requires_clarification:
+        clarification_questions = [
+            question.strip()
+            for question in task_spec.clarification_questions
+            if isinstance(question, str) and question.strip()
+        ]
+        clarification_summary = "Task paused pending clarification before worker dispatch."
+        if clarification_questions:
+            clarification_summary = (
+                f"{clarification_summary} Clarification needed: "
+                f"{' '.join(clarification_questions)}"
+            )
+        response["errors"] = [*state.errors, "task_spec_requires_clarification"]
+        response["result"] = WorkerResult(
+            status="failure",
+            summary=clarification_summary,
+            commands_run=[],
+            files_changed=[],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="await_manual_follow_up",
+        )
     return response
 
 
 def _route_after_generate_task_spec(state_input: OrchestratorState) -> str:
-    """Route either to load_memory or summarize_result if policy violations occur."""
+    """Route either to load_memory or summarize_result for early gate conditions."""
     state = _ensure_state(state_input)
     policy_errors = [e for e in state.errors if e.startswith("task_spec_policy:")]
-    return "summarize_result" if policy_errors else "load_memory"
+    if policy_errors:
+        return "summarize_result"
+    if state.task_spec is not None and state.task_spec.requires_clarification:
+        return "summarize_result"
+    return "load_memory"
 
 
 def load_memory(state_input: OrchestratorState) -> dict[str, Any]:
