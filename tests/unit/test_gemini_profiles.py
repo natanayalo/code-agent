@@ -1,7 +1,11 @@
+import pytest
+
 from apps.api.task_service_factory import (
     GEMINI_NATIVE_PLANNER_PROFILE,
     GEMINI_NATIVE_REVIEWER_PROFILE,
+    WorkerRuntimeMode,
     _build_default_worker_profiles,
+    _coerce_runtime_mode,
 )
 
 
@@ -14,8 +18,8 @@ def test_gemini_specialized_profiles_enabled(monkeypatch):
     profiles = _build_default_worker_profiles(
         include_gemini=True,
         include_openrouter=False,
-        codex_runtime_mode="tool_loop",
-        gemini_runtime_mode="native_agent",
+        codex_runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
+        gemini_runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
     )
 
     assert GEMINI_NATIVE_PLANNER_PROFILE in profiles
@@ -23,12 +27,12 @@ def test_gemini_specialized_profiles_enabled(monkeypatch):
 
     planner = profiles[GEMINI_NATIVE_PLANNER_PROFILE]
     assert planner.worker_type == "gemini"
-    assert planner.runtime_mode == "planner_only"
+    assert planner.runtime_mode == WorkerRuntimeMode.PLANNER_ONLY
     assert "planning" in planner.capability_tags
 
     reviewer = profiles[GEMINI_NATIVE_REVIEWER_PROFILE]
     assert reviewer.worker_type == "gemini"
-    assert reviewer.runtime_mode == "reviewer_only"
+    assert reviewer.runtime_mode == WorkerRuntimeMode.REVIEWER_ONLY
     assert "review" in reviewer.capability_tags
 
 
@@ -37,9 +41,15 @@ def test_gemini_specialized_profiles_disabled_in_tool_loop():
     profiles = _build_default_worker_profiles(
         include_gemini=True,
         include_openrouter=False,
-        codex_runtime_mode="tool_loop",
-        gemini_runtime_mode="tool_loop",
+        codex_runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
+        gemini_runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
     )
 
     assert GEMINI_NATIVE_PLANNER_PROFILE not in profiles
     assert GEMINI_NATIVE_REVIEWER_PROFILE not in profiles
+
+
+def test_invalid_runtime_mode_raises_error():
+    """Verify that an invalid runtime mode explicitly provided raises ValueError."""
+    with pytest.raises(ValueError, match="Invalid worker runtime mode: 'invalid_mode'"):
+        _coerce_runtime_mode("invalid_mode", default=WorkerRuntimeMode.TOOL_LOOP)

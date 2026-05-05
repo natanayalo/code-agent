@@ -78,15 +78,15 @@ def _coerce_runtime_mode(
     if value is None:
         return default
     normalized = value.strip().lower()
-    if normalized == WorkerRuntimeMode.NATIVE_AGENT.value:
-        return WorkerRuntimeMode.NATIVE_AGENT
-    if normalized == WorkerRuntimeMode.TOOL_LOOP.value:
-        return WorkerRuntimeMode.TOOL_LOOP
-    if normalized == WorkerRuntimeMode.PLANNER_ONLY.value:
-        return WorkerRuntimeMode.PLANNER_ONLY
-    if normalized == WorkerRuntimeMode.REVIEWER_ONLY.value:
-        return WorkerRuntimeMode.REVIEWER_ONLY
-    return default
+    try:
+        return WorkerRuntimeMode(normalized)
+    except ValueError:
+        # If the value was explicitly provided but is invalid, we should fail fast
+        # to avoid confusing behavior.
+        raise ValueError(
+            f"Invalid worker runtime mode: '{value}'. "
+            f"Expected one of: {[m.value for m in WorkerRuntimeMode]}"
+        )
 
 
 def _build_default_worker_profiles(
