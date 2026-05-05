@@ -354,7 +354,11 @@ def _serialize_span_payload(payload: Any) -> tuple[str, str]:
         serialized = str(payload)
         mime_type = "text/plain"
 
-    return _truncate_span_payload(serialized), mime_type
+    truncated = _truncate_span_payload(serialized)
+    if len(serialized) > MAX_SPAN_ATTRIBUTE_LENGTH:
+        mime_type = "text/plain"
+
+    return truncated, mime_type
 
 
 def set_span_input_output(

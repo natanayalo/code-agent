@@ -1130,7 +1130,7 @@ def _get_project_id(api_base_url: str, project_name: str) -> str:
             with urllib.request.urlopen(url, timeout=0.5) as response:
                 data = json.loads(response.read().decode())
                 _PHOENIX_PROJECT_ID_CACHE = data["data"]["id"]
-        except (urllib.error.URLError, ValueError, KeyError, TypeError) as e:
+        except (urllib.error.URLError, ValueError, KeyError, TypeError, TimeoutError) as e:
             # Fallback to the name if the API is unreachable or the project doesn't exist.
             # Record failure time to implement a TTL before the next retry, preventing
             # performance degradation during task listing.
