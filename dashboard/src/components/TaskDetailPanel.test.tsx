@@ -259,6 +259,25 @@ describe('TaskDetailPanel', () => {
     expect(within(errorRow as HTMLElement).getByText('1')).toBeInTheDocument();
   });
 
+  it('renders trace observability from explicit task fields', () => {
+    const task = buildTask({
+      trace_id: 'explicit-trace-id',
+      trace_url: 'http://localhost:6006/projects/code-agent/traces/explicit-trace-id',
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Trace Observability')).toBeInTheDocument();
+    expect(screen.getByText('Trace IDs')).toBeInTheDocument();
+    expect(screen.getByText('explicit-trace-id')).toBeInTheDocument();
+    expect(screen.getByText('Provider Deep Links')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', {
+        name: 'http://localhost:6006/projects/code-agent/traces/explicit-trace-id',
+      })
+    ).toHaveAttribute('href', 'http://localhost:6006/projects/code-agent/traces/explicit-trace-id');
+  });
+
   it('does not map deceptive hostnames to trusted trace providers', () => {
     const task = buildTask({
       latest_run: buildLatestRun({

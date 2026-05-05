@@ -192,6 +192,13 @@ function extractTraceObservability(task: TaskSnapshot | null): TraceObservabilit
     });
   };
 
+  if (task?.trace_id) {
+    addTraceId(task.trace_id);
+  }
+  if (task?.trace_url) {
+    addProviderLink(task.trace_url);
+  }
+
   const addSpanCount = (status: string, count: number) => {
     if (!Number.isFinite(count) || count < 0) return;
     const normalizedStatus = status.trim();

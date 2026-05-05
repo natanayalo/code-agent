@@ -27,6 +27,7 @@ INPUT_VALUE_ATTRIBUTE: Final[str] = "input.value"
 INPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "input.mime_type"
 OUTPUT_VALUE_ATTRIBUTE: Final[str] = "output.value"
 OUTPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "output.mime_type"
+MAX_SPAN_ATTRIBUTE_LENGTH: Final[int] = 12000
 SPAN_KIND_AGENT: Final[str] = "AGENT"
 SPAN_KIND_CHAIN: Final[str] = "CHAIN"
 SPAN_KIND_LLM: Final[str] = "LLM"
@@ -72,7 +73,10 @@ class _TracingDependencies:
     trace_context_propagator_cls: Any
 
 
-def _is_enabled(value: str | None) -> bool:
+def is_tracing_enabled(environ: Mapping[str, str] | None = None) -> bool:
+    """Check if tracing is explicitly enabled in the environment."""
+    env = os.environ if environ is None else environ
+    value = env.get(ENABLE_TRACING_ENV_VAR)
     if value is None:
         return False
     return value.strip().lower() in {"1", "true", "yes", "on"}
@@ -140,7 +144,7 @@ def configure_tracing_from_env(
 ) -> TracingBootstrapResult:
     """Bootstrap OTEL + OpenInference tracing when explicitly enabled."""
     resolved_env = os.environ if environ is None else environ
-    if not _is_enabled(resolved_env.get(ENABLE_TRACING_ENV_VAR)):
+    if not is_tracing_enabled(resolved_env):
         return TracingBootstrapResult(enabled=False, configured=False, reason="disabled")
 
     project_name = resolve_tracing_project_name(resolved_env)
@@ -330,14 +334,31 @@ def with_span_kind(kind: str, attributes: Mapping[str, Any] | None = None) -> di
     return merged
 
 
+def _truncate_span_payload(value: str) -> str:
+    """Standardized truncation for span attributes to prevent oversized payloads."""
+    if len(value) <= MAX_SPAN_ATTRIBUTE_LENGTH:
+        return value
+    truncated = value[:MAX_SPAN_ATTRIBUTE_LENGTH]
+    return f"{truncated}\n... (truncated to {MAX_SPAN_ATTRIBUTE_LENGTH} chars)"
+
+
 def _serialize_span_payload(payload: Any) -> tuple[str, str]:
     """Serialize payloads for OpenInference input/output span attributes."""
     import json
 
     if isinstance(payload, Mapping | list | tuple):
         actual_payload = dict(payload) if isinstance(payload, Mapping) else payload
-        return json.dumps(actual_payload, default=str), "application/json"
-    return str(payload), "text/plain"
+        serialized = json.dumps(actual_payload, default=str)
+        mime_type = "application/json"
+    else:
+        serialized = str(payload)
+        mime_type = "text/plain"
+
+    truncated = _truncate_span_payload(serialized)
+    if len(serialized) > MAX_SPAN_ATTRIBUTE_LENGTH:
+        mime_type = "text/plain"
+
+    return truncated, mime_type
 
 
 def set_span_input_output(

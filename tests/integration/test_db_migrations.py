@@ -233,7 +233,7 @@ def test_alembic_downgrade_cleans_review_result_artifacts(tmp_path: Path) -> Non
                 "id": "t1",
                 "session_id": "s1",
                 "repo_url": "https://example.com/repo.git",
-                "branch": "main",
+                "branch": "master",
                 "callback_url": None,
                 "task_text": "test",
                 "worker_override": None,

@@ -70,7 +70,7 @@ Granular tasks for the active and upcoming milestones:
 - [x] T-150: implement Phoenix OSS local/self-hosted (non-SaaS) + OpenInference tracing for LangGraph/orchestrator flow and verify graph/node visibility end-to-end (#145)
 - [x] T-150.5: migrate observability bootstrap to `phoenix.otel.register()` for simplified maintenance while preserving surgical span processor control (API vs Worker) and DB-based trace linkage (#147)
 - [x] T-151: add manual spans for TaskExecutionService, orchestrator nodes, and sandbox/shell; ensure logical failures (e.g. worker error results) are explicitly recorded as span error events and statuses (PR/CI stages deferred). (#148)
-- [ ] T-152: connect persisted OTEL/OpenInference trace metadata to the dashboard Trace Observability UI (trace IDs, deep links, span status summary) from local/self-hosted Phoenix traces
+- [x] T-152: connect persisted OTEL/OpenInference trace metadata to the dashboard Trace Observability UI (trace IDs, deep links, span status summary) from local/self-hosted Phoenix traces
 
 ### Milestone 17: Worker Profile Strategy
 - [ ] T-140: define `WorkerProfile` Pydantic model and capability matrix

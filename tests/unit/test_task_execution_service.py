@@ -24,7 +24,8 @@ from db.enums import (
     WorkerRunStatus,
     WorkerType,
 )
-from db.models import HumanInteraction
+from db.models import HumanInteraction, Task, User
+from db.models import Session as ConversationSession
 from orchestrator import (
     ApprovalCheckpoint,
     MemoryContext,
@@ -2976,3 +2977,90 @@ def test_create_task_persists_encryption_metadata() -> None:
                 reloaded = session.get(Task, task_p.task_id)
                 assert reloaded is not None
                 assert reloaded.secrets_encrypted is True
+
+
+def test_map_task_to_summary_includes_trace_metadata(monkeypatch) -> None:
+    """Task snapshots should include trace_id and trace_url when context is present."""
+    engine = create_engine_from_url("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+
+    # Enable tracing for URL generation
+    execution_module._clear_tracing_config_cache()
+    monkeypatch.setenv("CODE_AGENT_ENABLE_TRACING", "1")
+    monkeypatch.setenv("CODE_AGENT_TRACING_OTLP_ENDPOINT", "http://phoenix:6006/v1/traces")
+
+    with session_scope(session_factory) as session:
+        user = User(external_user_id="user-1")
+        session.add(user)
+        session.flush()
+
+        conv_session = ConversationSession(
+            user_id=user.id, channel="test", external_thread_id="thread-1"
+        )
+        session.add(conv_session)
+        session.flush()
+
+        trace_context = {"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
+        task = Task(
+            session_id=conv_session.id,
+            task_text="Test trace mapping",
+            trace_context=trace_context,
+            status=TaskStatus.PENDING,
+        )
+        session.add(task)
+        session.flush()
+
+        summary = service._map_task_to_summary(task)
+
+        assert summary.trace_id == "4bf92f3577b34da6a3ce929d0e0e4736"
+        assert (
+            summary.trace_url
+            == "http://localhost:6006/projects/code-agent/traces/4bf92f3577b34da6a3ce929d0e0e4736"
+        )
+
+
+def test_map_task_to_summary_omits_trace_metadata_when_disabled(monkeypatch) -> None:
+    """Task snapshots should omit trace_url if tracing is disabled."""
+    engine = create_engine_from_url("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+
+    execution_module._clear_tracing_config_cache()
+    monkeypatch.setenv("CODE_AGENT_ENABLE_TRACING", "0")
+
+    with session_scope(session_factory) as session:
+        user = User(external_user_id="user-1")
+        session.add(user)
+        session.flush()
+
+        conv_session = ConversationSession(
+            user_id=user.id, channel="test", external_thread_id="thread-1"
+        )
+        session.add(conv_session)
+        session.flush()
+
+        trace_context = {"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
+        task = Task(
+            session_id=conv_session.id,
+            task_text="Test trace mapping disabled",
+            trace_context=trace_context,
+            status=TaskStatus.PENDING,
+        )
+        session.add(task)
+        session.flush()
+
+        summary = service._map_task_to_summary(task)
+
+        assert summary.trace_id == "4bf92f3577b34da6a3ce929d0e0e4736"
+        assert summary.trace_url is None

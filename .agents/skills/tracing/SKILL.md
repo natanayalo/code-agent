@@ -37,7 +37,7 @@ curl -sS -X POST "http://127.0.0.1:8000/tasks" \
   -d '{
     "task_text": "Read-only: list top-level files.",
     "repo_url": "https://github.com/natanayalo/code-agent",
-    "branch": "main",
+    "branch": "master",
     "session": {
       "channel": "manual-trace",
       "external_user_id": "manual",

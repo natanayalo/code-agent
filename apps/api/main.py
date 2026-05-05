@@ -28,7 +28,11 @@ from apps.api.routes.webhook import router as webhook_router
 from apps.api.task_service_factory import build_task_service_from_env
 from apps.observability import configure_tracing_from_env
 from apps.runtime import RUN_API_ENV_VAR, should_run_api
-from orchestrator.execution import TaskExecutionService, shutdown_callback_dns_executor
+from orchestrator.execution import (
+    TaskExecutionService,
+    bootstrap_phoenix_project_id,
+    shutdown_callback_dns_executor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,7 @@ def create_app(
             )
 
         configure_tracing_from_env(service_name="code-agent-api")
+        bootstrap_phoenix_project_id()
 
         if task_service is None:
             outbound_http_clients = create_outbound_http_clients()

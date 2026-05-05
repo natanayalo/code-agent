@@ -161,7 +161,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
                 "task": {
                     "task_text": case.task_text,
                     "repo_url": f"https://example.invalid/{case.repo_fixture}",
-                    "branch": "main",
+                    "branch": "master",
                     "worker_override": self._worker_override,
                     "constraints": constraints,
                     "budget": {

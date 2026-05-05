@@ -62,6 +62,8 @@ export interface TaskSummarySnapshot {
   approval_status?: ApprovalStatus | null;
   approval_type?: string | null;
   approval_reason?: string | null;
+  trace_id?: string | null;
+  trace_url?: string | null;
 }
 export interface WorkerRunSnapshot {
   run_id: string;
