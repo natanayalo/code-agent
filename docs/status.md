@@ -40,11 +40,10 @@ Active focus:
 
 ## Next Priorities
 
-1. add a native-agent runner abstraction with fake-binary tests before changing real worker defaults (T-154)
-2. convert Codex, then Gemini, to native-agent mode behind rollback flags (T-155, T-156)
-3. add clarification dispatch gating and independent verifier/repair flow (T-157 to T-159)
-4. isolate OpenRouter as opt-in legacy tool-loop mode and add native-agent parity/eval coverage (T-160 to T-162)
-5. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
+1. convert Codex, then Gemini, to native-agent mode behind rollback flags (T-155, T-156)
+2. add clarification dispatch gating and independent verifier/repair flow (T-157 to T-159)
+3. isolate OpenRouter as opt-in legacy tool-loop mode and add native-agent parity/eval coverage (T-160 to T-162)
+4. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
 
 ## Current Backlog
 
