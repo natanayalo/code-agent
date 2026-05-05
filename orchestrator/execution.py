@@ -2774,7 +2774,7 @@ class TaskExecutionService:
             if state.route.chosen_worker is not None and state.route.route_reason is not None:
                 task.chosen_worker = cast(WorkerType, state.route.chosen_worker)
                 task.chosen_profile = state.route.chosen_profile
-                task.runtime_mode = cast(WorkerRuntimeMode, state.route.runtime_mode)
+                task.runtime_mode = cast(WorkerRuntimeMode | None, state.route.runtime_mode)
                 task.route_reason = state.route.route_reason
 
             if state.task_spec is not None:

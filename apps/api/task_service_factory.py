@@ -85,7 +85,7 @@ def _coerce_runtime_mode(
         # to avoid confusing behavior.
         raise ValueError(
             f"Invalid worker runtime mode: '{value}'. "
-            f"Expected one of: {[m.value for m in WorkerRuntimeMode]}"
+            f"Expected one of: {', '.join([m.value for m in WorkerRuntimeMode])}"
         )
 
 
