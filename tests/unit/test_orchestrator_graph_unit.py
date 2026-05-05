@@ -1245,3 +1245,55 @@ def test_verify_result_marks_post_run_lint_skip_as_passed() -> None:
     )
     assert lint_check["status"] == "passed"
     assert "skipped" in lint_check["message"]
+
+
+def test_compute_route_profile_aware_filters_read_only_when_mutations_allowed() -> None:
+    """Read-only profiles should be filtered out when the task allows mutations."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "fix helper"}, "task_kind": "implementation"}
+    )
+    # Only a read-only profile is available for codex.
+    profiles = {
+        "codex-read-only": WorkerProfile(
+            name="codex-read-only",
+            worker_type="codex",
+            runtime_mode="tool_loop",
+            mutation_policy="read_only",
+            capability_tags=["execution"],
+        )
+    }
+    route = _compute_route_decision(
+        state,
+        frozenset({"codex"}),
+        available_profiles=profiles,
+    )
+
+    # Should NOT select the read-only profile because task is NOT read-only.
+    assert route.chosen_worker == "codex"
+    assert route.chosen_profile is None
+    assert route.route_reason == "runtime_unavailable"
+
+
+def test_compute_route_profile_aware_selects_read_only_when_constrained() -> None:
+    """Read-only profiles should be selected when the task is constrained to read-only."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "investigate code", "constraints": {"read_only": True}}}
+    )
+    profiles = {
+        "codex-read-only": WorkerProfile(
+            name="codex-read-only",
+            worker_type="codex",
+            runtime_mode="tool_loop",
+            mutation_policy="read_only",
+            capability_tags=["execution"],
+        )
+    }
+    route = _compute_route_decision(
+        state,
+        frozenset({"codex"}),
+        available_profiles=profiles,
+    )
+
+    assert route.chosen_worker == "codex"
+    assert route.chosen_profile == "codex-read-only"
+    assert route.route_reason == "cheap_mechanical_change"

@@ -49,6 +49,10 @@ from workers import ArtifactReference, Worker, WorkerProfile, WorkerRequest, Wor
 
 logger = logging.getLogger(__name__)
 
+GEMINI_WORKER: Final[WorkerType] = "gemini"
+CODEX_WORKER: Final[WorkerType] = "codex"
+OPENROUTER_WORKER: Final[WorkerType] = "openrouter"
+
 ORCHESTRATOR_NODE_SEQUENCE = (
     "ingest_task",
     "classify_task",
@@ -508,11 +512,11 @@ def _configured_workers(
     openrouter_worker: Worker | None = None,
 ) -> dict[str, Worker]:
     """Return the workers that are actually wired into the graph."""
-    result: dict[str, Worker] = {"codex": worker or _DefaultFakeWorker()}
+    result: dict[str, Worker] = {CODEX_WORKER: worker or _DefaultFakeWorker()}
     if gemini_worker is not None:
-        result["gemini"] = gemini_worker
+        result[GEMINI_WORKER] = gemini_worker
     if openrouter_worker is not None:
-        result["openrouter"] = openrouter_worker
+        result[OPENROUTER_WORKER] = openrouter_worker
     return result
 
 
@@ -565,8 +569,15 @@ def _routable_execution_profiles(
             continue
         if profile.capability_tags and "execution" not in profile.capability_tags:
             continue
+
+        # Strict mutation policy matching:
+        # 1. If task is read-only, only read-only profiles are allowed.
+        # 2. If task allows mutations, only patch-allowed profiles are allowed.
         if requires_read_only and profile.mutation_policy != "read_only":
             continue
+        if not requires_read_only and profile.mutation_policy == "read_only":
+            continue
+
         if delivery_mode and profile.supported_delivery_modes:
             if delivery_mode not in profile.supported_delivery_modes:
                 continue
@@ -1034,8 +1045,8 @@ def _compute_legacy_route_decision(
         or contains_marker(task_text, HIGH_QUALITY_REQUEST_MARKERS)
     ):
         return _route_by_preference(
-            "gemini",
-            ("openrouter", "codex"),
+            GEMINI_WORKER,
+            (OPENROUTER_WORKER, CODEX_WORKER),
             "budget_preference",
             available_workers,
         )
@@ -1045,8 +1056,8 @@ def _compute_legacy_route_decision(
         or contains_marker(task_text, LOW_COST_REQUEST_MARKERS)
     ):
         return _route_by_preference(
-            "codex",
-            ("openrouter", "gemini"),
+            CODEX_WORKER,
+            (OPENROUTER_WORKER, GEMINI_WORKER),
             "budget_preference",
             available_workers,
         )
@@ -1055,28 +1066,28 @@ def _compute_legacy_route_decision(
     task_kind = state.task_kind
     if task_kind == "architecture":
         return _route_by_preference(
-            "gemini",
-            ("openrouter", "codex"),
+            GEMINI_WORKER,
+            (OPENROUTER_WORKER, CODEX_WORKER),
             "high_stakes_refactor",
             available_workers,
         )
     if task_kind == "ambiguous":
         return _route_by_preference(
-            "gemini",
-            ("openrouter", "codex"),
+            GEMINI_WORKER,
+            (OPENROUTER_WORKER, CODEX_WORKER),
             "ambiguous_task",
             available_workers,
         )
     if _task_complexity_reason(state) == "multi_file_task":
         return _route_by_preference(
-            "gemini",
-            ("openrouter", "codex"),
+            GEMINI_WORKER,
+            (OPENROUTER_WORKER, CODEX_WORKER),
             "high_stakes_refactor",
             available_workers,
         )
     return _route_by_preference(
-        "codex",
-        ("openrouter", "gemini"),
+        CODEX_WORKER,
+        (OPENROUTER_WORKER, GEMINI_WORKER),
         "cheap_mechanical_change",
         available_workers,
     )
@@ -1109,11 +1120,12 @@ def _compute_profile_route_decision(
             chosen_worker = known_profile.worker_type
         else:
             # Fallback to legacy selection among routable workers if profile is totally unknown
-            fallback = _compute_legacy_route_decision(
-                state,
-                frozenset({p.worker_type for p in routable_profiles.values()}),
-            )
-            chosen_worker = fallback.chosen_worker
+            profiled_workers = frozenset({p.worker_type for p in routable_profiles.values()})
+            if profiled_workers:
+                fallback = _compute_legacy_route_decision(state, profiled_workers)
+                chosen_worker = fallback.chosen_worker
+            else:
+                chosen_worker = None
 
         return RouteDecision(
             chosen_worker=chosen_worker,
