@@ -84,7 +84,7 @@ from repositories import (
 )
 from tools import coerce_permission_level
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
-from workers import ArtifactReference, Worker, WorkerResult
+from workers import ArtifactReference, Worker, WorkerProfile, WorkerResult
 
 logger = logging.getLogger(__name__)
 
@@ -1226,6 +1226,8 @@ class TaskExecutionService:
         worker: Worker,
         gemini_worker: Worker | None = None,
         openrouter_worker: Worker | None = None,
+        worker_profiles: Mapping[str, WorkerProfile] | None = None,
+        enable_worker_profiles: bool = False,
         progress_notifier: ProgressNotifier | None = None,
         default_task_max_attempts: int = 3,
         workspace_root: str | Path | None = None,
@@ -1236,6 +1238,8 @@ class TaskExecutionService:
         self.worker = worker
         self.gemini_worker = gemini_worker
         self.openrouter_worker = openrouter_worker
+        self.worker_profiles = dict(worker_profiles or {})
+        self.enable_worker_profiles = enable_worker_profiles
         self.progress_notifier = progress_notifier
         self.default_task_max_attempts = max(1, int(default_task_max_attempts))
         self.workspace_root = None
@@ -1257,6 +1261,8 @@ class TaskExecutionService:
                 worker=self.worker,
                 gemini_worker=self.gemini_worker,
                 openrouter_worker=self.openrouter_worker,
+                worker_profiles=self.worker_profiles,
+                enable_worker_profiles=self.enable_worker_profiles,
                 checkpointer=self._checkpointer,
             )
         return self._graph

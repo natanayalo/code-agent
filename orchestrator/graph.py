@@ -45,7 +45,7 @@ from orchestrator.task_spec import (
 )
 from tools import coerce_permission_level
 from tools.numeric import coerce_positive_int_like
-from workers import ArtifactReference, Worker, WorkerRequest, WorkerResult
+from workers import ArtifactReference, Worker, WorkerProfile, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
 
@@ -516,6 +516,103 @@ def _configured_workers(
     return result
 
 
+def _execution_profile_sort_key(profile: WorkerProfile) -> tuple[int, int, str]:
+    """Rank profiles deterministically for execution routing defaults."""
+    runtime_rank = (
+        0
+        if profile.runtime_mode == "native_agent"
+        else 1
+        if profile.runtime_mode == "tool_loop"
+        else 2
+    )
+    mutation_rank = 0 if profile.mutation_policy == "patch_allowed" else 1
+    return (runtime_rank, mutation_rank, profile.name)
+
+
+def _select_default_profile_for_worker(
+    profiles: Mapping[str, WorkerProfile],
+    worker_type: WorkerType,
+) -> str | None:
+    """Pick one execution-capable profile for a worker type."""
+    candidates = [
+        profile
+        for profile in profiles.values()
+        if profile.worker_type == worker_type
+        and profile.runtime_mode in {"native_agent", "tool_loop"}
+        and (
+            not profile.capability_tags
+            or "execution" in profile.capability_tags
+            or "routing" in profile.capability_tags
+        )
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=_execution_profile_sort_key)
+    return candidates[0].name
+
+
+def _routable_execution_profiles(
+    state: OrchestratorState,
+    profiles: Mapping[str, WorkerProfile],
+) -> dict[str, WorkerProfile]:
+    """Filter configured profiles to those compatible with the task request."""
+    delivery_mode = state.task_spec.delivery_mode if state.task_spec is not None else None
+    requires_read_only = bool(state.task.constraints.get("read_only"))
+
+    selected: dict[str, WorkerProfile] = {}
+    for name, profile in profiles.items():
+        if profile.runtime_mode not in {"native_agent", "tool_loop"}:
+            continue
+        if profile.capability_tags and "execution" not in profile.capability_tags:
+            continue
+        if requires_read_only and profile.mutation_policy != "read_only":
+            continue
+        if delivery_mode and profile.supported_delivery_modes:
+            if delivery_mode not in profile.supported_delivery_modes:
+                continue
+        selected[name] = profile
+    return selected
+
+
+def _route_for_profile(
+    profile: WorkerProfile,
+    *,
+    reason: str,
+    override_applied: bool,
+) -> RouteDecision:
+    """Build a route decision pinned to a concrete worker profile."""
+    return RouteDecision(
+        chosen_worker=profile.worker_type,
+        chosen_profile=profile.name,
+        runtime_mode=profile.runtime_mode,
+        route_reason=reason,
+        override_applied=override_applied,
+    )
+
+
+def _route_from_worker_choice(
+    worker_route: RouteDecision,
+    profiles: Mapping[str, WorkerProfile],
+) -> RouteDecision:
+    """Convert a worker-only routing decision into a profile-aware decision."""
+    chosen_worker = worker_route.chosen_worker
+    if chosen_worker is None:
+        return worker_route
+
+    profile_name = _select_default_profile_for_worker(profiles, chosen_worker)
+    if profile_name is None:
+        return worker_route
+
+    profile = profiles[profile_name]
+    return RouteDecision(
+        chosen_worker=chosen_worker,
+        chosen_profile=profile_name,
+        runtime_mode=profile.runtime_mode,
+        route_reason=worker_route.route_reason,
+        override_applied=worker_route.override_applied,
+    )
+
+
 def _unconfigured_worker_result(
     worker_type: str | None,
     *,
@@ -536,6 +633,51 @@ def _unconfigured_worker_result(
         test_results=[],
         artifacts=[],
         next_action_hint="configure_requested_worker",
+    )
+
+
+def _unconfigured_worker_profile_result(
+    profile_name: str,
+    *,
+    configured_profiles: frozenset[str],
+) -> WorkerResult:
+    """Return a structured error when routing selects an unavailable worker profile."""
+    configured_profiles_text = ", ".join(sorted(configured_profiles)) or "none"
+    return WorkerResult(
+        status="error",
+        summary=(
+            f"No worker profile is configured for route '{profile_name}'. "
+            f"Configured profiles: {configured_profiles_text}."
+        ),
+        failure_kind="provider_error",
+        commands_run=[],
+        files_changed=[],
+        test_results=[],
+        artifacts=[],
+        next_action_hint="configure_requested_worker_profile",
+    )
+
+
+def _worker_route_missing_profile_result(
+    worker_type: str | None,
+    *,
+    configured_profiles: frozenset[str],
+) -> WorkerResult:
+    """Return a structured error when worker selection has no routable execution profile."""
+    configured_profiles_text = ", ".join(sorted(configured_profiles)) or "none"
+    selected_worker = worker_type or "unknown"
+    return WorkerResult(
+        status="error",
+        summary=(
+            f"No worker profile is configured for worker route '{selected_worker}'. "
+            f"Configured profiles: {configured_profiles_text}."
+        ),
+        failure_kind="provider_error",
+        commands_run=[],
+        files_changed=[],
+        test_results=[],
+        artifacts=[],
+        next_action_hint="configure_requested_worker_profile",
     )
 
 
@@ -782,7 +924,7 @@ def _route_by_preference(
     )
 
 
-def _compute_route_decision(
+def _compute_legacy_route_decision(
     state: OrchestratorState,
     available_workers: frozenset[str],
 ) -> RouteDecision:
@@ -940,14 +1082,91 @@ def _compute_route_decision(
     )
 
 
+def _compute_profile_route_decision(
+    state: OrchestratorState,
+    available_workers: frozenset[str],
+    available_profiles: Mapping[str, WorkerProfile],
+) -> RouteDecision:
+    """Compute routing through configured worker profiles."""
+    routable_profiles = _routable_execution_profiles(state, available_profiles)
+    if not routable_profiles:
+        return _compute_legacy_route_decision(state, available_workers)
+
+    profile_override = state.task.worker_profile_override
+    if isinstance(profile_override, str) and profile_override.strip():
+        requested_profile = profile_override.strip()
+        profile = routable_profiles.get(requested_profile)
+        if profile is not None:
+            return _route_for_profile(
+                profile,
+                reason="manual_profile_override",
+                override_applied=True,
+            )
+        known_profile = available_profiles.get(requested_profile)
+        if known_profile is not None:
+            return _route_for_profile(
+                known_profile,
+                reason="runtime_unavailable",
+                override_applied=True,
+            )
+        fallback = _compute_legacy_route_decision(
+            state,
+            frozenset({p.worker_type for p in routable_profiles.values()}),
+        )
+        return RouteDecision(
+            chosen_worker=fallback.chosen_worker,
+            chosen_profile=requested_profile,
+            runtime_mode=None,
+            route_reason="runtime_unavailable",
+            override_applied=True,
+        )
+
+    worker_override = state.task.worker_override
+    if worker_override is not None:
+        profile_name = _select_default_profile_for_worker(routable_profiles, worker_override)
+        if profile_name is not None:
+            return _route_for_profile(
+                routable_profiles[profile_name],
+                reason="manual_override",
+                override_applied=True,
+            )
+        return RouteDecision(
+            chosen_worker=worker_override,
+            route_reason="runtime_unavailable",
+            override_applied=True,
+        )
+
+    profiled_workers = frozenset({p.worker_type for p in routable_profiles.values()})
+    worker_route = _compute_legacy_route_decision(state, profiled_workers)
+    return _route_from_worker_choice(worker_route, routable_profiles)
+
+
+def _compute_route_decision(
+    state: OrchestratorState,
+    available_workers: frozenset[str],
+    *,
+    available_profiles: Mapping[str, WorkerProfile] | None = None,
+) -> RouteDecision:
+    """Compute routing with profile-aware selection when profiles are configured."""
+    if not available_profiles:
+        return _compute_legacy_route_decision(state, available_workers)
+    return _compute_profile_route_decision(state, available_workers, available_profiles)
+
+
 def build_choose_worker_node(
     available_workers: frozenset[str],
+    *,
+    available_profiles: Mapping[str, WorkerProfile] | None = None,
 ) -> Callable[[OrchestratorState], dict[str, Any]]:
     """Create the choose-worker node bound to the given set of available workers."""
 
     def choose_worker_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
-        route = _compute_route_decision(state, available_workers)
+        route = _compute_route_decision(
+            state,
+            available_workers,
+            available_profiles=available_profiles,
+        )
         return {
             "current_step": "choose_worker",
             "route": route.model_dump(),
@@ -1102,6 +1321,8 @@ def build_await_result_node(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
+    *,
+    configured_profile_names: frozenset[str] = frozenset(),
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around the workers wired into the graph."""
     configured_workers = _configured_workers(worker, gemini_worker, openrouter_worker)
@@ -1109,26 +1330,51 @@ def build_await_result_node(
     async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
         worker_type = state.dispatch.worker_type or state.route.chosen_worker
-        bound_worker = configured_workers.get(worker_type or "")
-        if bound_worker is None:
-            result = _unconfigured_worker_result(
-                worker_type,
-                configured_workers=frozenset(configured_workers.keys()),
+        requested_profile = state.dispatch.worker_profile or state.route.chosen_profile
+        if (
+            requested_profile is not None
+            and configured_profile_names
+            and requested_profile not in configured_profile_names
+        ):
+            result = _unconfigured_worker_profile_result(
+                requested_profile,
+                configured_profiles=configured_profile_names,
             )
-            progress_updates = _progress_update(
-                state,
-                f"worker unavailable: {worker_type or 'unknown'}",
-            )
-        else:
-            request = _build_worker_request(state)
-            result, progress_message = await _await_worker_with_timeout(
-                bound_worker,
-                request,
-                worker_type=worker_type or "unknown",
-                session_id=request.session_id,
-                timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
-            )
+            progress_message = f"worker profile unavailable: {requested_profile}"
             progress_updates = _progress_update(state, progress_message)
+        elif state.route.route_reason == "runtime_unavailable":
+            if configured_profile_names and requested_profile is None:
+                result = _worker_route_missing_profile_result(
+                    worker_type,
+                    configured_profiles=configured_profile_names,
+                )
+                progress_message = f"worker profile unavailable: {worker_type or 'unknown'}"
+            else:
+                result = _unconfigured_worker_result(
+                    worker_type,
+                    configured_workers=frozenset(configured_workers.keys()),
+                )
+                progress_message = f"worker unavailable: {worker_type or 'unknown'}"
+            progress_updates = _progress_update(state, progress_message)
+        else:
+            bound_worker = configured_workers.get(worker_type or "")
+            if bound_worker is None:
+                result = _unconfigured_worker_result(
+                    worker_type,
+                    configured_workers=frozenset(configured_workers.keys()),
+                )
+                progress_message = f"worker unavailable: {worker_type or 'unknown'}"
+                progress_updates = _progress_update(state, progress_message)
+            else:
+                request = _build_worker_request(state)
+                result, progress_message = await _await_worker_with_timeout(
+                    bound_worker,
+                    request,
+                    worker_type=worker_type or "unknown",
+                    session_id=request.session_id,
+                    timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                )
+                progress_updates = _progress_update(state, progress_message)
         return {
             "current_step": "await_result",
             "result": result.model_dump(),
@@ -1579,6 +1825,8 @@ def build_orchestrator_graph(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
+    worker_profiles: Mapping[str, WorkerProfile] | None = None,
+    enable_worker_profiles: bool = False,
     checkpointer: BaseCheckpointSaver | None = None,
     interrupt_before: Literal["*"] | list[str] | None = None,
     interrupt_after: Literal["*"] | list[str] | None = None,
@@ -1593,13 +1841,31 @@ def build_orchestrator_graph(
     available_workers: frozenset[str] = frozenset(
         _configured_workers(worker, gemini_worker, openrouter_worker).keys()
     )
-    builder.add_node("choose_worker", RunnableLambda(build_choose_worker_node(available_workers)))
+    configured_profiles = dict(worker_profiles or {})
+    active_profiles = configured_profiles if enable_worker_profiles else None
+    profile_names = frozenset(configured_profiles.keys()) if enable_worker_profiles else frozenset()
+    builder.add_node(
+        "choose_worker",
+        RunnableLambda(
+            build_choose_worker_node(
+                available_workers,
+                available_profiles=active_profiles,
+            )
+        ),
+    )
     builder.add_node("check_approval", RunnableLambda(check_approval))
     builder.add_node("await_approval", RunnableLambda(await_approval))
     builder.add_node("dispatch_job", RunnableLambda(dispatch_job))
     builder.add_node(
         "await_result",
-        RunnableLambda(build_await_result_node(worker, gemini_worker, openrouter_worker)),
+        RunnableLambda(
+            build_await_result_node(
+                worker,
+                gemini_worker,
+                openrouter_worker,
+                configured_profile_names=profile_names,
+            )
+        ),
     )
     builder.add_node("await_permission_escalation", RunnableLambda(await_permission_escalation))
     builder.add_node("verify_result", RunnableLambda(verify_result))
