@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable
 from typing import Any, Final, Literal
@@ -9,6 +10,8 @@ from typing import Any, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from workers.review import ReviewResult
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerModel(BaseModel):
@@ -87,7 +90,11 @@ class WorkerProfile(WorkerModel):
         if value is None:
             return []
         if isinstance(value, list | tuple | set):
-            return sorted(set(value))
+            try:
+                return sorted(set(value))
+            except TypeError:
+                logger.debug("Failed to sort or deduplicate profile list value: %r", value)
+                return list(value)
         return value
 
 

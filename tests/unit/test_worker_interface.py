@@ -115,6 +115,17 @@ def test_worker_profile_normalizes_duplicate_list_entries() -> None:
     assert profile.supported_delivery_modes == ["draft_pr", "workspace"]
 
 
+def test_worker_profile_invalid_unhashable_list_entry_raises_validation_error() -> None:
+    """Unhashable items should not crash list normalization with a TypeError."""
+    with pytest.raises(ValidationError, match="Input should be"):
+        WorkerProfile(
+            name="bad-tags",
+            worker_type="codex",
+            runtime_mode="native_agent",
+            capability_tags=[{"unexpected": "dict"}],
+        )
+
+
 def test_supported_worker_types_contract_order() -> None:
     """Fallback order should be declared in one shared contract constant."""
     assert SUPPORTED_WORKER_TYPES == ("gemini", "openrouter", "codex")
