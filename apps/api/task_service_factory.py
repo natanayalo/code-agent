@@ -81,44 +81,6 @@ def _coerce_runtime_mode(
     return default
 
 
-def _create_worker_profiles(
-    worker_type: WorkerType,
-    runtime_mode: WorkerRuntimeMode,
-) -> dict[str, WorkerProfile]:
-    """Create standard and read-only profiles for a given worker."""
-    profile_name = (
-        f"{worker_type}-native-executor"
-        if runtime_mode == "native_agent"
-        else f"{worker_type}-tool-loop-executor"
-    )
-
-    base_profile_data = {
-        "worker_type": worker_type,
-        "runtime_mode": runtime_mode,
-        "capability_tags": ["execution"],
-        "supported_delivery_modes": ["workspace", "branch", "draft_pr"],
-        "self_review_policy": "on_failure",
-    }
-
-    profiles = {
-        profile_name: WorkerProfile(
-            **base_profile_data,  # type: ignore[arg-type]
-            name=profile_name,
-            permission_profile="workspace_write",
-            mutation_policy="patch_allowed",
-        )
-    }
-
-    read_only_profile_name = f"{profile_name}-read-only"
-    profiles[read_only_profile_name] = WorkerProfile(
-        **base_profile_data,  # type: ignore[arg-type]
-        name=read_only_profile_name,
-        permission_profile="read_only",
-        mutation_policy="read_only",
-    )
-    return profiles
-
-
 def _build_default_worker_profiles(
     *,
     include_gemini: bool,
@@ -128,10 +90,39 @@ def _build_default_worker_profiles(
 ) -> dict[str, WorkerProfile]:
     """Build the default executable profile map for routing decisions."""
     profiles: dict[str, WorkerProfile] = {}
-    profiles.update(_create_worker_profiles("codex", codex_runtime_mode))
+
+    def _add_profiles(worker_type: WorkerType, runtime_mode: WorkerRuntimeMode) -> None:
+        """Helper to add standard and read-only profiles for a worker."""
+        profile_name = (
+            f"{worker_type}-native-executor"
+            if runtime_mode == "native_agent"
+            else f"{worker_type}-tool-loop-executor"
+        )
+        base_data = {
+            "worker_type": worker_type,
+            "runtime_mode": runtime_mode,
+            "capability_tags": ["execution"],
+            "supported_delivery_modes": ["workspace", "branch", "draft_pr"],
+            "self_review_policy": "on_failure",
+        }
+        profiles[profile_name] = WorkerProfile(
+            **base_data,  # type: ignore[arg-type]
+            name=profile_name,
+            permission_profile="workspace_write",
+            mutation_policy="patch_allowed",
+        )
+        ro_name = f"{profile_name}-read-only"
+        profiles[ro_name] = WorkerProfile(
+            **base_data,  # type: ignore[arg-type]
+            name=ro_name,
+            permission_profile="read_only",
+            mutation_policy="read_only",
+        )
+
+    _add_profiles("codex", codex_runtime_mode)
 
     if include_gemini:
-        profiles.update(_create_worker_profiles("gemini", gemini_runtime_mode))
+        _add_profiles("gemini", gemini_runtime_mode)
 
     if include_openrouter:
         profiles["openrouter-tool-loop-legacy"] = WorkerProfile(
