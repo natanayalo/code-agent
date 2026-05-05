@@ -334,6 +334,14 @@ def with_span_kind(kind: str, attributes: Mapping[str, Any] | None = None) -> di
     return merged
 
 
+def _truncate_span_payload(value: str) -> str:
+    """Standardized truncation for span attributes to prevent oversized payloads."""
+    if len(value) <= MAX_SPAN_ATTRIBUTE_LENGTH:
+        return value
+    truncated = value[:MAX_SPAN_ATTRIBUTE_LENGTH]
+    return f"{truncated}\n... (truncated to {MAX_SPAN_ATTRIBUTE_LENGTH} chars)"
+
+
 def _serialize_span_payload(payload: Any) -> tuple[str, str]:
     """Serialize payloads for OpenInference input/output span attributes."""
     import json
@@ -346,12 +354,7 @@ def _serialize_span_payload(payload: Any) -> tuple[str, str]:
         serialized = str(payload)
         mime_type = "text/plain"
 
-    if len(serialized) > MAX_SPAN_ATTRIBUTE_LENGTH:
-        # Simple truncation with a marker
-        truncated = serialized[:MAX_SPAN_ATTRIBUTE_LENGTH]
-        return f"{truncated}\n... (truncated to {MAX_SPAN_ATTRIBUTE_LENGTH} chars)", mime_type
-
-    return serialized, mime_type
+    return _truncate_span_payload(serialized), mime_type
 
 
 def set_span_input_output(
