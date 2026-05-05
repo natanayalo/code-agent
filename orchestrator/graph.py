@@ -633,7 +633,7 @@ def _unconfigured_worker_result(
     configured_workers_text = ", ".join(sorted(configured_workers))
     selected_worker = worker_type or "unknown"
     return WorkerResult(
-        status="error",
+        status="failure",
         summary=(
             f"No worker is configured for route '{selected_worker}'. "
             f"Configured workers: {configured_workers_text}."
@@ -655,7 +655,7 @@ def _unconfigured_worker_profile_result(
     """Return a structured error when routing selects an unavailable worker profile."""
     configured_profiles_text = ", ".join(sorted(configured_profiles)) or "none"
     return WorkerResult(
-        status="error",
+        status="failure",
         summary=(
             f"No routable worker profile is available for route '{profile_name}'. "
             f"Configured profiles: {configured_profiles_text}."
@@ -678,7 +678,7 @@ def _worker_route_missing_profile_result(
     configured_profiles_text = ", ".join(sorted(configured_profiles)) or "none"
     selected_worker = worker_type or "unknown"
     return WorkerResult(
-        status="error",
+        status="failure",
         summary=(
             f"No routable worker profile is available for worker route '{selected_worker}'. "
             f"Configured profiles: {configured_profiles_text}."
@@ -1119,13 +1119,8 @@ def _compute_profile_route_decision(
         if known_profile is not None:
             chosen_worker = known_profile.worker_type
         else:
-            # Fallback to legacy selection among routable workers if profile is totally unknown
-            profiled_workers = frozenset({p.worker_type for p in routable_profiles.values()})
-            if profiled_workers:
-                fallback = _compute_legacy_route_decision(state, profiled_workers)
-                chosen_worker = fallback.chosen_worker
-            else:
-                chosen_worker = None
+            # The requested profile is completely unknown, so we can't infer a worker type.
+            chosen_worker = None
 
         return RouteDecision(
             chosen_worker=chosen_worker,
@@ -1311,7 +1306,10 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
     """Record the chosen worker before awaiting execution."""
     state = _ensure_state(state_input)
     worker_type = state.route.chosen_worker
-    assert worker_type is not None, "choose_worker must set route.chosen_worker before dispatch."
+    if state.route.route_reason != "runtime_unavailable":
+        assert (
+            worker_type is not None
+        ), "choose_worker must set route.chosen_worker before dispatch."
     dispatch = WorkerDispatch(
         worker_type=worker_type,
         worker_profile=state.route.chosen_profile,

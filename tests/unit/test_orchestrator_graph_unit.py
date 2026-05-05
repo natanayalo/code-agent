@@ -461,7 +461,7 @@ def test_compute_route_profile_override_unavailable_fails_explicitly() -> None:
         available_profiles=_PROFILED_CODEX_GEMINI,
     )
 
-    assert route.chosen_worker == "codex"
+    assert route.chosen_worker is None
     assert route.chosen_profile == "openrouter-tool-loop-legacy"
     assert route.runtime_mode is None
     assert route.route_reason == "runtime_unavailable"
