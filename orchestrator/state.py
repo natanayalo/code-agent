@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from workers import WorkerResult, WorkerRuntimeMode, WorkerType
+from workers import WorkerDeliveryMode, WorkerResult, WorkerRuntimeMode, WorkerType
 from workers.review import ReviewResult
 
 # Ordered by escalation preference in routing fallbacks:
@@ -125,7 +125,7 @@ TaskSpecType = Literal[
     "review_fix",
     "maintenance",
 ]
-TaskDeliveryMode = Literal["summary", "workspace", "branch", "draft_pr"]
+TaskDeliveryMode = WorkerDeliveryMode
 
 
 class TaskSpec(OrchestratorModel):
