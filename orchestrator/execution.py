@@ -1233,6 +1233,7 @@ class TaskExecutionService:
         openrouter_worker: Worker | None = None,
         worker_profiles: Mapping[str, WorkerProfile] | None = None,
         enable_worker_profiles: bool = False,
+        enable_independent_verifier: bool = False,
         progress_notifier: ProgressNotifier | None = None,
         default_task_max_attempts: int = 3,
         workspace_root: str | Path | None = None,
@@ -1245,6 +1246,7 @@ class TaskExecutionService:
         self.openrouter_worker = openrouter_worker
         self.worker_profiles = dict(worker_profiles or {})
         self.enable_worker_profiles = enable_worker_profiles
+        self.enable_independent_verifier = enable_independent_verifier
         self.progress_notifier = progress_notifier
         self.default_task_max_attempts = max(1, int(default_task_max_attempts))
         self.workspace_root = None
@@ -1268,6 +1270,7 @@ class TaskExecutionService:
                 openrouter_worker=self.openrouter_worker,
                 worker_profiles=self.worker_profiles,
                 enable_worker_profiles=self.enable_worker_profiles,
+                enable_independent_verifier=self.enable_independent_verifier,
                 checkpointer=self._checkpointer,
             )
         return self._graph

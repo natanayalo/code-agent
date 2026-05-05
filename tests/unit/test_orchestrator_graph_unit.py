@@ -1,6 +1,7 @@
 """Unit tests for the orchestrator graph internals."""
 
 import asyncio
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -1238,6 +1239,107 @@ def test_verify_result_marks_post_run_lint_skip_as_passed() -> None:
     )
     assert lint_check["status"] == "passed"
     assert "skipped" in lint_check["message"]
+
+
+def test_verify_result_runs_independent_verifier_when_enabled(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "README.md").write_text("demo\n", encoding="utf-8")
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "task_spec": {"goal": "demo", "verification_commands": ["ls"]},
+            "result": {
+                "status": "success",
+                "files_changed": ["README.md"],
+                "test_results": [{"name": "test1", "status": "passed"}],
+                "commands_run": [],
+                "artifacts": [
+                    {
+                        "name": "workspace",
+                        "uri": workspace.as_uri(),
+                        "artifact_type": "workspace",
+                    }
+                ],
+            },
+        }
+    )
+
+    res = verify_result(state, enable_independent_verifier=True)
+
+    independent_check = next(
+        item for item in res["verification"]["items"] if item["label"] == "independent_verifier"
+    )
+    assert independent_check["status"] == "passed"
+    assert res["verification"]["status"] == "passed"
+
+
+def test_verify_result_fails_when_independent_verifier_command_fails(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "task_spec": {"goal": "demo", "verification_commands": ["ls does-not-exist"]},
+            "result": {
+                "status": "success",
+                "files_changed": ["README.md"],
+                "test_results": [{"name": "test1", "status": "passed"}],
+                "commands_run": [],
+                "artifacts": [
+                    {
+                        "name": "workspace",
+                        "uri": workspace.as_uri(),
+                        "artifact_type": "workspace",
+                    }
+                ],
+            },
+        }
+    )
+
+    res = verify_result(state, enable_independent_verifier=True)
+
+    independent_check = next(
+        item for item in res["verification"]["items"] if item["label"] == "independent_verifier"
+    )
+    assert independent_check["status"] == "failed"
+    assert res["verification"]["status"] == "failed"
+    assert res["verification"]["failure_kind"] == "test_regression"
+
+
+def test_verify_result_warns_when_independent_verifier_command_is_unsafe(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "task_spec": {"goal": "demo", "verification_commands": ["rm -rf ."]},
+            "result": {
+                "status": "success",
+                "files_changed": ["README.md"],
+                "test_results": [{"name": "test1", "status": "passed"}],
+                "commands_run": [],
+                "artifacts": [
+                    {
+                        "name": "workspace",
+                        "uri": workspace.as_uri(),
+                        "artifact_type": "workspace",
+                    }
+                ],
+            },
+        }
+    )
+
+    res = verify_result(state, enable_independent_verifier=True)
+
+    independent_check = next(
+        item for item in res["verification"]["items"] if item["label"] == "independent_verifier"
+    )
+    assert independent_check["status"] == "warning"
+    assert res["verification"]["status"] == "warning"
 
 
 def test_compute_route_profile_aware_filters_read_only_when_mutations_allowed() -> None:

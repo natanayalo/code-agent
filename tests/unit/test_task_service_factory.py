@@ -123,6 +123,28 @@ def test_build_task_service_from_env_builds_a_codex_cli_worker(tmp_path: Path) -
         _close_outbound_http_clients(outbound_http_clients)
 
 
+def test_build_task_service_from_env_enables_independent_verifier_flag(
+    tmp_path: Path,
+) -> None:
+    """Bootstrap should expose the independent verifier graph toggle when configured."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED": "1",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert service.enable_independent_verifier is True
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
 def test_build_task_service_from_env_enables_profile_routing_with_defaults(
     tmp_path: Path,
 ) -> None:

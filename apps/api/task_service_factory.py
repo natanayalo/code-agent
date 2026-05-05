@@ -60,6 +60,7 @@ OPENROUTER_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_ENABLED"
 NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: Final[str] = (
     "CODE_AGENT_NATIVE_AGENT_EVENT_CAPTURE_ENABLED"
 )
+INDEPENDENT_VERIFIER_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED"
 
 # Default profile names
 GEMINI_NATIVE_PLANNER_PROFILE: Final[str] = "gemini-native-planner"
@@ -332,6 +333,9 @@ def build_task_service_from_env(
         openrouter_worker=openrouter_worker,
         worker_profiles=worker_profiles,
         enable_worker_profiles=enable_worker_profiles,
+        enable_independent_verifier=_is_enabled(
+            resolved_env.get(INDEPENDENT_VERIFIER_ENABLED_ENV_VAR)
+        ),
         progress_notifier=CompositeProgressNotifier(progress_notifiers),
         default_task_max_attempts=_coerce_positive_int(
             resolved_env.get(DEFAULT_TASK_MAX_ATTEMPTS_ENV_VAR),

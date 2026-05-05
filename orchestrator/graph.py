@@ -43,6 +43,7 @@ from orchestrator.task_spec import (
     is_destructive_task,
     validate_task_spec_policy,
 )
+from orchestrator.verification import run_independent_verifier
 from tools import coerce_permission_level
 from tools.numeric import coerce_positive_int_like
 from workers import ArtifactReference, Worker, WorkerProfile, WorkerRequest, WorkerResult
@@ -1599,7 +1600,11 @@ def _route_after_review_result(state_input: OrchestratorState) -> str:
     return "summarize_result"
 
 
-def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
+def verify_result(
+    state_input: OrchestratorState,
+    *,
+    enable_independent_verifier: bool = False,
+) -> dict[str, Any]:
     """Perform deterministic checks on the worker output before summarization."""
     state = _ensure_state(state_input)
     if state.result is None:
@@ -1717,6 +1722,17 @@ def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
                 )
             )
 
+    # 6. Optional independent verifier execution (T-158)
+    if enable_independent_verifier:
+        independent_status, independent_summary = run_independent_verifier(state)
+        items.append(
+            VerificationReportItem(
+                label="independent_verifier",
+                status=independent_status,
+                message=independent_summary,
+            )
+        )
+
     # Calculate overall status
     report_status: Literal["passed", "failed", "warning"]
     if any(i.status == "failed" for i in items):
@@ -1730,6 +1746,8 @@ def verify_result(state_input: OrchestratorState) -> dict[str, Any]:
     if report_status == "failed":
         failed_labels = {item.label for item in items if item.status == "failed"}
         if "test_results" in failed_labels:
+            report_failure_kind = "test_regression"
+        elif "independent_verifier" in failed_labels:
             report_failure_kind = "test_regression"
         elif "file_changes" in failed_labels:
             report_failure_kind = "scope_mismatch"
@@ -1870,6 +1888,22 @@ def build_review_result_node(
     return review_result_node
 
 
+def build_verify_result_node(
+    *,
+    enable_independent_verifier: bool = False,
+) -> Callable[[OrchestratorState], dict[str, Any]]:
+    """Create the verification node with optional independent verifier execution."""
+
+    def verify_result_node(state_input: OrchestratorState) -> dict[str, Any]:
+        state = _ensure_state(state_input)
+        return verify_result(
+            state,
+            enable_independent_verifier=enable_independent_verifier,
+        )
+
+    return verify_result_node
+
+
 def build_orchestrator_graph(
     *,
     worker: Worker | None = None,
@@ -1877,6 +1911,7 @@ def build_orchestrator_graph(
     openrouter_worker: Worker | None = None,
     worker_profiles: Mapping[str, WorkerProfile] | None = None,
     enable_worker_profiles: bool = False,
+    enable_independent_verifier: bool = False,
     checkpointer: BaseCheckpointSaver | None = None,
     interrupt_before: Literal["*"] | list[str] | None = None,
     interrupt_after: Literal["*"] | list[str] | None = None,
@@ -1918,7 +1953,14 @@ def build_orchestrator_graph(
         ),
     )
     builder.add_node("await_permission_escalation", RunnableLambda(await_permission_escalation))
-    builder.add_node("verify_result", RunnableLambda(verify_result))
+    builder.add_node(
+        "verify_result",
+        RunnableLambda(
+            build_verify_result_node(
+                enable_independent_verifier=enable_independent_verifier,
+            )
+        ),
+    )
     builder.add_node(
         "review_result",
         RunnableLambda(build_review_result_node(worker, gemini_worker, openrouter_worker)),
