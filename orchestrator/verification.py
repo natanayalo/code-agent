@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import shlex
 import subprocess
+import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import IO, TYPE_CHECKING, Literal
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_INDEPENDENT_VERIFIER_TIMEOUT_SECONDS = 120
 DEFAULT_INDEPENDENT_VERIFIER_MAX_COMMANDS = 3
+DEFAULT_INDEPENDENT_VERIFIER_OUTPUT_PREVIEW_BYTES = 4096
 
 _DISALLOWED_SHELL_MARKERS = (
     "&&",
@@ -126,18 +128,30 @@ def _looks_read_only_verifier_command(command: str) -> bool:
     )
 
 
+def _read_output_preview(file_obj: IO[bytes]) -> str:
+    """Read a bounded output preview from a temporary command-output stream."""
+    file_obj.seek(0)
+    content = file_obj.read(DEFAULT_INDEPENDENT_VERIFIER_OUTPUT_PREVIEW_BYTES)
+    if isinstance(content, bytes):
+        return content.decode("utf-8", errors="replace").strip()
+    return str(content).strip()
+
+
 def _run_command(command: str, *, workspace_path: Path, timeout_seconds: int) -> tuple[int, str]:
     """Execute one verifier command in the workspace and return (exit code, details)."""
     command_argv = shlex.split(command)
-    completed = subprocess.run(
-        command_argv,
-        cwd=workspace_path,
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-        check=False,
-    )
-    detail = (completed.stderr or completed.stdout).strip()
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        completed = subprocess.run(
+            command_argv,
+            cwd=workspace_path,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        stderr_preview = _read_output_preview(stderr_file)
+        stdout_preview = _read_output_preview(stdout_file)
+    detail = stderr_preview or stdout_preview
     return completed.returncode, detail
 
 
@@ -180,7 +194,7 @@ def run_independent_verifier(
                 workspace_path=workspace_path,
                 timeout_seconds=timeout_seconds,
             )
-        except TimeoutError:
+        except subprocess.TimeoutExpired:
             failed += 1
             failure_details.append(f"`{command}` timed out after {timeout_seconds}s")
             continue
