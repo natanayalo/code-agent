@@ -59,7 +59,6 @@ from workers.cli_runtime import (
     run_cli_runtime_loop,
     settings_from_budget,
 )
-from workers.codex_exec_adapter import DEFAULT_CODEX_SANDBOX_MODE
 from workers.failure_taxonomy import classify_failure_kind
 from workers.native_agent_runner import (
     NativeAgentRunRequest,
@@ -600,12 +599,11 @@ class CodexCliWorker(Worker):
         executable = getattr(self.runtime_adapter, "executable", "codex")
         model = getattr(self.runtime_adapter, "model", None)
         profile = getattr(self.runtime_adapter, "profile", None)
-        configured_sandbox = getattr(self.runtime_adapter, "sandbox_mode", None)
         read_only_requested = bool(request.constraints.get("read_only"))
         sandbox_mode = (
             "read-only"
             if read_only_requested
-            else (configured_sandbox or self.native_sandbox_mode or DEFAULT_CODEX_SANDBOX_MODE)
+            else (self.native_sandbox_mode or DEFAULT_CODEX_NATIVE_SANDBOX_MODE)
         )
 
         command = [
