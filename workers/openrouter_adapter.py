@@ -7,7 +7,7 @@ import os
 import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Final, cast
+from typing import Any, Final, cast
 
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
@@ -275,7 +275,6 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
                     messages=request_messages,
                     response_format={"type": "json_object"},
                 )
-                from typing import Any
 
                 content: str | None = None
                 try:

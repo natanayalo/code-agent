@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import time
+from unittest.mock import MagicMock
+
+import jwt
 
 from apps.api.auth import (
     ApiAuthConfig,
@@ -48,8 +51,6 @@ def test_build_api_auth_config_from_env_treats_blank_as_missing() -> None:
 
 def test_is_cookie_secure_logic() -> None:
     """ApiAuthConfig.is_cookie_secure should handle overrides and headers correctly."""
-    from unittest.mock import MagicMock
-
     # 1. Default (no overrides, no request)
     config = ApiAuthConfig()
     assert config.is_cookie_secure() is False
@@ -117,8 +118,6 @@ def test_dashboard_token_expiry() -> None:
     """Expired tokens should return None."""
     # We can't easily inject time into create_dashboard_token without mocking,
     # but we can verify it fails if exp is in the past.
-    import jwt
-
     secret = "test-secret"
     payload = {
         "iat": int(time.time()) - 3601,

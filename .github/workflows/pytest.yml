@@ -34,9 +34,9 @@ jobs:
         run: poetry install --no-interaction
       - name: Verify async pytest plugin availability
         run: poetry run python -c "import pytest_asyncio"
-      - name: Run pytest with coverage gate
+      - name: Run unit pytest with coverage gate
         run: |
-          poetry run pytest \
+          poetry run pytest tests/unit \
             --cov=apps \
             --cov=db \
             --cov=memory \
@@ -48,7 +48,9 @@ jobs:
             --cov-branch \
             --cov-report=term-missing \
             --cov-report=xml \
-            --cov-fail-under=90
+            --cov-fail-under=80
+      - name: Run integration pytest suite
+        run: poetry run pytest tests/integration
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
         with:

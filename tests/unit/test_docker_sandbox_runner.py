@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import sandbox.runner as runner_module
 from sandbox.audit import (
     parse_git_status_entries as _parse_git_status_entries,
 )
@@ -631,7 +632,6 @@ def test_run_docker_command_cleans_up_threads_on_unexpected_exception() -> None:
 
 def test_run_docker_command_closes_pipe_when_thread_hangs() -> None:
     """When a reader thread outlives _THREAD_JOIN_TIMEOUT the pipe is force-closed to unblock it."""
-    import sandbox.runner as runner_module
 
     class HangingStream:
         def __init__(self) -> None:

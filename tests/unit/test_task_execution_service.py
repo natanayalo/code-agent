@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base, utc_now
@@ -2931,10 +2932,6 @@ def test_apply_task_approval_decision_reject_is_terminal_and_conflict_is_reporte
 
 def test_create_task_persists_encryption_metadata() -> None:
     """Verify that TaskExecutionService correctly tags if secrets were encrypted at creation."""
-    from cryptography.fernet import Fernet
-
-    from db.models import Task
-
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},

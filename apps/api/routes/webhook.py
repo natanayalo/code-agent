@@ -10,6 +10,14 @@ from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.api.dependencies import get_task_service, require_api_auth
+from apps.observability import (
+    SESSION_ID_ATTRIBUTE,
+    SPAN_KIND_AGENT,
+    set_current_span_attribute,
+    set_span_input_output,
+    start_optional_span,
+    with_span_kind,
+)
 from db.enums import WorkerType
 from orchestrator.execution import (
     DeliveryKey,
@@ -118,15 +126,6 @@ def receive_webhook(
     to the same ``TaskExecutionService`` used by the direct ``/tasks`` path so
     all execution, persistence, and observability behaviour is shared.
     """
-    from apps.observability import (
-        SESSION_ID_ATTRIBUTE,
-        SPAN_KIND_AGENT,
-        set_current_span_attribute,
-        set_span_input_output,
-        start_optional_span,
-        with_span_kind,
-    )
-
     span_cm = start_optional_span(
         tracer_name="api.webhook",
         span_name="api.webhook",

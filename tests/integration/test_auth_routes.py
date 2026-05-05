@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
-from apps.api.auth import DASHBOARD_COOKIE_NAME, ApiAuthConfig
+from apps.api.auth import DASHBOARD_COOKIE_NAME, JWT_ALGORITHM, ApiAuthConfig
 from apps.api.main import create_app
 
 
@@ -103,12 +105,6 @@ def test_csrf_protection_on_logout(client: TestClient) -> None:
 
 def test_invalid_sub_claim(client: TestClient) -> None:
     """JWT with invalid 'sub' claim should be rejected."""
-    import time
-
-    import jwt
-
-    from apps.api.auth import JWT_ALGORITHM
-
     now = int(time.time())
     payload = {
         "iat": now,

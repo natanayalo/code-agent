@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+from collections import UserDict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -685,8 +686,6 @@ def test_set_span_input_output_handles_tuples_and_mappings() -> None:
             self.attributes[key] = value
 
     span = _FakeSpan()
-
-    from collections import UserDict
 
     custom_mapping = UserDict({"foo": "bar"})
 

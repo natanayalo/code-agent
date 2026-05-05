@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 
-from apps.api.auth import ApiAuthConfig
+from apps.api.auth import DASHBOARD_COOKIE_NAME, ApiAuthConfig, create_dashboard_token
 from apps.api.main import create_app
 from db.base import Base, utc_now
 from db.enums import TaskStatus, WorkerRunStatus, WorkerType
@@ -103,8 +103,6 @@ def test_get_metrics_requires_auth(session_factory) -> None:
 
 def test_get_metrics_allows_cookie_auth(session_factory) -> None:
     """The metrics endpoint should allow authentication via dashboard session cookie."""
-    from apps.api.auth import DASHBOARD_COOKIE_NAME, create_dashboard_token
-
     shared_secret = "test-shared-secret"
     app = create_app(
         task_service=TaskExecutionService(

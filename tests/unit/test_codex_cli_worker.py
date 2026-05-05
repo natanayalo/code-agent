@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -494,8 +495,6 @@ async def test_codex_cli_worker_returns_partial_result_on_cancellation(tmp_path:
 
         def next_step(self, messages, **kwargs):
             # Simulate a very long thought/command
-            import time
-
             time.sleep(1.2)
             return CliRuntimeStep(kind="final", final_output="Unreachable")
 

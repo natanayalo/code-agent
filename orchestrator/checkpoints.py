@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from importlib import import_module
 from pathlib import Path
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -21,7 +22,7 @@ def create_sqlite_checkpointer(checkpoint_path: str | Path) -> Iterator[BaseChec
     """Create a SQLite-backed checkpointer for durable graph execution."""
 
     try:
-        from langgraph.checkpoint.sqlite import SqliteSaver  # type: ignore[import-not-found]
+        from langgraph.checkpoint.sqlite import SqliteSaver  # type: ignore  # noqa: PLC0415
     except ImportError as exc:  # pragma: no cover - exercised only in misconfigured envs
         raise RuntimeError(
             "SQLite checkpoint persistence requires the "
@@ -42,9 +43,8 @@ async def create_async_sqlite_checkpointer(
     """Create an async SQLite-backed checkpointer for async graph execution."""
 
     try:
-        from langgraph.checkpoint.sqlite.aio import (  # type: ignore[import-not-found]
-            AsyncSqliteSaver,
-        )
+        sqlite_aio_module = import_module("langgraph.checkpoint.sqlite.aio")
+        AsyncSqliteSaver = sqlite_aio_module.AsyncSqliteSaver
     except ImportError as exc:  # pragma: no cover - exercised only in misconfigured envs
         raise RuntimeError(
             "Async SQLite checkpoint persistence requires the "

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import logging
 import os
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from functools import wraps
+from importlib import import_module
 from threading import Lock
 from typing import Any, Final, TypeVar
 
@@ -120,12 +122,12 @@ def resolve_tracing_project_name(environ: Mapping[str, str]) -> str:
 
 def _load_tracing_dependencies() -> _TracingDependencies | None:
     try:
-        from opentelemetry import propagate as propagate_api  # type: ignore[import-not-found]
-        from opentelemetry.sdk.resources import Resource  # type: ignore[import-not-found]
-        from opentelemetry.trace.propagation.tracecontext import (  # type: ignore[import-not-found]
-            TraceContextTextMapPropagator,
-        )
-        from phoenix.otel import register as register_fn  # type: ignore[import-not-found]
+        from opentelemetry import propagate as propagate_api  # type: ignore  # noqa: PLC0415
+        from opentelemetry.sdk.resources import Resource  # type: ignore  # noqa: PLC0415
+
+        tracecontext_module = import_module("opentelemetry.trace.propagation.tracecontext")
+        TraceContextTextMapPropagator = tracecontext_module.TraceContextTextMapPropagator
+        from phoenix.otel import register as register_fn  # type: ignore  # noqa: PLC0415
     except ImportError:
         return None
 
@@ -226,7 +228,7 @@ def capture_trace_context() -> dict[str, str]:
     if deps is None:
         return {}
 
-    from opentelemetry import context as context_api  # type: ignore[import-not-found]
+    from opentelemetry import context as context_api  # type: ignore  # noqa: PLC0415
 
     carrier: dict[str, str] = {}
     deps.propagate_api.inject(carrier, context=context_api.get_current())
@@ -261,7 +263,7 @@ def restore_trace_context(context: dict[str, str] | None) -> Any:
     if deps is None:
         return None
 
-    from opentelemetry import context as context_api  # type: ignore[import-not-found]
+    from opentelemetry import context as context_api  # type: ignore  # noqa: PLC0415
 
     token = deps.propagate_api.extract(carrier=context)
     return context_api.attach(token)
@@ -272,7 +274,7 @@ def detach_trace_context(token: Any) -> None:
     if token is None:
         return
     try:
-        from opentelemetry import context as context_api  # type: ignore[import-not-found]
+        from opentelemetry import context as context_api  # type: ignore  # noqa: PLC0415
 
         context_api.detach(token)
     except ImportError:
@@ -315,10 +317,8 @@ def start_optional_span(
     attributes: Mapping[str, Any] | None = None,
 ) -> Any:
     """Start a span when OTEL is available, otherwise return a no-op context manager."""
-    from contextlib import nullcontext
-
     try:
-        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+        from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
 
         tracer = otel_trace.get_tracer(tracer_name)
         span_attributes = dict(attributes) if attributes is not None else None
@@ -344,8 +344,6 @@ def _truncate_span_payload(value: str) -> str:
 
 def _serialize_span_payload(payload: Any) -> tuple[str, str]:
     """Serialize payloads for OpenInference input/output span attributes."""
-    import json
-
     if isinstance(payload, Mapping | list | tuple):
         actual_payload = dict(payload) if isinstance(payload, Mapping) else payload
         serialized = json.dumps(actual_payload, default=str)
@@ -367,7 +365,7 @@ def set_span_input_output(
 ) -> None:
     """Set OpenInference input/output attributes on the current span."""
     try:
-        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+        from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
 
         span = otel_trace.get_current_span()
         if not span.is_recording():
@@ -403,7 +401,7 @@ def set_optional_span_attribute(span: Any, key: str, value: Any) -> None:
 def set_current_span_attribute(key: str, value: Any) -> None:
     """Set a single attribute on the current span when tracing is available."""
     try:
-        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+        from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
 
         span = otel_trace.get_current_span()
         set_optional_span_attribute(span, key, value)
@@ -414,7 +412,7 @@ def set_current_span_attribute(key: str, value: Any) -> None:
 def record_span_exception(exc: Exception) -> None:
     """Record an exception on the current span when tracing is available."""
     try:
-        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+        from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
 
         span = otel_trace.get_current_span()
         if span.is_recording():
@@ -426,7 +424,7 @@ def record_span_exception(exc: Exception) -> None:
 def set_span_status(status_code: Any, description: str | None = None) -> None:
     """Set the status of the current span when tracing is available."""
     try:
-        from opentelemetry import trace as otel_trace  # type: ignore[import-not-found]
+        from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
 
         span = otel_trace.get_current_span()
         if span.is_recording():
