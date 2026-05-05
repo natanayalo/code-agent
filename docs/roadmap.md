@@ -95,31 +95,93 @@ Success criteria:
 - faster/clearer approval flow than Telegram-only
 - replay/retry invokable from dashboard
 
-## Milestone 17: Worker Mode and Runtime Leverage
+## Milestone 17: Native Agent Worker Runtime Profiles
 
 Goal:
 
-- reduce duplicated platform logic by using strong runtime-native capabilities where appropriate
-
-Planned deliverables:
-
-- worker profile definitions: planner, executor, reviewer, router/control, scout
-- runtime capability matrix (planning, subagents, autonomy modes, skills/hooks, structured output)
-- worker selection policy docs + config-driven defaults
-- explicit buy-vs-build decisions for at least one major capability
-
-Default direction (subject to validation):
-
-- planner: Gemini profile
-- primary executor: Codex profile
-- specialized/richer coding mode: OpenRouter-backed profile where beneficial
-- reviewer: stronger reviewer profile
-- control-plane chores: cheaper/smaller profile
+- migrate Codex and Gemini from platform-driven operation selection into native autonomous coding-agent workers while keeping orchestration, sandboxing, approval, budgets, verification, retries, artifacts, and human handoff under platform control
 
 Non-goals:
 
-- implementing every runtime feature
-- forcing one runtime to handle all roles
+- removing safety/governance boundaries
+- giving native agents host-level or deployment permissions by default
+- rebuilding Codex/Gemini inner loops in the platform
+- broad multi-agent swarms or autonomous merge/deploy
+- removing raw chat/tool-loop support before a replacement path is proven
+
+Design principles:
+
+- keep the current architecture and refactor inside existing worker/orchestrator boundaries
+- move control from each thought/action step to the boundary around a native agent run
+- treat native CLI workers as bounded repo executors, not as orchestrator owners
+- preserve `WorkerRequest`/`WorkerResult` as the platform contract
+- keep deterministic clamps for approvals, permissions, risk, worker availability, retry limits, secrets, sandbox mode, network, and budget caps
+- make runtime mode explicit and observable in task details, worker runs, traces, and artifacts
+
+Core design:
+
+- add `WorkerRuntimeMode`: `native_agent`, `tool_loop`, `planner_only`, `reviewer_only`
+- add `WorkerProfile`: profile name, worker type, runtime mode, capability tags, default budgets, permission profile, mutation policy, self-review policy, and supported delivery modes
+- make Codex and Gemini `native_agent` by default once parity/evals pass
+- keep `CliRuntimeLoop` as `tool_loop` infrastructure for OpenRouter/raw chat models and targeted compatibility tests
+- isolate OpenRouter as legacy `tool_loop`, disabled by default unless explicitly configured for evaluation
+- add an optional LLM orchestrator brain for TaskSpec enrichment, clarification detection, worker/profile recommendation, retry/escalation recommendation, and verifier-result acceptance; deterministic policy remains authoritative
+
+Task list:
+
+| ID | Priority | Description | Implementation notes | Acceptance criteria | Likely touched files | Risks / dependencies |
+| --- | --- | --- | --- | --- | --- | --- |
+| T-140 | P0 | Define worker runtime/profile contracts. | Add `WorkerRuntimeMode` and `WorkerProfile` models plus capability tags and permission-profile vocabulary. Keep compatibility with existing `WorkerType`. | Profiles validate in tests; profile JSON can describe Codex native, Gemini native, OpenRouter tool-loop, planner-only, and reviewer-only profiles. | `workers/base.py`, `orchestrator/state.py`, `tests/unit/test_worker_interface.py` | Avoid schema churn until persistence needs are clear. |
+| T-141 | P0 | Replace heuristic worker routing with profile-aware selection. | Route by TaskSpec, constraints, availability, profile mode, mutation policy, and delivery mode. Preserve manual override behavior. | Existing route tests pass; new tests cover native default selection, unavailable profile failure, and OpenRouter legacy opt-in. | `orchestrator/graph.py`, `orchestrator/execution.py`, `apps/api/task_service_factory.py`, graph tests | Must keep explicit failure when requested worker/profile is unavailable. |
+| T-142 | P0 | Map existing workers into the capability matrix. | Start with Codex native executor, Gemini native planner/reviewer/executor, OpenRouter legacy tool-loop. | Dashboard/API can expose selected worker/profile/runtime mode through existing snapshots or metadata. | `docs/status.md`, `docs/architecture.md`, `orchestrator/state.py`, task API tests | Dashboard typing may need a small follow-up. |
+| T-154 | P0 | Add native agent runner abstraction. | Create a reusable boundary runner that invokes a CLI once per task packet inside the sandbox and collects final message, JSONL/events when available, exit code, stdout/stderr artifacts, diff, changed files, and verification hints. | Unit tests prove timeout, non-zero exit, final-message parsing, and diff/artifact collection without using real CLIs. | `workers/native_agent_runner.py`, `workers/codex_cli_worker.py`, `workers/gemini_cli_worker.py`, `workers/base.py`, worker tests | Native CLI event formats vary; start with final message + git diff as the stable contract. |
+| T-155 | P0 | Convert Codex worker to native-agent default behind a flag. | Use `codex exec` as the inner loop with platform-controlled cwd, sandbox mode, model/profile, timeout, final-message capture, and optional JSONL event capture. Keep the current operation-selector implementation as `tool_loop`. | Codex native path can inspect/edit/test in a fixture repo and returns `WorkerResult` with summary, files changed, diff, artifacts, budget usage, and failure kind. | `workers/codex_cli_worker.py`, `workers/codex_exec_adapter.py`, `apps/api/task_service_factory.py`, Codex worker tests, integration fixture tests | Need careful CLI sandbox/approval mapping; command-level audit may be coarser unless JSONL events are parsed. |
+| T-156 | P0 | Convert Gemini worker to native-agent default behind a flag. | Use Gemini CLI non-interactive prompt mode with sandboxing, output-format support, final message capture, and explicit no-network/no-secret defaults. Keep operation-selector mode as `tool_loop`. | Gemini native path has parity tests matching Codex native worker contract and cleanly reports auth/provider errors. | `workers/gemini_cli_worker.py`, `workers/gemini_cli_adapter.py`, `apps/api/task_service_factory.py`, Gemini worker tests | Gemini sandbox expansion/approval behavior must not bypass platform approvals. |
+| T-157 | P0 | Add clarification gate before dispatch. | If TaskSpec requires clarification, halt before worker routing/dispatch and persist a resumable HumanInteraction. Existing TaskSpec rows already map to interactions; graph must honor them. | Ambiguous tasks do not dispatch a worker; dashboard/API show pending clarification; replay/resume path is documented. | `orchestrator/graph.py`, `orchestrator/execution.py`, `repositories/sqlalchemy.py`, interaction/task tests | Needs a clear operator response path before broad rollout. |
+| T-158 | P1 | Add independent verifier execution stage. | Run TaskSpec verification commands or a read-only verifier profile after native worker completion in a fresh/reused sandbox boundary, separate from worker self-review. | Verifier can pass/fail/warn independently; failures include actionable `failure_kind` and artifacts; no mutation by default. | `orchestrator/graph.py`, `orchestrator/review.py` or new `orchestrator/verification.py`, verifier tests | Verification commands can be expensive; must respect global budget caps. |
+| T-159 | P1 | Add continuation/repair after verifier failure. | Extend existing review repair handoff into a bounded verifier repair flow using the same workspace when safe, capped by retry/repair budgets. | One repair attempt can be dispatched after verifier failure; repeated failures stop with human-readable handoff. | `orchestrator/graph.py`, `orchestrator/review.py`, graph tests | Avoid infinite loops and cross-worker workspace confusion. |
+| T-160 | P1 | Add optional LLM orchestrator brain. | Introduce structured-output model calls for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance. Deterministic policy clamps override model suggestions. | Can be disabled; model suggestions are recorded with reasons; policy violations cannot be overridden by the model. | `orchestrator/task_spec.py`, new `orchestrator/brain.py`, tracing/tests | Adds provider dependency; ship after native runner is stable. |
+| T-161 | P1 | Update observability and artifacts for native agents. | Persist runtime mode/profile, CLI command metadata, stdout/stderr/event artifacts, final message, diff, changed files, and verifier result links. | Task detail can explain what native agent ran, for how long, what changed, and what verification accepted/rejected. | `orchestrator/execution.py`, `db/models.py` if needed, dashboard task detail, artifact tests | Prefer metadata-only changes unless persistence schema is necessary. |
+| T-162 | P2 | Deprecate operation-selector mode for native CLIs. | Keep `CliRuntimeLoop` for raw chat/OpenRouter and tests. Add warnings/metrics when Codex/Gemini run in `tool_loop`; remove default routing to those modes after evals. | Codex/Gemini default to `native_agent`; OpenRouter remains isolated legacy `tool_loop`; docs explain override and rollback. | `docs/architecture.md`, `docs/runbook.md`, worker bootstrap/tests | Do not delete the old path until rollback and eval coverage are proven. |
+
+Recommended implementation order:
+
+1. T-140, T-142, T-141
+2. T-154, T-155
+3. T-156
+4. T-157
+5. T-158, T-159
+6. T-160
+7. T-161, T-162
+
+Feature flags and rollout controls:
+
+- `CODE_AGENT_WORKER_PROFILES_ENABLED`: profile-aware routing
+- `CODE_AGENT_CODEX_RUNTIME_MODE`: `native_agent` or `tool_loop`
+- `CODE_AGENT_GEMINI_RUNTIME_MODE`: `native_agent` or `tool_loop`
+- `CODE_AGENT_OPENROUTER_ENABLED`: default `false` outside eval/legacy environments
+- `CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED`: default `false`
+- `CODE_AGENT_NATIVE_AGENT_EVENT_CAPTURE_ENABLED`: parse CLI JSONL/events when available
+- `CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED`: default `false` until verifier budget behavior is proven
+
+Tests and evals to add:
+
+- unit tests for profile validation, profile selection, and deterministic policy clamps
+- native-runner unit tests with fake Codex/Gemini binaries for success, timeout, auth/provider failure, malformed output, and no-change success
+- integration fixture where native Codex/Gemini fixes a small failing test in an isolated workspace
+- regression eval for the known failure mode: repeated read-only JSON `tool_call` actions must not happen in native mode
+- verifier evals for success, no tests reported, failing verification command, and repair handoff
+- artifact/observability tests proving final message, diff, files changed, runtime mode, profile, and verifier outcome persist
+
+Migration/deprecation plan:
+
+- phase 1: introduce profiles and keep all current worker behavior as the default
+- phase 2: enable Codex native-agent mode in non-production/dev with fake-binary and fixture coverage
+- phase 3: enable Gemini native-agent mode in non-production/dev
+- phase 4: run side-by-side evals comparing native-agent vs operation-selector behavior on representative tasks
+- phase 5: make Codex/Gemini native-agent default, retain per-worker rollback flags
+- phase 6: isolate OpenRouter as legacy tool-loop mode and keep disabled by default unless explicitly configured
+- phase 7: remove Codex/Gemini operation-selector defaults only after a documented rollback path and retained compatibility tests exist
 
 ## Milestone 18: Controlled Autonomy / Scout Mode
 

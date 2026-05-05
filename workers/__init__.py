@@ -1,13 +1,22 @@
 """Worker package boundary."""
 
 from workers.base import (
+    SUPPORTED_WORKER_TYPES,
     ArtifactReference,
     FailureKind,
     TestResult,
     Worker,
+    WorkerCapabilityTag,
     WorkerCommand,
+    WorkerDeliveryMode,
+    WorkerMutationPolicy,
+    WorkerPermissionProfile,
+    WorkerProfile,
     WorkerRequest,
     WorkerResult,
+    WorkerRuntimeMode,
+    WorkerSelfReviewPolicy,
+    WorkerType,
 )
 from workers.codex_cli_worker import CodexCliWorker
 from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter
@@ -28,9 +37,18 @@ __all__ = [
     "OpenRouterCliWorker",
     "ReviewFinding",
     "ReviewResult",
+    "SUPPORTED_WORKER_TYPES",
     "TestResult",
     "Worker",
+    "WorkerCapabilityTag",
     "WorkerCommand",
+    "WorkerDeliveryMode",
+    "WorkerMutationPolicy",
+    "WorkerPermissionProfile",
+    "WorkerProfile",
     "WorkerRequest",
     "WorkerResult",
+    "WorkerRuntimeMode",
+    "WorkerSelfReviewPolicy",
+    "WorkerType",
 ]

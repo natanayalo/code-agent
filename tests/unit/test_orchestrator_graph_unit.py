@@ -132,6 +132,11 @@ def test_build_worker_request_from_state():
                     }
                 ],
             },
+            "route": {
+                "chosen_worker": "codex",
+                "chosen_profile": "codex-native-executor",
+                "runtime_mode": "native_agent",
+            },
         }
     )
     request = _build_worker_request(state)
@@ -145,6 +150,8 @@ def test_build_worker_request_from_state():
     assert request.task_spec["goal"] == "Add worker interface"
     assert request.constraints == {"requires_approval": False}
     assert request.budget == {"max_minutes": 15}
+    assert request.worker_profile == "codex-native-executor"
+    assert request.runtime_mode == "native_agent"
 
 
 def test_build_worker_request_prefers_review_repair_handoff_text():
@@ -858,6 +865,27 @@ def test_dispatch_job_preserves_attempt_count_on_retry():
     result = dispatch_job(state)
     assert result["current_step"] == "dispatch_job"
     assert result["repair_handoff_requested"] is False
+
+
+def test_dispatch_job_includes_route_profile_metadata() -> None:
+    from orchestrator.graph import dispatch_job
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "route": {
+                "chosen_worker": "codex",
+                "chosen_profile": "codex-native-executor",
+                "runtime_mode": "native_agent",
+            },
+        }
+    )
+
+    result = dispatch_job(state)
+
+    assert result["dispatch"]["worker_type"] == "codex"
+    assert result["dispatch"]["worker_profile"] == "codex-native-executor"
+    assert result["dispatch"]["runtime_mode"] == "native_agent"
 
 
 def test_route_after_review_result_dispatches_on_repair_handoff():

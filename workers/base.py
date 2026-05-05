@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from workers.review import ReviewResult
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerModel(BaseModel):
@@ -31,6 +34,23 @@ FailureKind = Literal[
     "unknown",
 ]
 
+WorkerType = Literal["gemini", "codex", "openrouter"]
+# Ordered by escalation preference in routing fallbacks:
+# quality-first, then balanced, then low-cost.
+SUPPORTED_WORKER_TYPES: Final[tuple[WorkerType, ...]] = ("gemini", "openrouter", "codex")
+WorkerRuntimeMode = Literal["native_agent", "tool_loop", "planner_only", "reviewer_only"]
+WorkerCapabilityTag = Literal["planning", "execution", "review", "routing", "scout"]
+WorkerPermissionProfile = Literal[
+    "read_only",
+    "workspace_write",
+    "dangerous_shell",
+    "networked_write",
+    "git_push_or_deploy",
+]
+WorkerMutationPolicy = Literal["read_only", "patch_allowed"]
+WorkerSelfReviewPolicy = Literal["never", "on_failure", "always"]
+WorkerDeliveryMode = Literal["summary", "workspace", "branch", "draft_pr"]
+
 
 class WorkerRequest(WorkerModel):
     """Normalized task input passed from the orchestrator to a worker."""
@@ -46,6 +66,36 @@ class WorkerRequest(WorkerModel):
     tools: list[str] | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
+    worker_profile: str | None = None
+    runtime_mode: WorkerRuntimeMode | None = None
+
+
+class WorkerProfile(WorkerModel):
+    """Typed profile contract used for worker runtime selection and policy."""
+
+    name: str = Field(min_length=1)
+    worker_type: WorkerType
+    runtime_mode: WorkerRuntimeMode
+    capability_tags: list[WorkerCapabilityTag] = Field(default_factory=list)
+    default_budget: dict[str, Any] = Field(default_factory=dict)
+    permission_profile: WorkerPermissionProfile = "workspace_write"
+    mutation_policy: WorkerMutationPolicy = "patch_allowed"
+    self_review_policy: WorkerSelfReviewPolicy = "on_failure"
+    supported_delivery_modes: list[WorkerDeliveryMode] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("capability_tags", "supported_delivery_modes", mode="before")
+    @classmethod
+    def _normalize_profile_lists(cls, value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, list | tuple | set):
+            try:
+                return sorted(set(value))
+            except TypeError:
+                logger.debug("Failed to sort or deduplicate profile list value: %r", value)
+                return list(value)
+        return value
 
 
 class WorkerCommand(WorkerModel):
