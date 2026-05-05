@@ -1170,6 +1170,18 @@ def _clear_tracing_config_cache() -> None:
         _TRACING_CONFIG_CACHE = None
 
 
+def bootstrap_phoenix_project_id() -> None:
+    """Pre-resolve the Phoenix project ID to avoid blocking API threads later."""
+    enabled, endpoint, project_name = _get_tracing_config()
+    if not enabled or not endpoint:
+        return
+
+    # Standard OTLP HTTP traces endpoint to API base URL conversion
+    # http://127.0.0.1:6006/v1/traces -> http://127.0.0.1:6006
+    api_base_url = endpoint.removesuffix("/v1/traces")
+    _get_project_id(api_base_url, project_name)
+
+
 def _get_phoenix_url(trace_id: str | None) -> str | None:
     """Generate a browser-accessible Phoenix deep link for a given trace ID."""
     if not trace_id:
