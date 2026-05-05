@@ -303,7 +303,7 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
     assert state.dispatch.workspace_id is None
     assert worker.requests == []
     assert state.result is not None
-    assert state.result.status == "error"
+    assert state.result.status == "failure"
     assert (
         state.result.summary
         == "No worker is configured for route 'gemini'. Configured workers: codex."
@@ -371,11 +371,11 @@ def test_orchestrator_graph_errors_when_selected_profile_is_unavailable() -> Non
     assert state.route.chosen_profile == "openrouter-tool-loop-legacy"
     assert state.route.route_reason == "runtime_unavailable"
     assert state.route.override_applied is True
-    assert state.dispatch.worker_type == "codex"
+    assert state.dispatch.worker_type is None
     assert state.dispatch.worker_profile == "openrouter-tool-loop-legacy"
     assert worker.requests == []
     assert state.result is not None
-    assert state.result.status == "error"
+    assert state.result.status == "failure"
     assert (
         state.result.summary
         == "No routable worker profile is available for route 'openrouter-tool-loop-legacy'. "
@@ -440,7 +440,7 @@ def test_orchestrator_graph_worker_override_respects_profile_opt_in() -> None:
     assert state.route.chosen_worker == "openrouter"
     assert state.route.route_reason == "runtime_unavailable"
     assert state.result is not None
-    assert state.result.status == "error"
+    assert state.result.status == "failure"
     assert (
         state.result.summary
         == "No routable worker profile is available for worker route 'openrouter'. "
@@ -504,7 +504,7 @@ def test_orchestrator_graph_profile_override_incompatible_with_constraints() -> 
     assert state.route.chosen_profile == "codex-native-executor"
     assert state.route.route_reason == "runtime_unavailable"
     assert state.result is not None
-    assert state.result.status == "error"
+    assert state.result.status == "failure"
     assert (
         state.result.summary
         == "No routable worker profile is available for route 'codex-native-executor'. "
