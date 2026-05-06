@@ -92,6 +92,7 @@ def test_apply_task_spec_brain_suggestion_adds_fields_and_escalates_risk() -> No
         acceptance_criteria=["Include root-cause summary in final output."],
         non_goals=["Do not merge changes automatically."],
         clarification_questions=["Which CI job is failing most often?"],
+        verification_commands=["pytest tests/unit/test_task_spec.py -q"],
         suggested_risk_level="high",
         rationale="Needs manual gate while investigating CI impact.",
     )
@@ -105,6 +106,7 @@ def test_apply_task_spec_brain_suggestion_adds_fields_and_escalates_risk() -> No
     assert "CI runners are available." in merged.assumptions
     assert "Include root-cause summary in final output." in merged.acceptance_criteria
     assert "Do not merge changes automatically." in merged.non_goals
+    assert merged.verification_commands == ["pytest tests/unit/test_task_spec.py -q"]
     assert merged.requires_clarification is True
     assert merged.risk_level == "high"
     assert merged.requires_permission is True
@@ -112,6 +114,7 @@ def test_apply_task_spec_brain_suggestion_adds_fields_and_escalates_risk() -> No
     assert report.provider == "FakeBrain"
     assert report.applied is True
     assert report.added_clarification_questions == ["Which CI job is failing most often?"]
+    assert report.added_verification_commands == ["pytest tests/unit/test_task_spec.py -q"]
     assert report.ignored_fields == []
     assert validate_task_spec_policy(merged) == []
 

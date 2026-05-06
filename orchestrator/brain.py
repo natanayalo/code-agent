@@ -24,6 +24,7 @@ class TaskSpecBrainSuggestion(OrchestratorModel):
     acceptance_criteria: list[str] = Field(default_factory=list)
     non_goals: list[str] = Field(default_factory=list)
     clarification_questions: list[str] = Field(default_factory=list)
+    verification_commands: list[str] = Field(default_factory=list)
     suggested_risk_level: TaskRiskLevel | None = None
     suggested_task_type: TaskSpecType | None = None
     suggested_delivery_mode: TaskDeliveryMode | None = None
@@ -40,6 +41,7 @@ class TaskSpecBrainMergeReport(OrchestratorModel):
     added_acceptance_criteria: list[str] = Field(default_factory=list)
     added_non_goals: list[str] = Field(default_factory=list)
     added_clarification_questions: list[str] = Field(default_factory=list)
+    added_verification_commands: list[str] = Field(default_factory=list)
     ignored_fields: list[str] = Field(default_factory=list)
     rationale: str | None = None
     error: str | None = None
@@ -91,6 +93,7 @@ class RuleBasedOrchestratorBrain:
             and not suggestion.acceptance_criteria
             and not suggestion.non_goals
             and not suggestion.clarification_questions
+            and not suggestion.verification_commands
             and suggestion.suggested_risk_level is None
             and suggestion.suggested_task_type is None
             and suggestion.suggested_delivery_mode is None

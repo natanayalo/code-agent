@@ -296,6 +296,7 @@ def test_generate_task_spec_applies_brain_enrichment_with_policy_clamps() -> Non
             del kwargs
             return TaskSpecBrainSuggestion(
                 acceptance_criteria=["Document verifier pass/fail details in the summary."],
+                verification_commands=["pytest tests/unit/test_orchestrator_graph_unit.py -q"],
                 suggested_risk_level="high",
                 suggested_task_type="docs",
                 rationale="Increase scrutiny for risky workflow change.",
@@ -317,6 +318,9 @@ def test_generate_task_spec_applies_brain_enrichment_with_policy_clamps() -> Non
     assert res["task_spec"]["risk_level"] == "high"
     assert res["task_spec"]["requires_permission"] is True
     assert res["task_spec"]["task_type"] == "investigation"
+    assert res["task_spec"]["verification_commands"] == [
+        "pytest tests/unit/test_orchestrator_graph_unit.py -q"
+    ]
     assert "task spec generated with brain enrichment" in res["progress_updates"]
     brain_payload = res["timeline_events"][0].payload["brain"]
     assert brain_payload["provider"] == "_FakeBrain"
@@ -324,6 +328,9 @@ def test_generate_task_spec_applies_brain_enrichment_with_policy_clamps() -> Non
     assert brain_payload["ignored_fields"] == ["suggested_task_type"]
     assert brain_payload["added_acceptance_criteria"] == [
         "Document verifier pass/fail details in the summary."
+    ]
+    assert brain_payload["added_verification_commands"] == [
+        "pytest tests/unit/test_orchestrator_graph_unit.py -q"
     ]
 
 
