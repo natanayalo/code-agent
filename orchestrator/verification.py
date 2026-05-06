@@ -44,17 +44,37 @@ Output contract:
 def _normalize_verification_commands(raw: object) -> list[str]:
     """Normalize verification command inputs into stripped command strings."""
     if isinstance(raw, str):
-        return [line.strip() for line in raw.splitlines() if line.strip()]
+        commands: list[str] = []
+        current_command = ""
+        for raw_line in raw.splitlines():
+            line = raw_line.strip()
+            if not line:
+                if current_command:
+                    commands.append(current_command.strip())
+                    current_command = ""
+                continue
+
+            current_command = f"{current_command} {line}".strip() if current_command else line
+            if current_command.endswith("\\"):
+                current_command = current_command[:-1].rstrip()
+                continue
+
+            commands.append(current_command.strip())
+            current_command = ""
+
+        if current_command:
+            commands.append(current_command.strip())
+        return commands
     if not isinstance(raw, list | tuple):
         return []
-    commands: list[str] = []
+    normalized_commands: list[str] = []
     for item in raw:
         if not isinstance(item, str):
             continue
         command = item.strip()
         if command:
-            commands.append(command)
-    return commands
+            normalized_commands.append(command)
+    return normalized_commands
 
 
 def resolve_verification_commands(state: OrchestratorState) -> list[str]:
@@ -147,16 +167,20 @@ def _extract_json_payload(summary: str) -> dict[str, object] | None:
     except json.JSONDecodeError:
         pass
 
-    match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", stripped, flags=re.DOTALL | re.IGNORECASE)
-    if not match:
-        return None
-
-    try:
-        payload = json.loads(match.group(1))
-    except json.JSONDecodeError:
-        return None
-    if isinstance(payload, dict):
-        return payload
+    for match in re.finditer(
+        r"```(?:json)?\s*(.*?)\s*```",
+        stripped,
+        flags=re.DOTALL | re.IGNORECASE,
+    ):
+        block = match.group(1).strip()
+        if not block:
+            continue
+        try:
+            payload = json.loads(block)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
     return None
 
 
@@ -261,7 +285,7 @@ async def run_independent_verifier(
             extra={"worker_type": worker_type},
         )
         return (
-            "warning",
+            "failed",
             f"Independent verifier infrastructure error ({worker_type}): {type(exc).__name__}.",
         )
 

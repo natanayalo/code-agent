@@ -45,6 +45,17 @@ def _state() -> OrchestratorState:
     )
 
 
+def test_normalize_verification_commands_preserves_line_continuations() -> None:
+    commands = verification_module._normalize_verification_commands(  # noqa: SLF001
+        "pytest \\\n -v tests/unit/test_orchestrator_verification.py\n\nruff check"
+    )
+
+    assert commands == [
+        "pytest -v tests/unit/test_orchestrator_verification.py",
+        "ruff check",
+    ]
+
+
 @pytest.mark.anyio
 async def test_run_independent_verifier_uses_native_read_only_request() -> None:
     state = _state()
@@ -87,6 +98,42 @@ async def test_run_independent_verifier_parses_fenced_json_summary() -> None:
 
     assert status == "warning"
     assert summary == "could not run full suite"
+
+
+@pytest.mark.anyio
+async def test_run_independent_verifier_parses_multiple_fenced_blocks() -> None:
+    state = _state()
+    mock_worker = AsyncMock()
+    mock_worker.run.return_value = WorkerResult(
+        status="success",
+        summary=(
+            "```text\nlogs...\n```\n"
+            '```json\n{"status":"passed","summary":"structured payload"}\n```'
+        ),
+    )
+
+    status, summary = await verification_module.run_independent_verifier(
+        state,
+        worker_factory={"gemini": mock_worker},
+    )
+
+    assert status == "passed"
+    assert summary == "structured payload"
+
+
+@pytest.mark.anyio
+async def test_run_independent_verifier_infrastructure_exception_is_failed() -> None:
+    state = _state()
+    mock_worker = AsyncMock()
+    mock_worker.run.side_effect = RuntimeError("boom")
+
+    status, summary = await verification_module.run_independent_verifier(
+        state,
+        worker_factory={"codex": mock_worker},
+    )
+
+    assert status == "failed"
+    assert "infrastructure error" in summary
 
 
 @pytest.mark.anyio
