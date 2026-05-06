@@ -67,7 +67,7 @@ function renderStringList(title: string, items: string[] | undefined) {
       <h5>{title}</h5>
       <ul>
         {items.map((item) => (
-          <li key={`${title}-${item}`}>{item}</li>
+          <li key={title + '-' + item}>{item}</li>
         ))}
       </ul>
     </div>
@@ -90,8 +90,8 @@ function renderJsonBlock(value: unknown) {
 function artifactRows(run: TaskSnapshot['latest_run']) {
   if (!run) return [];
   if (Array.isArray(run.artifact_index) && run.artifact_index.length > 0) {
-    return run.artifact_index.map((artifact, idx) => ({
-      key: artifact.uri || artifact.name || `idx-${idx}`,
+    return run.artifact_index.map((artifact) => ({
+      key: artifact.uri || artifact.name || `artifact-${normalizeToken(artifact.artifact_type || 'unknown')}`,
       name: artifact.name || 'artifact',
       type: artifact.artifact_type || 'unknown',
       uri: artifact.uri || '',
@@ -139,7 +139,7 @@ function extractVerifierOutcome(value: unknown): VerifierOutcomeSnapshot {
           const message = typeof item.message === 'string' ? item.message : null;
           if (!label || !itemStatus) return null;
           // Generate a stable ID if not provided by backend
-          const generatedId = `${label}-${itemStatus}-${message || ''}`;
+          const generatedId = label + '-' + itemStatus + '-' + (message || '');
           return {
             id: typeof item.id === 'string' ? item.id : generatedId,
             label,
