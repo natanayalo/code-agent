@@ -66,8 +66,8 @@ function renderStringList(title: string, items: string[] | undefined) {
     <div className="task-detail-group">
       <h5>{title}</h5>
       <ul>
-        {items.map((item, idx) => (
-          <li key={`${title}-${item}-${idx}`}>{item}</li>
+        {items.map((item) => (
+          <li key={`${title}-${item}`}>{item}</li>
         ))}
       </ul>
     </div>
@@ -138,8 +138,10 @@ function extractVerifierOutcome(value: unknown): VerifierOutcomeSnapshot {
           const itemStatus = typeof item.status === 'string' ? item.status : null;
           const message = typeof item.message === 'string' ? item.message : null;
           if (!label || !itemStatus) return null;
+          // Generate a stable ID if not provided by backend
+          const generatedId = `${label}-${itemStatus}-${message || ''}`;
           return {
-            id: typeof item.id === 'string' ? item.id : label,
+            id: typeof item.id === 'string' ? item.id : generatedId,
             label,
             status: itemStatus,
             message,
@@ -553,7 +555,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
             {sortedTimeline.length > 0 ? (
               <ol className="task-timeline-list">
                 {sortedTimeline.map((event, idx) => (
-                  <li key={event.sequence_number ?? `event-${idx}`}>
+                  <li key={event.id}>
                     <p>
                       <strong>{formatLabel(event.event_type)}</strong>
                       <span className="task-detail-muted task-inline-meta">
@@ -578,9 +580,8 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                 <ol className="task-command-list">
                   {runCommands.map((command, idx) => {
                     const duration = formatDuration(command.duration_seconds);
-                    const commandId = command.id || `${command.command}-${idx}`;
                     return (
-                      <li key={commandId}>
+                      <li key={command.id}>
                         <p>
                           <strong>{command.command || `Command ${idx + 1}`}</strong>
                         </p>

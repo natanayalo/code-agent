@@ -89,7 +89,7 @@ export interface WorkerRunSnapshot {
 }
 
 export interface CommandRunSnapshot {
-  id?: string;
+  id: string;
   command?: string;
   exit_code?: number;
   duration_seconds?: number;
@@ -114,6 +114,7 @@ export interface ArtifactSnapshot {
 }
 
 export interface TaskTimelineEventSnapshot {
+  id: string;
   event_type: string;
   attempt_number?: number;
   sequence_number?: number;

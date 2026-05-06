@@ -6,6 +6,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable
 from typing import Any, Final, Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -101,6 +102,7 @@ class WorkerProfile(WorkerModel):
 class WorkerCommand(WorkerModel):
     """A command reported by a worker result."""
 
+    id: str = Field(default_factory=lambda: uuid4().hex)
     command: str
     exit_code: int | None = None
     duration_seconds: float | None = Field(default=None, ge=0)

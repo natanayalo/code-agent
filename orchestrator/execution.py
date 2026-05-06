@@ -418,6 +418,7 @@ class WorkerRunSnapshot(ExecutionModel):
 class TaskTimelineEventSnapshot(ExecutionModel):
     """A granular event in a task's lifecycle (T-090)."""
 
+    id: str
     event_type: str
     attempt_number: int = 0
     sequence_number: int = 0
@@ -1856,7 +1857,10 @@ class TaskExecutionService:
                 requested_permission=latest_run_obj.requested_permission,
                 budget_usage=latest_run_obj.budget_usage,
                 verifier_outcome=latest_run_obj.verifier_outcome,
-                commands_run=list(latest_run_obj.commands_run or []),
+                commands_run=[
+                    {"id": cmd.get("id") or uuid4().hex, **cmd}
+                    for cmd in (latest_run_obj.commands_run or [])
+                ],
                 files_changed_count=latest_run_obj.files_changed_count,
                 files_changed=list(latest_run_obj.files_changed or []),
                 artifact_index=list(latest_run_obj.artifact_index or []),
@@ -1884,6 +1888,7 @@ class TaskExecutionService:
             pending_interactions=pending_interactions,
             timeline=[
                 TaskTimelineEventSnapshot(
+                    id=event.id,
                     event_type=_enum_value(event.event_type) or "unknown",
                     attempt_number=event.attempt_number,
                     sequence_number=event.sequence_number,
