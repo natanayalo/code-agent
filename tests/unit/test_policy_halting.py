@@ -1,13 +1,16 @@
 from unittest.mock import MagicMock
 
+import pytest
+
 from orchestrator.graph import _route_after_generate_task_spec, generate_task_spec
 from orchestrator.state import OrchestratorState, TaskRequest, TaskSpec
 from workers import WorkerResult
 
 
-def test_generate_task_spec_halts_on_policy_violation(monkeypatch):
+@pytest.mark.asyncio
+async def test_generate_task_spec_halts_on_policy_violation(monkeypatch):
     """Verify that generate_task_spec halts and returns an error on policy violations."""
-    # 1. Create a violating TaskSpec (missing secret hardcode forbidden action)
+    # ... (same setup)
     violating_spec = TaskSpec(
         goal="test",
         task_type="feature",
@@ -32,7 +35,7 @@ def test_generate_task_spec_halts_on_policy_violation(monkeypatch):
     )
 
     # 4. Run the node
-    response = generate_task_spec(state)
+    response = await generate_task_spec(state)
 
     # 5. Verify it halted
     assert "task_spec_policy:missing_secret_hardcode_forbidden_action" in response["errors"]
@@ -74,7 +77,8 @@ def test_route_after_generate_task_spec_with_policy_violation():
     assert _route_after_generate_task_spec(clarification_state) == "summarize_result"
 
 
-def test_generate_task_spec_halts_on_clarification_requirement(monkeypatch):
+@pytest.mark.asyncio
+async def test_generate_task_spec_halts_on_clarification_requirement(monkeypatch):
     """Clarification-required TaskSpecs should pause before worker dispatch."""
     clarification_spec = TaskSpec(
         goal="fix it",
@@ -100,7 +104,7 @@ def test_generate_task_spec_halts_on_clarification_requirement(monkeypatch):
         )
     )
 
-    response = generate_task_spec(state)
+    response = await generate_task_spec(state)
 
     result = response["result"]
     assert isinstance(result, WorkerResult)

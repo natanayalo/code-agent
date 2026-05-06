@@ -268,7 +268,8 @@ def test_plan_task_detects_multifile_compound_marker():
     assert res["task_plan"]["complexity_reason"] == "multi_file_task"
 
 
-def test_generate_task_spec_creates_policy_checked_contract_before_routing() -> None:
+@pytest.mark.asyncio
+async def test_generate_task_spec_creates_policy_checked_contract_before_routing() -> None:
     state = OrchestratorState.model_validate(
         {
             "task": {
@@ -280,7 +281,7 @@ def test_generate_task_spec_creates_policy_checked_contract_before_routing() -> 
         }
     )
 
-    res = generate_task_spec(state)
+    res = await generate_task_spec(state)
 
     assert res["current_step"] == "generate_task_spec"
     assert res["task_spec"]["goal"] == "Delete all generated files"
@@ -290,9 +291,10 @@ def test_generate_task_spec_creates_policy_checked_contract_before_routing() -> 
     assert res["timeline_events"][0].payload["policy_violations"] == []
 
 
-def test_generate_task_spec_applies_brain_enrichment_with_policy_clamps() -> None:
+@pytest.mark.asyncio
+async def test_generate_task_spec_applies_brain_enrichment_with_policy_clamps() -> None:
     class _FakeBrain:
-        def suggest_task_spec(self, **kwargs):
+        async def suggest_task_spec(self, **kwargs):
             del kwargs
             return TaskSpecBrainSuggestion(
                 acceptance_criteria=["Document verifier pass/fail details in the summary."],
@@ -313,7 +315,7 @@ def test_generate_task_spec_applies_brain_enrichment_with_policy_clamps() -> Non
         }
     )
 
-    res = generate_task_spec(state, orchestrator_brain=_FakeBrain())
+    res = await generate_task_spec(state, orchestrator_brain=_FakeBrain())
 
     assert res["task_spec"]["risk_level"] == "high"
     assert res["task_spec"]["requires_permission"] is True
@@ -334,9 +336,10 @@ def test_generate_task_spec_applies_brain_enrichment_with_policy_clamps() -> Non
     ]
 
 
-def test_generate_task_spec_brain_failures_fall_back_to_deterministic_spec() -> None:
+@pytest.mark.asyncio
+async def test_generate_task_spec_brain_failures_fall_back_to_deterministic_spec() -> None:
     class _ExplodingBrain:
-        def suggest_task_spec(self, **kwargs):
+        async def suggest_task_spec(self, **kwargs):
             del kwargs
             raise RuntimeError("brain unavailable")
 
@@ -347,7 +350,7 @@ def test_generate_task_spec_brain_failures_fall_back_to_deterministic_spec() -> 
         }
     )
 
-    res = generate_task_spec(state, orchestrator_brain=_ExplodingBrain())
+    res = await generate_task_spec(state, orchestrator_brain=_ExplodingBrain())
 
     assert res["task_spec"]["goal"] == "Add API pagination"
     brain_payload = res["timeline_events"][0].payload["brain"]

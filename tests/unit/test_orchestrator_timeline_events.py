@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from db.enums import TimelineEventType
 from orchestrator.graph import (
     _timeline_events,
@@ -56,14 +58,15 @@ def test_plan_task_emits_event_when_generated():
     assert res["timeline_events"][0].payload["planning"] == "generated"
 
 
-def test_generate_task_spec_emits_event():
+@pytest.mark.asyncio
+async def test_generate_task_spec_emits_event():
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "Add API pagination"},
             "task_kind": "implementation",
         }
     )
-    res = generate_task_spec(state)
+    res = await generate_task_spec(state)
     assert len(res["timeline_events"]) == 1
     assert res["timeline_events"][0].event_type == TimelineEventType.TASK_SPEC_GENERATED
     assert res["timeline_events"][0].payload["task_spec"]["goal"] == "Add API pagination"
