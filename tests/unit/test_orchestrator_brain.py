@@ -418,3 +418,45 @@ async def test_suggest_task_spec_model_malformed_json_falls_back_to_rules() -> N
     )
     assert suggestion is not None
     assert suggestion.suggested_risk_level == "medium"
+
+
+def test_merge_list_ensures_strict_uniqueness() -> None:
+    from orchestrator.brain import _merge_list
+
+    a = ["a", "b", "a"]
+    b = ["c", "b", "d"]
+    # Result should be ["a", "b", "c", "d"]
+    merged = _merge_list(a, b)
+    assert merged == ["a", "b", "c", "d"]
+
+
+@pytest.mark.asyncio
+async def test_suggest_task_spec_model_uses_empty_secrets() -> None:
+    worker = _StaticWorker(WorkerResult(status="success", summary='{"assumptions":["test"]}'))
+    brain = RuleBasedOrchestratorBrain(planner_worker=worker)
+
+    task = TaskRequest(task_text="text", secrets={"key": "secret"})
+    task_spec = TaskSpec(goal="goal")
+
+    await brain.suggest_task_spec(
+        task=task, task_kind="implementation", task_plan=None, task_spec=task_spec
+    )
+
+    assert worker.requests[-1].secrets == {}
+
+
+@pytest.mark.asyncio
+async def test_suggest_route_model_uses_empty_secrets() -> None:
+    worker = _StaticWorker(WorkerResult(status="success", summary='{"suggested_worker":"codex"}'))
+    brain = RuleBasedOrchestratorBrain(planner_worker=worker)
+
+    state = _state()
+    state.task.secrets = {"key": "secret"}
+
+    await brain.suggest_route(
+        state=state,
+        available_workers=frozenset({"codex"}),
+        available_profiles=None,
+    )
+
+    assert worker.requests[-1].secrets == {}

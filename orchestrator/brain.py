@@ -121,9 +121,9 @@ def _to_serializable(obj: Any) -> Any:
 
 def _merge_list(a: list[str], b: list[str]) -> list[str]:
     """Merge two lists of strings, preserving order and ensuring uniqueness."""
-    seen = set(a)
-    merged = list(a)
-    for item in b:
+    merged = []
+    seen = set()
+    for item in a + b:
         if item not in seen:
             merged.append(item)
             seen.add(item)
@@ -255,7 +255,9 @@ class RuleBasedOrchestratorBrain:
 
         # If no enrichment fields were suggested (ignoring rationale), skip applying
         has_enrichment = any(
-            getattr(suggestion, field) for field in suggestion.model_fields if field != "rationale"
+            getattr(suggestion, field)
+            for field in type(suggestion).model_fields
+            if field != "rationale"
         )
         if not has_enrichment:
             return None
@@ -339,7 +341,7 @@ class RuleBasedOrchestratorBrain:
             task_spec=task_spec.model_dump(mode="json"),
             constraints=constraints,
             budget=budget,
-            secrets=dict(task.secrets),
+            secrets={},
             tools=task.tools,
             worker_profile=self.planner_profile,
             runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
@@ -474,7 +476,7 @@ class RuleBasedOrchestratorBrain:
             task_spec=state.task_spec.model_dump(mode="json") if state.task_spec else None,
             constraints=constraints,
             budget=budget,
-            secrets=dict(state.task.secrets),
+            secrets={},
             tools=state.task.tools,
             worker_profile=self.planner_profile,
             runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
