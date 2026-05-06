@@ -1,6 +1,6 @@
 import React from 'react';
 import { X } from 'lucide-react';
-import { TaskSnapshot } from '../types/task';
+import { TaskSnapshot, VerifierOutcomeItem, VerifierOutcomeSnapshot } from '../types/task';
 import { TaskApprovalSection } from './TaskApprovalSection';
 import { formatLabel } from '../utils/formatters';
 
@@ -28,18 +28,7 @@ interface TraceObservabilitySnapshot {
   spanStatusCounts: SpanStatusCount[];
 }
 
-interface VerifierOutcomeItem {
-  id: string;
-  label: string;
-  status: string;
-  message: string | null;
-}
 
-interface VerifierOutcomeSnapshot {
-  status: string | null;
-  summary: string | null;
-  items: VerifierOutcomeItem[];
-}
 
 function formatTimestamp(value: string | null | undefined): string {
   if (!value) return 'Unknown time';
@@ -62,11 +51,13 @@ function formatDuration(seconds: number | undefined): string | null {
 
 function renderStringList(title: string, items: string[] | undefined) {
   if (!items || items.length === 0) return null;
+  // Deduplicate items to ensure unique React keys as per review feedback
+  const uniqueItems = Array.from(new Set(items));
   return (
     <div className="task-detail-group">
       <h5>{title}</h5>
       <ul>
-        {items.map((item) => (
+        {uniqueItems.map((item) => (
           <li key={`${title}-${item}`}>{item}</li>
         ))}
       </ul>

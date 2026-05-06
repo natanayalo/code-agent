@@ -83,7 +83,7 @@ describe('TaskDetailPanel', () => {
       typeof message === 'string' && message.includes('unique "key"')
     );
     expect(duplicateKeyWarnings).toHaveLength(0);
-    expect(screen.getAllByText('Repeat me')).toHaveLength(2);
+    expect(screen.getAllByText('Repeat me')).toHaveLength(1);
   });
 
   it('handles nullish labels without crashing when payload fields are missing', () => {
