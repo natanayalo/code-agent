@@ -673,6 +673,56 @@ def test_gemini_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path)
     assert result.artifacts[0].name == "workspace"
 
 
+def test_gemini_cli_worker_native_mode_honors_read_only_constraint(tmp_path: Path) -> None:
+    """Read-only constraints should map Gemini native runs to plan approval mode."""
+    adapter = _ScriptedAdapter([])
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(container)
+    worker = GeminiCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+    )
+    native_result = NativeAgentRunResult(
+        status="success",
+        summary="Native command completed.",
+        command="gemini --output-format json --approval-mode plan",
+        exit_code=0,
+        duration_seconds=0.4,
+        timed_out=False,
+        final_message='{"status":"passed","summary":"verification passed"}',
+        diff_text="",
+        files_changed=[],
+        artifacts=[],
+        stdout='{"response":"ok"}',
+        stderr="",
+    )
+
+    with patch(
+        "workers.gemini_cli_worker.run_native_agent",
+        return_value=native_result,
+    ) as run_native:
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-native-read-only",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Verify read-only behavior",
+                    constraints={"read_only": True},
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                )
+            )
+        )
+
+    assert result.status == "success"
+    command = run_native.call_args.args[0].command
+    assert "--approval-mode" in command
+    assert command[command.index("--approval-mode") + 1] == "plan"
+
+
 def test_gemini_cli_worker_rejects_non_execution_runtime_modes(tmp_path: Path) -> None:
     """Planner/reviewer runtime modes should fail fast for Gemini execution worker."""
     workspace = _make_workspace(tmp_path)
