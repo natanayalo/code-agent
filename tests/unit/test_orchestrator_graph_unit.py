@@ -540,6 +540,80 @@ def test_compute_route_profile_aware_selects_native_default_for_codex() -> None:
     assert route.route_reason == "cheap_mechanical_change"
 
 
+def test_compute_route_profile_aware_keeps_legacy_tool_loop_out_of_default_selection() -> None:
+    """Native codex profile should stay the default even when legacy tool-loop is configured."""
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "add helper"}, "task_kind": "implementation"}
+    )
+    profiles = {
+        "codex-native-executor": WorkerProfile(
+            name="codex-native-executor",
+            worker_type="codex",
+            runtime_mode="native_agent",
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
+        ),
+        "codex-tool-loop-executor": WorkerProfile(
+            name="codex-tool-loop-executor",
+            worker_type="codex",
+            runtime_mode="tool_loop",
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            metadata={"legacy_mode": True},
+        ),
+    }
+    route = _compute_route_decision(
+        state,
+        frozenset({"codex"}),
+        available_profiles=profiles,
+    )
+
+    assert route.chosen_worker == "codex"
+    assert route.chosen_profile == "codex-native-executor"
+    assert route.runtime_mode == "native_agent"
+    assert route.route_reason == "cheap_mechanical_change"
+
+
+def test_compute_route_profile_override_allows_explicit_legacy_tool_loop_opt_in() -> None:
+    """Explicit profile overrides should still allow codex legacy tool-loop execution."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "use explicit legacy profile",
+                "worker_profile_override": "codex-tool-loop-executor",
+            }
+        }
+    )
+    profiles = {
+        "codex-native-executor": WorkerProfile(
+            name="codex-native-executor",
+            worker_type="codex",
+            runtime_mode="native_agent",
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
+        ),
+        "codex-tool-loop-executor": WorkerProfile(
+            name="codex-tool-loop-executor",
+            worker_type="codex",
+            runtime_mode="tool_loop",
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            metadata={"legacy_mode": True},
+        ),
+    }
+    route = _compute_route_decision(
+        state,
+        frozenset({"codex"}),
+        available_profiles=profiles,
+    )
+
+    assert route.chosen_worker == "codex"
+    assert route.chosen_profile == "codex-tool-loop-executor"
+    assert route.runtime_mode == "tool_loop"
+    assert route.route_reason == "manual_profile_override"
+    assert route.override_applied is True
+
+
 def test_compute_route_profile_override_unavailable_fails_explicitly() -> None:
     """Unavailable profile overrides should fail explicitly rather than silently falling back."""
     state = OrchestratorState.model_validate(

@@ -62,16 +62,26 @@ Before routing, the orchestrator builds and persists a TaskSpec so workers, APIs
 Profile-aware routing toggle and mapping:
 
 - Enable profile-aware routing with `CODE_AGENT_WORKER_PROFILES_ENABLED=1` (wired in API bootstrap).
-- Runtime mode defaults/overrides come from `CODE_AGENT_CODEX_RUNTIME_MODE` and `CODE_AGENT_GEMINI_RUNTIME_MODE`.
+- Codex/Gemini default runtime mode is pinned to `native_agent`.
+- `CODE_AGENT_CODEX_RUNTIME_MODE` and `CODE_AGENT_GEMINI_RUNTIME_MODE` still accept
+  `native_agent|tool_loop`, but `tool_loop` now emits a deprecation warning and is ignored for
+  defaults.
+- Legacy Codex/Gemini `tool_loop` execution profiles are opt-in via
+  `CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED=1` and
+  `CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED=1`.
+- Legacy Codex/Gemini profiles are intended for explicit per-task opt-in through
+  `worker_profile_override`; default selection remains native-agent.
 - OpenRouter legacy execution profile is added only when OpenRouter is configured and `CODE_AGENT_OPENROUTER_ENABLED=1`.
 - Execution routing then filters profiles by worker availability, execution capability tag, read-only vs patch-allowed mutation policy, and delivery-mode compatibility before selecting a concrete profile.
 
 Current default profile matrix:
 
-- **Codex execution**: `codex-native-executor` or `codex-tool-loop-executor` with explicit read-only variants `codex-native-executor-read-only` and `codex-tool-loop-executor-read-only`
-- **Gemini execution**: `gemini-native-executor` or `gemini-tool-loop-executor` with explicit read-only variants `gemini-native-executor-read-only` and `gemini-tool-loop-executor-read-only`
+- **Codex execution**: `codex-native-executor` with explicit read-only variant `codex-native-executor-read-only`
+- **Gemini execution**: `gemini-native-executor` with explicit read-only variant `gemini-native-executor-read-only`
 - **Gemini specialist profiles** (native mode): `gemini-native-planner` and `gemini-native-reviewer`
 - **OpenRouter legacy execution**: `openrouter-tool-loop-legacy` (explicit opt-in only)
+- **Optional Codex/Gemini legacy execution**: `*-tool-loop-executor` profiles are available only
+  when the corresponding `*_TOOL_LOOP_LEGACY_ENABLED` env toggle is set.
 
 The selected worker/profile/runtime metadata is persisted on task and worker-run records and returned in task snapshots for operator and dashboard inspection.
 

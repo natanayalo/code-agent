@@ -48,6 +48,7 @@ class WebhookPayload(BaseModel):
     branch: str | None = Field(default=None, max_length=255)
     priority: int = Field(default=0, ge=0)
     worker_override: WorkerType | None = None
+    worker_profile_override: str | None = Field(default=None, min_length=1, max_length=255)
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
 
@@ -108,6 +109,7 @@ def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
         branch=payload.branch,
         priority=payload.priority,
         worker_override=payload.worker_override,
+        worker_profile_override=payload.worker_profile_override,
         constraints=payload.constraints,
         budget=payload.budget,
         callback_url=payload.callback_url,

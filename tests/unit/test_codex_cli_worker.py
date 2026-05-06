@@ -1082,6 +1082,51 @@ def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) 
     assert result.artifacts[0].name == "workspace"
 
 
+def test_codex_cli_worker_warns_when_legacy_tool_loop_mode_is_used(tmp_path: Path) -> None:
+    """Tool-loop execution should emit a deprecation warning for observability."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-tool-loop-warning",
+        image="python:3.12-slim",
+    )
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(container)
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")])
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
+                output="",
+            )
+        }
+    )
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+        session_factory=lambda started_container, **_: session,
+    )
+
+    with patch("workers.codex_cli_worker.logger.warning") as warning_logger:
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-tool-loop-warning",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Inspect only",
+                    runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
+                    worker_profile="codex-tool-loop-executor",
+                )
+            )
+        )
+
+    assert result.status == "success"
+    warning_messages = [call.args[0] for call in warning_logger.call_args_list]
+    assert any("tool_loop runtime mode is deprecated" in message for message in warning_messages)
+
+
 def test_codex_cli_worker_rejects_non_execution_runtime_modes(tmp_path: Path) -> None:
     """Planner/reviewer runtime modes should fail fast for Codex execution worker."""
     workspace = _workspace_handle(tmp_path)

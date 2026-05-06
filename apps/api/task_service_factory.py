@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -63,10 +64,14 @@ NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: Final[str] = (
 )
 INDEPENDENT_VERIFIER_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED"
 ORCHESTRATOR_BRAIN_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED"
+CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED"
+GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED"
 
 # Default profile names
 GEMINI_NATIVE_PLANNER_PROFILE: Final[str] = "gemini-native-planner"
 GEMINI_NATIVE_REVIEWER_PROFILE: Final[str] = "gemini-native-reviewer"
+
+logger = logging.getLogger(__name__)
 
 
 def _is_enabled(value: str | None) -> bool:
@@ -112,23 +117,55 @@ def _coerce_execution_runtime_mode(
     return runtime_mode
 
 
+def _resolve_default_runtime_mode(
+    value: str | None,
+    *,
+    default: WorkerRuntimeMode,
+    worker_name: str,
+    env_var_name: str,
+) -> WorkerRuntimeMode:
+    """Resolve default worker runtime mode while hard-deprecating tool-loop defaults."""
+    runtime_mode = _coerce_execution_runtime_mode(
+        value,
+        default=default,
+        worker_name=worker_name,
+    )
+    if runtime_mode == WorkerRuntimeMode.TOOL_LOOP:
+        logger.warning(
+            "Ignoring deprecated %s=%s for %s default runtime mode. "
+            "Defaults are pinned to native_agent; enable legacy tool-loop profiles explicitly "
+            "and use worker_profile_override for per-task opt-in.",
+            env_var_name,
+            runtime_mode.value,
+            worker_name,
+        )
+        return default
+    return runtime_mode
+
+
 def _build_default_worker_profiles(
     *,
     include_gemini: bool,
     include_openrouter: bool,
-    codex_runtime_mode: WorkerRuntimeMode,
-    gemini_runtime_mode: WorkerRuntimeMode,
+    include_codex_legacy_tool_loop: bool,
+    include_gemini_legacy_tool_loop: bool,
 ) -> dict[str, WorkerProfile]:
     """Build the default executable profile map for routing decisions."""
     profiles: dict[str, WorkerProfile] = {}
 
-    def _add_profiles(worker_type: WorkerType, runtime_mode: WorkerRuntimeMode) -> None:
+    def _add_profiles(
+        worker_type: WorkerType,
+        runtime_mode: WorkerRuntimeMode,
+        *,
+        legacy_mode: bool = False,
+    ) -> None:
         """Helper to add standard and read-only profiles for a worker."""
         profile_name = (
             f"{worker_type}-native-executor"
             if runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
             else f"{worker_type}-tool-loop-executor"
         )
+        metadata = {"legacy_mode": True} if legacy_mode else {}
         # Standard profile
         profiles[profile_name] = WorkerProfile(
             name=profile_name,
@@ -139,6 +176,7 @@ def _build_default_worker_profiles(
             permission_profile="workspace_write",
             mutation_policy="patch_allowed",
             self_review_policy="on_failure",
+            metadata=metadata,
         )
         # Read-only profile
         ro_name = f"{profile_name}-read-only"
@@ -151,33 +189,38 @@ def _build_default_worker_profiles(
             permission_profile="read_only",
             mutation_policy="read_only",
             self_review_policy="on_failure",
+            metadata=metadata,
         )
 
-    _add_profiles("codex", codex_runtime_mode)
+    _add_profiles("codex", WorkerRuntimeMode.NATIVE_AGENT)
+    if include_codex_legacy_tool_loop:
+        _add_profiles("codex", WorkerRuntimeMode.TOOL_LOOP, legacy_mode=True)
+
     if include_gemini:
-        _add_profiles("gemini", gemini_runtime_mode)
+        _add_profiles("gemini", WorkerRuntimeMode.NATIVE_AGENT)
+        if include_gemini_legacy_tool_loop:
+            _add_profiles("gemini", WorkerRuntimeMode.TOOL_LOOP, legacy_mode=True)
         # Add specialized profiles for Gemini (T-142)
-        if gemini_runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
-            profiles[GEMINI_NATIVE_PLANNER_PROFILE] = WorkerProfile(
-                name=GEMINI_NATIVE_PLANNER_PROFILE,
-                worker_type="gemini",
-                runtime_mode=WorkerRuntimeMode.PLANNER_ONLY,
-                capability_tags=["planning"],
-                supported_delivery_modes=["workspace", "branch", "draft_pr"],
-                permission_profile="workspace_write",
-                mutation_policy="patch_allowed",
-                self_review_policy="on_failure",
-            )
-            profiles[GEMINI_NATIVE_REVIEWER_PROFILE] = WorkerProfile(
-                name=GEMINI_NATIVE_REVIEWER_PROFILE,
-                worker_type="gemini",
-                runtime_mode=WorkerRuntimeMode.REVIEWER_ONLY,
-                capability_tags=["review"],
-                supported_delivery_modes=["workspace", "branch", "draft_pr"],
-                permission_profile="workspace_write",
-                mutation_policy="patch_allowed",
-                self_review_policy="on_failure",
-            )
+        profiles[GEMINI_NATIVE_PLANNER_PROFILE] = WorkerProfile(
+            name=GEMINI_NATIVE_PLANNER_PROFILE,
+            worker_type="gemini",
+            runtime_mode=WorkerRuntimeMode.PLANNER_ONLY,
+            capability_tags=["planning"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            permission_profile="workspace_write",
+            mutation_policy="patch_allowed",
+            self_review_policy="on_failure",
+        )
+        profiles[GEMINI_NATIVE_REVIEWER_PROFILE] = WorkerProfile(
+            name=GEMINI_NATIVE_REVIEWER_PROFILE,
+            worker_type="gemini",
+            runtime_mode=WorkerRuntimeMode.REVIEWER_ONLY,
+            capability_tags=["review"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            permission_profile="workspace_write",
+            mutation_policy="patch_allowed",
+            self_review_policy="on_failure",
+        )
 
     if include_openrouter:
         profiles["openrouter-tool-loop-legacy"] = WorkerProfile(
@@ -253,15 +296,17 @@ def build_task_service_from_env(
         if resolved_sandbox_image
         else DockerSandboxContainerManager()
     )
-    codex_runtime_mode = _coerce_execution_runtime_mode(
+    codex_runtime_mode = _resolve_default_runtime_mode(
         resolved_env.get(CODEX_RUNTIME_MODE_ENV_VAR),
         default=WorkerRuntimeMode.NATIVE_AGENT,
         worker_name="Codex",
+        env_var_name=CODEX_RUNTIME_MODE_ENV_VAR,
     )
-    gemini_runtime_mode = _coerce_execution_runtime_mode(
+    gemini_runtime_mode = _resolve_default_runtime_mode(
         resolved_env.get(GEMINI_RUNTIME_MODE_ENV_VAR),
         default=WorkerRuntimeMode.NATIVE_AGENT,
         worker_name="Gemini",
+        env_var_name=GEMINI_RUNTIME_MODE_ENV_VAR,
     )
 
     codex_worker = CodexCliWorker(
@@ -301,8 +346,13 @@ def build_task_service_from_env(
                 openrouter_worker is not None
                 and _is_enabled(resolved_env.get(OPENROUTER_ENABLED_ENV_VAR))
             ),
-            codex_runtime_mode=codex_runtime_mode,
-            gemini_runtime_mode=gemini_runtime_mode,
+            include_codex_legacy_tool_loop=_is_enabled(
+                resolved_env.get(CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR)
+            ),
+            include_gemini_legacy_tool_loop=(
+                gemini_worker is not None
+                and _is_enabled(resolved_env.get(GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR))
+            ),
         )
     if outbound_http_clients is None:
         raise RuntimeError(

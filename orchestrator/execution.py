@@ -353,6 +353,7 @@ class TaskSubmission(ExecutionModel):
     branch: str | None = None
     priority: int = Field(default=0, ge=0)
     worker_override: WorkerType | None = None
+    worker_profile_override: str | None = Field(default=None, min_length=1, max_length=255)
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
@@ -568,6 +569,8 @@ class OperationalMetrics(ExecutionModel):
     retry_rate: float
     status_counts: dict[str, int]
     worker_usage: dict[str, int]
+    runtime_mode_usage: dict[str, int]
+    legacy_tool_loop_usage: dict[str, int]
     avg_duration_seconds: float
     success_rate: float
 
@@ -647,7 +650,9 @@ class ApprovalDecisionResult:
 _REPLAYABLE_STATUSES: frozenset[str] = frozenset(
     {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value, TaskStatus.CANCELLED.value}
 )
-_RESERVED_INTERNAL_CONSTRAINT_KEYS: frozenset[str] = frozenset({"approval"})
+_RESERVED_INTERNAL_CONSTRAINT_KEYS: frozenset[str] = frozenset(
+    {"approval", "worker_profile_override"}
+)
 
 
 @dataclass(frozen=True)
@@ -2227,6 +2232,8 @@ class TaskExecutionService:
                 retry_rate=task_metrics["retry_rate"],
                 status_counts=task_metrics["status_counts"],
                 worker_usage=run_metrics["worker_usage"],
+                runtime_mode_usage=run_metrics["runtime_mode_usage"],
+                legacy_tool_loop_usage=run_metrics["legacy_tool_loop_usage"],
                 avg_duration_seconds=run_metrics["avg_duration_seconds"],
                 success_rate=run_metrics["success_rate"],
             )
@@ -2361,6 +2368,16 @@ class TaskExecutionService:
             task_repo = TaskRepository(session)
             interaction_repo = HumanInteractionRepository(session)
             sanitized_constraints = _sanitize_submission_constraints(submission.constraints)
+            persisted_constraints = dict(sanitized_constraints)
+            if (
+                isinstance(submission.worker_profile_override, str)
+                and submission.worker_profile_override.strip()
+            ):
+                persisted_constraints["worker_profile_override"] = (
+                    submission.worker_profile_override.strip()
+                )
+            if submission.tools is not None:
+                persisted_constraints["tools"] = submission.tools
             task_spec = build_task_spec(
                 task_text=submission.task_text,
                 repo_url=submission.repo_url,
@@ -2404,13 +2421,8 @@ class TaskExecutionService:
                 secrets=dict(submission.secrets),
                 task_spec=task_spec,
                 trace_context=trace_context,
-                # Store tools in constraints to avoid a schema migration for now
-                constraints={
-                    **sanitized_constraints,
-                    "tools": submission.tools,
-                }
-                if submission.tools is not None
-                else dict(sanitized_constraints),
+                # Store request-level overrides in constraints to avoid a schema migration for now.
+                constraints=persisted_constraints,
                 secrets_encrypted=self.is_secret_encryption_active(),
                 status=status,
                 max_attempts=max(1, max_attempts),
@@ -2585,6 +2597,7 @@ class TaskExecutionService:
                     if submission.worker_override is not None
                     else None
                 ),
+                "worker_profile_override": submission.worker_profile_override,
                 "constraints": dict(submission.constraints),
                 "budget": effective_budget,
                 "secrets": dict(submission.secrets),
@@ -2628,18 +2641,23 @@ class TaskExecutionService:
             user = user_repo.get(conversation_session.user_id)
             if user is None:
                 return None
+            task_constraints = dict(task.constraints or {})
+            worker_profile_override = task_constraints.pop("worker_profile_override", None)
             submission = TaskSubmission(
                 task_text=task.task_text,
                 repo_url=task.repo_url,
                 branch=task.branch,
                 worker_override=task.worker_override,
-                constraints=dict(task.constraints or {}),
+                worker_profile_override=(
+                    worker_profile_override.strip()
+                    if isinstance(worker_profile_override, str) and worker_profile_override.strip()
+                    else None
+                ),
+                constraints=task_constraints,
                 budget=dict(task.budget or {}),
                 secrets=dict(task.secrets or {}),
                 callback_url=task.callback_url,
-                tools=(task.constraints or {}).get("tools")
-                if isinstance(task.constraints, dict)
-                else None,
+                tools=task_constraints.get("tools"),
                 priority=task.priority,
                 session=SubmissionSession(
                     channel=conversation_session.channel,

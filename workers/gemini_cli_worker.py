@@ -856,6 +856,16 @@ class GeminiCliWorker(Worker):
 
         try:
             runtime_mode = self._resolve_runtime_mode(request)
+            if runtime_mode == WorkerRuntimeMode.TOOL_LOOP:
+                logger.warning(
+                    "Gemini tool_loop runtime mode is deprecated. "
+                    "Prefer native_agent defaults; keep tool_loop only for explicit legacy opt-in.",
+                    extra={
+                        "session_id": request.session_id,
+                        "worker_profile": request.worker_profile,
+                        "runtime_mode": runtime_mode.value,
+                    },
+                )
             if runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
                 runtime_settings = settings_from_budget(
                     request.budget,

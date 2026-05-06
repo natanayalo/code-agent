@@ -2211,8 +2211,8 @@ def test_persist_execution_outcome_accepts_raw_verification_mapping() -> None:
     }
 
 
-def test_load_submission_for_task_restores_constraints_budget_and_worker_override() -> None:
-    """Queued task loading should preserve execution controls from the submitted payload."""
+def test_load_submission_for_task_restores_execution_overrides_and_budget() -> None:
+    """Queued task loading should preserve worker/profile overrides plus constraints and budget."""
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -2230,6 +2230,7 @@ def test_load_submission_for_task_restores_constraints_budget_and_worker_overrid
             task_text="Needs approval",
             repo_url="https://github.com/natanayalo/code-agent",
             worker_override="gemini",
+            worker_profile_override="gemini-tool-loop-executor",
             constraints={"requires_approval": True, "approval_reason": "manual gate"},
             budget={"max_iterations": 5},
         )
@@ -2239,6 +2240,7 @@ def test_load_submission_for_task_restores_constraints_budget_and_worker_overrid
     assert loaded is not None
     submission, _ = loaded
     assert submission.worker_override == "gemini"
+    assert submission.worker_profile_override == "gemini-tool-loop-executor"
     assert submission.constraints == {"requires_approval": True, "approval_reason": "manual gate"}
     assert submission.budget == {"max_iterations": 5}
 

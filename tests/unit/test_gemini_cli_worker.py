@@ -723,6 +723,49 @@ def test_gemini_cli_worker_native_mode_honors_read_only_constraint(tmp_path: Pat
     assert command[command.index("--approval-mode") + 1] == "plan"
 
 
+def test_gemini_cli_worker_warns_when_legacy_tool_loop_mode_is_used(tmp_path: Path) -> None:
+    """Tool-loop execution should emit a deprecation warning for observability."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(container)
+    adapter = _ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")])
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): DockerShellCommandResult(
+                command=_git_status_command(container.working_dir),
+                exit_code=0,
+                output="",
+                duration_seconds=0.0,
+            ),
+        }
+    )
+    worker = GeminiCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+        session_factory=lambda _, **__: session,
+    )
+
+    with patch("workers.gemini_cli_worker.logger.warning") as warning_logger:
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-gemini-tool-loop-warning",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Inspect only",
+                    runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
+                    worker_profile="gemini-tool-loop-executor",
+                )
+            )
+        )
+
+    assert result.status == "success"
+    warning_messages = [call.args[0] for call in warning_logger.call_args_list]
+    assert any("tool_loop runtime mode is deprecated" in message for message in warning_messages)
+
+
 def test_gemini_cli_worker_rejects_non_execution_runtime_modes(tmp_path: Path) -> None:
     """Planner/reviewer runtime modes should fail fast for Gemini execution worker."""
     workspace = _make_workspace(tmp_path)
