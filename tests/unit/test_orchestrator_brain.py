@@ -1,0 +1,230 @@
+"""Unit tests for orchestrator brain route recommendation behavior."""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from orchestrator.brain import RuleBasedOrchestratorBrain
+from orchestrator.state import OrchestratorState
+from workers import Worker, WorkerRequest, WorkerResult
+
+
+class _StaticWorker(Worker):
+    """Worker test double returning a predefined result."""
+
+    def __init__(self, result: WorkerResult) -> None:
+        self.result = result
+        self.requests: list[WorkerRequest] = []
+
+    async def run(
+        self,
+        request: WorkerRequest,
+        *,
+        system_prompt: str | None = None,
+    ) -> WorkerResult:
+        self.requests.append(request)
+        assert system_prompt is not None
+        return self.result
+
+
+class _ExplodingWorker(Worker):
+    """Worker test double raising an exception."""
+
+    async def run(
+        self,
+        request: WorkerRequest,
+        *,
+        system_prompt: str | None = None,
+    ) -> WorkerResult:
+        del request, system_prompt
+        raise RuntimeError("planner crashed")
+
+
+class _SlowWorker(Worker):
+    """Worker test double sleeping long enough to trigger timeout."""
+
+    async def run(
+        self,
+        request: WorkerRequest,
+        *,
+        system_prompt: str | None = None,
+    ) -> WorkerResult:
+        del request, system_prompt
+        await asyncio.sleep(1.1)
+        return WorkerResult(status="success", summary='{"suggested_worker":"codex"}')
+
+
+def _state() -> OrchestratorState:
+    return OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Route this task"},
+            "task_kind": "implementation",
+        }
+    )
+
+
+def test_suggest_route_parses_plain_json_payload() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(
+            WorkerResult(
+                status="success",
+                summary=(
+                    '{"suggested_worker":"codex","suggested_profile":null,'
+                    '"rationale":"prefer codex"}'
+                ),
+            )
+        )
+    )
+
+    suggestion = asyncio.run(
+        brain.suggest_route(
+            state=_state(),
+            available_workers=frozenset({"codex", "gemini"}),
+            available_profiles=None,
+        )
+    )
+
+    assert suggestion is not None
+    assert suggestion.suggested_worker == "codex"
+    assert suggestion.suggested_profile is None
+    assert suggestion.rationale == "prefer codex"
+
+
+def test_suggest_route_parses_fenced_json_payload() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(
+            WorkerResult(
+                status="success",
+                summary=(
+                    "```json\n"
+                    '{"suggested_worker":"gemini","suggested_profile":"gemini-native-executor",'
+                    '"rationale":"complex task"}\n'
+                    "```"
+                ),
+            )
+        )
+    )
+
+    suggestion = asyncio.run(
+        brain.suggest_route(
+            state=_state(),
+            available_workers=frozenset({"codex", "gemini"}),
+            available_profiles=None,
+        )
+    )
+
+    assert suggestion is not None
+    assert suggestion.suggested_worker == "gemini"
+    assert suggestion.suggested_profile == "gemini-native-executor"
+    assert suggestion.rationale == "complex task"
+
+
+def test_suggest_route_requires_planner_worker() -> None:
+    brain = RuleBasedOrchestratorBrain(planner_worker=None)
+
+    with pytest.raises(RuntimeError, match="planner worker not wired"):
+        asyncio.run(
+            brain.suggest_route(
+                state=_state(),
+                available_workers=frozenset({"codex"}),
+                available_profiles=None,
+            )
+        )
+
+
+def test_suggest_route_rejects_empty_summary() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(WorkerResult(status="success", summary=""))
+    )
+
+    with pytest.raises(RuntimeError, match="empty summary"):
+        asyncio.run(
+            brain.suggest_route(
+                state=_state(),
+                available_workers=frozenset({"codex"}),
+                available_profiles=None,
+            )
+        )
+
+
+def test_suggest_route_rejects_malformed_json() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(WorkerResult(status="success", summary="not-json"))
+    )
+
+    with pytest.raises(RuntimeError, match="invalid JSON"):
+        asyncio.run(
+            brain.suggest_route(
+                state=_state(),
+                available_workers=frozenset({"codex"}),
+                available_profiles=None,
+            )
+        )
+
+
+def test_suggest_route_rejects_non_success_worker_result() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(
+            WorkerResult(status="failure", summary="planner could not complete")
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="non-success status"):
+        asyncio.run(
+            brain.suggest_route(
+                state=_state(),
+                available_workers=frozenset({"codex"}),
+                available_profiles=None,
+            )
+        )
+
+
+def test_suggest_route_surfaces_unavailable_planner_profile() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(
+            WorkerResult(
+                status="failure",
+                summary="worker profile 'gemini-native-planner' is unavailable",
+            )
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="non-success status"):
+        asyncio.run(
+            brain.suggest_route(
+                state=_state(),
+                available_workers=frozenset({"codex"}),
+                available_profiles=None,
+            )
+        )
+
+
+def test_suggest_route_surfaces_worker_exception() -> None:
+    brain = RuleBasedOrchestratorBrain(planner_worker=_ExplodingWorker())
+
+    with pytest.raises(RuntimeError, match="planner crashed"):
+        asyncio.run(
+            brain.suggest_route(
+                state=_state(),
+                available_workers=frozenset({"codex"}),
+                available_profiles=None,
+            )
+        )
+
+
+def test_suggest_route_times_out_when_planner_slow() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_SlowWorker(),
+        planner_timeout_seconds=1,
+    )
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        asyncio.run(
+            brain.suggest_route(
+                state=_state(),
+                available_workers=frozenset({"codex"}),
+                available_profiles=None,
+            )
+        )

@@ -168,6 +168,31 @@ def test_build_task_service_from_env_enables_orchestrator_brain_flag(
         _close_outbound_http_clients(outbound_http_clients)
 
 
+def test_build_task_service_from_env_wires_planner_worker_into_orchestrator_brain(
+    tmp_path: Path,
+) -> None:
+    """Brain-enabled bootstrap should wire Gemini as the planner backend when available."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED": "1",
+            "CODE_AGENT_GEMINI_CLI_BIN": "/usr/local/bin/gemini",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert isinstance(service.orchestrator_brain, RuleBasedOrchestratorBrain)
+        assert service.gemini_worker is not None
+        assert service.orchestrator_brain.planner_worker is service.gemini_worker
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
 def test_build_task_service_from_env_enables_profile_routing_with_defaults(
     tmp_path: Path,
 ) -> None:

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from orchestrator.brain import TaskSpecBrainSuggestion
+from orchestrator.brain import RouteBrainSuggestion, TaskSpecBrainSuggestion
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.graph import (
     _await_worker_with_timeout,
@@ -878,9 +878,157 @@ def test_build_choose_worker_node_binds_available_workers():
     )
     # With only codex available, gemini-preferred architecture task falls back to codex.
     node = build_choose_worker_node(frozenset({"codex"}))
-    res = node(state)
+    res = asyncio.run(node(state))
     assert res["route"]["chosen_worker"] == "codex"
     assert res["route"]["route_reason"] == "preferred_unavailable"
+
+
+def test_build_choose_worker_node_applies_brain_worker_suggestion() -> None:
+    class _Brain:
+        def suggest_task_spec(self, **kwargs):
+            del kwargs
+            return None
+
+        async def suggest_route(self, **kwargs):
+            del kwargs
+            return RouteBrainSuggestion(
+                suggested_worker="gemini",
+                rationale="Prefer higher-quality reasoning for this task.",
+            )
+
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "implement change"}, "task_kind": "implementation"}
+    )
+    node = build_choose_worker_node(
+        _ALL_WORKERS,
+        orchestrator_brain=_Brain(),
+    )
+    res = asyncio.run(node(state))
+
+    assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["route_reason"] == "brain_recommendation"
+    brain_payload = res["timeline_events"][0].payload["brain"]
+    assert brain_payload["provider"] == "_Brain"
+    assert brain_payload["applied"] is True
+    assert brain_payload["ignored_fields"] == []
+    assert brain_payload["final_chosen_worker"] == "gemini"
+    assert brain_payload["final_route_reason"] == "brain_recommendation"
+
+
+def test_build_choose_worker_node_applies_brain_profile_suggestion_with_worker_clamp() -> None:
+    class _Brain:
+        def suggest_task_spec(self, **kwargs):
+            del kwargs
+            return None
+
+        async def suggest_route(self, **kwargs):
+            del kwargs
+            return RouteBrainSuggestion(
+                suggested_worker="codex",
+                suggested_profile="gemini-native-executor",
+                rationale="Use the gemini native profile despite worker hint mismatch.",
+            )
+
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "investigate behavior"}, "task_kind": "ambiguous"}
+    )
+    node = build_choose_worker_node(
+        _ALL_WORKERS,
+        available_profiles=_PROFILED_CODEX_GEMINI,
+        orchestrator_brain=_Brain(),
+    )
+    res = asyncio.run(node(state))
+
+    assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["chosen_profile"] == "gemini-native-executor"
+    assert res["route"]["runtime_mode"] == "native_agent"
+    assert res["route"]["route_reason"] == "brain_recommendation"
+    brain_payload = res["timeline_events"][0].payload["brain"]
+    assert brain_payload["applied"] is True
+    assert brain_payload["ignored_fields"] == ["suggested_worker"]
+    assert brain_payload["final_chosen_profile"] == "gemini-native-executor"
+
+
+def test_build_choose_worker_node_falls_back_when_brain_suggestion_is_unavailable() -> None:
+    class _Brain:
+        def suggest_task_spec(self, **kwargs):
+            del kwargs
+            return None
+
+        async def suggest_route(self, **kwargs):
+            del kwargs
+            return RouteBrainSuggestion(
+                suggested_worker="openrouter",
+                rationale="Prefer openrouter.",
+            )
+
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "refactor module"}, "task_kind": "architecture"}
+    )
+    node = build_choose_worker_node(
+        _CODEX_ONLY,
+        orchestrator_brain=_Brain(),
+    )
+    res = asyncio.run(node(state))
+
+    assert res["route"]["chosen_worker"] == "codex"
+    assert res["route"]["route_reason"] == "preferred_unavailable"
+    brain_payload = res["timeline_events"][0].payload["brain"]
+    assert brain_payload["applied"] is False
+    assert brain_payload["ignored_fields"] == ["suggested_worker"]
+    assert brain_payload["final_chosen_worker"] == "codex"
+    assert brain_payload["final_route_reason"] == "preferred_unavailable"
+
+
+def test_build_choose_worker_node_skips_brain_for_manual_override() -> None:
+    class _Brain:
+        def suggest_task_spec(self, **kwargs):
+            del kwargs
+            return None
+
+        async def suggest_route(self, **kwargs):
+            del kwargs
+            return RouteBrainSuggestion(suggested_worker="codex")
+
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "demo", "worker_override": "gemini"}}
+    )
+    node = build_choose_worker_node(
+        _ALL_WORKERS,
+        orchestrator_brain=_Brain(),
+    )
+    res = asyncio.run(node(state))
+
+    assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["route_reason"] == "manual_override"
+    assert "brain" not in res["timeline_events"][0].payload
+
+
+def test_build_choose_worker_node_reports_brain_errors_and_falls_back() -> None:
+    class _ExplodingBrain:
+        def suggest_task_spec(self, **kwargs):
+            del kwargs
+            return None
+
+        async def suggest_route(self, **kwargs):
+            del kwargs
+            raise RuntimeError("planner unavailable")
+
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "add helper"}, "task_kind": "implementation"}
+    )
+    node = build_choose_worker_node(
+        _ALL_WORKERS,
+        orchestrator_brain=_ExplodingBrain(),
+    )
+    res = asyncio.run(node(state))
+
+    assert res["route"]["chosen_worker"] == "codex"
+    assert res["route"]["route_reason"] == "cheap_mechanical_change"
+    brain_payload = res["timeline_events"][0].payload["brain"]
+    assert brain_payload["provider"] == "_ExplodingBrain"
+    assert brain_payload["applied"] is False
+    assert brain_payload["error"] == "RuntimeError: planner unavailable"
 
 
 def test_compute_route_neither_worker_available():
