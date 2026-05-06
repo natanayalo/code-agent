@@ -8,7 +8,7 @@ import logging
 import re
 from collections.abc import Mapping
 from enum import Enum
-from typing import Any, Final, Protocol, cast
+from typing import Any, Final, Literal, Protocol, cast
 
 from pydantic import Field
 
@@ -48,9 +48,28 @@ Output contract:
   {
     "suggested_worker": "codex" | "gemini" | "openrouter" | null,
     "suggested_profile": "<profile-name>" | null,
+    "suggested_retry_strategy": "retry_same_worker" | "escalate_to_alternate" | null,
+    "accept_warning_status": true | false | null,
     "rationale": "<short reason>"
   }
-- Set at least one of suggested_worker or suggested_profile.
+- Set at least one of suggested_worker, suggested_profile, or suggested_retry_strategy.
+""".strip()
+
+_VERIFICATION_SYSTEM_PROMPT = """
+You are an orchestrator verification-acceptance assistant.
+
+Task:
+- Review verification context and suggest whether warning-level outcomes may be accepted.
+- Your suggestion is advisory only and will be clamped by deterministic policy.
+- Never suggest suppressing hard failures.
+
+Output contract:
+- Return exactly one JSON object, and no extra prose.
+- JSON schema:
+  {
+    "accept_warning_status": true | false | null,
+    "rationale": "<short reason>"
+  }
 """.strip()
 
 _TASK_SPEC_SYSTEM_PROMPT = """
@@ -159,6 +178,8 @@ class RouteBrainSuggestion(OrchestratorModel):
 
     suggested_worker: WorkerType | None = None
     suggested_profile: str | None = None
+    suggested_retry_strategy: Literal["retry_same_worker", "escalate_to_alternate"] | None = None
+    accept_warning_status: bool | None = None
     rationale: str | None = None
 
 
@@ -170,6 +191,8 @@ class RouteBrainMergeReport(OrchestratorModel):
     applied: bool = False
     suggested_worker: WorkerType | None = None
     suggested_profile: str | None = None
+    suggested_retry_strategy: Literal["retry_same_worker", "escalate_to_alternate"] | None = None
+    accept_warning_status: bool | None = None
     ignored_fields: list[str] = Field(default_factory=list)
     rationale: str | None = None
     error: str | None = None
@@ -177,6 +200,26 @@ class RouteBrainMergeReport(OrchestratorModel):
     final_chosen_profile: str | None = None
     final_runtime_mode: WorkerRuntimeMode | None = None
     final_route_reason: str | None = None
+
+
+class VerificationBrainSuggestion(OrchestratorModel):
+    """Structured verification acceptance recommendation from an optional brain."""
+
+    accept_warning_status: bool | None = None
+    rationale: str | None = None
+
+
+class VerificationBrainMergeReport(OrchestratorModel):
+    """Audit details about how verification brain suggestions were applied or ignored."""
+
+    enabled: bool = True
+    provider: str | None = None
+    applied: bool = False
+    accept_warning_status: bool | None = None
+    ignored_fields: list[str] = Field(default_factory=list)
+    rationale: str | None = None
+    error: str | None = None
+    final_verification_status: Literal["passed", "failed", "warning"] | None = None
 
 
 class OrchestratorBrain(Protocol):
@@ -200,6 +243,15 @@ class OrchestratorBrain(Protocol):
         available_profiles: Mapping[str, WorkerProfile] | None = None,
     ) -> RouteBrainSuggestion | None:
         """Return structured route suggestions, or None when no suggestion is needed."""
+
+    async def suggest_verification(
+        self,
+        *,
+        state: OrchestratorState,
+        independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str]
+        | None = None,
+    ) -> VerificationBrainSuggestion | None:
+        """Return structured verification-acceptance suggestions, or None."""
 
 
 class RuleBasedOrchestratorBrain:
@@ -534,10 +586,157 @@ class RuleBasedOrchestratorBrain:
         suggestion = RouteBrainSuggestion(
             suggested_worker=_coerce_worker_type(payload.get("suggested_worker")),
             suggested_profile=suggested_profile,
+            suggested_retry_strategy=payload.get("suggested_retry_strategy"),
+            accept_warning_status=(
+                payload.get("accept_warning_status")
+                if isinstance(payload.get("accept_warning_status"), bool)
+                else None
+            ),
             rationale=rationale,
         )
-        if suggestion.suggested_worker is None and suggestion.suggested_profile is None:
+        if (
+            suggestion.suggested_worker is None
+            and suggestion.suggested_profile is None
+            and suggestion.suggested_retry_strategy is None
+        ):
             raise RuntimeError(
-                "planner route recommendation omitted both suggested_worker and suggested_profile"
+                "planner route recommendation omitted worker/profile and retry strategy hints"
             )
         return suggestion
+
+    async def suggest_verification(
+        self,
+        *,
+        state: OrchestratorState,
+        independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str]
+        | None = None,
+    ) -> VerificationBrainSuggestion | None:
+        """Use the planner worker to produce structured verification-acceptance hints."""
+        if self.planner_worker is None:
+            raise RuntimeError(
+                "planner verification recommendation unavailable: planner worker not wired"
+            )
+
+        task_text = state.normalized_task_text or state.task.task_text
+        verification_context = {
+            "task_text": task_text,
+            "task_kind": state.task_kind,
+            "attempt_count": state.attempt_count,
+            "dispatch_worker": state.dispatch.worker_type,
+            "worker_result_status": state.result.status if state.result else None,
+            "worker_failure_kind": state.result.failure_kind if state.result else None,
+            "files_changed_count": len(state.result.files_changed) if state.result else 0,
+            "failed_tests_count": len(
+                [
+                    test
+                    for test in (state.result.test_results if state.result else [])
+                    if test.status == "failed"
+                ]
+            ),
+            "independent_verifier_outcome": (
+                {
+                    "status": independent_verifier_outcome[0],
+                    "summary": independent_verifier_outcome[1],
+                }
+                if independent_verifier_outcome is not None
+                else None
+            ),
+            "task_constraints": dict(state.task.constraints),
+            "task_budget": dict(state.task.budget),
+        }
+        context_json = json.dumps(
+            _to_serializable(verification_context),
+            sort_keys=True,
+            default=str,
+        )
+        prompt = (
+            "Return verification acceptance guidance for this orchestration context.\n\n"
+            "Context JSON:\n"
+            f"{context_json}\n"
+        )
+
+        constraints = dict(state.task.constraints)
+        constraints["read_only"] = True
+        constraints.pop("granted_permission", None)
+        budget = dict(state.task.budget)
+        budget["worker_timeout_seconds"] = self.planner_timeout_seconds
+
+        request = WorkerRequest(
+            session_id=state.session.session_id if state.session is not None else None,
+            repo_url=state.task.repo_url,
+            branch=state.task.branch,
+            task_text=prompt,
+            memory_context=state.memory.model_dump(),
+            task_plan=state.task_plan.model_dump(mode="json") if state.task_plan else None,
+            task_spec=state.task_spec.model_dump(mode="json") if state.task_spec else None,
+            constraints=constraints,
+            budget=budget,
+            secrets={},
+            tools=state.task.tools,
+            worker_profile=self.planner_profile,
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        )
+
+        try:
+            async with asyncio.timeout(
+                self.planner_timeout_seconds + DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS
+            ):
+                result = await self.planner_worker.run(
+                    request,
+                    system_prompt=_VERIFICATION_SYSTEM_PROMPT,
+                )
+        except TimeoutError as exc:  # pragma: no cover - covered via tests with stubs
+            raise RuntimeError(
+                "planner verification recommendation timed out after "
+                f"{self.planner_timeout_seconds}s"
+            ) from exc
+        except asyncio.CancelledError:  # pragma: no cover - passthrough
+            raise
+        except Exception as exc:  # pragma: no cover - covered via tests with stubs
+            raise RuntimeError(
+                "planner verification recommendation failed: "
+                f"{type(exc).__name__}: {str(exc).strip() or 'no detail'}"
+            ) from exc
+
+        if result.status != "success":
+            preview = (result.summary or "no summary").strip().replace("\n", " ")
+            if len(preview) > _ROUTE_MAX_SUMMARY_PREVIEW_CHARS:
+                preview = preview[:_ROUTE_MAX_SUMMARY_PREVIEW_CHARS] + "..."
+            raise RuntimeError(
+                "planner verification recommendation returned non-success status "
+                f"'{result.status}': {preview}"
+            )
+
+        raw_summary = (result.summary or "").strip()
+        if not raw_summary:
+            raise RuntimeError("planner verification recommendation returned an empty summary")
+
+        normalized_json = _unwrap_markdown_json_fence(raw_summary)
+        try:
+            payload = json.loads(normalized_json)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "planner verification recommendation returned invalid JSON: "
+                f"{str(exc).strip() or 'parse error'}"
+            ) from exc
+
+        if not isinstance(payload, dict):
+            raise RuntimeError(
+                "planner verification recommendation returned a non-object JSON payload"
+            )
+
+        accept_warning_status = payload.get("accept_warning_status")
+        if not isinstance(accept_warning_status, bool):
+            accept_warning_status = None
+        raw_rationale = payload.get("rationale")
+        rationale = (
+            raw_rationale.strip()
+            if isinstance(raw_rationale, str) and raw_rationale.strip()
+            else None
+        )
+        if accept_warning_status is None and rationale is None:
+            return None
+        return VerificationBrainSuggestion(
+            accept_warning_status=accept_warning_status,
+            rationale=rationale,
+        )

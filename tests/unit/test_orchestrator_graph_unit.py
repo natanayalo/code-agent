@@ -6,7 +6,11 @@ from unittest.mock import patch
 
 import pytest
 
-from orchestrator.brain import RouteBrainSuggestion, TaskSpecBrainSuggestion
+from orchestrator.brain import (
+    RouteBrainSuggestion,
+    TaskSpecBrainSuggestion,
+    VerificationBrainSuggestion,
+)
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.graph import (
     _await_worker_with_timeout,
@@ -1108,6 +1112,132 @@ def test_build_choose_worker_node_reports_brain_errors_and_falls_back() -> None:
     assert brain_payload["error"] == "RuntimeError: planner unavailable"
 
 
+def test_build_choose_worker_node_applies_brain_retry_same_worker_hint() -> None:
+    class _Brain:
+        def suggest_task_spec(self, **kwargs):
+            del kwargs
+            return None
+
+        async def suggest_route(self, **kwargs):
+            del kwargs
+            return RouteBrainSuggestion(
+                suggested_retry_strategy="retry_same_worker",
+                rationale="Retry provider/auth issues on the same worker.",
+            )
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "fix auth issue"},
+            "attempt_count": 1,
+            "dispatch": {"worker_type": "codex"},
+            "result": {
+                "status": "error",
+                "failure_kind": "provider_auth",
+                "commands_run": [],
+                "files_changed": [],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    node = build_choose_worker_node(
+        _ALL_WORKERS,
+        orchestrator_brain=_Brain(),
+    )
+    res = asyncio.run(node(state))
+
+    assert res["route"]["chosen_worker"] == "codex"
+    assert res["route"]["route_reason"] == "brain_retry_same_worker"
+    brain_payload = res["timeline_events"][0].payload["brain"]
+    assert brain_payload["applied"] is True
+    assert brain_payload["suggested_retry_strategy"] == "retry_same_worker"
+    assert brain_payload["final_route_reason"] == "brain_retry_same_worker"
+
+
+def test_build_choose_worker_node_ignores_invalid_brain_retry_hint() -> None:
+    class _Brain:
+        def suggest_task_spec(self, **kwargs):
+            del kwargs
+            return None
+
+        async def suggest_route(self, **kwargs):
+            del kwargs
+            return RouteBrainSuggestion(
+                suggested_retry_strategy="retry_same_worker",
+                rationale="Retry on same worker.",
+            )
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "fix tests"},
+            "attempt_count": 1,
+            "dispatch": {"worker_type": "codex"},
+            "result": {
+                "status": "failure",
+                "failure_kind": "test",
+                "commands_run": [],
+                "files_changed": [],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    node = build_choose_worker_node(
+        _ALL_WORKERS,
+        orchestrator_brain=_Brain(),
+    )
+    res = asyncio.run(node(state))
+
+    assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["route_reason"] == "previous_worker_failed"
+    brain_payload = res["timeline_events"][0].payload["brain"]
+    assert brain_payload["applied"] is False
+    assert brain_payload["ignored_fields"] == ["suggested_retry_strategy"]
+
+
+def test_build_choose_worker_node_applies_brain_retry_escalation_hint() -> None:
+    class _Brain:
+        def suggest_task_spec(self, **kwargs):
+            del kwargs
+            return None
+
+        async def suggest_route(self, **kwargs):
+            del kwargs
+            return RouteBrainSuggestion(
+                suggested_worker="openrouter",
+                suggested_retry_strategy="escalate_to_alternate",
+                rationale="Escalate to openrouter for alternate perspective.",
+            )
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "fix tests"},
+            "attempt_count": 1,
+            "dispatch": {"worker_type": "codex"},
+            "result": {
+                "status": "failure",
+                "failure_kind": "test",
+                "commands_run": [],
+                "files_changed": [],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    node = build_choose_worker_node(
+        _ALL_WORKERS,
+        orchestrator_brain=_Brain(),
+    )
+    res = asyncio.run(node(state))
+
+    assert res["route"]["chosen_worker"] == "openrouter"
+    assert res["route"]["route_reason"] == "brain_retry_escalation"
+    brain_payload = res["timeline_events"][0].payload["brain"]
+    assert brain_payload["applied"] is True
+    assert brain_payload["suggested_retry_strategy"] == "escalate_to_alternate"
+    assert brain_payload["final_route_reason"] == "brain_retry_escalation"
+
+
 def test_compute_route_neither_worker_available():
     """_route_by_preference keeps the preferred intent when neither worker is available."""
     state = OrchestratorState.model_validate(
@@ -1479,6 +1609,63 @@ def test_verify_result_warning_no_changes():
     assert res["verification"]["status"] == "warning"
     assert res["verification"]["items"][2]["label"] == "file_changes"
     assert res["verification"]["items"][2]["status"] == "warning"
+
+
+def test_verify_result_accepts_warning_status_from_brain_hint() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "success",
+                "files_changed": [],
+                "test_results": [{"name": "test1", "status": "passed"}],
+                "commands_run": [],
+            },
+        }
+    )
+
+    res = verify_result(
+        state,
+        verification_brain_suggestion=VerificationBrainSuggestion(
+            accept_warning_status=True,
+            rationale="Warnings are acceptable for this documentation-only task.",
+        ),
+    )
+
+    assert res["verification"]["status"] == "passed"
+    assert res["progress_updates"][-1] == "verification passed via brain warning-acceptance hint"
+    brain_payload = res["timeline_events"][1].payload["brain"]
+    assert brain_payload["applied"] is True
+    assert brain_payload["accept_warning_status"] is True
+    assert brain_payload["final_verification_status"] == "passed"
+
+
+def test_verify_result_rejects_brain_warning_acceptance_for_failed_checks() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "success",
+                "files_changed": ["file1.py"],
+                "test_results": [{"name": "test1", "status": "failed"}],
+                "commands_run": [],
+            },
+        }
+    )
+
+    res = verify_result(
+        state,
+        verification_brain_suggestion=VerificationBrainSuggestion(
+            accept_warning_status=True,
+            rationale="Try to continue despite failures.",
+        ),
+    )
+
+    assert res["verification"]["status"] == "failed"
+    brain_payload = res["timeline_events"][1].payload["brain"]
+    assert brain_payload["applied"] is False
+    assert brain_payload["ignored_fields"] == ["accept_warning_status"]
+    assert brain_payload["final_verification_status"] == "failed"
 
 
 def test_verify_result_failed_with_changes():

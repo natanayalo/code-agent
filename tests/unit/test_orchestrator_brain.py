@@ -233,6 +233,67 @@ def test_suggest_route_times_out_when_planner_slow() -> None:
         )
 
 
+def test_suggest_verification_parses_plain_json_payload() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(
+            WorkerResult(
+                status="success",
+                summary=(
+                    '{"accept_warning_status":true,'
+                    '"rationale":"docs-only warning is acceptable"}'
+                ),
+            )
+        )
+    )
+    state = _state()
+    state.result = WorkerResult(
+        status="success",
+        files_changed=[],
+        test_results=[{"name": "unit", "status": "passed"}],
+        commands_run=[],
+    )
+
+    suggestion = asyncio.run(
+        brain.suggest_verification(
+            state=state,
+            independent_verifier_outcome=None,
+        )
+    )
+
+    assert suggestion is not None
+    assert suggestion.accept_warning_status is True
+    assert suggestion.rationale == "docs-only warning is acceptable"
+
+
+def test_suggest_verification_requires_planner_worker() -> None:
+    brain = RuleBasedOrchestratorBrain(planner_worker=None)
+    state = _state()
+
+    with pytest.raises(RuntimeError, match="planner worker not wired"):
+        asyncio.run(
+            brain.suggest_verification(
+                state=state,
+                independent_verifier_outcome=None,
+            )
+        )
+
+
+def test_suggest_verification_returns_none_when_model_emits_no_hint() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(WorkerResult(status="success", summary="{}"))
+    )
+    state = _state()
+
+    suggestion = asyncio.run(
+        brain.suggest_verification(
+            state=state,
+            independent_verifier_outcome=None,
+        )
+    )
+
+    assert suggestion is None
+
+
 def test_suggest_route_serializes_complex_payload() -> None:
     from collections.abc import Mapping
 

@@ -21,6 +21,8 @@ from orchestrator.brain import (
     RouteBrainMergeReport,
     RouteBrainSuggestion,
     TaskSpecBrainMergeReport,
+    VerificationBrainMergeReport,
+    VerificationBrainSuggestion,
 )
 from orchestrator.constants import (
     COMPLEX_TASK_MARKERS,
@@ -1435,8 +1437,113 @@ def _record_route_brain_final_choice(
     )
 
 
+def _route_for_worker(
+    *,
+    worker_type: WorkerType,
+    reason: str,
+    available_profiles: Mapping[str, WorkerProfile] | None,
+    routable_profiles: Mapping[str, WorkerProfile],
+) -> RouteDecision | None:
+    """Build a route decision for a worker, attaching default profile metadata when available."""
+    if available_profiles:
+        profile_name = _select_default_profile_for_worker(routable_profiles, worker_type)
+        if profile_name is None:
+            return None
+        return _route_for_profile(
+            routable_profiles[profile_name],
+            reason=reason,
+            override_applied=False,
+        )
+    return RouteDecision(
+        chosen_worker=worker_type,
+        route_reason=reason,
+        override_applied=False,
+    )
+
+
+def _resolve_brain_retry_context(state: OrchestratorState) -> tuple[WorkerType | None, str | None]:
+    """Resolve deterministic retry context from prior verification or worker failures."""
+    prior_worker = state.dispatch.worker_type
+    if state.attempt_count <= 0 or prior_worker is None:
+        return None, None
+    if state.verification is not None and state.verification.status == "failed":
+        verification_failure_kind = state.verification.failure_kind or "unknown"
+        if verification_failure_kind in _VERIFICATION_FAILURE_REROUTE_KINDS:
+            return prior_worker, "escalate_to_alternate"
+    if state.result is not None and state.result.status != "success":
+        failure_kind = state.result.failure_kind or "unknown"
+        if failure_kind in _WORKER_FAILURE_REROUTE_KINDS:
+            return prior_worker, "escalate_to_alternate"
+        if failure_kind in _WORKER_FAILURE_RETRY_SAME_WORKER_KINDS:
+            return prior_worker, "retry_same_worker"
+    return prior_worker, None
+
+
+def _apply_brain_retry_strategy(
+    *,
+    state: OrchestratorState,
+    suggestion: RouteBrainSuggestion,
+    available_workers: frozenset[str],
+    available_profiles: Mapping[str, WorkerProfile] | None,
+    routable_profiles: Mapping[str, WorkerProfile],
+) -> tuple[RouteDecision | None, list[str]]:
+    """Apply advisory brain retry strategy while preserving deterministic retry policy clamps."""
+    ignored_fields: list[str] = []
+    retry_strategy = suggestion.suggested_retry_strategy
+    if retry_strategy is None:
+        return None, ignored_fields
+
+    prior_worker, allowed_strategy = _resolve_brain_retry_context(state)
+    if prior_worker is None or allowed_strategy is None:
+        ignored_fields.append("suggested_retry_strategy")
+        return None, ignored_fields
+    if retry_strategy != allowed_strategy:
+        ignored_fields.append("suggested_retry_strategy")
+        return None, ignored_fields
+
+    if retry_strategy == "retry_same_worker":
+        if prior_worker not in available_workers:
+            ignored_fields.extend(["suggested_retry_strategy", "suggested_worker"])
+            return None, ignored_fields
+        route = _route_for_worker(
+            worker_type=prior_worker,
+            reason="brain_retry_same_worker",
+            available_profiles=available_profiles,
+            routable_profiles=routable_profiles,
+        )
+        if route is None:
+            ignored_fields.extend(["suggested_retry_strategy", "suggested_worker"])
+        return route, ignored_fields
+
+    # `escalate_to_alternate` path with deterministic alternate fallback ordering.
+    assert retry_strategy == "escalate_to_alternate"
+    candidate_workers: list[WorkerType] = []
+    if suggestion.suggested_worker is not None:
+        if suggestion.suggested_worker != prior_worker:
+            candidate_workers.append(suggestion.suggested_worker)
+        else:
+            ignored_fields.append("suggested_worker")
+    candidate_workers.extend(worker for worker in SUPPORTED_WORKER_TYPES if worker != prior_worker)
+
+    for candidate in dict.fromkeys(candidate_workers):
+        if candidate not in available_workers:
+            continue
+        route = _route_for_worker(
+            worker_type=candidate,
+            reason="brain_retry_escalation",
+            available_profiles=available_profiles,
+            routable_profiles=routable_profiles,
+        )
+        if route is not None:
+            return route, ignored_fields
+
+    ignored_fields.extend(["suggested_retry_strategy", "suggested_worker"])
+    return None, ignored_fields
+
+
 def _apply_brain_route_suggestion(
     *,
+    state: OrchestratorState,
     suggestion: RouteBrainSuggestion,
     provider: str | None,
     available_workers: frozenset[str],
@@ -1449,9 +1556,29 @@ def _apply_brain_route_suggestion(
         provider=provider,
         suggested_worker=suggestion.suggested_worker,
         suggested_profile=suggestion.suggested_profile,
+        suggested_retry_strategy=suggestion.suggested_retry_strategy,
+        accept_warning_status=suggestion.accept_warning_status,
         rationale=suggestion.rationale,
     )
     ignored_fields: list[str] = []
+
+    retry_route, retry_ignored_fields = _apply_brain_retry_strategy(
+        state=state,
+        suggestion=suggestion,
+        available_workers=available_workers,
+        available_profiles=available_profiles,
+        routable_profiles=routable_profiles,
+    )
+    ignored_fields.extend(retry_ignored_fields)
+    if retry_route is not None:
+        if suggestion.suggested_profile is not None:
+            ignored_fields.append("suggested_profile")
+        return retry_route, report.model_copy(
+            update={
+                "applied": True,
+                "ignored_fields": _dedupe_preserving_order(ignored_fields),
+            }
+        )
 
     suggested_profile = suggestion.suggested_profile
     if suggested_profile:
@@ -1490,31 +1617,19 @@ def _apply_brain_route_suggestion(
             update={"ignored_fields": _dedupe_preserving_order(ignored_fields)}
         )
 
-    if available_profiles:
-        profile_name = _select_default_profile_for_worker(routable_profiles, suggested_worker)
-        if profile_name is None:
-            ignored_fields.append("suggested_worker")
-            return None, report.model_copy(
-                update={"ignored_fields": _dedupe_preserving_order(ignored_fields)}
-            )
-        route = _route_for_profile(
-            routable_profiles[profile_name],
-            reason="brain_recommendation",
-            override_applied=False,
-        )
-        return route, report.model_copy(
-            update={
-                "applied": True,
-                "ignored_fields": _dedupe_preserving_order(ignored_fields),
-            }
+    worker_route = _route_for_worker(
+        worker_type=suggested_worker,
+        reason="brain_recommendation",
+        available_profiles=available_profiles,
+        routable_profiles=routable_profiles,
+    )
+    if worker_route is None:
+        ignored_fields.append("suggested_worker")
+        return None, report.model_copy(
+            update={"ignored_fields": _dedupe_preserving_order(ignored_fields)}
         )
 
-    route = RouteDecision(
-        chosen_worker=suggested_worker,
-        route_reason="brain_recommendation",
-        override_applied=False,
-    )
-    return route, report.model_copy(
+    return worker_route, report.model_copy(
         update={
             "applied": True,
             "ignored_fields": _dedupe_preserving_order(ignored_fields),
@@ -1562,6 +1677,7 @@ def build_choose_worker_node(
                     )
                 else:
                     route, brain_report = _apply_brain_route_suggestion(
+                        state=state,
                         suggestion=suggestion,
                         provider=provider_name,
                         available_workers=available_workers,
@@ -1971,6 +2087,8 @@ def verify_result(
     *,
     enable_independent_verifier: bool = False,
     independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = None,
+    verification_brain_suggestion: VerificationBrainSuggestion | None = None,
+    verification_brain_report: VerificationBrainMergeReport | None = None,
 ) -> dict[str, Any]:
     """Perform deterministic checks on the worker output before summarization."""
     state = _ensure_state(state_input)
@@ -2117,6 +2235,29 @@ def verify_result(
     else:
         report_status = "passed"
 
+    brain_report = verification_brain_report
+    if verification_brain_suggestion is not None:
+        if brain_report is None:
+            brain_report = VerificationBrainMergeReport(
+                enabled=True,
+                accept_warning_status=verification_brain_suggestion.accept_warning_status,
+                rationale=verification_brain_suggestion.rationale,
+            )
+        ignored_fields = list(brain_report.ignored_fields)
+        applied = brain_report.applied
+        if verification_brain_suggestion.accept_warning_status is True:
+            if report_status == "warning":
+                report_status = "passed"
+                applied = True
+            else:
+                ignored_fields.append("accept_warning_status")
+        brain_report = brain_report.model_copy(
+            update={
+                "applied": applied,
+                "ignored_fields": _dedupe_preserving_order(ignored_fields),
+            }
+        )
+
     report_failure_kind: VerificationFailureKind | None = None
     if report_status == "failed":
         failed_labels = {item.label for item in items if item.status == "failed"}
@@ -2139,7 +2280,17 @@ def verify_result(
         failure_kind=report_failure_kind,
         items=items,
     )
+    if brain_report is not None:
+        brain_report = brain_report.model_copy(update={"final_verification_status": report.status})
     progress_message = f"verification {report_status}"
+    if (
+        brain_report is not None
+        and brain_report.applied
+        and report.status == "passed"
+        and verification_brain_suggestion is not None
+        and verification_brain_suggestion.accept_warning_status is True
+    ):
+        progress_message = "verification passed via brain warning-acceptance hint"
     updated_task: dict[str, Any] | None = None
     updated_result: dict[str, Any] | None = None
     repair_handoff_requested = False
@@ -2192,6 +2343,10 @@ def verify_result(
         else:
             progress_message = f"verification {report_status} after bounded repair handoff"
 
+    verification_payload = report.model_dump()
+    if brain_report is not None:
+        verification_payload["brain"] = brain_report.model_dump(mode="json")
+
     response: dict[str, Any] = {
         "current_step": "verify_result",
         "verification": report.model_dump(),
@@ -2202,7 +2357,7 @@ def verify_result(
             (
                 TimelineEventType.VERIFICATION_COMPLETED,
                 report.summary,
-                report.model_dump(),
+                verification_payload,
             ),
         ),
     }
@@ -2328,6 +2483,7 @@ def build_verify_result_node(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
+    orchestrator_brain: OrchestratorBrain | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the verification node with optional independent verifier execution."""
 
@@ -2338,15 +2494,50 @@ def build_verify_result_node(
         independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = (
             None
         )
+        verification_brain_suggestion: VerificationBrainSuggestion | None = None
+        verification_brain_report: VerificationBrainMergeReport | None = None
         if enable_independent_verifier:
             independent_verifier_outcome = await run_independent_verifier(
                 state,
                 worker_factory=configured_workers,
             )
+        if orchestrator_brain is not None:
+            suggest_verification = getattr(orchestrator_brain, "suggest_verification", None)
+            if callable(suggest_verification):
+                provider_name = type(orchestrator_brain).__name__
+                try:
+                    verification_brain_suggestion = await suggest_verification(
+                        state=state,
+                        independent_verifier_outcome=independent_verifier_outcome,
+                    )
+                except Exception as exc:
+                    detail = str(exc).strip()
+                    verification_brain_report = VerificationBrainMergeReport(
+                        enabled=True,
+                        provider=provider_name,
+                        error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
+                    )
+                else:
+                    if verification_brain_suggestion is None:
+                        verification_brain_report = VerificationBrainMergeReport(
+                            enabled=True,
+                            provider=provider_name,
+                        )
+                    else:
+                        verification_brain_report = VerificationBrainMergeReport(
+                            enabled=True,
+                            provider=provider_name,
+                            accept_warning_status=(
+                                verification_brain_suggestion.accept_warning_status
+                            ),
+                            rationale=verification_brain_suggestion.rationale,
+                        )
         return verify_result(
             state,
             enable_independent_verifier=enable_independent_verifier,
             independent_verifier_outcome=independent_verifier_outcome,
+            verification_brain_suggestion=verification_brain_suggestion,
+            verification_brain_report=verification_brain_report,
         )
 
     return verify_result_node
@@ -2418,6 +2609,7 @@ def build_orchestrator_graph(
                 worker=worker,
                 gemini_worker=gemini_worker,
                 openrouter_worker=openrouter_worker,
+                orchestrator_brain=orchestrator_brain,
             )
         ),
     )
