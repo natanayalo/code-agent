@@ -121,17 +121,7 @@ def _to_serializable(obj: Any) -> Any:
 
 def _merge_list(a: list[str], b: list[str]) -> list[str]:
     """Merge two lists of strings, preserving order and ensuring uniqueness."""
-    merged = []
-    seen = set()
-    for item in a:
-        if item not in seen:
-            merged.append(item)
-            seen.add(item)
-    for item in b:
-        if item not in seen:
-            merged.append(item)
-            seen.add(item)
-    return merged
+    return list(dict.fromkeys(a + b))
 
 
 class TaskSpecBrainSuggestion(OrchestratorModel):
