@@ -1858,8 +1858,9 @@ class TaskExecutionService:
                 budget_usage=latest_run_obj.budget_usage,
                 verifier_outcome=latest_run_obj.verifier_outcome,
                 commands_run=[
-                    {"id": cmd.get("id") or uuid4().hex, **cmd}
-                    for cmd in (latest_run_obj.commands_run or [])
+                    {"id": cmd.get("id") or f"legacy-{idx}", **cmd}
+                    for idx, cmd in enumerate(latest_run_obj.commands_run or [])
+                    if isinstance(cmd, dict)
                 ],
                 files_changed_count=latest_run_obj.files_changed_count,
                 files_changed=list(latest_run_obj.files_changed or []),
@@ -1873,7 +1874,9 @@ class TaskExecutionService:
                         uri=artifact.uri,
                         artifact_metadata=artifact.artifact_metadata,
                     )
-                    for artifact in latest_run_obj.artifacts
+                    for artifact in (
+                        latest_run_obj.artifacts if "artifacts" in latest_run_obj.__dict__ else []
+                    )
                 ],
             )
 
@@ -1896,7 +1899,7 @@ class TaskExecutionService:
                     payload=event.payload,
                     created_at=event.created_at,
                 )
-                for event in task.timeline_events
+                for event in (task.timeline_events if "timeline_events" in task.__dict__ else [])
             ],
         )
 
@@ -1999,7 +2002,9 @@ class TaskExecutionService:
     def _pending_interaction_snapshots(self, task: Task) -> list[HumanInteractionSnapshot]:
         pending_interactions = [
             interaction
-            for interaction in task.human_interactions
+            for interaction in (
+                task.human_interactions if "human_interactions" in task.__dict__ else []
+            )
             if self._is_pending_interaction(interaction)
         ]
         return [
