@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from collections.abc import Mapping
 from enum import Enum
-from typing import Any, Protocol, cast
+from typing import Any, Final, Protocol, cast
 
 from pydantic import Field
 
 from db.enums import WorkerRuntimeMode
+from orchestrator.constants import RISK_ORDER
 from orchestrator.state import (
     OrchestratorModel,
     OrchestratorState,
@@ -25,8 +27,12 @@ from orchestrator.state import (
 )
 from workers.base import Worker, WorkerProfile, WorkerRequest
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_ROUTE_BRAIN_TIMEOUT_SECONDS = 45
+DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS = 30
 DEFAULT_ROUTE_PLANNER_PROFILE = "gemini-native-planner"
+DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS: Final = 5
 
 _ROUTE_SYSTEM_PROMPT = """
 You are an orchestrator routing assistant.
@@ -47,7 +53,34 @@ Output contract:
 - Set at least one of suggested_worker or suggested_profile.
 """.strip()
 
+_TASK_SPEC_SYSTEM_PROMPT = """
+You are an orchestrator enrichment assistant.
+
+Task:
+- Review the task text and the current deterministic task spec.
+- Suggest additional assumptions, acceptance criteria, non-goals, clarification questions,
+  and verification commands.
+- You can also suggest a risk level, task type, and delivery mode, but these are subject
+  to strict policy clamps.
+
+Output contract:
+- Return exactly one JSON object, and no extra prose.
+- JSON schema:
+  {
+    "assumptions": ["<assumption>"],
+    "acceptance_criteria": ["<criterion>"],
+    "non_goals": ["<non-goal>"],
+    "clarification_questions": ["<question>"],
+    "verification_commands": ["<command>"],
+    "suggested_risk_level": "low" | "medium" | "high" | null,
+    "suggested_task_type": "feature" | "bug" | "refactor" | "investigation" | "docs" | null,
+    "suggested_delivery_mode": "workspace" | "branch" | "draft_pr" | "summary" | null,
+    "rationale": "<short reason>"
+  }
+""".strip()
+
 _ROUTE_MAX_SUMMARY_PREVIEW_CHARS = 300
+_RULES_RATIONALE = "rules_v1"
 
 
 def _unwrap_markdown_json_fence(text: str) -> str:
@@ -84,6 +117,11 @@ def _to_serializable(obj: Any) -> Any:
     if isinstance(obj, Enum):
         return obj.value
     return obj
+
+
+def _merge_list(a: list[str], b: list[str]) -> list[str]:
+    """Merge two lists of strings, preserving order and ensuring uniqueness."""
+    return list(dict.fromkeys(a + b))
 
 
 class TaskSpecBrainSuggestion(OrchestratorModel):
@@ -144,7 +182,7 @@ class RouteBrainMergeReport(OrchestratorModel):
 class OrchestratorBrain(Protocol):
     """Optional suggestion provider used by orchestrator nodes."""
 
-    def suggest_task_spec(
+    async def suggest_task_spec(
         self,
         *,
         task: TaskRequest,
@@ -182,7 +220,44 @@ class RuleBasedOrchestratorBrain:
             else DEFAULT_ROUTE_BRAIN_TIMEOUT_SECONDS
         )
 
-    def suggest_task_spec(
+    async def suggest_task_spec(
+        self,
+        *,
+        task: TaskRequest,
+        task_kind: str | None,
+        task_plan: TaskPlan | None,
+        task_spec: TaskSpec,
+    ) -> TaskSpecBrainSuggestion | None:
+        # 1. Run rule-based bootstrap logic first
+        suggestion = self._suggest_task_spec_rules(
+            task=task,
+            task_kind=task_kind,
+            task_plan=task_plan,
+            task_spec=task_spec,
+        ) or TaskSpecBrainSuggestion(rationale="brain_enrichment_v1")
+
+        # 2. Attempt model-backed enrichment if planner is available
+        if self.planner_worker is not None:
+            model_suggestion = await self._suggest_task_spec_model(
+                task=task,
+                task_kind=task_kind,
+                task_plan=task_plan,
+                task_spec=task_spec,
+            )
+            if model_suggestion:
+                suggestion = self._merge_task_spec_suggestions(suggestion, model_suggestion)
+
+        # If no enrichment fields were suggested (ignoring rationale), skip applying
+        has_enrichment = any(
+            getattr(suggestion, field)
+            for field in type(suggestion).model_fields
+            if field != "rationale"
+        )
+        if not has_enrichment:
+            return None
+        return suggestion
+
+    def _suggest_task_spec_rules(
         self,
         *,
         task: TaskRequest,
@@ -193,7 +268,7 @@ class RuleBasedOrchestratorBrain:
         del task_kind, task_plan
 
         suggestion = TaskSpecBrainSuggestion(
-            rationale="rule_based_task_spec_enrichment_v1",
+            rationale=_RULES_RATIONALE,
         )
         normalized_text = task.task_text.lower()
 
@@ -218,6 +293,120 @@ class RuleBasedOrchestratorBrain:
         ):
             return None
         return suggestion
+
+    async def _suggest_task_spec_model(
+        self,
+        *,
+        task: TaskRequest,
+        task_kind: str | None,
+        task_plan: TaskPlan | None,
+        task_spec: TaskSpec,
+    ) -> TaskSpecBrainSuggestion | None:
+        """Use the planner worker to produce model-backed TaskSpec enrichment."""
+        if self.planner_worker is None:
+            return None
+
+        prompt_payload = {
+            "task_text": task.task_text,
+            "task_kind": task_kind,
+            "deterministic_spec": task_spec.model_dump(mode="json"),
+            "task_plan": task_plan.model_dump(mode="json") if task_plan else None,
+            "constraints": dict(task.constraints),
+        }
+        context_json = json.dumps(_to_serializable(prompt_payload), sort_keys=True, default=str)
+        prompt = (
+            "Suggest TaskSpec enrichments for this task.\n\n" "Context JSON:\n" f"{context_json}\n"
+        )
+
+        constraints = dict(task.constraints)
+        constraints["read_only"] = True
+        constraints.pop("granted_permission", None)
+        budget = dict(task.budget)
+        budget["worker_timeout_seconds"] = DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS
+
+        request = WorkerRequest(
+            session_id=None,  # Brain runs are detached from session state by default
+            repo_url=task.repo_url,
+            branch=task.branch,
+            task_text=prompt,
+            memory_context={},  # TaskSpec generation happens before memory loading
+            task_plan=task_plan.model_dump(mode="json") if task_plan else None,
+            task_spec=task_spec.model_dump(mode="json"),
+            constraints=constraints,
+            budget=budget,
+            secrets={},
+            tools=task.tools,
+            worker_profile=self.planner_profile,
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        )
+
+        try:
+            async with asyncio.timeout(
+                DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS + DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS
+            ):
+                result = await self.planner_worker.run(
+                    request, system_prompt=_TASK_SPEC_SYSTEM_PROMPT
+                )
+        except TimeoutError:
+            logger.warning("planner task spec enrichment timed out; using deterministic defaults")
+            return None
+        except Exception as exc:
+            logger.warning(
+                f"planner task spec enrichment failed: {type(exc).__name__}: {exc}; "
+                "using deterministic defaults"
+            )
+            return None
+
+        if result.status != "success":
+            logger.warning(
+                f"planner task spec enrichment returned non-success status '{result.status}'"
+            )
+            return None
+
+        raw_summary = (result.summary or "").strip()
+        if not raw_summary:
+            return None
+
+        normalized_json = _unwrap_markdown_json_fence(raw_summary)
+        try:
+            data = json.loads(normalized_json)
+            return TaskSpecBrainSuggestion.model_validate(data)
+        except Exception as exc:
+            logger.warning(f"Failed to parse brain task spec suggestion: {exc}")
+            return None
+
+    @staticmethod
+    def _merge_task_spec_suggestions(
+        base: TaskSpecBrainSuggestion,
+        model: TaskSpecBrainSuggestion,
+    ) -> TaskSpecBrainSuggestion:
+        """Merge model-backed suggestions into rule-based ones."""
+        return TaskSpecBrainSuggestion(
+            assumptions=_merge_list(base.assumptions, model.assumptions),
+            acceptance_criteria=_merge_list(base.acceptance_criteria, model.acceptance_criteria),
+            non_goals=_merge_list(base.non_goals, model.non_goals),
+            clarification_questions=_merge_list(
+                base.clarification_questions, model.clarification_questions
+            ),
+            verification_commands=_merge_list(
+                base.verification_commands, model.verification_commands
+            ),
+            suggested_risk_level=max(
+                (r for r in [base.suggested_risk_level, model.suggested_risk_level] if r),
+                key=lambda r: RISK_ORDER[cast(str, r)],
+                default=None,
+            ),
+            suggested_task_type=model.suggested_task_type or base.suggested_task_type,
+            suggested_delivery_mode=model.suggested_delivery_mode or base.suggested_delivery_mode,
+            rationale=" | ".join(
+                [
+                    f"[{k}] {v}"
+                    for k, v in [("rules", base.rationale), ("model", model.rationale)]
+                    if v
+                ]
+            )
+            or None,
+        )
 
     async def suggest_route(
         self,
@@ -258,10 +447,11 @@ class RuleBasedOrchestratorBrain:
             "task_constraints": dict(state.task.constraints),
             "task_budget": dict(state.task.budget),
         }
+        context_json = json.dumps(_to_serializable(prompt_payload), sort_keys=True, default=str)
         prompt = (
             "Return the best route recommendation for this orchestration context.\n\n"
             "Context JSON:\n"
-            f"{json.dumps(_to_serializable(prompt_payload), sort_keys=True, default=str)}\n"
+            f"{context_json}\n"
         )
 
         constraints = dict(state.task.constraints)
@@ -280,17 +470,17 @@ class RuleBasedOrchestratorBrain:
             task_spec=state.task_spec.model_dump(mode="json") if state.task_spec else None,
             constraints=constraints,
             budget=budget,
-            secrets=dict(state.task.secrets),
+            secrets={},
             tools=state.task.tools,
             worker_profile=self.planner_profile,
             runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
         )
 
         try:
-            result = await asyncio.wait_for(
-                self.planner_worker.run(request, system_prompt=_ROUTE_SYSTEM_PROMPT),
-                timeout=self.planner_timeout_seconds,
-            )
+            async with asyncio.timeout(
+                self.planner_timeout_seconds + DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS
+            ):
+                result = await self.planner_worker.run(request, system_prompt=_ROUTE_SYSTEM_PROMPT)
         except TimeoutError as exc:  # pragma: no cover - covered via tests with stubs
             raise RuntimeError(
                 f"planner route recommendation timed out after {self.planner_timeout_seconds}s"

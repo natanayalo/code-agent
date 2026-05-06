@@ -983,7 +983,7 @@ def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
     }
 
 
-def generate_task_spec(
+async def generate_task_spec(
     state_input: OrchestratorState,
     *,
     orchestrator_brain: OrchestratorBrain | None = None,
@@ -999,7 +999,7 @@ def generate_task_spec(
     if orchestrator_brain is not None:
         provider_name = type(orchestrator_brain).__name__
         try:
-            suggestion = orchestrator_brain.suggest_task_spec(
+            suggestion = await orchestrator_brain.suggest_task_spec(
                 task=state.task,
                 task_kind=state.task_kind,
                 task_plan=state.task_plan,
@@ -2370,15 +2370,14 @@ def build_orchestrator_graph(
     builder.add_node("ingest_task", RunnableLambda(ingest_task))
     builder.add_node("classify_task", RunnableLambda(classify_task))
     builder.add_node("plan_task", RunnableLambda(plan_task))
-    builder.add_node(
-        "generate_task_spec",
-        RunnableLambda(
-            lambda state_input: generate_task_spec(
-                state_input,
-                orchestrator_brain=orchestrator_brain,
-            )
-        ),
-    )
+
+    async def _generate_task_spec_node(state_input: OrchestratorState) -> dict[str, Any]:
+        return await generate_task_spec(
+            state_input,
+            orchestrator_brain=orchestrator_brain,
+        )
+
+    builder.add_node("generate_task_spec", RunnableLambda(_generate_task_spec_node))
     builder.add_node("load_memory", RunnableLambda(load_memory))
     available_workers: frozenset[str] = frozenset(
         _configured_workers(worker, gemini_worker, openrouter_worker).keys()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from orchestrator.brain import RuleBasedOrchestratorBrain, TaskSpecBrainSuggestion
 from orchestrator.state import TaskRequest
 from orchestrator.task_spec import (
@@ -152,7 +154,8 @@ def test_apply_task_spec_brain_suggestion_clamps_unsafe_overrides() -> None:
     assert validate_task_spec_policy(merged) == []
 
 
-def test_rule_based_orchestrator_brain_escalates_urgent_low_risk_task() -> None:
+@pytest.mark.asyncio
+async def test_rule_based_orchestrator_brain_escalates_urgent_low_risk_task() -> None:
     """Urgent low-risk asks should trigger medium-risk escalation suggestion."""
     brain = RuleBasedOrchestratorBrain()
     task = TaskRequest(task_text="Urgent: fix this typo")
@@ -163,7 +166,7 @@ def test_rule_based_orchestrator_brain_escalates_urgent_low_risk_task() -> None:
     )
     assert deterministic_spec.risk_level == "low"
 
-    suggestion = brain.suggest_task_spec(
+    suggestion = await brain.suggest_task_spec(
         task=task,
         task_kind="implementation",
         task_plan=None,
