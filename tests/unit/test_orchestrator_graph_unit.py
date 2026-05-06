@@ -173,7 +173,7 @@ def test_build_worker_request_prefers_review_repair_handoff_text():
     assert request.task_text == "Repair follow-up task"
 
 
-def test_build_worker_request_prefers_verifier_repair_handoff_text():
+def test_build_worker_request_combines_verifier_and_review_repair_handoff_text():
     state = OrchestratorState.model_validate(
         {
             "task": {
@@ -189,7 +189,11 @@ def test_build_worker_request_prefers_verifier_repair_handoff_text():
 
     request = _build_worker_request(state)
 
-    assert request.task_text == "Verifier repair follow-up task"
+    assert request.task_text.startswith("Apply the following repair instructions in one pass.")
+    assert "Verifier repair instructions:" in request.task_text
+    assert "Verifier repair follow-up task" in request.task_text
+    assert "Independent review repair instructions:" in request.task_text
+    assert "Review repair follow-up task" in request.task_text
 
 
 def test_plan_task_skips_simple_tasks():

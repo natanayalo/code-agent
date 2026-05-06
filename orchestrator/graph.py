@@ -574,12 +574,40 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
     """Build the typed worker request from orchestrator state."""
     task_text = state.normalized_task_text or state.task.task_text
     verifier_repair_task_text = state.task.constraints.get(VERIFIER_REPAIR_REQUEST_CONSTRAINT)
-    if isinstance(verifier_repair_task_text, str) and verifier_repair_task_text.strip():
-        task_text = verifier_repair_task_text.strip()
-    else:
-        review_repair_task_text = state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT)
-        if isinstance(review_repair_task_text, str) and review_repair_task_text.strip():
-            task_text = review_repair_task_text.strip()
+    normalized_verifier_repair_task_text = (
+        verifier_repair_task_text.strip()
+        if isinstance(verifier_repair_task_text, str) and verifier_repair_task_text.strip()
+        else None
+    )
+    review_repair_task_text = state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT)
+    normalized_review_repair_task_text = (
+        review_repair_task_text.strip()
+        if isinstance(review_repair_task_text, str) and review_repair_task_text.strip()
+        else None
+    )
+
+    if normalized_verifier_repair_task_text and normalized_review_repair_task_text:
+        task_text = "\n".join(
+            [
+                "Apply the following repair instructions in one pass.",
+                "Address verifier failures first, then independent review findings.",
+                "",
+                "Verifier repair instructions:",
+                normalized_verifier_repair_task_text,
+                "",
+                "Independent review repair instructions:",
+                normalized_review_repair_task_text,
+                "",
+                (
+                    "After completing both, run the smallest relevant verification commands "
+                    "and summarize."
+                ),
+            ]
+        )
+    elif normalized_verifier_repair_task_text:
+        task_text = normalized_verifier_repair_task_text
+    elif normalized_review_repair_task_text:
+        task_text = normalized_review_repair_task_text
 
     return WorkerRequest(
         session_id=state.session.session_id if state.session is not None else None,
