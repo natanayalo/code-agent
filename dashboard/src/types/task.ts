@@ -89,6 +89,7 @@ export interface WorkerRunSnapshot {
 }
 
 export interface CommandRunSnapshot {
+  id?: string;
   command?: string;
   exit_code?: number;
   duration_seconds?: number;

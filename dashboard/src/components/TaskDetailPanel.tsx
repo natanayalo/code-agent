@@ -29,6 +29,7 @@ interface TraceObservabilitySnapshot {
 }
 
 interface VerifierOutcomeItem {
+  id: string;
   label: string;
   status: string;
   message: string | null;
@@ -138,6 +139,7 @@ function extractVerifierOutcome(value: unknown): VerifierOutcomeSnapshot {
           const message = typeof item.message === 'string' ? item.message : null;
           if (!label || !itemStatus) return null;
           return {
+            id: typeof item.id === 'string' ? item.id : label,
             label,
             status: itemStatus,
             message,
@@ -527,7 +529,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                     {verifierOutcome.items.length > 0 ? (
                       <ul>
                         {verifierOutcome.items.map((item) => (
-                          <li key={item.label}>
+                          <li key={item.id}>
                             <strong>{formatLabel(item.label)}:</strong> {formatLabel(item.status)}
                             {item.message ? ` - ${item.message}` : ''}
                           </li>
@@ -555,7 +557,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                     <p>
                       <strong>{formatLabel(event.event_type)}</strong>
                       <span className="task-detail-muted task-inline-meta">
-                        #{event.sequence_number} · attempt {event.attempt_number ?? 0} ·{' '}
+                        #{event.sequence_number ?? idx} · attempt {event.attempt_number ?? 0} ·{' '}
                         {formatTimestamp(event.created_at)}
                       </span>
                     </p>
@@ -576,8 +578,9 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                 <ol className="task-command-list">
                   {runCommands.map((command, idx) => {
                     const duration = formatDuration(command.duration_seconds);
+                    const commandId = command.id || `${command.command}-${idx}`;
                     return (
-                      <li key={command.command || idx}>
+                      <li key={commandId}>
                         <p>
                           <strong>{command.command || `Command ${idx + 1}`}</strong>
                         </p>
