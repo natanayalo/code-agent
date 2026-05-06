@@ -610,13 +610,17 @@ class RuleBasedOrchestratorBrain:
             )
 
         task_text = state.normalized_task_text or state.task.task_text
+        worker_result_summary = state.result.summary if state.result else None
+        if worker_result_summary and len(worker_result_summary) > 2000:
+            worker_result_summary = worker_result_summary[:2000] + "... [truncated]"
+
         verification_context = {
             "task_text": task_text,
             "task_kind": state.task_kind,
             "attempt_count": state.attempt_count,
             "dispatch_worker": state.dispatch.worker_type,
             "worker_result_status": state.result.status if state.result else None,
-            "worker_result_summary": state.result.summary if state.result else None,
+            "worker_result_summary": worker_result_summary,
             "worker_failure_kind": state.result.failure_kind if state.result else None,
             "files_changed_count": len(state.result.files_changed) if state.result else 0,
             "failed_tests_count": len(

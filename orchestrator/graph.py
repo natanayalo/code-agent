@@ -662,7 +662,7 @@ class _DefaultFakeWorker(Worker):
         return _default_worker_result_provider(request)
 
 
-def _configured_workers(
+def _available_workers(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
@@ -712,7 +712,7 @@ def _routable_execution_profiles(
     profiles: Mapping[str, WorkerProfile],
     available_workers: frozenset[str],
 ) -> dict[str, WorkerProfile]:
-    """Filter configured profiles to those compatible with the task request."""
+    """Filter available profiles to those compatible with the task request."""
     SUPPORTED_RUNTIME_MODES: Final = {"native_agent", "tool_loop"}
     delivery_mode = state.task_spec.delivery_mode if state.task_spec is not None else None
     requires_read_only = bool(state.task.constraints.get("read_only"))
@@ -780,19 +780,19 @@ def _route_from_worker_choice(
     )
 
 
-def _unconfigured_worker_result(
+def _worker_unavailable_result(
     worker_type: str | None,
     *,
-    configured_workers: frozenset[str],
+    available_workers: frozenset[str],
 ) -> WorkerResult:
     """Return a structured error when routing selects an unavailable worker."""
-    configured_workers_text = ", ".join(sorted(configured_workers))
+    available_workers_text = ", ".join(sorted(available_workers))
     selected_worker = worker_type or "unknown"
     return WorkerResult(
         status="failure",
         summary=(
-            f"No worker is configured for route '{selected_worker}'. "
-            f"Configured workers: {configured_workers_text}."
+            f"No worker is available for route '{selected_worker}'. "
+            f"Available workers: {available_workers_text}."
         ),
         failure_kind="provider_error",
         commands_run=[],
@@ -803,18 +803,18 @@ def _unconfigured_worker_result(
     )
 
 
-def _unconfigured_worker_profile_result(
+def _profile_unavailable_result(
     profile_name: str,
     *,
-    configured_profiles: frozenset[str],
+    available_profiles: frozenset[str],
 ) -> WorkerResult:
     """Return a structured error when routing selects an unavailable worker profile."""
-    configured_profiles_text = ", ".join(sorted(configured_profiles)) or "none"
+    available_profiles_text = ", ".join(sorted(available_profiles)) or "none"
     return WorkerResult(
         status="failure",
         summary=(
             f"No routable worker profile is available for route '{profile_name}'. "
-            f"Configured profiles: {configured_profiles_text}."
+            f"Available profiles: {available_profiles_text}."
         ),
         failure_kind="provider_error",
         commands_run=[],
@@ -825,19 +825,19 @@ def _unconfigured_worker_profile_result(
     )
 
 
-def _worker_route_missing_profile_result(
+def _worker_missing_routable_profile_result(
     worker_type: str | None,
     *,
-    configured_profiles: frozenset[str],
+    available_profiles: frozenset[str],
 ) -> WorkerResult:
     """Return a structured error when worker selection has no routable execution profile."""
-    configured_profiles_text = ", ".join(sorted(configured_profiles)) or "none"
+    available_profiles_text = ", ".join(sorted(available_profiles)) or "none"
     selected_worker = worker_type or "unknown"
     return WorkerResult(
         status="failure",
         summary=(
             f"No routable worker profile is available for worker route '{selected_worker}'. "
-            f"Configured profiles: {configured_profiles_text}."
+            f"Available profiles: {available_profiles_text}."
         ),
         failure_kind="provider_error",
         commands_run=[],
@@ -1876,46 +1876,46 @@ def build_await_result_node(
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
     *,
-    configured_profile_names: frozenset[str] = frozenset(),
+    available_profile_names: frozenset[str] = frozenset(),
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around the workers wired into the graph."""
-    configured_workers = _configured_workers(worker, gemini_worker, openrouter_worker)
+    available_workers = _available_workers(worker, gemini_worker, openrouter_worker)
 
     async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
         worker_type = state.dispatch.worker_type or state.route.chosen_worker
         requested_profile = state.dispatch.worker_profile or state.route.chosen_profile
         if state.route.route_reason in ("runtime_unavailable", "incompatible_profile"):
-            if configured_profile_names:
+            if available_profile_names:
                 if requested_profile is None:
-                    result = _worker_route_missing_profile_result(
+                    result = _worker_missing_routable_profile_result(
                         worker_type,
-                        configured_profiles=configured_profile_names,
+                        available_profiles=available_profile_names,
                     )
                     progress_message = (
                         f"no routable profile available for worker: {worker_type or 'unknown'}"
                     )
                 else:
-                    result = _unconfigured_worker_profile_result(
+                    result = _profile_unavailable_result(
                         requested_profile,
-                        configured_profiles=configured_profile_names,
+                        available_profiles=available_profile_names,
                     )
                     progress_message = (
                         f"worker profile unavailable or incompatible: {requested_profile}"
                     )
             else:
-                result = _unconfigured_worker_result(
+                result = _worker_unavailable_result(
                     worker_type,
-                    configured_workers=frozenset(configured_workers.keys()),
+                    available_workers=frozenset(available_workers.keys()),
                 )
                 progress_message = f"worker unavailable: {worker_type or 'unknown'}"
             progress_updates = _progress_update(state, progress_message)
         else:
-            bound_worker = configured_workers.get(worker_type or "")
+            bound_worker = available_workers.get(worker_type or "")
             if bound_worker is None:
-                result = _unconfigured_worker_result(
+                result = _worker_unavailable_result(
                     worker_type,
-                    configured_workers=frozenset(configured_workers.keys()),
+                    available_workers=frozenset(available_workers.keys()),
                 )
                 progress_message = f"worker unavailable: {worker_type or 'unknown'}"
                 progress_updates = _progress_update(state, progress_message)
@@ -2489,11 +2489,11 @@ def build_review_result_node(
     openrouter_worker: Worker | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the review-result node around the workers wired into the graph."""
-    configured_workers = _configured_workers(worker, gemini_worker, openrouter_worker)
+    available_workers = _available_workers(worker, gemini_worker, openrouter_worker)
 
     async def review_result_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
-        return await review_result(state, worker_factory=configured_workers)
+        return await review_result(state, worker_factory=available_workers)
 
     return review_result_node
 
@@ -2508,7 +2508,7 @@ def build_verify_result_node(
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the verification node with optional independent verifier execution."""
 
-    configured_workers = _configured_workers(worker, gemini_worker, openrouter_worker)
+    available_workers = _available_workers(worker, gemini_worker, openrouter_worker)
 
     async def verify_result_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
@@ -2520,7 +2520,7 @@ def build_verify_result_node(
         if enable_independent_verifier:
             independent_verifier_outcome = await run_independent_verifier(
                 state,
-                worker_factory=configured_workers,
+                worker_factory=available_workers,
             )
         if orchestrator_brain is not None:
             suggest_verification = getattr(orchestrator_brain, "suggest_verification", None)
@@ -2592,11 +2592,11 @@ def build_orchestrator_graph(
     builder.add_node("generate_task_spec", RunnableLambda(_generate_task_spec_node))
     builder.add_node("load_memory", RunnableLambda(load_memory))
     available_workers: frozenset[str] = frozenset(
-        _configured_workers(worker, gemini_worker, openrouter_worker).keys()
+        _available_workers(worker, gemini_worker, openrouter_worker).keys()
     )
-    configured_profiles = dict(worker_profiles or {})
-    active_profiles = configured_profiles if enable_worker_profiles else None
-    profile_names = frozenset(configured_profiles.keys()) if enable_worker_profiles else frozenset()
+    available_profiles = dict(worker_profiles or {})
+    active_profiles = available_profiles if enable_worker_profiles else None
+    profile_names = frozenset(available_profiles.keys()) if enable_worker_profiles else frozenset()
     builder.add_node(
         "choose_worker",
         RunnableLambda(
@@ -2617,7 +2617,7 @@ def build_orchestrator_graph(
                 worker,
                 gemini_worker,
                 openrouter_worker,
-                configured_profile_names=profile_names,
+                available_profile_names=profile_names,
             )
         ),
     )
