@@ -1522,7 +1522,8 @@ def _apply_brain_retry_strategy(
         return route, ignored_fields
 
     # `escalate_to_alternate` path with deterministic alternate fallback ordering.
-    assert retry_strategy == "escalate_to_alternate"
+    if retry_strategy != "escalate_to_alternate":
+        raise RuntimeError(f"unexpected retry strategy state: {retry_strategy}")
     candidate_workers: list[WorkerType] = []
     if suggestion.suggested_worker is not None:
         if suggestion.suggested_worker != prior_worker:
