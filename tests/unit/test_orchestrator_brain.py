@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 
 import pytest
 
@@ -228,3 +230,49 @@ def test_suggest_route_times_out_when_planner_slow() -> None:
                 available_profiles=None,
             )
         )
+
+
+def test_suggest_route_serializes_complex_payload() -> None:
+    from collections.abc import Mapping
+
+    class CustomMapping(Mapping):
+        def __init__(self, data):
+            self._data = data
+
+        def __getitem__(self, key):
+            return self._data[key]
+
+        def __iter__(self):
+            return iter(self._data)
+
+        def __len__(self):
+            return len(self._data)
+
+    worker = _StaticWorker(WorkerResult(status="success", summary='{"suggested_worker":"codex"}'))
+    brain = RuleBasedOrchestratorBrain(planner_worker=worker)
+
+    state = _state()
+    # Add some complex types to the state that should be serialized
+    state.task.constraints["custom_mapping"] = CustomMapping({"key": "value"})
+
+    asyncio.run(
+        brain.suggest_route(
+            state=state,
+            available_workers=frozenset({"codex"}),
+            available_profiles=None,
+        )
+    )
+
+    # Verify that the last request's task_text contains a valid JSON representation
+    # of the complex payload
+    last_request = worker.requests[-1]
+    # Find the JSON block in the prompt
+    match = re.search(r"Context JSON:\n(.*?)\n", last_request.task_text, re.DOTALL)
+    assert match is not None
+    json_text = match.group(1)
+    payload = json.loads(json_text)
+
+    # Check that custom_mapping was converted to a dict
+    assert payload["task_constraints"]["custom_mapping"] == {"key": "value"}
+    # Check that worker types (Enums/Literals) are handled
+    assert "dispatch_worker" in payload

@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 from collections.abc import Mapping
+from enum import Enum
 from typing import Any, Protocol, cast
 
 from pydantic import Field
@@ -72,6 +73,17 @@ def _coerce_worker_type(value: object) -> WorkerType | None:
     if normalized in {"codex", "gemini", "openrouter"}:
         return cast(WorkerType, normalized)
     return None
+
+
+def _to_serializable(obj: Any) -> Any:
+    """Recursively ensure Mapping types are dicts for robust JSON serialization."""
+    if isinstance(obj, Mapping):
+        return {str(k): _to_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list | tuple | set | frozenset):
+        return [_to_serializable(item) for item in obj]
+    if isinstance(obj, Enum):
+        return obj.value
+    return obj
 
 
 class TaskSpecBrainSuggestion(OrchestratorModel):
@@ -249,7 +261,7 @@ class RuleBasedOrchestratorBrain:
         prompt = (
             "Return the best route recommendation for this orchestration context.\n\n"
             "Context JSON:\n"
-            f"{json.dumps(prompt_payload, sort_keys=True)}\n"
+            f"{json.dumps(_to_serializable(prompt_payload), sort_keys=True, default=str)}\n"
         )
 
         constraints = dict(state.task.constraints)
