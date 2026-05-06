@@ -49,7 +49,6 @@ Output contract:
     "suggested_worker": "codex" | "gemini" | "openrouter" | null,
     "suggested_profile": "<profile-name>" | null,
     "suggested_retry_strategy": "retry_same_worker" | "escalate_to_alternate" | null,
-    "accept_warning_status": true | false | null,
     "rationale": "<short reason>"
   }
 - Set at least one of suggested_worker, suggested_profile, or suggested_retry_strategy.
@@ -179,7 +178,6 @@ class RouteBrainSuggestion(OrchestratorModel):
     suggested_worker: WorkerType | None = None
     suggested_profile: str | None = None
     suggested_retry_strategy: Literal["retry_same_worker", "escalate_to_alternate"] | None = None
-    accept_warning_status: bool | None = None
     rationale: str | None = None
 
 
@@ -192,7 +190,6 @@ class RouteBrainMergeReport(OrchestratorModel):
     suggested_worker: WorkerType | None = None
     suggested_profile: str | None = None
     suggested_retry_strategy: Literal["retry_same_worker", "escalate_to_alternate"] | None = None
-    accept_warning_status: bool | None = None
     ignored_fields: list[str] = Field(default_factory=list)
     rationale: str | None = None
     error: str | None = None
@@ -587,17 +584,13 @@ class RuleBasedOrchestratorBrain:
             suggested_worker=_coerce_worker_type(payload.get("suggested_worker")),
             suggested_profile=suggested_profile,
             suggested_retry_strategy=payload.get("suggested_retry_strategy"),
-            accept_warning_status=(
-                payload.get("accept_warning_status")
-                if isinstance(payload.get("accept_warning_status"), bool)
-                else None
-            ),
             rationale=rationale,
         )
         if (
             suggestion.suggested_worker is None
             and suggestion.suggested_profile is None
             and suggestion.suggested_retry_strategy is None
+            and suggestion.rationale is None
         ):
             raise RuntimeError(
                 "planner route recommendation omitted worker/profile and retry strategy hints"

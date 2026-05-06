@@ -1557,7 +1557,6 @@ def _apply_brain_route_suggestion(
         suggested_worker=suggestion.suggested_worker,
         suggested_profile=suggestion.suggested_profile,
         suggested_retry_strategy=suggestion.suggested_retry_strategy,
-        accept_warning_status=suggestion.accept_warning_status,
         rationale=suggestion.rationale,
     )
     ignored_fields: list[str] = []
