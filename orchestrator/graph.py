@@ -570,20 +570,22 @@ def _manual_verifier_handoff_summary(
     return handoff_note
 
 
+def _normalize_repair_task_text(value: object) -> str | None:
+    """Return a stripped repair task text when present and non-empty."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
 def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
     """Build the typed worker request from orchestrator state."""
     task_text = state.normalized_task_text or state.task.task_text
-    verifier_repair_task_text = state.task.constraints.get(VERIFIER_REPAIR_REQUEST_CONSTRAINT)
-    normalized_verifier_repair_task_text = (
-        verifier_repair_task_text.strip()
-        if isinstance(verifier_repair_task_text, str) and verifier_repair_task_text.strip()
-        else None
+    normalized_verifier_repair_task_text = _normalize_repair_task_text(
+        state.task.constraints.get(VERIFIER_REPAIR_REQUEST_CONSTRAINT)
     )
-    review_repair_task_text = state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT)
-    normalized_review_repair_task_text = (
-        review_repair_task_text.strip()
-        if isinstance(review_repair_task_text, str) and review_repair_task_text.strip()
-        else None
+    normalized_review_repair_task_text = _normalize_repair_task_text(
+        state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT)
     )
 
     if normalized_verifier_repair_task_text and normalized_review_repair_task_text:
