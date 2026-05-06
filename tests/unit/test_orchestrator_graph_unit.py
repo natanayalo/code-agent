@@ -1338,6 +1338,31 @@ def test_verify_result_queues_bounded_repair_handoff_after_verifier_failure() ->
     assert "pytest -q tests/unit" in repair_text
 
 
+def test_verify_result_verifier_repair_budget_is_decoupled_from_max_retries() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "budget": {"max_retries": 0, "max_verifier_passes": 1},
+            },
+            "result": {
+                "status": "success",
+                "summary": "Applied change set.",
+                "files_changed": ["orchestrator/graph.py"],
+                "test_results": [{"name": "test1", "status": "failed"}],
+                "commands_run": [],
+            },
+        }
+    )
+
+    res = verify_result(state)
+
+    assert res["verification"]["status"] == "failed"
+    assert res["repair_handoff_requested"] is True
+    constraints = res["task"]["constraints"]
+    assert constraints["independent_verifier_repair_passes_used"] == 1
+
+
 def test_verify_result_stops_after_bounded_repair_attempts() -> None:
     state = OrchestratorState.model_validate(
         {

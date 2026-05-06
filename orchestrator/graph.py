@@ -478,7 +478,7 @@ def _route_after_await_approval(state_input: OrchestratorState) -> str:
 
 
 def _resolve_verifier_repair_handoff_budget(state: OrchestratorState) -> tuple[int, int]:
-    """Resolve bounded verifier-repair settings from constraints and budget caps."""
+    """Resolve bounded verifier-repair settings from constraints and verifier budget caps."""
     constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
     budget = state.task.budget if isinstance(state.task.budget, dict) else {}
 
@@ -491,11 +491,9 @@ def _resolve_verifier_repair_handoff_budget(state: OrchestratorState) -> tuple[i
         else DEFAULT_INDEPENDENT_VERIFIER_MAX_REPAIR_PASSES
     )
 
-    retry_budget_cap = coerce_non_negative_int_like(budget.get("max_retries"))
     verifier_budget_cap = coerce_non_negative_int_like(budget.get("max_verifier_passes"))
-    for cap in (retry_budget_cap, verifier_budget_cap):
-        if cap is not None:
-            max_passes = min(max_passes, cap)
+    if verifier_budget_cap is not None:
+        max_passes = min(max_passes, verifier_budget_cap)
 
     used_passes = coerce_non_negative_int_like(
         constraints.get(VERIFIER_REPAIR_PASSES_USED_CONSTRAINT)
