@@ -551,3 +551,23 @@ async def test_suggest_route_model_uses_empty_secrets() -> None:
     )
 
     assert worker.requests[-1].secrets == {}
+
+
+def test_suggest_route_rejects_rationale_only_payload() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(
+            WorkerResult(
+                status="success",
+                summary='{"rationale":"only a rationale"}',
+            )
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="omitted worker/profile and retry strategy hints"):
+        asyncio.run(
+            brain.suggest_route(
+                state=_state(),
+                available_workers=frozenset({"codex"}),
+                available_profiles=None,
+            )
+        )

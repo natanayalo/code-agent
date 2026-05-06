@@ -590,7 +590,6 @@ class RuleBasedOrchestratorBrain:
             suggestion.suggested_worker is None
             and suggestion.suggested_profile is None
             and suggestion.suggested_retry_strategy is None
-            and suggestion.rationale is None
         ):
             raise RuntimeError(
                 "planner route recommendation omitted worker/profile and retry strategy hints"
