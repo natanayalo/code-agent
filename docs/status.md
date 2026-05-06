@@ -47,11 +47,11 @@ Active focus:
 Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17: Native Agent Worker Runtime Profiles
-- [ ] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance (planner-style reasoning should default to native read-only execution mode/profile) — slice in progress: TaskSpec brain contract, feature-flagged enrichment hook, deterministic safety clamps ([#165](https://github.com/natanayalo/code-agent/pull/165)), and additive brain-suggested verification-command enrichment with merge audit metadata ([#166](https://github.com/natanayalo/code-agent/pull/166)) are now wired; model-backed recommendation breadth remains.
 - [ ] T-161: update observability/artifact persistence for runtime mode, profile, CLI stdout/stderr/events, final message, diff, changed files, and verifier result
 - [ ] T-162: deprecate operation-selector mode for Codex/Gemini while keeping `CliRuntimeLoop` for raw chat/OpenRouter compatibility
 
 ### Milestone 17 Done (Published)
+- [x] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance ([#167](https://github.com/natanayalo/code-agent/pull/167)) — implemented async model-backed enrichment with strict safety clamps, rule-based fallbacks, and 93% test coverage.
 - [x] T-159: add bounded continuation/repair after verifier failure ([#164](https://github.com/natanayalo/code-agent/pull/164))
 - [x] T-158: add an independent verifier execution stage with read-only/default-safe behavior ([#163](https://github.com/natanayalo/code-agent/pull/163))
 - [x] T-157: add a clarification gate before worker routing/dispatch when TaskSpec requires clarification ([#162](https://github.com/natanayalo/code-agent/pull/162))
