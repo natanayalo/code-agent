@@ -294,6 +294,36 @@ def test_suggest_verification_returns_none_when_model_emits_no_hint() -> None:
     assert suggestion is None
 
 
+def test_suggest_verification_context_counts_failed_and_error_tests() -> None:
+    worker = _StaticWorker(WorkerResult(status="success", summary="{}"))
+    brain = RuleBasedOrchestratorBrain(planner_worker=worker)
+    state = _state()
+    state.result = WorkerResult(
+        status="success",
+        files_changed=[],
+        test_results=[
+            {"name": "unit-pass", "status": "passed"},
+            {"name": "unit-fail", "status": "failed"},
+            {"name": "unit-error", "status": "error"},
+        ],
+        commands_run=[],
+    )
+
+    suggestion = asyncio.run(
+        brain.suggest_verification(
+            state=state,
+            independent_verifier_outcome=None,
+        )
+    )
+
+    assert suggestion is None
+    last_request = worker.requests[-1]
+    match = re.search(r"Context JSON:\n(.*?)\n", last_request.task_text, re.DOTALL)
+    assert match is not None
+    payload = json.loads(match.group(1))
+    assert payload["failed_tests_count"] == 2
+
+
 def test_suggest_route_serializes_complex_payload() -> None:
     from collections.abc import Mapping
 

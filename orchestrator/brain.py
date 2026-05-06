@@ -630,7 +630,7 @@ class RuleBasedOrchestratorBrain:
                 [
                     test
                     for test in (state.result.test_results if state.result else [])
-                    if test.status == "failed"
+                    if test.status in ("failed", "error")
                 ]
             ),
             "independent_verifier_outcome": (
