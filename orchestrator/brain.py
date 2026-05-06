@@ -80,6 +80,7 @@ Output contract:
 """.strip()
 
 _ROUTE_MAX_SUMMARY_PREVIEW_CHARS = 300
+_RULES_RATIONALE = "rules_v1"
 
 
 def _unwrap_markdown_json_fence(text: str) -> str:
@@ -253,9 +254,10 @@ class RuleBasedOrchestratorBrain:
                 suggestion = self._merge_task_spec_suggestions(suggestion, model_suggestion)
 
         # If no enrichment fields were suggested (ignoring rationale), skip applying
-        if not suggestion.model_dump(
-            exclude_none=True, exclude_defaults=True, exclude={"rationale"}
-        ):
+        has_enrichment = any(
+            getattr(suggestion, field) for field in suggestion.model_fields if field != "rationale"
+        )
+        if not has_enrichment:
             return None
         return suggestion
 
@@ -270,7 +272,7 @@ class RuleBasedOrchestratorBrain:
         del task_kind, task_plan
 
         suggestion = TaskSpecBrainSuggestion(
-            rationale="rule_based_task_spec_enrichment_v1",
+            rationale=_RULES_RATIONALE,
         )
         normalized_text = task.task_text.lower()
 
@@ -375,8 +377,8 @@ class RuleBasedOrchestratorBrain:
             logger.warning(f"Failed to parse brain task spec suggestion: {exc}")
             return None
 
+    @staticmethod
     def _merge_task_spec_suggestions(
-        self,
         base: TaskSpecBrainSuggestion,
         model: TaskSpecBrainSuggestion,
     ) -> TaskSpecBrainSuggestion:
@@ -398,9 +400,9 @@ class RuleBasedOrchestratorBrain:
             ),
             suggested_task_type=model.suggested_task_type or base.suggested_task_type,
             suggested_delivery_mode=model.suggested_delivery_mode or base.suggested_delivery_mode,
-            rationale=" + ".join(
+            rationale=" | ".join(
                 [
-                    f"{k}({v})"
+                    f"[{k}] {v}"
                     for k, v in [("rules", base.rationale), ("model", model.rationale)]
                     if v
                 ]

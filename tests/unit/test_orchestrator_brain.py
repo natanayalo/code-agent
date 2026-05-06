@@ -308,8 +308,8 @@ async def test_suggest_task_spec_model_backed_enrichment() -> None:
     assert "Model assumption" in suggestion.assumptions
     assert "Model criteria" in suggestion.acceptance_criteria
     assert "model-check" in suggestion.verification_commands
-    assert "rules(rule_based_task_spec_enrichment_v1)" in suggestion.rationale
-    assert "model(Model knows best)" in suggestion.rationale
+    assert "[rules] rules_v1" in suggestion.rationale
+    assert "[model] Model knows best" in suggestion.rationale
 
 
 @pytest.mark.asyncio
@@ -332,7 +332,7 @@ async def test_suggest_task_spec_model_timeout_falls_back_to_rules() -> None:
         # Should still have the rule-based escalation
         assert suggestion is not None
         assert suggestion.suggested_risk_level == "medium"
-        assert suggestion.rationale == "rule_based_task_spec_enrichment_v1"
+        assert suggestion.rationale == "rules_v1"
 
 
 @pytest.mark.asyncio
@@ -347,7 +347,7 @@ async def test_suggest_task_spec_model_failure_falls_back_to_rules() -> None:
     )
     assert suggestion is not None
     assert suggestion.suggested_risk_level == "medium"
-    assert suggestion.rationale == "rule_based_task_spec_enrichment_v1"
+    assert suggestion.rationale == "rules_v1"
 
 
 @pytest.mark.asyncio
@@ -368,9 +368,7 @@ async def test_suggest_task_spec_risk_level_merging_takes_max() -> None:
 
     # Should stay medium (from rules) instead of being downgraded to low
     assert suggestion.suggested_risk_level == "medium"
-    expected_rationale = (
-        "rules(rule_based_task_spec_enrichment_v1) + model(Model thinks it is easy)"
-    )
+    expected_rationale = "[rules] rules_v1 | [model] Model thinks it is easy"
     assert expected_rationale in suggestion.rationale
 
 
