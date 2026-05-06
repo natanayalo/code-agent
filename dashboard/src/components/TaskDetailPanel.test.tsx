@@ -533,4 +533,41 @@ describe('TaskDetailPanel', () => {
     expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(second.compareDocumentPosition(third) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  it('falls back for invalid run timestamps and ignores non-http trace urls', () => {
+    const task = buildTask({
+      latest_run: buildLatestRun({
+        started_at: 'not-a-date',
+        finished_at: '2026-04-28T00:01:10.000Z',
+        budget_usage: {
+          telemetry: {
+            trace_url: 'ftp://example.com/trace/abc',
+          },
+        },
+      }),
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Unknown duration')).toBeInTheDocument();
+    expect(screen.queryByText('Provider Deep Links')).not.toBeInTheDocument();
+    expect(screen.getByText('No trace metadata available yet.')).toBeInTheDocument();
+  });
+
+  it('handles numeric span-status fields exposed directly on metadata objects', () => {
+    const task = buildTask({
+      latest_run: buildLatestRun({
+        verifier_outcome: {
+          span_status_counts: 2,
+        },
+      }),
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Span Status Summary')).toBeInTheDocument();
+    const row = screen.getByText('Span Status Counts:').closest('li');
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText('2')).toBeInTheDocument();
+  });
 });
