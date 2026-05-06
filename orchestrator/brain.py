@@ -395,7 +395,14 @@ class RuleBasedOrchestratorBrain:
             suggested_risk_level=model.suggested_risk_level or base.suggested_risk_level,
             suggested_task_type=model.suggested_task_type or base.suggested_task_type,
             suggested_delivery_mode=model.suggested_delivery_mode or base.suggested_delivery_mode,
-            rationale=f"rules({base.rationale}) + model({model.rationale})",
+            rationale=" + ".join(
+                [
+                    f"{k}({v})"
+                    for k, v in [("rules", base.rationale), ("model", model.rationale)]
+                    if v
+                ]
+            )
+            or None,
         )
 
     async def suggest_route(
