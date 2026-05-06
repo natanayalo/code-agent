@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from db.enums import TimelineEventType
 from orchestrator.graph import (
     _timeline_events,
@@ -72,7 +74,7 @@ def test_choose_worker_emits_event():
         {"task": {"task_text": "hello"}, "task_kind": "implementation"}
     )
     choose_node = build_choose_worker_node(frozenset({"codex"}))
-    res = choose_node(state)
+    res = asyncio.run(choose_node(state))
     assert len(res["timeline_events"]) == 1
     assert res["timeline_events"][0].event_type == TimelineEventType.WORKER_SELECTED
     assert res["timeline_events"][0].payload["chosen_worker"] == "codex"

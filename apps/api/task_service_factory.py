@@ -339,7 +339,7 @@ def build_task_service_from_env(
             resolved_env.get(INDEPENDENT_VERIFIER_ENABLED_ENV_VAR)
         ),
         orchestrator_brain=(
-            RuleBasedOrchestratorBrain()
+            RuleBasedOrchestratorBrain(planner_worker=gemini_worker)
             if _is_enabled(resolved_env.get(ORCHESTRATOR_BRAIN_ENABLED_ENV_VAR))
             else None
         ),

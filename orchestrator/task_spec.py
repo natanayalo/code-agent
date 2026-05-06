@@ -298,6 +298,10 @@ def apply_task_spec_brain_suggestion(
         list(task_spec.clarification_questions),
         _coerce_string_list(suggestion.clarification_questions),
     )
+    verification_commands, added_verification_commands = _append_unique(
+        list(task_spec.verification_commands),
+        _coerce_string_list(suggestion.verification_commands),
+    )
 
     ignored_fields: list[str] = []
     suggested_task_type = suggestion.suggested_task_type
@@ -333,6 +337,7 @@ def apply_task_spec_brain_suggestion(
             "acceptance_criteria": acceptance_criteria,
             "non_goals": non_goals,
             "clarification_questions": clarification_questions,
+            "verification_commands": verification_commands,
             "requires_clarification": requires_clarification,
             "risk_level": risk_level,
             "requires_permission": requires_permission,
@@ -349,6 +354,7 @@ def apply_task_spec_brain_suggestion(
             or added_acceptance
             or added_non_goals
             or added_clarification_questions
+            or added_verification_commands
             or risk_level != task_spec.risk_level
             or requires_permission != task_spec.requires_permission
             or permission_reason != task_spec.permission_reason
@@ -358,6 +364,7 @@ def apply_task_spec_brain_suggestion(
         added_acceptance_criteria=added_acceptance,
         added_non_goals=added_non_goals,
         added_clarification_questions=added_clarification_questions,
+        added_verification_commands=added_verification_commands,
         ignored_fields=_dedupe_preserving_order(ignored_fields),
         rationale=suggestion.rationale,
     )

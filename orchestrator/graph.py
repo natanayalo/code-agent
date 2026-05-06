@@ -16,7 +16,12 @@ from langgraph.types import interrupt
 
 from db.base import utc_now
 from db.enums import TimelineEventType
-from orchestrator.brain import OrchestratorBrain, TaskSpecBrainMergeReport
+from orchestrator.brain import (
+    OrchestratorBrain,
+    RouteBrainMergeReport,
+    RouteBrainSuggestion,
+    TaskSpecBrainMergeReport,
+)
 from orchestrator.constants import (
     COMPLEX_TASK_MARKERS,
     HIGH_QUALITY_REQUEST_MARKERS,
@@ -1398,20 +1403,184 @@ def _compute_route_decision(
     return _compute_profile_route_decision(state, available_workers, available_profiles)
 
 
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    """Return unique values while preserving first-seen ordering."""
+    return list(dict.fromkeys(values))
+
+
+def _should_attempt_brain_route(state: OrchestratorState) -> bool:
+    """Return whether the brain route path can run for this state."""
+    if state.task.worker_override is not None:
+        return False
+    if (
+        isinstance(state.task.worker_profile_override, str)
+        and state.task.worker_profile_override.strip()
+    ):
+        return False
+    return True
+
+
+def _record_route_brain_final_choice(
+    report: RouteBrainMergeReport,
+    route: RouteDecision,
+) -> RouteBrainMergeReport:
+    """Attach final route metadata to a brain merge report."""
+    return report.model_copy(
+        update={
+            "final_chosen_worker": route.chosen_worker,
+            "final_chosen_profile": route.chosen_profile,
+            "final_runtime_mode": route.runtime_mode,
+            "final_route_reason": route.route_reason,
+        }
+    )
+
+
+def _apply_brain_route_suggestion(
+    *,
+    suggestion: RouteBrainSuggestion,
+    provider: str | None,
+    available_workers: frozenset[str],
+    available_profiles: Mapping[str, WorkerProfile] | None,
+    routable_profiles: Mapping[str, WorkerProfile],
+) -> tuple[RouteDecision | None, RouteBrainMergeReport]:
+    """Clamp a brain route suggestion to deterministic availability and policy boundaries."""
+    report = RouteBrainMergeReport(
+        enabled=True,
+        provider=provider,
+        suggested_worker=suggestion.suggested_worker,
+        suggested_profile=suggestion.suggested_profile,
+        rationale=suggestion.rationale,
+    )
+    ignored_fields: list[str] = []
+
+    suggested_profile = suggestion.suggested_profile
+    if suggested_profile:
+        if not available_profiles:
+            ignored_fields.append("suggested_profile")
+        else:
+            profile = available_profiles.get(suggested_profile)
+            if profile is None or suggested_profile not in routable_profiles:
+                ignored_fields.append("suggested_profile")
+            else:
+                if (
+                    suggestion.suggested_worker is not None
+                    and suggestion.suggested_worker != profile.worker_type
+                ):
+                    ignored_fields.append("suggested_worker")
+                route = _route_for_profile(
+                    profile,
+                    reason="brain_recommendation",
+                    override_applied=False,
+                )
+                return route, report.model_copy(
+                    update={
+                        "applied": True,
+                        "ignored_fields": _dedupe_preserving_order(ignored_fields),
+                    }
+                )
+
+    suggested_worker = suggestion.suggested_worker
+    if suggested_worker is None:
+        return None, report.model_copy(
+            update={"ignored_fields": _dedupe_preserving_order(ignored_fields)}
+        )
+    if suggested_worker not in available_workers:
+        ignored_fields.append("suggested_worker")
+        return None, report.model_copy(
+            update={"ignored_fields": _dedupe_preserving_order(ignored_fields)}
+        )
+
+    if available_profiles:
+        profile_name = _select_default_profile_for_worker(routable_profiles, suggested_worker)
+        if profile_name is None:
+            ignored_fields.append("suggested_worker")
+            return None, report.model_copy(
+                update={"ignored_fields": _dedupe_preserving_order(ignored_fields)}
+            )
+        route = _route_for_profile(
+            routable_profiles[profile_name],
+            reason="brain_recommendation",
+            override_applied=False,
+        )
+        return route, report.model_copy(
+            update={
+                "applied": True,
+                "ignored_fields": _dedupe_preserving_order(ignored_fields),
+            }
+        )
+
+    route = RouteDecision(
+        chosen_worker=suggested_worker,
+        route_reason="brain_recommendation",
+        override_applied=False,
+    )
+    return route, report.model_copy(
+        update={
+            "applied": True,
+            "ignored_fields": _dedupe_preserving_order(ignored_fields),
+        }
+    )
+
+
 def build_choose_worker_node(
     available_workers: frozenset[str],
     *,
     available_profiles: Mapping[str, WorkerProfile] | None = None,
-) -> Callable[[OrchestratorState], dict[str, Any]]:
+    orchestrator_brain: OrchestratorBrain | None = None,
+) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the choose-worker node bound to the given set of available workers."""
 
-    def choose_worker_node(state_input: OrchestratorState) -> dict[str, Any]:
+    async def choose_worker_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
-        route = _compute_route_decision(
-            state,
-            available_workers,
-            available_profiles=available_profiles,
+        route: RouteDecision | None = None
+        brain_report: RouteBrainMergeReport | None = None
+        routable_profiles = (
+            _routable_execution_profiles(state, available_profiles, available_workers)
+            if available_profiles
+            else {}
         )
+        if orchestrator_brain is not None and _should_attempt_brain_route(state):
+            provider_name = type(orchestrator_brain).__name__
+            try:
+                suggestion = await orchestrator_brain.suggest_route(
+                    state=state,
+                    available_workers=available_workers,
+                    available_profiles=available_profiles,
+                )
+            except Exception as exc:
+                detail = str(exc).strip()
+                brain_report = RouteBrainMergeReport(
+                    enabled=True,
+                    provider=provider_name,
+                    error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
+                )
+            else:
+                if suggestion is None:
+                    brain_report = RouteBrainMergeReport(
+                        enabled=True,
+                        provider=provider_name,
+                    )
+                else:
+                    route, brain_report = _apply_brain_route_suggestion(
+                        suggestion=suggestion,
+                        provider=provider_name,
+                        available_workers=available_workers,
+                        available_profiles=available_profiles,
+                        routable_profiles=routable_profiles,
+                    )
+
+        if route is None:
+            route = _compute_route_decision(
+                state,
+                available_workers,
+                available_profiles=available_profiles,
+            )
+        if brain_report is not None:
+            brain_report = _record_route_brain_final_choice(brain_report, route)
+
+        event_payload = route.model_dump(mode="json")
+        if brain_report is not None:
+            event_payload["brain"] = brain_report.model_dump(mode="json")
         return {
             "current_step": "choose_worker",
             "route": route.model_dump(),
@@ -1423,7 +1592,7 @@ def build_choose_worker_node(
                 state,
                 TimelineEventType.WORKER_SELECTED,
                 message=f"Worker selected: {route.chosen_worker}",
-                payload=route.model_dump(),
+                payload=event_payload,
             ),
         }
 
@@ -2223,6 +2392,7 @@ def build_orchestrator_graph(
             build_choose_worker_node(
                 available_workers,
                 available_profiles=active_profiles,
+                orchestrator_brain=orchestrator_brain,
             )
         ),
     )
