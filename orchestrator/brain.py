@@ -123,7 +123,11 @@ def _merge_list(a: list[str], b: list[str]) -> list[str]:
     """Merge two lists of strings, preserving order and ensuring uniqueness."""
     merged = []
     seen = set()
-    for item in a + b:
+    for item in a:
+        if item not in seen:
+            merged.append(item)
+            seen.add(item)
+    for item in b:
         if item not in seen:
             merged.append(item)
             seen.add(item)
@@ -319,10 +323,9 @@ class RuleBasedOrchestratorBrain:
             "task_plan": task_plan.model_dump(mode="json") if task_plan else None,
             "constraints": dict(task.constraints),
         }
+        context_json = json.dumps(_to_serializable(prompt_payload), sort_keys=True, default=str)
         prompt = (
-            "Suggest TaskSpec enrichments for this task.\n\n"
-            "Context JSON:\n"
-            f"{json.dumps(_to_serializable(prompt_payload), sort_keys=True, default=str)}\n"
+            "Suggest TaskSpec enrichments for this task.\n\n" "Context JSON:\n" f"{context_json}\n"
         )
 
         constraints = dict(task.constraints)
@@ -454,10 +457,11 @@ class RuleBasedOrchestratorBrain:
             "task_constraints": dict(state.task.constraints),
             "task_budget": dict(state.task.budget),
         }
+        context_json = json.dumps(_to_serializable(prompt_payload), sort_keys=True, default=str)
         prompt = (
             "Return the best route recommendation for this orchestration context.\n\n"
             "Context JSON:\n"
-            f"{json.dumps(_to_serializable(prompt_payload), sort_keys=True, default=str)}\n"
+            f"{context_json}\n"
         )
 
         constraints = dict(state.task.constraints)
