@@ -165,13 +165,11 @@ def test_submit_task_persists_execution_path_and_allows_polling(
     assert latest_run["commands_run"][0]["stdout_artifact_uri"] == "artifacts/stdout.log"
     assert latest_run["commands_run"][0]["stderr_artifact_uri"] == "artifacts/stderr.log"
     assert "id" in latest_run["commands_run"][0]
-    assert latest_run["artifact_index"] == [
-        {
-            "name": "workspace",
-            "uri": "/tmp/workspace-task-44-1234",
-            "artifact_type": "workspace",
-        }
-    ]
+    assert len(latest_run["artifact_index"]) == 1
+    assert latest_run["artifact_index"][0]["name"] == "workspace"
+    assert latest_run["artifact_index"][0]["uri"] == "/tmp/workspace-task-44-1234"
+    assert latest_run["artifact_index"][0]["artifact_type"] == "workspace"
+    assert "id" in latest_run["artifact_index"][0]
     assert latest_run["artifacts"][0]["artifact_type"] == "workspace"
     assert latest_run["artifacts"][0]["name"] == "workspace"
 
