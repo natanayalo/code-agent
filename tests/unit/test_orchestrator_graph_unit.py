@@ -1274,6 +1274,43 @@ def test_build_choose_worker_node_prevents_brain_from_bypassing_escalation() -> 
     assert brain_payload["ignored_fields"] == ["suggested_worker"]
 
 
+def test_build_choose_worker_node_handles_hallucinated_brain_retry_strategy() -> None:
+    class _Brain:
+        def suggest_task_spec(self, **kwargs):
+            return None
+
+        async def suggest_route(self, **kwargs):
+            return RouteBrainSuggestion(
+                suggested_retry_strategy="hallucinated_strategy",
+                rationale="I am a creative LLM.",
+            )
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "fix tests"},
+            "attempt_count": 1,
+            "dispatch": {"worker_type": "codex"},
+            "result": {
+                "status": "failure",
+                "failure_kind": "test",
+                "commands_run": [],
+                "files_changed": [],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    node = build_choose_worker_node(_ALL_WORKERS, orchestrator_brain=_Brain())
+    # This should NOT raise RuntimeError anymore
+    res = asyncio.run(node(state))
+
+    brain_payload = res["timeline_events"][0].payload["brain"]
+    assert res["route"]["chosen_worker"] == "gemini"  # Fallback to deterministic policy
+    assert res["route"]["route_reason"] == "previous_worker_failed"
+    assert brain_payload["applied"] is False
+    assert brain_payload["ignored_fields"] == ["suggested_retry_strategy"]
+
+
 def test_apply_brain_retry_strategy_only_logs_provided_ignored_fields() -> None:
     # Manual unit test of the internal function
     state = OrchestratorState.model_validate(

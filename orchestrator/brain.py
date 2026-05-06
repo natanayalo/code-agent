@@ -177,7 +177,7 @@ class RouteBrainSuggestion(OrchestratorModel):
 
     suggested_worker: WorkerType | None = None
     suggested_profile: str | None = None
-    suggested_retry_strategy: Literal["retry_same_worker", "escalate_to_alternate"] | None = None
+    suggested_retry_strategy: str | None = None
     rationale: str | None = None
 
 
@@ -189,7 +189,7 @@ class RouteBrainMergeReport(OrchestratorModel):
     applied: bool = False
     suggested_worker: WorkerType | None = None
     suggested_profile: str | None = None
-    suggested_retry_strategy: Literal["retry_same_worker", "escalate_to_alternate"] | None = None
+    suggested_retry_strategy: str | None = None
     ignored_fields: list[str] = Field(default_factory=list)
     rationale: str | None = None
     error: str | None = None

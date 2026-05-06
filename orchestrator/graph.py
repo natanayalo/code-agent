@@ -1517,7 +1517,12 @@ def _apply_brain_retry_strategy(
 
     # escalate_to_alternate path with deterministic alternate fallback ordering.
     if retry_strategy != "escalate_to_alternate":
-        raise RuntimeError(f"unexpected retry strategy state: {retry_strategy}")
+        logger.warning(
+            "Brain suggested an unhandled retry strategy; ignoring and falling back to policy",
+            extra={"retry_strategy": retry_strategy},
+        )
+        ignored_fields.append("suggested_retry_strategy")
+        return None, ignored_fields
     candidate_workers: list[WorkerType] = []
     if suggestion.suggested_worker is not None:
         if suggestion.suggested_worker != prior_worker:
