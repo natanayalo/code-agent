@@ -173,6 +173,25 @@ def test_build_worker_request_prefers_review_repair_handoff_text():
     assert request.task_text == "Repair follow-up task"
 
 
+def test_build_worker_request_prefers_verifier_repair_handoff_text():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Original task",
+                "constraints": {
+                    "independent_verifier_repair_request": "Verifier repair follow-up task",
+                    "independent_review_repair_request": "Review repair follow-up task",
+                },
+            },
+            "normalized_task_text": "Normalized original task",
+        }
+    )
+
+    request = _build_worker_request(state)
+
+    assert request.task_text == "Verifier repair follow-up task"
+
+
 def test_plan_task_skips_simple_tasks():
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "Add a helper"}, "task_kind": "implementation"}
@@ -1239,6 +1258,101 @@ def test_verify_result_marks_post_run_lint_skip_as_passed() -> None:
     )
     assert lint_check["status"] == "passed"
     assert "skipped" in lint_check["message"]
+
+
+def test_verify_result_queues_bounded_repair_handoff_after_verifier_failure() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "budget": {"max_retries": 1},
+            },
+            "task_spec": {"goal": "demo", "verification_commands": ["pytest -q tests/unit"]},
+            "result": {
+                "status": "success",
+                "summary": "Applied change set.",
+                "files_changed": ["orchestrator/graph.py"],
+                "test_results": [{"name": "test1", "status": "failed"}],
+                "commands_run": [],
+            },
+        }
+    )
+
+    res = verify_result(state)
+
+    assert res["verification"]["status"] == "failed"
+    assert res["repair_handoff_requested"] is True
+    assert "queued bounded repair handoff (1/1)" in res["progress_updates"][-1]
+    constraints = res["task"]["constraints"]
+    assert constraints["independent_verifier_repair_passes_used"] == 1
+    repair_text = constraints["independent_verifier_repair_request"]
+    assert "Apply targeted code fixes for failed verification checks." in repair_text
+    assert "pytest -q tests/unit" in repair_text
+
+
+def test_verify_result_stops_after_bounded_repair_attempts() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "constraints": {
+                    "independent_verifier_repair_request": "repair text",
+                    "independent_verifier_repair_passes_used": 1,
+                },
+                "budget": {"max_retries": 1},
+            },
+            "result": {
+                "status": "success",
+                "summary": "Applied repair candidate.",
+                "files_changed": ["orchestrator/graph.py"],
+                "test_results": [{"name": "test1", "status": "failed"}],
+                "commands_run": [],
+            },
+        }
+    )
+
+    res = verify_result(state)
+
+    assert res["verification"]["status"] == "failed"
+    assert "repair_handoff_requested" not in res
+    assert "independent_verifier_repair_request" not in res["task"]["constraints"]
+    assert res["task"]["constraints"]["independent_verifier_repair_passes_used"] == 1
+    assert "verification failed after bounded repair attempts" in res["progress_updates"][-1]
+    assert (
+        "Verification is still failing after 1 bounded repair attempt" in res["result"]["summary"]
+    )
+    assert res["result"]["next_action_hint"] == "await_manual_follow_up"
+
+
+def test_verify_result_cleans_verifier_repair_task_after_successful_follow_up() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "constraints": {
+                    "independent_verifier_repair_request": "repair text",
+                    "independent_verifier_repair_passes_used": 1,
+                },
+                "budget": {"max_retries": 1},
+            },
+            "result": {
+                "status": "success",
+                "summary": "Applied repair candidate.",
+                "files_changed": ["orchestrator/graph.py"],
+                "test_results": [{"name": "test1", "status": "passed"}],
+                "commands_run": [],
+            },
+        }
+    )
+
+    res = verify_result(state)
+
+    assert res["verification"]["status"] == "passed"
+    assert "repair_handoff_requested" not in res
+    assert "result" not in res
+    assert "independent_verifier_repair_request" not in res["task"]["constraints"]
+    assert res["task"]["constraints"]["independent_verifier_repair_passes_used"] == 1
+    assert "verification passed after bounded repair handoff" in res["progress_updates"][-1]
 
 
 def test_verify_result_runs_independent_verifier_when_enabled(tmp_path: Path) -> None:
