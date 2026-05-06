@@ -38,18 +38,18 @@ Active focus:
 
 ## Next Priorities
 
-1. implement T-163 brain-driven retry/escalation and verifier-acceptance hints with deterministic safety clamps
-2. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
-3. continue tightening native-agent observability and verifier acceptance policy after T-160 rollout
+1. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
+2. continue tightening native-agent observability and verifier acceptance policy after T-160 rollout
+3. prepare bounded-scout lane planning after Milestone 17 stabilization
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17: Native Agent Worker Runtime Profiles
-- [ ] T-163: add brain-driven retry/escalation and verifier-acceptance hints as first-class, clamp-governed controls in the orchestration graph
 
 ### Milestone 17 Done (Published)
+- [x] T-163: add brain-driven retry/escalation and verifier-acceptance hints as first-class, clamp-governed controls in the orchestration graph ([#170](https://github.com/natanayalo/code-agent/pull/170)) — added explicit brain hint contracts, deterministic route/verification clamps, and timeline-visible rationale for applied vs ignored hints.
 - [x] T-162: deprecate operation-selector mode for Codex/Gemini while keeping `CliRuntimeLoop` for raw chat/OpenRouter compatibility ([#169](https://github.com/natanayalo/code-agent/pull/169)) — hard-pinned Codex/Gemini defaults to native-agent mode, added explicit legacy tool-loop profile opt-in with per-task `worker_profile_override`, and expanded deprecation observability via warning logs plus runtime-mode/legacy usage metrics.
 - [x] T-161: update observability/artifact persistence for runtime mode, profile, CLI stdout/stderr/events, final message, diff, changed files, and verifier result ([#168](https://github.com/natanayalo/code-agent/pull/168)) — surfaced `latest_run.files_changed` via task snapshots and added dashboard run-observability rendering for worker/profile/runtime/verification details.
 - [x] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, and clarification ([#167](https://github.com/natanayalo/code-agent/pull/167)) — implemented async model-backed enrichment with strict safety clamps, rule-based fallbacks, and 93% test coverage.

@@ -21,6 +21,8 @@ from orchestrator.brain import (
     RouteBrainMergeReport,
     RouteBrainSuggestion,
     TaskSpecBrainMergeReport,
+    VerificationBrainMergeReport,
+    VerificationBrainSuggestion,
 )
 from orchestrator.constants import (
     COMPLEX_TASK_MARKERS,
@@ -660,7 +662,7 @@ class _DefaultFakeWorker(Worker):
         return _default_worker_result_provider(request)
 
 
-def _configured_workers(
+def _available_workers(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
@@ -710,7 +712,7 @@ def _routable_execution_profiles(
     profiles: Mapping[str, WorkerProfile],
     available_workers: frozenset[str],
 ) -> dict[str, WorkerProfile]:
-    """Filter configured profiles to those compatible with the task request."""
+    """Filter available profiles to those compatible with the task request."""
     SUPPORTED_RUNTIME_MODES: Final = {"native_agent", "tool_loop"}
     delivery_mode = state.task_spec.delivery_mode if state.task_spec is not None else None
     requires_read_only = bool(state.task.constraints.get("read_only"))
@@ -778,19 +780,19 @@ def _route_from_worker_choice(
     )
 
 
-def _unconfigured_worker_result(
+def _worker_unavailable_result(
     worker_type: str | None,
     *,
-    configured_workers: frozenset[str],
+    available_workers: frozenset[str],
 ) -> WorkerResult:
     """Return a structured error when routing selects an unavailable worker."""
-    configured_workers_text = ", ".join(sorted(configured_workers))
+    available_workers_text = ", ".join(sorted(available_workers))
     selected_worker = worker_type or "unknown"
     return WorkerResult(
         status="failure",
         summary=(
-            f"No worker is configured for route '{selected_worker}'. "
-            f"Configured workers: {configured_workers_text}."
+            f"No worker is available for route '{selected_worker}'. "
+            f"Available workers: {available_workers_text}."
         ),
         failure_kind="provider_error",
         commands_run=[],
@@ -801,18 +803,18 @@ def _unconfigured_worker_result(
     )
 
 
-def _unconfigured_worker_profile_result(
+def _profile_unavailable_result(
     profile_name: str,
     *,
-    configured_profiles: frozenset[str],
+    available_profiles: frozenset[str],
 ) -> WorkerResult:
     """Return a structured error when routing selects an unavailable worker profile."""
-    configured_profiles_text = ", ".join(sorted(configured_profiles)) or "none"
+    available_profiles_text = ", ".join(sorted(available_profiles)) or "none"
     return WorkerResult(
         status="failure",
         summary=(
             f"No routable worker profile is available for route '{profile_name}'. "
-            f"Configured profiles: {configured_profiles_text}."
+            f"Available profiles: {available_profiles_text}."
         ),
         failure_kind="provider_error",
         commands_run=[],
@@ -823,19 +825,19 @@ def _unconfigured_worker_profile_result(
     )
 
 
-def _worker_route_missing_profile_result(
+def _worker_missing_routable_profile_result(
     worker_type: str | None,
     *,
-    configured_profiles: frozenset[str],
+    available_profiles: frozenset[str],
 ) -> WorkerResult:
     """Return a structured error when worker selection has no routable execution profile."""
-    configured_profiles_text = ", ".join(sorted(configured_profiles)) or "none"
+    available_profiles_text = ", ".join(sorted(available_profiles)) or "none"
     selected_worker = worker_type or "unknown"
     return WorkerResult(
         status="failure",
         summary=(
             f"No routable worker profile is available for worker route '{selected_worker}'. "
-            f"Configured profiles: {configured_profiles_text}."
+            f"Available profiles: {available_profiles_text}."
         ),
         failure_kind="provider_error",
         commands_run=[],
@@ -1435,8 +1437,121 @@ def _record_route_brain_final_choice(
     )
 
 
+def _route_for_worker(
+    *,
+    worker_type: WorkerType,
+    reason: str,
+    available_profiles: Mapping[str, WorkerProfile] | None,
+    routable_profiles: Mapping[str, WorkerProfile],
+) -> RouteDecision | None:
+    """Build a route decision for a worker, attaching default profile metadata when available."""
+    if available_profiles:
+        profile_name = _select_default_profile_for_worker(routable_profiles, worker_type)
+        if profile_name is None:
+            return None
+        return _route_for_profile(
+            routable_profiles[profile_name],
+            reason=reason,
+            override_applied=False,
+        )
+    return RouteDecision(
+        chosen_worker=worker_type,
+        route_reason=reason,
+        override_applied=False,
+    )
+
+
+def _resolve_brain_retry_context(state: OrchestratorState) -> tuple[WorkerType | None, str | None]:
+    """Resolve deterministic retry context from prior verification or worker failures."""
+    prior_worker = state.dispatch.worker_type
+    if state.attempt_count <= 0 or prior_worker is None:
+        return None, None
+    if state.verification is not None and state.verification.status == "failed":
+        verification_failure_kind = state.verification.failure_kind or "unknown"
+        if verification_failure_kind in _VERIFICATION_FAILURE_REROUTE_KINDS:
+            return prior_worker, "escalate_to_alternate"
+    if state.result is not None and state.result.status != "success":
+        failure_kind = state.result.failure_kind or "unknown"
+        if failure_kind in _WORKER_FAILURE_REROUTE_KINDS:
+            return prior_worker, "escalate_to_alternate"
+        if failure_kind in _WORKER_FAILURE_RETRY_SAME_WORKER_KINDS:
+            return prior_worker, "retry_same_worker"
+    return prior_worker, None
+
+
+def _apply_brain_retry_strategy(
+    *,
+    suggestion: RouteBrainSuggestion,
+    available_workers: frozenset[str],
+    available_profiles: Mapping[str, WorkerProfile] | None,
+    routable_profiles: Mapping[str, WorkerProfile],
+    prior_worker: WorkerType | None,
+    allowed_strategy: str | None,
+) -> tuple[RouteDecision | None, list[str]]:
+    """Apply advisory brain retry strategy while preserving deterministic retry policy clamps."""
+    ignored_fields: list[str] = []
+    retry_strategy = suggestion.suggested_retry_strategy
+    if retry_strategy is None:
+        return None, ignored_fields
+
+    if prior_worker is None or allowed_strategy is None or retry_strategy != allowed_strategy:
+        ignored_fields.append("suggested_retry_strategy")
+        return None, ignored_fields
+
+    if retry_strategy == "retry_same_worker":
+        if prior_worker not in available_workers:
+            ignored_fields.append("suggested_retry_strategy")
+            return None, ignored_fields
+        route = _route_for_worker(
+            worker_type=prior_worker,
+            reason="brain_retry_same_worker",
+            available_profiles=available_profiles,
+            routable_profiles=routable_profiles,
+        )
+        if route is None:
+            ignored_fields.append("suggested_retry_strategy")
+        else:
+            if suggestion.suggested_worker and suggestion.suggested_worker != prior_worker:
+                ignored_fields.append("suggested_worker")
+        return route, ignored_fields
+
+    # escalate_to_alternate path with deterministic alternate fallback ordering.
+    if retry_strategy != "escalate_to_alternate":
+        logger.warning(
+            "Brain suggested an unhandled retry strategy; ignoring and falling back to policy",
+            extra={"retry_strategy": retry_strategy},
+        )
+        ignored_fields.append("suggested_retry_strategy")
+        return None, ignored_fields
+    candidate_workers: list[WorkerType] = []
+    if suggestion.suggested_worker is not None:
+        if suggestion.suggested_worker != prior_worker:
+            candidate_workers.append(suggestion.suggested_worker)
+        else:
+            ignored_fields.append("suggested_worker")
+    candidate_workers.extend(worker for worker in SUPPORTED_WORKER_TYPES if worker != prior_worker)
+
+    for candidate in dict.fromkeys(candidate_workers):
+        if candidate not in available_workers:
+            continue
+        route = _route_for_worker(
+            worker_type=candidate,
+            reason="brain_retry_escalation",
+            available_profiles=available_profiles,
+            routable_profiles=routable_profiles,
+        )
+        if route is not None:
+            if suggestion.suggested_worker and candidate != suggestion.suggested_worker:
+                ignored_fields.append("suggested_worker")
+            return route, ignored_fields
+
+    ignored_fields.append("suggested_retry_strategy")
+    return None, ignored_fields
+
+
 def _apply_brain_route_suggestion(
     *,
+    state: OrchestratorState,
     suggestion: RouteBrainSuggestion,
     provider: str | None,
     available_workers: frozenset[str],
@@ -1449,9 +1564,36 @@ def _apply_brain_route_suggestion(
         provider=provider,
         suggested_worker=suggestion.suggested_worker,
         suggested_profile=suggestion.suggested_profile,
+        suggested_retry_strategy=suggestion.suggested_retry_strategy,
         rationale=suggestion.rationale,
     )
     ignored_fields: list[str] = []
+
+    prior_worker, allowed_strategy = _resolve_brain_retry_context(state)
+    retry_route, retry_ignored_fields = _apply_brain_retry_strategy(
+        suggestion=suggestion,
+        available_workers=available_workers,
+        available_profiles=available_profiles,
+        routable_profiles=routable_profiles,
+        prior_worker=prior_worker,
+        allowed_strategy=allowed_strategy,
+    )
+    ignored_fields.extend(retry_ignored_fields)
+    if retry_route is not None:
+        if suggestion.suggested_profile is not None:
+            ignored_fields.append("suggested_profile")
+        return retry_route, report.model_copy(
+            update={
+                "applied": True,
+                "ignored_fields": _dedupe_preserving_order(ignored_fields),
+            }
+        )
+
+    # Deterministic escalation safety check: if the policy requires escalation,
+    # prevent the brain from suggesting the prior (failed) worker via profile or worker hints.
+    disallowed_worker: WorkerType | None = None
+    if allowed_strategy == "escalate_to_alternate":
+        disallowed_worker = prior_worker
 
     suggested_profile = suggestion.suggested_profile
     if suggested_profile:
@@ -1459,7 +1601,11 @@ def _apply_brain_route_suggestion(
             ignored_fields.append("suggested_profile")
         else:
             profile = available_profiles.get(suggested_profile)
-            if profile is None or suggested_profile not in routable_profiles:
+            if (
+                profile is None
+                or suggested_profile not in routable_profiles
+                or (disallowed_worker and profile.worker_type == disallowed_worker)
+            ):
                 ignored_fields.append("suggested_profile")
             else:
                 if (
@@ -1484,37 +1630,27 @@ def _apply_brain_route_suggestion(
         return None, report.model_copy(
             update={"ignored_fields": _dedupe_preserving_order(ignored_fields)}
         )
-    if suggested_worker not in available_workers:
+    if suggested_worker not in available_workers or (
+        disallowed_worker and suggested_worker == disallowed_worker
+    ):
         ignored_fields.append("suggested_worker")
         return None, report.model_copy(
             update={"ignored_fields": _dedupe_preserving_order(ignored_fields)}
         )
 
-    if available_profiles:
-        profile_name = _select_default_profile_for_worker(routable_profiles, suggested_worker)
-        if profile_name is None:
-            ignored_fields.append("suggested_worker")
-            return None, report.model_copy(
-                update={"ignored_fields": _dedupe_preserving_order(ignored_fields)}
-            )
-        route = _route_for_profile(
-            routable_profiles[profile_name],
-            reason="brain_recommendation",
-            override_applied=False,
-        )
-        return route, report.model_copy(
-            update={
-                "applied": True,
-                "ignored_fields": _dedupe_preserving_order(ignored_fields),
-            }
+    worker_route = _route_for_worker(
+        worker_type=suggested_worker,
+        reason="brain_recommendation",
+        available_profiles=available_profiles,
+        routable_profiles=routable_profiles,
+    )
+    if worker_route is None:
+        ignored_fields.append("suggested_worker")
+        return None, report.model_copy(
+            update={"ignored_fields": _dedupe_preserving_order(ignored_fields)}
         )
 
-    route = RouteDecision(
-        chosen_worker=suggested_worker,
-        route_reason="brain_recommendation",
-        override_applied=False,
-    )
-    return route, report.model_copy(
+    return worker_route, report.model_copy(
         update={
             "applied": True,
             "ignored_fields": _dedupe_preserving_order(ignored_fields),
@@ -1562,6 +1698,7 @@ def build_choose_worker_node(
                     )
                 else:
                     route, brain_report = _apply_brain_route_suggestion(
+                        state=state,
                         suggestion=suggestion,
                         provider=provider_name,
                         available_workers=available_workers,
@@ -1739,46 +1876,46 @@ def build_await_result_node(
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
     *,
-    configured_profile_names: frozenset[str] = frozenset(),
+    available_profile_names: frozenset[str] = frozenset(),
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around the workers wired into the graph."""
-    configured_workers = _configured_workers(worker, gemini_worker, openrouter_worker)
+    available_workers = _available_workers(worker, gemini_worker, openrouter_worker)
 
     async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
         worker_type = state.dispatch.worker_type or state.route.chosen_worker
         requested_profile = state.dispatch.worker_profile or state.route.chosen_profile
         if state.route.route_reason in ("runtime_unavailable", "incompatible_profile"):
-            if configured_profile_names:
+            if available_profile_names:
                 if requested_profile is None:
-                    result = _worker_route_missing_profile_result(
+                    result = _worker_missing_routable_profile_result(
                         worker_type,
-                        configured_profiles=configured_profile_names,
+                        available_profiles=available_profile_names,
                     )
                     progress_message = (
                         f"no routable profile available for worker: {worker_type or 'unknown'}"
                     )
                 else:
-                    result = _unconfigured_worker_profile_result(
+                    result = _profile_unavailable_result(
                         requested_profile,
-                        configured_profiles=configured_profile_names,
+                        available_profiles=available_profile_names,
                     )
                     progress_message = (
                         f"worker profile unavailable or incompatible: {requested_profile}"
                     )
             else:
-                result = _unconfigured_worker_result(
+                result = _worker_unavailable_result(
                     worker_type,
-                    configured_workers=frozenset(configured_workers.keys()),
+                    available_workers=frozenset(available_workers.keys()),
                 )
                 progress_message = f"worker unavailable: {worker_type or 'unknown'}"
             progress_updates = _progress_update(state, progress_message)
         else:
-            bound_worker = configured_workers.get(worker_type or "")
+            bound_worker = available_workers.get(worker_type or "")
             if bound_worker is None:
-                result = _unconfigured_worker_result(
+                result = _worker_unavailable_result(
                     worker_type,
-                    configured_workers=frozenset(configured_workers.keys()),
+                    available_workers=frozenset(available_workers.keys()),
                 )
                 progress_message = f"worker unavailable: {worker_type or 'unknown'}"
                 progress_updates = _progress_update(state, progress_message)
@@ -1971,6 +2108,8 @@ def verify_result(
     *,
     enable_independent_verifier: bool = False,
     independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = None,
+    verification_brain_suggestion: VerificationBrainSuggestion | None = None,
+    verification_brain_report: VerificationBrainMergeReport | None = None,
 ) -> dict[str, Any]:
     """Perform deterministic checks on the worker output before summarization."""
     state = _ensure_state(state_input)
@@ -2117,6 +2256,29 @@ def verify_result(
     else:
         report_status = "passed"
 
+    brain_report = verification_brain_report
+    if verification_brain_suggestion is not None:
+        if brain_report is None:
+            brain_report = VerificationBrainMergeReport(
+                enabled=True,
+                accept_warning_status=verification_brain_suggestion.accept_warning_status,
+                rationale=verification_brain_suggestion.rationale,
+            )
+        ignored_fields = list(brain_report.ignored_fields)
+        applied = brain_report.applied
+        if verification_brain_suggestion.accept_warning_status is True:
+            if report_status == "warning":
+                report_status = "passed"
+                applied = True
+            else:
+                ignored_fields.append("accept_warning_status")
+        brain_report = brain_report.model_copy(
+            update={
+                "applied": applied,
+                "ignored_fields": _dedupe_preserving_order(ignored_fields),
+            }
+        )
+
     report_failure_kind: VerificationFailureKind | None = None
     if report_status == "failed":
         failed_labels = {item.label for item in items if item.status == "failed"}
@@ -2139,7 +2301,17 @@ def verify_result(
         failure_kind=report_failure_kind,
         items=items,
     )
+    if brain_report is not None:
+        brain_report = brain_report.model_copy(update={"final_verification_status": report.status})
     progress_message = f"verification {report_status}"
+    if (
+        brain_report is not None
+        and brain_report.applied
+        and report.status == "passed"
+        and verification_brain_suggestion is not None
+        and verification_brain_suggestion.accept_warning_status is True
+    ):
+        progress_message = "verification passed via brain warning-acceptance hint"
     updated_task: dict[str, Any] | None = None
     updated_result: dict[str, Any] | None = None
     repair_handoff_requested = False
@@ -2192,6 +2364,10 @@ def verify_result(
         else:
             progress_message = f"verification {report_status} after bounded repair handoff"
 
+    verification_payload = report.model_dump()
+    if brain_report is not None:
+        verification_payload["brain"] = brain_report.model_dump(mode="json")
+
     response: dict[str, Any] = {
         "current_step": "verify_result",
         "verification": report.model_dump(),
@@ -2202,7 +2378,7 @@ def verify_result(
             (
                 TimelineEventType.VERIFICATION_COMPLETED,
                 report.summary,
-                report.model_dump(),
+                verification_payload,
             ),
         ),
     }
@@ -2313,11 +2489,11 @@ def build_review_result_node(
     openrouter_worker: Worker | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the review-result node around the workers wired into the graph."""
-    configured_workers = _configured_workers(worker, gemini_worker, openrouter_worker)
+    available_workers = _available_workers(worker, gemini_worker, openrouter_worker)
 
     async def review_result_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
-        return await review_result(state, worker_factory=configured_workers)
+        return await review_result(state, worker_factory=available_workers)
 
     return review_result_node
 
@@ -2328,25 +2504,61 @@ def build_verify_result_node(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
+    orchestrator_brain: OrchestratorBrain | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the verification node with optional independent verifier execution."""
 
-    configured_workers = _configured_workers(worker, gemini_worker, openrouter_worker)
+    available_workers = _available_workers(worker, gemini_worker, openrouter_worker)
 
     async def verify_result_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
         independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = (
             None
         )
+        verification_brain_suggestion: VerificationBrainSuggestion | None = None
+        verification_brain_report: VerificationBrainMergeReport | None = None
         if enable_independent_verifier:
             independent_verifier_outcome = await run_independent_verifier(
                 state,
-                worker_factory=configured_workers,
+                worker_factory=available_workers,
             )
+        if orchestrator_brain is not None:
+            suggest_verification = getattr(orchestrator_brain, "suggest_verification", None)
+            if callable(suggest_verification):
+                provider_name = type(orchestrator_brain).__name__
+                try:
+                    verification_brain_suggestion = await suggest_verification(
+                        state=state,
+                        independent_verifier_outcome=independent_verifier_outcome,
+                    )
+                except Exception as exc:
+                    detail = str(exc).strip()
+                    verification_brain_report = VerificationBrainMergeReport(
+                        enabled=True,
+                        provider=provider_name,
+                        error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
+                    )
+                else:
+                    if verification_brain_suggestion is None:
+                        verification_brain_report = VerificationBrainMergeReport(
+                            enabled=True,
+                            provider=provider_name,
+                        )
+                    else:
+                        verification_brain_report = VerificationBrainMergeReport(
+                            enabled=True,
+                            provider=provider_name,
+                            accept_warning_status=(
+                                verification_brain_suggestion.accept_warning_status
+                            ),
+                            rationale=verification_brain_suggestion.rationale,
+                        )
         return verify_result(
             state,
             enable_independent_verifier=enable_independent_verifier,
             independent_verifier_outcome=independent_verifier_outcome,
+            verification_brain_suggestion=verification_brain_suggestion,
+            verification_brain_report=verification_brain_report,
         )
 
     return verify_result_node
@@ -2380,11 +2592,11 @@ def build_orchestrator_graph(
     builder.add_node("generate_task_spec", RunnableLambda(_generate_task_spec_node))
     builder.add_node("load_memory", RunnableLambda(load_memory))
     available_workers: frozenset[str] = frozenset(
-        _configured_workers(worker, gemini_worker, openrouter_worker).keys()
+        _available_workers(worker, gemini_worker, openrouter_worker).keys()
     )
-    configured_profiles = dict(worker_profiles or {})
-    active_profiles = configured_profiles if enable_worker_profiles else None
-    profile_names = frozenset(configured_profiles.keys()) if enable_worker_profiles else frozenset()
+    available_profiles = dict(worker_profiles or {})
+    active_profiles = available_profiles if enable_worker_profiles else None
+    profile_names = frozenset(available_profiles.keys()) if enable_worker_profiles else frozenset()
     builder.add_node(
         "choose_worker",
         RunnableLambda(
@@ -2405,7 +2617,7 @@ def build_orchestrator_graph(
                 worker,
                 gemini_worker,
                 openrouter_worker,
-                configured_profile_names=profile_names,
+                available_profile_names=profile_names,
             )
         ),
     )
@@ -2418,6 +2630,7 @@ def build_orchestrator_graph(
                 worker=worker,
                 gemini_worker=gemini_worker,
                 openrouter_worker=openrouter_worker,
+                orchestrator_brain=orchestrator_brain,
             )
         ),
     )

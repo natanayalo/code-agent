@@ -381,7 +381,7 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
     assert state.result.status == "failure"
     assert (
         state.result.summary
-        == "No worker is configured for route 'gemini'. Configured workers: codex."
+        == "No worker is available for route 'gemini'. Available workers: codex."
     )
     assert state.result.next_action_hint == "configure_requested_worker"
     assert state.progress_updates == [
@@ -454,7 +454,7 @@ def test_orchestrator_graph_errors_when_selected_profile_is_unavailable() -> Non
     assert (
         state.result.summary
         == "No routable worker profile is available for route 'openrouter-tool-loop-legacy'. "
-        "Configured profiles: codex-native-executor."
+        "Available profiles: codex-native-executor."
     )
     assert state.result.next_action_hint == "configure_requested_worker_profile"
 
@@ -519,7 +519,7 @@ def test_orchestrator_graph_worker_override_respects_profile_opt_in() -> None:
     assert (
         state.result.summary
         == "No routable worker profile is available for worker route 'openrouter'. "
-        "Configured profiles: codex-native-executor."
+        "Available profiles: codex-native-executor."
     )
     assert worker.requests == []
     assert openrouter_worker.requests == []
@@ -583,7 +583,7 @@ def test_orchestrator_graph_profile_override_incompatible_with_constraints() -> 
     assert (
         state.result.summary
         == "No routable worker profile is available for route 'codex-native-executor'. "
-        "Configured profiles: codex-native-executor, codex-read-only-executor."
+        "Available profiles: codex-native-executor, codex-read-only-executor."
     )
     assert state.result.next_action_hint == "configure_requested_worker_profile"
     assert worker.requests == []
