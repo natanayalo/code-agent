@@ -389,8 +389,8 @@ class RuleBasedOrchestratorBrain:
                 base.verification_commands, model.verification_commands
             ),
             suggested_risk_level=max(
-                [r for r in [base.suggested_risk_level, model.suggested_risk_level] if r],
-                key=lambda level: RISK_ORDER.get(cast(str, level), -1),
+                (r for r in [base.suggested_risk_level, model.suggested_risk_level] if r),
+                key=lambda r: RISK_ORDER[cast(str, r)],
                 default=None,
             ),
             suggested_task_type=model.suggested_task_type or base.suggested_task_type,
