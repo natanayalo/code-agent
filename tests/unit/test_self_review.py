@@ -601,7 +601,7 @@ def test_run_shared_self_review_fix_loop_runs_fix_pass_and_merges_artifacts(
             return self._steps.pop(0)
 
     follow_up = _runtime_result(summary="Applied fix pass.")
-    follow_up.commands_run = [WorkerCommand(command="pytest -q", exit_code=0)]
+    follow_up.commands_run = [WorkerCommand(id="test-cmd-id", command="pytest -q", exit_code=0)]
     mock_run_loop.return_value = follow_up
 
     def _post_run_lint_collector(_execution, existing_files):
@@ -637,7 +637,9 @@ def test_run_shared_self_review_fix_loop_runs_fix_pass_and_merges_artifacts(
 
     assert mock_run_loop.call_count == 1
     assert execution.summary == "Applied fix pass."
-    assert execution.commands_run == [WorkerCommand(command="pytest -q", exit_code=0)]
+    assert execution.commands_run == [
+        WorkerCommand(id="test-cmd-id", command="pytest -q", exit_code=0)
+    ]
     assert review_result is not None
     assert review_result.outcome == "no_findings"
     assert files_changed == ["app.py", "tests/test_app.py"]
