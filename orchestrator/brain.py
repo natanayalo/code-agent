@@ -363,6 +363,9 @@ class RuleBasedOrchestratorBrain:
             return None
 
         if result.status != "success":
+            logger.warning(
+                f"planner task spec enrichment returned non-success status '{result.status}'"
+            )
             return None
 
         raw_summary = (result.summary or "").strip()
