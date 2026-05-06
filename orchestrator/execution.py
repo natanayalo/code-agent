@@ -410,6 +410,7 @@ class WorkerRunSnapshot(ExecutionModel):
     verifier_outcome: dict[str, Any] | None = None
     commands_run: list[dict[str, Any]] = Field(default_factory=list)
     files_changed_count: int = 0
+    files_changed: list[str] = Field(default_factory=list)
     artifact_index: list[dict[str, Any]] = Field(default_factory=list)
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
 
@@ -1857,6 +1858,7 @@ class TaskExecutionService:
                 verifier_outcome=latest_run_obj.verifier_outcome,
                 commands_run=list(latest_run_obj.commands_run or []),
                 files_changed_count=latest_run_obj.files_changed_count,
+                files_changed=list(latest_run_obj.files_changed or []),
                 artifact_index=list(latest_run_obj.artifact_index or []),
                 artifacts=[
                     ArtifactSnapshot(

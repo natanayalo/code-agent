@@ -28,6 +28,18 @@ interface TraceObservabilitySnapshot {
   spanStatusCounts: SpanStatusCount[];
 }
 
+interface VerifierOutcomeItem {
+  label: string;
+  status: string;
+  message: string | null;
+}
+
+interface VerifierOutcomeSnapshot {
+  status: string | null;
+  summary: string | null;
+  items: VerifierOutcomeItem[];
+}
+
 function formatTimestamp(value: string | null | undefined): string {
   if (!value) return 'Unknown time';
   const parsed = new Date(value);
@@ -109,6 +121,50 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
+}
+
+function extractVerifierOutcome(value: unknown): VerifierOutcomeSnapshot {
+  const payload = asRecord(value);
+  if (!payload) {
+    return { status: null, summary: null, items: [] };
+  }
+
+  const status = typeof payload.status === 'string' ? payload.status : null;
+  const summary = typeof payload.summary === 'string' ? payload.summary : null;
+  const items = Array.isArray(payload.items)
+    ? payload.items
+        .map((entry) => {
+          const item = asRecord(entry);
+          if (!item) return null;
+          const label = typeof item.label === 'string' ? item.label : null;
+          const itemStatus = typeof item.status === 'string' ? item.status : null;
+          const message = typeof item.message === 'string' ? item.message : null;
+          if (!label || !itemStatus) return null;
+          return {
+            label,
+            status: itemStatus,
+            message,
+          };
+        })
+        .filter((item): item is VerifierOutcomeItem => item !== null)
+    : [];
+
+  return {
+    status,
+    summary,
+    items,
+  };
+}
+
+function computeRunDuration(startedAt: string | null | undefined, finishedAt: string | null | undefined) {
+  if (!startedAt || !finishedAt) return null;
+  const startedTimestamp = new Date(startedAt).getTime();
+  const finishedTimestamp = new Date(finishedAt).getTime();
+  if (Number.isNaN(startedTimestamp) || Number.isNaN(finishedTimestamp)) {
+    return null;
+  }
+  const elapsedSeconds = Math.max(0, (finishedTimestamp - startedTimestamp) / 1000);
+  return formatDuration(elapsedSeconds);
 }
 
 function parseHttpUrl(value: string): URL | null {
@@ -306,6 +362,15 @@ function extractTraceObservability(task: TaskSnapshot | null): TraceObservabilit
 export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: TaskDetailPanelProps) {
   const run = task?.latest_run ?? null;
   const runCommands = run?.commands_run ?? [];
+  const changedFiles = run?.files_changed ?? [];
+  const runDuration = React.useMemo(
+    () => computeRunDuration(run?.started_at, run?.finished_at),
+    [run?.started_at, run?.finished_at]
+  );
+  const verifierOutcome = React.useMemo(
+    () => extractVerifierOutcome(run?.verifier_outcome),
+    [run?.verifier_outcome]
+  );
   const artifacts = React.useMemo(() => artifactRows(run), [run]);
   const traceObservability = React.useMemo(() => extractTraceObservability(task), [task]);
   const sortedTimeline = React.useMemo(() => {
@@ -411,6 +476,76 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
               </ul>
             ) : (
               <p className="task-detail-muted">No pending interactions.</p>
+            )}
+          </section>
+
+          <section className="task-detail-section">
+            <h4>Run Observability</h4>
+            {run ? (
+              <>
+                <div className="task-detail-grid">
+                  <p>
+                    <strong>Worker:</strong> {run.worker_type || task.chosen_worker || 'unknown'}
+                  </p>
+                  <p>
+                    <strong>Profile:</strong> {run.worker_profile || task.chosen_profile || 'n/a'}
+                  </p>
+                  <p>
+                    <strong>Runtime Mode:</strong>{' '}
+                    {formatLabel(run.runtime_mode || task.runtime_mode || 'n/a')}
+                  </p>
+                  <p>
+                    <strong>Workspace:</strong> {run.workspace_id || 'n/a'}
+                  </p>
+                  <p>
+                    <strong>Started:</strong> {formatTimestamp(run.started_at)}
+                  </p>
+                  <p>
+                    <strong>Finished:</strong>{' '}
+                    {run.finished_at ? formatTimestamp(run.finished_at) : 'In progress'}
+                  </p>
+                  <p>
+                    <strong>Duration:</strong> {runDuration || 'Unknown duration'}
+                  </p>
+                  <p>
+                    <strong>Status:</strong> {formatLabel(run.status)}
+                  </p>
+                </div>
+
+                {changedFiles.length > 0 ? (
+                  renderStringList('Changed Files', changedFiles)
+                ) : (
+                  <p className="task-detail-muted">No changed files captured for the latest run.</p>
+                )}
+
+                {verifierOutcome.status || verifierOutcome.summary || verifierOutcome.items.length > 0 ? (
+                  <div className="task-detail-group">
+                    <h5>Verification Outcome</h5>
+                    <p>
+                      <strong>Status:</strong> {formatLabel(verifierOutcome.status || 'unknown')}
+                    </p>
+                    <p>
+                      <strong>Summary:</strong> {verifierOutcome.summary || 'No summary reported.'}
+                    </p>
+                    {verifierOutcome.items.length > 0 ? (
+                      <ul>
+                        {verifierOutcome.items.map((item, idx) => (
+                          <li key={`${item.label}-${item.status}-${idx}`}>
+                            <strong>{formatLabel(item.label)}:</strong> {formatLabel(item.status)}
+                            {item.message ? ` - ${item.message}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="task-detail-muted">
+                    No verifier outcome captured for the latest run.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="task-detail-muted">No run observability metadata available yet.</p>
             )}
           </section>
 

@@ -157,6 +157,7 @@ def test_submit_task_persists_execution_path_and_allows_polling(
     assert latest_run["budget_usage"] == {"iterations_used": 2, "tool_calls_used": 1}
     assert latest_run["verifier_outcome"]["status"] == "warning"
     assert latest_run["files_changed_count"] == 1
+    assert latest_run["files_changed"] == ["note.txt"]
     assert latest_run["commands_run"] == [
         {
             "command": "printf 'done\\n' > note.txt",

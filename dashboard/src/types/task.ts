@@ -51,6 +51,8 @@ export interface TaskSummarySnapshot {
   branch?: string | null;
   priority: number;
   chosen_worker?: string | null;
+  chosen_profile?: string | null;
+  runtime_mode?: string | null;
   route_reason?: string | null;
   created_at: string;
   updated_at: string;
@@ -69,6 +71,8 @@ export interface WorkerRunSnapshot {
   run_id: string;
   session_id?: string | null;
   worker_type: string;
+  worker_profile?: string | null;
+  runtime_mode?: string | null;
   workspace_id?: string | null;
   status: string;
   started_at: string;
@@ -79,6 +83,7 @@ export interface WorkerRunSnapshot {
   verifier_outcome?: Record<string, unknown> | null;
   commands_run: CommandRunSnapshot[];
   files_changed_count: number;
+  files_changed: string[];
   artifact_index: ArtifactIndexEntry[];
   artifacts: ArtifactSnapshot[];
 }

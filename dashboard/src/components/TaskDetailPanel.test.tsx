@@ -41,6 +41,8 @@ function buildLatestRun(overrides: Partial<NonNullable<TaskSnapshot['latest_run'
     run_id: 'run-base',
     session_id: 'session-1',
     worker_type: 'codex',
+    worker_profile: 'codex-native-executor',
+    runtime_mode: 'native_agent',
     workspace_id: 'workspace-1',
     status: 'success',
     started_at: '2026-04-28T00:01:05.000Z',
@@ -51,6 +53,7 @@ function buildLatestRun(overrides: Partial<NonNullable<TaskSnapshot['latest_run'
     verifier_outcome: {},
     commands_run: [],
     files_changed_count: 0,
+    files_changed: [],
     artifact_index: [],
     artifacts: [],
     ...overrides,
@@ -137,6 +140,8 @@ describe('TaskDetailPanel', () => {
         run_id: 'run-1',
         session_id: 'session-1',
         worker_type: 'codex',
+        worker_profile: 'codex-native-executor',
+        runtime_mode: 'native_agent',
         workspace_id: 'workspace-1',
         status: 'success',
         started_at: '2026-04-28T00:01:05.000Z',
@@ -144,7 +149,7 @@ describe('TaskDetailPanel', () => {
         summary: 'Done',
         requested_permission: null,
         budget_usage: { iterations_used: 1 },
-        verifier_outcome: { status: 'pass' },
+        verifier_outcome: { status: 'passed' },
         commands_run: [
           {
             command: "printf 'done\\n' > note.txt",
@@ -155,6 +160,7 @@ describe('TaskDetailPanel', () => {
           },
         ],
         files_changed_count: 1,
+        files_changed: ['note.txt'],
         artifact_index: [
           {
             name: 'workspace',
@@ -169,6 +175,12 @@ describe('TaskDetailPanel', () => {
 
     render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
 
+    expect(screen.getByText('Run Observability')).toBeInTheDocument();
+    expect(screen.getByText('codex-native-executor')).toBeInTheDocument();
+    expect(screen.getByText('Native Agent')).toBeInTheDocument();
+    expect(screen.getByText('note.txt')).toBeInTheDocument();
+    expect(screen.getByText('Verification Outcome')).toBeInTheDocument();
+    expect(screen.getByText('No summary reported.')).toBeInTheDocument();
     expect(screen.getByText('Timeline')).toBeInTheDocument();
     expect(screen.getByText('Selected codex for execution')).toBeInTheDocument();
     expect(screen.getByText(/worker selected/i)).toBeInTheDocument();
@@ -184,10 +196,53 @@ describe('TaskDetailPanel', () => {
   it('renders no-data states for timeline, commands, and artifacts', () => {
     render(<TaskDetailPanel task={baseTask} loading={false} error={null} onClose={vi.fn()} />);
 
+    expect(screen.getByText('No run observability metadata available yet.')).toBeInTheDocument();
     expect(screen.getByText('No timeline events recorded yet.')).toBeInTheDocument();
     expect(screen.getByText('No run metadata available yet.')).toBeInTheDocument();
     expect(screen.getByText('No trace metadata available yet.')).toBeInTheDocument();
     expect(screen.getByText('No artifacts persisted for the latest run.')).toBeInTheDocument();
+  });
+
+  it('renders verifier outcome status, summary, and item details when present', () => {
+    const task = buildTask({
+      latest_run: buildLatestRun({
+        files_changed: ['workers/codex_cli_worker.py'],
+        verifier_outcome: {
+          status: 'warning',
+          summary: 'Independent verifier reported one warning.',
+          items: [
+            {
+              label: 'independent_verifier',
+              status: 'warning',
+              message: 'Verifier found a flaky assertion.',
+            },
+          ],
+        },
+      }),
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Verification Outcome')).toBeInTheDocument();
+    expect(screen.getByText('Independent verifier reported one warning.')).toBeInTheDocument();
+    expect(screen.getByText('Independent Verifier:')).toBeInTheDocument();
+    expect(screen.getByText(/flaky assertion\./i)).toBeInTheDocument();
+  });
+
+  it('handles sparse verifier payloads without crashing', () => {
+    const task = buildTask({
+      latest_run: buildLatestRun({
+        verifier_outcome: {
+          status: 123,
+          items: [{ status: 'passed' }, 'bad item'],
+        } as unknown as Record<string, unknown>,
+      }),
+    });
+
+    expect(() =>
+      render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />)
+    ).not.toThrow();
+    expect(screen.getByText('No verifier outcome captured for the latest run.')).toBeInTheDocument();
   });
 
   it('renders trace observability details from run and timeline metadata', () => {
