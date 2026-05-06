@@ -223,12 +223,13 @@ def test_build_task_service_from_env_enables_profile_routing_with_defaults(
         _close_outbound_http_clients(outbound_http_clients)
 
 
-def test_build_task_service_from_env_respects_runtime_mode_overrides(
-    tmp_path: Path,
+def test_build_task_service_from_env_ignores_deprecated_codex_tool_loop_default_override(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Bootstrap should respect environment-driven runtime mode overrides for profiles."""
+    """Codex tool_loop env overrides should warn and keep native-agent defaults pinned."""
     database_path = tmp_path / "code-agent.db"
     outbound_http_clients = create_outbound_http_clients()
+    caplog.clear()
     service = build_task_service_from_env(
         {
             "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
@@ -241,10 +242,10 @@ def test_build_task_service_from_env_respects_runtime_mode_overrides(
 
     try:
         assert service is not None
-        assert "codex-tool-loop-executor" in service.worker_profiles
-        assert service.worker_profiles["codex-tool-loop-executor"].runtime_mode == "tool_loop"
-        assert "codex-tool-loop-executor-read-only" in service.worker_profiles
-        assert service.worker.default_runtime_mode == "tool_loop"
+        assert "codex-native-executor" in service.worker_profiles
+        assert "codex-tool-loop-executor" not in service.worker_profiles
+        assert service.worker.default_runtime_mode == "native_agent"
+        assert "Ignoring deprecated CODE_AGENT_CODEX_RUNTIME_MODE=tool_loop" in caplog.text
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
@@ -318,12 +319,13 @@ def test_build_task_service_from_env_builds_gemini_worker_when_configured(tmp_pa
         _close_outbound_http_clients(outbound_http_clients)
 
 
-def test_build_task_service_from_env_respects_gemini_runtime_mode_override(
-    tmp_path: Path,
+def test_build_task_service_from_env_ignores_deprecated_gemini_tool_loop_default_override(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Gemini runtime mode override should keep rollback to tool_loop available."""
+    """Gemini tool_loop env overrides should warn and keep native-agent defaults pinned."""
     database_path = tmp_path / "code-agent.db"
     outbound_http_clients = create_outbound_http_clients()
+    caplog.clear()
     service = build_task_service_from_env(
         {
             "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
@@ -338,11 +340,73 @@ def test_build_task_service_from_env_respects_gemini_runtime_mode_override(
     try:
         assert service is not None
         assert isinstance(service.gemini_worker, GeminiCliWorker)
-        assert service.gemini_worker.default_runtime_mode == "tool_loop"
+        assert service.gemini_worker.default_runtime_mode == "native_agent"
+        assert "gemini-native-executor" in service.worker_profiles
+        assert "gemini-tool-loop-executor" not in service.worker_profiles
+        assert "gemini-native-planner" in service.worker_profiles
+        assert "gemini-native-reviewer" in service.worker_profiles
+        assert "Ignoring deprecated CODE_AGENT_GEMINI_RUNTIME_MODE=tool_loop" in caplog.text
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
+def test_build_task_service_from_env_adds_codex_legacy_tool_loop_profiles_when_enabled(
+    tmp_path: Path,
+) -> None:
+    """Codex legacy tool-loop profiles should be opt-in and marked as legacy metadata."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_WORKER_PROFILES_ENABLED": "true",
+            "CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED": "1",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert service.worker.default_runtime_mode == "native_agent"
+        assert "codex-native-executor" in service.worker_profiles
+        assert "codex-tool-loop-executor" in service.worker_profiles
+        assert service.worker_profiles["codex-tool-loop-executor"].metadata == {"legacy_mode": True}
+        assert service.worker_profiles["codex-tool-loop-executor-read-only"].metadata == {
+            "legacy_mode": True
+        }
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
+def test_build_task_service_from_env_adds_gemini_legacy_tool_loop_profiles_when_enabled(
+    tmp_path: Path,
+) -> None:
+    """Gemini legacy tool-loop profiles should be opt-in while native planner/reviewer remain."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_WORKER_PROFILES_ENABLED": "true",
+            "CODE_AGENT_GEMINI_CLI_BIN": "/usr/local/bin/gemini",
+            "CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED": "1",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert isinstance(service.gemini_worker, GeminiCliWorker)
+        assert service.gemini_worker.default_runtime_mode == "native_agent"
+        assert "gemini-native-executor" in service.worker_profiles
         assert "gemini-tool-loop-executor" in service.worker_profiles
-        assert "gemini-tool-loop-executor-read-only" in service.worker_profiles
-        assert "gemini-native-planner" not in service.worker_profiles
-        assert "gemini-native-reviewer" not in service.worker_profiles
+        assert service.worker_profiles["gemini-tool-loop-executor"].metadata == {
+            "legacy_mode": True
+        }
+        assert "gemini-native-planner" in service.worker_profiles
+        assert "gemini-native-reviewer" in service.worker_profiles
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 

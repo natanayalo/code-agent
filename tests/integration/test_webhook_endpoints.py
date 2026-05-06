@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
 from db.base import Base
-from db.enums import TaskStatus
+from db.enums import TaskStatus, WorkerRuntimeMode
 from orchestrator.execution import TaskExecutionService
 from repositories import (
     TaskRepository,
@@ -21,7 +21,7 @@ from repositories import (
     create_session_factory,
     session_scope,
 )
-from workers import Worker, WorkerRequest, WorkerResult
+from workers import Worker, WorkerProfile, WorkerRequest, WorkerResult
 
 
 class StaticWorker(Worker):
@@ -232,6 +232,133 @@ def test_webhook_full_payload_creates_and_completes_task(
         task = task_repo.get(task_id)
         assert task is not None
         assert task.status is TaskStatus.COMPLETED
+
+
+def test_webhook_accepts_worker_profile_override_for_explicit_legacy_opt_in(
+    session_factory,
+) -> None:
+    """Webhook payloads should pass top-level worker_profile_override through to routing."""
+    notifier = RecordingProgressNotifier()
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="Webhook task completed through explicit legacy profile override.",
+            budget_usage={"iterations_used": 1, "tool_calls_used": 1},
+            commands_run=[],
+            files_changed=[],
+            artifacts=[],
+            next_action_hint=None,
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(
+            session_factory=session_factory,
+            worker=worker,
+            progress_notifier=notifier,
+            enable_worker_profiles=True,
+            worker_profiles={
+                "codex-native-executor": WorkerProfile(
+                    name="codex-native-executor",
+                    worker_type="codex",
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                    capability_tags=["execution"],
+                    supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                    permission_profile="workspace_write",
+                    mutation_policy="patch_allowed",
+                    self_review_policy="on_failure",
+                ),
+                "codex-tool-loop-executor": WorkerProfile(
+                    name="codex-tool-loop-executor",
+                    worker_type="codex",
+                    runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
+                    capability_tags=["execution"],
+                    supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                    permission_profile="workspace_write",
+                    mutation_policy="patch_allowed",
+                    self_review_policy="on_failure",
+                    metadata={"legacy_mode": True},
+                ),
+            },
+        ),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+    )
+    app.state.test_worker = worker
+    app.state.test_notifier = notifier
+
+    with TestClient(app) as profiled_client:
+        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        response = profiled_client.post(
+            "/webhook",
+            json={
+                "task_text": "Run webhook task through codex tool-loop profile",
+                "worker_profile_override": "codex-tool-loop-executor",
+            },
+        )
+
+        assert response.status_code == 202
+        task_id = response.json()["task_id"]
+
+        _run_one_queued_task(profiled_client)
+        snapshot = profiled_client.get(f"/tasks/{task_id}")
+        assert snapshot.status_code == 200
+        payload = snapshot.json()
+        assert payload["chosen_profile"] == "codex-tool-loop-executor"
+        assert payload["runtime_mode"] == "tool_loop"
+        assert payload["latest_run"]["worker_profile"] == "codex-tool-loop-executor"
+        assert payload["latest_run"]["runtime_mode"] == "tool_loop"
+        assert worker.requests[0].worker_profile == "codex-tool-loop-executor"
+        assert worker.requests[0].runtime_mode == "tool_loop"
+
+
+def test_webhook_rejects_unknown_worker_profile_override(session_factory) -> None:
+    """Webhook submissions should fail fast when worker_profile_override is not configured."""
+    notifier = RecordingProgressNotifier()
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="ok",
+            budget_usage={},
+            commands_run=[],
+            files_changed=[],
+            artifacts=[],
+            next_action_hint=None,
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(
+            session_factory=session_factory,
+            worker=worker,
+            progress_notifier=notifier,
+            enable_worker_profiles=True,
+            worker_profiles={
+                "codex-native-executor": WorkerProfile(
+                    name="codex-native-executor",
+                    worker_type="codex",
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                    capability_tags=["execution"],
+                    supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                    permission_profile="workspace_write",
+                    mutation_policy="patch_allowed",
+                    self_review_policy="on_failure",
+                ),
+            },
+        ),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+    )
+
+    with TestClient(app) as profiled_client:
+        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        response = profiled_client.post(
+            "/webhook",
+            json={
+                "task_text": "Run webhook task through unknown profile",
+                "worker_profile_override": "codex-tool-loop-executor",
+            },
+        )
+
+        assert response.status_code == 422
+        assert "unknown profile" in response.json()["detail"].lower()
+        assert worker.requests == []
 
 
 def test_webhook_uses_default_repo_url_when_omitted(

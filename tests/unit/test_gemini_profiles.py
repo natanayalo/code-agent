@@ -18,8 +18,8 @@ def test_gemini_specialized_profiles_enabled(monkeypatch):
     profiles = _build_default_worker_profiles(
         include_gemini=True,
         include_openrouter=False,
-        codex_runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
-        gemini_runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        include_codex_legacy_tool_loop=False,
+        include_gemini_legacy_tool_loop=False,
     )
 
     assert GEMINI_NATIVE_PLANNER_PROFILE in profiles
@@ -36,17 +36,19 @@ def test_gemini_specialized_profiles_enabled(monkeypatch):
     assert "review" in reviewer.capability_tags
 
 
-def test_gemini_specialized_profiles_disabled_in_tool_loop():
-    """Verify that specialized Gemini profiles are NOT created when tool_loop mode is active."""
+def test_gemini_specialized_profiles_stay_enabled_with_legacy_tool_loop_opt_in():
+    """Gemini planner/reviewer profiles should remain available even with legacy opt-in."""
     profiles = _build_default_worker_profiles(
         include_gemini=True,
         include_openrouter=False,
-        codex_runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
-        gemini_runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
+        include_codex_legacy_tool_loop=False,
+        include_gemini_legacy_tool_loop=True,
     )
 
-    assert GEMINI_NATIVE_PLANNER_PROFILE not in profiles
-    assert GEMINI_NATIVE_REVIEWER_PROFILE not in profiles
+    assert GEMINI_NATIVE_PLANNER_PROFILE in profiles
+    assert GEMINI_NATIVE_REVIEWER_PROFILE in profiles
+    assert "gemini-tool-loop-executor" in profiles
+    assert profiles["gemini-tool-loop-executor"].runtime_mode == WorkerRuntimeMode.TOOL_LOOP
 
 
 def test_invalid_runtime_mode_raises_error():

@@ -353,6 +353,7 @@ class TaskSubmission(ExecutionModel):
     branch: str | None = None
     priority: int = Field(default=0, ge=0)
     worker_override: WorkerType | None = None
+    worker_profile_override: str | None = Field(default=None, min_length=1, max_length=255)
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
@@ -377,9 +378,14 @@ class TaskReplayRequest(ExecutionModel):
     """Optional overrides when replaying an existing task."""
 
     worker_override: WorkerType | None = None
+    worker_profile_override: str | None = Field(default=None, min_length=1, max_length=255)
     constraints: dict[str, Any] | None = None
     budget: dict[str, Any] | None = None
     secrets: dict[str, str] | None = None
+
+
+class TaskSubmissionValidationError(ValueError):
+    """Raised when a task submission payload is semantically invalid."""
 
 
 class ArtifactSnapshot(ExecutionModel):
@@ -568,6 +574,8 @@ class OperationalMetrics(ExecutionModel):
     retry_rate: float
     status_counts: dict[str, int]
     worker_usage: dict[str, int]
+    runtime_mode_usage: dict[str, int]
+    legacy_tool_loop_usage: dict[str, int]
     avg_duration_seconds: float
     success_rate: float
 
@@ -647,7 +655,9 @@ class ApprovalDecisionResult:
 _REPLAYABLE_STATUSES: frozenset[str] = frozenset(
     {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value, TaskStatus.CANCELLED.value}
 )
-_RESERVED_INTERNAL_CONSTRAINT_KEYS: frozenset[str] = frozenset({"approval"})
+_RESERVED_INTERNAL_CONSTRAINT_KEYS: frozenset[str] = frozenset(
+    {"approval", "worker_profile_override"}
+)
 
 
 @dataclass(frozen=True)
@@ -1382,6 +1392,7 @@ class TaskExecutionService:
         delivery_key: DeliveryKey | None = None,
     ) -> CreateTaskOutcome:
         """Persist a task request or return the previously created task for a duplicate delivery."""
+        submission = self._normalize_and_validate_submission(submission)
         if delivery_key is not None and delivery_key.channel != submission.session.channel:
             raise ValueError(
                 "delivery_key.channel must match submission.session.channel for dedupe."
@@ -1403,6 +1414,30 @@ class TaskExecutionService:
             task_snapshot=task_snapshot,
             persisted=persisted,
             duplicate=duplicate_task_id is not None,
+        )
+
+    def _normalize_and_validate_submission(self, submission: TaskSubmission) -> TaskSubmission:
+        """Normalize execution overrides and validate profile selections before persistence."""
+        normalized_profile_override = (
+            submission.worker_profile_override.strip()
+            if isinstance(submission.worker_profile_override, str)
+            and submission.worker_profile_override.strip()
+            else None
+        )
+        if (
+            normalized_profile_override is not None
+            and self.enable_worker_profiles
+            and normalized_profile_override not in self.worker_profiles
+        ):
+            raise TaskSubmissionValidationError(
+                "worker_profile_override must reference a configured worker profile "
+                f"when profile routing is enabled. Unknown profile: "
+                f"'{normalized_profile_override}'."
+            )
+        if normalized_profile_override == submission.worker_profile_override:
+            return submission
+        return submission.model_copy(
+            update={"worker_profile_override": normalized_profile_override}
         )
 
     async def submit_task(
@@ -2227,6 +2262,8 @@ class TaskExecutionService:
                 retry_rate=task_metrics["retry_rate"],
                 status_counts=task_metrics["status_counts"],
                 worker_usage=run_metrics["worker_usage"],
+                runtime_mode_usage=run_metrics["runtime_mode_usage"],
+                legacy_tool_loop_usage=run_metrics["legacy_tool_loop_usage"],
                 avg_duration_seconds=run_metrics["avg_duration_seconds"],
                 success_rate=run_metrics["success_rate"],
             )
@@ -2278,6 +2315,8 @@ class TaskExecutionService:
         if replay_request is not None:
             if replay_request.worker_override is not None:
                 updates["worker_override"] = replay_request.worker_override
+            if replay_request.worker_profile_override is not None:
+                updates["worker_profile_override"] = replay_request.worker_profile_override
             if replay_request.constraints is not None:
                 updates["constraints"] = _deep_merge(
                     submission.constraints,
@@ -2336,6 +2375,7 @@ class TaskExecutionService:
                 "source_task_id": source_task_id,
                 "new_task_id": task_snapshot.task_id,
                 "worker_override": submission.worker_override,
+                "worker_profile_override": submission.worker_profile_override,
             },
         )
         return TaskReplayResult(
@@ -2361,6 +2401,16 @@ class TaskExecutionService:
             task_repo = TaskRepository(session)
             interaction_repo = HumanInteractionRepository(session)
             sanitized_constraints = _sanitize_submission_constraints(submission.constraints)
+            persisted_constraints = dict(sanitized_constraints)
+            if (
+                isinstance(submission.worker_profile_override, str)
+                and submission.worker_profile_override.strip()
+            ):
+                persisted_constraints["worker_profile_override"] = (
+                    submission.worker_profile_override.strip()
+                )
+            if submission.tools is not None:
+                persisted_constraints["tools"] = submission.tools
             task_spec = build_task_spec(
                 task_text=submission.task_text,
                 repo_url=submission.repo_url,
@@ -2404,13 +2454,10 @@ class TaskExecutionService:
                 secrets=dict(submission.secrets),
                 task_spec=task_spec,
                 trace_context=trace_context,
-                # Store tools in constraints to avoid a schema migration for now
-                constraints={
-                    **sanitized_constraints,
-                    "tools": submission.tools,
-                }
-                if submission.tools is not None
-                else dict(sanitized_constraints),
+                # Store request-level profile overrides in constraints for now to avoid an
+                # immediate schema migration; promoting this to a first-class DB column is a
+                # known follow-up so profile selections remain queryable/indexable at scale.
+                constraints=persisted_constraints,
                 secrets_encrypted=self.is_secret_encryption_active(),
                 status=status,
                 max_attempts=max(1, max_attempts),
@@ -2585,6 +2632,7 @@ class TaskExecutionService:
                     if submission.worker_override is not None
                     else None
                 ),
+                "worker_profile_override": submission.worker_profile_override,
                 "constraints": dict(submission.constraints),
                 "budget": effective_budget,
                 "secrets": dict(submission.secrets),
@@ -2628,18 +2676,23 @@ class TaskExecutionService:
             user = user_repo.get(conversation_session.user_id)
             if user is None:
                 return None
+            task_constraints = dict(task.constraints or {})
+            worker_profile_override = task_constraints.pop("worker_profile_override", None)
             submission = TaskSubmission(
                 task_text=task.task_text,
                 repo_url=task.repo_url,
                 branch=task.branch,
                 worker_override=task.worker_override,
-                constraints=dict(task.constraints or {}),
+                worker_profile_override=(
+                    worker_profile_override.strip()
+                    if isinstance(worker_profile_override, str) and worker_profile_override.strip()
+                    else None
+                ),
+                constraints=task_constraints,
                 budget=dict(task.budget or {}),
                 secrets=dict(task.secrets or {}),
                 callback_url=task.callback_url,
-                tools=(task.constraints or {}).get("tools")
-                if isinstance(task.constraints, dict)
-                else None,
+                tools=task_constraints.get("tools"),
                 priority=task.priority,
                 session=SubmissionSession(
                     channel=conversation_session.channel,

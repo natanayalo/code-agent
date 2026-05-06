@@ -18,6 +18,7 @@ from orchestrator.execution import (
     TaskReplayRequest,
     TaskSnapshot,
     TaskSubmission,
+    TaskSubmissionValidationError,
     TaskSummarySnapshot,
 )
 
@@ -36,8 +37,14 @@ def submit_task(
         attributes=with_span_kind(SPAN_KIND_AGENT),
     ):
         set_span_input_output(input_data=payload.model_dump(exclude={"secrets"}))
-        task_snapshot, _ = task_service.create_task(payload)
-        return task_snapshot
+        try:
+            task_snapshot, _ = task_service.create_task(payload)
+            return task_snapshot
+        except TaskSubmissionValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
 
 
 @router.get("", response_model=list[TaskSummarySnapshot])
@@ -114,10 +121,16 @@ def replay_task(
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> TaskSnapshot:
     """Replay a prior terminal task, creating a new task with optional overrides."""
-    result = task_service.replay_task(
-        source_task_id=task_id,
-        replay_request=payload,
-    )
+    try:
+        result = task_service.replay_task(
+            source_task_id=task_id,
+            replay_request=payload,
+        )
+    except TaskSubmissionValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     if result.status == "not_found":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

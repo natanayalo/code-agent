@@ -1023,6 +1023,25 @@ class WorkerRunRepository:
             usage_stmt = usage_stmt.where(WorkerRun.started_at >= since)
         worker_usage = self.session.execute(usage_stmt).all()
 
+        runtime_usage_stmt = select(WorkerRun.runtime_mode, func.count(WorkerRun.id)).group_by(
+            WorkerRun.runtime_mode
+        )
+        if since:
+            runtime_usage_stmt = runtime_usage_stmt.where(WorkerRun.started_at >= since)
+        runtime_mode_usage = self.session.execute(runtime_usage_stmt).all()
+
+        legacy_tool_loop_stmt = (
+            select(WorkerRun.worker_type, func.count(WorkerRun.id))
+            .where(
+                WorkerRun.runtime_mode == WorkerRuntimeMode.TOOL_LOOP,
+                WorkerRun.worker_type.in_((WorkerType.CODEX, WorkerType.GEMINI)),
+            )
+            .group_by(WorkerRun.worker_type)
+        )
+        if since:
+            legacy_tool_loop_stmt = legacy_tool_loop_stmt.where(WorkerRun.started_at >= since)
+        legacy_tool_loop_usage = self.session.execute(legacy_tool_loop_stmt).all()
+
         duration_stmt = select(
             func.avg(
                 # NOTE: extract("epoch") is dialect-specific but handled via
@@ -1042,6 +1061,14 @@ class WorkerRunRepository:
         return {
             "worker_usage": {
                 (w.value if hasattr(w, "value") else str(w)): count for w, count in worker_usage
+            },
+            "runtime_mode_usage": {
+                (m.value if hasattr(m, "value") else ("unknown" if m is None else str(m))): count
+                for m, count in runtime_mode_usage
+            },
+            "legacy_tool_loop_usage": {
+                (w.value if hasattr(w, "value") else str(w)): count
+                for w, count in legacy_tool_loop_usage
             },
             "avg_duration_seconds": float(duration_stats.avg_duration or 0),
             "success_rate": (duration_stats.success_count / duration_stats.total_count)

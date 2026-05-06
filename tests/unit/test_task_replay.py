@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base, utc_now
-from db.enums import TaskStatus, WorkerType
+from db.enums import TaskStatus, WorkerRuntimeMode, WorkerType
 from orchestrator import execution as execution_module
 from repositories import (
     TaskRepository,
@@ -13,7 +13,7 @@ from repositories import (
     create_session_factory,
     session_scope,
 )
-from workers import Worker, WorkerRequest, WorkerResult
+from workers import Worker, WorkerProfile, WorkerRequest, WorkerResult
 
 
 class _StaticWorker(Worker):
@@ -140,6 +140,55 @@ def test_replay_with_worker_override() -> None:
         task = TaskRepository(session).get(result.task_snapshot.task_id)
         assert task is not None
         assert task.worker_override == WorkerType.GEMINI
+
+
+def test_replay_with_worker_profile_override() -> None:
+    """Replay should accept a worker_profile_override and persist it for routing."""
+    _service, session_factory = _make_service()
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+        enable_worker_profiles=True,
+        worker_profiles={
+            "codex-native-executor": WorkerProfile(
+                name="codex-native-executor",
+                worker_type="codex",
+                runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                permission_profile="workspace_write",
+                mutation_policy="patch_allowed",
+                self_review_policy="on_failure",
+            ),
+            "codex-tool-loop-executor": WorkerProfile(
+                name="codex-tool-loop-executor",
+                worker_type="codex",
+                runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                permission_profile="workspace_write",
+                mutation_policy="patch_allowed",
+                self_review_policy="on_failure",
+                metadata={"legacy_mode": True},
+            ),
+        },
+    )
+    source_id = _create_terminal_task(service, session_factory, worker_override=WorkerType.CODEX)
+
+    replay_request = execution_module.TaskReplayRequest(
+        worker_profile_override="codex-tool-loop-executor",
+    )
+    result = service.replay_task(
+        source_task_id=source_id,
+        replay_request=replay_request,
+    )
+
+    assert result.status == "created"
+    assert result.task_snapshot is not None
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(result.task_snapshot.task_id)
+        assert task is not None
+        assert task.constraints.get("worker_profile_override") == "codex-tool-loop-executor"
 
 
 def test_replay_with_constraint_overrides_merges() -> None:

@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 from apps.api.auth import DASHBOARD_COOKIE_NAME, ApiAuthConfig, create_dashboard_token
 from apps.api.main import create_app
 from db.base import Base, utc_now
-from db.enums import TaskStatus, WorkerRunStatus, WorkerType
+from db.enums import TaskStatus, WorkerRunStatus, WorkerRuntimeMode, WorkerType
 from orchestrator.execution import TaskExecutionService
 from repositories import (
     TaskRepository,
@@ -155,6 +155,7 @@ def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factor
         run_repo.create(
             task_id=t1.id,
             worker_type=WorkerType.CODEX,
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
             started_at=now - timedelta(minutes=10),
             finished_at=now - timedelta(minutes=5),  # 5 min duration
             status=WorkerRunStatus.SUCCESS,
@@ -162,6 +163,7 @@ def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factor
         run_repo.create(
             task_id=t2.id,
             worker_type=WorkerType.GEMINI,
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
             started_at=now - timedelta(minutes=10),
             finished_at=now - timedelta(minutes=2),  # 8 min duration
             status=WorkerRunStatus.FAILURE,
@@ -169,6 +171,7 @@ def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factor
         run_repo.create(
             task_id=t4.id,
             worker_type=WorkerType.CODEX,
+            runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
             started_at=now - timedelta(minutes=10),
             finished_at=now - timedelta(minutes=7),  # 3 min duration
             status=WorkerRunStatus.SUCCESS,
@@ -190,6 +193,9 @@ def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factor
     # Run metrics
     assert data["worker_usage"]["codex"] == 2
     assert data["worker_usage"]["gemini"] == 1
+    assert data["runtime_mode_usage"]["native_agent"] == 2
+    assert data["runtime_mode_usage"]["tool_loop"] == 1
+    assert data["legacy_tool_loop_usage"]["codex"] == 1
     # Average of 5, 8, and 3 minutes = (300 + 480 + 180) / 3 = 960 / 3 = 320 seconds
     assert data["avg_duration_seconds"] == 320.0
     # 2 successes out of 3 runs
@@ -207,6 +213,8 @@ def test_get_metrics_empty_state(client: TestClient) -> None:
     assert data["retry_rate"] == 0.0
     assert data["status_counts"] == {}
     assert data["worker_usage"] == {}
+    assert data["runtime_mode_usage"] == {}
+    assert data["legacy_tool_loop_usage"] == {}
     assert data["avg_duration_seconds"] == 0.0
     assert data["success_rate"] == 0.0
 

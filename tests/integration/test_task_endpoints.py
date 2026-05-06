@@ -298,6 +298,140 @@ def test_task_endpoints_expose_profile_and_runtime_metadata_when_profile_routing
             assert worker_run.runtime_mode is WorkerRuntimeMode.NATIVE_AGENT
 
 
+def test_task_endpoints_accept_worker_profile_override_for_explicit_legacy_opt_in(
+    session_factory,
+) -> None:
+    """Explicit worker_profile_override should pin routing to the requested legacy profile."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="Applied change through explicit legacy profile override.",
+            files_changed=["note.txt"],
+            artifacts=[
+                {
+                    "name": "workspace",
+                    "uri": "/tmp/workspace-task-profiled-legacy",
+                    "artifact_type": "workspace",
+                }
+            ],
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(
+            session_factory=session_factory,
+            worker=worker,
+            enable_worker_profiles=True,
+            worker_profiles={
+                "codex-native-executor": WorkerProfile(
+                    name="codex-native-executor",
+                    worker_type="codex",
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                    capability_tags=["execution"],
+                    supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                    permission_profile="workspace_write",
+                    mutation_policy="patch_allowed",
+                    self_review_policy="on_failure",
+                ),
+                "codex-tool-loop-executor": WorkerProfile(
+                    name="codex-tool-loop-executor",
+                    worker_type="codex",
+                    runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
+                    capability_tags=["execution"],
+                    supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                    permission_profile="workspace_write",
+                    mutation_policy="patch_allowed",
+                    self_review_policy="on_failure",
+                    metadata={"legacy_mode": True},
+                ),
+            },
+        ),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+    )
+    app.state.test_worker = worker
+
+    with TestClient(app) as profiled_client:
+        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        response = profiled_client.post(
+            "/tasks",
+            json={
+                "task_text": "Run with explicit codex tool-loop legacy profile",
+                "repo_url": "https://github.com/natanayalo/code-agent",
+                "worker_profile_override": "codex-tool-loop-executor",
+                "session": {
+                    "channel": "http",
+                    "external_user_id": "http:test-user-profiled-legacy",
+                    "external_thread_id": "thread-profiled-legacy",
+                },
+            },
+        )
+
+        assert response.status_code == 202
+        task_id = response.json()["task_id"]
+        _run_one_queued_task(profiled_client)
+
+        get_response = profiled_client.get(f"/tasks/{task_id}")
+        assert get_response.status_code == 200
+        payload = get_response.json()
+        latest_run = payload["latest_run"]
+
+        assert payload["chosen_profile"] == "codex-tool-loop-executor"
+        assert payload["runtime_mode"] == "tool_loop"
+        assert latest_run["worker_profile"] == "codex-tool-loop-executor"
+        assert latest_run["runtime_mode"] == "tool_loop"
+        assert len(worker.requests) == 1
+        assert worker.requests[0].worker_profile == "codex-tool-loop-executor"
+        assert worker.requests[0].runtime_mode == "tool_loop"
+
+
+def test_task_endpoints_reject_unknown_worker_profile_override(session_factory) -> None:
+    """Task submissions should fail fast when worker_profile_override is not configured."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="ok",
+            budget_usage={},
+            commands_run=[],
+            files_changed=[],
+            artifacts=[],
+            next_action_hint=None,
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(
+            session_factory=session_factory,
+            worker=worker,
+            enable_worker_profiles=True,
+            worker_profiles={
+                "codex-native-executor": WorkerProfile(
+                    name="codex-native-executor",
+                    worker_type="codex",
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                    capability_tags=["execution"],
+                    supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                    permission_profile="workspace_write",
+                    mutation_policy="patch_allowed",
+                    self_review_policy="on_failure",
+                ),
+            },
+        ),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+    )
+
+    with TestClient(app) as profiled_client:
+        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        response = profiled_client.post(
+            "/tasks",
+            json={
+                "task_text": "Run with unknown profile",
+                "worker_profile_override": "codex-tool-loop-executor",
+            },
+        )
+
+        assert response.status_code == 422
+        assert "unknown profile" in response.json()["detail"].lower()
+        assert worker.requests == []
+
+
 def test_queued_task_requires_approval_before_worker_dispatch(client: TestClient) -> None:
     """requires_approval should halt execution before the worker is invoked."""
     response = client.post(
