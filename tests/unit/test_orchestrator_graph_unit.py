@@ -1295,14 +1295,16 @@ def test_apply_brain_retry_strategy_only_logs_provided_ignored_fields() -> None:
     suggestion = RouteBrainSuggestion(suggested_retry_strategy="retry_same_worker")
 
     # We need to call the internal _apply_brain_retry_strategy
-    from orchestrator.graph import _apply_brain_retry_strategy
+    from orchestrator.graph import _apply_brain_retry_strategy, _resolve_brain_retry_context
 
+    prior_worker, allowed_strategy = _resolve_brain_retry_context(state)
     route, ignored = _apply_brain_retry_strategy(
-        state=state,
         suggestion=suggestion,
         available_workers=frozenset({"codex", "gemini"}),
         available_profiles=None,
         routable_profiles={},
+        prior_worker=prior_worker,
+        allowed_strategy=allowed_strategy,
     )
     assert route is None
     assert ignored == ["suggested_retry_strategy"]  # suggested_worker should NOT be here
