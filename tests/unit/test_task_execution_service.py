@@ -38,6 +38,7 @@ from orchestrator import (
     WorkerResult,
 )
 from orchestrator import execution as execution_module
+from orchestrator.brain import RuleBasedOrchestratorBrain
 from repositories import (
     ArtifactRepository,
     HumanInteractionRepository,
@@ -441,6 +442,44 @@ def test_task_execution_service_reuses_one_compiled_graph(
 
     assert len(build_calls) == 1
     assert len(fake_graph.calls) == 2
+
+
+def test_task_execution_service_passes_orchestrator_brain_to_graph_builder(monkeypatch) -> None:
+    """Graph construction should receive the configured orchestrator-brain provider."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    fake_graph = _FakeGraph()
+    seen_brains: list[object | None] = []
+
+    def fake_build_orchestrator_graph(*, orchestrator_brain=None, **kwargs):
+        del kwargs
+        seen_brains.append(orchestrator_brain)
+        return fake_graph
+
+    monkeypatch.setattr(
+        execution_module,
+        "build_orchestrator_graph",
+        fake_build_orchestrator_graph,
+    )
+
+    brain = RuleBasedOrchestratorBrain()
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+        orchestrator_brain=brain,
+    )
+
+    submission = execution_module.TaskSubmission(task_text="route with brain")
+    _, persisted = service.create_task(submission)
+    asyncio.run(service._run_orchestrator(submission, persisted))
+
+    assert seen_brains == [brain]
 
 
 def test_run_orchestrator_propagates_submission_secrets(

@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from orchestrator.brain import TaskSpecBrainSuggestion
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.graph import (
     _await_worker_with_timeout,
@@ -287,6 +288,64 @@ def test_generate_task_spec_creates_policy_checked_contract_before_routing() -> 
     assert res["task_spec"]["risk_level"] == "high"
     assert res["timeline_events"][0].event_type == "task_spec_generated"
     assert res["timeline_events"][0].payload["policy_violations"] == []
+
+
+def test_generate_task_spec_applies_brain_enrichment_with_policy_clamps() -> None:
+    class _FakeBrain:
+        def suggest_task_spec(self, **kwargs):
+            del kwargs
+            return TaskSpecBrainSuggestion(
+                acceptance_criteria=["Document verifier pass/fail details in the summary."],
+                suggested_risk_level="high",
+                suggested_task_type="docs",
+                rationale="Increase scrutiny for risky workflow change.",
+            )
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Investigate flaky verifier behavior",
+                "repo_url": "https://github.com/natanayalo/code-agent",
+                "branch": "main",
+            },
+            "task_kind": "implementation",
+        }
+    )
+
+    res = generate_task_spec(state, orchestrator_brain=_FakeBrain())
+
+    assert res["task_spec"]["risk_level"] == "high"
+    assert res["task_spec"]["requires_permission"] is True
+    assert res["task_spec"]["task_type"] == "investigation"
+    assert "task spec generated with brain enrichment" in res["progress_updates"]
+    brain_payload = res["timeline_events"][0].payload["brain"]
+    assert brain_payload["provider"] == "_FakeBrain"
+    assert brain_payload["applied"] is True
+    assert brain_payload["ignored_fields"] == ["suggested_task_type"]
+    assert brain_payload["added_acceptance_criteria"] == [
+        "Document verifier pass/fail details in the summary."
+    ]
+
+
+def test_generate_task_spec_brain_failures_fall_back_to_deterministic_spec() -> None:
+    class _ExplodingBrain:
+        def suggest_task_spec(self, **kwargs):
+            del kwargs
+            raise RuntimeError("brain unavailable")
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Add API pagination"},
+            "task_kind": "implementation",
+        }
+    )
+
+    res = generate_task_spec(state, orchestrator_brain=_ExplodingBrain())
+
+    assert res["task_spec"]["goal"] == "Add API pagination"
+    brain_payload = res["timeline_events"][0].payload["brain"]
+    assert brain_payload["provider"] == "_ExplodingBrain"
+    assert "RuntimeError: brain unavailable" == brain_payload["error"]
 
 
 def test_plan_task_complexity_marker_uses_word_boundaries():
