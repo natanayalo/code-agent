@@ -13,6 +13,7 @@ from typing import Any, Protocol, cast
 from pydantic import Field
 
 from db.enums import WorkerRuntimeMode
+from orchestrator.constants import RISK_ORDER
 from orchestrator.state import (
     OrchestratorModel,
     OrchestratorState,
@@ -114,6 +115,17 @@ def _to_serializable(obj: Any) -> Any:
     if isinstance(obj, Enum):
         return obj.value
     return obj
+
+
+def _merge_list(a: list[str], b: list[str]) -> list[str]:
+    """Merge two lists of strings, preserving order and ensuring uniqueness."""
+    seen = set(a)
+    merged = list(a)
+    for item in b:
+        if item not in seen:
+            merged.append(item)
+            seen.add(item)
+    return merged
 
 
 class TaskSpecBrainSuggestion(OrchestratorModel):
@@ -239,15 +251,9 @@ class RuleBasedOrchestratorBrain:
             if model_suggestion:
                 suggestion = self._merge_task_spec_suggestions(suggestion, model_suggestion)
 
-        if (
-            not suggestion.assumptions
-            and not suggestion.acceptance_criteria
-            and not suggestion.non_goals
-            and not suggestion.clarification_questions
-            and not suggestion.verification_commands
-            and suggestion.suggested_risk_level is None
-            and suggestion.suggested_task_type is None
-            and suggestion.suggested_delivery_mode is None
+        # If no enrichment fields were suggested (ignoring rationale), skip applying
+        if not suggestion.model_dump(
+            exclude_none=True, exclude_defaults=True, exclude={"rationale"}
         ):
             return None
         return suggestion
@@ -337,10 +343,10 @@ class RuleBasedOrchestratorBrain:
         )
 
         try:
-            result = await asyncio.wait_for(
-                self.planner_worker.run(request, system_prompt=_TASK_SPEC_SYSTEM_PROMPT),
-                timeout=DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS,
-            )
+            async with asyncio.timeout(DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS):
+                result = await self.planner_worker.run(
+                    request, system_prompt=_TASK_SPEC_SYSTEM_PROMPT
+                )
         except TimeoutError:
             logger.warning("planner task spec enrichment timed out; using deterministic defaults")
             return None
@@ -372,16 +378,6 @@ class RuleBasedOrchestratorBrain:
         model: TaskSpecBrainSuggestion,
     ) -> TaskSpecBrainSuggestion:
         """Merge model-backed suggestions into rule-based ones."""
-
-        def _merge_list(a: list[str], b: list[str]) -> list[str]:
-            seen = set(a)
-            merged = list(a)
-            for item in b:
-                if item not in seen:
-                    merged.append(item)
-                    seen.add(item)
-            return merged
-
         return TaskSpecBrainSuggestion(
             assumptions=_merge_list(base.assumptions, model.assumptions),
             acceptance_criteria=_merge_list(base.acceptance_criteria, model.acceptance_criteria),
@@ -392,7 +388,11 @@ class RuleBasedOrchestratorBrain:
             verification_commands=_merge_list(
                 base.verification_commands, model.verification_commands
             ),
-            suggested_risk_level=model.suggested_risk_level or base.suggested_risk_level,
+            suggested_risk_level=max(
+                [r for r in [base.suggested_risk_level, model.suggested_risk_level] if r],
+                key=lambda level: RISK_ORDER.get(cast(str, level), -1),
+                default=None,
+            ),
             suggested_task_type=model.suggested_task_type or base.suggested_task_type,
             suggested_delivery_mode=model.suggested_delivery_mode or base.suggested_delivery_mode,
             rationale=" + ".join(
@@ -473,10 +473,8 @@ class RuleBasedOrchestratorBrain:
         )
 
         try:
-            result = await asyncio.wait_for(
-                self.planner_worker.run(request, system_prompt=_ROUTE_SYSTEM_PROMPT),
-                timeout=self.planner_timeout_seconds,
-            )
+            async with asyncio.timeout(self.planner_timeout_seconds):
+                result = await self.planner_worker.run(request, system_prompt=_ROUTE_SYSTEM_PROMPT)
         except TimeoutError as exc:  # pragma: no cover - covered via tests with stubs
             raise RuntimeError(
                 f"planner route recommendation timed out after {self.planner_timeout_seconds}s"

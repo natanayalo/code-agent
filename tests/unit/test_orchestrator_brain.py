@@ -351,6 +351,30 @@ async def test_suggest_task_spec_model_failure_falls_back_to_rules() -> None:
 
 
 @pytest.mark.asyncio
+async def test_suggest_task_spec_risk_level_merging_takes_max() -> None:
+    # Rules say medium (via "Urgent"), Model says low
+    suggestion_data = {"suggested_risk_level": "low", "rationale": "Model thinks it is easy"}
+    worker = _StaticWorker(WorkerResult(status="success", summary=json.dumps(suggestion_data)))
+    brain = RuleBasedOrchestratorBrain(planner_worker=worker)
+
+    task = TaskRequest(task_text="Urgent task")
+    task_spec = TaskSpec(
+        goal="goal", task_type="feature", risk_level="low", delivery_mode="workspace"
+    )
+
+    suggestion = await brain.suggest_task_spec(
+        task=task, task_kind="implementation", task_plan=None, task_spec=task_spec
+    )
+
+    # Should stay medium (from rules) instead of being downgraded to low
+    assert suggestion.suggested_risk_level == "medium"
+    expected_rationale = (
+        "rules(rule_based_task_spec_enrichment_v1) + model(Model thinks it is easy)"
+    )
+    assert expected_rationale in suggestion.rationale
+
+
+@pytest.mark.asyncio
 async def test_suggest_task_spec_model_non_success_falls_back_to_rules() -> None:
     brain = RuleBasedOrchestratorBrain(
         planner_worker=_StaticWorker(WorkerResult(status="failure", summary="error"))
