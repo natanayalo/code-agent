@@ -72,6 +72,7 @@ Run the API only (local dev mode):
 export CODE_AGENT_RUN_API="1"
 export CODE_AGENT_RUN_WORKER="0"
 export CODE_AGENT_ENABLE_TASK_SERVICE="1"
+export CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED="0"  # optional TaskSpec enrichment hook
 export CODE_AGENT_API_SHARED_SECRET="<shared-secret>"
 export DATABASE_URL="postgresql+psycopg://code_agent:<password>@localhost:5432/code_agent"
 poetry run python -m uvicorn apps.api.main:app --reload

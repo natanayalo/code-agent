@@ -16,6 +16,7 @@ from langgraph.types import interrupt
 
 from db.base import utc_now
 from db.enums import TimelineEventType
+from orchestrator.brain import OrchestratorBrain, TaskSpecBrainMergeReport
 from orchestrator.constants import (
     COMPLEX_TASK_MARKERS,
     HIGH_QUALITY_REQUEST_MARKERS,
@@ -38,6 +39,7 @@ from orchestrator.state import (
     WorkerType,
 )
 from orchestrator.task_spec import (
+    apply_task_spec_brain_suggestion,
     build_task_spec_for_request,
     contains_marker,
     is_destructive_task,
@@ -976,7 +978,11 @@ def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
     }
 
 
-def generate_task_spec(state_input: OrchestratorState) -> dict[str, Any]:
+def generate_task_spec(
+    state_input: OrchestratorState,
+    *,
+    orchestrator_brain: OrchestratorBrain | None = None,
+) -> dict[str, Any]:
     """Generate the structured task contract before memory loading and worker routing."""
     state = _ensure_state(state_input)
     task_spec = build_task_spec_for_request(
@@ -984,12 +990,60 @@ def generate_task_spec(state_input: OrchestratorState) -> dict[str, Any]:
         task_kind=state.task_kind,
         task_plan=state.task_plan,
     )
+    brain_report: TaskSpecBrainMergeReport | None = None
+    if orchestrator_brain is not None:
+        provider_name = type(orchestrator_brain).__name__
+        try:
+            suggestion = orchestrator_brain.suggest_task_spec(
+                task=state.task,
+                task_kind=state.task_kind,
+                task_plan=state.task_plan,
+                task_spec=task_spec,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Orchestrator brain suggestion failed; falling back to deterministic TaskSpec.",
+                exc_info=True,
+                extra={
+                    "session_id": state.session.session_id if state.session is not None else None,
+                    "task_id": state.task.task_id,
+                    "brain_provider": provider_name,
+                },
+            )
+            detail = str(exc).strip()
+            brain_report = TaskSpecBrainMergeReport(
+                enabled=True,
+                provider=provider_name,
+                error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
+            )
+        else:
+            if suggestion is None:
+                brain_report = TaskSpecBrainMergeReport(
+                    enabled=True,
+                    provider=provider_name,
+                )
+            else:
+                task_spec, brain_report = apply_task_spec_brain_suggestion(
+                    task_spec=task_spec,
+                    suggestion=suggestion,
+                    provider=provider_name,
+                )
+
     policy_violations = validate_task_spec_policy(task_spec)
     progress_message = "task spec generated"
     if policy_violations:
         progress_message = "task spec generated with policy warnings"
+    elif brain_report is not None and brain_report.applied:
+        progress_message = "task spec generated with brain enrichment"
     elif task_spec.requires_clarification:
         progress_message = "clarification required before execution"
+
+    event_payload: dict[str, Any] = {
+        "task_spec": task_spec.model_dump(mode="json"),
+        "policy_violations": policy_violations,
+    }
+    if brain_report is not None:
+        event_payload["brain"] = brain_report.model_dump(mode="json")
 
     response: dict[str, Any] = {
         "current_step": "generate_task_spec",
@@ -999,10 +1053,7 @@ def generate_task_spec(state_input: OrchestratorState) -> dict[str, Any]:
             state,
             TimelineEventType.TASK_SPEC_GENERATED,
             message="TaskSpec generated for worker routing.",
-            payload={
-                "task_spec": task_spec.model_dump(mode="json"),
-                "policy_violations": policy_violations,
-            },
+            payload=event_payload,
         ),
     }
     if policy_violations:
@@ -2140,6 +2191,7 @@ def build_orchestrator_graph(
     worker_profiles: Mapping[str, WorkerProfile] | None = None,
     enable_worker_profiles: bool = False,
     enable_independent_verifier: bool = False,
+    orchestrator_brain: OrchestratorBrain | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
     interrupt_before: Literal["*"] | list[str] | None = None,
     interrupt_after: Literal["*"] | list[str] | None = None,
@@ -2149,7 +2201,15 @@ def build_orchestrator_graph(
     builder.add_node("ingest_task", RunnableLambda(ingest_task))
     builder.add_node("classify_task", RunnableLambda(classify_task))
     builder.add_node("plan_task", RunnableLambda(plan_task))
-    builder.add_node("generate_task_spec", RunnableLambda(generate_task_spec))
+    builder.add_node(
+        "generate_task_spec",
+        RunnableLambda(
+            lambda state_input: generate_task_spec(
+                state_input,
+                orchestrator_brain=orchestrator_brain,
+            )
+        ),
+    )
     builder.add_node("load_memory", RunnableLambda(load_memory))
     available_workers: frozenset[str] = frozenset(
         _configured_workers(worker, gemini_worker, openrouter_worker).keys()

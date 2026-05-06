@@ -16,6 +16,7 @@ from apps.api.progress import (
 )
 from apps.runtime import coerce_positive_int_env as _coerce_positive_int
 from db.enums import WorkerRuntimeMode
+from orchestrator.brain import RuleBasedOrchestratorBrain
 from orchestrator.execution import ProgressNotifier, TaskExecutionService
 from repositories import create_engine_from_url, create_session_factory
 from sandbox import DockerSandboxContainerManager
@@ -61,6 +62,7 @@ NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: Final[str] = (
     "CODE_AGENT_NATIVE_AGENT_EVENT_CAPTURE_ENABLED"
 )
 INDEPENDENT_VERIFIER_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED"
+ORCHESTRATOR_BRAIN_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED"
 
 # Default profile names
 GEMINI_NATIVE_PLANNER_PROFILE: Final[str] = "gemini-native-planner"
@@ -335,6 +337,11 @@ def build_task_service_from_env(
         enable_worker_profiles=enable_worker_profiles,
         enable_independent_verifier=_is_enabled(
             resolved_env.get(INDEPENDENT_VERIFIER_ENABLED_ENV_VAR)
+        ),
+        orchestrator_brain=(
+            RuleBasedOrchestratorBrain()
+            if _is_enabled(resolved_env.get(ORCHESTRATOR_BRAIN_ENABLED_ENV_VAR))
+            else None
         ),
         progress_notifier=CompositeProgressNotifier(progress_notifiers),
         default_task_max_attempts=_coerce_positive_int(

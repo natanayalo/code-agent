@@ -47,7 +47,7 @@ Active focus:
 Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17: Native Agent Worker Runtime Profiles
-- [ ] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance (planner-style reasoning should default to native read-only execution mode/profile)
+- [ ] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance (planner-style reasoning should default to native read-only execution mode/profile) — slice in progress: TaskSpec brain contract, feature-flagged enrichment hook, and deterministic safety clamps are now wired ([#165](https://github.com/natanayalo/code-agent/pull/165)); model-backed recommendation breadth remains.
 - [ ] T-161: update observability/artifact persistence for runtime mode, profile, CLI stdout/stderr/events, final message, diff, changed files, and verifier result
 - [ ] T-162: deprecate operation-selector mode for Codex/Gemini while keeping `CliRuntimeLoop` for raw chat/OpenRouter compatibility
 

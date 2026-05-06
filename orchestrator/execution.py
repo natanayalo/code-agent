@@ -65,6 +65,7 @@ from db.models import HumanInteraction, PersonalMemory, ProjectMemory, Task, Use
 from db.models import (
     Session as ConversationSession,
 )
+from orchestrator.brain import OrchestratorBrain
 from orchestrator.checkpoints import create_async_sqlite_checkpointer
 from orchestrator.graph import build_orchestrator_graph
 from orchestrator.state import OrchestratorState, SessionRef, TaskSpec
@@ -1234,6 +1235,7 @@ class TaskExecutionService:
         worker_profiles: Mapping[str, WorkerProfile] | None = None,
         enable_worker_profiles: bool = False,
         enable_independent_verifier: bool = False,
+        orchestrator_brain: OrchestratorBrain | None = None,
         progress_notifier: ProgressNotifier | None = None,
         default_task_max_attempts: int = 3,
         workspace_root: str | Path | None = None,
@@ -1247,6 +1249,7 @@ class TaskExecutionService:
         self.worker_profiles = dict(worker_profiles or {})
         self.enable_worker_profiles = enable_worker_profiles
         self.enable_independent_verifier = enable_independent_verifier
+        self.orchestrator_brain = orchestrator_brain
         self.progress_notifier = progress_notifier
         self.default_task_max_attempts = max(1, int(default_task_max_attempts))
         self.workspace_root = None
@@ -1271,6 +1274,7 @@ class TaskExecutionService:
                 worker_profiles=self.worker_profiles,
                 enable_worker_profiles=self.enable_worker_profiles,
                 enable_independent_verifier=self.enable_independent_verifier,
+                orchestrator_brain=self.orchestrator_brain,
                 checkpointer=self._checkpointer,
             )
         return self._graph

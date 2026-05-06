@@ -6,6 +6,7 @@ import re
 from collections.abc import Mapping
 from typing import Any, cast
 
+from orchestrator.brain import TaskSpecBrainMergeReport, TaskSpecBrainSuggestion
 from orchestrator.constants import (
     AMBIGUOUS_ASKS,
     BUGFIX_MARKERS,
@@ -48,6 +49,22 @@ def _coerce_string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    """Return unique values while preserving first-seen ordering."""
+    return list(dict.fromkeys(values))
+
+
+def _append_unique(base: list[str], additions: list[str]) -> tuple[list[str], list[str]]:
+    """Append non-empty additions while reporting only newly inserted values."""
+    merged = list(base)
+    added: list[str] = []
+    for value in additions:
+        if value not in merged:
+            merged.append(value)
+            added.append(value)
+    return merged, added
 
 
 def _resolve_task_type(task_text: str, task_kind: str | None) -> TaskSpecType:
@@ -256,6 +273,96 @@ def build_task_spec_for_request(
         task_kind=task_kind,
         task_plan=task_plan,
     )
+
+
+def apply_task_spec_brain_suggestion(
+    *,
+    task_spec: TaskSpec,
+    suggestion: TaskSpecBrainSuggestion,
+    provider: str | None = None,
+) -> tuple[TaskSpec, TaskSpecBrainMergeReport]:
+    """Safely merge optional brain suggestions into a deterministic TaskSpec."""
+    assumptions, added_assumptions = _append_unique(
+        list(task_spec.assumptions),
+        _coerce_string_list(suggestion.assumptions),
+    )
+    acceptance_criteria, added_acceptance = _append_unique(
+        list(task_spec.acceptance_criteria),
+        _coerce_string_list(suggestion.acceptance_criteria),
+    )
+    non_goals, added_non_goals = _append_unique(
+        list(task_spec.non_goals),
+        _coerce_string_list(suggestion.non_goals),
+    )
+    clarification_questions, added_clarification_questions = _append_unique(
+        list(task_spec.clarification_questions),
+        _coerce_string_list(suggestion.clarification_questions),
+    )
+
+    ignored_fields: list[str] = []
+    suggested_task_type = suggestion.suggested_task_type
+    if suggested_task_type is not None and suggested_task_type != task_spec.task_type:
+        ignored_fields.append("suggested_task_type")
+
+    suggested_delivery_mode = suggestion.suggested_delivery_mode
+    if suggested_delivery_mode is not None and suggested_delivery_mode != task_spec.delivery_mode:
+        ignored_fields.append("suggested_delivery_mode")
+
+    risk_level = task_spec.risk_level
+    suggested_risk_level = suggestion.suggested_risk_level
+    if suggested_risk_level is not None:
+        if RISK_ORDER[suggested_risk_level] > RISK_ORDER[risk_level]:
+            risk_level = cast(TaskRiskLevel, suggested_risk_level)
+        elif RISK_ORDER[suggested_risk_level] < RISK_ORDER[risk_level]:
+            ignored_fields.append("suggested_risk_level")
+
+    requires_permission = task_spec.requires_permission or risk_level in {"high", "critical"}
+    permission_reason = task_spec.permission_reason
+    forbidden_actions = _dedupe_preserving_order(list(task_spec.forbidden_actions))
+    if requires_permission:
+        if "destructive_actions_without_permission" not in forbidden_actions:
+            forbidden_actions.append("destructive_actions_without_permission")
+        if not permission_reason:
+            permission_reason = f"Task is classified as {risk_level} risk."
+
+    requires_clarification = task_spec.requires_clarification or bool(clarification_questions)
+
+    merged_spec = task_spec.model_copy(
+        update={
+            "assumptions": assumptions,
+            "acceptance_criteria": acceptance_criteria,
+            "non_goals": non_goals,
+            "clarification_questions": clarification_questions,
+            "requires_clarification": requires_clarification,
+            "risk_level": risk_level,
+            "requires_permission": requires_permission,
+            "permission_reason": permission_reason,
+            "forbidden_actions": forbidden_actions,
+        }
+    )
+
+    report = TaskSpecBrainMergeReport(
+        enabled=True,
+        provider=provider,
+        applied=bool(
+            added_assumptions
+            or added_acceptance
+            or added_non_goals
+            or added_clarification_questions
+            or risk_level != task_spec.risk_level
+            or requires_permission != task_spec.requires_permission
+            or permission_reason != task_spec.permission_reason
+            or forbidden_actions != task_spec.forbidden_actions
+        ),
+        added_assumptions=added_assumptions,
+        added_acceptance_criteria=added_acceptance,
+        added_non_goals=added_non_goals,
+        added_clarification_questions=added_clarification_questions,
+        ignored_fields=_dedupe_preserving_order(ignored_fields),
+        rationale=suggestion.rationale,
+    )
+
+    return merged_spec, report
 
 
 def validate_task_spec_policy(task_spec: TaskSpec) -> list[str]:

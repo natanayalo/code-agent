@@ -18,6 +18,7 @@ from apps.api.task_service_factory import (
     _database_url_from_env,
     build_task_service_from_env,
 )
+from orchestrator.brain import RuleBasedOrchestratorBrain
 from workers import (
     CodexCliWorker,
     CodexExecCliRuntimeAdapter,
@@ -141,6 +142,28 @@ def test_build_task_service_from_env_enables_independent_verifier_flag(
     try:
         assert service is not None
         assert service.enable_independent_verifier is True
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
+def test_build_task_service_from_env_enables_orchestrator_brain_flag(
+    tmp_path: Path,
+) -> None:
+    """Bootstrap should wire the optional orchestrator-brain provider when configured."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED": "1",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert isinstance(service.orchestrator_brain, RuleBasedOrchestratorBrain)
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
