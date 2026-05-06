@@ -1856,7 +1856,7 @@ class TaskExecutionService:
                 summary=latest_run_obj.summary,
                 requested_permission=latest_run_obj.requested_permission,
                 budget_usage=latest_run_obj.budget_usage,
-                verifier_outcome=latest_run_obj.verifier_outcome,
+                verifier_outcome=self._ensure_verifier_outcome_ids(latest_run_obj.verifier_outcome),
                 commands_run=[
                     {"id": cmd.get("id") or f"legacy-{idx}", **cmd}
                     for idx, cmd in enumerate(latest_run_obj.commands_run or [])
@@ -1864,7 +1864,11 @@ class TaskExecutionService:
                 ],
                 files_changed_count=latest_run_obj.files_changed_count,
                 files_changed=list(latest_run_obj.files_changed or []),
-                artifact_index=list(latest_run_obj.artifact_index or []),
+                artifact_index=[
+                    {"id": entry.get("id") or entry.get("uri") or f"idx-{idx}", **entry}
+                    for idx, entry in enumerate(latest_run_obj.artifact_index or [])
+                    if isinstance(entry, dict)
+                ],
                 artifacts=[
                     ArtifactSnapshot(
                         artifact_id=artifact.id,
@@ -2020,6 +2024,27 @@ class TaskExecutionService:
             for interaction in task.human_interactions
             if self._is_pending_interaction(interaction)
         )
+
+    def _ensure_verifier_outcome_ids(self, outcome: Any) -> Any:
+        """Inject stable IDs into verifier outcome items if missing (T-161)."""
+        if not isinstance(outcome, dict):
+            return outcome
+        items = outcome.get("items")
+        if not isinstance(items, list):
+            return outcome
+
+        new_items = []
+        for idx, item in enumerate(items):
+            if isinstance(item, dict) and not item.get("id"):
+                # Use a stable combination for old data, fallback to index
+                label = item.get("label", "item")
+                status = item.get("status", "unknown")
+                new_item = {"id": f"v-{idx}-{label}-{status}", **item}
+                new_items.append(new_item)
+            else:
+                new_items.append(item)
+
+        return {**outcome, "items": new_items}
 
     def _map_session_to_snapshot(self, s: ConversationSession) -> SessionSnapshot:
         """Map a ConversationSession database model to a SessionSnapshot Pydantic model (T-131)."""

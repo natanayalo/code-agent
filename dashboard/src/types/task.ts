@@ -99,6 +99,7 @@ export interface CommandRunSnapshot {
 }
 
 export interface ArtifactIndexEntry {
+  id: string;
   name?: string;
   uri?: string;
   artifact_type?: string;
@@ -121,6 +122,19 @@ export interface TaskTimelineEventSnapshot {
   message?: string | null;
   payload?: Record<string, unknown> | null;
   created_at: string;
+}
+
+export interface VerifierOutcomeItem {
+  id: string;
+  label: string;
+  status: string;
+  message: string | null;
+}
+
+export interface VerifierOutcomeSnapshot {
+  status: string | null;
+  summary: string | null;
+  items: VerifierOutcomeItem[];
 }
 
 export interface HumanInteractionSnapshot {

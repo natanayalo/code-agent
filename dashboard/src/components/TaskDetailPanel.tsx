@@ -66,8 +66,8 @@ function renderStringList(title: string, items: string[] | undefined) {
     <div className="task-detail-group">
       <h5>{title}</h5>
       <ul>
-        {items.map((item, idx) => (
-          <li key={`${title}-${item}-${idx}`}>{item}</li>
+        {items.map((item) => (
+          <li key={`${title}-${item}`}>{item}</li>
         ))}
       </ul>
     </div>
@@ -91,7 +91,7 @@ function artifactRows(run: TaskSnapshot['latest_run']) {
   if (!run) return [];
   if (Array.isArray(run.artifact_index) && run.artifact_index.length > 0) {
     return run.artifact_index.map((artifact) => ({
-      key: `${artifact.uri || artifact.name || 'artifact'}`,
+      key: artifact.id || artifact.uri || artifact.name || 'artifact',
       name: artifact.name || 'artifact',
       type: artifact.artifact_type || 'unknown',
       uri: artifact.uri || '',

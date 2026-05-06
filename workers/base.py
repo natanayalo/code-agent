@@ -121,6 +121,7 @@ class TestResult(WorkerModel):
 class ArtifactReference(WorkerModel):
     """A summarized artifact emitted by a worker run."""
 
+    id: str = Field(default_factory=lambda: uuid4().hex)
     name: str
     uri: str
     artifact_type: str | None = None
