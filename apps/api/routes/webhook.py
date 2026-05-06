@@ -6,7 +6,7 @@ import os
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.api.dependencies import get_task_service, require_api_auth
@@ -25,6 +25,7 @@ from orchestrator.execution import (
     TaskExecutionService,
     TaskSnapshot,
     TaskSubmission,
+    TaskSubmissionValidationError,
     validate_callback_url,
 )
 
@@ -141,14 +142,20 @@ def receive_webhook(
 
         # We will link the session ID after creating the outcome
 
-        outcome = task_service.create_task_outcome(
-            submission,
-            delivery_key=(
-                DeliveryKey(channel=submission.session.channel, delivery_id=payload.delivery_id)
-                if payload.delivery_id is not None
-                else None
-            ),
-        )
+        try:
+            outcome = task_service.create_task_outcome(
+                submission,
+                delivery_key=(
+                    DeliveryKey(channel=submission.session.channel, delivery_id=payload.delivery_id)
+                    if payload.delivery_id is not None
+                    else None
+                ),
+            )
+        except TaskSubmissionValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
 
         set_current_span_attribute(SESSION_ID_ATTRIBUTE, outcome.task_snapshot.session_id)
 

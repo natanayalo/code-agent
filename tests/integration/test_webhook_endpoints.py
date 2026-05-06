@@ -310,6 +310,57 @@ def test_webhook_accepts_worker_profile_override_for_explicit_legacy_opt_in(
         assert worker.requests[0].runtime_mode == "tool_loop"
 
 
+def test_webhook_rejects_unknown_worker_profile_override(session_factory) -> None:
+    """Webhook submissions should fail fast when worker_profile_override is not configured."""
+    notifier = RecordingProgressNotifier()
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            summary="ok",
+            budget_usage={},
+            commands_run=[],
+            files_changed=[],
+            artifacts=[],
+            next_action_hint=None,
+        )
+    )
+    app = create_app(
+        task_service=TaskExecutionService(
+            session_factory=session_factory,
+            worker=worker,
+            progress_notifier=notifier,
+            enable_worker_profiles=True,
+            worker_profiles={
+                "codex-native-executor": WorkerProfile(
+                    name="codex-native-executor",
+                    worker_type="codex",
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                    capability_tags=["execution"],
+                    supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                    permission_profile="workspace_write",
+                    mutation_policy="patch_allowed",
+                    self_review_policy="on_failure",
+                ),
+            },
+        ),
+        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+    )
+
+    with TestClient(app) as profiled_client:
+        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        response = profiled_client.post(
+            "/webhook",
+            json={
+                "task_text": "Run webhook task through unknown profile",
+                "worker_profile_override": "codex-tool-loop-executor",
+            },
+        )
+
+        assert response.status_code == 422
+        assert "unknown profile" in response.json()["detail"].lower()
+        assert worker.requests == []
+
+
 def test_webhook_uses_default_repo_url_when_omitted(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
