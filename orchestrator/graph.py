@@ -1499,11 +1499,15 @@ def _apply_brain_retry_strategy(
         return None, ignored_fields
     if retry_strategy != allowed_strategy:
         ignored_fields.append("suggested_retry_strategy")
+        if suggestion.suggested_worker is not None:
+            ignored_fields.append("suggested_worker")
         return None, ignored_fields
 
     if retry_strategy == "retry_same_worker":
         if prior_worker not in available_workers:
-            ignored_fields.extend(["suggested_retry_strategy", "suggested_worker"])
+            ignored_fields.append("suggested_retry_strategy")
+            if suggestion.suggested_worker is not None:
+                ignored_fields.append("suggested_worker")
             return None, ignored_fields
         route = _route_for_worker(
             worker_type=prior_worker,
@@ -1512,7 +1516,9 @@ def _apply_brain_retry_strategy(
             routable_profiles=routable_profiles,
         )
         if route is None:
-            ignored_fields.extend(["suggested_retry_strategy", "suggested_worker"])
+            ignored_fields.append("suggested_retry_strategy")
+            if suggestion.suggested_worker is not None:
+                ignored_fields.append("suggested_worker")
         return route, ignored_fields
 
     # `escalate_to_alternate` path with deterministic alternate fallback ordering.
@@ -1537,7 +1543,9 @@ def _apply_brain_retry_strategy(
         if route is not None:
             return route, ignored_fields
 
-    ignored_fields.extend(["suggested_retry_strategy", "suggested_worker"])
+    ignored_fields.append("suggested_retry_strategy")
+    if suggestion.suggested_worker is not None:
+        ignored_fields.append("suggested_worker")
     return None, ignored_fields
 
 
@@ -1579,13 +1587,24 @@ def _apply_brain_route_suggestion(
             }
         )
 
+    # Deterministic escalation safety check: if the policy requires escalation,
+    # prevent the brain from suggesting the prior (failed) worker via profile or worker hints.
+    prior_worker, allowed_strategy = _resolve_brain_retry_context(state)
+    disallowed_worker: WorkerType | None = None
+    if allowed_strategy == "escalate_to_alternate":
+        disallowed_worker = prior_worker
+
     suggested_profile = suggestion.suggested_profile
     if suggested_profile:
         if not available_profiles:
             ignored_fields.append("suggested_profile")
         else:
             profile = available_profiles.get(suggested_profile)
-            if profile is None or suggested_profile not in routable_profiles:
+            if (
+                profile is None
+                or suggested_profile not in routable_profiles
+                or (disallowed_worker and profile.worker_type == disallowed_worker)
+            ):
                 ignored_fields.append("suggested_profile")
             else:
                 if (
@@ -1610,7 +1629,9 @@ def _apply_brain_route_suggestion(
         return None, report.model_copy(
             update={"ignored_fields": _dedupe_preserving_order(ignored_fields)}
         )
-    if suggested_worker not in available_workers:
+    if suggested_worker not in available_workers or (
+        disallowed_worker and suggested_worker == disallowed_worker
+    ):
         ignored_fields.append("suggested_worker")
         return None, report.model_copy(
             update={"ignored_fields": _dedupe_preserving_order(ignored_fields)}
