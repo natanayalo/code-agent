@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from orchestrator.brain import TaskSpecBrainSuggestion
+from orchestrator.brain import RuleBasedOrchestratorBrain, TaskSpecBrainSuggestion
+from orchestrator.state import TaskRequest
 from orchestrator.task_spec import (
     apply_task_spec_brain_suggestion,
     build_task_spec,
@@ -146,3 +147,25 @@ def test_apply_task_spec_brain_suggestion_clamps_unsafe_overrides() -> None:
         "suggested_risk_level",
     ]
     assert validate_task_spec_policy(merged) == []
+
+
+def test_rule_based_orchestrator_brain_escalates_urgent_low_risk_task() -> None:
+    """Urgent low-risk asks should trigger medium-risk escalation suggestion."""
+    brain = RuleBasedOrchestratorBrain()
+    task = TaskRequest(task_text="Urgent: fix this typo")
+    deterministic_spec = build_task_spec(
+        task_text=task.task_text,
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="main",
+    )
+    assert deterministic_spec.risk_level == "low"
+
+    suggestion = brain.suggest_task_spec(
+        task=task,
+        task_kind="implementation",
+        task_plan=None,
+        task_spec=deterministic_spec,
+    )
+
+    assert suggestion is not None
+    assert suggestion.suggested_risk_level == "medium"
