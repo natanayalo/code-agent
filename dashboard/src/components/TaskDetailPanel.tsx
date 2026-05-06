@@ -66,8 +66,8 @@ function renderStringList(title: string, items: string[] | undefined) {
     <div className="task-detail-group">
       <h5>{title}</h5>
       <ul>
-        {items.map((item) => (
-          <li key={title + '-' + item}>{item}</li>
+        {items.map((item, idx) => (
+          <li key={`${title}-${item}-${idx}`}>{item}</li>
         ))}
       </ul>
     </div>
@@ -91,7 +91,7 @@ function artifactRows(run: TaskSnapshot['latest_run']) {
   if (!run) return [];
   if (Array.isArray(run.artifact_index) && run.artifact_index.length > 0) {
     return run.artifact_index.map((artifact) => ({
-      key: artifact.uri || artifact.name || `artifact-${normalizeToken(artifact.artifact_type || 'unknown')}`,
+      key: `${artifact.uri || artifact.name || 'artifact'}`,
       name: artifact.name || 'artifact',
       type: artifact.artifact_type || 'unknown',
       uri: artifact.uri || '',
@@ -362,8 +362,8 @@ function extractTraceObservability(task: TaskSnapshot | null): TraceObservabilit
 
 export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: TaskDetailPanelProps) {
   const run = task?.latest_run ?? null;
-  const runCommands = run?.commands_run ?? [];
-  const changedFiles = run?.files_changed ?? [];
+  const runCommands = React.useMemo(() => run?.commands_run ?? [], [run]);
+  const changedFiles = React.useMemo(() => run?.files_changed ?? [], [run]);
   const runDuration = React.useMemo(
     () => computeRunDuration(run?.started_at, run?.finished_at),
     [run?.started_at, run?.finished_at]
