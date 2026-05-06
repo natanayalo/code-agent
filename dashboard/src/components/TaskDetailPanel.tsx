@@ -61,16 +61,13 @@ function formatDuration(seconds: number | undefined): string | null {
 
 function renderStringList(title: string, items: string[] | undefined) {
   if (!items || items.length === 0) return null;
-  const duplicateCounts = new Map<string, number>();
   return (
     <div className="task-detail-group">
       <h5>{title}</h5>
       <ul>
-        {items.map((item) => {
-          const duplicateIndex = duplicateCounts.get(item) || 0;
-          duplicateCounts.set(item, duplicateIndex + 1);
-          return <li key={`${title}-${item}-${duplicateIndex}`}>{item}</li>;
-        })}
+        {items.map((item, idx) => (
+          <li key={`${title}-${item}-${idx}`}>{item}</li>
+        ))}
       </ul>
     </div>
   );
@@ -93,7 +90,7 @@ function artifactRows(run: TaskSnapshot['latest_run']) {
   if (!run) return [];
   if (Array.isArray(run.artifact_index) && run.artifact_index.length > 0) {
     return run.artifact_index.map((artifact, idx) => ({
-      key: `${artifact.name || 'artifact'}-${artifact.uri || 'uri'}-${idx}`,
+      key: artifact.uri || artifact.name || `idx-${idx}`,
       name: artifact.name || 'artifact',
       type: artifact.artifact_type || 'unknown',
       uri: artifact.uri || '',
@@ -101,8 +98,8 @@ function artifactRows(run: TaskSnapshot['latest_run']) {
     }));
   }
   if (Array.isArray(run.artifacts) && run.artifacts.length > 0) {
-    return run.artifacts.map((artifact, idx) => ({
-      key: `${artifact.artifact_id}-${idx}`,
+    return run.artifacts.map((artifact) => ({
+      key: artifact.artifact_id,
       name: artifact.name,
       type: artifact.artifact_type,
       uri: artifact.uri,
@@ -529,8 +526,8 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                     </p>
                     {verifierOutcome.items.length > 0 ? (
                       <ul>
-                        {verifierOutcome.items.map((item, idx) => (
-                          <li key={`${item.label}-${item.status}-${idx}`}>
+                        {verifierOutcome.items.map((item) => (
+                          <li key={item.label}>
                             <strong>{formatLabel(item.label)}:</strong> {formatLabel(item.status)}
                             {item.message ? ` - ${item.message}` : ''}
                           </li>
@@ -554,11 +551,11 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
             {sortedTimeline.length > 0 ? (
               <ol className="task-timeline-list">
                 {sortedTimeline.map((event, idx) => (
-                  <li key={`${event.created_at}-${event.sequence_number ?? idx}-${idx}`}>
+                  <li key={event.sequence_number ?? `event-${idx}`}>
                     <p>
                       <strong>{formatLabel(event.event_type)}</strong>
                       <span className="task-detail-muted task-inline-meta">
-                        #{event.sequence_number ?? idx} · attempt {event.attempt_number ?? 0} ·{' '}
+                        #{event.sequence_number} · attempt {event.attempt_number ?? 0} ·{' '}
                         {formatTimestamp(event.created_at)}
                       </span>
                     </p>
@@ -580,7 +577,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                   {runCommands.map((command, idx) => {
                     const duration = formatDuration(command.duration_seconds);
                     return (
-                      <li key={`${command.command || 'command'}-${idx}`}>
+                      <li key={command.command || idx}>
                         <p>
                           <strong>{command.command || `Command ${idx + 1}`}</strong>
                         </p>
