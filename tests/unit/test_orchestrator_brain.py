@@ -55,7 +55,7 @@ class _SlowWorker(Worker):
         system_prompt: str | None = None,
     ) -> WorkerResult:
         del request, system_prompt
-        await asyncio.sleep(1.1)
+        await asyncio.sleep(10.0)
         return WorkerResult(status="success", summary='{"suggested_worker":"codex"}')
 
 

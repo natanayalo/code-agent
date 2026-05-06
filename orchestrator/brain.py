@@ -8,7 +8,7 @@ import logging
 import re
 from collections.abc import Mapping
 from enum import Enum
-from typing import Any, Protocol, cast
+from typing import Any, Final, Protocol, cast
 
 from pydantic import Field
 
@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_ROUTE_BRAIN_TIMEOUT_SECONDS = 45
 DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS = 30
 DEFAULT_ROUTE_PLANNER_PROFILE = "gemini-native-planner"
+DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS: Final = 5
 
 _ROUTE_SYSTEM_PROMPT = """
 You are an orchestrator routing assistant.
@@ -343,7 +344,9 @@ class RuleBasedOrchestratorBrain:
         )
 
         try:
-            async with asyncio.timeout(DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS):
+            async with asyncio.timeout(
+                DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS + DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS
+            ):
                 result = await self.planner_worker.run(
                     request, system_prompt=_TASK_SPEC_SYSTEM_PROMPT
                 )
@@ -473,7 +476,9 @@ class RuleBasedOrchestratorBrain:
         )
 
         try:
-            async with asyncio.timeout(self.planner_timeout_seconds):
+            async with asyncio.timeout(
+                self.planner_timeout_seconds + DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS
+            ):
                 result = await self.planner_worker.run(request, system_prompt=_ROUTE_SYSTEM_PROMPT)
         except TimeoutError as exc:  # pragma: no cover - covered via tests with stubs
             raise RuntimeError(
