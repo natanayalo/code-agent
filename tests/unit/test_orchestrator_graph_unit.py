@@ -1206,6 +1206,54 @@ def test_verify_result_failed_with_changes():
     assert "but changed 1 files" in file_changes["message"]
 
 
+def test_verify_result_queues_repair_for_repairable_worker_failure() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo", "budget": {"max_retries": 1}},
+            "result": {
+                "status": "failure",
+                "failure_kind": "compile",
+                "summary": "Compile step failed.",
+                "files_changed": ["orchestrator/graph.py"],
+                "test_results": [],
+                "commands_run": [{"command": "pytest", "exit_code": 1}],
+            },
+        }
+    )
+
+    res = verify_result(state)
+
+    assert res["verification"]["status"] == "failed"
+    assert res["verification"]["failure_kind"] == "worker_failure"
+    assert res["repair_handoff_requested"] is True
+    assert "queued bounded repair handoff (1/1)" in res["progress_updates"][-1]
+    assert res["task"]["constraints"]["independent_verifier_repair_passes_used"] == 1
+
+
+def test_verify_result_skips_repair_for_non_repairable_worker_failure() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo", "budget": {"max_retries": 1}},
+            "result": {
+                "status": "failure",
+                "failure_kind": "provider_error",
+                "summary": "Provider unavailable.",
+                "files_changed": [],
+                "test_results": [],
+                "commands_run": [],
+            },
+        }
+    )
+
+    res = verify_result(state)
+
+    assert res["verification"]["status"] == "failed"
+    assert res["verification"]["failure_kind"] == "worker_failure"
+    assert "repair_handoff_requested" not in res
+    assert "task" not in res
+    assert res["progress_updates"][-1] == "verification failed"
+
+
 def test_verify_result_surfaces_post_run_lint_warnings() -> None:
     state = OrchestratorState.model_validate(
         {

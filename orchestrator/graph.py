@@ -103,7 +103,15 @@ _VERIFIER_REPAIRABLE_FAILURE_KINDS = frozenset(
     {
         "test_regression",
         "scope_mismatch",
+        "worker_failure",
         "unknown",
+    }
+)
+_VERIFIER_REPAIRABLE_WORKER_FAILURE_KINDS = frozenset(
+    {
+        "compile",
+        "test",
+        "tool_runtime",
     }
 )
 
@@ -1892,12 +1900,17 @@ def verify_result(
     had_verifier_repair_request = isinstance(verifier_repair_request, str) and bool(
         verifier_repair_request.strip()
     )
+    repairable_worker_failure = (
+        report.failure_kind == "worker_failure"
+        and state.result.status == "failure"
+        and state.result.failure_kind in _VERIFIER_REPAIRABLE_WORKER_FAILURE_KINDS
+    )
 
     if (
         report.status == "failed"
-        and state.result.status == "success"
         and report.failure_kind in _VERIFIER_REPAIRABLE_FAILURE_KINDS
         and used_passes < max_passes
+        and (state.result.status == "success" or repairable_worker_failure)
     ):
         repair_task_text = _build_verifier_repair_task_text(state, report)
         updated_constraints = dict(state.task.constraints)
