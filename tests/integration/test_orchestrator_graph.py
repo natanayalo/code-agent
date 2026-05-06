@@ -24,6 +24,20 @@ class StaticWorker(Worker):
         return self.result
 
 
+class SequencedWorker(Worker):
+    """Test worker that yields a predefined sequence of results."""
+
+    def __init__(self, results: list[WorkerResult]) -> None:
+        self._results = list(results)
+        self.requests: list[WorkerRequest] = []
+
+    async def run(self, request: WorkerRequest) -> WorkerResult:
+        self.requests.append(request)
+        if not self._results:
+            raise AssertionError("SequencedWorker received more requests than expected.")
+        return self._results.pop(0)
+
+
 class UnexpectedWorker(Worker):
     """Test worker that should never be invoked."""
 
@@ -162,6 +176,67 @@ def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
         "result summarized and session state updated",
         "memory persistence queued",
     ]
+
+
+def test_orchestrator_graph_runs_one_verifier_repair_handoff_then_stops() -> None:
+    worker = SequencedWorker(
+        [
+            WorkerResult(
+                status="success",
+                summary="Initial implementation finished.",
+                commands_run=[],
+                files_changed=["orchestrator/graph.py"],
+                test_results=[{"name": "unit", "status": "failed"}],
+                artifacts=[],
+                next_action_hint="persist_memory",
+            ),
+            WorkerResult(
+                status="success",
+                summary="Applied verifier repair follow-up.",
+                commands_run=[],
+                files_changed=["orchestrator/graph.py"],
+                test_results=[{"name": "unit", "status": "failed"}],
+                artifacts=[],
+                next_action_hint="persist_memory",
+            ),
+        ]
+    )
+    graph = build_orchestrator_graph(worker=worker)
+
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": "Fix verifier repair behavior",
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                }
+            }
+        )
+    )
+
+    state = OrchestratorState.model_validate(raw_output)
+
+    assert state.current_step == "persist_memory"
+    assert len(worker.requests) == 2
+    assert worker.requests[1].task_text.startswith(
+        "Apply targeted code fixes for failed verification checks."
+    )
+    assert state.verification is not None
+    assert state.verification.status == "failed"
+    assert state.result is not None
+    assert state.result.next_action_hint == "await_manual_follow_up"
+    assert "Verification is still failing after 1 bounded repair attempt" in (
+        state.result.summary or ""
+    )
+    assert any(
+        "verification failed; queued bounded repair handoff (1/1)" in update
+        for update in state.progress_updates
+    )
+    assert any(
+        "verification failed after bounded repair attempts" in update
+        for update in state.progress_updates
+    )
 
 
 def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(

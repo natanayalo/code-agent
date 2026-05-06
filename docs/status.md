@@ -38,21 +38,21 @@ Active focus:
 
 ## Next Priorities
 
-1. add independent verifier execution and bounded repair flow (T-159)
-2. isolate OpenRouter as opt-in legacy tool-loop mode and add native-agent parity/eval coverage (T-160 to T-162)
-3. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
+1. isolate OpenRouter as opt-in legacy tool-loop mode and add native-agent parity/eval coverage (T-160 to T-162)
+2. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
+3. continue tightening native-agent observability and verifier acceptance policy after T-160 rollout
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17: Native Agent Worker Runtime Profiles
-- [ ] T-159: add bounded continuation/repair after verifier failure
 - [ ] T-160: add optional LLM orchestrator brain for TaskSpec enrichment, classification, clarification, profile recommendation, retry/escalation, and verifier acceptance (planner-style reasoning should default to native read-only execution mode/profile)
 - [ ] T-161: update observability/artifact persistence for runtime mode, profile, CLI stdout/stderr/events, final message, diff, changed files, and verifier result
 - [ ] T-162: deprecate operation-selector mode for Codex/Gemini while keeping `CliRuntimeLoop` for raw chat/OpenRouter compatibility
 
 ### Milestone 17 Done (Published)
+- [x] T-159: add bounded continuation/repair after verifier failure ([#164](https://github.com/natanayalo/code-agent/pull/164))
 - [x] T-158: add an independent verifier execution stage with read-only/default-safe behavior ([#163](https://github.com/natanayalo/code-agent/pull/163))
 - [x] T-157: add a clarification gate before worker routing/dispatch when TaskSpec requires clarification ([#162](https://github.com/natanayalo/code-agent/pull/162))
 - [x] T-156: convert Gemini worker to native-agent default behind `CODE_AGENT_GEMINI_RUNTIME_MODE` ([#161](https://github.com/natanayalo/code-agent/pull/161))

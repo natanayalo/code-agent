@@ -43,9 +43,9 @@ from orchestrator.task_spec import (
     is_destructive_task,
     validate_task_spec_policy,
 )
-from orchestrator.verification import run_independent_verifier
+from orchestrator.verification import resolve_verification_commands, run_independent_verifier
 from tools import coerce_permission_level
-from tools.numeric import coerce_positive_int_like
+from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
 from workers import ArtifactReference, Worker, WorkerProfile, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,25 @@ _WORKER_FAILURE_RETRY_SAME_WORKER_KINDS = frozenset(
         "sandbox_infra",
         "provider_auth",
         "permission_denied",
+    }
+)
+DEFAULT_INDEPENDENT_VERIFIER_MAX_REPAIR_PASSES = 1
+VERIFIER_REPAIR_REQUEST_CONSTRAINT = "independent_verifier_repair_request"
+VERIFIER_REPAIR_PASSES_USED_CONSTRAINT = "independent_verifier_repair_passes_used"
+VERIFIER_REPAIR_MAX_PASSES_CONSTRAINT = "independent_verifier_max_repair_passes"
+_VERIFIER_REPAIRABLE_FAILURE_KINDS = frozenset(
+    {
+        "test_regression",
+        "scope_mismatch",
+        "worker_failure",
+        "unknown",
+    }
+)
+_VERIFIER_REPAIRABLE_WORKER_FAILURE_KINDS = frozenset(
+    {
+        "compile",
+        "test",
+        "tool_runtime",
     }
 )
 
@@ -458,12 +477,139 @@ def _route_after_await_approval(state_input: OrchestratorState) -> str:
     return "dispatch_job" if state.approval.status == "approved" else "summarize_result"
 
 
+def _resolve_verifier_repair_handoff_budget(state: OrchestratorState) -> tuple[int, int]:
+    """Resolve bounded verifier-repair settings from constraints and verifier budget caps."""
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    budget = state.task.budget if isinstance(state.task.budget, dict) else {}
+
+    configured_max_passes = coerce_non_negative_int_like(
+        constraints.get(VERIFIER_REPAIR_MAX_PASSES_CONSTRAINT)
+    )
+    max_passes = (
+        configured_max_passes
+        if configured_max_passes is not None
+        else DEFAULT_INDEPENDENT_VERIFIER_MAX_REPAIR_PASSES
+    )
+
+    verifier_budget_cap = coerce_non_negative_int_like(budget.get("max_verifier_passes"))
+    if verifier_budget_cap is not None:
+        max_passes = min(max_passes, verifier_budget_cap)
+
+    used_passes = coerce_non_negative_int_like(
+        constraints.get(VERIFIER_REPAIR_PASSES_USED_CONSTRAINT)
+    )
+    if used_passes is None:
+        used_passes = 0
+    return max_passes, used_passes
+
+
+def _cleanup_verifier_repair_handoff_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:
+    """Drop transient verifier-repair task text after a bounded repair attempt."""
+    cleaned = dict(constraints)
+    cleaned.pop(VERIFIER_REPAIR_REQUEST_CONSTRAINT, None)
+    return cleaned
+
+
+def _build_verifier_repair_task_text(
+    state: OrchestratorState,
+    report: VerificationReport,
+) -> str:
+    """Create a focused repair task from failed verification checks."""
+    task_text = state.normalized_task_text or state.task.task_text
+    failed_checks = [item for item in report.items if item.status == "failed"]
+    verification_commands = resolve_verification_commands(state)
+
+    lines = [
+        "Apply targeted code fixes for failed verification checks.",
+        "Keep changes minimal and inside the original task scope.",
+        f"Original task objective: {task_text}",
+        "",
+        "Failed verification checks:",
+    ]
+
+    if failed_checks:
+        for index, check in enumerate(failed_checks, start=1):
+            message = check.message or "No additional details were reported."
+            lines.append(f"{index}. {check.label}: {message}")
+    else:
+        lines.append(
+            "1. Verification failed without per-check details; inspect the latest diff and tests."
+        )
+
+    if verification_commands:
+        lines.extend(
+            [
+                "",
+                "Re-run these verification commands when applicable:",
+                *[f"- {command}" for command in verification_commands],
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "After applying fixes, run the smallest relevant verification commands and summarize.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _manual_verifier_handoff_summary(
+    existing_summary: str | None,
+    *,
+    used_passes: int,
+) -> str:
+    """Append a human-readable handoff note once verifier repair attempts are exhausted."""
+    attempt_label = "attempt" if used_passes == 1 else "attempts"
+    handoff_note = (
+        "Verification is still failing after "
+        f"{used_passes} bounded repair {attempt_label}; manual follow-up is required."
+    )
+    if isinstance(existing_summary, str) and existing_summary.strip():
+        return f"{existing_summary.rstrip()}\n\n{handoff_note}"
+    return handoff_note
+
+
+def _normalize_repair_task_text(value: object) -> str | None:
+    """Return a stripped repair task text when present and non-empty."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
 def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
     """Build the typed worker request from orchestrator state."""
     task_text = state.normalized_task_text or state.task.task_text
-    repair_task_text = state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT)
-    if isinstance(repair_task_text, str) and repair_task_text.strip():
-        task_text = repair_task_text.strip()
+    normalized_verifier_repair_task_text = _normalize_repair_task_text(
+        state.task.constraints.get(VERIFIER_REPAIR_REQUEST_CONSTRAINT)
+    )
+    normalized_review_repair_task_text = _normalize_repair_task_text(
+        state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT)
+    )
+
+    if normalized_verifier_repair_task_text and normalized_review_repair_task_text:
+        task_text = "\n".join(
+            [
+                "Apply the following repair instructions in one pass.",
+                "Address verifier failures first, then independent review findings.",
+                "",
+                "Verifier repair instructions:",
+                normalized_verifier_repair_task_text,
+                "",
+                "Independent review repair instructions:",
+                normalized_review_repair_task_text,
+                "",
+                (
+                    "After completing both, run the smallest relevant verification commands "
+                    "and summarize."
+                ),
+            ]
+        )
+    elif normalized_verifier_repair_task_text:
+        task_text = normalized_verifier_repair_task_text
+    elif normalized_review_repair_task_text:
+        task_text = normalized_review_repair_task_text
 
     return WorkerRequest(
         session_id=state.session.session_id if state.session is not None else None,
@@ -1773,11 +1919,63 @@ def verify_result(
         failure_kind=report_failure_kind,
         items=items,
     )
+    progress_message = f"verification {report_status}"
+    updated_task: dict[str, Any] | None = None
+    updated_result: dict[str, Any] | None = None
+    repair_handoff_requested = False
+    max_passes, used_passes = _resolve_verifier_repair_handoff_budget(state)
+    verifier_repair_request = state.task.constraints.get(VERIFIER_REPAIR_REQUEST_CONSTRAINT)
+    had_verifier_repair_request = isinstance(verifier_repair_request, str) and bool(
+        verifier_repair_request.strip()
+    )
+    repairable_worker_failure = (
+        report.failure_kind == "worker_failure"
+        and state.result.status == "failure"
+        and state.result.failure_kind in _VERIFIER_REPAIRABLE_WORKER_FAILURE_KINDS
+    )
 
-    return {
+    if (
+        report.status == "failed"
+        and report.failure_kind in _VERIFIER_REPAIRABLE_FAILURE_KINDS
+        and used_passes < max_passes
+        and (state.result.status == "success" or repairable_worker_failure)
+    ):
+        repair_task_text = _build_verifier_repair_task_text(state, report)
+        updated_constraints = dict(state.task.constraints)
+        updated_constraints[VERIFIER_REPAIR_REQUEST_CONSTRAINT] = repair_task_text
+        updated_constraints[VERIFIER_REPAIR_PASSES_USED_CONSTRAINT] = used_passes + 1
+        updated_task = state.task.model_copy(
+            update={"constraints": updated_constraints}
+        ).model_dump()
+        repair_handoff_requested = True
+        progress_message = (
+            "verification failed; queued bounded repair handoff "
+            f"({used_passes + 1}/{max_passes})"
+        )
+    elif had_verifier_repair_request:
+        cleaned_constraints = _cleanup_verifier_repair_handoff_constraints(state.task.constraints)
+        if cleaned_constraints != state.task.constraints:
+            updated_task = state.task.model_copy(
+                update={"constraints": cleaned_constraints}
+            ).model_dump()
+        if report.status == "failed":
+            progress_message = "verification failed after bounded repair attempts"
+            updated_result = state.result.model_copy(
+                update={
+                    "summary": _manual_verifier_handoff_summary(
+                        state.result.summary,
+                        used_passes=used_passes,
+                    ),
+                    "next_action_hint": "await_manual_follow_up",
+                }
+            ).model_dump()
+        else:
+            progress_message = f"verification {report_status} after bounded repair handoff"
+
+    response: dict[str, Any] = {
         "current_step": "verify_result",
         "verification": report.model_dump(),
-        "progress_updates": _progress_update(state, f"verification {report_status}"),
+        "progress_updates": _progress_update(state, progress_message),
         **_timeline_events(
             state,
             (TimelineEventType.VERIFICATION_STARTED, None, None),
@@ -1788,6 +1986,13 @@ def verify_result(
             ),
         ),
     }
+    if updated_task is not None:
+        response["task"] = updated_task
+    if updated_result is not None:
+        response["result"] = updated_result
+    if repair_handoff_requested:
+        response["repair_handoff_requested"] = True
+    return response
 
 
 def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
