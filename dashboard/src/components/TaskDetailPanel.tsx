@@ -1,6 +1,6 @@
 import React from 'react';
 import { X } from 'lucide-react';
-import { TaskSnapshot } from '../types/task';
+import { TaskSnapshot, VerifierOutcomeItem, VerifierOutcomeSnapshot } from '../types/task';
 import { TaskApprovalSection } from './TaskApprovalSection';
 import { formatLabel } from '../utils/formatters';
 
@@ -28,6 +28,8 @@ interface TraceObservabilitySnapshot {
   spanStatusCounts: SpanStatusCount[];
 }
 
+
+
 function formatTimestamp(value: string | null | undefined): string {
   if (!value) return 'Unknown time';
   const parsed = new Date(value);
@@ -49,16 +51,15 @@ function formatDuration(seconds: number | undefined): string | null {
 
 function renderStringList(title: string, items: string[] | undefined) {
   if (!items || items.length === 0) return null;
-  const duplicateCounts = new Map<string, number>();
+  // Deduplicate items to ensure unique React keys as per review feedback
+  const uniqueItems = Array.from(new Set(items));
   return (
     <div className="task-detail-group">
       <h5>{title}</h5>
       <ul>
-        {items.map((item) => {
-          const duplicateIndex = duplicateCounts.get(item) || 0;
-          duplicateCounts.set(item, duplicateIndex + 1);
-          return <li key={`${title}-${item}-${duplicateIndex}`}>{item}</li>;
-        })}
+        {uniqueItems.map((item) => (
+          <li key={`${title}-${item}`}>{item}</li>
+        ))}
       </ul>
     </div>
   );
@@ -80,8 +81,8 @@ function renderJsonBlock(value: unknown) {
 function artifactRows(run: TaskSnapshot['latest_run']) {
   if (!run) return [];
   if (Array.isArray(run.artifact_index) && run.artifact_index.length > 0) {
-    return run.artifact_index.map((artifact, idx) => ({
-      key: `${artifact.name || 'artifact'}-${artifact.uri || 'uri'}-${idx}`,
+    return run.artifact_index.map((artifact) => ({
+      key: artifact.id || artifact.uri || artifact.name || 'artifact',
       name: artifact.name || 'artifact',
       type: artifact.artifact_type || 'unknown',
       uri: artifact.uri || '',
@@ -89,8 +90,8 @@ function artifactRows(run: TaskSnapshot['latest_run']) {
     }));
   }
   if (Array.isArray(run.artifacts) && run.artifacts.length > 0) {
-    return run.artifacts.map((artifact, idx) => ({
-      key: `${artifact.artifact_id}-${idx}`,
+    return run.artifacts.map((artifact) => ({
+      key: artifact.artifact_id,
       name: artifact.name,
       type: artifact.artifact_type,
       uri: artifact.uri,
@@ -109,6 +110,53 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
+}
+
+function extractVerifierOutcome(value: unknown): VerifierOutcomeSnapshot {
+  const payload = asRecord(value);
+  if (!payload) {
+    return { status: null, summary: null, items: [] };
+  }
+
+  const status = typeof payload.status === 'string' ? payload.status : null;
+  const summary = typeof payload.summary === 'string' ? payload.summary : null;
+  const items = Array.isArray(payload.items)
+    ? payload.items
+        .map((entry) => {
+          const item = asRecord(entry);
+          if (!item) return null;
+          const label = typeof item.label === 'string' ? item.label : null;
+          const itemStatus = typeof item.status === 'string' ? item.status : null;
+          const message = typeof item.message === 'string' ? item.message : null;
+          if (!label || !itemStatus) return null;
+          // Generate a stable ID if not provided by backend
+          const generatedId = label + '-' + itemStatus + '-' + (message || '');
+          return {
+            id: typeof item.id === 'string' ? item.id : generatedId,
+            label,
+            status: itemStatus,
+            message,
+          };
+        })
+        .filter((item): item is VerifierOutcomeItem => item !== null)
+    : [];
+
+  return {
+    status,
+    summary,
+    items,
+  };
+}
+
+function computeRunDuration(startedAt: string | null | undefined, finishedAt: string | null | undefined) {
+  if (!startedAt || !finishedAt) return null;
+  const startedTimestamp = new Date(startedAt).getTime();
+  const finishedTimestamp = new Date(finishedAt).getTime();
+  if (Number.isNaN(startedTimestamp) || Number.isNaN(finishedTimestamp)) {
+    return null;
+  }
+  const elapsedSeconds = Math.max(0, (finishedTimestamp - startedTimestamp) / 1000);
+  return formatDuration(elapsedSeconds);
 }
 
 function parseHttpUrl(value: string): URL | null {
@@ -305,7 +353,16 @@ function extractTraceObservability(task: TaskSnapshot | null): TraceObservabilit
 
 export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: TaskDetailPanelProps) {
   const run = task?.latest_run ?? null;
-  const runCommands = run?.commands_run ?? [];
+  const runCommands = React.useMemo(() => run?.commands_run ?? [], [run]);
+  const changedFiles = React.useMemo(() => run?.files_changed ?? [], [run]);
+  const runDuration = React.useMemo(
+    () => computeRunDuration(run?.started_at, run?.finished_at),
+    [run?.started_at, run?.finished_at]
+  );
+  const verifierOutcome = React.useMemo(
+    () => extractVerifierOutcome(run?.verifier_outcome),
+    [run?.verifier_outcome]
+  );
   const artifacts = React.useMemo(() => artifactRows(run), [run]);
   const traceObservability = React.useMemo(() => extractTraceObservability(task), [task]);
   const sortedTimeline = React.useMemo(() => {
@@ -415,11 +472,81 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
           </section>
 
           <section className="task-detail-section">
+            <h4>Run Observability</h4>
+            {run ? (
+              <>
+                <div className="task-detail-grid">
+                  <p>
+                    <strong>Worker:</strong> {run.worker_type || task.chosen_worker || 'unknown'}
+                  </p>
+                  <p>
+                    <strong>Profile:</strong> {run.worker_profile || task.chosen_profile || 'n/a'}
+                  </p>
+                  <p>
+                    <strong>Runtime Mode:</strong>{' '}
+                    {formatLabel(run.runtime_mode || task.runtime_mode || 'n/a')}
+                  </p>
+                  <p>
+                    <strong>Workspace:</strong> {run.workspace_id || 'n/a'}
+                  </p>
+                  <p>
+                    <strong>Started:</strong> {formatTimestamp(run.started_at)}
+                  </p>
+                  <p>
+                    <strong>Finished:</strong>{' '}
+                    {run.finished_at ? formatTimestamp(run.finished_at) : 'In progress'}
+                  </p>
+                  <p>
+                    <strong>Duration:</strong> {runDuration || 'Unknown duration'}
+                  </p>
+                  <p>
+                    <strong>Status:</strong> {formatLabel(run.status)}
+                  </p>
+                </div>
+
+                {changedFiles.length > 0 ? (
+                  renderStringList('Changed Files', changedFiles)
+                ) : (
+                  <p className="task-detail-muted">No changed files captured for the latest run.</p>
+                )}
+
+                {verifierOutcome.status || verifierOutcome.summary || verifierOutcome.items.length > 0 ? (
+                  <div className="task-detail-group">
+                    <h5>Verification Outcome</h5>
+                    <p>
+                      <strong>Status:</strong> {formatLabel(verifierOutcome.status || 'unknown')}
+                    </p>
+                    <p>
+                      <strong>Summary:</strong> {verifierOutcome.summary || 'No summary reported.'}
+                    </p>
+                    {verifierOutcome.items.length > 0 ? (
+                      <ul>
+                        {verifierOutcome.items.map((item) => (
+                          <li key={item.id}>
+                            <strong>{formatLabel(item.label)}:</strong> {formatLabel(item.status)}
+                            {item.message ? ` - ${item.message}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="task-detail-muted">
+                    No verifier outcome captured for the latest run.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="task-detail-muted">No run observability metadata available yet.</p>
+            )}
+          </section>
+
+          <section className="task-detail-section">
             <h4>Timeline</h4>
             {sortedTimeline.length > 0 ? (
               <ol className="task-timeline-list">
                 {sortedTimeline.map((event, idx) => (
-                  <li key={`${event.created_at}-${event.sequence_number ?? idx}-${idx}`}>
+                  <li key={event.id}>
                     <p>
                       <strong>{formatLabel(event.event_type)}</strong>
                       <span className="task-detail-muted task-inline-meta">
@@ -445,7 +572,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                   {runCommands.map((command, idx) => {
                     const duration = formatDuration(command.duration_seconds);
                     return (
-                      <li key={`${command.command || 'command'}-${idx}`}>
+                      <li key={command.id}>
                         <p>
                           <strong>{command.command || `Command ${idx + 1}`}</strong>
                         </p>

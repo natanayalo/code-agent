@@ -410,6 +410,7 @@ class WorkerRunSnapshot(ExecutionModel):
     verifier_outcome: dict[str, Any] | None = None
     commands_run: list[dict[str, Any]] = Field(default_factory=list)
     files_changed_count: int = 0
+    files_changed: list[str] = Field(default_factory=list)
     artifact_index: list[dict[str, Any]] = Field(default_factory=list)
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
 
@@ -417,6 +418,7 @@ class WorkerRunSnapshot(ExecutionModel):
 class TaskTimelineEventSnapshot(ExecutionModel):
     """A granular event in a task's lifecycle (T-090)."""
 
+    id: str
     event_type: str
     attempt_number: int = 0
     sequence_number: int = 0
@@ -1854,10 +1856,19 @@ class TaskExecutionService:
                 summary=latest_run_obj.summary,
                 requested_permission=latest_run_obj.requested_permission,
                 budget_usage=latest_run_obj.budget_usage,
-                verifier_outcome=latest_run_obj.verifier_outcome,
-                commands_run=list(latest_run_obj.commands_run or []),
+                verifier_outcome=self._ensure_verifier_outcome_ids(latest_run_obj.verifier_outcome),
+                commands_run=[
+                    {"id": cmd.get("id") or f"legacy-{idx}", **cmd}
+                    for idx, cmd in enumerate(latest_run_obj.commands_run or [])
+                    if isinstance(cmd, dict)
+                ],
                 files_changed_count=latest_run_obj.files_changed_count,
-                artifact_index=list(latest_run_obj.artifact_index or []),
+                files_changed=list(latest_run_obj.files_changed or []),
+                artifact_index=[
+                    {"id": entry.get("id") or entry.get("uri") or f"idx-{idx}", **entry}
+                    for idx, entry in enumerate(latest_run_obj.artifact_index or [])
+                    if isinstance(entry, dict)
+                ],
                 artifacts=[
                     ArtifactSnapshot(
                         artifact_id=artifact.id,
@@ -1867,7 +1878,9 @@ class TaskExecutionService:
                         uri=artifact.uri,
                         artifact_metadata=artifact.artifact_metadata,
                     )
-                    for artifact in latest_run_obj.artifacts
+                    for artifact in (
+                        latest_run_obj.artifacts if "artifacts" in latest_run_obj.__dict__ else []
+                    )
                 ],
             )
 
@@ -1882,6 +1895,7 @@ class TaskExecutionService:
             pending_interactions=pending_interactions,
             timeline=[
                 TaskTimelineEventSnapshot(
+                    id=event.id,
                     event_type=_enum_value(event.event_type) or "unknown",
                     attempt_number=event.attempt_number,
                     sequence_number=event.sequence_number,
@@ -1889,7 +1903,7 @@ class TaskExecutionService:
                     payload=event.payload,
                     created_at=event.created_at,
                 )
-                for event in task.timeline_events
+                for event in (task.timeline_events if "timeline_events" in task.__dict__ else [])
             ],
         )
 
@@ -1992,7 +2006,9 @@ class TaskExecutionService:
     def _pending_interaction_snapshots(self, task: Task) -> list[HumanInteractionSnapshot]:
         pending_interactions = [
             interaction
-            for interaction in task.human_interactions
+            for interaction in (
+                task.human_interactions if "human_interactions" in task.__dict__ else []
+            )
             if self._is_pending_interaction(interaction)
         ]
         return [
@@ -2008,6 +2024,27 @@ class TaskExecutionService:
             for interaction in task.human_interactions
             if self._is_pending_interaction(interaction)
         )
+
+    def _ensure_verifier_outcome_ids(self, outcome: Any) -> Any:
+        """Inject stable IDs into verifier outcome items if missing (T-161)."""
+        if not isinstance(outcome, dict):
+            return outcome
+        items = outcome.get("items")
+        if not isinstance(items, list):
+            return outcome
+
+        new_items = []
+        for idx, item in enumerate(items):
+            if isinstance(item, dict) and not item.get("id"):
+                # Use a stable combination for old data, fallback to index
+                label = item.get("label", "item")
+                status = item.get("status", "unknown")
+                new_item = {"id": f"v-{idx}-{label}-{status}", **item}
+                new_items.append(new_item)
+            else:
+                new_items.append(item)
+
+        return {**outcome, "items": new_items}
 
     def _map_session_to_snapshot(self, s: ConversationSession) -> SessionSnapshot:
         """Map a ConversationSession database model to a SessionSnapshot Pydantic model (T-131)."""

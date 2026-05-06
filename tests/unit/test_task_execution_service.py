@@ -1868,7 +1868,14 @@ def test_persist_execution_outcome_persists_session_state_update() -> None:
     assert task_snapshot.latest_run.verifier_outcome == {
         "status": "passed",
         "summary": "Verifier accepted the run.",
-        "items": [{"label": "worker_status", "status": "passed", "message": None}],
+        "items": [
+            {
+                "id": "v-0-worker_status-passed",
+                "label": "worker_status",
+                "status": "passed",
+                "message": None,
+            }
+        ],
     }
 
     with session_scope(session_factory) as session:
