@@ -32,6 +32,7 @@ from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
 
 logger = logging.getLogger(__name__)
+_JSON_DECODER = json.JSONDecoder()
 
 DEFAULT_NATIVE_AGENT_TIMEOUT_SECONDS = 600
 DEFAULT_NATIVE_AGENT_DIFF_TIMEOUT_SECONDS = 15
@@ -41,6 +42,7 @@ DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS = 64 * 1024
 DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS = 1000
 _STDOUT_FALLBACK_TRUNCATION_NOTE = "[stdout truncated for summary]\n"
 NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH: Final[int] = 2000
+DEFAULT_FINAL_MESSAGE_READ_BUFFER: Final[int] = DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS + 1
 _FINAL_MESSAGE_FIELDS: Final = (
     "error",
     "final_output",
@@ -132,7 +134,9 @@ def format_native_run_summary(result: NativeAgentRunResult) -> str:
         return base
 
     # Include truncated stderr for failures to aid classification and debugging
-    stderr_preview = truncate_detail_keep_tail(result.stderr, max_characters=500)
+    stderr_preview = truncate_detail_keep_tail(
+        result.stderr, max_characters=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
+    )
     return f"{base} {stderr_preview}".strip()
 
 
@@ -149,7 +153,7 @@ def _read_final_message(path: Path) -> str | None:
     if not path.exists():
         return None
     with path.open("r", encoding="utf-8", errors="replace") as handle:
-        raw_payload = handle.read(DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS + 1)
+        raw_payload = handle.read(DEFAULT_FINAL_MESSAGE_READ_BUFFER)
     truncated = len(raw_payload) > DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS
     raw_text = raw_payload[:DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS].strip()
     if not raw_text:
@@ -240,11 +244,10 @@ def _stdout_fallback_final_message(stdout_text: str) -> str | None:
 
     # 2. Try finding a JSON block in the search space (could be logs followed by JSON)
     # We iterate backwards and use raw_decode to find the last valid JSON object.
-    decoder = json.JSONDecoder()
     pos = search_space.rfind("{")
     while pos != -1:
         try:
-            _, end_idx = decoder.raw_decode(search_space[pos:])
+            _, end_idx = _JSON_DECODER.raw_decode(search_space[pos:])
             block = search_space[pos : pos + end_idx]
             extracted = _extract_final_message(block)
             if extracted and extracted != block:
