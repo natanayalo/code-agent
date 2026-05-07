@@ -631,11 +631,19 @@ class TaskRepository:
         if task is None:
             return None
 
+        # Enforce that only non-terminal tasks can be transitioned
+        terminal_statuses = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
+        if task.status in terminal_statuses:
+            return task
+
         # Terminate any active lease
         task.lease_owner = None
         task.lease_expires_at = None
         task.next_attempt_at = None
-        task.status = TaskStatus.CANCELLED
+        # Resulting state aligns with requirement that operator-initiated rejections
+        # result in FAILED
+        task.status = TaskStatus.FAILED
+        task.last_error = "Task cancelled by operator."
 
         # Cancel any pending interactions to prevent operator confusion
         self.session.execute(

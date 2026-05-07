@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
-from db.enums import TimelineEventType
+from db.enums import TaskStatus, TimelineEventType
 from orchestrator.execution import TaskExecutionService
 from repositories import (
     TaskRepository,
@@ -86,7 +86,7 @@ def test_cancel_pending_task_prevents_claim(client: TestClient, session_factory)
     # Cancel it immediately
     cancel_response = client.post(f"/tasks/{task_id}/cancel")
     assert cancel_response.status_code == 200
-    assert cancel_response.json()["status"] == "cancelled"
+    assert cancel_response.json()["status"] == "failed"
 
     # Try to claim it
     service = client.app.state.task_service
@@ -130,13 +130,30 @@ def test_cancel_in_progress_task_aborts_execution(client: TestClient, session_fa
 
     # Verify final status
     get_response = client.get(f"/tasks/{task_id}")
-    assert get_response.json()["status"] == "cancelled"
+    assert get_response.json()["status"] == "failed"
+    assert "cancelled" in get_response.json()["last_error"].lower()
 
     # Verify timeline
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(task_id)
         events = [e.event_type for e in task.timeline_events]
         assert TimelineEventType.TASK_CANCELLED in events
+
+
+def test_cancel_terminal_task_is_ignored(client: TestClient, session_factory):
+    """Cancelling an already terminal task should return the task unchanged."""
+    response = client.post("/tasks", json={"task_text": "Terminal test"})
+    task_id = response.json()["task_id"]
+
+    # Mark as completed manually
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(task_id)
+        task.status = TaskStatus.COMPLETED
+        session.flush()
+
+    cancel_response = client.post(f"/tasks/{task_id}/cancel")
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] == "completed"
 
 
 def test_cancelled_task_is_terminal(client: TestClient, session_factory):

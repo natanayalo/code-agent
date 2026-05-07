@@ -538,6 +538,7 @@ class TaskSummarySnapshot(ExecutionModel):
     latest_run_worker: str | None = None
     latest_run_requested_permission: str | None = None
     pending_interaction_count: int = 0
+    last_error: str | None = None
     approval_status: Literal["pending", "approved", "rejected", "not_required"] | None = None
     approval_type: str | None = None
     approval_reason: str | None = None
@@ -1603,7 +1604,14 @@ class TaskExecutionService:
                         except asyncio.CancelledError:
                             # Re-load the task to see why we were cancelled
                             task_snapshot = await self._run_blocking(self.get_task, task_id)
-                            if task_snapshot and task_snapshot.status == TaskStatus.CANCELLED:
+                            is_cancelled = task_snapshot and (
+                                task_snapshot.status == TaskStatus.CANCELLED
+                                or (
+                                    task_snapshot.status == TaskStatus.FAILED
+                                    and task_snapshot.last_error == "Task cancelled by operator."
+                                )
+                            )
+                            if is_cancelled:
                                 logger.info(
                                     "Task execution aborted: task was cancelled",
                                     extra={"task_id": task_id},
@@ -1614,7 +1622,7 @@ class TaskExecutionService:
                                     self._release_task_terminal_failure,
                                     task_id=task_id,
                                     worker_id=worker_id,
-                                    status=TaskStatus.CANCELLED,
+                                    status=TaskStatus.FAILED,
                                 )
                                 return None
                             else:
@@ -2045,6 +2053,7 @@ class TaskExecutionService:
             latest_run_worker=latest_run_worker,
             latest_run_requested_permission=latest_run_requested_permission,
             pending_interaction_count=int(pending_interaction_count or 0),
+            last_error=task.last_error,
             approval_status=approval_status,  # type: ignore[arg-type]
             approval_type=approval_type,
             approval_reason=approval_reason,
