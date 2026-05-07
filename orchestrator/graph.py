@@ -1164,7 +1164,7 @@ def _route_after_generate_task_spec(state_input: OrchestratorState) -> str:
             data=data,
         ):
             return "load_memory"
-        return "summarize_result"
+        return "await_clarification"
     return "load_memory"
 
 

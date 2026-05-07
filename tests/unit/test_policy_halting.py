@@ -61,7 +61,7 @@ def test_route_after_generate_task_spec_with_policy_violation():
     )
     assert _route_after_generate_task_spec(state) == "load_memory"
 
-    # Case: Clarification-required TaskSpec should halt before worker routing.
+    # Case: Clarification-required TaskSpec should route to clarification interrupt.
     clarification_state = OrchestratorState(
         task=TaskRequest(task_id="t", task_text="fix it", repo_url="r", branch="b"),
         task_spec=TaskSpec(
@@ -74,7 +74,7 @@ def test_route_after_generate_task_spec_with_policy_violation():
             clarification_questions=["What exact failure should be fixed?"],
         ),
     )
-    assert _route_after_generate_task_spec(clarification_state) == "summarize_result"
+    assert _route_after_generate_task_spec(clarification_state) == "await_clarification"
 
 
 @pytest.mark.asyncio

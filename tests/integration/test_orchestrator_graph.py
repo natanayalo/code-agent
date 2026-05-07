@@ -756,25 +756,12 @@ def test_orchestrator_graph_halts_when_clarification_is_required() -> None:
         )
     )
 
-    state = OrchestratorState.model_validate(raw_output)
-
-    assert state.current_step == "persist_memory"
-    assert state.task_spec is not None
-    assert state.task_spec.requires_clarification is True
-    assert state.route.chosen_worker is None
-    assert state.dispatch.worker_type is None
-    assert state.result is not None
-    assert state.result.status == "failure"
-    assert "pending clarification" in (state.result.summary or "")
-    assert state.result.next_action_hint == "await_manual_follow_up"
-    assert state.progress_updates == [
-        "task ingested",
-        "task classified as implementation",
-        "planning skipped: task is straightforward",
-        "clarification required before execution",
-        "result summarized and session state updated",
-        "memory persistence queued",
-    ]
+    interrupts = raw_output["__interrupt__"]
+    assert len(interrupts) == 1
+    interrupt_payload = getattr(interrupts[0], "value")
+    assert interrupt_payload["type"] == "clarification"
+    assert "clarification" in interrupt_payload["summary"].lower()
+    assert interrupt_payload["task_text"] == "fix it"
 
 
 def test_orchestrator_graph_returns_a_structured_timeout_result() -> None:
