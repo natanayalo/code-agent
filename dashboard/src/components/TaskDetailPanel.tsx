@@ -1,6 +1,11 @@
 import React from 'react';
 import { X } from 'lucide-react';
-import { TaskSnapshot, VerifierOutcomeItem, VerifierOutcomeSnapshot } from '../types/task';
+import {
+  TaskSnapshot,
+  TaskStatus,
+  VerifierOutcomeItem,
+  VerifierOutcomeSnapshot,
+} from '../types/task';
 import { TaskApprovalSection } from './TaskApprovalSection';
 import { formatLabel } from '../utils/formatters';
 import { api } from '../services/api';
@@ -161,7 +166,11 @@ function computeRunDuration(startedAt: string | null | undefined, finishedAt: st
 }
 
 function isTerminalTaskStatus(status: string | null | undefined): boolean {
-  return status === 'completed' || status === 'failed' || status === 'cancelled';
+  return (
+    status === TaskStatus.COMPLETED ||
+    status === TaskStatus.FAILED ||
+    status === TaskStatus.CANCELLED
+  );
 }
 
 function parseHttpUrl(value: string): URL | null {
@@ -405,6 +414,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
 
   const hasPendingInteractions = Boolean(task?.pending_interactions && task.pending_interactions.length > 0);
   const isTaskTerminal = isTerminalTaskStatus(task?.status);
+  const isSubmittingAction = isCancelling || resolvingInteractionId !== null;
 
   const handleCancelTask = async () => {
     if (!task || isCancelling || isTaskTerminal) return;
@@ -430,7 +440,6 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
         response_data: {
           source: 'dashboard_operator',
           action: 'resolve',
-          timestamp: new Date().toISOString(),
         },
       });
       onRefresh?.();
@@ -452,6 +461,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
           className="icon-button"
           title="Close Panel"
           aria-label="Close task detail"
+          disabled={isSubmittingAction}
         >
           <X size={20} />
         </button>
