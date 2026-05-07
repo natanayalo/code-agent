@@ -430,10 +430,12 @@ def _task_requires_approval(state: OrchestratorState) -> bool:
             "reason": reason,
             "risk_level": state.task_spec.risk_level,
         }
-        content_hash = compute_interaction_content_hash("permission", reason, data)
-        interactions = constraints.get("interactions") or {}
-        resolved = interactions.get(content_hash)
-        if resolved and resolved.get("status") == "resolved":
+        if _is_interaction_requirement_resolved(
+            state,
+            interaction_type="permission",
+            summary=reason,
+            data=data,
+        ):
             return False
 
         return True
@@ -441,6 +443,20 @@ def _task_requires_approval(state: OrchestratorState) -> bool:
     if constraints.get("requires_approval") is True:
         return True
     return is_destructive_task(task_text, constraints)
+
+
+def _is_interaction_requirement_resolved(
+    state: OrchestratorState,
+    *,
+    interaction_type: str,
+    summary: str,
+    data: Mapping[str, Any],
+) -> bool:
+    """Return True when an interaction requirement with matching content hash is resolved."""
+    content_hash = compute_interaction_content_hash(interaction_type, summary, dict(data))
+    interactions = state.task.constraints.get("interactions") or {}
+    resolved = interactions.get(content_hash)
+    return bool(resolved and resolved.get("status") == "resolved")
 
 
 def _build_approval_checkpoint(state: OrchestratorState) -> ApprovalCheckpoint:
@@ -1141,10 +1157,12 @@ def _route_after_generate_task_spec(state_input: OrchestratorState) -> str:
             "resume_token": f"clarification-{state.task.task_id}",
             "questions": questions,
         }
-        content_hash = compute_interaction_content_hash("clarification", summary, data)
-        interactions = state.task.constraints.get("interactions") or {}
-        resolved = interactions.get(content_hash)
-        if resolved and resolved.get("status") == "resolved":
+        if _is_interaction_requirement_resolved(
+            state,
+            interaction_type="clarification",
+            summary=summary,
+            data=data,
+        ):
             return "load_memory"
         return "summarize_result"
     return "load_memory"
@@ -1165,10 +1183,12 @@ def await_clarification(state_input: OrchestratorState) -> dict[str, Any]:
     }
 
     # Check if we already have a resolved interaction for this exact requirement.
-    content_hash = compute_interaction_content_hash("clarification", summary, data)
-    interactions = state.task.constraints.get("interactions") or {}
-    resolved = interactions.get(content_hash)
-    if resolved and resolved.get("status") == "resolved":
+    if _is_interaction_requirement_resolved(
+        state,
+        interaction_type="clarification",
+        summary=summary,
+        data=data,
+    ):
         return {
             "current_step": "await_clarification",
             "progress_updates": _progress_update(state, "clarification already resolved"),
@@ -2060,10 +2080,12 @@ def await_permission(state_input: OrchestratorState) -> dict[str, Any]:
     }
 
     # Check if we already have a resolved interaction for this exact requirement.
-    content_hash = compute_interaction_content_hash("permission", summary, data)
-    interactions = state.task.constraints.get("interactions") or {}
-    resolved = interactions.get(content_hash)
-    if resolved and resolved.get("status") == "resolved":
+    if _is_interaction_requirement_resolved(
+        state,
+        interaction_type="permission",
+        summary=summary,
+        data=data,
+    ):
         return {
             "current_step": "await_permission",
             "progress_updates": _progress_update(state, "permission already resolved"),
