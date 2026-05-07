@@ -30,6 +30,20 @@ INPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "input.mime_type"
 OUTPUT_VALUE_ATTRIBUTE: Final[str] = "output.value"
 OUTPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "output.mime_type"
 MAX_SPAN_ATTRIBUTE_LENGTH: Final[int] = 12000
+
+# Native Agent Span Attributes
+NATIVE_AGENT_COMMAND_ATTRIBUTE: Final[str] = "code_agent.native_agent.command"
+NATIVE_AGENT_EXIT_CODE_ATTRIBUTE: Final[str] = "code_agent.native_agent.exit_code"
+NATIVE_AGENT_TIMED_OUT_ATTRIBUTE: Final[str] = "code_agent.native_agent.timed_out"
+NATIVE_AGENT_STDOUT_ATTRIBUTE: Final[str] = "code_agent.native_agent.stdout"
+NATIVE_AGENT_STDERR_ATTRIBUTE: Final[str] = "code_agent.native_agent.stderr"
+NATIVE_AGENT_DURATION_ATTRIBUTE: Final[str] = "code_agent.native_agent.duration_seconds"
+NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH: Final[int] = 2000
+
+# Native Agent Resource Limits
+DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS: Final[int] = 64 * 1024
+DEFAULT_FINAL_MESSAGE_READ_BUFFER: Final[int] = DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS + 1
+
 SPAN_KIND_AGENT: Final[str] = "AGENT"
 SPAN_KIND_CHAIN: Final[str] = "CHAIN"
 SPAN_KIND_LLM: Final[str] = "LLM"
@@ -293,7 +307,7 @@ def with_restored_trace_context(context: dict[str, str] | None) -> Iterator[None
         detach_trace_context(token)
 
 
-def bind_current_trace_context(
+def bind_current_trace_context(  # noqa: UP047
     func: Callable[[], T],
     *,
     original_func: Callable[..., Any] | None = None,

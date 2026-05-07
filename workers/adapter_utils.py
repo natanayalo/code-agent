@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from apps.observability import NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
+
+if TYPE_CHECKING:
+    from workers.native_agent_models import NativeAgentRunResult
+
 
 def coerce_positive_int(value: object, *, default: int) -> int:
     """Parse a positive integer override or fall back to the default."""
@@ -66,3 +73,27 @@ def truncate_detail_keep_head(text: str, *, max_characters: int) -> str:
     if len(stripped) <= max_characters:
         return stripped
     return f"{stripped[:max_characters]}...[truncated]"
+
+
+def format_native_run_summary(
+    result: NativeAgentRunResult, *, max_characters: int | None = None
+) -> str:
+    """Format a human-readable summary from a native agent run result."""
+    limit = max_characters or NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
+    base = result.final_message or result.summary
+    if result.status == "success":
+        return base
+
+    # Include truncated stderr for failures to aid classification and debugging
+    detail = (result.stderr or "").strip()
+    if not detail:
+        return base
+
+    preview = truncate_detail_keep_tail(detail, max_characters=limit)
+    # Avoid appending if the diagnostic content is already part of the base summary.
+    # We check the tail specifically as failures often share a common prefix but
+    # have unique suffixes.
+    if detail[-limit:].strip() in base:
+        return base
+
+    return f"{base} {preview}".strip()
