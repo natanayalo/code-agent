@@ -171,6 +171,48 @@ def _copy_artifact(
     )
 
 
+def _collect_standard_artifacts(
+    *,
+    artifact_root: Path,
+    stdout_text: str,
+    stderr_text: str,
+    events_path: Path | None,
+) -> list[ArtifactReference]:
+    """Write and return the standard set of execution artifacts."""
+    artifacts = [
+        _write_artifact(
+            artifact_root=artifact_root,
+            file_name="stdout.txt",
+            content=stdout_text,
+            name="native-agent-stdout",
+            artifact_type="log",
+        ),
+        _write_artifact(
+            artifact_root=artifact_root,
+            file_name="stderr.txt",
+            content=stderr_text,
+            name="native-agent-stderr",
+            artifact_type="log",
+        ),
+    ]
+
+    event_artifact = (
+        _copy_artifact(
+            artifact_root=artifact_root,
+            source_path=events_path,
+            file_name="events.jsonl",
+            name="native-agent-events",
+            artifact_type="log",
+        )
+        if events_path is not None
+        else None
+    )
+    if event_artifact is not None:
+        artifacts.append(event_artifact)
+
+    return artifacts
+
+
 def _collect_diff_text(*, repo_path: Path, timeout_seconds: int) -> str | None:
     command = ["git", "-C", str(repo_path), "diff", "--no-color", "--", "."]
     try:
@@ -351,36 +393,13 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
             stderr_text = _normalize_stream_payload(exc.stderr)
             try:
                 artifacts.extend(
-                    [
-                        _write_artifact(
-                            artifact_root=artifact_root,
-                            file_name="stdout.txt",
-                            content=stdout_text,
-                            name="native-agent-stdout",
-                            artifact_type="log",
-                        ),
-                        _write_artifact(
-                            artifact_root=artifact_root,
-                            file_name="stderr.txt",
-                            content=stderr_text,
-                            name="native-agent-stderr",
-                            artifact_type="log",
-                        ),
-                    ]
-                )
-                event_artifact = (
-                    _copy_artifact(
+                    _collect_standard_artifacts(
                         artifact_root=artifact_root,
-                        source_path=events_path,
-                        file_name="events.jsonl",
-                        name="native-agent-events",
-                        artifact_type="log",
+                        stdout_text=stdout_text,
+                        stderr_text=stderr_text,
+                        events_path=events_path,
                     )
-                    if events_path is not None
-                    else None
                 )
-                if event_artifact is not None:
-                    artifacts.append(event_artifact)
             except Exception:
                 logger.exception(
                     "Native agent runner failed while collecting timeout artifacts.",
@@ -413,37 +432,13 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
         stderr_text = completed.stderr or ""
         try:
             artifacts.extend(
-                [
-                    _write_artifact(
-                        artifact_root=artifact_root,
-                        file_name="stdout.txt",
-                        content=stdout_text,
-                        name="native-agent-stdout",
-                        artifact_type="log",
-                    ),
-                    _write_artifact(
-                        artifact_root=artifact_root,
-                        file_name="stderr.txt",
-                        content=stderr_text,
-                        name="native-agent-stderr",
-                        artifact_type="log",
-                    ),
-                ]
-            )
-
-            event_artifact = (
-                _copy_artifact(
+                _collect_standard_artifacts(
                     artifact_root=artifact_root,
-                    source_path=events_path,
-                    file_name="events.jsonl",
-                    name="native-agent-events",
-                    artifact_type="log",
+                    stdout_text=stdout_text,
+                    stderr_text=stderr_text,
+                    events_path=events_path,
                 )
-                if events_path is not None
-                else None
             )
-            if event_artifact is not None:
-                artifacts.append(event_artifact)
 
             final_message_artifact = (
                 _copy_artifact(
