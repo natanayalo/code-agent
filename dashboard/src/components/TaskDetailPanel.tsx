@@ -407,14 +407,20 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
     traceObservability.traceIds.length > 0 ||
     traceObservability.providerLinks.length > 0 ||
     traceObservability.spanStatusCounts.length > 0;
+  const hasPendingInteractions = Boolean(task?.pending_interactions && task.pending_interactions.length > 0);
+  const isTaskTerminal = isTerminalTaskStatus(task?.status);
+  const isSubmittingAction = isCancelling || resolvingInteractionId !== null;
+
+  React.useEffect(() => {
+    setIsCancelling(false);
+    setCancelError(null);
+    setInteractionError(null);
+    setResolvingInteractionId(null);
+  }, [task?.task_id]);
 
   if (!task && !loading && !error) {
     return null;
   }
-
-  const hasPendingInteractions = Boolean(task?.pending_interactions && task.pending_interactions.length > 0);
-  const isTaskTerminal = isTerminalTaskStatus(task?.status);
-  const isSubmittingAction = isCancelling || resolvingInteractionId !== null;
 
   const handleCancelTask = async () => {
     if (!task || isCancelling || isTaskTerminal) return;
@@ -487,7 +493,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                 type="button"
                 className="btn btn-reject"
                 onClick={handleCancelTask}
-                disabled={isCancelling}
+                disabled={isSubmittingAction || loading}
               >
                 {isCancelling ? 'Cancelling...' : 'Cancel Task'}
               </button>
@@ -540,7 +546,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                         type="button"
                         className="btn btn-approve"
                         onClick={() => handleResolveInteraction(interaction.interaction_id)}
-                        disabled={resolvingInteractionId !== null}
+                        disabled={isSubmittingAction || loading}
                       >
                         {resolvingInteractionId === interaction.interaction_id
                           ? 'Resolving...'

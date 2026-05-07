@@ -685,4 +685,50 @@ describe('TaskDetailPanel', () => {
     expect(await screen.findByText('Cancel conflict')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel Task' })).not.toBeDisabled());
   });
+
+  it('disables action buttons while loading is true', () => {
+    const task = buildTask({
+      status: TaskStatus.IN_PROGRESS,
+      pending_interactions: [
+        {
+          interaction_id: 'interaction-1',
+          interaction_type: 'clarification',
+          status: 'pending',
+          summary: 'Need input',
+          data: {},
+          response_data: null,
+          created_at: '2026-04-28T00:00:00.000Z',
+          updated_at: '2026-04-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(<TaskDetailPanel task={task} loading={true} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Cancel Task' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Resolve' })).toBeDisabled();
+  });
+
+  it('resets local action errors when selected task changes', async () => {
+    vi.mocked(api.cancelTask).mockRejectedValueOnce(new Error('Cancel conflict'));
+    const initialTask = buildTask({ task_id: 'task-1', status: TaskStatus.PENDING });
+
+    const { rerender } = render(
+      <TaskDetailPanel task={initialTask} loading={false} error={null} onClose={vi.fn()} />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Task' }));
+    expect(await screen.findByText('Cancel conflict')).toBeInTheDocument();
+
+    rerender(
+      <TaskDetailPanel
+        task={buildTask({ task_id: 'task-2', status: TaskStatus.PENDING })}
+        loading={false}
+        error={null}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText('Cancel conflict')).not.toBeInTheDocument();
+  });
 });
