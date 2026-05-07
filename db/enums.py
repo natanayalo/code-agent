@@ -103,6 +103,7 @@ class TimelineEventType(StrEnum):
     VERIFICATION_COMPLETED = "verification_completed"
     TASK_COMPLETED = "task_completed"
     TASK_FAILED = "task_failed"
+    TASK_CANCELLED = "task_cancelled"
 
 
 def build_sql_enum(enum_class: type[StrEnum], *, name: str) -> SQLAlchemyEnum:

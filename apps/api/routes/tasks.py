@@ -110,6 +110,21 @@ def decide_task_approval(
     return result.task_snapshot
 
 
+@router.post("/{task_id}/cancel", response_model=TaskSnapshot)
+def cancel_task(
+    task_id: str,
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> TaskSnapshot:
+    """Terminally cancel a task and stop any in-flight worker execution."""
+    task_snapshot = task_service.cancel_task(task_id=task_id)
+    if task_snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task '{task_id}' was not found.",
+        )
+    return task_snapshot
+
+
 @router.post(
     "/{task_id}/replay",
     response_model=TaskSnapshot,
