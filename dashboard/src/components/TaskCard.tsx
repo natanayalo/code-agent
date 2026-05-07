@@ -6,6 +6,7 @@ import {
   GitBranch,
   RotateCcw,
   SlidersHorizontal,
+  Ban,
 } from 'lucide-react';
 import { TaskSummarySnapshot, TaskStatus } from '../types/task';
 import { api } from '../services/api';
@@ -80,6 +81,7 @@ export function TaskCard({
   isSelected = false,
 }: TaskCardProps) {
   const [isReplaying, setIsReplaying] = React.useState(false);
+  const [isCancelling, setIsCancelling] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const repoName = useMemo(() => {
@@ -107,6 +109,23 @@ export function TaskCard({
     event.stopPropagation();
     setError(null);
     onReplayWithOverrides?.(task.task_id);
+  };
+
+  const handleCancel = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isCancelling) return;
+    if (!window.confirm('Are you sure you want to cancel this task?')) return;
+
+    setIsCancelling(true);
+    try {
+      setError(null);
+      await api.cancelTask(task.task_id);
+      onRefresh?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel task');
+    } finally {
+      setIsCancelling(false);
+    }
   };
 
   const isTerminal = task.status === TaskStatus.COMPLETED ||
@@ -178,6 +197,16 @@ export function TaskCard({
                   <SlidersHorizontal size={14} />
                 </button>
               </>
+            )}
+            {!isTerminal && (
+              <button
+                className="btn-icon-sm btn-cancel-compact"
+                onClick={handleCancel}
+                disabled={isCancelling}
+                title="Cancel task"
+              >
+                <Ban size={14} className={isCancelling ? 'pulse' : ''} />
+              </button>
             )}
             {task.latest_run_status && (
               <div className={`run-status ${getRunStatusClass(task.latest_run_status)}`}>

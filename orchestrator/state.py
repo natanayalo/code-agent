@@ -229,6 +229,19 @@ class TaskTimelineEventState(OrchestratorModel):
     created_at: datetime | None = None
 
 
+class HumanInteractionSnapshot(OrchestratorModel):
+    """A snapshot of a human interaction checkpoint."""
+
+    interaction_id: str
+    interaction_type: str
+    status: str
+    summary: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    response_data: dict[str, Any] | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class OrchestratorState(OrchestratorModel):
     """Top-level state handed between orchestrator workflow nodes."""
 
@@ -240,6 +253,7 @@ class OrchestratorState(OrchestratorModel):
     task_plan: TaskPlan | None = None
     task_spec: TaskSpec | None = None
     memory: MemoryContext = Field(default_factory=MemoryContext)
+    interactions: list[HumanInteractionSnapshot] = Field(default_factory=list)
     route: RouteDecision = Field(default_factory=RouteDecision)
     approval: ApprovalCheckpoint = Field(default_factory=ApprovalCheckpoint)
     dispatch: WorkerDispatch = Field(default_factory=WorkerDispatch)

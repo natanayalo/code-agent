@@ -57,6 +57,7 @@ from db.enums import (
     ArtifactType,
     HumanInteractionStatus,
     TaskStatus,
+    TimelineEventType,
     WorkerRunStatus,
     WorkerRuntimeMode,
     WorkerType,
@@ -103,14 +104,14 @@ _VALID_EXECUTION_MODES = frozenset({_INTERACTIVE_EXECUTION_MODE, _UNATTENDED_EXE
 _DEFAULT_EXECUTION_BUDGETS: dict[str, dict[str, int]] = {
     _INTERACTIVE_EXECUTION_MODE: {
         "max_iterations": 8,
-        "worker_timeout_seconds": 300,
+        "worker_timeout_seconds": 600,
         "max_tool_calls": 24,
         "max_shell_commands": 24,
         "max_retries": 2,
     },
     _UNATTENDED_EXECUTION_MODE: {
         "max_iterations": 5,
-        "worker_timeout_seconds": 180,
+        "worker_timeout_seconds": 600,
         "max_tool_calls": 12,
         "max_shell_commands": 12,
         "max_retries": 1,
@@ -118,9 +119,9 @@ _DEFAULT_EXECUTION_BUDGETS: dict[str, dict[str, int]] = {
 }
 _GLOBAL_BUDGET_CAPS: dict[str, int] = {
     "max_iterations": 20,
-    "worker_timeout_seconds": 900,
-    "max_minutes": 15,
-    "orchestrator_timeout_seconds": 930,
+    "worker_timeout_seconds": 1200,
+    "max_minutes": 20,
+    "orchestrator_timeout_seconds": 1200,
     "command_timeout_seconds": 300,
     "max_tool_calls": 100,
     "max_shell_commands": 100,
@@ -553,8 +554,8 @@ class HumanInteractionSnapshot(ExecutionModel):
     summary: str
     data: dict[str, Any] = Field(default_factory=dict)
     response_data: dict[str, Any] | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class TaskSnapshot(TaskSummarySnapshot):
@@ -599,7 +600,31 @@ class _PersistedTaskContext:
     task_id: str
     attempt_count: int
     task_spec: dict[str, Any] | None = None
+    interactions: list[HumanInteractionSnapshot] = field(default_factory=list)
     trace_context: dict[str, str] = field(default_factory=dict)
+
+
+class InteractionResponseDecision(ExecutionModel):
+    """Payload for submitting a response to a pending human interaction."""
+
+    status: HumanInteractionStatus = Field(default=HumanInteractionStatus.RESOLVED)
+    response_data: dict[str, Any] = Field(default_factory=dict)
+
+
+class InteractionResponseResult(BaseModel):
+    """Outcome of applying an interaction response."""
+
+    status: Literal["applied", "already_applied", "not_found", "not_waiting", "conflict", "error"]
+    detail: str | None = None
+    task_snapshot: TaskSnapshot | None = None
+
+
+class CancelTaskResult(BaseModel):
+    """Outcome of attempting to cancel a task."""
+
+    status: Literal["cancelled", "already_cancelled", "terminal", "not_found", "error"]
+    detail: str | None = None
+    task_snapshot: TaskSnapshot | None = None
 
 
 @dataclass(frozen=True)
@@ -2243,6 +2268,175 @@ class TaskExecutionService:
             )
         return ApprovalDecisionResult(status="applied", task_snapshot=snapshot)
 
+    def cancel_task(self, task_id: str) -> CancelTaskResult:
+        """Mark a task as cancelled and release any active queue leases."""
+        with session_scope(self.session_factory) as session:
+            task_repo = TaskRepository(session)
+            timeline_repo = TaskTimelineRepository(session)
+
+            task = task_repo.get(task_id)
+            if task is None:
+                return CancelTaskResult(status="not_found", detail=f"Task '{task_id}' not found.")
+
+            if task.status == TaskStatus.CANCELLED:
+                return CancelTaskResult(
+                    status="already_cancelled", task_snapshot=self.get_task(task_id)
+                )
+
+            if task.status in {TaskStatus.COMPLETED, TaskStatus.FAILED}:
+                return CancelTaskResult(
+                    status="terminal",
+                    detail=f"Task '{task_id}' is already in a terminal state ({task.status}).",
+                    task_snapshot=self.get_task(task_id),
+                )
+
+            # Update status and release lease
+            task.status = TaskStatus.CANCELLED
+            task.lease_owner = None
+            task.lease_expires_at = None
+            task.next_attempt_at = None
+
+            # Record timeline event
+            timeline_repo.create(
+                task_id=task_id,
+                event_type=TimelineEventType.TASK_CANCELLED,
+                message="Task was cancelled by user via dashboard/API.",
+                payload={},
+            )
+
+            session.flush()
+
+        snapshot = self.get_task(task_id)
+        return CancelTaskResult(status="cancelled", task_snapshot=snapshot)
+
+    def apply_interaction_response(
+        self,
+        *,
+        task_id: str,
+        interaction_id: str,
+        response: InteractionResponseDecision,
+    ) -> InteractionResponseResult:
+        """Apply a response to a pending human interaction and resume the task if possible."""
+        decided_at = utc_now()
+        with session_scope(self.session_factory) as session:
+            task_repo = TaskRepository(session)
+            interaction_repo = HumanInteractionRepository(session)
+
+            task = task_repo.get(task_id)
+            if task is None:
+                return InteractionResponseResult(
+                    status="not_found",
+                    detail=f"Task '{task_id}' was not found.",
+                )
+
+            interaction = interaction_repo.get(interaction_id)
+
+            with with_restored_trace_context(task.trace_context):
+                span_cm = start_optional_span(
+                    tracer_name="orchestrator.execution",
+                    span_name="TaskExecutionService.apply_interaction_response",
+                    attributes=with_span_kind(
+                        SPAN_KIND_AGENT,
+                        attributes={
+                            "code_agent.task_id": task_id,
+                            "code_agent.interaction_id": interaction_id,
+                            "code_agent.interaction_type": (
+                                interaction.interaction_type if interaction else None
+                            ),
+                            "code_agent.interaction_status": response.status,
+                        },
+                    ),
+                )
+                with span_cm:
+                    set_span_input_output(
+                        input_data={
+                            "task_id": task_id,
+                            "interaction": {
+                                "id": interaction.id,
+                                "status": interaction.status,
+                                "interaction_type": interaction.interaction_type,
+                                "task_id": interaction.task_id,
+                            }
+                            if interaction
+                            else None,
+                            "response": response.model_dump(mode="json"),
+                        }
+                    )
+                    result = self._apply_interaction_response_internal(
+                        session=session,
+                        task=task,
+                        interaction_id=interaction_id,
+                        response=response,
+                        decided_at=decided_at,
+                    )
+                    set_span_input_output(
+                        input_data=None,
+                        output_data=result.model_dump(mode="json"),
+                    )
+                    return result
+
+    def _apply_interaction_response_internal(
+        self,
+        *,
+        session: Session,
+        task: Task,
+        interaction_id: str,
+        response: InteractionResponseDecision,
+        decided_at: datetime,
+    ) -> InteractionResponseResult:
+        """Internal logic for applying interaction response, intended to be wrapped in a span."""
+        task_id = task.id
+        interaction_repo = HumanInteractionRepository(session)
+
+        interaction = interaction_repo.get(interaction_id)
+        if interaction is None or interaction.task_id != task_id:
+            return InteractionResponseResult(
+                status="not_found",
+                detail=f"Interaction '{interaction_id}' not found for task '{task_id}'.",
+            )
+
+        if interaction.status != HumanInteractionStatus.PENDING:
+            if interaction.status == response.status:
+                return InteractionResponseResult(
+                    status="already_applied",
+                    task_snapshot=self.get_task(task_id),
+                )
+            return InteractionResponseResult(
+                status="conflict",
+                detail=f"Interaction is already in state '{interaction.status}'.",
+            )
+
+        # Record the response
+        interaction_repo.record_response(
+            interaction_id=interaction_id,
+            status=response.status,
+            response_data=response.response_data,
+        )
+
+        # Resuming the task logic:
+        # If all interactions for this task are now RESOLVED, we resume the task.
+        pending = interaction_repo.list_by_task(
+            task_id=task_id,
+            statuses=(HumanInteractionStatus.PENDING,),
+        )
+        if not pending:
+            # Resume task execution
+            task.status = TaskStatus.PENDING
+            task.next_attempt_at = decided_at
+            task.last_error = None
+            task.lease_owner = None
+            task.lease_expires_at = None
+
+        session.flush()
+
+        snapshot = self.get_task(task_id)
+        if snapshot is None:
+            return InteractionResponseResult(
+                status="not_found",
+                detail=f"Task '{task_id}' was not found after applying response.",
+            )
+        return InteractionResponseResult(status="applied", task_snapshot=snapshot)
+
     def get_operational_metrics(self, window_hours: int | None = 24) -> OperationalMetrics:
         """Return aggregated operational metrics across tasks and runs."""
         since = None
@@ -2639,6 +2833,7 @@ class TaskExecutionService:
                 "tools": submission.tools,
             },
             "task_spec": persisted.task_spec,
+            "interactions": [i.model_dump() for i in persisted.interactions],
             "attempt_count": persisted.attempt_count,
             "timeline_persisted_count": initial_persisted_count,
         }
@@ -2701,6 +2896,22 @@ class TaskExecutionService:
                     display_name=user.display_name,
                 ),
             )
+            interaction_repo = HumanInteractionRepository(session)
+            interactions = interaction_repo.list_by_task(task_id=task.id)
+            interaction_snapshots = [
+                HumanInteractionSnapshot(
+                    interaction_id=row.id,
+                    interaction_type=row.interaction_type.value,
+                    status=row.status.value,
+                    summary=row.summary,
+                    data=dict(row.data or {}),
+                    response_data=dict(row.response_data) if row.response_data else None,
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                )
+                for row in interactions
+            ]
+
             persisted = _PersistedTaskContext(
                 user_id=user.id,
                 session_id=conversation_session.id,
@@ -2709,6 +2920,7 @@ class TaskExecutionService:
                 task_id=task.id,
                 attempt_count=task.attempt_count,
                 task_spec=dict(task.task_spec) if isinstance(task.task_spec, dict) else None,
+                interactions=interaction_snapshots,
                 trace_context=dict(task.trace_context or {}),
             )
             return submission, persisted
@@ -2878,6 +3090,13 @@ class TaskExecutionService:
                 task.task_spec = state.task_spec.model_dump(mode="json")
             if isinstance(task.task_spec, Mapping):
                 interaction_repo.sync_task_spec_flags(task_id=task_id, task_spec=task.task_spec)
+
+            if task.status == TaskStatus.CANCELLED:
+                logger.warning(
+                    "Skipping execution outcome persistence: task was cancelled concurrently.",
+                    extra={"task_id": task_id},
+                )
+                return
 
             task.status = cast(TaskStatus, force_task_status or _task_status_from_result(state))
 

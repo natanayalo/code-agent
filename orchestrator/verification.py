@@ -264,6 +264,7 @@ async def run_independent_verifier(
         secrets=dict(state.task.secrets),
         tools=state.task.tools,
         runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        role="verifier",
     )
 
     try:

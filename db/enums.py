@@ -101,6 +101,7 @@ class TimelineEventType(StrEnum):
     WORKER_ERROR = "worker_error"
     VERIFICATION_STARTED = "verification_started"
     VERIFICATION_COMPLETED = "verification_completed"
+    TASK_CANCELLED = "task_cancelled"
     TASK_COMPLETED = "task_completed"
     TASK_FAILED = "task_failed"
 

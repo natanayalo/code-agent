@@ -1,8 +1,10 @@
 import React from 'react';
-import { X } from 'lucide-react';
-import { TaskSnapshot, VerifierOutcomeItem, VerifierOutcomeSnapshot } from '../types/task';
+import { X, Ban } from 'lucide-react';
+import { TaskSnapshot, TaskStatus, VerifierOutcomeItem, VerifierOutcomeSnapshot } from '../types/task';
 import { TaskApprovalSection } from './TaskApprovalSection';
+import { TaskInteractionSection } from './TaskInteractionSection';
 import { formatLabel } from '../utils/formatters';
+import { api } from '../services/api';
 
 interface TaskDetailPanelProps {
   task: TaskSnapshot | null;
@@ -352,6 +354,8 @@ function extractTraceObservability(task: TaskSnapshot | null): TraceObservabilit
 }
 
 export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: TaskDetailPanelProps) {
+  const [isCancelling, setIsCancelling] = React.useState(false);
+
   const run = task?.latest_run ?? null;
   const runCommands = React.useMemo(() => run?.commands_run ?? [], [run]);
   const changedFiles = React.useMemo(() => run?.files_changed ?? [], [run]);
@@ -390,6 +394,26 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
     traceObservability.providerLinks.length > 0 ||
     traceObservability.spanStatusCounts.length > 0;
 
+  const isTerminal =
+    task?.status === TaskStatus.COMPLETED ||
+    task?.status === TaskStatus.FAILED ||
+    task?.status === TaskStatus.CANCELLED;
+
+  const handleCancel = async () => {
+    if (!task || isCancelling) return;
+    if (!window.confirm('Are you sure you want to cancel this task?')) return;
+
+    setIsCancelling(true);
+    try {
+      await api.cancelTask(task.task_id);
+      onRefresh?.();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to cancel task');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   if (!task && !loading && !error) {
     return null;
   }
@@ -423,6 +447,20 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
             Status: <strong>{formatLabel(task.status)}</strong>
           </p>
 
+          {!isTerminal && (
+            <div className="task-detail-actions">
+              <button
+                className="btn-outline btn-sm btn-cancel"
+                onClick={handleCancel}
+                disabled={isCancelling}
+                title="Cancel Task"
+              >
+                <Ban size={14} />
+                <span>Cancel Task</span>
+              </button>
+            </div>
+          )}
+
           <TaskApprovalSection task={task} onRefresh={onRefresh} className="task-detail-approval" />
 
           {task.task_spec ? (
@@ -455,17 +493,33 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
           <section className="task-detail-section">
             <h4>Pending Interactions</h4>
             {task.pending_interactions && task.pending_interactions.length > 0 ? (
-              <ul className="task-interactions-list">
+              <div className="task-interactions-list">
                 {task.pending_interactions.map((interaction) => (
-                  <li key={interaction.interaction_id}>
-                    <p>
-                      <strong>{formatLabel(interaction.interaction_type)}:</strong>{' '}
-                      {interaction.summary}
-                    </p>
-                    <p className="task-detail-muted">Status: {formatLabel(interaction.status)}</p>
-                  </li>
+                  <div key={interaction.interaction_id} className="task-interaction-item">
+                    {interaction.status === 'pending' ? (
+                      <TaskInteractionSection
+                        task={task}
+                        interaction={interaction}
+                        onRefresh={onRefresh}
+                      />
+                    ) : (
+                      <div className="interaction-resolved-view">
+                        <p>
+                          <strong>{formatLabel(interaction.interaction_type)}:</strong>{' '}
+                          {interaction.summary}
+                        </p>
+                        <p className="task-detail-muted">Status: {formatLabel(interaction.status)}</p>
+                        {interaction.response_data?.text && (
+                          <div className="interaction-response-preview">
+                            <strong>Response:</strong>
+                            <p>{String(interaction.response_data.text)}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 ))}
-              </ul>
+              </div>
             ) : (
               <p className="task-detail-muted">No pending interactions.</p>
             )}

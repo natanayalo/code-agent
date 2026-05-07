@@ -579,5 +579,72 @@ describe('api service', () => {
       expect(warnSpy).toHaveBeenCalled();
       warnSpy.mockRestore();
     });
+
+    it('respondToInteraction sends correct POST request', async () => {
+      const mockSnapshot = { task_id: 'task-1', status: 'pending' };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockSnapshot,
+      });
+
+      const result = await api.respondToInteraction('task-1', 'int-1', 'resolved', { text: 'ok' });
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/tasks/task-1/interactions/int-1/response');
+      expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual({
+        status: 'resolved',
+        response_data: { text: 'ok' },
+      });
+      expect(result).toEqual(mockSnapshot);
+    });
+
+    it('respondToInteraction catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(api.respondToInteraction('1', '2', 'resolved')).rejects.toThrow('Network fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('getSystemTools returns tools array', async () => {
+      const mockTools = [{ name: 'test-tool' }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockTools,
+      });
+
+      const result = await api.getSystemTools();
+      expect(result).toEqual(mockTools);
+    });
+
+    it('getSystemTools returns empty array if not an array', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({ unexpected: 'data' }),
+      });
+
+      const result = await api.getSystemTools();
+      expect(result).toEqual([]);
+    });
+
+    it('getSandboxStatus returns status', async () => {
+      const mockStatus = { healthy: true };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockStatus,
+      });
+
+      const result = await api.getSandboxStatus();
+      expect(result).toEqual(mockStatus);
+    });
   });
 });

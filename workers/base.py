@@ -69,6 +69,7 @@ class WorkerRequest(WorkerModel):
     budget: dict[str, Any] = Field(default_factory=dict)
     worker_profile: str | None = None
     runtime_mode: WorkerRuntimeMode | None = None
+    role: str | None = None
 
 
 class WorkerProfile(WorkerModel):

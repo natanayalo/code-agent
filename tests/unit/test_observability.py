@@ -720,7 +720,7 @@ def test_set_span_input_output_truncates_long_payloads() -> None:
 
     val = span.attributes["input.value"]
     assert len(val) > observability_module.MAX_SPAN_ATTRIBUTE_LENGTH
-    assert "... (truncated to 12000 chars)" in val
+    assert f"... (truncated to {observability_module.MAX_SPAN_ATTRIBUTE_LENGTH} chars)" in val
     assert val.startswith("a" * observability_module.MAX_SPAN_ATTRIBUTE_LENGTH)
 
 
@@ -745,7 +745,10 @@ def test_set_span_input_output_changes_mime_type_on_truncation() -> None:
         observability_module.set_span_input_output(input_data=long_dict)
 
     assert span.attributes["input.mime_type"] == "text/plain"
-    assert "... (truncated to 12000 chars)" in span.attributes["input.value"]
+    assert (
+        f"... (truncated to {observability_module.MAX_SPAN_ATTRIBUTE_LENGTH} chars)"
+        in span.attributes["input.value"]
+    )
 
 
 def test_record_span_exception_invokes_otel_record_exception() -> None:

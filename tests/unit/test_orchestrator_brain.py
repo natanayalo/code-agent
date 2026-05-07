@@ -571,3 +571,40 @@ def test_suggest_route_rejects_rationale_only_payload() -> None:
                 available_profiles=None,
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_suggest_task_spec_model_includes_interactions() -> None:
+    from orchestrator.state import HumanInteractionSnapshot
+
+    worker = _StaticWorker(WorkerResult(status="success", summary='{"assumptions":["test"]}'))
+    brain = RuleBasedOrchestratorBrain(planner_worker=worker)
+
+    task = TaskRequest(task_text="Route this task")
+    task_spec = TaskSpec(goal="goal")
+    interactions = [
+        HumanInteractionSnapshot(
+            interaction_id="int-1",
+            interaction_type="clarification",
+            status="resolved",
+            summary="Clarification request",
+            response_data={"answer": "The repo is code-agent"},
+        )
+    ]
+
+    await brain.suggest_task_spec(
+        task=task,
+        task_kind="implementation",
+        task_plan=None,
+        task_spec=task_spec,
+        interactions=interactions,
+    )
+
+    last_request = worker.requests[-1]
+    match = re.search(r"Context JSON:\n(.*?)\n", last_request.task_text, re.DOTALL)
+    assert match is not None
+    payload = json.loads(match.group(1))
+    assert "interactions" in payload
+    assert len(payload["interactions"]) == 1
+    assert payload["interactions"][0]["interaction_id"] == "int-1"
+    assert payload["interactions"][0]["response_data"] == {"answer": "The repo is code-agent"}

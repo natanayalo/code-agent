@@ -254,7 +254,7 @@ def test_apply_execution_budget_policy_defaults_to_unattended_for_non_telegram_c
 
     assert budget["execution_mode"] == "unattended"
     assert budget["max_iterations"] == 5
-    assert budget["worker_timeout_seconds"] == 180
+    assert budget["worker_timeout_seconds"] == 600
     assert budget["max_tool_calls"] == 12
     assert budget["max_shell_commands"] == 12
     assert budget["max_retries"] == 1
@@ -270,7 +270,7 @@ def test_apply_execution_budget_policy_defaults_to_interactive_for_telegram() ->
 
     assert budget["execution_mode"] == "interactive"
     assert budget["max_iterations"] == 8
-    assert budget["worker_timeout_seconds"] == 300
+    assert budget["worker_timeout_seconds"] == 600
     assert budget["max_tool_calls"] == 24
     assert budget["max_shell_commands"] == 24
     assert budget["max_retries"] == 2
@@ -295,7 +295,7 @@ def test_apply_execution_budget_policy_respects_explicit_execution_mode_override
         budget={},
     )
     assert budget["execution_mode"] == "unattended"
-    assert budget["worker_timeout_seconds"] == 180
+    assert budget["worker_timeout_seconds"] == 600
 
 
 def test_apply_execution_budget_policy_prefers_constraints_over_budget_execution_mode() -> None:
@@ -353,9 +353,9 @@ def test_apply_execution_budget_policy_caps_oversized_runtime_limits() -> None:
     )
 
     assert budget["max_iterations"] == 20
-    assert budget["worker_timeout_seconds"] == 900
-    assert budget["max_minutes"] == 15
-    assert budget["orchestrator_timeout_seconds"] == 930
+    assert budget["worker_timeout_seconds"] == 1200
+    assert budget["max_minutes"] == 20
+    assert budget["orchestrator_timeout_seconds"] == 1200
     assert budget["max_tool_calls"] == 100
     assert budget["max_shell_commands"] == 100
     assert budget["max_retries"] == 10
@@ -557,7 +557,7 @@ def test_run_orchestrator_applies_effective_budget_policy_to_payload(monkeypatch
     task_payload = fake_graph.calls[0]["task"]
     assert task_payload["budget"]["execution_mode"] == "unattended"
     assert task_payload["budget"]["max_iterations"] == 20
-    assert task_payload["budget"]["worker_timeout_seconds"] == 180
+    assert task_payload["budget"]["worker_timeout_seconds"] == 600
     assert task_payload["budget"]["max_tool_calls"] == 100
 
 

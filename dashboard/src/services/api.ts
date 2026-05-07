@@ -223,6 +223,23 @@ export const api = {
     }
   },
 
+  async respondToInteraction(
+    taskId: string,
+    interactionId: string,
+    status: string,
+    responseData: Record<string, unknown> = {}
+  ): Promise<TaskSnapshot> {
+    try {
+      return await fetchWithAuth(`/tasks/${taskId}/interactions/${interactionId}/response`, {
+        method: 'POST',
+        body: JSON.stringify({ status, response_data: responseData }),
+      });
+    } catch (error) {
+      console.warn(`Failed to respond to interaction ${interactionId} for task ${taskId}`, error);
+      throw error;
+    }
+  },
+
   async replayTask(taskId: string, replayRequest?: TaskReplayRequest): Promise<TaskSnapshot> {
     try {
       return await fetchWithAuth(`/tasks/${taskId}/replay`, {
@@ -231,6 +248,17 @@ export const api = {
       });
     } catch (error) {
       console.warn(`Failed to replay task ${taskId}`, error);
+      throw error;
+    }
+  },
+
+  async cancelTask(taskId: string): Promise<TaskSnapshot> {
+    try {
+      return await fetchWithAuth(`/tasks/${taskId}/cancel`, {
+        method: 'POST',
+      });
+    } catch (error) {
+      console.warn(`Failed to cancel task ${taskId}`, error);
       throw error;
     }
   },

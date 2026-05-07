@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from collections.abc import Mapping
 from enum import Enum
 from typing import Any, Final, Literal, Protocol, cast
@@ -26,11 +25,12 @@ from orchestrator.state import (
     WorkerType,
 )
 from workers.base import Worker, WorkerProfile, WorkerRequest
+from workers.markdown import unwrap_markdown_json_fence
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ROUTE_BRAIN_TIMEOUT_SECONDS = 45
-DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS = 30
+DEFAULT_ROUTE_BRAIN_TIMEOUT_SECONDS = 300
+DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS = 120
 DEFAULT_ROUTE_PLANNER_PROFILE = "gemini-native-planner"
 DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS: Final = 5
 
@@ -75,7 +75,9 @@ _TASK_SPEC_SYSTEM_PROMPT = """
 You are an orchestrator enrichment assistant.
 
 Task:
-- Review the task text and the current deterministic task spec.
+- Review the task text, the current deterministic task spec, and any prior human interactions.
+- Prior human interactions (if any) contain questions previously asked and the human's responses.
+- Use prior responses to satisfy requirements and avoid re-asking the same or redundant questions.
 - Suggest additional assumptions, acceptance criteria, non-goals, clarification questions,
   and verification commands.
 - You can also suggest a risk level, task type, and delivery mode, but these are subject
@@ -99,21 +101,6 @@ Output contract:
 
 _ROUTE_MAX_SUMMARY_PREVIEW_CHARS = 300
 _RULES_RATIONALE = "rules_v1"
-
-
-def _unwrap_markdown_json_fence(text: str) -> str:
-    """Extract JSON payload from a fenced markdown block when present."""
-    stripped = text.strip()
-    if not stripped:
-        return stripped
-    fenced_matches = re.findall(
-        r"```(?:json)?\s*(.*?)```",
-        stripped,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    if fenced_matches:
-        return fenced_matches[-1].strip()
-    return stripped
 
 
 def _coerce_worker_type(value: object) -> WorkerType | None:
@@ -229,6 +216,7 @@ class OrchestratorBrain(Protocol):
         task_kind: str | None,
         task_plan: TaskPlan | None,
         task_spec: TaskSpec,
+        interactions: list[HumanInteractionSnapshot] | None = None,
     ) -> TaskSpecBrainSuggestion | None:
         """Return structured TaskSpec suggestions, or None when no change is needed."""
 
@@ -276,6 +264,7 @@ class RuleBasedOrchestratorBrain:
         task_kind: str | None,
         task_plan: TaskPlan | None,
         task_spec: TaskSpec,
+        interactions: list[HumanInteractionSnapshot] | None = None,
     ) -> TaskSpecBrainSuggestion | None:
         # 1. Run rule-based bootstrap logic first
         suggestion = self._suggest_task_spec_rules(
@@ -292,6 +281,7 @@ class RuleBasedOrchestratorBrain:
                 task_kind=task_kind,
                 task_plan=task_plan,
                 task_spec=task_spec,
+                interactions=interactions,
             )
             if model_suggestion:
                 suggestion = self._merge_task_spec_suggestions(suggestion, model_suggestion)
@@ -350,6 +340,7 @@ class RuleBasedOrchestratorBrain:
         task_kind: str | None,
         task_plan: TaskPlan | None,
         task_spec: TaskSpec,
+        interactions: list[HumanInteractionSnapshot] | None = None,
     ) -> TaskSpecBrainSuggestion | None:
         """Use the planner worker to produce model-backed TaskSpec enrichment."""
         if self.planner_worker is None:
@@ -361,6 +352,7 @@ class RuleBasedOrchestratorBrain:
             "deterministic_spec": task_spec.model_dump(mode="json"),
             "task_plan": task_plan.model_dump(mode="json") if task_plan else None,
             "constraints": dict(task.constraints),
+            "interactions": [i.model_dump(mode="json") for i in (interactions or [])],
         }
         context_json = json.dumps(_to_serializable(prompt_payload), sort_keys=True, default=str)
         prompt = (
@@ -387,6 +379,7 @@ class RuleBasedOrchestratorBrain:
             tools=task.tools,
             worker_profile=self.planner_profile,
             runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            role="planner",
         )
 
         try:
@@ -416,7 +409,7 @@ class RuleBasedOrchestratorBrain:
         if not raw_summary:
             return None
 
-        normalized_json = _unwrap_markdown_json_fence(raw_summary)
+        normalized_json = unwrap_markdown_json_fence(raw_summary)
         try:
             data = json.loads(normalized_json)
             return TaskSpecBrainSuggestion.model_validate(data)
@@ -523,6 +516,7 @@ class RuleBasedOrchestratorBrain:
             tools=state.task.tools,
             worker_profile=self.planner_profile,
             runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            role="router",
         )
 
         try:
@@ -555,7 +549,7 @@ class RuleBasedOrchestratorBrain:
         if not raw_summary:
             raise RuntimeError("planner route recommendation returned an empty summary")
 
-        normalized_json = _unwrap_markdown_json_fence(raw_summary)
+        normalized_json = unwrap_markdown_json_fence(raw_summary)
         try:
             payload = json.loads(normalized_json)
         except json.JSONDecodeError as exc:
@@ -672,6 +666,7 @@ class RuleBasedOrchestratorBrain:
             tools=state.task.tools,
             worker_profile=self.planner_profile,
             runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            role="verifier",
         )
 
         try:
@@ -708,7 +703,7 @@ class RuleBasedOrchestratorBrain:
         if not raw_summary:
             raise RuntimeError("planner verification recommendation returned an empty summary")
 
-        normalized_json = _unwrap_markdown_json_fence(raw_summary)
+        normalized_json = unwrap_markdown_json_fence(raw_summary)
         try:
             payload = json.loads(normalized_json)
         except json.JSONDecodeError as exc:

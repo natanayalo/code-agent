@@ -8,6 +8,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from db.enums import WorkerRuntimeMode
 from tools import DEFAULT_MCP_TOOL_CLIENT, McpToolClient, ToolDefinition, ToolRegistry
 from workers.base import WorkerRequest
 from workers.markdown import markdown_fence_for_content
@@ -99,8 +100,22 @@ def _fenced_text_block_overhead(label: str, content: str, *, fence: str | None =
     return len(label) + len(f"{actual_fence}text") + len(actual_fence) + 3
 
 
-def build_role_description_section() -> str:
+def build_role_description_section(runtime_mode: WorkerRuntimeMode | None = None) -> str:
     """Describe the worker's job and guardrails."""
+    if runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
+        return "\n".join(
+            [
+                "## Role",
+                "You are an expert AI software engineer. Your goal is to solve the assigned task",
+                "within the provided sandboxed repository. You have direct shell access and should",
+                "use it to explore, implement, and verify your changes autonomously.",
+                "Make the smallest safe changes that satisfy the task, and ensure all your work",
+                "is verified by running relevant tests or build commands before finishing.",
+                "Do not mutate orchestrator state directly, write to memory directly, bypass sandbox",
+                "rules, or invent results you did not verify.",
+            ]
+        )
+
     return "\n".join(
         [
             "## Role",
@@ -1178,8 +1193,28 @@ def build_task_context_section(request: WorkerRequest) -> str:
     return "\n".join(lines)
 
 
-def build_workflow_instructions_section() -> str:
+def build_workflow_instructions_section(
+    runtime_mode: WorkerRuntimeMode | None = None,
+) -> str:
     """Describe the expected worker execution workflow."""
+    if runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
+        return "\n".join(
+            [
+                "## Workflow Instructions",
+                "You have direct access to a persistent shell in a sandboxed workspace.",
+                "- Inspect relevant files before making changes.",
+                "- Prefer minimal, reviewable edits over broad rewrites.",
+                "- Use shell commands (e.g., `rg`, `sed`, `grep`, `cat`) to explore and verify.",
+                "- Apply your changes using reliable shell-based editing or provided tool wrappers.",
+                "- Always verify your changes by running tests or build commands.",
+                "- If a command fails, analyze the output and fix the root cause before retrying.",
+                "- Use the available tools with focused commands; avoid dumping large files or verbose output.",
+                "- End with a concise summary of changes, verification, and any follow-up needed.",
+                "- YOUR FINAL OUTPUT MUST BE A VALID JSON BLOCK wrapped in markdown fences (```json ... ```) ",
+                "containing a structured summary of your work (status, summary, files_changed).",
+            ]
+        )
+
     return "\n".join(
         [
             "## Workflow Instructions",
@@ -1378,7 +1413,7 @@ def build_system_prompt(
     )
 
     sections = [
-        build_role_description_section(),
+        build_role_description_section(runtime_mode=request.runtime_mode),
         build_available_tools_section(tool_registry, tool_client),
         _build_repo_context_section_with_guidance(
             workspace_path,
@@ -1387,6 +1422,6 @@ def build_system_prompt(
         ),
         build_section or "",
         build_task_context_section(request),
-        build_workflow_instructions_section(),
+        build_workflow_instructions_section(runtime_mode=request.runtime_mode),
     ]
     return "\n\n".join(section for section in sections if section.strip())

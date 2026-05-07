@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from collections.abc import Callable
@@ -13,6 +12,7 @@ from typing import Protocol
 from apps.observability import (
     SPAN_KIND_AGENT,
     STATUS_ERROR,
+    get_tracing_env_vars,
     record_span_exception,
     set_span_status,
     set_span_status_from_outcome,
@@ -289,7 +289,13 @@ class GeminiCliWorker(Worker):
         with start_optional_span(
             tracer_name="workers.gemini_cli_worker",
             span_name="GeminiCliWorker.run",
-            attributes=with_span_kind(SPAN_KIND_AGENT),
+            attributes=with_span_kind(
+                SPAN_KIND_AGENT,
+                {
+                    "code_agent.worker_profile": request.worker_profile,
+                    "code_agent.role": request.role,
+                },
+            ),
         ):
 
             def _run_sync(cancel_requested: Callable[[], bool]) -> WorkerResult:
@@ -637,13 +643,7 @@ class GeminiCliWorker(Worker):
 
     def _native_error_detail(self, native_result: NativeAgentRunResult) -> str | None:
         """Extract the structured Gemini error payload when present."""
-        stdout_text = native_result.stdout.strip()
-        if not stdout_text:
-            return None
-        try:
-            payload = json.loads(stdout_text)
-        except json.JSONDecodeError:
-            return None
+        payload = native_result.json_payload
         if not isinstance(payload, dict):
             return None
 
@@ -663,18 +663,13 @@ class GeminiCliWorker(Worker):
 
     def _native_final_message(self, native_result: NativeAgentRunResult) -> str | None:
         """Extract the best final message from Gemini JSON output or runner fallback."""
-        stdout_text = native_result.stdout.strip()
-        if stdout_text:
-            try:
-                payload = json.loads(stdout_text)
-            except json.JSONDecodeError:
-                payload = None
-            if isinstance(payload, dict):
-                response = payload.get("response")
-                if isinstance(response, str):
-                    normalized_response = response.strip()
-                    if normalized_response:
-                        return normalized_response
+        payload = native_result.json_payload
+        if isinstance(payload, dict):
+            response = payload.get("response")
+            if isinstance(response, str):
+                normalized_response = response.strip()
+                if normalized_response:
+                    return normalized_response
 
         if native_result.final_message is not None:
             normalized = native_result.final_message.strip()
@@ -717,6 +712,10 @@ class GeminiCliWorker(Worker):
             base_env.setdefault("GEMINI_SANDBOX", "true")
             # On macOS seatbelt, prefer the no-network profile unless explicitly overridden.
             base_env.setdefault("SEATBELT_PROFILE", "permissive-closed")
+
+        # Propagate tracing configuration
+        base_env.update(get_tracing_env_vars())
+
         return base_env or None
 
     def _execute_native_runtime(
@@ -766,6 +765,12 @@ class GeminiCliWorker(Worker):
                 env=self._native_run_env(),
                 collect_diff=True,
                 collect_changed_files=True,
+                span_name=f"native_agent:{request.worker_profile or 'default'}",
+                span_attributes={
+                    "code_agent.worker_profile": request.worker_profile,
+                    "code_agent.runtime_mode": runtime_mode.value,
+                    "code_agent.role": request.role,
+                },
             )
         )
 

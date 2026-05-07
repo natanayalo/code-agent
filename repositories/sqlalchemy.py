@@ -831,6 +831,28 @@ class HumanInteractionRepository:
             interaction_types=self._TASK_SPEC_INTERACTION_TYPES,
         )
 
+    def get(self, interaction_id: str) -> HumanInteraction | None:
+        """Return a single interaction by ID."""
+        return self.session.get(HumanInteraction, interaction_id)
+
+    def record_response(
+        self,
+        interaction_id: str,
+        *,
+        status: HumanInteractionStatus,
+        response_data: Mapping[str, Any] | None = None,
+    ) -> HumanInteraction | None:
+        """Apply a response to a pending interaction and advance its status."""
+        interaction = self.get(interaction_id)
+        if interaction is None:
+            return None
+
+        interaction.status = status
+        if response_data is not None:
+            interaction.response_data = dict(response_data)
+        self.session.flush()
+        return interaction
+
 
 class InboundDeliveryRepository:
     """Persist and query webhook delivery dedupe claims."""

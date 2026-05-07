@@ -29,11 +29,12 @@ INPUT_VALUE_ATTRIBUTE: Final[str] = "input.value"
 INPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "input.mime_type"
 OUTPUT_VALUE_ATTRIBUTE: Final[str] = "output.value"
 OUTPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "output.mime_type"
-MAX_SPAN_ATTRIBUTE_LENGTH: Final[int] = 12000
+MAX_SPAN_ATTRIBUTE_LENGTH: Final[int] = 100000
 SPAN_KIND_AGENT: Final[str] = "AGENT"
 SPAN_KIND_CHAIN: Final[str] = "CHAIN"
 SPAN_KIND_LLM: Final[str] = "LLM"
 SPAN_KIND_TOOL: Final[str] = "TOOL"
+SPAN_KIND_SERVER: Final[str] = "SERVER"
 STATUS_OK: Final[str] = "OK"
 STATUS_ERROR: Final[str] = "ERROR"
 STATUS_UNSET: Final[str] = "UNSET"
@@ -248,6 +249,22 @@ def inject_w3c_trace_context_env(
         if value:
             effective_env.setdefault(env_key, value)
     return effective_env
+
+
+def get_tracing_env_vars(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Return all environment variables needed to configure tracing in a child process."""
+    env = os.environ if environ is None else environ
+    vars: dict[str, str] = {}
+    if is_tracing_enabled(env):
+        vars[ENABLE_TRACING_ENV_VAR] = "true"
+        vars[TRACING_PROJECT_ENV_VAR] = resolve_tracing_project_name(env)
+        endpoint = resolve_otel_tracing_endpoint(env)
+        vars[TRACING_OTLP_ENDPOINT_ENV_VAR] = endpoint
+        vars[OTEL_OTLP_TRACES_ENDPOINT_ENV_VAR] = endpoint
+        # Phoenix also likes this one
+        vars[PHOENIX_COLLECTOR_ENDPOINT_ENV_VAR] = endpoint.removesuffix("/v1/traces")
+
+    return vars
 
 
 def restore_trace_context(context: dict[str, str] | None) -> Any:

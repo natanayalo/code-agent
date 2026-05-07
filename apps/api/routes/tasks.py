@@ -7,12 +7,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from apps.api.dependencies import get_task_service, require_any_valid_auth
 from apps.observability import (
     SPAN_KIND_AGENT,
+    SPAN_KIND_SERVER,
     set_span_input_output,
     start_optional_span,
     with_span_kind,
 )
 from db.enums import TaskStatus
 from orchestrator.execution import (
+    InteractionResponseDecision,
     TaskApprovalDecision,
     TaskExecutionService,
     TaskReplayRequest,
@@ -145,5 +147,73 @@ def replay_task(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Replay task was created but the snapshot could not be reloaded.",
+        )
+    return result.task_snapshot
+
+
+@router.post("/{task_id}/interactions/{interaction_id}/response", response_model=TaskSnapshot)
+def respond_to_interaction(
+    task_id: str,
+    interaction_id: str,
+    payload: InteractionResponseDecision,
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> TaskSnapshot:
+    """Submit a response to a pending human interaction for a task."""
+    span_cm = start_optional_span(
+        tracer_name="apps.api.routes.tasks",
+        span_name="api.respond_to_interaction",
+        attributes=with_span_kind(
+            SPAN_KIND_SERVER,
+            attributes={
+                "code_agent.task_id": task_id,
+                "code_agent.interaction_id": interaction_id,
+            },
+        ),
+    )
+    with span_cm:
+        result = task_service.apply_interaction_response(
+            task_id=task_id,
+            interaction_id=interaction_id,
+            response=payload,
+        )
+        if result.status == "not_found":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=result.detail or f"Interaction '{interaction_id}' not found.",
+            )
+        if result.status == "conflict":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=result.detail or "Interaction is not awaiting a response.",
+            )
+        if result.task_snapshot is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Interaction response was applied but the task snapshot could not be reloaded.",
+            )
+        return result.task_snapshot
+
+
+@router.post("/{task_id}/cancel", response_model=TaskSnapshot)
+def cancel_task(
+    task_id: str,
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> TaskSnapshot:
+    """Mark a task as cancelled, stopping further retry attempts and releasing leases."""
+    result = task_service.cancel_task(task_id)
+    if result.status == "not_found":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result.detail or f"Task '{task_id}' was not found.",
+        )
+    if result.status == "terminal":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=result.detail or "Task is already in a terminal state.",
+        )
+    if result.task_snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Task was cancelled but the snapshot could not be reloaded.",
         )
     return result.task_snapshot

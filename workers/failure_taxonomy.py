@@ -61,6 +61,12 @@ _CONTEXT_WINDOW_SUMMARY_MARKERS = (
     "prompt too long",
     "token limit",
 )
+_SANDBOX_INFRA_SUMMARY_MARKERS = (
+    "bwrap: no permissions",
+    "read-only sandbox",
+    "namespace execution failed",
+    "rejected by user approval settings",
+)
 
 
 def classify_failure_kind(
@@ -110,6 +116,8 @@ def classify_failure_kind(
         return "compile"
     if stop_reason == "adapter_error":
         return "provider_error"
+    if _contains_any(normalized_summary, _SANDBOX_INFRA_SUMMARY_MARKERS):
+        return "sandbox_infra"
     if failed_commands:
         return "tool_runtime"
     return "unknown"

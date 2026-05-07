@@ -12,6 +12,7 @@ from typing import Protocol
 from apps.observability import (
     SPAN_KIND_AGENT,
     STATUS_ERROR,
+    get_tracing_env_vars,
     record_span_exception,
     set_span_status,
     set_span_status_from_outcome,
@@ -289,7 +290,13 @@ class CodexCliWorker(Worker):
         with start_optional_span(
             tracer_name="workers.codex_cli_worker",
             span_name="CodexCliWorker.run",
-            attributes=with_span_kind(SPAN_KIND_AGENT),
+            attributes=with_span_kind(
+                SPAN_KIND_AGENT,
+                {
+                    "code_agent.worker_profile": request.worker_profile,
+                    "code_agent.role": request.role,
+                },
+            ),
         ):
 
             def _run_sync(cancel_requested: Callable[[], bool]) -> WorkerResult:
@@ -610,16 +617,24 @@ class CodexCliWorker(Worker):
             executable,
             "exec",
             "--skip-git-repo-check",
-            "--sandbox",
-            sandbox_mode,
-            "--color",
-            "never",
-            "--output-last-message",
-            str(final_message_path),
-            "--ephemeral",
-            "-C",
-            str(workspace.repo_path),
         ]
+        if sandbox_mode != "none":
+            command.extend(["--sandbox", sandbox_mode])
+        else:
+            # If sandbox is explicitly 'none', we assume external isolation (e.g. Docker)
+            # and use the bypass flag to avoid bwrap initialization failures.
+            command.append("--dangerously-bypass-approvals-and-sandbox")
+        command.extend(
+            [
+                "--color",
+                "never",
+                "--output-last-message",
+                str(final_message_path),
+                "--ephemeral",
+                "-C",
+                str(workspace.repo_path),
+            ]
+        )
         if model:
             command.extend(["--model", str(model)])
         if profile:
@@ -712,6 +727,9 @@ class CodexCliWorker(Worker):
             final_message_path=final_message_path,
             runtime_mode=runtime_mode,
         )
+        env = dict(getattr(self.runtime_adapter, "env", {}) or {})
+        env.update(get_tracing_env_vars())
+
         native_result = run_native_agent(
             NativeAgentRunRequest(
                 command=command,
@@ -721,11 +739,17 @@ class CodexCliWorker(Worker):
                 timeout_seconds=runtime_settings.worker_timeout_seconds,
                 diff_timeout_seconds=runtime_settings.command_timeout_seconds,
                 changed_files_timeout_seconds=runtime_settings.command_timeout_seconds,
-                env=getattr(self.runtime_adapter, "env", None),
+                env=env,
                 final_message_path=final_message_path,
                 events_path=events_path,
                 collect_diff=True,
                 collect_changed_files=True,
+                span_name=f"native_agent:{request.worker_profile or 'default'}",
+                span_attributes={
+                    "code_agent.worker_profile": request.worker_profile,
+                    "code_agent.runtime_mode": runtime_mode.value,
+                    "code_agent.role": request.role,
+                },
             )
         )
 

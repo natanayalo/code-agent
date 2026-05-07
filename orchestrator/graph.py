@@ -84,7 +84,7 @@ _COMPLEX_TASK_PATTERN = re.compile(
     rf"(?<![\w-])(?:{'|'.join(re.escape(marker) for marker in COMPLEX_TASK_MARKERS)})(?![\w-])"
 )
 
-DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = 330
+DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = 900
 ORCHESTRATOR_TIMEOUT_GRACE_SECONDS = 30
 _WORKER_FAILURE_REROUTE_KINDS = frozenset(
     {
@@ -634,6 +634,7 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         tools=state.task.tools,
         worker_profile=state.dispatch.worker_profile or state.route.chosen_profile,
         runtime_mode=state.dispatch.runtime_mode or state.route.runtime_mode,
+        role="worker",
     )
 
 
@@ -1006,6 +1007,7 @@ async def generate_task_spec(
                 task_kind=state.task_kind,
                 task_plan=state.task_plan,
                 task_spec=task_spec,
+                interactions=state.interactions,
             )
         except Exception as exc:
             logger.warning(

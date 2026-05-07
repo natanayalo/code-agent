@@ -68,6 +68,7 @@ CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TOOL_LOOP
 GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED"
 
 # Default profile names
+GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_NATIVE_SANDBOX_ENABLED"
 GEMINI_NATIVE_PLANNER_PROFILE: Final[str] = "gemini-native-planner"
 GEMINI_NATIVE_REVIEWER_PROFILE: Final[str] = "gemini-native-reviewer"
 
@@ -331,6 +332,9 @@ def build_task_service_from_env(
             runtime_adapter=GeminiCliRuntimeAdapter.from_env(resolved_env),
             container_manager=container_manager,
             default_runtime_mode=gemini_runtime_mode,
+            native_sandbox_enabled=_is_enabled(
+                resolved_env.get(GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR, "1")
+            ),
         )
     if resolved_env.get(OPENROUTER_API_KEY_ENV_VAR):
         openrouter_worker = OpenRouterCliWorker(
