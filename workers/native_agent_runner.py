@@ -222,15 +222,18 @@ def _stdout_fallback_final_message(stdout_text: str) -> str | None:
         return extracted
 
     # 2. Try finding a JSON block in the search space (could be logs followed by JSON)
-    # We iterate backwards to find the last valid JSON block that yields a message.
+    # We iterate backwards and use raw_decode to find the last valid JSON object.
+    decoder = json.JSONDecoder()
     pos = search_space.rfind("{")
     while pos != -1:
-        end_pos = search_space.rfind("}", pos)
-        if end_pos != -1:
-            block = search_space[pos : end_pos + 1]
+        try:
+            _, end_idx = decoder.raw_decode(search_space[pos:])
+            block = search_space[pos : pos + end_idx]
             extracted = _extract_final_message(block)
             if extracted and extracted != block:
                 return extracted
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.debug("Failed to decode JSON block at position %d: %s", pos, e)
         pos = search_space.rfind("{", 0, pos)
 
     # 3. Fallback to raw text (with truncation note if applicable)
