@@ -10,7 +10,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal
 
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
@@ -24,7 +24,14 @@ DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR = ".code-agent/native-agent-runner"
 DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS = 64 * 1024
 DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS = 1000
 _STDOUT_FALLBACK_TRUNCATION_NOTE = "[stdout truncated for summary]\n"
-_FINAL_MESSAGE_FIELDS = ("final_output", "summary", "message", "content", "response")
+_FINAL_MESSAGE_FIELDS: Final = (
+    "final_output",
+    "summary",
+    "message",
+    "content",
+    "response",
+    "error",
+)
 
 
 def _extract_final_message(raw_text: str) -> str | None:
@@ -49,6 +56,18 @@ def _extract_final_message(raw_text: str) -> str | None:
                 normalized = raw_value.strip()
                 if normalized:
                     return normalized
+
+            # Handle structured error payloads (parity with previous GeminiCliWorker logic)
+            if field_name == "error" and isinstance(raw_value, dict):
+                err_type = raw_value.get("type")
+                err_msg = raw_value.get("message")
+                if isinstance(err_type, str) and isinstance(err_msg, str):
+                    return f"{err_type}: {err_msg}"
+                if isinstance(err_msg, str):
+                    return err_msg
+                if isinstance(err_type, str):
+                    return err_type
+
     return candidate
 
 

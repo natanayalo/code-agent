@@ -641,7 +641,9 @@ class GeminiCliWorker(Worker):
         if native_result.timed_out:
             return "timeout"
 
-        summary = f"{native_result.summary} {native_result.stderr}".strip()
+        summary = (
+            f"{native_result.final_message or native_result.summary} " f"{native_result.stderr}"
+        ).strip()
 
         classified = classify_failure_kind(
             status=native_result.status,

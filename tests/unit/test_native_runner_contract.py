@@ -40,6 +40,21 @@ def test_extract_final_message_json_dict_final_output():
     assert _extract_final_message(json.dumps(payload)) == "This is final output"
 
 
+def test_extract_final_message_json_dict_error():
+    payload = {"error": "Simple error message"}
+    assert _extract_final_message(json.dumps(payload)) == "Simple error message"
+
+
+def test_extract_final_message_json_dict_structured_error():
+    payload = {
+        "error": {
+            "type": "rate_limit_exceeded",
+            "message": "Too many requests",
+        }
+    }
+    assert _extract_final_message(json.dumps(payload)) == "rate_limit_exceeded: Too many requests"
+
+
 def test_extract_final_message_json_dict_unknown_fallback():
     payload = {"unknown": "field"}
     raw = json.dumps(payload)
