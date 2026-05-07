@@ -52,9 +52,9 @@ def _check_condition(column_name: str, values: Iterable[str]) -> str:
 def upgrade() -> None:
     """Allow the task_cancelled timeline event in persisted task timelines."""
     with op.batch_alter_table("task_timeline_events") as batch_op:
-        batch_op.drop_constraint("ck_task_timeline_events_event_type", type_="check")
+        batch_op.drop_constraint(op.f("ck_task_timeline_events_event_type"), type_="check")
         batch_op.create_check_constraint(
-            "ck_task_timeline_events_event_type",
+            op.f("ck_task_timeline_events_event_type"),
             _check_condition("event_type", TIMELINE_EVENT_TYPE_VALUES),
         )
 
@@ -63,8 +63,8 @@ def downgrade() -> None:
     """Remove task_cancelled from allowed persisted task timeline event types."""
     op.execute("DELETE FROM task_timeline_events WHERE event_type = 'task_cancelled'")
     with op.batch_alter_table("task_timeline_events") as batch_op:
-        batch_op.drop_constraint("ck_task_timeline_events_event_type", type_="check")
+        batch_op.drop_constraint(op.f("ck_task_timeline_events_event_type"), type_="check")
         batch_op.create_check_constraint(
-            "ck_task_timeline_events_event_type",
+            op.f("ck_task_timeline_events_event_type"),
             _check_condition("event_type", _PREVIOUS_TIMELINE_EVENT_TYPE_VALUES),
         )
