@@ -425,7 +425,8 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                         events_path=events_path,
                     )
                 )
-            except Exception:
+            except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as exc:
+                logger.debug("Native agent runner failed to collect timeout artifacts: %s", exc)
                 logger.exception(
                     "Native agent runner failed while collecting timeout artifacts.",
                     extra={"command": command_text},

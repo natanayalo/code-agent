@@ -90,7 +90,9 @@ def format_native_run_summary(
         return base
 
     preview = truncate_detail_keep_tail(detail, max_characters=limit)
-    # Avoid appending if the diagnostic content is already part of the base summary
+    # Avoid appending if the diagnostic content is already part of the base summary.
+    # We check the tail specifically as failures often share a common prefix but
+    # have unique suffixes.
     if detail[-limit:].strip() in base:
         return base
 
