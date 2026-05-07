@@ -30,6 +30,7 @@ from apps.observability import (
     with_span_kind,
 )
 from sandbox.redact import SecretRedactor, redact_and_truncate_output, sanitize_command
+from workers.adapter_utils import format_native_run_summary
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
 from workers.native_agent_models import NativeAgentRunResult
@@ -265,12 +266,15 @@ def _finalize_native_agent_run(
     )
 
     # Standardized Tracing Metadata
-    redacted_summary = redact_and_truncate_output(summary, redactor=request.redactor)
+    redacted_summary = redact_and_truncate_output(
+        format_native_run_summary(result), redactor=request.redactor
+    )
     set_span_input_output(
         input_data=None,  # Input data is recorded at the start of run_native_agent span
         output_data=redacted_summary,
     )
-    set_current_span_attribute(NATIVE_AGENT_EXIT_CODE_ATTRIBUTE, result.exit_code)
+    if result.exit_code is not None:
+        set_current_span_attribute(NATIVE_AGENT_EXIT_CODE_ATTRIBUTE, result.exit_code)
     set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, timed_out)
     set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, elapsed)
     set_current_span_attribute(
@@ -316,6 +320,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
     completed: subprocess.CompletedProcess | None = None
     stdout_text: str = ""
     stderr_text: str = ""
+    artifacts: list[ArtifactReference] = []
 
     with start_optional_span(
         tracer_name="workers.native_agent_runner",
@@ -344,7 +349,6 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
         except subprocess.TimeoutExpired as exc:
             stdout_text = _normalize_stream_payload(exc.stdout)
             stderr_text = _normalize_stream_payload(exc.stderr)
-            artifacts: list[ArtifactReference] = []
             try:
                 artifacts.extend(
                     [
@@ -408,22 +412,24 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
         stdout_text = completed.stdout or ""
         stderr_text = completed.stderr or ""
         try:
-            artifacts = [
-                _write_artifact(
-                    artifact_root=artifact_root,
-                    file_name="stdout.txt",
-                    content=stdout_text,
-                    name="native-agent-stdout",
-                    artifact_type="log",
-                ),
-                _write_artifact(
-                    artifact_root=artifact_root,
-                    file_name="stderr.txt",
-                    content=stderr_text,
-                    name="native-agent-stderr",
-                    artifact_type="log",
-                ),
-            ]
+            artifacts.extend(
+                [
+                    _write_artifact(
+                        artifact_root=artifact_root,
+                        file_name="stdout.txt",
+                        content=stdout_text,
+                        name="native-agent-stdout",
+                        artifact_type="log",
+                    ),
+                    _write_artifact(
+                        artifact_root=artifact_root,
+                        file_name="stderr.txt",
+                        content=stderr_text,
+                        name="native-agent-stderr",
+                        artifact_type="log",
+                    ),
+                ]
+            )
 
             event_artifact = (
                 _copy_artifact(
@@ -523,4 +529,5 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 exit_code=completed.returncode if completed else None,
                 stdout=stdout_text,
                 stderr=stderr_text,
+                artifacts=artifacts,
             )
