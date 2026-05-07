@@ -407,7 +407,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
     traceObservability.traceIds.length > 0 ||
     traceObservability.providerLinks.length > 0 ||
     traceObservability.spanStatusCounts.length > 0;
-  const hasPendingInteractions = Boolean(task?.pending_interactions && task.pending_interactions.length > 0);
+  const hasPendingInteractions = Boolean(task?.pending_interactions?.length);
   const isTaskTerminal = isTerminalTaskStatus(task?.status);
   const isSubmittingAction = isCancelling || resolvingInteractionId !== null;
 
@@ -423,7 +423,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
   }
 
   const handleCancelTask = async () => {
-    if (!task || isCancelling || isTaskTerminal) return;
+    if (!task || isSubmittingAction || isTaskTerminal) return;
     setCancelError(null);
     setIsCancelling(true);
     try {
@@ -437,7 +437,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
   };
 
   const handleResolveInteraction = async (interactionId: string) => {
-    if (!task || resolvingInteractionId) return;
+    if (!task || isSubmittingAction) return;
     setInteractionError(null);
     setResolvingInteractionId(interactionId);
     try {
