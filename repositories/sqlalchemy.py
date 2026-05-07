@@ -625,6 +625,42 @@ class TaskRepository:
         self.session.flush()
         return task
 
+    def cancel(self, *, task_id: str) -> tuple[Task | None, bool]:
+        """Mark a task as terminally cancelled and clear queue lease state.
+
+        Returns (task, was_cancelled).
+        """
+        task = self.get(task_id)
+        if task is None:
+            return None, False
+
+        # Enforce that only non-terminal tasks can be transitioned
+        terminal_statuses = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
+        if task.status in terminal_statuses:
+            return task, False
+
+        # Terminate any active lease
+        task.lease_owner = None
+        task.lease_expires_at = None
+        task.next_attempt_at = None
+        # Resulting state aligns with requirement that operator-initiated rejections
+        # result in FAILED
+        task.status = TaskStatus.FAILED
+        task.last_error = "Task cancelled by operator."
+
+        # Cancel any pending interactions to prevent operator confusion
+        self.session.execute(
+            update(HumanInteraction)
+            .where(
+                HumanInteraction.task_id == task_id,
+                HumanInteraction.status == HumanInteractionStatus.PENDING,
+            )
+            .values(status=HumanInteractionStatus.CANCELLED)
+        )
+
+        self.session.flush()
+        return task, True
+
     def record_attempt_error(
         self,
         *,

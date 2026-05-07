@@ -57,6 +57,7 @@ from db.enums import (
     ArtifactType,
     HumanInteractionStatus,
     TaskStatus,
+    TimelineEventType,
     WorkerRunStatus,
     WorkerRuntimeMode,
     WorkerType,
@@ -537,6 +538,7 @@ class TaskSummarySnapshot(ExecutionModel):
     latest_run_worker: str | None = None
     latest_run_requested_permission: str | None = None
     pending_interaction_count: int = 0
+    last_error: str | None = None
     approval_status: Literal["pending", "approved", "rejected", "not_required"] | None = None
     approval_type: str | None = None
     approval_reason: str | None = None
@@ -1569,31 +1571,72 @@ class TaskExecutionService:
                 await self._emit_progress(submission, persisted, phase="started")
                 await self._emit_progress(submission, persisted, phase="running")
 
-                heartbeat_task = asyncio.create_task(
-                    self._heartbeat_loop(
-                        task_id=task_id,
-                        worker_id=worker_id,
-                        lease_seconds=lease_seconds,
-                    ),
-                    name=f"task-heartbeat-{task_id}",
-                )
                 started_at = utc_now()
-                logger.info(
-                    "Starting execution-path task run",
-                    extra={
-                        "session_id": persisted.session_id,
-                        "task_id": persisted.task_id,
-                        "chosen_worker": None,
-                        "route_reason": None,
-                        "workspace_id": None,
-                        "start_timestamp": started_at.isoformat(),
-                        "worker_id": worker_id,
-                    },
-                )
                 try:
-                    state = await self._run_orchestrator(submission, persisted)
-                    finished_at = utc_now()
+                    orchestrator_task = asyncio.create_task(
+                        self._run_orchestrator(submission, persisted),
+                        name=f"orchestrator-{task_id}",
+                    )
+                    heartbeat_task = asyncio.create_task(
+                        self._heartbeat_loop(
+                            task_id=task_id,
+                            worker_id=worker_id,
+                            lease_seconds=lease_seconds,
+                        ),
+                        name=f"task-heartbeat-{task_id}",
+                    )
 
+                    done, pending = await asyncio.wait(
+                        [orchestrator_task, heartbeat_task],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+
+                    if orchestrator_task in done:
+                        state = orchestrator_task.result()
+                    else:
+                        # Heartbeat task finished first, which means the lease was lost
+                        # or the task status was externally updated (e.g. CANCELLED).
+                        # We must cancel the orchestrator task immediately.
+                        orchestrator_task.cancel()
+                        try:
+                            await orchestrator_task
+                        except asyncio.CancelledError:
+                            # Re-load the task to see why we were cancelled
+                            task_snapshot = await self._run_blocking(self.get_task, task_id)
+                            is_cancelled = task_snapshot and (
+                                task_snapshot.status == TaskStatus.CANCELLED
+                                or (
+                                    task_snapshot.status == TaskStatus.FAILED
+                                    and task_snapshot.last_error == "Task cancelled by operator."
+                                )
+                            )
+                            if is_cancelled:
+                                logger.info(
+                                    "Task execution aborted: task was cancelled",
+                                    extra={"task_id": task_id},
+                                )
+                                # We don't need to persist outcome here as cancel_task handled it.
+                                return None
+                            else:
+                                logger.warning(
+                                    "Task execution aborted: lease lost or stolen",
+                                    extra={"task_id": task_id},
+                                )
+                                # Task was likely stolen or lease expired.
+                                # Do NOT release failure as we no longer own the task.
+                                return None
+
+                        # If await orchestrator_task didn't raise CancelledError, it means the task
+                        # finished before the cancellation took effect. We should still abort
+                        # because the heartbeat failed, and not proceed with the result.
+                        logger.warning(
+                            "Orchestrator task completed despite cancellation request. "
+                            "Aborting due to heartbeat failure.",
+                            extra={"task_id": task_id},
+                        )
+                        return None
+
+                    finished_at = utc_now()
                     self._update_span_status_from_state(state)
 
                     if state.result is not None and state.result.status == "success":
@@ -1704,6 +1747,10 @@ class TaskExecutionService:
                 lease_seconds=lease_seconds,
             )
             if not ok:
+                logger.debug(
+                    "Heartbeat failed: lease lost or task status changed",
+                    extra={"task_id": task_id, "worker_id": worker_id},
+                )
                 return None
 
     def claim_next_task(self, *, worker_id: str, lease_seconds: int) -> TaskClaim | None:
@@ -2008,6 +2055,7 @@ class TaskExecutionService:
             latest_run_worker=latest_run_worker,
             latest_run_requested_permission=latest_run_requested_permission,
             pending_interaction_count=int(pending_interaction_count or 0),
+            last_error=task.last_error,
             approval_status=approval_status,  # type: ignore[arg-type]
             approval_type=approval_type,
             approval_reason=approval_reason,
@@ -2242,6 +2290,28 @@ class TaskExecutionService:
                 detail=f"Task '{task_id}' was not found after applying decision.",
             )
         return ApprovalDecisionResult(status="applied", task_snapshot=snapshot)
+
+    def cancel_task(self, *, task_id: str) -> TaskSnapshot | None:
+        """Terminally cancel a task and record the lifecycle event."""
+        with session_scope(self.session_factory) as session:
+            task_repo = TaskRepository(session)
+            timeline_repo = TaskTimelineRepository(session)
+
+            task, was_cancelled = task_repo.cancel(task_id=task_id)
+            if task is None:
+                return None
+
+            if was_cancelled:
+                timeline_repo.create(
+                    task_id=task_id,
+                    attempt_number=task.attempt_count,
+                    sequence_number=timeline_repo.count_by_attempt(
+                        task_id=task_id, attempt_number=task.attempt_count
+                    ),
+                    event_type=TimelineEventType.TASK_CANCELLED,
+                    message="Task was cancelled by operator.",
+                )
+        return self.get_task(task_id)
 
     def get_operational_metrics(self, window_hours: int | None = 24) -> OperationalMetrics:
         """Return aggregated operational metrics across tasks and runs."""

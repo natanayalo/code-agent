@@ -94,6 +94,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "verification_completed",
             "task_completed",
             "task_failed",
+            "task_cancelled",
         },
     },
 }

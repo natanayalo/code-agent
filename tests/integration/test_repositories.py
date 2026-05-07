@@ -301,6 +301,52 @@ def test_task_repository_release_terminal_failure_clears_lease(session_factory) 
         assert updated.lease_expires_at is None
 
 
+def test_task_repository_cancel_is_atomic_and_terminal(session_factory) -> None:
+    """Cancellation must be terminal, idempotent, and clean up pending interactions."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        interaction_repo = HumanInteractionRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:cancel", display_name="Canceller")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-cancel",
+        )
+        task = task_repo.create(session_id=conversation_session.id, task_text="cancel me")
+
+        # Create some pending interactions
+        interaction_repo.sync_task_spec_flags(
+            task_id=task.id,
+            task_spec={"requires_clarification": True, "requires_permission": True},
+        )
+
+        # First cancellation
+        cancelled, was_cancelled = task_repo.cancel(task_id=task.id)
+        assert was_cancelled is True
+        assert cancelled.status is TaskStatus.FAILED
+        assert cancelled.last_error == "Task cancelled by operator."
+
+        # Verify interactions are cancelled
+        interactions = interaction_repo.list_by_task(task_id=task.id)
+        assert len(interactions) == 2
+        for interaction in interactions:
+            assert interaction.status is HumanInteractionStatus.CANCELLED
+
+        # Second cancellation (idempotency/terminality)
+        # Mark as completed to test that it stays completed
+        cancelled.status = TaskStatus.COMPLETED
+        cancelled.last_error = None
+        session.flush()
+
+        re_cancelled, re_was_cancelled = task_repo.cancel(task_id=task.id)
+        assert re_was_cancelled is False
+        assert re_cancelled.status is TaskStatus.COMPLETED
+        assert re_cancelled.last_error is None
+
+
 def test_task_repository_claim_next_returns_fresh_claimed_task(session_factory) -> None:
     """Claim should return current DB state even when task was loaded before claiming."""
     with session_scope(session_factory) as session:
