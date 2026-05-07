@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { TaskSnapshot, VerifierOutcomeItem, VerifierOutcomeSnapshot } from '../types/task';
 import { TaskApprovalSection } from './TaskApprovalSection';
 import { formatLabel } from '../utils/formatters';
+import { api } from '../services/api';
 
 interface TaskDetailPanelProps {
   task: TaskSnapshot | null;
@@ -157,6 +158,10 @@ function computeRunDuration(startedAt: string | null | undefined, finishedAt: st
   }
   const elapsedSeconds = Math.max(0, (finishedTimestamp - startedTimestamp) / 1000);
   return formatDuration(elapsedSeconds);
+}
+
+function isTerminalTaskStatus(status: string | null | undefined): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
 function parseHttpUrl(value: string): URL | null {
@@ -352,6 +357,10 @@ function extractTraceObservability(task: TaskSnapshot | null): TraceObservabilit
 }
 
 export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: TaskDetailPanelProps) {
+  const [isCancelling, setIsCancelling] = React.useState(false);
+  const [cancelError, setCancelError] = React.useState<string | null>(null);
+  const [interactionError, setInteractionError] = React.useState<string | null>(null);
+  const [resolvingInteractionId, setResolvingInteractionId] = React.useState<string | null>(null);
   const run = task?.latest_run ?? null;
   const runCommands = React.useMemo(() => run?.commands_run ?? [], [run]);
   const changedFiles = React.useMemo(() => run?.files_changed ?? [], [run]);
@@ -394,6 +403,46 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
     return null;
   }
 
+  const hasPendingInteractions = Boolean(task?.pending_interactions && task.pending_interactions.length > 0);
+  const isTaskTerminal = isTerminalTaskStatus(task?.status);
+
+  const handleCancelTask = async () => {
+    if (!task || isCancelling || isTaskTerminal) return;
+    setCancelError(null);
+    setIsCancelling(true);
+    try {
+      await api.cancelTask(task.task_id);
+      onRefresh?.();
+    } catch (cancelTaskError) {
+      setCancelError(cancelTaskError instanceof Error ? cancelTaskError.message : 'Failed to cancel task.');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const handleResolveInteraction = async (interactionId: string) => {
+    if (!task || resolvingInteractionId) return;
+    setInteractionError(null);
+    setResolvingInteractionId(interactionId);
+    try {
+      await api.recordInteractionResponse(task.task_id, interactionId, {
+        status: 'resolved',
+        response_data: {
+          source: 'dashboard_operator',
+          action: 'resolve',
+          timestamp: new Date().toISOString(),
+        },
+      });
+      onRefresh?.();
+    } catch (resolveError) {
+      setInteractionError(
+        resolveError instanceof Error ? resolveError.message : 'Failed to resolve interaction.'
+      );
+    } finally {
+      setResolvingInteractionId(null);
+    }
+  };
+
   return (
     <aside className="glass-panel task-detail-panel">
       <div className="task-detail-header">
@@ -422,6 +471,19 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
           <p className="task-detail-meta">
             Status: <strong>{formatLabel(task.status)}</strong>
           </p>
+          {!isTaskTerminal ? (
+            <div className="task-detail-actions">
+              <button
+                type="button"
+                className="btn btn-reject"
+                onClick={handleCancelTask}
+                disabled={isCancelling}
+              >
+                {isCancelling ? 'Cancelling...' : 'Cancel Task'}
+              </button>
+            </div>
+          ) : null}
+          {cancelError ? <p className="task-detail-error">{cancelError}</p> : null}
 
           <TaskApprovalSection task={task} onRefresh={onRefresh} className="task-detail-approval" />
 
@@ -463,12 +525,27 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                       {interaction.summary}
                     </p>
                     <p className="task-detail-muted">Status: {formatLabel(interaction.status)}</p>
+                    <div className="task-interaction-actions">
+                      <button
+                        type="button"
+                        className="btn btn-approve"
+                        onClick={() => handleResolveInteraction(interaction.interaction_id)}
+                        disabled={resolvingInteractionId !== null}
+                      >
+                        {resolvingInteractionId === interaction.interaction_id
+                          ? 'Resolving...'
+                          : 'Resolve'}
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
             ) : (
               <p className="task-detail-muted">No pending interactions.</p>
             )}
+            {hasPendingInteractions && interactionError ? (
+              <p className="task-detail-error">{interactionError}</p>
+            ) : null}
           </section>
 
           <section className="task-detail-section">

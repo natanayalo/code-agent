@@ -10,6 +10,12 @@ import {
 import { ToolDefinition, SandboxStatusResponse } from '../types/system';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+type InteractionResponseStatus = 'resolved' | 'rejected' | 'cancelled' | 'pending';
+
+interface TaskInteractionResponsePayload {
+  response_data: Record<string, unknown>;
+  status?: InteractionResponseStatus;
+}
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const headers = {
@@ -231,6 +237,36 @@ export const api = {
       });
     } catch (error) {
       console.warn(`Failed to replay task ${taskId}`, error);
+      throw error;
+    }
+  },
+
+  async cancelTask(taskId: string): Promise<TaskSnapshot> {
+    try {
+      return await fetchWithAuth(`/tasks/${taskId}/cancel`, {
+        method: 'POST',
+      });
+    } catch (error) {
+      console.warn(`Failed to cancel task ${taskId}`, error);
+      throw error;
+    }
+  },
+
+  async recordInteractionResponse(
+    taskId: string,
+    interactionId: string,
+    payload: TaskInteractionResponsePayload,
+  ): Promise<TaskSnapshot> {
+    try {
+      return await fetchWithAuth(`/tasks/${taskId}/interactions/${interactionId}/response`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      console.warn(
+        `Failed to record interaction response for task ${taskId} interaction ${interactionId}`,
+        error
+      );
       throw error;
     }
   },

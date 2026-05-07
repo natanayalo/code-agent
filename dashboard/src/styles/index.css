@@ -676,6 +676,10 @@ button {
   margin-top: var(--spacing-lg);
 }
 
+.task-detail-actions {
+  margin-bottom: var(--spacing-md);
+}
+
 .task-detail-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -700,6 +704,12 @@ button {
 
 .task-interactions-list li {
   margin-bottom: var(--spacing-sm);
+}
+
+.task-interaction-actions {
+  margin-top: var(--spacing-xs);
+  display: flex;
+  gap: var(--spacing-sm);
 }
 
 .task-timeline-list,
