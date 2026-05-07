@@ -40,6 +40,7 @@ DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR = ".code-agent/native-agent-runner"
 DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS = 64 * 1024
 DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS = 1000
 _STDOUT_FALLBACK_TRUNCATION_NOTE = "[stdout truncated for summary]\n"
+NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH: Final[int] = 2000
 _FINAL_MESSAGE_FIELDS: Final = (
     "error",
     "final_output",
@@ -258,6 +259,64 @@ def _stdout_fallback_final_message(stdout_text: str) -> str | None:
     return extracted or search_space
 
 
+def _finalize_native_agent_run(
+    request: NativeAgentRunRequest,
+    *,
+    status: Literal["success", "failure", "error"],
+    summary: str,
+    command_text: str,
+    started_at: float,
+    timed_out: bool,
+    exit_code: int | None = None,
+    stdout: str = "",
+    stderr: str = "",
+    final_message: str | None = None,
+    diff_text: str | None = None,
+    files_changed: list[str] | None = None,
+    artifacts: list[ArtifactReference] | None = None,
+) -> NativeAgentRunResult:
+    """Centralize NativeAgentRunResult construction and standardized span metadata recording."""
+    elapsed = time.perf_counter() - started_at
+    result = NativeAgentRunResult(
+        status=status,
+        summary=summary,
+        command=command_text,
+        exit_code=exit_code,
+        duration_seconds=elapsed,
+        timed_out=timed_out,
+        final_message=final_message,
+        diff_text=diff_text,
+        files_changed=files_changed or [],
+        artifacts=artifacts or [],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    # Standardized Tracing Metadata
+    set_span_input_output(
+        input_data=None,  # Input data is recorded at the start of run_native_agent span
+        output_data=redact_and_truncate_output(summary, redactor=request.redactor),
+    )
+    set_current_span_attribute(NATIVE_AGENT_EXIT_CODE_ATTRIBUTE, result.exit_code)
+    set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, timed_out)
+    set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, elapsed)
+    set_current_span_attribute(
+        NATIVE_AGENT_STDOUT_ATTRIBUTE,
+        redact_and_truncate_output(
+            stdout, redactor=request.redactor, limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
+        ),
+    )
+    set_current_span_attribute(
+        NATIVE_AGENT_STDERR_ATTRIBUTE,
+        redact_and_truncate_output(
+            stderr, redactor=request.redactor, limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
+        ),
+    )
+    set_span_status_from_outcome(result.status, result.summary)
+
+    return result
+
+
 def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
     """Run one native-agent CLI command and capture stable worker-facing outputs."""
 
@@ -281,6 +340,9 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
 
     command_text = shlex.join(request.command)
     started_at = time.perf_counter()
+    completed: subprocess.CompletedProcess | None = None
+    stdout_text: str = ""
+    stderr_text: str = ""
 
     with start_optional_span(
         tracer_name="workers.native_agent_runner",
@@ -307,7 +369,6 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
             )
             timed_out = False
         except subprocess.TimeoutExpired as exc:
-            elapsed = time.perf_counter() - started_at
             stdout_text = _normalize_stream_payload(exc.stdout)
             stderr_text = _normalize_stream_payload(exc.stderr)
             artifacts: list[ArtifactReference] = []
@@ -349,57 +410,27 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                     extra={"command": command_text},
                 )
 
-            result = NativeAgentRunResult(
+            return _finalize_native_agent_run(
+                request=request,
                 status="error",
                 summary=f"Native agent command timed out after {request.timeout_seconds}s.",
-                command=command_text,
-                exit_code=None,
-                duration_seconds=elapsed,
+                command_text=command_text,
+                started_at=started_at,
                 timed_out=True,
-                artifacts=artifacts,
                 stdout=stdout_text,
                 stderr=stderr_text,
+                artifacts=artifacts,
             )
-            set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, True)
-            set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, elapsed)
-            set_span_input_output(
-                input_data=None,
-                output_data=redact_and_truncate_output(result.summary, redactor=request.redactor),
-            )
-            set_current_span_attribute(
-                NATIVE_AGENT_STDOUT_ATTRIBUTE,
-                redact_and_truncate_output(
-                    stdout_text, redactor=request.redactor, limit_chars=2000
-                ),
-            )
-            set_current_span_attribute(
-                NATIVE_AGENT_STDERR_ATTRIBUTE,
-                redact_and_truncate_output(
-                    stderr_text, redactor=request.redactor, limit_chars=2000
-                ),
-            )
-            set_span_status_from_outcome(result.status, result.summary)
-            return result
         except OSError as exc:
-            elapsed = time.perf_counter() - started_at
-            result = NativeAgentRunResult(
+            return _finalize_native_agent_run(
+                request=request,
                 status="error",
                 summary=(f"Native agent command could not start `{request.command[0]}`: {exc}"),
-                command=command_text,
-                exit_code=None,
-                duration_seconds=elapsed,
+                command_text=command_text,
+                started_at=started_at,
                 timed_out=False,
             )
-            set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, elapsed)
-            set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, False)
-            set_span_input_output(
-                input_data=None,
-                output_data=redact_and_truncate_output(result.summary, redactor=request.redactor),
-            )
-            set_span_status_from_outcome(result.status, result.summary)
-            return result
 
-        elapsed = time.perf_counter() - started_at
         timed_out = False
         stdout_text = completed.stdout or ""
         stderr_text = completed.stderr or ""
@@ -486,76 +517,37 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 summary = f"Native agent command exited with code {completed.returncode}."
                 status = "failure"
 
-            result = NativeAgentRunResult(
+            return _finalize_native_agent_run(
+                request=request,
                 status=status,
                 summary=summary,
-                command=command_text,
-                exit_code=completed.returncode,
-                duration_seconds=elapsed,
+                command_text=command_text,
+                started_at=started_at,
                 timed_out=timed_out,
+                exit_code=completed.returncode,
+                stdout=stdout_text,
+                stderr=stderr_text,
                 final_message=final_message,
                 diff_text=diff_text,
                 files_changed=files_changed,
                 artifacts=artifacts,
-                stdout=stdout_text,
-                stderr=stderr_text,
             )
-
-            # Standardized Tracing Metadata
-            set_span_input_output(
-                input_data=None,  # Already set
-                output_data=redact_and_truncate_output(summary, redactor=request.redactor),
-            )
-            set_current_span_attribute(NATIVE_AGENT_EXIT_CODE_ATTRIBUTE, result.exit_code)
-            set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, False)
-            set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, elapsed)
-            set_current_span_attribute(
-                NATIVE_AGENT_STDOUT_ATTRIBUTE,
-                redact_and_truncate_output(
-                    stdout_text, redactor=request.redactor, limit_chars=2000
-                ),
-            )
-            set_current_span_attribute(
-                NATIVE_AGENT_STDERR_ATTRIBUTE,
-                redact_and_truncate_output(
-                    stderr_text, redactor=request.redactor, limit_chars=2000
-                ),
-            )
-            set_span_status_from_outcome(result.status, result.summary)
-
-            return result
         except Exception as exc:
             logger.exception(
                 "Native agent runner failed while collecting artifacts or metadata.",
-                extra={"command": command_text, "exit_code": completed.returncode},
+                extra={
+                    "command": command_text,
+                    "exit_code": completed.returncode if completed else None,
+                },
             )
-            result = NativeAgentRunResult(
+            return _finalize_native_agent_run(
+                request=request,
                 status="error",
                 summary=f"Native agent runner failed while collecting artifacts: {exc}",
-                command=command_text,
-                exit_code=completed.returncode,
-                duration_seconds=elapsed,
+                command_text=command_text,
+                started_at=started_at,
                 timed_out=False,
+                exit_code=completed.returncode if completed else None,
                 stdout=stdout_text,
                 stderr=stderr_text,
             )
-            set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, False)
-            set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, elapsed)
-            set_span_input_output(
-                input_data=None,
-                output_data=redact_and_truncate_output(result.summary, redactor=request.redactor),
-            )
-            set_current_span_attribute(
-                NATIVE_AGENT_STDOUT_ATTRIBUTE,
-                redact_and_truncate_output(
-                    stdout_text, redactor=request.redactor, limit_chars=2000
-                ),
-            )
-            set_current_span_attribute(
-                NATIVE_AGENT_STDERR_ATTRIBUTE,
-                redact_and_truncate_output(
-                    stderr_text, redactor=request.redactor, limit_chars=2000
-                ),
-            )
-            set_span_status_from_outcome(result.status, result.summary)
-            return result
