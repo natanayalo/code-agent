@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, Literal
 
+from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
 
@@ -113,8 +114,9 @@ def format_native_run_summary(result: NativeAgentRunResult) -> str:
     if result.status == "success":
         return base
 
-    # Include stderr for failures to aid classification and debugging
-    return f"{base} {result.stderr}".strip()
+    # Include truncated stderr for failures to aid classification and debugging
+    stderr_preview = truncate_detail_keep_tail(result.stderr, max_characters=500)
+    return f"{base} {stderr_preview}".strip()
 
 
 def _normalize_stream_payload(payload: str | bytes | None) -> str:
@@ -220,14 +222,16 @@ def _stdout_fallback_final_message(stdout_text: str) -> str | None:
         return extracted
 
     # 2. Try finding a JSON block in the search space (could be logs followed by JSON)
-    if "{" in search_space and "}" in search_space:
-        start = search_space.rfind("{")
-        end = search_space.rfind("}")
-        if 0 <= start < end:
-            block = search_space[start : end + 1]
+    # We iterate backwards to find the last valid JSON block that yields a message.
+    pos = search_space.rfind("{")
+    while pos != -1:
+        end_pos = search_space.rfind("}", pos)
+        if end_pos != -1:
+            block = search_space[pos : end_pos + 1]
             extracted = _extract_final_message(block)
             if extracted and extracted != block:
                 return extracted
+        pos = search_space.rfind("{", 0, pos)
 
     # 3. Fallback to raw text (with truncation note if applicable)
     if is_truncated:

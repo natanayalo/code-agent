@@ -1,6 +1,6 @@
 import stat
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -41,7 +41,7 @@ sys.exit(0)
     gemini_bin.chmod(gemini_bin.stat().st_mode | stat.S_IEXEC)
 
     worker = GeminiCliWorker(
-        runtime_adapter=None,  # type: ignore
+        runtime_adapter=MagicMock(env={}, executable="gemini", model="gemini-pro"),
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(_make_container(workspace)),
         # We'll use the real runner but mock the environment to find our fake binary
@@ -100,7 +100,7 @@ sys.exit(1)
     gemini_bin.chmod(gemini_bin.stat().st_mode | stat.S_IEXEC)
 
     worker = GeminiCliWorker(
-        runtime_adapter=None,  # type: ignore
+        runtime_adapter=MagicMock(env={}, executable="gemini", model="gemini-pro"),
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(_make_container(workspace)),
     )
