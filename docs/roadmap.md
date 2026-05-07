@@ -16,6 +16,7 @@ Priority sequence:
 2. Milestone A: TaskSpec and human workflow foundation
 3. Milestone 16: Operator UX and transparency
 4. Milestone 17: Worker profile and runtime leverage
+5. Milestone 17.5: Full E2E stabilization
 
 Planned next phases:
 
@@ -183,6 +184,45 @@ Migration/deprecation plan:
 - phase 5: make Codex/Gemini native-agent default, retain per-worker rollback flags
 - phase 6: isolate OpenRouter as legacy tool-loop mode and keep disabled by default unless explicitly configured
 - phase 7: remove Codex/Gemini operation-selector defaults only after a documented rollback path and retained compatibility tests exist
+
+## Milestone 17.5: Full E2E Stabilization
+
+Goal:
+
+- make end-to-end execution reliable across dashboard, tracing, API, orchestrator, and worker runtime
+
+Non-goals:
+
+- feature expansion beyond stabilization and operator controls
+- autonomy expansion or scout-mode changes
+- infrastructure redesign outside reliability-focused fixes
+
+Deliverables:
+
+- task lifecycle and control-path reliability (cancel, interaction response, resume semantics)
+- API and UI operator controls with integration coverage
+- migration correctness for timeline and interaction-related states
+- observability/tracing clarity for native runtime executions
+- runnable local e2e path with compose/env and runbook verification
+
+Coverage target:
+
+- improve test coverage for every Milestone 17.5 behavior change by adding targeted tests in the relevant layer (`tests/unit`, `tests/integration`, and dashboard Vitest suites where applicable)
+- treat coverage as a release gate for this milestone: no slice is complete without new/updated tests that exercise the changed path
+- meet existing CI coverage gates while raising coverage depth on e2e-critical flows (cancel, interactions, migration parity, tracing, and local e2e wiring)
+
+Task list:
+
+| ID | Priority | Description | Implementation notes | Acceptance criteria | Likely touched files | Risks / dependencies |
+| --- | --- | --- | --- | --- | --- | --- |
+| T-164 | P0 | Repair native runner contracts and output parsing reliability. | Normalize final-message parsing, environment propagation, and summary fallback behavior for native runs. | Native runner and Gemini/Codex native tests pass with deterministic summary and stderr handling. | `workers/native_agent_runner.py`, `workers/gemini_cli_worker.py`, `workers/codex_cli_worker.py`, worker unit tests | Cross-provider output differences can hide regressions without targeted fixtures. |
+| T-165 | P0 | Harden cancellation semantics across queue/execution races. | Ensure cancellation remains terminal/sticky while leases and concurrent completion paths resolve. | Cancelled tasks do not requeue or transition back to running/completed unexpectedly. | `orchestrator/execution.py`, `repositories/sqlalchemy.py`, task execution tests | Concurrency paths are timing-sensitive and require robust coverage. |
+| T-166 | P0 | Harden interaction response state-machine behavior. | Enforce valid transitions and safe resume gating after human responses. | Interaction responses are idempotent/conflict-safe and only resume when policy allows. | `orchestrator/execution.py`, `repositories/sqlalchemy.py`, interaction tests | Clarification and permission flows can diverge without explicit transition guards. |
+| T-167 | P0 | Expand integration coverage for existing cancel/interaction endpoints. | Cover success, not-found, conflict, and idempotent paths for currently shipped endpoints; any endpoint behavior changes are tracked as separate backlog items. | Integration tests validate current endpoint behavior against real service wiring without coupling to new endpoint implementation work. | `tests/integration/test_task_endpoints.py` | Missing coverage can mask regressions in operator workflows. |
+| T-168 | P0 | Align DB migration constraints with task cancellation timeline events. | Add migration updates for `task_cancelled` timeline check constraints and validate upgrade path behavior. | Migrated databases accept `task_cancelled` timeline writes without constraint failures. | `db/migrations/versions/*`, `tests/integration/test_db_migrations.py` | Constraint drift across revisions can break production-upgraded databases. |
+| T-169 | P1 | Stabilize dashboard interaction/cancel UX behavior. | Ensure component typing, response rendering, and action states match API semantics. | Dashboard tests cover interaction response and cancel UX paths without runtime/type regressions. | `dashboard/src/components/*`, `dashboard/src/services/api.ts`, dashboard tests | UI state drift from backend semantics can confuse operators. |
+| T-170 | P1 | Add tracing/observability guardrails for native runs. | Bound trace payload size/noise while preserving actionable runtime metadata and status signals. | Native-run spans remain readable, structured, and policy-safe under heavy output. | `apps/observability.py`, `workers/native_agent_runner.py`, tracing tests | Overly noisy spans reduce debuggability and increase telemetry overhead. |
+| T-171 | P1 | Verify local e2e execution path and runbook/compose alignment. | Tighten local environment defaults, compose wiring checks, and operational runbook guidance. | Local e2e smoke path is reproducible with documented setup and verification steps. | `docker-compose.yml`, `docs/runbook.md`, infra tests/scripts | Environment skew between API/worker/dashboard/tracing can cause false negatives. |
 
 ## Milestone 18: Controlled Autonomy / Scout Mode
 
