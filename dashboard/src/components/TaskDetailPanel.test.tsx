@@ -709,6 +709,28 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByRole('button', { name: 'Resolve' })).toBeDisabled();
   });
 
+  it('disables resolve action for terminal tasks with pending interactions', () => {
+    const task = buildTask({
+      status: TaskStatus.CANCELLED,
+      pending_interactions: [
+        {
+          interaction_id: 'interaction-1',
+          interaction_type: 'clarification',
+          status: 'pending',
+          summary: 'No longer actionable',
+          data: {},
+          response_data: null,
+          created_at: '2026-04-28T00:00:00.000Z',
+          updated_at: '2026-04-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Resolve' })).toBeDisabled();
+  });
+
   it('resets local action errors when selected task changes', async () => {
     vi.mocked(api.cancelTask).mockRejectedValueOnce(new Error('Cancel conflict'));
     const initialTask = buildTask({ task_id: 'task-1', status: TaskStatus.PENDING });

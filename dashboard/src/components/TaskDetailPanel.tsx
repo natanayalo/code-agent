@@ -437,7 +437,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
   };
 
   const handleResolveInteraction = async (interactionId: string) => {
-    if (!task || isSubmittingAction) return;
+    if (!task || isSubmittingAction || isTaskTerminal) return;
     setInteractionError(null);
     setResolvingInteractionId(interactionId);
     try {
@@ -546,7 +546,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                         type="button"
                         className="btn btn-approve"
                         onClick={() => handleResolveInteraction(interaction.interaction_id)}
-                        disabled={isSubmittingAction || loading}
+                        disabled={isSubmittingAction || loading || isTaskTerminal}
                       >
                         {resolvingInteractionId === interaction.interaction_id
                           ? 'Resolving...'
