@@ -25,12 +25,12 @@ DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS = 64 * 1024
 DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS = 1000
 _STDOUT_FALLBACK_TRUNCATION_NOTE = "[stdout truncated for summary]\n"
 _FINAL_MESSAGE_FIELDS: Final = (
+    "error",
     "final_output",
     "summary",
     "message",
     "content",
     "response",
-    "error",
 )
 
 
@@ -105,6 +105,16 @@ class NativeAgentRunResult:
     artifacts: list[ArtifactReference] = field(default_factory=list)
     stdout: str = ""
     stderr: str = ""
+
+
+def format_native_run_summary(result: NativeAgentRunResult) -> str:
+    """Format a human-readable summary from a native agent run result."""
+    base = result.final_message or result.summary
+    if result.status == "success":
+        return base
+
+    # Include stderr for failures to aid classification and debugging
+    return f"{base} {result.stderr}".strip()
 
 
 def _normalize_stream_payload(payload: str | bytes | None) -> str:

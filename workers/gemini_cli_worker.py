@@ -63,6 +63,7 @@ from workers.failure_taxonomy import classify_failure_kind
 from workers.native_agent_runner import (
     NativeAgentRunRequest,
     NativeAgentRunResult,
+    format_native_run_summary,
     run_native_agent,
 )
 from workers.post_run_lint import (
@@ -641,9 +642,7 @@ class GeminiCliWorker(Worker):
         if native_result.timed_out:
             return "timeout"
 
-        summary = (
-            f"{native_result.final_message or native_result.summary} " f"{native_result.stderr}"
-        ).strip()
+        summary = format_native_run_summary(native_result)
 
         classified = classify_failure_kind(
             status=native_result.status,
@@ -719,7 +718,7 @@ class GeminiCliWorker(Worker):
             )
         )
 
-        summary = native_result.final_message or native_result.summary
+        summary = format_native_run_summary(native_result)
         result = WorkerResult(
             status=native_result.status,
             summary=summary,
