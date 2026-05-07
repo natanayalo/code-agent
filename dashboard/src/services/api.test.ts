@@ -522,6 +522,61 @@ describe('api service', () => {
       expect(result).toEqual(mockSnapshot);
     });
 
+    it('cancelTask sends correct POST request', async () => {
+      const mockSnapshot = { task_id: 'task-1', status: 'failed' };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockSnapshot,
+      });
+
+      const result = await api.cancelTask('task-1');
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/tasks/task-1/cancel');
+      expect(options.method).toBe('POST');
+      expect(result).toEqual(mockSnapshot);
+    });
+
+    it('recordInteractionResponse sends correct POST request', async () => {
+      const mockSnapshot = { task_id: 'task-1', status: 'pending' };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockSnapshot,
+      });
+
+      await api.recordInteractionResponse('task-1', 'interaction-1', {
+        status: 'resolved',
+        response_data: { answer: 'yes' },
+      });
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/tasks/task-1/interactions/interaction-1/response');
+      expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual({
+        status: 'resolved',
+        response_data: { answer: 'yes' },
+      });
+    });
+
+    it('cancelTask catch block rethrows error', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(api.cancelTask('task-1')).rejects.toThrow('Network fail');
+    });
+
+    it('recordInteractionResponse catch block rethrows error', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(
+        api.recordInteractionResponse('task-1', 'interaction-1', {
+          status: 'resolved',
+          response_data: {},
+        })
+      ).rejects.toThrow('Network fail');
+    });
+
     it('replayTask sends override payload when provided', async () => {
       const mockSnapshot = { task_id: 'new-task', status: 'pending' };
       mockFetch.mockResolvedValueOnce({
@@ -576,6 +631,60 @@ describe('api service', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       mockFetch.mockRejectedValueOnce(new Error('Metrics fail'));
       await expect(api.getMetrics()).rejects.toThrow('Metrics fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('getSystemTools returns array and falls back to [] for non-array payloads', async () => {
+      const toolsPayload = [{ name: 'shell', description: 'Shell tool' }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => toolsPayload,
+      });
+
+      const result = await api.getSystemTools();
+      expect(result).toEqual(toolsPayload);
+      expect(mockFetch.mock.calls[0][0]).toContain('/system/tools');
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({ not: 'array' }),
+      });
+
+      const fallbackResult = await api.getSystemTools();
+      expect(fallbackResult).toEqual([]);
+    });
+
+    it('getSystemTools catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Tools fail'));
+      await expect(api.getSystemTools()).rejects.toThrow('Tools fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('getSandboxStatus sends correct GET request', async () => {
+      const sandboxPayload = { status: 'healthy', retention_enabled: true };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => sandboxPayload,
+      });
+
+      const result = await api.getSandboxStatus();
+      expect(result).toEqual(sandboxPayload);
+      expect(mockFetch.mock.calls[0][0]).toContain('/system/sandbox');
+    });
+
+    it('getSandboxStatus catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Sandbox fail'));
+      await expect(api.getSandboxStatus()).rejects.toThrow('Sandbox fail');
       expect(warnSpy).toHaveBeenCalled();
       warnSpy.mockRestore();
     });

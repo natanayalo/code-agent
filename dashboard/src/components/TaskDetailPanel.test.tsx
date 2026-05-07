@@ -1,8 +1,16 @@
 import React from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskSnapshot, TaskStatus } from '../types/task';
+import { api } from '../services/api';
+
+vi.mock('../services/api', () => ({
+  api: {
+    cancelTask: vi.fn(),
+    recordInteractionResponse: vi.fn(),
+  },
+}));
 
 const baseTask: TaskSnapshot = {
   task_id: 'task-1',
@@ -569,5 +577,197 @@ describe('TaskDetailPanel', () => {
     const row = screen.getByText('Span Status Counts:').closest('li');
     expect(row).not.toBeNull();
     expect(within(row as HTMLElement).getByText('2')).toBeInTheDocument();
+  });
+
+  it('renders and executes interaction resolve action for pending interactions', async () => {
+    const onRefresh = vi.fn();
+    vi.mocked(api.recordInteractionResponse).mockResolvedValue(baseTask);
+    const task = buildTask({
+      pending_interactions: [
+        {
+          interaction_id: 'interaction-1',
+          interaction_type: 'clarification',
+          status: 'pending',
+          summary: 'Need a quick operator answer',
+          data: {},
+          response_data: null,
+          created_at: '2026-04-28T00:00:00.000Z',
+          updated_at: '2026-04-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(
+      <TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} onRefresh={onRefresh} />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve' }));
+
+    await waitFor(() => expect(api.recordInteractionResponse).toHaveBeenCalledTimes(1));
+    expect(api.recordInteractionResponse).toHaveBeenCalledWith(
+      'task-1',
+      'interaction-1',
+      expect.objectContaining({
+        status: 'resolved',
+        response_data: expect.objectContaining({
+          source: 'dashboard_operator',
+          action: 'resolve',
+        }),
+      })
+    );
+    expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it('shows interaction resolve errors and recovers loading state', async () => {
+    vi.mocked(api.recordInteractionResponse).mockRejectedValueOnce(new Error('Conflict: already resolved'));
+    const task = buildTask({
+      pending_interactions: [
+        {
+          interaction_id: 'interaction-1',
+          interaction_type: 'clarification',
+          status: 'pending',
+          summary: 'Need input',
+          data: {},
+          response_data: null,
+          created_at: '2026-04-28T00:00:00.000Z',
+          updated_at: '2026-04-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve' }));
+
+    expect(await screen.findByText('Conflict: already resolved')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Resolve' })).not.toBeDisabled());
+  });
+
+  it('does not render cancel action for terminal tasks and cancels active tasks', async () => {
+    const onRefresh = vi.fn();
+    vi.mocked(api.cancelTask).mockResolvedValue(baseTask);
+    const activeTask = buildTask({ status: TaskStatus.IN_PROGRESS });
+
+    const { rerender } = render(
+      <TaskDetailPanel
+        task={activeTask}
+        loading={false}
+        error={null}
+        onClose={vi.fn()}
+        onRefresh={onRefresh}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Task' }));
+    await waitFor(() => expect(api.cancelTask).toHaveBeenCalledWith('task-1'));
+    expect(onRefresh).toHaveBeenCalled();
+
+    rerender(
+      <TaskDetailPanel
+        task={buildTask({ status: TaskStatus.CANCELLED })}
+        loading={false}
+        error={null}
+        onClose={vi.fn()}
+        onRefresh={onRefresh}
+      />
+    );
+    expect(screen.queryByRole('button', { name: 'Cancel Task' })).not.toBeInTheDocument();
+  });
+
+  it('shows cancel errors and re-enables the cancel action', async () => {
+    vi.mocked(api.cancelTask).mockRejectedValueOnce(new Error('Cancel conflict'));
+    const task = buildTask({ status: TaskStatus.PENDING });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Task' }));
+
+    expect(await screen.findByText('Cancel conflict')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel Task' })).not.toBeDisabled());
+  });
+
+  it('disables action buttons while loading is true', () => {
+    const task = buildTask({
+      status: TaskStatus.IN_PROGRESS,
+      pending_interactions: [
+        {
+          interaction_id: 'interaction-1',
+          interaction_type: 'clarification',
+          status: 'pending',
+          summary: 'Need input',
+          data: {},
+          response_data: null,
+          created_at: '2026-04-28T00:00:00.000Z',
+          updated_at: '2026-04-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(<TaskDetailPanel task={task} loading={true} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Cancel Task' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Resolve' })).toBeDisabled();
+  });
+
+  it('disables resolve action for terminal tasks with pending interactions', () => {
+    const task = buildTask({
+      status: TaskStatus.CANCELLED,
+      pending_interactions: [
+        {
+          interaction_id: 'interaction-1',
+          interaction_type: 'clarification',
+          status: 'pending',
+          summary: 'No longer actionable',
+          data: {},
+          response_data: null,
+          created_at: '2026-04-28T00:00:00.000Z',
+          updated_at: '2026-04-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Resolve' })).toBeDisabled();
+  });
+
+  it('resets local action errors when selected task changes', async () => {
+    vi.mocked(api.cancelTask).mockRejectedValueOnce(new Error('Cancel conflict'));
+    const initialTask = buildTask({ task_id: 'task-1', status: TaskStatus.PENDING });
+
+    const { rerender } = render(
+      <TaskDetailPanel task={initialTask} loading={false} error={null} onClose={vi.fn()} />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Task' }));
+    expect(await screen.findByText('Cancel conflict')).toBeInTheDocument();
+
+    rerender(
+      <TaskDetailPanel
+        task={buildTask({ task_id: 'task-2', status: TaskStatus.PENDING })}
+        loading={false}
+        error={null}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText('Cancel conflict')).not.toBeInTheDocument();
+  });
+
+  it('clears local action errors when panel is closed and reopened for the same task', async () => {
+    vi.mocked(api.cancelTask).mockRejectedValueOnce(new Error('Cancel conflict'));
+    const task = buildTask({ task_id: 'task-1', status: TaskStatus.PENDING });
+
+    const { rerender } = render(
+      <TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Task' }));
+    expect(await screen.findByText('Cancel conflict')).toBeInTheDocument();
+
+    rerender(<TaskDetailPanel task={null} loading={false} error={null} onClose={vi.fn()} />);
+    rerender(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.queryByText('Cancel conflict')).not.toBeInTheDocument();
   });
 });

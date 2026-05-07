@@ -1,8 +1,14 @@
 import React from 'react';
 import { X } from 'lucide-react';
-import { TaskSnapshot, VerifierOutcomeItem, VerifierOutcomeSnapshot } from '../types/task';
+import {
+  TaskSnapshot,
+  TaskStatus,
+  VerifierOutcomeItem,
+  VerifierOutcomeSnapshot,
+} from '../types/task';
 import { TaskApprovalSection } from './TaskApprovalSection';
 import { formatLabel } from '../utils/formatters';
+import { api } from '../services/api';
 
 interface TaskDetailPanelProps {
   task: TaskSnapshot | null;
@@ -157,6 +163,14 @@ function computeRunDuration(startedAt: string | null | undefined, finishedAt: st
   }
   const elapsedSeconds = Math.max(0, (finishedTimestamp - startedTimestamp) / 1000);
   return formatDuration(elapsedSeconds);
+}
+
+function isTerminalTaskStatus(status: string | null | undefined): boolean {
+  return (
+    status === TaskStatus.COMPLETED ||
+    status === TaskStatus.FAILED ||
+    status === TaskStatus.CANCELLED
+  );
 }
 
 function parseHttpUrl(value: string): URL | null {
@@ -352,6 +366,10 @@ function extractTraceObservability(task: TaskSnapshot | null): TraceObservabilit
 }
 
 export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: TaskDetailPanelProps) {
+  const [isCancelling, setIsCancelling] = React.useState(false);
+  const [cancelError, setCancelError] = React.useState<string | null>(null);
+  const [interactionError, setInteractionError] = React.useState<string | null>(null);
+  const [resolvingInteractionId, setResolvingInteractionId] = React.useState<string | null>(null);
   const run = task?.latest_run ?? null;
   const runCommands = React.useMemo(() => run?.commands_run ?? [], [run]);
   const changedFiles = React.useMemo(() => run?.files_changed ?? [], [run]);
@@ -389,10 +407,56 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
     traceObservability.traceIds.length > 0 ||
     traceObservability.providerLinks.length > 0 ||
     traceObservability.spanStatusCounts.length > 0;
+  const hasPendingInteractions = Boolean(task?.pending_interactions?.length);
+  const isTaskTerminal = isTerminalTaskStatus(task?.status);
+  const isSubmittingAction = isCancelling || resolvingInteractionId !== null;
+
+  React.useEffect(() => {
+    setIsCancelling(false);
+    setCancelError(null);
+    setInteractionError(null);
+    setResolvingInteractionId(null);
+  }, [task?.task_id]);
 
   if (!task && !loading && !error) {
     return null;
   }
+
+  const handleCancelTask = async () => {
+    if (!task || isSubmittingAction || isTaskTerminal) return;
+    setCancelError(null);
+    setIsCancelling(true);
+    try {
+      await api.cancelTask(task.task_id);
+      onRefresh?.();
+    } catch (cancelTaskError) {
+      setCancelError(cancelTaskError instanceof Error ? cancelTaskError.message : 'Failed to cancel task.');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const handleResolveInteraction = async (interactionId: string) => {
+    if (!task || isSubmittingAction || isTaskTerminal) return;
+    setInteractionError(null);
+    setResolvingInteractionId(interactionId);
+    try {
+      await api.recordInteractionResponse(task.task_id, interactionId, {
+        status: 'resolved',
+        response_data: {
+          source: 'dashboard_operator',
+          action: 'resolve',
+        },
+      });
+      onRefresh?.();
+    } catch (resolveError) {
+      setInteractionError(
+        resolveError instanceof Error ? resolveError.message : 'Failed to resolve interaction.'
+      );
+    } finally {
+      setResolvingInteractionId(null);
+    }
+  };
 
   return (
     <aside className="glass-panel task-detail-panel">
@@ -403,6 +467,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
           className="icon-button"
           title="Close Panel"
           aria-label="Close task detail"
+          disabled={isSubmittingAction}
         >
           <X size={20} />
         </button>
@@ -422,6 +487,19 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
           <p className="task-detail-meta">
             Status: <strong>{formatLabel(task.status)}</strong>
           </p>
+          {!isTaskTerminal ? (
+            <div className="task-detail-actions">
+              <button
+                type="button"
+                className="btn btn-reject"
+                onClick={handleCancelTask}
+                disabled={isSubmittingAction || loading}
+              >
+                {isCancelling ? 'Cancelling...' : 'Cancel Task'}
+              </button>
+            </div>
+          ) : null}
+          {cancelError ? <p className="task-detail-error">{cancelError}</p> : null}
 
           <TaskApprovalSection task={task} onRefresh={onRefresh} className="task-detail-approval" />
 
@@ -463,12 +541,27 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                       {interaction.summary}
                     </p>
                     <p className="task-detail-muted">Status: {formatLabel(interaction.status)}</p>
+                    <div className="task-interaction-actions">
+                      <button
+                        type="button"
+                        className="btn btn-approve"
+                        onClick={() => handleResolveInteraction(interaction.interaction_id)}
+                        disabled={isSubmittingAction || loading || isTaskTerminal}
+                      >
+                        {resolvingInteractionId === interaction.interaction_id
+                          ? 'Resolving...'
+                          : 'Resolve'}
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
             ) : (
               <p className="task-detail-muted">No pending interactions.</p>
             )}
+            {hasPendingInteractions && interactionError ? (
+              <p className="task-detail-error">{interactionError}</p>
+            ) : null}
           </section>
 
           <section className="task-detail-section">
