@@ -324,7 +324,8 @@ def test_task_repository_cancel_is_atomic_and_terminal(session_factory) -> None:
         )
 
         # First cancellation
-        cancelled = task_repo.cancel(task_id=task.id)
+        cancelled, was_cancelled = task_repo.cancel(task_id=task.id)
+        assert was_cancelled is True
         assert cancelled.status is TaskStatus.FAILED
         assert cancelled.last_error == "Task cancelled by operator."
 
@@ -340,7 +341,8 @@ def test_task_repository_cancel_is_atomic_and_terminal(session_factory) -> None:
         cancelled.last_error = None
         session.flush()
 
-        re_cancelled = task_repo.cancel(task_id=task.id)
+        re_cancelled, re_was_cancelled = task_repo.cancel(task_id=task.id)
+        assert re_was_cancelled is False
         assert re_cancelled.status is TaskStatus.COMPLETED
         assert re_cancelled.last_error is None
 

@@ -625,16 +625,19 @@ class TaskRepository:
         self.session.flush()
         return task
 
-    def cancel(self, *, task_id: str) -> Task | None:
-        """Mark a task as terminally cancelled and clear queue lease state."""
+    def cancel(self, *, task_id: str) -> tuple[Task | None, bool]:
+        """Mark a task as terminally cancelled and clear queue lease state.
+
+        Returns (task, was_cancelled).
+        """
         task = self.get(task_id)
         if task is None:
-            return None
+            return None, False
 
         # Enforce that only non-terminal tasks can be transitioned
         terminal_statuses = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
         if task.status in terminal_statuses:
-            return task
+            return task, False
 
         # Terminate any active lease
         task.lease_owner = None
@@ -656,7 +659,7 @@ class TaskRepository:
         )
 
         self.session.flush()
-        return task
+        return task, True
 
     def record_attempt_error(
         self,

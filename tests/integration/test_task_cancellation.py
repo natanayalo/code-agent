@@ -137,7 +137,16 @@ def test_cancel_in_progress_task_aborts_execution(client: TestClient, session_fa
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(task_id)
         events = [e.event_type for e in task.timeline_events]
-        assert TimelineEventType.TASK_CANCELLED in events
+        assert events.count(TimelineEventType.TASK_CANCELLED) == 1
+
+    # Call cancel again and verify no duplicate event
+    cancel_response = client.post(f"/tasks/{task_id}/cancel")
+    assert cancel_response.status_code == 200
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(task_id)
+        events = [e.event_type for e in task.timeline_events]
+        assert events.count(TimelineEventType.TASK_CANCELLED) == 1
 
 
 def test_cancel_terminal_task_is_ignored(client: TestClient, session_factory):

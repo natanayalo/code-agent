@@ -2304,19 +2304,20 @@ class TaskExecutionService:
             task_repo = TaskRepository(session)
             timeline_repo = TaskTimelineRepository(session)
 
-            task = task_repo.cancel(task_id=task_id)
+            task, was_cancelled = task_repo.cancel(task_id=task_id)
             if task is None:
                 return None
 
-            timeline_repo.create(
-                task_id=task_id,
-                attempt_number=task.attempt_count,
-                sequence_number=timeline_repo.count_by_attempt(
-                    task_id=task_id, attempt_number=task.attempt_count
-                ),
-                event_type=TimelineEventType.TASK_CANCELLED,
-                message="Task was cancelled by operator.",
-            )
+            if was_cancelled:
+                timeline_repo.create(
+                    task_id=task_id,
+                    attempt_number=task.attempt_count,
+                    sequence_number=timeline_repo.count_by_attempt(
+                        task_id=task_id, attempt_number=task.attempt_count
+                    ),
+                    event_type=TimelineEventType.TASK_CANCELLED,
+                    message="Task was cancelled by operator.",
+                )
         return self.get_task(task_id)
 
     def get_operational_metrics(self, window_hours: int | None = 24) -> OperationalMetrics:
