@@ -50,6 +50,7 @@ Granular tasks for the active and upcoming milestones:
 ### Milestone 17: Native Agent Worker Runtime Profiles
 
 ### Milestone 17.5: Full E2E Stabilization
+- Milestone target: increase test coverage across all e2e-critical slices (T-164 to T-171) with explicit unit/integration/dashboard tests for each changed behavior, while meeting existing CI coverage gates.
 - [ ] T-164: native runner contract repair
 - [ ] T-165: cancellation semantics hardening
 - [ ] T-166: interaction response state machine hardening

@@ -205,6 +205,12 @@ Deliverables:
 - observability/tracing clarity for native runtime executions
 - runnable local e2e path with compose/env and runbook verification
 
+Coverage target:
+
+- improve test coverage for every Milestone 17.5 behavior change by adding targeted tests in the relevant layer (`tests/unit`, `tests/integration`, and dashboard Vitest suites where applicable)
+- treat coverage as a release gate for this milestone: no slice is complete without new/updated tests that exercise the changed path
+- meet existing CI coverage gates while raising coverage depth on e2e-critical flows (cancel, interactions, migration parity, tracing, and local e2e wiring)
+
 Task list:
 
 | ID | Priority | Description | Implementation notes | Acceptance criteria | Likely touched files | Risks / dependencies |
