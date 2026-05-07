@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from apps.observability import NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
+
 if TYPE_CHECKING:
     from workers.native_agent_models import NativeAgentRunResult
 
@@ -77,8 +79,6 @@ def format_native_run_summary(
     result: NativeAgentRunResult, *, max_characters: int | None = None
 ) -> str:
     """Format a human-readable summary from a native agent run result."""
-    from apps.observability import NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
-
     limit = max_characters or NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
     base = result.final_message or result.summary
     if result.status == "success":
