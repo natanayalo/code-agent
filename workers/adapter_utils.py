@@ -85,5 +85,13 @@ def format_native_run_summary(
         return base
 
     # Include truncated stderr for failures to aid classification and debugging
-    stderr_preview = truncate_detail_keep_tail(result.stderr, max_characters=limit)
-    return f"{base} {stderr_preview}".strip()
+    detail = (result.stderr or "").strip()
+    if not detail:
+        return base
+
+    preview = truncate_detail_keep_tail(detail, max_characters=limit)
+    # Avoid appending if the diagnostic content is already part of the base summary
+    if preview in base:
+        return base
+
+    return f"{base} {preview}".strip()
