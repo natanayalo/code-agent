@@ -1131,7 +1131,22 @@ def _route_after_generate_task_spec(state_input: OrchestratorState) -> str:
     if policy_errors:
         return "summarize_result"
     if state.task_spec is not None and state.task_spec.requires_clarification:
-        return "await_clarification"
+        # Preserve legacy flow: unresolved clarification gates halt with a summarized
+        # response. If the exact clarification interaction was already resolved,
+        # continue execution on subsequent attempts.
+        questions = state.task_spec.clarification_questions or []
+        summary = "Task requires clarification before execution can continue."
+        data = {
+            "source": "task_spec",
+            "resume_token": f"clarification-{state.task.task_id}",
+            "questions": questions,
+        }
+        content_hash = compute_interaction_content_hash("clarification", summary, data)
+        interactions = state.task.constraints.get("interactions") or {}
+        resolved = interactions.get(content_hash)
+        if resolved and resolved.get("status") == "resolved":
+            return "load_memory"
+        return "summarize_result"
     return "load_memory"
 
 
@@ -2020,6 +2035,18 @@ def await_permission(state_input: OrchestratorState) -> dict[str, Any]:
     if state.task_spec is None or not state.task_spec.requires_permission:
         return {"current_step": "await_permission"}
 
+    # Trusted pre-approval (API/orchestrator) also satisfies this gate.
+    if _is_already_approved(state):
+        return {"current_step": "await_permission"}
+
+    # Avoid double-gating destructive tasks: the dedicated approval checkpoint
+    # persists pending state and powers API approval/resume semantics.
+    task_text = state.normalized_task_text or state.task.task_text
+    if state.task.constraints.get("requires_approval") is True or is_destructive_task(
+        task_text, state.task.constraints
+    ):
+        return {"current_step": "await_permission"}
+
     reason = (
         state.task_spec.permission_reason
         or "Task requires explicit permission before execution can continue."
@@ -2043,7 +2070,6 @@ def await_permission(state_input: OrchestratorState) -> dict[str, Any]:
         }
 
     # Otherwise, interrupt for operator input.
-    task_text = state.normalized_task_text or state.task.task_text
     interrupt(
         {
             "type": "permission",
