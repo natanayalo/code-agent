@@ -1615,14 +1615,7 @@ class TaskExecutionService:
                                     "Task execution aborted: task was cancelled",
                                     extra={"task_id": task_id},
                                 )
-                                # We don't need to persist outcome here as cancel_task handled it,
-                                # but we do need to release the terminal state properly.
-                                await self._run_blocking(
-                                    self._release_task_terminal_failure,
-                                    task_id=task_id,
-                                    worker_id=worker_id,
-                                    status=TaskStatus.FAILED,
-                                )
+                                # We don't need to persist outcome here as cancel_task handled it.
                                 return None
                             else:
                                 logger.warning(
