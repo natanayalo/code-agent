@@ -43,6 +43,7 @@ from tools import (
     UnknownToolError,
     granted_permission_from_constraints,
 )
+from workers.adapter_utils import format_native_run_summary
 from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import (
     ArtifactReference,
@@ -61,10 +62,9 @@ from workers.cli_runtime import (
     settings_from_budget,
 )
 from workers.failure_taxonomy import classify_failure_kind
+from workers.native_agent_models import NativeAgentRunResult
 from workers.native_agent_runner import (
     NativeAgentRunRequest,
-    NativeAgentRunResult,
-    format_native_run_summary,
     run_native_agent,
 )
 from workers.post_run_lint import (

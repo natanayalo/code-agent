@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from workers.native_agent_models import NativeAgentRunResult
+
 
 def coerce_positive_int(value: object, *, default: int) -> int:
     """Parse a positive integer override or fall back to the default."""
@@ -66,3 +71,19 @@ def truncate_detail_keep_head(text: str, *, max_characters: int) -> str:
     if len(stripped) <= max_characters:
         return stripped
     return f"{stripped[:max_characters]}...[truncated]"
+
+
+def format_native_run_summary(
+    result: NativeAgentRunResult, *, max_characters: int | None = None
+) -> str:
+    """Format a human-readable summary from a native agent run result."""
+    from apps.observability import NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
+
+    limit = max_characters or NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
+    base = result.final_message or result.summary
+    if result.status == "success":
+        return base
+
+    # Include truncated stderr for failures to aid classification and debugging
+    stderr_preview = truncate_detail_keep_tail(result.stderr, max_characters=limit)
+    return f"{base} {stderr_preview}".strip()

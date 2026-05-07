@@ -8,17 +8,20 @@ import shlex
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal
 
 from apps.observability import (
+    DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS,
+    DEFAULT_FINAL_MESSAGE_READ_BUFFER,
     NATIVE_AGENT_COMMAND_ATTRIBUTE,
     NATIVE_AGENT_DURATION_ATTRIBUTE,
     NATIVE_AGENT_EXIT_CODE_ATTRIBUTE,
     NATIVE_AGENT_STDERR_ATTRIBUTE,
     NATIVE_AGENT_STDOUT_ATTRIBUTE,
     NATIVE_AGENT_TIMED_OUT_ATTRIBUTE,
+    NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH,
     SPAN_KIND_AGENT,
     set_current_span_attribute,
     set_span_input_output,
@@ -27,9 +30,9 @@ from apps.observability import (
     with_span_kind,
 )
 from sandbox.redact import SecretRedactor, redact_and_truncate_output, sanitize_command
-from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
+from workers.native_agent_models import NativeAgentRunResult
 
 logger = logging.getLogger(__name__)
 _JSON_DECODER = json.JSONDecoder()
@@ -38,11 +41,8 @@ DEFAULT_NATIVE_AGENT_TIMEOUT_SECONDS = 600
 DEFAULT_NATIVE_AGENT_DIFF_TIMEOUT_SECONDS = 15
 DEFAULT_NATIVE_AGENT_CHANGED_FILES_TIMEOUT_SECONDS = 10
 DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR = ".code-agent/native-agent-runner"
-DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS = 64 * 1024
 DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS = 1000
 _STDOUT_FALLBACK_TRUNCATION_NOTE = "[stdout truncated for summary]\n"
-NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH: Final[int] = 2000
-DEFAULT_FINAL_MESSAGE_READ_BUFFER: Final[int] = DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS + 1
 _FINAL_MESSAGE_FIELDS: Final = (
     "error",
     "final_output",
@@ -107,37 +107,6 @@ class NativeAgentRunRequest:
     collect_diff: bool = True
     collect_changed_files: bool = True
     redactor: SecretRedactor | None = None
-
-
-@dataclass
-class NativeAgentRunResult:
-    """Structured output from one native-agent CLI execution."""
-
-    status: Literal["success", "failure", "error"]
-    summary: str
-    command: str
-    exit_code: int | None
-    duration_seconds: float
-    timed_out: bool
-    final_message: str | None = None
-    diff_text: str | None = None
-    files_changed: list[str] = field(default_factory=list)
-    artifacts: list[ArtifactReference] = field(default_factory=list)
-    stdout: str = ""
-    stderr: str = ""
-
-
-def format_native_run_summary(result: NativeAgentRunResult) -> str:
-    """Format a human-readable summary from a native agent run result."""
-    base = result.final_message or result.summary
-    if result.status == "success":
-        return base
-
-    # Include truncated stderr for failures to aid classification and debugging
-    stderr_preview = truncate_detail_keep_tail(
-        result.stderr, max_characters=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
-    )
-    return f"{base} {stderr_preview}".strip()
 
 
 def _normalize_stream_payload(payload: str | bytes | None) -> str:
