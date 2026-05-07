@@ -296,9 +296,10 @@ def _finalize_native_agent_run(
     )
 
     # Standardized Tracing Metadata
+    redacted_summary = redact_and_truncate_output(summary, redactor=request.redactor)
     set_span_input_output(
         input_data=None,  # Input data is recorded at the start of run_native_agent span
-        output_data=redact_and_truncate_output(summary, redactor=request.redactor),
+        output_data=redacted_summary,
     )
     set_current_span_attribute(NATIVE_AGENT_EXIT_CODE_ATTRIBUTE, result.exit_code)
     set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, timed_out)
@@ -315,7 +316,7 @@ def _finalize_native_agent_run(
             stderr, redactor=request.redactor, limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
         ),
     )
-    set_span_status_from_outcome(result.status, result.summary)
+    set_span_status_from_outcome(result.status, redacted_summary)
 
     return result
 
