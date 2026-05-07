@@ -24,7 +24,32 @@ DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR = ".code-agent/native-agent-runner"
 DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS = 64 * 1024
 DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS = 1000
 _STDOUT_FALLBACK_TRUNCATION_NOTE = "[stdout truncated for summary]\n"
-_FINAL_MESSAGE_FIELDS = ("final_output", "summary", "message", "content")
+_FINAL_MESSAGE_FIELDS = ("final_output", "summary", "message", "content", "response")
+
+
+def _extract_final_message(raw_text: str) -> str | None:
+    """Extract a meaningful final message from raw text or JSON."""
+    candidate = raw_text.strip()
+    if not candidate:
+        return None
+
+    try:
+        payload = json.loads(candidate)
+    except json.JSONDecodeError:
+        return candidate
+
+    if isinstance(payload, str):
+        value = payload.strip()
+        return value or None
+
+    if isinstance(payload, dict):
+        for field_name in _FINAL_MESSAGE_FIELDS:
+            raw_value = payload.get(field_name)
+            if isinstance(raw_value, str):
+                normalized = raw_value.strip()
+                if normalized:
+                    return normalized
+    return candidate
 
 
 @dataclass(frozen=True)
@@ -72,6 +97,7 @@ def _normalize_stream_payload(payload: str | bytes | None) -> str:
 
 
 def _read_final_message(path: Path) -> str | None:
+    """Read and parse the final message from a file."""
     if not path.exists():
         return None
     with path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -80,26 +106,11 @@ def _read_final_message(path: Path) -> str | None:
     raw_text = raw_payload[:DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS].strip()
     if not raw_text:
         return None
-    try:
-        payload = json.loads(raw_text)
-    except json.JSONDecodeError:
-        if truncated:
-            return f"{raw_text}\n\n[final message truncated for safety]"
-        return raw_text
 
-    if isinstance(payload, str):
-        value = payload.strip()
-        return value or None
-    if isinstance(payload, dict):
-        for field_name in _FINAL_MESSAGE_FIELDS:
-            raw_value = payload.get(field_name)
-            if isinstance(raw_value, str):
-                normalized = raw_value.strip()
-                if normalized:
-                    return normalized
-    if truncated:
-        return f"{raw_text}\n\n[final message truncated for safety]"
-    return raw_text
+    extracted = _extract_final_message(raw_text)
+    if extracted and truncated:
+        return f"{extracted}\n\n[final message truncated for safety]"
+    return extracted
 
 
 def _write_artifact(
@@ -164,11 +175,19 @@ def _collect_diff_text(*, repo_path: Path, timeout_seconds: int) -> str | None:
 
 
 def _stdout_fallback_final_message(stdout_text: str) -> str | None:
+    """Extract final message from stdout tail, with JSON support."""
     candidate = stdout_text.strip()
     if not candidate:
         return None
+
+    # Try parsing the whole thing first if it's small, or the last block
+    extracted = _extract_final_message(candidate)
+    if extracted and extracted != candidate:
+        return extracted
+
     if len(candidate) <= DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS:
-        return candidate
+        return extracted or candidate
+
     tail = candidate[-DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS:]
     return f"{_STDOUT_FALLBACK_TRUNCATION_NOTE}{tail}"
 

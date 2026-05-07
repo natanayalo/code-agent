@@ -28,7 +28,7 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 3. Call out the main risk and the smallest safe scope.
 4. Implement the narrowest working slice.
 5. Add or update tests in the same slice.
-6. Run the minimal checks and tests that cover the changed behavior, including `pre-commit`, `pytest`, or `npm run test` with coverage on the changed files. Once these pass, run the full test suite (pytest or npm run test:run) to ensure no regressions. If a command needs approval or is blocked, request approval or report the blocker clearly.
+6. Run layered verification for the changed behavior: changed-file lint/type checks, targeted unit tests, required integration tests, and required e2e smoke checks for touched critical paths. After targeted checks pass, run the broader suite (`pytest` or `npm run test:run`) before publishing. Use repo-standard entrypoints (for Python prefer `.venv/bin/...`). If a command needs approval or is blocked, request approval or report the blocker clearly.
 7. Create or switch to a focused task branch before publishing work. Prefer `task/<task-id>-<short-slug>` when a task ID exists; otherwise use `task/<short-slug>`.
 8. Update `docs/status.md` before wrapping up:
    - move a finished task slice out of `Next` or `In Progress`
@@ -37,6 +37,39 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 9. Stage only the task files, create a specific commit, push the branch, and create a Pull Request (PR) by default once checks pass; skip publish steps only if the user explicitly asks not to publish. Use `gh pr create` with a descriptive title and body.
 10. Update `README.md` or other nearby instructions when local workflow, verification, or CI/CD behavior changes.
 11. Call out any manual external follow-up that cannot be enforced from repo code, then summarize what changed, what was verified, what was deferred, and provide the PR link.
+
+## Critical-Path Test Matrix (Required)
+
+- If you touch `workers/`, `orchestrator/`, `repositories/`, or task-control API routes such as `apps/api/routes/tasks.py`:
+  - add or update unit tests for changed logic
+  - add or update integration tests for the changed behavior and state transitions
+  - run a focused e2e smoke (`tests/integration/test_vertical_slice_e2e.py` or equivalent) that covers the affected operator flow
+- If you touch `db/migrations/` or timeline/state constraints:
+  - add or update migration integration tests (upgrade path plus write-path assertions)
+  - add or update integration coverage for the affected orchestrator/repository behavior
+- If you touch dashboard operator controls under `dashboard/src/`:
+  - add or update component tests
+  - add or update service/API contract coverage
+  - add one interaction-state smoke test for the changed control path
+
+## Regression-First Rule
+
+- For bug fixes and regressions, add or update a failing test (or capture a clear failing diagnostic) before implementing the fix when practical.
+- If you cannot write a failing test first, explain why and still add the strongest regression test immediately after the fix.
+
+## Coverage Guardrails
+
+- Do not treat global 100% line coverage as the main quality gate.
+- For critical-path slices, require high changed-line coverage (target `>=95%`) plus tests for all newly introduced branches in changed critical functions.
+- Do not publish if a known critical-path behavior is untested unless the risk is explicitly documented in the PR summary with follow-up ownership.
+
+## Basic Use-Case Checklist (Critical-Path PRs)
+
+- Task creation succeeds and enters the expected state.
+- Human interaction request/response flow works and resumes correctly.
+- Cancellation works for queued and running tasks with terminal semantics.
+- Final status and timeline events remain consistent with API responses.
+- Dashboard state and tracing data reflect the run outcome without contradictions.
 
 ## Scope guardrails
 

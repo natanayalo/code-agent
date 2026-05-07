@@ -278,11 +278,28 @@ Must have:
 - integration tests for orchestrator flow
 - integration tests for sandbox runner
 - one e2e happy path
+- regression coverage for every critical-path bug fix
+
+Critical-path test gate:
+- Changes under `workers/`, `orchestrator/`, `repositories/`, or task-control API routes (for example `apps/api/routes/tasks.py`) must include:
+  - targeted unit coverage for changed logic
+  - integration coverage for changed state/API behavior
+  - a focused e2e smoke covering the affected operator flow
+- Changes under `db/migrations/` or timeline/state constraints must include migration-path integration coverage (upgrade plus write assertions).
+- Changes to dashboard operator controls must include component coverage, API/service contract coverage, and an interaction-state smoke test.
+
+Coverage expectations:
+- Do not optimize for blanket 100% global line coverage.
+- For critical-path slices, changed-line coverage target is `>=95%`.
+- New branches in changed critical functions must be exercised by tests.
+- If a critical-path behavior remains untested, do not merge without explicit documented risk acceptance and follow-up ownership.
 
 Before merging:
 - run unit + integration tests
+- run required critical-path e2e smoke checks for touched areas
 - run formatter/linter
 - verify at least one happy path manually if behavior changed
+- include the exact verification commands and outcomes in the PR description
 
 ## Priorities
 

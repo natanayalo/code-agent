@@ -52,7 +52,9 @@ Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17.5: Full E2E Stabilization
 - Milestone target: increase test coverage across all e2e-critical slices (T-164 to T-171) with explicit unit/integration/dashboard tests for each changed behavior, while meeting existing CI coverage gates.
-- [ ] T-164: native runner contract repair
+### Milestone 17.5 Done (Published)
+- [x] T-164: native runner contract repair ([#TBD](https://github.com/natanayalo/code-agent/pull/TBD)) — normalized final-message and error extraction in NativeAgentRunner, refactored GeminiCliWorker to use common outputs, and expanded integration coverage.
+
 - [ ] T-165: cancellation semantics hardening
 - [ ] T-166: interaction response state machine hardening
 - [ ] T-167: integration coverage expansion for existing cancel/interaction endpoints

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from collections.abc import Callable
@@ -635,53 +634,6 @@ class GeminiCliWorker(Worker):
             return "inspect_worker_configuration"
         return "inspect_workspace_artifacts"
 
-    def _native_error_detail(self, native_result: NativeAgentRunResult) -> str | None:
-        """Extract the structured Gemini error payload when present."""
-        stdout_text = native_result.stdout.strip()
-        if not stdout_text:
-            return None
-        try:
-            payload = json.loads(stdout_text)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(payload, dict):
-            return None
-
-        error_payload = payload.get("error")
-        if not isinstance(error_payload, dict):
-            return None
-
-        error_type = error_payload.get("type")
-        error_message = error_payload.get("message")
-        if isinstance(error_type, str) and isinstance(error_message, str):
-            return f"{error_type}: {error_message}"
-        if isinstance(error_message, str):
-            return error_message
-        if isinstance(error_type, str):
-            return error_type
-        return None
-
-    def _native_final_message(self, native_result: NativeAgentRunResult) -> str | None:
-        """Extract the best final message from Gemini JSON output or runner fallback."""
-        stdout_text = native_result.stdout.strip()
-        if stdout_text:
-            try:
-                payload = json.loads(stdout_text)
-            except json.JSONDecodeError:
-                payload = None
-            if isinstance(payload, dict):
-                response = payload.get("response")
-                if isinstance(response, str):
-                    normalized_response = response.strip()
-                    if normalized_response:
-                        return normalized_response
-
-        if native_result.final_message is not None:
-            normalized = native_result.final_message.strip()
-            if normalized:
-                return normalized
-        return None
-
     def _native_failure_kind(self, native_result: NativeAgentRunResult) -> FailureKind | None:
         """Classify failure kind for native-agent outcomes."""
         if native_result.status == "success":
@@ -689,11 +641,7 @@ class GeminiCliWorker(Worker):
         if native_result.timed_out:
             return "timeout"
 
-        detail = self._native_error_detail(native_result)
-        summary = native_result.summary
-        if detail:
-            summary = f"{summary} {detail}"
-        summary = f"{summary} {native_result.stderr}".strip()
+        summary = f"{native_result.summary} {native_result.stderr}".strip()
 
         classified = classify_failure_kind(
             status=native_result.status,
@@ -769,11 +717,7 @@ class GeminiCliWorker(Worker):
             )
         )
 
-        detail = self._native_error_detail(native_result)
-        final_message = self._native_final_message(native_result)
-        summary = final_message or native_result.summary
-        if detail and native_result.status != "success":
-            summary = f"{summary} {detail}"
+        summary = native_result.final_message or native_result.summary
         result = WorkerResult(
             status=native_result.status,
             summary=summary,
