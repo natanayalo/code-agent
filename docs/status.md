@@ -6,6 +6,7 @@ Phase 1: clarity and control.
 
 Active focus:
 
+- Milestone 17.5 (full e2e stabilization across dashboard, API, tracing, and worker runtime)
 - Milestone 17 (native agent worker runtime profiles)
 - migration planning for Codex/Gemini native-agent execution
 - preserving TaskSpec, HumanInteraction, dashboard, and verification governance around worker autonomy
@@ -38,15 +39,25 @@ Active focus:
 
 ## Next Priorities
 
-1. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
-2. continue tightening native-agent observability and verifier acceptance policy after T-160 rollout
-3. prepare bounded-scout lane planning after Milestone 17 stabilization
+1. stabilize full e2e path for dashboard, tracing, API, orchestrator, and worker runtime (Milestone 17.5 / T-164 to T-171)
+2. add PR-native delivery fields and GitHub branch/draft-PR integration after native worker delivery is stable
+3. prepare bounded-scout lane planning after Milestone 17.5 stabilization
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17: Native Agent Worker Runtime Profiles
+
+### Milestone 17.5: Full E2E Stabilization
+- [ ] T-164: native runner contract repair
+- [ ] T-165: cancellation semantics hardening
+- [ ] T-166: interaction response state machine hardening
+- [ ] T-167: cancel/interaction endpoint integration coverage
+- [ ] T-168: migration parity for task_cancelled timeline event
+- [ ] T-169: dashboard interaction/cancel UX stabilization
+- [ ] T-170: tracing/observability guardrails for native runs
+- [ ] T-171: local e2e runbook + compose/env verification
 
 ### Milestone 17 Done (Published)
 - [x] T-163: add brain-driven retry/escalation and verifier-acceptance hints as first-class, clamp-governed controls in the orchestration graph ([#170](https://github.com/natanayalo/code-agent/pull/170)) — added explicit brain hint contracts, deterministic route/verification clamps, and timeline-visible rationale for applied vs ignored hints.
