@@ -60,9 +60,9 @@ Granular tasks for the active and upcoming milestones:
 
 - [x] T-167: integration coverage expansion for existing cancel/interaction endpoints — added comprehensive integration tests for cancellation atomicity, terminality, and interaction cleanup.
 - [x] T-168: migration parity for task_cancelled timeline event — implemented migration for the new event type and verified upgrade path/constraint integrity.
-- [ ] T-169: dashboard interaction/cancel UX stabilization
 - [ ] T-170: tracing/observability guardrails for native runs
 - [ ] T-171: local e2e runbook + compose/env verification
+- [x] T-169: dashboard interaction/cancel UX stabilization ([#175](https://github.com/natanayalo/code-agent/pull/175)) — added task-detail interaction resolve/cancel operator controls with resilient API/error handling and dashboard test coverage.
 
 ### Milestone 17 Done (Published)
 - [x] T-163: add brain-driven retry/escalation and verifier-acceptance hints as first-class, clamp-governed controls in the orchestration graph ([#170](https://github.com/natanayalo/code-agent/pull/170)) — added explicit brain hint contracts, deterministic route/verification clamps, and timeline-visible rationale for applied vs ignored hints.
