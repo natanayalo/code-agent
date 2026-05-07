@@ -735,11 +735,38 @@ class HumanInteractionRepository:
             statement = statement.where(HumanInteraction.status.in_(statuses))
         return list(self.session.scalars(statement))
 
-    def sync_task_spec_flags(
+    def record_response(
         self,
+        interaction_id: str,
         *,
         task_id: str,
-        task_spec: Mapping[str, Any],
+        response_data: Mapping[str, Any],
+        status: HumanInteractionStatus = HumanInteractionStatus.RESOLVED,
+    ) -> tuple[HumanInteraction | None, bool]:
+        """Apply an idempotent response to a pending human interaction.
+
+        Returns (interaction, applied).
+        - If interaction is not found, returns (None, False).
+        - If interaction exists but task_id mismatches, returns (None, False).
+        - If interaction is already terminal, returns (interaction, False) because
+          no new state transition is persisted.
+        """
+        interaction = self.session.get(HumanInteraction, interaction_id)
+        if interaction is None or interaction.task_id != task_id:
+            return None, False
+
+        # Idempotency check: if already terminal
+        if interaction.status != HumanInteractionStatus.PENDING:
+            return interaction, False
+
+        interaction.status = status
+        interaction.response_data = dict(response_data)
+        interaction.updated_at = utc_now()
+        self.session.flush()
+        return interaction, True
+
+    def sync_task_spec_flags(
+        self, *, task_id: str, task_spec: dict[str, Any]
     ) -> list[HumanInteraction]:
         """Map TaskSpec clarification/permission flags into pending interaction rows."""
         desired: dict[HumanInteractionType, tuple[str, dict[str, Any]]] = {}
@@ -1381,6 +1408,38 @@ class TaskTimelineRepository:
             )
             or 0
         )
+
+    def create_next_for_attempt(
+        self,
+        *,
+        task_id: str,
+        attempt_number: int,
+        event_type: str | TimelineEventType,
+        message: str | None = None,
+        payload: dict[str, Any] | None = None,
+        created_at: datetime | None = None,
+        max_retries: int = 3,
+    ) -> TaskTimelineEvent:
+        """Create the next sequence event for an attempt with bounded retry on conflicts."""
+        tries = 0
+        while True:
+            sequence_number = self.count_by_attempt(task_id=task_id, attempt_number=attempt_number)
+            try:
+                with self.session.begin_nested():
+                    event = self.create(
+                        task_id=task_id,
+                        attempt_number=attempt_number,
+                        sequence_number=sequence_number,
+                        event_type=event_type,
+                        message=message,
+                        payload=payload,
+                        created_at=created_at,
+                    )
+                return event
+            except IntegrityError:
+                tries += 1
+                if tries >= max_retries:
+                    raise
 
     def create_batch(
         self,

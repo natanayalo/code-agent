@@ -56,6 +56,7 @@ from db.base import utc_now
 from db.enums import (
     ArtifactType,
     HumanInteractionStatus,
+    HumanInteractionType,
     TaskStatus,
     TimelineEventType,
     WorkerRunStatus,
@@ -69,7 +70,12 @@ from db.models import (
 from orchestrator.brain import OrchestratorBrain
 from orchestrator.checkpoints import create_async_sqlite_checkpointer
 from orchestrator.graph import build_orchestrator_graph
-from orchestrator.state import OrchestratorState, SessionRef, TaskSpec
+from orchestrator.state import (
+    OrchestratorState,
+    SessionRef,
+    TaskSpec,
+    compute_interaction_content_hash,
+)
 from orchestrator.task_spec import build_task_spec
 from repositories import (
     ArtifactRepository,
@@ -141,6 +147,13 @@ class ExecutionModel(BaseModel):
     """Base model for task-execution service payloads."""
 
     model_config = ConfigDict(extra="forbid")
+
+
+class InteractionResponse(ExecutionModel):
+    """Payload for submitting a response to a human interaction."""
+
+    response_data: dict[str, Any]
+    status: HumanInteractionStatus = HumanInteractionStatus.RESOLVED
 
 
 class SubmissionSession(ExecutionModel):
@@ -2187,6 +2200,85 @@ class TaskExecutionService:
             updated_at=memory.updated_at,
         )
 
+    def record_interaction_response(
+        self,
+        task_id: str,
+        interaction_id: str,
+        response: InteractionResponse,
+    ) -> TaskSnapshot | None:
+        """Apply an operator response to a pending interaction and trigger task resumption."""
+        with session_scope(self.session_factory) as session:
+            task_repo = TaskRepository(session)
+            interaction_repo = HumanInteractionRepository(session)
+            timeline_repo = TaskTimelineRepository(session)
+
+            task = task_repo.get(task_id)
+            if not task:
+                return None
+
+            interaction, applied = interaction_repo.record_response(
+                interaction_id=interaction_id,
+                task_id=task_id,
+                response_data=response.response_data,
+                status=response.status,
+            )
+            if interaction is None:
+                return None
+
+            if applied and interaction.status == HumanInteractionStatus.RESOLVED:
+                # 1. Update task constraints with the resolved interaction signal.
+                content_hash = compute_interaction_content_hash(
+                    interaction.interaction_type,
+                    interaction.summary,
+                    interaction.data,
+                )
+                constraints = dict(task.constraints or {})
+                interactions = dict(constraints.get("interactions") or {})
+                interactions[content_hash] = {
+                    "status": "resolved",
+                    "response_data": response.response_data,
+                    "interaction_id": interaction.id,
+                    "interaction_type": interaction.interaction_type,
+                }
+                constraints["interactions"] = interactions
+
+                # 2. Unified Approval Satisfaction: if this was a permission grant,
+                # also satisfy the legacy approval gate to avoid double-pausing.
+                if interaction.interaction_type == HumanInteractionType.PERMISSION:
+                    constraints["requires_approval"] = False
+                    constraints["approval"] = {
+                        "status": "approved",
+                        "source": "orchestrator",
+                        "reason": f"Permission granted via interaction {interaction.id}",
+                        "granted_at": utc_now().isoformat(),
+                    }
+
+                task.constraints = constraints
+
+                # 3. Reset next_attempt_at to trigger immediate worker pick-up.
+                task.next_attempt_at = utc_now()
+                task.status = TaskStatus.PENDING
+
+                # 4. Emit timeline event.
+                event_type = (
+                    TimelineEventType.APPROVAL_GRANTED
+                    if interaction.interaction_type == HumanInteractionType.PERMISSION
+                    else TimelineEventType.TASK_SPEC_GENERATED
+                )
+                timeline_repo.create_next_for_attempt(
+                    task_id=task_id,
+                    attempt_number=task.attempt_count,
+                    event_type=event_type,
+                    message=f"Interaction '{interaction.interaction_type}' resolved by operator.",
+                    payload={
+                        "interaction_id": interaction.id,
+                        "response_data": response.response_data,
+                    },
+                )
+
+            session.flush()
+            return self.get_task(task_id)
+
     def apply_task_approval_decision(
         self,
         *,
@@ -2302,12 +2394,9 @@ class TaskExecutionService:
                 return None
 
             if was_cancelled:
-                timeline_repo.create(
+                timeline_repo.create_next_for_attempt(
                     task_id=task_id,
                     attempt_number=task.attempt_count,
-                    sequence_number=timeline_repo.count_by_attempt(
-                        task_id=task_id, attempt_number=task.attempt_count
-                    ),
                     event_type=TimelineEventType.TASK_CANCELLED,
                     message="Task was cancelled by operator.",
                 )

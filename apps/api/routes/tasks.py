@@ -13,6 +13,7 @@ from apps.observability import (
 )
 from db.enums import TaskStatus
 from orchestrator.execution import (
+    InteractionResponse,
     TaskApprovalDecision,
     TaskExecutionService,
     TaskReplayRequest,
@@ -162,3 +163,24 @@ def replay_task(
             detail="Replay task was created but the snapshot could not be reloaded.",
         )
     return result.task_snapshot
+
+
+@router.post("/{task_id}/interactions/{interaction_id}/response", response_model=TaskSnapshot)
+def record_interaction_response(
+    task_id: str,
+    interaction_id: str,
+    payload: InteractionResponse,
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> TaskSnapshot:
+    """Submit a response to a pending human interaction."""
+    snapshot = task_service.record_interaction_response(
+        task_id=task_id,
+        interaction_id=interaction_id,
+        response=payload,
+    )
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Interaction '{interaction_id}' for task '{task_id}' was not found.",
+        )
+    return snapshot
