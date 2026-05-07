@@ -274,6 +274,28 @@ def _stdout_fallback_final_message(stdout_text: str) -> str | None:
     return extracted or search_space
 
 
+def _record_span_data(
+    *,
+    input_data: str | None = None,
+    output_data: str | None = None,
+    redactor: SecretRedactor | None = None,
+) -> None:
+    """Standardized recording of span input/output with redaction and truncation."""
+    # Use consistent truncation limit for span attributes to prevent oversized payloads.
+    limit = NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
+    redacted_input = (
+        redact_and_truncate_output(input_data, redactor=redactor, limit_chars=limit)
+        if input_data is not None
+        else None
+    )
+    redacted_output = (
+        redact_and_truncate_output(output_data, redactor=redactor, limit_chars=limit)
+        if output_data is not None
+        else None
+    )
+    set_span_input_output(input_data=redacted_input, output_data=redacted_output)
+
+
 def _finalize_native_agent_run(
     request: NativeAgentRunRequest,
     *,
@@ -308,12 +330,10 @@ def _finalize_native_agent_run(
     )
 
     # Standardized Tracing Metadata
-    redacted_summary = redact_and_truncate_output(
-        format_native_run_summary(result), redactor=request.redactor
-    )
-    set_span_input_output(
-        input_data=None,  # Input data is recorded at the start of run_native_agent span
-        output_data=redacted_summary,
+    run_summary = format_native_run_summary(result)
+    _record_span_data(
+        output_data=run_summary,
+        redactor=request.redactor,
     )
     if result.exit_code is not None:
         set_current_span_attribute(NATIVE_AGENT_EXIT_CODE_ATTRIBUTE, result.exit_code)
@@ -331,7 +351,11 @@ def _finalize_native_agent_run(
             stderr, redactor=request.redactor, limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
         ),
     )
-    set_span_status_from_outcome(result.status, redacted_summary)
+
+    redacted_status_summary = redact_and_truncate_output(
+        run_summary, redactor=request.redactor, limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
+    )
+    set_span_status_from_outcome(result.status, redacted_status_summary)
 
     return result
 
@@ -369,8 +393,9 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
         span_name="native_agent_run",
         attributes=with_span_kind(SPAN_KIND_AGENT),
     ):
-        set_span_input_output(
-            input_data=redact_and_truncate_output(request.prompt, redactor=request.redactor),
+        _record_span_data(
+            input_data=request.prompt,
+            redactor=request.redactor,
         )
         set_current_span_attribute(
             NATIVE_AGENT_COMMAND_ATTRIBUTE, sanitize_command(command_text, request.redactor)
@@ -506,7 +531,8 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 files_changed=files_changed,
                 artifacts=artifacts,
             )
-        except Exception as exc:
+        except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as exc:
+            logger.debug("Native agent runner artifact collection failed: %s", exc)
             logger.exception(
                 "Native agent runner failed while collecting artifacts or metadata.",
                 extra={
