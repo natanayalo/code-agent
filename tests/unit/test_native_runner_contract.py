@@ -66,6 +66,11 @@ def test_stdout_fallback_final_message_json():
     assert _stdout_fallback_final_message(stdout) == "Extracted from stdout"
 
 
+def test_stdout_fallback_final_message_json_in_tail():
+    stdout = "Some logs here\n" + json.dumps({"response": "Extracted from tail"})
+    assert _stdout_fallback_final_message(stdout) == "Extracted from tail"
+
+
 def test_stdout_fallback_final_message_plain():
     stdout = "Plain text output"
     assert _stdout_fallback_final_message(stdout) == "Plain text output"

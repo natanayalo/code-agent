@@ -194,21 +194,35 @@ def _collect_diff_text(*, repo_path: Path, timeout_seconds: int) -> str | None:
 
 
 def _stdout_fallback_final_message(stdout_text: str) -> str | None:
-    """Extract final message from stdout tail, with JSON support."""
+    """Extract final message from stdout tail, prioritizing JSON extraction from the end."""
     candidate = stdout_text.strip()
     if not candidate:
         return None
 
-    # Try parsing the whole thing first if it's small, or the last block
-    extracted = _extract_final_message(candidate)
-    if extracted and extracted != candidate:
+    # Limit search space to avoid parsing giant outputs
+    search_limit = DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS
+    is_truncated = len(candidate) > search_limit
+    search_space = candidate[-search_limit:] if is_truncated else candidate
+
+    # 1. Try parsing the search space as a whole (could be a full JSON response)
+    extracted = _extract_final_message(search_space)
+    if extracted and extracted != search_space:
         return extracted
 
-    if len(candidate) <= DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS:
-        return extracted or candidate
+    # 2. Try finding a JSON block in the search space (could be logs followed by JSON)
+    if "{" in search_space and "}" in search_space:
+        start = search_space.rfind("{")
+        end = search_space.rfind("}")
+        if 0 <= start < end:
+            block = search_space[start : end + 1]
+            extracted = _extract_final_message(block)
+            if extracted and extracted != block:
+                return extracted
 
-    tail = candidate[-DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS:]
-    return f"{_STDOUT_FALLBACK_TRUNCATION_NOTE}{tail}"
+    # 3. Fallback to raw text (with truncation note if applicable)
+    if is_truncated:
+        return f"{_STDOUT_FALLBACK_TRUNCATION_NOTE}{search_space}"
+    return extracted or search_space
 
 
 def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
