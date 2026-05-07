@@ -731,4 +731,21 @@ describe('TaskDetailPanel', () => {
 
     expect(screen.queryByText('Cancel conflict')).not.toBeInTheDocument();
   });
+
+  it('clears local action errors when panel is closed and reopened for the same task', async () => {
+    vi.mocked(api.cancelTask).mockRejectedValueOnce(new Error('Cancel conflict'));
+    const task = buildTask({ task_id: 'task-1', status: TaskStatus.PENDING });
+
+    const { rerender } = render(
+      <TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Task' }));
+    expect(await screen.findByText('Cancel conflict')).toBeInTheDocument();
+
+    rerender(<TaskDetailPanel task={null} loading={false} error={null} onClose={vi.fn()} />);
+    rerender(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.queryByText('Cancel conflict')).not.toBeInTheDocument();
+  });
 });
