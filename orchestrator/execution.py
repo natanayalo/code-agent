@@ -1600,7 +1600,6 @@ class TaskExecutionService:
                         orchestrator_task.cancel()
                         try:
                             await orchestrator_task
-                            state = orchestrator_task.result()
                         except asyncio.CancelledError:
                             # Re-load the task to see why we were cancelled
                             task_snapshot = await self._run_blocking(self.get_task, task_id)
@@ -1633,6 +1632,16 @@ class TaskExecutionService:
                                 # Task was likely stolen or lease expired.
                                 # Do NOT release failure as we no longer own the task.
                                 return None
+
+                        # If await orchestrator_task didn't raise CancelledError, it means the task
+                        # finished before the cancellation took effect. We should still abort
+                        # because the heartbeat failed, and not proceed with the result.
+                        logger.warning(
+                            "Orchestrator task completed despite cancellation request. "
+                            "Aborting due to heartbeat failure.",
+                            extra={"task_id": task_id},
+                        )
+                        return None
 
                     finished_at = utc_now()
                     self._update_span_status_from_state(state)
@@ -2302,7 +2311,7 @@ class TaskExecutionService:
             timeline_repo.create(
                 task_id=task_id,
                 attempt_number=task.attempt_count,
-                sequence_number=TaskTimelineRepository(session).count_by_attempt(
+                sequence_number=timeline_repo.count_by_attempt(
                     task_id=task_id, attempt_number=task.attempt_count
                 ),
                 event_type=TimelineEventType.TASK_CANCELLED,
