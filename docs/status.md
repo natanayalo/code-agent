@@ -54,11 +54,12 @@ Granular tasks for the active and upcoming milestones:
 - Milestone target: increase test coverage across all e2e-critical slices (T-164 to T-171) with explicit unit/integration/dashboard tests for each changed behavior, while meeting existing CI coverage gates.
 ### Milestone 17.5 Done (Published)
 - [x] T-164: native runner contract repair ([#172](https://github.com/natanayalo/code-agent/pull/172)) — normalized final-message and error extraction in NativeAgentRunner, refactored GeminiCliWorker to use common outputs, and expanded integration coverage.
+- [x] T-166: interaction response state machine hardening ([#174](https://github.com/natanayalo/code-agent/pull/174)) — fixed missing imports, corrected graph data structure inconsistencies for hashing, and repaired timeline emission.
 
-- [ ] T-165: cancellation semantics hardening
-- [ ] T-166: interaction response state machine hardening
-- [ ] T-167: integration coverage expansion for existing cancel/interaction endpoints
-- [ ] T-168: migration parity for task_cancelled timeline event
+- [x] T-165: cancellation semantics hardening ([#173](https://github.com/natanayalo/code-agent/pull/173)) — enforced terminal status machine (FAILED for cancelled), added heartbeat-race abort guards, and ensured idempotent TASK_CANCELLED timeline event recording.
+
+- [x] T-167: integration coverage expansion for existing cancel/interaction endpoints — added comprehensive integration tests for cancellation atomicity, terminality, and interaction cleanup.
+- [x] T-168: migration parity for task_cancelled timeline event — implemented migration for the new event type and verified upgrade path/constraint integrity.
 - [ ] T-169: dashboard interaction/cancel UX stabilization
 - [ ] T-170: tracing/observability guardrails for native runs
 - [ ] T-171: local e2e runbook + compose/env verification
