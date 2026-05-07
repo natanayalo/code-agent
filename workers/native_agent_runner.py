@@ -10,8 +10,9 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal
 
+from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
 
@@ -24,7 +25,51 @@ DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR = ".code-agent/native-agent-runner"
 DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS = 64 * 1024
 DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS = 1000
 _STDOUT_FALLBACK_TRUNCATION_NOTE = "[stdout truncated for summary]\n"
-_FINAL_MESSAGE_FIELDS = ("final_output", "summary", "message", "content")
+_FINAL_MESSAGE_FIELDS: Final = (
+    "error",
+    "final_output",
+    "summary",
+    "message",
+    "content",
+    "response",
+)
+
+
+def _extract_final_message(raw_text: str) -> str | None:
+    """Extract a meaningful final message from raw text or JSON."""
+    candidate = raw_text.strip()
+    if not candidate:
+        return None
+
+    try:
+        payload = json.loads(candidate)
+    except json.JSONDecodeError:
+        return candidate
+
+    if isinstance(payload, str):
+        value = payload.strip()
+        return value or None
+
+    if isinstance(payload, dict):
+        for field_name in _FINAL_MESSAGE_FIELDS:
+            raw_value = payload.get(field_name)
+            if isinstance(raw_value, str):
+                normalized = raw_value.strip()
+                if normalized:
+                    return normalized
+
+            # Handle structured error payloads (parity with previous GeminiCliWorker logic)
+            if field_name == "error" and isinstance(raw_value, dict):
+                err_type = raw_value.get("type")
+                err_msg = raw_value.get("message")
+                if isinstance(err_type, str) and isinstance(err_msg, str):
+                    return f"{err_type}: {err_msg}"
+                if isinstance(err_msg, str):
+                    return err_msg
+                if isinstance(err_type, str):
+                    return err_type
+
+    return candidate
 
 
 @dataclass(frozen=True)
@@ -63,6 +108,17 @@ class NativeAgentRunResult:
     stderr: str = ""
 
 
+def format_native_run_summary(result: NativeAgentRunResult) -> str:
+    """Format a human-readable summary from a native agent run result."""
+    base = result.final_message or result.summary
+    if result.status == "success":
+        return base
+
+    # Include truncated stderr for failures to aid classification and debugging
+    stderr_preview = truncate_detail_keep_tail(result.stderr, max_characters=500)
+    return f"{base} {stderr_preview}".strip()
+
+
 def _normalize_stream_payload(payload: str | bytes | None) -> str:
     if payload is None:
         return ""
@@ -72,6 +128,7 @@ def _normalize_stream_payload(payload: str | bytes | None) -> str:
 
 
 def _read_final_message(path: Path) -> str | None:
+    """Read and parse the final message from a file."""
     if not path.exists():
         return None
     with path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -80,26 +137,11 @@ def _read_final_message(path: Path) -> str | None:
     raw_text = raw_payload[:DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS].strip()
     if not raw_text:
         return None
-    try:
-        payload = json.loads(raw_text)
-    except json.JSONDecodeError:
-        if truncated:
-            return f"{raw_text}\n\n[final message truncated for safety]"
-        return raw_text
 
-    if isinstance(payload, str):
-        value = payload.strip()
-        return value or None
-    if isinstance(payload, dict):
-        for field_name in _FINAL_MESSAGE_FIELDS:
-            raw_value = payload.get(field_name)
-            if isinstance(raw_value, str):
-                normalized = raw_value.strip()
-                if normalized:
-                    return normalized
-    if truncated:
-        return f"{raw_text}\n\n[final message truncated for safety]"
-    return raw_text
+    extracted = _extract_final_message(raw_text)
+    if extracted and truncated:
+        return f"{extracted}\n\n[final message truncated for safety]"
+    return extracted
 
 
 def _write_artifact(
@@ -164,13 +206,40 @@ def _collect_diff_text(*, repo_path: Path, timeout_seconds: int) -> str | None:
 
 
 def _stdout_fallback_final_message(stdout_text: str) -> str | None:
+    """Extract final message from stdout tail, prioritizing JSON extraction from the end."""
     candidate = stdout_text.strip()
     if not candidate:
         return None
-    if len(candidate) <= DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS:
-        return candidate
-    tail = candidate[-DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS:]
-    return f"{_STDOUT_FALLBACK_TRUNCATION_NOTE}{tail}"
+
+    # Limit search space to avoid parsing giant outputs
+    search_limit = DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS
+    is_truncated = len(candidate) > search_limit
+    search_space = candidate[-search_limit:] if is_truncated else candidate
+
+    # 1. Try parsing the search space as a whole (could be a full JSON response)
+    extracted = _extract_final_message(search_space)
+    if extracted and extracted != search_space:
+        return extracted
+
+    # 2. Try finding a JSON block in the search space (could be logs followed by JSON)
+    # We iterate backwards and use raw_decode to find the last valid JSON object.
+    decoder = json.JSONDecoder()
+    pos = search_space.rfind("{")
+    while pos != -1:
+        try:
+            _, end_idx = decoder.raw_decode(search_space[pos:])
+            block = search_space[pos : pos + end_idx]
+            extracted = _extract_final_message(block)
+            if extracted and extracted != block:
+                return extracted
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.debug("Failed to decode JSON block at position %d: %s", pos, e)
+        pos = search_space.rfind("{", 0, pos)
+
+    # 3. Fallback to raw text (with truncation note if applicable)
+    if is_truncated:
+        return f"{_STDOUT_FALLBACK_TRUNCATION_NOTE}{search_space}"
+    return extracted or search_space
 
 
 def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:

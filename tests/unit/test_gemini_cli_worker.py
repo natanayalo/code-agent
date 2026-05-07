@@ -620,7 +620,7 @@ def test_gemini_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path)
         exit_code=0,
         duration_seconds=1.4,
         timed_out=False,
-        final_message=None,
+        final_message="Native run complete.",
         diff_text="diff --git a/note.txt b/note.txt",
         files_changed=["note.txt"],
         artifacts=[
