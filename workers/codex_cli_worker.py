@@ -32,6 +32,7 @@ from sandbox import (
     WorkspaceManagerError,
     WorkspaceRequest,
 )
+from sandbox.redact import SecretRedactor
 from sandbox.workspace import _mask_url_credentials, default_workspace_root
 from tools import (
     DEFAULT_TOOL_REGISTRY,
@@ -727,6 +728,7 @@ class CodexCliWorker(Worker):
                 events_path=events_path,
                 collect_diff=True,
                 collect_changed_files=True,
+                redactor=SecretRedactor(list((request.secrets or {}).values())),
             )
         )
 

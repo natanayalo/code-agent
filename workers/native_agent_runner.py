@@ -12,6 +12,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, Literal
 
+from apps.observability import (
+    NATIVE_AGENT_COMMAND_ATTRIBUTE,
+    NATIVE_AGENT_DURATION_ATTRIBUTE,
+    NATIVE_AGENT_EXIT_CODE_ATTRIBUTE,
+    NATIVE_AGENT_STDERR_ATTRIBUTE,
+    NATIVE_AGENT_STDOUT_ATTRIBUTE,
+    NATIVE_AGENT_TIMED_OUT_ATTRIBUTE,
+    SPAN_KIND_AGENT,
+    set_current_span_attribute,
+    set_span_input_output,
+    set_span_status_from_outcome,
+    start_optional_span,
+    with_span_kind,
+)
+from sandbox.redact import SecretRedactor, redact_and_truncate_output, sanitize_command
 from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
@@ -88,6 +103,7 @@ class NativeAgentRunRequest:
     events_path: Path | None = None
     collect_diff: bool = True
     collect_changed_files: bool = True
+    redactor: SecretRedactor | None = None
 
 
 @dataclass
@@ -266,42 +282,145 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
     command_text = shlex.join(request.command)
     started_at = time.perf_counter()
 
-    try:
-        completed = subprocess.run(
-            request.command,
-            input=request.prompt,
-            check=False,
-            capture_output=True,
-            text=True,
-            cwd=repo_path,
-            env=request.env,
-            timeout=request.timeout_seconds,
+    with start_optional_span(
+        tracer_name="workers.native_agent_runner",
+        span_name="native_agent_run",
+        attributes=with_span_kind(SPAN_KIND_AGENT),
+    ):
+        set_span_input_output(
+            input_data=redact_and_truncate_output(request.prompt, redactor=request.redactor),
         )
-        timed_out = False
-    except subprocess.TimeoutExpired as exc:
-        elapsed = time.perf_counter() - started_at
-        stdout_text = _normalize_stream_payload(exc.stdout)
-        stderr_text = _normalize_stream_payload(exc.stderr)
-        artifacts: list[ArtifactReference] = []
+        set_current_span_attribute(
+            NATIVE_AGENT_COMMAND_ATTRIBUTE, sanitize_command(command_text, request.redactor)
+        )
+
         try:
-            artifacts.extend(
-                [
-                    _write_artifact(
-                        artifact_root=artifact_root,
-                        file_name="stdout.txt",
-                        content=stdout_text,
-                        name="native-agent-stdout",
-                        artifact_type="log",
-                    ),
-                    _write_artifact(
-                        artifact_root=artifact_root,
-                        file_name="stderr.txt",
-                        content=stderr_text,
-                        name="native-agent-stderr",
-                        artifact_type="log",
-                    ),
-                ]
+            completed = subprocess.run(
+                request.command,
+                input=request.prompt,
+                check=False,
+                capture_output=True,
+                text=True,
+                cwd=repo_path,
+                env=request.env,
+                timeout=request.timeout_seconds,
             )
+            timed_out = False
+        except subprocess.TimeoutExpired as exc:
+            elapsed = time.perf_counter() - started_at
+            stdout_text = _normalize_stream_payload(exc.stdout)
+            stderr_text = _normalize_stream_payload(exc.stderr)
+            artifacts: list[ArtifactReference] = []
+            try:
+                artifacts.extend(
+                    [
+                        _write_artifact(
+                            artifact_root=artifact_root,
+                            file_name="stdout.txt",
+                            content=stdout_text,
+                            name="native-agent-stdout",
+                            artifact_type="log",
+                        ),
+                        _write_artifact(
+                            artifact_root=artifact_root,
+                            file_name="stderr.txt",
+                            content=stderr_text,
+                            name="native-agent-stderr",
+                            artifact_type="log",
+                        ),
+                    ]
+                )
+                event_artifact = (
+                    _copy_artifact(
+                        artifact_root=artifact_root,
+                        source_path=events_path,
+                        file_name="events.jsonl",
+                        name="native-agent-events",
+                        artifact_type="log",
+                    )
+                    if events_path is not None
+                    else None
+                )
+                if event_artifact is not None:
+                    artifacts.append(event_artifact)
+            except Exception:
+                logger.exception(
+                    "Native agent runner failed while collecting timeout artifacts.",
+                    extra={"command": command_text},
+                )
+
+            result = NativeAgentRunResult(
+                status="error",
+                summary=f"Native agent command timed out after {request.timeout_seconds}s.",
+                command=command_text,
+                exit_code=None,
+                duration_seconds=elapsed,
+                timed_out=True,
+                artifacts=artifacts,
+                stdout=stdout_text,
+                stderr=stderr_text,
+            )
+            set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, True)
+            set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, elapsed)
+            set_span_input_output(
+                input_data=None,
+                output_data=redact_and_truncate_output(result.summary, redactor=request.redactor),
+            )
+            set_current_span_attribute(
+                NATIVE_AGENT_STDOUT_ATTRIBUTE,
+                redact_and_truncate_output(
+                    stdout_text, redactor=request.redactor, limit_chars=2000
+                ),
+            )
+            set_current_span_attribute(
+                NATIVE_AGENT_STDERR_ATTRIBUTE,
+                redact_and_truncate_output(
+                    stderr_text, redactor=request.redactor, limit_chars=2000
+                ),
+            )
+            set_span_status_from_outcome(result.status, result.summary)
+            return result
+        except OSError as exc:
+            elapsed = time.perf_counter() - started_at
+            result = NativeAgentRunResult(
+                status="error",
+                summary=(f"Native agent command could not start `{request.command[0]}`: {exc}"),
+                command=command_text,
+                exit_code=None,
+                duration_seconds=elapsed,
+                timed_out=False,
+            )
+            set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, elapsed)
+            set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, False)
+            set_span_input_output(
+                input_data=None,
+                output_data=redact_and_truncate_output(result.summary, redactor=request.redactor),
+            )
+            set_span_status_from_outcome(result.status, result.summary)
+            return result
+
+        elapsed = time.perf_counter() - started_at
+        timed_out = False
+        stdout_text = completed.stdout or ""
+        stderr_text = completed.stderr or ""
+        try:
+            artifacts = [
+                _write_artifact(
+                    artifact_root=artifact_root,
+                    file_name="stdout.txt",
+                    content=stdout_text,
+                    name="native-agent-stdout",
+                    artifact_type="log",
+                ),
+                _write_artifact(
+                    artifact_root=artifact_root,
+                    file_name="stderr.txt",
+                    content=stderr_text,
+                    name="native-agent-stderr",
+                    artifact_type="log",
+                ),
+            ]
+
             event_artifact = (
                 _copy_artifact(
                     artifact_root=artifact_root,
@@ -315,144 +434,128 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
             )
             if event_artifact is not None:
                 artifacts.append(event_artifact)
-        except Exception:
-            logger.exception(
-                "Native agent runner failed while collecting timeout artifacts.",
-                extra={"command": command_text},
-            )
-        return NativeAgentRunResult(
-            status="error",
-            summary=f"Native agent command timed out after {request.timeout_seconds}s.",
-            command=command_text,
-            exit_code=None,
-            duration_seconds=elapsed,
-            timed_out=True,
-            artifacts=artifacts,
-            stdout=stdout_text,
-            stderr=stderr_text,
-        )
-    except OSError as exc:
-        elapsed = time.perf_counter() - started_at
-        return NativeAgentRunResult(
-            status="error",
-            summary=f"Native agent command could not start `{request.command[0]}`: {exc}",
-            command=command_text,
-            exit_code=None,
-            duration_seconds=elapsed,
-            timed_out=False,
-        )
 
-    elapsed = time.perf_counter() - started_at
-    timed_out = False
-    stdout_text = completed.stdout or ""
-    stderr_text = completed.stderr or ""
-    try:
-        artifacts = [
-            _write_artifact(
-                artifact_root=artifact_root,
-                file_name="stdout.txt",
-                content=stdout_text,
-                name="native-agent-stdout",
-                artifact_type="log",
-            ),
-            _write_artifact(
-                artifact_root=artifact_root,
-                file_name="stderr.txt",
-                content=stderr_text,
-                name="native-agent-stderr",
-                artifact_type="log",
-            ),
-        ]
-
-        event_artifact = (
-            _copy_artifact(
-                artifact_root=artifact_root,
-                source_path=events_path,
-                file_name="events.jsonl",
-                name="native-agent-events",
-                artifact_type="log",
-            )
-            if events_path is not None
-            else None
-        )
-        if event_artifact is not None:
-            artifacts.append(event_artifact)
-
-        final_message_artifact = (
-            _copy_artifact(
-                artifact_root=artifact_root,
-                source_path=final_message_path,
-                file_name="final-message.txt",
-                name="native-agent-final-message",
-                artifact_type="result_summary",
-            )
-            if final_message_path is not None
-            else None
-        )
-        if final_message_artifact is not None:
-            artifacts.append(final_message_artifact)
-
-        final_message = _read_final_message(final_message_path) if final_message_path else None
-        if final_message is None:
-            final_message = _stdout_fallback_final_message(stdout_text)
-
-        files_changed = (
-            collect_changed_files_from_repo_path(
-                repo_path,
-                timeout_seconds=request.changed_files_timeout_seconds,
-            )
-            if request.collect_changed_files
-            else []
-        )
-        diff_text = (
-            _collect_diff_text(repo_path=repo_path, timeout_seconds=request.diff_timeout_seconds)
-            if request.collect_diff
-            else None
-        )
-        if diff_text is not None:
-            artifacts.append(
-                _write_artifact(
+            final_message_artifact = (
+                _copy_artifact(
                     artifact_root=artifact_root,
-                    file_name="diff.patch",
-                    content=diff_text,
-                    name="native-agent-diff",
-                    artifact_type="diff",
+                    source_path=final_message_path,
+                    file_name="final-message.txt",
+                    name="native-agent-final-message",
+                    artifact_type="result_summary",
                 )
+                if final_message_path is not None
+                else None
+            )
+            if final_message_artifact is not None:
+                artifacts.append(final_message_artifact)
+
+            final_message = _read_final_message(final_message_path) if final_message_path else None
+            if final_message is None:
+                final_message = _stdout_fallback_final_message(stdout_text)
+
+            files_changed = (
+                collect_changed_files_from_repo_path(
+                    repo_path,
+                    timeout_seconds=request.changed_files_timeout_seconds,
+                )
+                if request.collect_changed_files
+                else []
+            )
+            diff_text = (
+                _collect_diff_text(
+                    repo_path=repo_path, timeout_seconds=request.diff_timeout_seconds
+                )
+                if request.collect_diff
+                else None
+            )
+            if diff_text is not None:
+                artifacts.append(
+                    _write_artifact(
+                        artifact_root=artifact_root,
+                        file_name="diff.patch",
+                        content=diff_text,
+                        name="native-agent-diff",
+                        artifact_type="diff",
+                    )
+                )
+
+            if completed.returncode == 0:
+                summary = final_message or "Native agent run completed successfully."
+                status: Literal["success", "failure", "error"] = "success"
+            else:
+                summary = f"Native agent command exited with code {completed.returncode}."
+                status = "failure"
+
+            result = NativeAgentRunResult(
+                status=status,
+                summary=summary,
+                command=command_text,
+                exit_code=completed.returncode,
+                duration_seconds=elapsed,
+                timed_out=timed_out,
+                final_message=final_message,
+                diff_text=diff_text,
+                files_changed=files_changed,
+                artifacts=artifacts,
+                stdout=stdout_text,
+                stderr=stderr_text,
             )
 
-        if completed.returncode == 0:
-            summary = final_message or "Native agent run completed successfully."
-            status: Literal["success", "failure", "error"] = "success"
-        else:
-            summary = f"Native agent command exited with code {completed.returncode}."
-            status = "failure"
+            # Standardized Tracing Metadata
+            set_span_input_output(
+                input_data=None,  # Already set
+                output_data=redact_and_truncate_output(summary, redactor=request.redactor),
+            )
+            set_current_span_attribute(NATIVE_AGENT_EXIT_CODE_ATTRIBUTE, result.exit_code)
+            set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, False)
+            set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, elapsed)
+            set_current_span_attribute(
+                NATIVE_AGENT_STDOUT_ATTRIBUTE,
+                redact_and_truncate_output(
+                    stdout_text, redactor=request.redactor, limit_chars=2000
+                ),
+            )
+            set_current_span_attribute(
+                NATIVE_AGENT_STDERR_ATTRIBUTE,
+                redact_and_truncate_output(
+                    stderr_text, redactor=request.redactor, limit_chars=2000
+                ),
+            )
+            set_span_status_from_outcome(result.status, result.summary)
 
-        return NativeAgentRunResult(
-            status=status,
-            summary=summary,
-            command=command_text,
-            exit_code=completed.returncode,
-            duration_seconds=elapsed,
-            timed_out=timed_out,
-            final_message=final_message,
-            diff_text=diff_text,
-            files_changed=files_changed,
-            artifacts=artifacts,
-            stdout=stdout_text,
-            stderr=stderr_text,
-        )
-    except Exception as exc:
-        logger.exception(
-            "Native agent runner failed while collecting artifacts or metadata.",
-            extra={"command": command_text, "exit_code": completed.returncode},
-        )
-        return NativeAgentRunResult(
-            status="error",
-            summary=f"Native agent runner failed while collecting artifacts: {exc}",
-            command=command_text,
-            exit_code=completed.returncode,
-            duration_seconds=elapsed,
-            timed_out=False,
-            stdout=stdout_text,
-            stderr=stderr_text,
-        )
+            return result
+        except Exception as exc:
+            logger.exception(
+                "Native agent runner failed while collecting artifacts or metadata.",
+                extra={"command": command_text, "exit_code": completed.returncode},
+            )
+            result = NativeAgentRunResult(
+                status="error",
+                summary=f"Native agent runner failed while collecting artifacts: {exc}",
+                command=command_text,
+                exit_code=completed.returncode,
+                duration_seconds=elapsed,
+                timed_out=False,
+                stdout=stdout_text,
+                stderr=stderr_text,
+            )
+            set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, False)
+            set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, elapsed)
+            set_span_input_output(
+                input_data=None,
+                output_data=redact_and_truncate_output(result.summary, redactor=request.redactor),
+            )
+            set_current_span_attribute(
+                NATIVE_AGENT_STDOUT_ATTRIBUTE,
+                redact_and_truncate_output(
+                    stdout_text, redactor=request.redactor, limit_chars=2000
+                ),
+            )
+            set_current_span_attribute(
+                NATIVE_AGENT_STDERR_ATTRIBUTE,
+                redact_and_truncate_output(
+                    stderr_text, redactor=request.redactor, limit_chars=2000
+                ),
+            )
+            set_span_status_from_outcome(result.status, result.summary)
+            return result
