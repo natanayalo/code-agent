@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from operator import add
 from typing import Annotated, Any, Literal
@@ -35,8 +37,10 @@ WorkflowStep = Literal[
     "classify_task",
     "plan_task",
     "generate_task_spec",
+    "await_clarification",
     "load_memory",
     "choose_worker",
+    "await_permission",
     "check_approval",
     "await_approval",
     "dispatch_job",
@@ -254,3 +258,16 @@ class OrchestratorState(OrchestratorModel):
     errors: list[str] = Field(default_factory=list)
     attempt_count: int = Field(default=0, ge=0)
     session_state_update: SessionStateUpdate | None = None
+
+
+def compute_interaction_content_hash(
+    interaction_type: str, summary: str, data: dict[str, Any]
+) -> str:
+    """Compute a stable content hash for an interaction requirement."""
+    payload = {
+        "type": str(interaction_type),
+        "summary": summary,
+        "data": data,
+    }
+    content = json.dumps(payload, sort_keys=True).encode()
+    return hashlib.sha256(content).hexdigest()

@@ -735,11 +735,41 @@ class HumanInteractionRepository:
             statement = statement.where(HumanInteraction.status.in_(statuses))
         return list(self.session.scalars(statement))
 
-    def sync_task_spec_flags(
+    def record_response(
         self,
+        interaction_id: str,
         *,
         task_id: str,
-        task_spec: Mapping[str, Any],
+        response_data: Mapping[str, Any],
+        status: HumanInteractionStatus = HumanInteractionStatus.RESOLVED,
+    ) -> tuple[HumanInteraction | None, bool]:
+        """Apply an idempotent response to a pending human interaction.
+
+        Returns (interaction, applied).
+        - If interaction is not found, returns (None, False).
+        - If interaction exists but task_id mismatches, returns (None, False).
+        - If interaction is already terminal, returns (interaction, False) unless
+          the status and response_data match exactly (idempotent success).
+        """
+        interaction = self.session.get(HumanInteraction, interaction_id)
+        if interaction is None or interaction.task_id != task_id:
+            return None, False
+
+        # Idempotency check: if already terminal
+        if interaction.status != HumanInteractionStatus.PENDING:
+            is_identical = interaction.status == status and interaction.response_data == dict(
+                response_data
+            )
+            return interaction, is_identical
+
+        interaction.status = status
+        interaction.response_data = dict(response_data)
+        interaction.updated_at = utc_now()
+        self.session.flush()
+        return interaction, True
+
+    def sync_task_spec_flags(
+        self, *, task_id: str, task_spec: dict[str, Any]
     ) -> list[HumanInteraction]:
         """Map TaskSpec clarification/permission flags into pending interaction rows."""
         desired: dict[HumanInteractionType, tuple[str, dict[str, Any]]] = {}
