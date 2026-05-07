@@ -634,5 +634,59 @@ describe('api service', () => {
       expect(warnSpy).toHaveBeenCalled();
       warnSpy.mockRestore();
     });
+
+    it('getSystemTools returns array and falls back to [] for non-array payloads', async () => {
+      const toolsPayload = [{ name: 'shell', description: 'Shell tool' }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => toolsPayload,
+      });
+
+      const result = await api.getSystemTools();
+      expect(result).toEqual(toolsPayload);
+      expect(mockFetch.mock.calls[0][0]).toContain('/system/tools');
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({ not: 'array' }),
+      });
+
+      const fallbackResult = await api.getSystemTools();
+      expect(fallbackResult).toEqual([]);
+    });
+
+    it('getSystemTools catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Tools fail'));
+      await expect(api.getSystemTools()).rejects.toThrow('Tools fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it('getSandboxStatus sends correct GET request', async () => {
+      const sandboxPayload = { status: 'healthy', retention_enabled: true };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => sandboxPayload,
+      });
+
+      const result = await api.getSandboxStatus();
+      expect(result).toEqual(sandboxPayload);
+      expect(mockFetch.mock.calls[0][0]).toContain('/system/sandbox');
+    });
+
+    it('getSandboxStatus catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Sandbox fail'));
+      await expect(api.getSandboxStatus()).rejects.toThrow('Sandbox fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
   });
 });
