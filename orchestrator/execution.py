@@ -2265,12 +2265,9 @@ class TaskExecutionService:
                     if interaction.interaction_type == HumanInteractionType.PERMISSION
                     else TimelineEventType.TASK_SPEC_GENERATED
                 )
-                timeline_repo.create(
+                timeline_repo.create_next_for_attempt(
                     task_id=task_id,
                     attempt_number=task.attempt_count,
-                    sequence_number=timeline_repo.count_by_attempt(
-                        task_id=task_id, attempt_number=task.attempt_count
-                    ),
                     event_type=event_type,
                     message=f"Interaction '{interaction.interaction_type}' resolved by operator.",
                     payload={
@@ -2397,12 +2394,9 @@ class TaskExecutionService:
                 return None
 
             if was_cancelled:
-                timeline_repo.create(
+                timeline_repo.create_next_for_attempt(
                     task_id=task_id,
                     attempt_number=task.attempt_count,
-                    sequence_number=timeline_repo.count_by_attempt(
-                        task_id=task_id, attempt_number=task.attempt_count
-                    ),
                     event_type=TimelineEventType.TASK_CANCELLED,
                     message="Task was cancelled by operator.",
                 )

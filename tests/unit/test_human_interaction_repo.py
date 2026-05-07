@@ -88,8 +88,8 @@ def test_record_response_idempotency(
     )
     assert updated.id == interaction.id
     assert (
-        applied is True
-    )  # It was already in that state, so we consider it "applied" (idempotent success)
+        applied is False
+    )  # Idempotent terminal replay should not report a newly applied transition.
 
     # Mismatched response
     updated, applied = repo.record_response(

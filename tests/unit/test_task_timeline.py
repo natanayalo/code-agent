@@ -95,6 +95,34 @@ def test_task_relationship_includes_timeline_events(session_factory) -> None:
         assert persisted_task.timeline_events[0].message == "Step 1"
 
 
+def test_create_next_for_attempt_assigns_monotonic_sequence_numbers(session_factory) -> None:
+    """Auto-sequenced timeline inserts should use the next available sequence number."""
+    with session_scope(session_factory) as session:
+        task_repo = TaskRepository(session)
+        timeline_repo = TaskTimelineRepository(session)
+
+        task = task_repo.create(
+            session_id="session-789",
+            task_text="Sequence check",
+        )
+
+        first = timeline_repo.create_next_for_attempt(
+            task_id=task.id,
+            attempt_number=task.attempt_count,
+            event_type=TimelineEventType.TASK_INGESTED,
+            message="First",
+        )
+        second = timeline_repo.create_next_for_attempt(
+            task_id=task.id,
+            attempt_number=task.attempt_count,
+            event_type=TimelineEventType.WORKER_SELECTED,
+            message="Second",
+        )
+
+        assert first.sequence_number == 0
+        assert second.sequence_number == 1
+
+
 def test_timeline_event_type_validation() -> None:
     """Invalid event types should be rejected or coerced if possible."""
     # This is partially handled by the @validates but also by the Enum column
