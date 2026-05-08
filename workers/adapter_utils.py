@@ -105,7 +105,20 @@ def build_failure_summary(
     final_message: str | None = None,
 ) -> str:
     """Construct a unified failure summary from raw output and structured messages."""
-    normalized_summary = (summary or "").strip()
-    if final_message:
-        normalized_summary = f"{final_message.strip()} {normalized_summary}".strip()
-    return normalized_summary
+    base = (summary or "").strip()
+    if not final_message:
+        return base
+
+    msg = final_message.strip()
+    # Avoid duplication if the structured message is already contained in the raw summary
+    # or vice-versa (which can happen if the runtime loop uses the final message as summary).
+    if not msg:
+        return base
+    if not base:
+        return msg
+    if msg in base:
+        return base
+    if base in msg:
+        return msg
+
+    return f"{msg} {base}".strip()

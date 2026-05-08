@@ -21,6 +21,21 @@ def test_build_failure_summary_concatenates_inputs() -> None:
     assert build_failure_summary(summary="base", final_message="   ") == "base"
     assert build_failure_summary(summary=None, final_message=None) == ""
 
+    # Deduplication
+    assert (
+        build_failure_summary(summary="Native run complete.", final_message="Native run complete.")
+        == "Native run complete."
+    )
+    assert (
+        build_failure_summary(
+            summary="Partial summary.", final_message="This is a Partial summary."
+        )
+        == "This is a Partial summary."
+    )
+    assert (
+        build_failure_summary(summary="Final note.txt", final_message="Final") == "Final note.txt"
+    )
+
 
 def test_coerce_positive_int_parses_supported_inputs() -> None:
     """Positive ints should parse from numbers/strings and default otherwise."""
