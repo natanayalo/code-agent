@@ -1211,3 +1211,73 @@ def test_codex_cli_worker_native_mode_honors_read_only_constraint(tmp_path: Path
     command = run_native.call_args.args[0].command
     assert result.status == "success"
     assert command[command.index("--sandbox") + 1] == "read-only"
+
+
+def test_codex_cli_worker_native_sandbox_logic(tmp_path: Path) -> None:
+    """Codex native mode should align sandbox with container status and repo trust."""
+    workspace = _workspace_handle(tmp_path)
+    worker = CodexCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(None),
+        trusted_repo_patterns=[r".*github\.com/trusted/.*"],
+    )
+
+    native_result = NativeAgentRunResult(
+        status="success",
+        summary="Success",
+        command="codex exec",
+        exit_code=0,
+        duration_seconds=0.1,
+        timed_out=False,
+    )
+
+    scenarios = [
+        # (in_container, repo_url, read_only, expected_sandbox)
+        (True, "https://github.com/trusted/repo", False, "danger-full-access"),
+        (True, "https://github.com/untrusted/repo", False, "workspace-write"),
+        (False, "https://github.com/trusted/repo", False, "workspace-write"),
+        (True, "https://github.com/trusted/repo", True, "read-only"),
+    ]
+
+    for in_container, repo_url, read_only, expected_sandbox in scenarios:
+        with (
+            patch("workers.codex_cli_worker.is_in_container", return_value=in_container),
+            patch(
+                "workers.codex_cli_worker.run_native_agent", return_value=native_result
+            ) as run_native,
+        ):
+            result = asyncio.run(
+                worker.run(
+                    WorkerRequest(
+                        task_text="test",
+                        repo_url=repo_url,
+                        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                        constraints={"read_only": read_only},
+                    )
+                )
+            )
+
+            command = run_native.call_args.args[0].command
+            assert command[command.index("--sandbox") + 1] == expected_sandbox
+            assert result.budget_usage["native_agent"]["sandbox_mode"] == expected_sandbox
+            assert result.budget_usage["native_agent"]["in_container"] == in_container
+            assert result.budget_usage["native_agent"]["repo_trusted"] == (
+                repo_url == "https://github.com/trusted/repo"
+            )
+
+
+def test_codex_cli_worker_handles_invalid_trusted_patterns(tmp_path: Path) -> None:
+    """Worker initialization should be resilient to malformed regex patterns."""
+    with patch("workers.codex_cli_worker.logger.warning") as mock_warning:
+        worker = CodexCliWorker(
+            runtime_adapter=_ScriptedAdapter([]),
+            trusted_repo_patterns=["[invalid", "valid.*"],
+        )
+        assert len(worker.trusted_repo_patterns) == 1
+        assert worker.trusted_repo_patterns[0].pattern == "valid.*"
+        # Verify warning was logged for the invalid pattern
+        assert mock_warning.called
+        args = mock_warning.call_args[0]
+        assert "Ignoring invalid trusted repo pattern" in args[0]
+        assert "[invalid" in args[1]
