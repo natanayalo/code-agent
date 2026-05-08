@@ -57,31 +57,22 @@ def normalize_prompt_override(prompt_override: str | None) -> str | None:
 
 def truncate_detail_keep_tail(text: str, *, max_characters: int) -> str:
     """Render bounded text keeping the trailing suffix for context."""
-    if not text:
+    stripped = text.strip()
+    if not stripped:
         return "<empty>"
-
-    # Avoid copying the entire string if it exceeds the limit.
-    if len(text) <= max_characters:
-        stripped = text.strip()
-        return stripped if stripped else "<empty>"
-
-    # Extract the tail first, then strip. This prevents a full copy of a large input string.
-    tail = text[-max_characters:].lstrip()
-    return f"[truncated]...{tail}" if tail else "[truncated]..."
+    if len(stripped) <= max_characters:
+        return stripped
+    return f"[truncated]...{stripped[-max_characters:].lstrip()}"
 
 
 def truncate_detail_keep_head(text: str, *, max_characters: int) -> str:
     """Render bounded text keeping the leading prefix for context."""
-    if not text:
+    stripped = text.strip()
+    if not stripped:
         return "<empty>"
-
-    if len(text) <= max_characters:
-        stripped = text.strip()
-        return stripped if stripped else "<empty>"
-
-    # Extract the head first, then strip. This prevents a full copy of a large input string.
-    head = text[:max_characters].rstrip()
-    return f"{head}...[truncated]" if head else "...[truncated]"
+    if len(stripped) <= max_characters:
+        return stripped
+    return f"{stripped[:max_characters]}...[truncated]"
 
 
 def format_native_run_summary(
