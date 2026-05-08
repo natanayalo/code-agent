@@ -30,6 +30,7 @@ VerificationFailureKind = Literal[
     "scope_mismatch",
     "risky_command",
     "worker_failure",
+    "timeout",
     "unknown",
 ]
 WorkflowStep = Literal[

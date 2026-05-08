@@ -1259,6 +1259,7 @@ class TaskExecutionService:
         worker: Worker,
         gemini_worker: Worker | None = None,
         openrouter_worker: Worker | None = None,
+        shell_worker: Worker | None = None,
         worker_profiles: Mapping[str, WorkerProfile] | None = None,
         enable_worker_profiles: bool = False,
         enable_independent_verifier: bool = False,
@@ -1273,6 +1274,7 @@ class TaskExecutionService:
         self.worker = worker
         self.gemini_worker = gemini_worker
         self.openrouter_worker = openrouter_worker
+        self.shell_worker = shell_worker
         self.worker_profiles = dict(worker_profiles or {})
         self.enable_worker_profiles = enable_worker_profiles
         self.enable_independent_verifier = enable_independent_verifier
@@ -1298,6 +1300,7 @@ class TaskExecutionService:
                 worker=self.worker,
                 gemini_worker=self.gemini_worker,
                 openrouter_worker=self.openrouter_worker,
+                shell_worker=self.shell_worker,
                 worker_profiles=self.worker_profiles,
                 enable_worker_profiles=self.enable_worker_profiles,
                 enable_independent_verifier=self.enable_independent_verifier,

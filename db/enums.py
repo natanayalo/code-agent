@@ -50,6 +50,7 @@ class WorkerRuntimeMode(StrEnum):
     TOOL_LOOP = "tool_loop"
     PLANNER_ONLY = "planner_only"
     REVIEWER_ONLY = "reviewer_only"
+    SHELL = "shell"
 
 
 class WorkerType(StrEnum):
@@ -101,6 +102,7 @@ class TimelineEventType(StrEnum):
     WORKER_ERROR = "worker_error"
     VERIFICATION_STARTED = "verification_started"
     VERIFICATION_COMPLETED = "verification_completed"
+    VERIFICATION_SKIPPED = "verification_skipped"
     TASK_COMPLETED = "task_completed"
     TASK_FAILED = "task_failed"
     TASK_CANCELLED = "task_cancelled"

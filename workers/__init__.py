@@ -30,6 +30,7 @@ from workers.native_agent_runner import (
 from workers.openrouter_adapter import OpenRouterCliRuntimeAdapter
 from workers.openrouter_cli_worker import OpenRouterCliWorker
 from workers.review import ReviewFinding, ReviewResult
+from workers.shell_worker import ShellWorker
 
 __all__ = [
     "ArtifactReference",
@@ -58,5 +59,6 @@ __all__ = [
     "WorkerRuntimeMode",
     "WorkerSelfReviewPolicy",
     "WorkerType",
+    "ShellWorker",
     "run_native_agent",
 ]

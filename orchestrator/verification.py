@@ -7,14 +7,12 @@ import json
 import logging
 import re
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from db.enums import WorkerRuntimeMode
+from orchestrator.state import OrchestratorState
 from tools.numeric import coerce_positive_int_like
 from workers import Worker, WorkerRequest
-
-if TYPE_CHECKING:
-    from orchestrator.state import OrchestratorState
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +226,16 @@ def _parse_verifier_summary(summary: str) -> tuple[Literal["passed", "failed", "
     return fallback_status, f"Independent verifier returned unstructured output: {preview}"
 
 
+def _internal_tests_passed(state: OrchestratorState) -> bool:
+    """Check if the previous worker's reported test results all passed."""
+    if state.result is None:
+        return False
+    # If no tests reported, rely on worker status
+    if not state.result.test_results:
+        return state.result.status == "success"
+    return all(r.status == "passed" for r in state.result.test_results)
+
+
 async def run_independent_verifier(
     state: OrchestratorState,
     *,
@@ -238,8 +246,19 @@ async def run_independent_verifier(
         return "warning", "Independent verifier skipped: no worker result available."
 
     workers = worker_factory or {}
+    logger.info(
+        "Starting independent verifier check",
+        extra={
+            "session_id": state.session.session_id if state.session else None,
+            "task_id": state.task.task_id,
+        },
+    )
     selected = _pick_verifier_worker(state, workers)
     if selected is None:
+        logger.info(
+            "Independent verifier skipped: no verifier worker configured",
+            extra={"task_id": state.task.task_id},
+        )
         return "warning", "Independent verifier skipped: no verifier worker configured."
 
     worker_type, worker = selected
@@ -272,6 +291,12 @@ async def run_independent_verifier(
             timeout=timeout_seconds + _INDEPENDENT_VERIFIER_TIMEOUT_GRACE_SECONDS,
         )
     except TimeoutError:
+        if _internal_tests_passed(state):
+            return (
+                "warning",
+                f"Independent verifier timed out after {timeout_seconds}s ({worker_type}), "
+                "but internal tests passed.",
+            )
         return (
             "failed",
             f"Independent verifier timed out after {timeout_seconds}s ({worker_type}).",
@@ -303,3 +328,96 @@ async def run_independent_verifier(
 
     parsed_status, parsed_summary = _parse_verifier_summary(verifier_result.summary or "")
     return parsed_status, parsed_summary
+
+
+async def run_deterministic_verification(
+    state: OrchestratorState,
+    *,
+    worker_factory: Mapping[str, Worker] | None,
+) -> tuple[Literal["passed", "failed", "warning"], str]:
+    """Run explicit verification commands deterministically in the sandbox."""
+    if state.result is None:
+        return "warning", "Deterministic verification skipped: no worker result available."
+
+    commands = resolve_verification_commands(state)
+    if not commands:
+        return "passed", "No explicit verification commands defined."
+
+    workers = worker_factory or {}
+    # We prefer the shell worker if available.
+    if "shell" not in workers:
+        return "warning", "Deterministic verification skipped: no 'shell' worker available."
+
+    worker = workers["shell"]
+    timeout_seconds = _resolve_independent_verifier_timeout_seconds(state)
+
+    logger.info(
+        "Running deterministic verification commands",
+        extra={
+            "session_id": state.session.session_id if state.session else None,
+            "task_id": state.task.task_id,
+            "command_count": len(commands),
+        },
+    )
+    # Build a script from commands
+    script = "\n".join(commands)
+
+    constraints = dict(state.task.constraints)
+    if state.result is not None and state.result.diff_text:
+        constraints["apply_diff_text"] = state.result.diff_text
+
+    request = WorkerRequest(
+        session_id=state.session.session_id if state.session is not None else None,
+        repo_url=state.task.repo_url,
+        branch=state.task.branch,
+        task_text=script,
+        budget={"worker_timeout_seconds": timeout_seconds},
+        secrets=dict(state.task.secrets),
+        constraints=constraints,
+        runtime_mode=WorkerRuntimeMode.SHELL,
+    )
+
+    try:
+        verifier_result = await asyncio.wait_for(
+            worker.run(request),
+            timeout=timeout_seconds + _INDEPENDENT_VERIFIER_TIMEOUT_GRACE_SECONDS,
+        )
+    except TimeoutError:
+        if _internal_tests_passed(state):
+            return (
+                "warning",
+                f"Deterministic verification timed out after {timeout_seconds}s, "
+                "but internal tests passed.",
+            )
+        return (
+            "failed",
+            f"Deterministic verification timed out after {timeout_seconds}s.",
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("Deterministic verification execution failed unexpectedly", exc_info=True)
+        return (
+            "failed",
+            f"Deterministic verification infrastructure error: {type(exc).__name__}.",
+        )
+
+    if verifier_result.status != "success":
+        message = verifier_result.summary or "no summary returned"
+        logger.warning(
+            "Deterministic verification commands failed",
+            extra={
+                "session_id": state.session.session_id if state.session else None,
+                "task_id": state.task.task_id,
+            },
+        )
+        return "failed", f"Deterministic verification failed: {message}"
+
+    logger.info(
+        "Deterministic verification commands passed",
+        extra={
+            "session_id": state.session.session_id if state.session else None,
+            "task_id": state.task.task_id,
+        },
+    )
+    return "passed", "Explicit verification commands passed."

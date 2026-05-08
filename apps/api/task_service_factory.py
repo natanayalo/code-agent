@@ -29,6 +29,7 @@ from workers import (
     GeminiCliWorker,
     OpenRouterCliRuntimeAdapter,
     OpenRouterCliWorker,
+    ShellWorker,
     WorkerProfile,
     WorkerType,
 )
@@ -298,6 +299,13 @@ def build_task_service_from_env(
         if resolved_sandbox_image
         else DockerSandboxContainerManager()
     )
+
+    workspace_root = resolved_env.get(WORKSPACE_ROOT_ENV_VAR)
+    if workspace_root is None or not workspace_root.strip():
+        resolved_workspace_root = default_workspace_root().resolve()
+    else:
+        resolved_workspace_root = Path(workspace_root).expanduser().resolve()
+
     codex_runtime_mode = _resolve_default_runtime_mode(
         resolved_env.get(CODEX_RUNTIME_MODE_ENV_VAR),
         default=WorkerRuntimeMode.NATIVE_AGENT,
@@ -347,6 +355,10 @@ def build_task_service_from_env(
             runtime_adapter=OpenRouterCliRuntimeAdapter.from_env(resolved_env),
             container_manager=container_manager,
         )
+    shell_worker = ShellWorker(
+        workspace_root=resolved_workspace_root,
+        container_manager=container_manager,
+    )
     enable_worker_profiles = _is_enabled(resolved_env.get(WORKER_PROFILES_ENABLED_ENV_VAR))
     worker_profiles: dict[str, WorkerProfile] | None = None
     if enable_worker_profiles:
@@ -394,16 +406,12 @@ def build_task_service_from_env(
                 ),
             )
         )
-    workspace_root = resolved_env.get(WORKSPACE_ROOT_ENV_VAR)
-    if workspace_root is None or not workspace_root.strip():
-        resolved_workspace_root = default_workspace_root().resolve()
-    else:
-        resolved_workspace_root = Path(workspace_root).expanduser().resolve()
     return TaskExecutionService(
         session_factory=session_factory,
         worker=codex_worker,
         gemini_worker=gemini_worker,
         openrouter_worker=openrouter_worker,
+        shell_worker=shell_worker,
         worker_profiles=worker_profiles,
         enable_worker_profiles=enable_worker_profiles,
         enable_independent_verifier=_is_enabled(

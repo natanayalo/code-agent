@@ -36,7 +36,7 @@ jobs:
         run: poetry run python -c "import pytest_asyncio"
       - name: Run unit pytest with coverage gate
         run: |
-          poetry run pytest tests/unit \
+          poetry run pytest tests/unit tests/workers \
             --cov=apps \
             --cov=db \
             --cov=memory \

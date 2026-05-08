@@ -53,7 +53,11 @@ from orchestrator.task_spec import (
     is_destructive_task,
     validate_task_spec_policy,
 )
-from orchestrator.verification import resolve_verification_commands, run_independent_verifier
+from orchestrator.verification import (
+    resolve_verification_commands,
+    run_deterministic_verification,
+    run_independent_verifier,
+)
 from tools import coerce_permission_level
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
 from workers import ArtifactReference, Worker, WorkerProfile, WorkerRequest, WorkerResult
@@ -700,6 +704,7 @@ def _available_workers(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
+    shell_worker: Worker | None = None,
 ) -> dict[str, Worker]:
     """Return the workers that are actually wired into the graph."""
     result: dict[str, Worker] = {CODEX_WORKER: worker or _DefaultFakeWorker()}
@@ -707,6 +712,8 @@ def _available_workers(
         result[GEMINI_WORKER] = gemini_worker
     if openrouter_worker is not None:
         result[OPENROUTER_WORKER] = openrouter_worker
+    if shell_worker is not None:
+        result["shell"] = shell_worker
     return result
 
 
@@ -1124,8 +1131,7 @@ async def generate_task_spec(
         clarification_summary = "Task paused pending clarification before worker dispatch."
         if clarification_questions:
             clarification_summary = (
-                f"{clarification_summary} Clarification needed: "
-                f"{' '.join(clarification_questions)}"
+                f"{clarification_summary} Clarification needed: {' '.join(clarification_questions)}"
             )
         response["errors"] = [*state.errors, "task_spec_requires_clarification"]
         response["result"] = WorkerResult(
@@ -2254,9 +2260,14 @@ def verify_result(
     state_input: OrchestratorState,
     *,
     enable_independent_verifier: bool = False,
+    deterministic_verifier_outcome: (
+        tuple[Literal["passed", "failed", "warning"], str] | None
+    ) = None,
     independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = None,
     verification_brain_suggestion: VerificationBrainSuggestion | None = None,
     verification_brain_report: VerificationBrainMergeReport | None = None,
+    extra_timeline_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]]
+    | None = None,
 ) -> dict[str, Any]:
     """Perform deterministic checks on the worker output before summarization."""
     state = _ensure_state(state_input)
@@ -2268,31 +2279,64 @@ def verify_result(
 
     items: list[VerificationReportItem] = []
 
-    # 1. Worker Status
-    items.append(
-        VerificationReportItem(
-            label="worker_status",
-            status="passed" if state.result.status == "success" else "failed",
-            message=f"Worker reported status: {state.result.status}",
+    # 1. Immediate deterministic checks on previous worker's result
+    # Worker Status Check
+    if state.result.status == "success":
+        items.append(
+            VerificationReportItem(
+                label="worker_status",
+                status="passed",
+                message="Worker reported success.",
+            )
         )
-    )
-
-    # 2. Test Results
-    failed_tests = [t for t in state.result.test_results if t.status in ("failed", "error")]
-    status: Literal["passed", "failed", "warning"] = "warning"
-    if state.result.test_results:
-        status = "failed" if failed_tests else "passed"
-        msg = f"{len(failed_tests)} failed" if failed_tests else "All tests passed"
     else:
-        status = "warning"
-        msg = "No test results reported"
-    items.append(
-        VerificationReportItem(
-            label="test_results",
-            status=status,
-            message=msg,
+        items.append(
+            VerificationReportItem(
+                label="worker_status",
+                status="failed",
+                message=state.result.summary or "Worker reported failure without summary.",
+            )
         )
-    )
+
+    # Test Results Check
+    if state.result.test_results:
+        failed_tests = [r for r in state.result.test_results if r.status in ("failed", "error")]
+        if failed_tests:
+            failed_names = [r.name for r in failed_tests]
+            items.append(
+                VerificationReportItem(
+                    label="tests",
+                    status="failed",
+                    message=f"Deterministic tests failed: {', '.join(failed_names)}",
+                )
+            )
+        else:
+            items.append(
+                VerificationReportItem(
+                    label="tests",
+                    status="passed",
+                    message=f"{len(state.result.test_results)} tests passed.",
+                )
+            )
+    else:
+        items.append(
+            VerificationReportItem(
+                label="tests",
+                status="warning",
+                message="No test results reported by worker.",
+            )
+        )
+
+    # 2. Deterministic Verification Commands (from run_deterministic_verification)
+    if deterministic_verifier_outcome is not None:
+        status, summary = deterministic_verifier_outcome
+        items.append(
+            VerificationReportItem(
+                label="deterministic_commands",
+                status=status,
+                message=summary,
+            )
+        )
 
     # 3. File Changes
     if state.result.status == "success" and not state.result.files_changed:
@@ -2429,9 +2473,11 @@ def verify_result(
     report_failure_kind: VerificationFailureKind | None = None
     if report_status == "failed":
         failed_labels = {item.label for item in items if item.status == "failed"}
-        if "test_results" in failed_labels:
+        if "tests" in failed_labels:
             report_failure_kind = "test_regression"
         elif "independent_verifier" in failed_labels:
+            report_failure_kind = "test_regression"
+        elif "deterministic_commands" in failed_labels:
             report_failure_kind = "test_regression"
         elif "file_changes" in failed_labels:
             report_failure_kind = "scope_mismatch"
@@ -2488,8 +2534,7 @@ def verify_result(
         ).model_dump()
         repair_handoff_requested = True
         progress_message = (
-            "verification failed; queued bounded repair handoff "
-            f"({used_passes + 1}/{max_passes})"
+            f"verification failed; queued bounded repair handoff ({used_passes + 1}/{max_passes})"
         )
     elif had_verifier_repair_request:
         cleaned_constraints = _cleanup_verifier_repair_handoff_constraints(state.task.constraints)
@@ -2522,6 +2567,7 @@ def verify_result(
         **_timeline_events(
             state,
             (TimelineEventType.VERIFICATION_STARTED, None, None),
+            *(extra_timeline_events or []),
             (
                 TimelineEventType.VERIFICATION_COMPLETED,
                 report.summary,
@@ -2651,24 +2697,84 @@ def build_verify_result_node(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
+    shell_worker: Worker | None = None,
     orchestrator_brain: OrchestratorBrain | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the verification node with optional independent verifier execution."""
 
-    available_workers = _available_workers(worker, gemini_worker, openrouter_worker)
+    available_workers = _available_workers(
+        worker, gemini_worker, openrouter_worker, shell_worker=shell_worker
+    )
 
     async def verify_result_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
+        logger.info(
+            "Entering verify_result_node",
+            extra={
+                "session_id": state.session.session_id if state.session else None,
+                "task_id": state.task.task_id,
+                "attempt": state.attempt_count,
+            },
+        )
+
+        # 1. Immediate deterministic checks (short-circuit if worker already failed)
+        if state.result is None:
+            logger.warning(
+                "Skipping verification node: no worker result available",
+                extra={"task_id": state.task.task_id},
+            )
+            return verify_result(state)
+
+        worker_failed = state.result.status != "success"
+        tests_failed = any(t.status in ("failed", "error") for t in state.result.test_results)
+
+        if worker_failed or tests_failed:
+            logger.info(
+                "Short-circuiting verification due to worker or test failure",
+                extra={
+                    "worker_status": state.result.status,
+                    "failed_tests": len(
+                        [t for t in state.result.test_results if t.status in ("failed", "error")]
+                    ),
+                },
+            )
+            return verify_result(state)
+
+        deterministic_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str]
         independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = (
             None
         )
-        verification_brain_suggestion: VerificationBrainSuggestion | None = None
-        verification_brain_report: VerificationBrainMergeReport | None = None
-        if enable_independent_verifier:
+
+        # 2. Run explicit verification commands deterministically
+        verification_commands = resolve_verification_commands(state)
+        skipped_message: str | None = None
+
+        if not verification_commands:
+            logger.info(
+                "Skipping deterministic verification: no commands provided by TaskSpec",
+                extra={"task_id": state.task.task_id},
+            )
+            skipped_message = "Deterministic verification skipped: no commands provided."
+            deterministic_verifier_outcome = (
+                "passed",
+                "No explicit verification commands defined.",
+            )
+        else:
+            deterministic_verifier_outcome = await run_deterministic_verification(
+                state,
+                worker_factory=available_workers,
+            )
+
+        # 3. Run LLM-based independent verifier if enabled and deterministic checks passed
+        if enable_independent_verifier and deterministic_verifier_outcome[0] != "failed":
             independent_verifier_outcome = await run_independent_verifier(
                 state,
                 worker_factory=available_workers,
             )
+
+        verification_brain_suggestion: VerificationBrainSuggestion | None = None
+        verification_brain_report: VerificationBrainMergeReport | None = None
+
         if orchestrator_brain is not None:
             suggest_verification = getattr(orchestrator_brain, "suggest_verification", None)
             if callable(suggest_verification):
@@ -2700,13 +2806,22 @@ def build_verify_result_node(
                             ),
                             rationale=verification_brain_suggestion.rationale,
                         )
-        return verify_result(
+        # 5. Verify the result
+        extra_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]] = []
+        if skipped_message:
+            extra_events.append((TimelineEventType.VERIFICATION_SKIPPED, skipped_message, None))
+
+        response = verify_result(
             state,
             enable_independent_verifier=enable_independent_verifier,
+            deterministic_verifier_outcome=deterministic_verifier_outcome,
             independent_verifier_outcome=independent_verifier_outcome,
             verification_brain_suggestion=verification_brain_suggestion,
             verification_brain_report=verification_brain_report,
+            extra_timeline_events=extra_events,
         )
+
+        return response
 
     return verify_result_node
 
@@ -2716,6 +2831,7 @@ def build_orchestrator_graph(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
+    shell_worker: Worker | None = None,
     worker_profiles: Mapping[str, WorkerProfile] | None = None,
     enable_worker_profiles: bool = False,
     enable_independent_verifier: bool = False,
