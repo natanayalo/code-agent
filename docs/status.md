@@ -52,6 +52,8 @@ Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17.5: Full E2E Stabilization
 - Milestone target: increase test coverage across all e2e-critical slices (T-164 to T-171) with explicit unit/integration/dashboard tests for each changed behavior, while meeting existing CI coverage gates.
+See [Stabilization Tasks](stabilization_tasks.md) for the full list of tasks.
+
 - [ ] T-174: Implement deterministic-first verification and reclassify infra timeouts
 - [ ] T-175: Add infra-failure (shell crash) detection to NativeAgentRunner
 - [ ] T-176: Standardize Phoenix/OpenInference span attributes and JSON payloads
