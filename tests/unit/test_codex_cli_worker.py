@@ -21,7 +21,7 @@ from sandbox import (
 from tools import DEFAULT_TOOL_REGISTRY, ToolRegistry
 from workers import CodexCliWorker, ReviewResult, WorkerRequest
 from workers.base import ArtifactReference
-from workers.cli_runtime import CliRuntimeMessage, CliRuntimeStep
+from workers.cli_runtime import CliRuntimeMessage, CliRuntimeSettings, CliRuntimeStep
 from workers.native_agent_runner import NativeAgentRunResult
 
 
@@ -1272,7 +1272,7 @@ def test_codex_cli_worker_handles_invalid_trusted_patterns(tmp_path: Path) -> No
     with patch("workers.codex_cli_worker.logger.warning") as mock_warning:
         worker = CodexCliWorker(
             runtime_adapter=_ScriptedAdapter([]),
-            trusted_repo_patterns=["[invalid", "valid.*"],
+            trusted_repo_patterns=["[invalid", "", "  ", "valid.*"],
         )
         assert len(worker.trusted_repo_patterns) == 1
         assert worker.trusted_repo_patterns[0].pattern == "valid.*"
@@ -1280,3 +1280,96 @@ def test_codex_cli_worker_handles_invalid_trusted_patterns(tmp_path: Path) -> No
         assert mock_warning.called
         args = mock_warning.call_args[0]
         assert "Ignoring malformed trusted repository pattern" in args[0]
+
+
+def test_codex_cli_worker_native_overrides_and_failures(tmp_path: Path) -> None:
+    """Native execution should respect model/profile overrides and handle failures."""
+    workspace = _workspace_handle(tmp_path)
+    adapter = _ScriptedAdapter([])
+    adapter.model = "gpt-4o"
+    adapter.profile = "fast"
+
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(None),
+    )
+
+    # 1. Test model/profile propagation
+    with patch("workers.codex_cli_worker.run_native_agent") as run_native:
+        run_native.return_value = NativeAgentRunResult(
+            status="success",
+            summary="ok",
+            command="codex",
+            exit_code=0,
+            duration_seconds=1,
+            timed_out=False,
+        )
+        asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    task_text="test", repo_url="url", runtime_mode=WorkerRuntimeMode.NATIVE_AGENT
+                )
+            )
+        )
+        command = run_native.call_args.args[0].command
+        assert "--model" in command
+        assert "gpt-4o" in command
+        assert "--profile" in command
+        assert "fast" in command
+
+    # 2. Test timeout handling
+    with patch("workers.codex_cli_worker.run_native_agent") as run_native:
+        run_native.return_value = NativeAgentRunResult(
+            status="failure",
+            summary="timeout",
+            command="codex",
+            exit_code=1,
+            duration_seconds=1,
+            timed_out=True,
+        )
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    task_text="test", repo_url="url", runtime_mode=WorkerRuntimeMode.NATIVE_AGENT
+                )
+            )
+        )
+        assert result.status == "failure"
+        assert result.failure_kind == "timeout"
+        assert result.next_action_hint == "increase_budget_or_reduce_scope"
+
+    # 3. Test generic error handling
+    with patch("workers.codex_cli_worker.run_native_agent") as run_native:
+        run_native.return_value = NativeAgentRunResult(
+            status="error",
+            summary="boom",
+            command="codex",
+            exit_code=1,
+            duration_seconds=1,
+            timed_out=False,
+        )
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    task_text="test", repo_url="url", runtime_mode=WorkerRuntimeMode.NATIVE_AGENT
+                )
+            )
+        )
+        assert result.status == "error"
+        assert result.next_action_hint == "inspect_worker_configuration"
+
+    # 4. Test pre-execution cancellation
+    with patch("workers.codex_cli_worker.run_native_agent") as run_native:
+        # We call _execute_native_runtime directly to test the cancellation branch
+        worker_result = worker._execute_native_runtime(
+            WorkerRequest(task_text="test", repo_url="url"),
+            workspace=workspace,
+            runtime_settings=CliRuntimeSettings(),
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            system_prompt_override="test",
+            cancel_token=lambda: True,
+        )
+        assert worker_result.status == "error"
+        assert worker_result.failure_kind == "timeout"
+        assert not run_native.called
