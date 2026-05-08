@@ -116,9 +116,9 @@ def build_available_tools_section(
     )
     tools = resolved_client.list_tool_definitions()
     if not tools:
-        return "## Tools\n- No tools configured."
+        return "## Available Tools\n- No tools configured."
     tool_sections = [_render_tool_definition(tool) for tool in tools]
-    return "\n".join(["## Tools", *tool_sections])
+    return "\n".join(["## Available Tools", *tool_sections])
 
 
 def _extract_available_tool_names_from_system_prompt(system_prompt: str | None) -> set[str] | None:
@@ -293,7 +293,17 @@ def build_runtime_adapter_tool_guidance_lines(
 
 def _render_tool_definition(tool: ToolDefinition) -> str:
     """Render one tool definition for prompt injection."""
-    return f"- `{tool.name}`: {tool.description}"
+    expected_artifacts = (
+        ", ".join(f"`{artifact.value}`" for artifact in tool.expected_artifacts)
+        if tool.expected_artifacts
+        else None
+    )
+    lines = [f"### `{tool.name}`", tool.description]
+    if tool.required_permission.value != "none":
+        lines.append(f"Required permission: `{tool.required_permission.value}`")
+    if expected_artifacts:
+        lines.append(f"Expected artifacts: {expected_artifacts}")
+    return "\n".join(lines)
 
 
 def read_workspace_agents_guidance(
