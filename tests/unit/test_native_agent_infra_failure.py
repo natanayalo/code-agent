@@ -208,3 +208,11 @@ def test_failure_taxonomy_classifies_infra_crash() -> None:
         summary="The request was fulfilled successfully.",
     )
     assert kind == "unknown"
+
+    # Check for false positive prevention for other markers (unaborted, omnibus)
+    from workers.failure_taxonomy import find_infra_failure_marker
+
+    assert find_infra_failure_marker("The process was unaborted.") is None
+    assert find_infra_failure_marker("The omnibus was parked.") is None
+    assert find_infra_failure_marker("aborted") == "aborted"
+    assert find_infra_failure_marker("bus error") == "bus error"

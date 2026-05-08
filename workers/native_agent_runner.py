@@ -518,10 +518,10 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 summary = f"Native agent command exited with code {completed.returncode}."
                 status = "failure"
 
-            if completed.returncode != 0:
-                # Use centralized truncation helper and limit search space to tail
-                # to avoid performance issues with giant logs.
-                stderr_tail = truncate_detail_keep_tail(stderr_text, max_characters=4096).lower()
+                # Detect systemic infrastructure failures (shell crashes, OOM, etc)
+                # from non-zero exit codes. Use centralized truncation helper to
+                # avoid performance issues with giant logs.
+                stderr_tail = truncate_detail_keep_tail(stderr_text, max_characters=4096)
                 marker = find_infra_failure_marker(stderr_tail)
                 if marker:
                     status = "error"

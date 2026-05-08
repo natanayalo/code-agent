@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Final
 
 from workers.base import FailureKind, WorkerCommand
 
@@ -77,19 +78,17 @@ INFRA_FAILURE_MARKERS = (
 )
 
 
+_INFRA_FAILURE_RE: Final = re.compile(
+    rf"\b({'|'.join(map(re.escape, INFRA_FAILURE_MARKERS))})\b", re.IGNORECASE
+)
+
+
 def find_infra_failure_marker(text: str) -> str | None:
     """Check if the text contains any infrastructure failure markers and return the first match."""
-    # We use regex word boundaries for "killed" to avoid false positives (e.g. "fulfilled").
-    normalized = text.lower()
-    for marker in INFRA_FAILURE_MARKERS:
-        is_match = (
-            marker in normalized
-            if marker != "killed"
-            else bool(re.search(r"\bkilled\b", normalized))
-        )
-        if is_match:
-            return marker
-    return None
+    match = _INFRA_FAILURE_RE.search(text)
+    if not match:
+        return None
+    return match.group(1).lower()
 
 
 def classify_failure_kind(
