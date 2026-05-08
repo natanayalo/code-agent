@@ -279,7 +279,7 @@ def test_codex_cli_worker_runs_the_shared_runtime_and_retains_the_workspace(
     assert "`execute_bash`" in first_prompt
     assert "Required permission: `workspace_write`" in first_prompt
     assert "Expected artifacts: `stdout`, `stderr`, `changed_files`" in first_prompt
-    assert "AGENTS.md guidance:" in first_prompt
+    assert "Your first action MUST be to read `AGENTS.md`" in first_prompt
     assert "README.md" in first_prompt
 
 
