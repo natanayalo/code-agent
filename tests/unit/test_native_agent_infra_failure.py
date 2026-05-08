@@ -211,6 +211,61 @@ sys.exit(139)
     assert "(sigsegv)" in result.summary.lower()
 
 
+def test_native_agent_runner_detects_negative_return_code(
+    tmp_path: Path, repo_path: Path, monkeypatch
+) -> None:
+    """If returncode is negative (direct signal), it should be flagged as infra error."""
+    import subprocess
+
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-direct-signal.py",
+        """#!/usr/bin/env python3
+import sys
+print("ok")
+""",
+    )
+
+    # Mock subprocess.run to return a negative returncode
+    original_run = subprocess.run
+
+    def mock_run(*args, **kwargs):
+        res = original_run(*args, **kwargs)
+        return subprocess.CompletedProcess(
+            args=res.args,
+            returncode=-11,  # SIGSEGV
+            stdout=res.stdout,
+            stderr=res.stderr,
+        )
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+
+    assert result.status == "error"
+    assert "SANDBOX_INFRA" in result.summary
+    assert "(sigsegv)" in result.summary.lower()
+
+
+def test_failure_taxonomy_precedence_infra_over_test() -> None:
+    """Infra crashes should take precedence over test failures in classification."""
+    # If a summary contains both a test failure marker and an infra crash marker,
+    # it should be classified as sandbox_infra.
+    summary = "Tests failed: AssertionError. Process killed by SIGKILL."
+    kind = classify_failure_kind(
+        status="error",
+        summary=summary,
+    )
+    assert kind == "sandbox_infra"
+
+
 def test_failure_taxonomy_classifies_infra_crash() -> None:
     """The taxonomy should recognize crash markers in the summary."""
     # Direct check of taxonomy logic

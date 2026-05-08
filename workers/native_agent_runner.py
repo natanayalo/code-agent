@@ -61,10 +61,17 @@ _INFRA_FAILURE_PATTERN: Final = re.compile(
 
 _SIGNAL_EXIT_CODES: Final = {
     132: "SIGILL",
+    -4: "SIGILL",
     134: "SIGABRT",
+    -6: "SIGABRT",
     137: "SIGKILL",
+    -9: "SIGKILL",
+    135: "SIGBUS",
     138: "SIGBUS",
+    -7: "SIGBUS",
+    -10: "SIGBUS",
     139: "SIGSEGV",
+    -11: "SIGSEGV",
 }
 
 

@@ -96,6 +96,7 @@ def classify_failure_kind(
     status: str,
     stop_reason: str | None = None,
     summary: str | None = None,
+    final_message: str | None = None,
     commands_run: list[WorkerCommand] | None = None,
 ) -> FailureKind | None:
     """Return a typed failure kind for a worker/runtime outcome."""
@@ -103,6 +104,9 @@ def classify_failure_kind(
         return None
 
     normalized_summary = (summary or "").lower()
+    if final_message:
+        normalized_summary = f"{final_message.lower()} {normalized_summary}".strip()
+
     failed_commands = [
         command.command.lower() for command in (commands_run or []) if command.exit_code
     ]
@@ -129,6 +133,12 @@ def classify_failure_kind(
     if _contains_any(normalized_summary, _AUTH_SUMMARY_MARKERS):
         return "provider_auth"
 
+    # Infrastructure failures (crashes, OOM, etc) take precedence over
+    # functional failures (test/compile) when a systemic crash is detected.
+    marker = find_infra_failure_marker(normalized_summary)
+    if marker:
+        return "sandbox_infra"
+
     if _contains_any_in_commands(failed_commands, _TEST_COMMAND_MARKERS) or _contains_any(
         normalized_summary, _TEST_SUMMARY_MARKERS
     ):
@@ -137,11 +147,6 @@ def classify_failure_kind(
         normalized_summary, _COMPILE_SUMMARY_MARKERS
     ):
         return "compile"
-
-    # Infrastructure failures (crashes, OOM, etc).
-    marker = find_infra_failure_marker(normalized_summary)
-    if marker:
-        return "sandbox_infra"
     if stop_reason == "adapter_error":
         return "provider_error"
     if failed_commands:

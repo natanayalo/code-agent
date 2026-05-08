@@ -180,6 +180,11 @@ def _worker_result_from_execution(
             status=execution.status,
             stop_reason=execution.stop_reason,
             summary=execution.summary,
+            final_message=(
+                execution.messages[-1].content
+                if execution.messages and execution.messages[-1].role == "assistant"
+                else None
+            ),
             commands_run=execution.commands_run,
         ),
         requested_permission=requested_permission,
