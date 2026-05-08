@@ -69,6 +69,8 @@ _INFRA_SUMMARY_MARKERS = (
     "out of memory",
     "oom-kill",
     "killed by signal",
+    "illegal instruction",
+    "aborted",
 )
 
 

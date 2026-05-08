@@ -79,6 +79,83 @@ sys.exit(137)
     assert "killed" in result.summary.lower()
 
 
+def test_native_agent_runner_detects_illegal_instruction(tmp_path: Path, repo_path: Path) -> None:
+    """An illegal instruction in stderr should be flagged as an infra error."""
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-ill.py",
+        """#!/usr/bin/env python3
+import sys
+print("Illegal instruction: 4", file=sys.stderr)
+sys.exit(132)
+""",
+    )
+
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+
+    assert result.status == "error"
+    assert "SANDBOX_INFRA" in result.summary
+    assert "illegal instruction" in result.summary.lower()
+
+
+def test_native_agent_runner_ignores_false_positive_killed(tmp_path: Path, repo_path: Path) -> None:
+    """Words containing 'killed' but not being a crash should not be flagged."""
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-fulfilled.py",
+        """#!/usr/bin/env python3
+import sys
+print("The request was fulfilled successfully.", file=sys.stderr)
+sys.exit(1)
+""",
+    )
+
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+
+    # Should be "failure" because exit code 1, but NOT "error"
+    assert result.status == "failure"
+    assert "SANDBOX_INFRA" not in result.summary
+
+
+def test_native_agent_runner_ignores_success_with_markers(tmp_path: Path, repo_path: Path) -> None:
+    """Successful runs should not be scanned for crash markers."""
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-success-marker.py",
+        """#!/usr/bin/env python3
+import sys
+print("Segmentation fault", file=sys.stderr)
+sys.exit(0)
+""",
+    )
+
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+
+    assert result.status == "success"
+    assert "SANDBOX_INFRA" not in result.summary
+
+
 def test_failure_taxonomy_classifies_infra_crash() -> None:
     """The taxonomy should recognize crash markers in the summary."""
     # Direct check of taxonomy logic
