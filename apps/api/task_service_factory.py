@@ -339,7 +339,7 @@ def build_task_service_from_env(
             container_manager=container_manager,
             default_runtime_mode=gemini_runtime_mode,
             native_sandbox_enabled=_is_enabled(
-                resolved_env.get(GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR, "1")
+                resolved_env.get(GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR)
             ),
         )
     if resolved_env.get(OPENROUTER_API_KEY_ENV_VAR):
