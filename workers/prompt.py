@@ -7,7 +7,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from db.enums import WorkerRuntimeMode
 from tools import DEFAULT_MCP_TOOL_CLIENT, McpToolClient, ToolDefinition, ToolRegistry
+from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import WorkerRequest
 from workers.markdown import markdown_fence_for_content
 
@@ -489,7 +491,7 @@ def read_workspace_repo_guidance(
         except OSError:
             agents_contents = ""
         if agents_contents:
-            agents_guidance = _truncate_to_budget(agents_contents, max_characters=remaining)
+            agents_guidance = truncate_detail_keep_tail(agents_contents, max_characters=remaining)
             remaining -= len(agents_guidance)
 
     agents_assets_guidance = read_workspace_agents_assets_guidance(
@@ -557,15 +559,14 @@ def _build_repo_context_section_with_guidance(
     workspace_path: Path,
     agents_guidance: str | None,
     agents_assets_guidance: str | None,
+    *,
+    omit_dir_listing: bool = False,
 ) -> str:
-    """Render repo-level prompt context from pre-resolved guidance snippets."""
-    lines = [
-        "## Repo Context",
-        "Directory listing:",
-        "```text",
-        build_workspace_directory_listing(workspace_path),
-        "```",
-    ]
+    """Render the repository context section with directory tree and guidance."""
+    lines = ["## Repo Context"]
+    if not omit_dir_listing:
+        lines.append("Directory listing:")
+        lines.append(f"```text\n{build_workspace_directory_listing(workspace_path)}\n```")
     if agents_guidance is not None:
         lines.extend(_fenced_text_block_lines("AGENTS.md guidance:", agents_guidance))
     if agents_assets_guidance is not None:
@@ -691,6 +692,8 @@ def build_workflow_instructions_section(request: WorkerRequest) -> str:
 
     lines.extend(
         [
+            "- The persistent shell already starts in the checked-out workspace repository; "
+            "treat `repo_url` as the clone source, not as a filesystem path to `cd` into.",
             "- Use tools with focused commands; avoid dumping large files.",
             "- Base steps on observed output and exit codes.",
             "- Surface blockers explicitly instead of guessing.",
@@ -715,7 +718,7 @@ def read_workspace_review_guidance(
         return None
     if not contents:
         return None
-    return _truncate_to_budget(contents, max_characters=max_characters)
+    return truncate_detail_keep_tail(contents, max_characters=max_characters)
 
 
 def build_review_prompt(
@@ -866,13 +869,15 @@ def build_system_prompt(
         guidance_wrapper_overhead += _fenced_text_block_overhead(
             ".agents guidance:", agents_assets_guidance
         )
+    is_native = request.runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
     sections = [
         build_role_description_section(request),
-        build_available_tools_section(tool_registry, tool_client),
+        build_available_tools_section(tool_registry, tool_client) if not is_native else "",
         _build_repo_context_section_with_guidance(
             workspace_path,
             agents_guidance,
             agents_assets_guidance,
+            omit_dir_listing=is_native,
         ),
         _render_build_test_info(workspace_path) or "",
         build_task_context_section(request),
