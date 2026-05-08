@@ -2895,7 +2895,6 @@ def build_orchestrator_graph(
                 worker=worker,
                 gemini_worker=gemini_worker,
                 openrouter_worker=openrouter_worker,
-                shell_worker=shell_worker,
                 orchestrator_brain=orchestrator_brain,
             )
         ),
