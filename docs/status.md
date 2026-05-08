@@ -60,7 +60,7 @@ Granular tasks for the active and upcoming milestones:
 - [ ] T-171: local e2e runbook + compose/env verification
 
 ### Milestone 17.5 Done (Published)
-- [x] T-173: Simplify native-agent prompts and enforce delivery_mode (Review vs Fix) ([#177](https://github.com/natanayalo/code-agent/pull/177)) — reduced prompt size by 30%+, refactored role/permissions for "read" vs "read/write" execution workers, and aligned native instructions with summary/workspace modes.
+- [x] T-173: Simplify native-agent prompts and enforce delivery_mode (Review vs Fix) ([#179](https://github.com/natanayalo/code-agent/pull/179)) — reduced prompt size by 30%+, refactored role/permissions for "read" vs "read/write" execution workers, and aligned native instructions with summary/workspace modes.
 - [x] T-164: native runner contract repair ([#172](https://github.com/natanayalo/code-agent/pull/172)) — normalized final-message and error extraction in NativeAgentRunner, refactored GeminiCliWorker to use common outputs, and expanded integration coverage.
 - [x] T-166: interaction response state machine hardening ([#174](https://github.com/natanayalo/code-agent/pull/174)) — fixed missing imports, corrected graph data structure inconsistencies for hashing, and repaired timeline emission.
 
