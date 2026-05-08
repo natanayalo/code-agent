@@ -100,9 +100,9 @@ def build_role_description_section(request: WorkerRequest) -> str:
 
     return "\n".join(
         [
-            "## Role",
             f"You are the coding execution worker with {permissions} permissions. "
             f"Work inside the repository, {action}.{mutation_guard}"
+            "Your first action MUST be to read `AGENTS.md` to understand repository policy. "
             "Keep reasoning grounded in observed state. Do not bypass sandbox rules.",
         ]
     )
@@ -549,28 +549,19 @@ def build_workspace_directory_listing(
 
 def build_repo_context_section(workspace_path: Path) -> str:
     """Render repo-level prompt context from the workspace."""
-    return _build_repo_context_section_with_guidance(
-        workspace_path,
-        *read_workspace_repo_guidance(workspace_path),
-    )
+    return _build_repo_context_section_with_guidance(workspace_path)
 
 
 def _build_repo_context_section_with_guidance(
     workspace_path: Path,
-    agents_guidance: str | None,
-    agents_assets_guidance: str | None,
     *,
     omit_dir_listing: bool = False,
 ) -> str:
-    """Render the repository context section with directory tree and guidance."""
+    """Render the repository context section with directory tree."""
     lines = ["## Repo Context"]
     if not omit_dir_listing:
         lines.append("Directory listing:")
         lines.append(f"```text\n{build_workspace_directory_listing(workspace_path)}\n```")
-    if agents_guidance is not None:
-        lines.extend(_fenced_text_block_lines("AGENTS.md guidance:", agents_guidance))
-    if agents_assets_guidance is not None:
-        lines.extend(_fenced_text_block_lines(".agents guidance:", agents_assets_guidance))
     return "\n".join(lines)
 
 
@@ -855,28 +846,12 @@ def build_system_prompt(
     tool_client: McpToolClient | None = None,
 ) -> str:
     """Assemble the structured system prompt for a coding worker run."""
-    agents_guidance_budget = DEFAULT_AGENTS_MAX_CHARACTERS
-    agents_guidance, agents_assets_guidance = read_workspace_repo_guidance(
-        workspace_path,
-        max_characters=agents_guidance_budget,
-    )
-    guidance_wrapper_overhead = 0
-    if agents_guidance is not None:
-        guidance_wrapper_overhead += _fenced_text_block_overhead(
-            "AGENTS.md guidance:", agents_guidance
-        )
-    if agents_assets_guidance is not None:
-        guidance_wrapper_overhead += _fenced_text_block_overhead(
-            ".agents guidance:", agents_assets_guidance
-        )
     is_native = request.runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
     sections = [
         build_role_description_section(request),
         build_available_tools_section(tool_registry, tool_client) if not is_native else "",
         _build_repo_context_section_with_guidance(
             workspace_path,
-            agents_guidance,
-            agents_assets_guidance,
             omit_dir_listing=is_native,
         ),
         _render_build_test_info(workspace_path) or "",
