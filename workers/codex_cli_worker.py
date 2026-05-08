@@ -674,15 +674,23 @@ class CodexCliWorker(Worker):
     def _build_native_prompt(self, *, system_prompt: str, request: WorkerRequest) -> str:
         """Build the native-agent prompt packet for one-shot Codex execution."""
         task_text = request.task_text.strip()
+        delivery_mode = (request.task_spec or {}).get("delivery_mode", "workspace")
+        is_read_only = delivery_mode == "summary"
+        output_instructions = (
+            "Return a comprehensive summary of your findings and any recommendations."
+            if is_read_only
+            else (
+                "Return a concise final summary of what changed, verification performed, "
+                "and any remaining blocker."
+            )
+        )
+
         sections = [
             system_prompt.strip(),
             "## Native Execution Task",
             task_text,
             "## Output",
-            (
-                "Return a concise final summary of what changed, verification performed, "
-                "and any remaining blocker."
-            ),
+            output_instructions,
         ]
         return "\n\n".join(section for section in sections if section.strip())
 
