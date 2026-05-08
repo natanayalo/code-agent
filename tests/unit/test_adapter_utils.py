@@ -37,6 +37,19 @@ def test_build_failure_summary_concatenates_inputs() -> None:
     )
 
 
+def test_build_failure_summary_handles_mocks() -> None:
+    """The helper should be robust against MagicMocks from tests."""
+    from unittest.mock import MagicMock
+
+    mock_msg = MagicMock()
+    # If final_message is a mock, it should be ignored if it's not a string
+    assert build_failure_summary(summary="base", final_message=mock_msg) == "base"
+
+    mock_summary = MagicMock()
+    # If summary is a mock, it should be ignored if it's not a string
+    assert build_failure_summary(summary=mock_summary, final_message="Final.") == "Final."
+
+
 def test_coerce_positive_int_parses_supported_inputs() -> None:
     """Positive ints should parse from numbers/strings and default otherwise."""
     assert coerce_positive_int(42, default=5) == 42

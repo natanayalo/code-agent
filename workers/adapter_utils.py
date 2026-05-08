@@ -105,11 +105,16 @@ def build_failure_summary(
     final_message: str | None = None,
 ) -> str:
     """Construct a unified failure summary from raw output and structured messages."""
-    base = (summary or "").strip()
-    if not final_message:
+    # Ensure we only perform string operations if the inputs are actual strings.
+    # This prevents TypeErrors in tests when MagicMocks are passed as result fields.
+    safe_summary = summary if isinstance(summary, str) else None
+    safe_message = final_message if isinstance(final_message, str) else None
+
+    base = (safe_summary or "").strip()
+    if not safe_message:
         return base
 
-    msg = final_message.strip()
+    msg = safe_message.strip()
     # Avoid duplication if the structured message is already contained in the raw summary
     # or vice-versa (which can happen if the runtime loop uses the final message as summary).
     if not msg:
