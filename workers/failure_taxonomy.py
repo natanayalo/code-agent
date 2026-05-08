@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from workers.base import FailureKind, WorkerCommand
 
 _TEST_COMMAND_MARKERS = (
@@ -61,7 +63,7 @@ _CONTEXT_WINDOW_SUMMARY_MARKERS = (
     "prompt too long",
     "token limit",
 )
-_INFRA_SUMMARY_MARKERS = (
+INFRA_FAILURE_MARKERS = (
     "sandbox_infra",
     "segmentation fault",
     "core dumped",
@@ -112,8 +114,17 @@ def classify_failure_kind(
         return "context_window"
     if _contains_any(normalized_summary, _AUTH_SUMMARY_MARKERS):
         return "provider_auth"
-    if _contains_any(normalized_summary, _INFRA_SUMMARY_MARKERS):
-        return "sandbox_infra"
+
+    # Infrastructure failures (crashes, OOM, etc).
+    # We use regex word boundaries for "killed" to avoid false positives (e.g. "fulfilled").
+    for marker in INFRA_FAILURE_MARKERS:
+        is_match = (
+            marker in normalized_summary
+            if marker != "killed"
+            else bool(re.search(r"\bkilled\b", normalized_summary))
+        )
+        if is_match:
+            return "sandbox_infra"
     if _contains_any_in_commands(failed_commands, _TEST_COMMAND_MARKERS) or _contains_any(
         normalized_summary, _TEST_SUMMARY_MARKERS
     ):

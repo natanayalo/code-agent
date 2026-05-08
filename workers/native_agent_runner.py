@@ -34,6 +34,7 @@ from sandbox.redact import SecretRedactor, redact_and_truncate_output, sanitize_
 from workers.adapter_utils import format_native_run_summary, truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
+from workers.failure_taxonomy import INFRA_FAILURE_MARKERS
 from workers.native_agent_models import NativeAgentRunResult
 
 logger = logging.getLogger(__name__)
@@ -52,17 +53,6 @@ _FINAL_MESSAGE_FIELDS: Final = (
     "message",
     "content",
     "response",
-)
-_INFRA_FAILURE_MARKERS: Final = (
-    "segmentation fault",
-    "core dumped",
-    "bus error",
-    "out of memory",
-    "oom-kill",
-    "killed by signal",
-    "illegal instruction",
-    "aborted",
-    "killed",
 )
 
 
@@ -533,7 +523,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 # Use centralized truncation helper and limit search space to tail
                 # to avoid performance issues with giant logs.
                 stderr_tail = truncate_detail_keep_tail(stderr_text, max_characters=4096).lower()
-                for marker in _INFRA_FAILURE_MARKERS:
+                for marker in INFRA_FAILURE_MARKERS:
                     # Avoid false positives with substring matches (e.g. "fulfilled")
                     # by checking for word boundaries for the "killed" marker.
                     is_crash = (

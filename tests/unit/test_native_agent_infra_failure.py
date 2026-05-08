@@ -201,3 +201,10 @@ def test_failure_taxonomy_classifies_infra_crash() -> None:
         summary="Native agent run failed: out of memory",
     )
     assert kind == "sandbox_infra"
+
+    # Check for false positive prevention (fulfilled)
+    kind = classify_failure_kind(
+        status="error",
+        summary="The request was fulfilled successfully.",
+    )
+    assert kind == "unknown"
