@@ -100,6 +100,7 @@ def build_role_description_section(request: WorkerRequest) -> str:
 
     return "\n".join(
         [
+            "## Role",
             f"You are the coding execution worker with {permissions} permissions. "
             f"Work inside the repository, {action}.{mutation_guard}"
             "Your first action MUST be to read `AGENTS.md` to understand repository policy. "
@@ -571,38 +572,25 @@ def _compact_json_summary(value: Any) -> str:
     return _truncate_to_budget(serialized, max_characters=_BUILD_CONTEXT_VALUE_MAX_CHARACTERS)
 
 
-def _extract_makefile_targets(contents: str) -> list[str]:
-    """Extract a bounded set of non-special Makefile targets."""
-    targets: list[str] = []
-    for line in contents.splitlines():
-        match = re.match(
-            r"^([A-Za-z0-9][A-Za-z0-9_.%/-]*(?:\s+[A-Za-z0-9][A-Za-z0-9_.%/-]*)*)\s*:(?!\s*=)",
-            line,
-        )
-        if match is None:
-            continue
-        for target in match.group(1).split():
-            if target.startswith(".") or "%" in target:
-                continue
-            if target not in targets:
-                targets.append(target)
-            if len(targets) >= _BUILD_CONTEXT_ITEM_LIMIT:
-                return targets
-    return targets
-
-
-def _render_build_test_info(path: Path) -> str | None:
+def build_build_test_section(
+    workspace_path: Path,
+    *,
+    max_characters: int = DEFAULT_AGENTS_MAX_CHARACTERS,
+) -> str | None:
     """Render a compact summary of build/test metadata."""
+    if max_characters <= 0:
+        return None
     parts = []
-    if (path / "pyproject.toml").exists():
+    if (workspace_path / "pyproject.toml").exists():
         parts.append("- Build/Test config found in `pyproject.toml`.")
-    if (path / "Dockerfile").exists():
+    if (workspace_path / "Dockerfile").exists():
         parts.append("- Deployment config found in `Dockerfile`.")
-    if (path / ".github/workflows").is_dir():
+    if (workspace_path / ".github/workflows").is_dir():
         parts.append("- CI workflows found in `.github/workflows/`.")
     if not parts:
         return None
-    return "\n".join(["## Build & Test", *parts])
+    section = "\n".join(["## Build & Test", *parts])
+    return _truncate_to_budget(section, max_characters=max_characters)
 
 
 def _json_safe(value: Any) -> Any:
@@ -675,7 +663,7 @@ def build_workflow_instructions_section(request: WorkerRequest) -> str:
     """Describe the expected worker execution workflow."""
     is_read_only = bool(request.constraints.get("read_only"))
     lines = [
-        "## Workflow",
+        "## Workflow Instructions",
         "- Inspect files before making decisions.",
     ]
     if not is_read_only:
@@ -800,7 +788,7 @@ def build_review_prompt(
         )
         guidance_block_count += 1
 
-    build_test_context = _render_build_test_info(workspace_path)
+    build_test_context = build_build_test_section(workspace_path)
     guidance_section = ""
     if guidance_lines:
         guidance_section = "\n".join(["## Review Guidance", *guidance_lines])
@@ -854,7 +842,7 @@ def build_system_prompt(
             workspace_path,
             omit_dir_listing=is_native,
         ),
-        _render_build_test_info(workspace_path) or "",
+        build_build_test_section(workspace_path) or "",
         build_task_context_section(request),
         build_workflow_instructions_section(request),
     ]
