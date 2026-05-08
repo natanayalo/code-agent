@@ -52,6 +52,15 @@ _FINAL_MESSAGE_FIELDS: Final = (
     "content",
     "response",
 )
+_INFRA_FAILURE_MARKERS: Final = (
+    "segmentation fault",
+    "core dumped",
+    "bus error",
+    "killed",
+    "out of memory",
+    "oom-kill",
+    "killed by signal",
+)
 
 
 def _extract_final_message(raw_text: str) -> str | None:
@@ -516,6 +525,15 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
             else:
                 summary = f"Native agent command exited with code {completed.returncode}."
                 status = "failure"
+
+            # Detect systemic infrastructure failures (shell crashes, OOM, etc)
+            # from stderr markers even if exit code is not zero.
+            stderr_lower = stderr_text.lower()
+            for marker in _INFRA_FAILURE_MARKERS:
+                if marker in stderr_lower:
+                    status = "error"
+                    summary = f"SANDBOX_INFRA: detected shell crash ({marker})"
+                    break
 
             return _finalize_native_agent_run(
                 request=request,

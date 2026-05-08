@@ -61,6 +61,15 @@ _CONTEXT_WINDOW_SUMMARY_MARKERS = (
     "prompt too long",
     "token limit",
 )
+_INFRA_SUMMARY_MARKERS = (
+    "sandbox_infra",
+    "segmentation fault",
+    "core dumped",
+    "bus error",
+    "out of memory",
+    "oom-kill",
+    "killed by signal",
+)
 
 
 def classify_failure_kind(
@@ -100,6 +109,8 @@ def classify_failure_kind(
         return "context_window"
     if _contains_any(normalized_summary, _AUTH_SUMMARY_MARKERS):
         return "provider_auth"
+    if _contains_any(normalized_summary, _INFRA_SUMMARY_MARKERS):
+        return "sandbox_infra"
     if _contains_any_in_commands(failed_commands, _TEST_COMMAND_MARKERS) or _contains_any(
         normalized_summary, _TEST_SUMMARY_MARKERS
     ):
