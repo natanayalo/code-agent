@@ -1699,7 +1699,7 @@ def test_verify_result_failed_tests():
     res = verify_result(state)
     assert res["verification"]["status"] == "failed"
     assert res["verification"]["failure_kind"] == "test_regression"
-    assert res["verification"]["items"][1]["label"] == "test_results"
+    assert res["verification"]["items"][1]["label"] == "tests"
     assert res["verification"]["items"][1]["status"] == "failed"
 
 

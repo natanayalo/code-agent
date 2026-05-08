@@ -54,7 +54,6 @@ Granular tasks for the active and upcoming milestones:
 - Milestone target: increase test coverage across all e2e-critical slices (T-164 to T-171) with explicit unit/integration/dashboard tests for each changed behavior, while meeting existing CI coverage gates.
 See [Stabilization Tasks](stabilization_tasks.md) for the full list of tasks.
 
-- [ ] T-174: Implement deterministic-first verification and reclassify infra timeouts
 - [ ] T-175: Add infra-failure (shell crash) detection to NativeAgentRunner
 - [ ] T-176: Standardize Phoenix/OpenInference span attributes and JSON payloads
 - [ ] T-177: Optimize discovery latency and brain-router fallback resilience
@@ -62,6 +61,7 @@ See [Stabilization Tasks](stabilization_tasks.md) for the full list of tasks.
 - [ ] T-171: local e2e runbook + compose/env verification
 
 ### Milestone 17.5 Done (Published)
+- [x] T-174: Implement deterministic-first verification and reclassify infra timeouts — added `SHELL` worker runtime, tiered verification logic (deterministic -> LLM), and refined timeout handling (warning on infra issue if tests passed).
 - [x] T-173: Simplify native-agent prompts and enforce delivery_mode (Review vs Fix) ([#179](https://github.com/natanayalo/code-agent/pull/179)) — reduced prompt size by 30%+, refactored role/permissions for "read" vs "read/write" execution workers, and aligned native instructions with summary/workspace modes.
 - [x] T-164: native runner contract repair ([#172](https://github.com/natanayalo/code-agent/pull/172)) — normalized final-message and error extraction in NativeAgentRunner, refactored GeminiCliWorker to use common outputs, and expanded integration coverage.
 - [x] T-166: interaction response state machine hardening ([#174](https://github.com/natanayalo/code-agent/pull/174)) — fixed missing imports, corrected graph data structure inconsistencies for hashing, and repaired timeline emission.
