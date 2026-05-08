@@ -57,12 +57,12 @@ _INFRA_FAILURE_MARKERS: Final = (
     "segmentation fault",
     "core dumped",
     "bus error",
-    "killed",
     "out of memory",
     "oom-kill",
     "killed by signal",
     "illegal instruction",
     "aborted",
+    "killed",
 )
 
 

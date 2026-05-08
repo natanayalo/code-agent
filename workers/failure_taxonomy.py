@@ -71,6 +71,7 @@ _INFRA_SUMMARY_MARKERS = (
     "killed by signal",
     "illegal instruction",
     "aborted",
+    "killed",
 )
 
 

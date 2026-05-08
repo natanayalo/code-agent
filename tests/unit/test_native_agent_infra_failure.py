@@ -156,6 +156,36 @@ sys.exit(0)
     assert "SANDBOX_INFRA" not in result.summary
 
 
+def test_native_agent_runner_detects_killed_by_signal_precedence(
+    tmp_path: Path, repo_path: Path
+) -> None:
+    """Specific markers should take precedence over generic ones (killed by signal vs killed)."""
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-kbs.py",
+        """#!/usr/bin/env python3
+import sys
+print("Killed by signal 9", file=sys.stderr)
+sys.exit(137)
+""",
+    )
+
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+
+    assert result.status == "error"
+    assert "SANDBOX_INFRA" in result.summary
+    # Should be the more specific one
+    assert "(killed by signal)" in result.summary.lower()
+    assert "(killed)" not in result.summary.lower()
+
+
 def test_failure_taxonomy_classifies_infra_crash() -> None:
     """The taxonomy should recognize crash markers in the summary."""
     # Direct check of taxonomy logic
