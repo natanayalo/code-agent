@@ -89,9 +89,9 @@ def _fenced_text_block_overhead(label: str, content: str, *, fence: str | None =
     return len(label) + len(f"{actual_fence}text") + len(actual_fence) + 3
 
 
-def build_role_description_section(delivery_mode: str = "workspace") -> str:
+def build_role_description_section(request: WorkerRequest) -> str:
     """Describe the worker's job and guardrails."""
-    is_read_only = delivery_mode == "summary"
+    is_read_only = bool(request.constraints.get("read_only"))
     permissions = "read" if is_read_only else "read/write"
     action = "analyze files" if is_read_only else "make smallest safe changes"
     mutation_guard = " Do not modify files." if is_read_only else ""
@@ -99,10 +99,8 @@ def build_role_description_section(delivery_mode: str = "workspace") -> str:
     return "\n".join(
         [
             "## Role",
-            (
-                f"You are the coding execution worker with {permissions} permissions. "
-                f"Work inside the repository, {action}.{mutation_guard}"
-            ),
+            f"You are the coding execution worker with {permissions} permissions. "
+            f"Work inside the repository, {action}.{mutation_guard}"
             "Keep reasoning grounded in observed state. Do not bypass sandbox rules.",
         ]
     )
@@ -671,9 +669,9 @@ def build_task_context_section(request: WorkerRequest) -> str:
     return "\n".join(lines)
 
 
-def build_workflow_instructions_section(delivery_mode: str = "workspace") -> str:
+def build_workflow_instructions_section(request: WorkerRequest) -> str:
     """Describe the expected worker execution workflow."""
-    is_read_only = delivery_mode == "summary"
+    is_read_only = bool(request.constraints.get("read_only"))
     lines = [
         "## Workflow",
         "- Inspect files before making decisions.",
@@ -858,9 +856,8 @@ def build_system_prompt(
         guidance_wrapper_overhead += _fenced_text_block_overhead(
             ".agents guidance:", agents_assets_guidance
         )
-    delivery_mode = (request.task_spec or {}).get("delivery_mode", "workspace")
     sections = [
-        build_role_description_section(delivery_mode=delivery_mode),
+        build_role_description_section(request),
         build_available_tools_section(tool_registry, tool_client),
         _build_repo_context_section_with_guidance(
             workspace_path,
@@ -869,6 +866,6 @@ def build_system_prompt(
         ),
         _render_build_test_info(workspace_path) or "",
         build_task_context_section(request),
-        build_workflow_instructions_section(delivery_mode=delivery_mode),
+        build_workflow_instructions_section(request),
     ]
     return "\n\n".join(section for section in sections if section.strip())

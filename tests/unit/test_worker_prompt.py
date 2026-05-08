@@ -13,6 +13,7 @@ def test_build_system_prompt_respects_delivery_mode_summary(tmp_path) -> None:
         task_text="Analyze the codebase",
         repo_url="https://example.com/repo.git",
         task_spec={"delivery_mode": "summary"},
+        constraints={"read_only": True},
     )
 
     prompt = build_system_prompt(request, tmp_path)
@@ -31,6 +32,7 @@ def test_build_system_prompt_respects_delivery_mode_workspace(tmp_path) -> None:
         task_text="Fix the bug",
         repo_url="https://example.com/repo.git",
         task_spec={"delivery_mode": "workspace"},
+        constraints={"read_only": False},
     )
 
     prompt = build_system_prompt(request, tmp_path)
