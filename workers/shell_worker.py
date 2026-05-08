@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
+from typing import Final
 
 from sandbox import (
     DockerSandboxContainerManager,
@@ -22,6 +23,8 @@ from workers.native_agent_runner import (
 )
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_GIT_APPLY_TIMEOUT_SECONDS: Final = 60
 
 
 class ShellWorker(Worker):
@@ -106,7 +109,7 @@ class ShellWorker(Worker):
                                 prompt=diff_text,
                                 repo_path=workspace.repo_path,
                                 workspace_path=workspace.workspace_path,
-                                timeout_seconds=30,
+                                timeout_seconds=DEFAULT_GIT_APPLY_TIMEOUT_SECONDS,
                             )
                         )
                         setup_commands.append(
