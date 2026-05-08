@@ -161,3 +161,35 @@ async def test_shell_worker_handles_apply_failure(
         assert result.status == "error"
         assert "Failed to apply changes" in result.summary
         assert mock_run.call_count == 1
+
+
+@pytest.mark.anyio
+async def test_shell_worker_handles_cancellation(
+    shell_worker, mock_workspace_manager, mock_container_manager, workspace_handle
+):
+    request = WorkerRequest(
+        session_id="test-session",
+        repo_url="https://example.com/repo.git",
+        branch="main",
+        task_text="echo hello",
+        runtime_mode=WorkerRuntimeMode.SHELL,
+        budget={"worker_timeout_seconds": 60},
+    )
+
+    mock_workspace_manager.create_workspace.return_value = workspace_handle
+    mock_container = MagicMock()
+    mock_container.container_name = "test-container"
+    mock_container_manager.start.return_value = mock_container
+
+    # Patch run_sync_with_cancellable_executor to inject cancel=True
+    async def mock_run_sync(fn):
+        return fn(lambda: True)
+
+    with patch(
+        "workers.shell_worker.run_sync_with_cancellable_executor", side_effect=mock_run_sync
+    ):
+        result = await shell_worker.run(request)
+
+        assert result.status == "error"
+        assert result.failure_kind == "timeout"
+        assert "cancelled" in result.summary.lower()

@@ -77,6 +77,13 @@ class ShellWorker(Worker):
                 )
             )
 
+            if cancel_requested():
+                return WorkerResult(
+                    status="error",
+                    summary="ShellWorker execution was cancelled by the orchestrator.",
+                    failure_kind="timeout",
+                )
+
             try:
                 container = self.container_manager.start(
                     DockerSandboxContainerRequest(
@@ -130,6 +137,14 @@ class ShellWorker(Worker):
                                 commands_run=setup_commands,
                             )
 
+                    if cancel_requested():
+                        return WorkerResult(
+                            status="error",
+                            summary="ShellWorker execution was cancelled by the orchestrator.",
+                            failure_kind="timeout",
+                            commands_run=setup_commands,
+                        )
+
                     # In SHELL mode, we treat task_text as the script content.
                     native_result = run_native_agent(
                         NativeAgentRunRequest(
@@ -148,6 +163,24 @@ class ShellWorker(Worker):
                             env=request.secrets,
                         )
                     )
+
+                    if cancel_requested():
+                        return WorkerResult(
+                            status="error",
+                            summary="ShellWorker execution was cancelled by the orchestrator.",
+                            failure_kind="timeout",
+                            commands_run=[
+                                *setup_commands,
+                                WorkerCommand(
+                                    command=native_result.command,
+                                    exit_code=native_result.exit_code,
+                                    duration_seconds=native_result.duration_seconds,
+                                ),
+                            ],
+                            files_changed=native_result.files_changed,
+                            artifacts=native_result.artifacts,
+                            diff_text=native_result.diff_text,
+                        )
 
                     status = native_result.status
                     summary = native_result.summary
