@@ -66,6 +66,8 @@ INDEPENDENT_VERIFIER_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_INDEPENDENT_VERIF
 ORCHESTRATOR_BRAIN_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED"
 CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED"
 GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED"
+CODEX_TRUSTED_REPO_PATTERNS_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TRUSTED_REPO_PATTERNS"
+GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_NATIVE_SANDBOX_ENABLED"
 
 # Default profile names
 GEMINI_NATIVE_PLANNER_PROFILE: Final[str] = "gemini-native-planner"
@@ -320,6 +322,11 @@ def build_task_service_from_env(
         native_event_capture_enabled=_is_enabled(
             resolved_env.get(NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR)
         ),
+        trusted_repo_patterns=(
+            [p.strip() for p in s.split(",") if p.strip()]
+            if (s := resolved_env.get(CODEX_TRUSTED_REPO_PATTERNS_ENV_VAR))
+            else None
+        ),
     )
     gemini_worker: GeminiCliWorker | None = None
     openrouter_worker: OpenRouterCliWorker | None = None
@@ -331,6 +338,9 @@ def build_task_service_from_env(
             runtime_adapter=GeminiCliRuntimeAdapter.from_env(resolved_env),
             container_manager=container_manager,
             default_runtime_mode=gemini_runtime_mode,
+            native_sandbox_enabled=_is_enabled(
+                resolved_env.get(GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR)
+            ),
         )
     if resolved_env.get(OPENROUTER_API_KEY_ENV_VAR):
         openrouter_worker = OpenRouterCliWorker(
@@ -340,19 +350,30 @@ def build_task_service_from_env(
     enable_worker_profiles = _is_enabled(resolved_env.get(WORKER_PROFILES_ENABLED_ENV_VAR))
     worker_profiles: dict[str, WorkerProfile] | None = None
     if enable_worker_profiles:
+        codex_legacy_tool_loop_requested = _is_enabled(
+            resolved_env.get(CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR)
+        )
+        gemini_legacy_tool_loop_requested = gemini_worker is not None and _is_enabled(
+            resolved_env.get(GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR)
+        )
+        if codex_legacy_tool_loop_requested:
+            logger.warning(
+                "Ignoring CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED for execution workers; "
+                "Codex worker is native-only."
+            )
+        if gemini_legacy_tool_loop_requested:
+            logger.warning(
+                "Ignoring CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED for execution workers; "
+                "Gemini worker is native-only."
+            )
         worker_profiles = _build_default_worker_profiles(
             include_gemini=gemini_worker is not None,
             include_openrouter=(
                 openrouter_worker is not None
                 and _is_enabled(resolved_env.get(OPENROUTER_ENABLED_ENV_VAR))
             ),
-            include_codex_legacy_tool_loop=_is_enabled(
-                resolved_env.get(CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR)
-            ),
-            include_gemini_legacy_tool_loop=(
-                gemini_worker is not None
-                and _is_enabled(resolved_env.get(GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR))
-            ),
+            include_codex_legacy_tool_loop=False,
+            include_gemini_legacy_tool_loop=False,
         )
     if outbound_http_clients is None:
         raise RuntimeError(

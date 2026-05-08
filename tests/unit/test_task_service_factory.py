@@ -193,6 +193,30 @@ def test_build_task_service_from_env_wires_planner_worker_into_orchestrator_brai
         _close_outbound_http_clients(outbound_http_clients)
 
 
+def test_build_task_service_from_env_propagates_gemini_native_sandbox_toggle(
+    tmp_path: Path,
+) -> None:
+    """Gemini native sandbox env toggle should propagate to the worker configuration."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_GEMINI_CLI_BIN": "/usr/local/bin/gemini",
+            "CODE_AGENT_GEMINI_NATIVE_SANDBOX_ENABLED": "0",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert isinstance(service.gemini_worker, GeminiCliWorker)
+        assert service.gemini_worker.native_sandbox_enabled is False
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
 def test_build_task_service_from_env_enables_profile_routing_with_defaults(
     tmp_path: Path,
 ) -> None:
@@ -350,10 +374,10 @@ def test_build_task_service_from_env_ignores_deprecated_gemini_tool_loop_default
         _close_outbound_http_clients(outbound_http_clients)
 
 
-def test_build_task_service_from_env_adds_codex_legacy_tool_loop_profiles_when_enabled(
-    tmp_path: Path,
+def test_build_task_service_from_env_ignores_codex_legacy_tool_loop_profiles_when_enabled(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Codex legacy tool-loop profiles should be opt-in and marked as legacy metadata."""
+    """Codex legacy tool-loop profile toggle should be ignored for native-only execution workers."""
     database_path = tmp_path / "code-agent.db"
     outbound_http_clients = create_outbound_http_clients()
     service = build_task_service_from_env(
@@ -370,19 +394,16 @@ def test_build_task_service_from_env_adds_codex_legacy_tool_loop_profiles_when_e
         assert service is not None
         assert service.worker.default_runtime_mode == "native_agent"
         assert "codex-native-executor" in service.worker_profiles
-        assert "codex-tool-loop-executor" in service.worker_profiles
-        assert service.worker_profiles["codex-tool-loop-executor"].metadata == {"legacy_mode": True}
-        assert service.worker_profiles["codex-tool-loop-executor-read-only"].metadata == {
-            "legacy_mode": True
-        }
+        assert "codex-tool-loop-executor" not in service.worker_profiles
+        assert "Ignoring CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED" in caplog.text
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
 
-def test_build_task_service_from_env_adds_gemini_legacy_tool_loop_profiles_when_enabled(
-    tmp_path: Path,
+def test_build_task_service_from_env_ignores_gemini_legacy_tool_loop_profiles_when_enabled(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Gemini legacy tool-loop profiles should be opt-in while native planner/reviewer remain."""
+    """Gemini legacy tool-loop profile toggle should be ignored for native-only execution workers"""
     database_path = tmp_path / "code-agent.db"
     outbound_http_clients = create_outbound_http_clients()
     service = build_task_service_from_env(
@@ -401,12 +422,10 @@ def test_build_task_service_from_env_adds_gemini_legacy_tool_loop_profiles_when_
         assert isinstance(service.gemini_worker, GeminiCliWorker)
         assert service.gemini_worker.default_runtime_mode == "native_agent"
         assert "gemini-native-executor" in service.worker_profiles
-        assert "gemini-tool-loop-executor" in service.worker_profiles
-        assert service.worker_profiles["gemini-tool-loop-executor"].metadata == {
-            "legacy_mode": True
-        }
+        assert "gemini-tool-loop-executor" not in service.worker_profiles
         assert "gemini-native-planner" in service.worker_profiles
         assert "gemini-native-reviewer" in service.worker_profiles
+        assert "Ignoring CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED" in caplog.text
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 

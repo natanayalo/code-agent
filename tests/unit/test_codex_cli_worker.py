@@ -21,7 +21,7 @@ from sandbox import (
 from tools import DEFAULT_TOOL_REGISTRY, ToolRegistry
 from workers import CodexCliWorker, ReviewResult, WorkerRequest
 from workers.base import ArtifactReference
-from workers.cli_runtime import CliRuntimeMessage, CliRuntimeStep
+from workers.cli_runtime import CliRuntimeMessage, CliRuntimeSettings, CliRuntimeStep
 from workers.native_agent_runner import NativeAgentRunResult
 
 
@@ -1211,3 +1211,165 @@ def test_codex_cli_worker_native_mode_honors_read_only_constraint(tmp_path: Path
     command = run_native.call_args.args[0].command
     assert result.status == "success"
     assert command[command.index("--sandbox") + 1] == "read-only"
+
+
+def test_codex_cli_worker_native_sandbox_logic(tmp_path: Path) -> None:
+    """Codex native mode should align sandbox with container status and repo trust."""
+    workspace = _workspace_handle(tmp_path)
+    worker = CodexCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(None),
+        trusted_repo_patterns=[r".*github\.com/trusted/.*"],
+    )
+
+    native_result = NativeAgentRunResult(
+        status="success",
+        summary="Success",
+        command="codex exec",
+        exit_code=0,
+        duration_seconds=0.1,
+        timed_out=False,
+    )
+
+    scenarios = [
+        # (in_container, repo_url, read_only, expected_sandbox)
+        (True, "https://github.com/trusted/repo", False, "danger-full-access"),
+        (True, "https://github.com/untrusted/repo", False, "workspace-write"),
+        (False, "https://github.com/trusted/repo", False, "workspace-write"),
+        (True, "https://github.com/trusted/repo", True, "read-only"),
+    ]
+
+    for in_container, repo_url, read_only, expected_sandbox in scenarios:
+        with (
+            patch("workers.codex_cli_worker.is_in_container", return_value=in_container),
+            patch(
+                "workers.codex_cli_worker.run_native_agent", return_value=native_result
+            ) as run_native,
+        ):
+            result = asyncio.run(
+                worker.run(
+                    WorkerRequest(
+                        task_text="test",
+                        repo_url=repo_url,
+                        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                        constraints={"read_only": read_only},
+                    )
+                )
+            )
+
+            command = run_native.call_args.args[0].command
+            assert command[command.index("--sandbox") + 1] == expected_sandbox
+            assert result.budget_usage["native_agent"]["sandbox_mode"] == expected_sandbox
+            assert result.budget_usage["native_agent"]["in_container"] == in_container
+            assert result.budget_usage["native_agent"]["repo_trusted"] == (
+                repo_url == "https://github.com/trusted/repo"
+            )
+
+
+def test_codex_cli_worker_handles_invalid_trusted_patterns(tmp_path: Path) -> None:
+    """Worker initialization should be resilient to malformed regex patterns."""
+    with patch("workers.codex_cli_worker.logger.warning") as mock_warning:
+        worker = CodexCliWorker(
+            runtime_adapter=_ScriptedAdapter([]),
+            trusted_repo_patterns=["[invalid", "", "  ", "valid.*"],
+        )
+        assert len(worker.trusted_repo_patterns) == 1
+        assert worker.trusted_repo_patterns[0].pattern == "valid.*"
+        # Verify warning was logged for the invalid pattern
+        assert mock_warning.called
+        args = mock_warning.call_args[0]
+        assert "Ignoring malformed trusted repository pattern" in args[0]
+
+
+def test_codex_cli_worker_native_overrides_and_failures(tmp_path: Path) -> None:
+    """Native execution should respect model/profile overrides and handle failures."""
+    workspace = _workspace_handle(tmp_path)
+    adapter = _ScriptedAdapter([])
+    adapter.model = "gpt-4o"
+    adapter.profile = "fast"
+
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(None),
+    )
+
+    # 1. Test model/profile propagation
+    with patch("workers.codex_cli_worker.run_native_agent") as run_native:
+        run_native.return_value = NativeAgentRunResult(
+            status="success",
+            summary="ok",
+            command="codex",
+            exit_code=0,
+            duration_seconds=1,
+            timed_out=False,
+        )
+        asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    task_text="test", repo_url="url", runtime_mode=WorkerRuntimeMode.NATIVE_AGENT
+                )
+            )
+        )
+        command = run_native.call_args.args[0].command
+        assert "--model" in command
+        assert "gpt-4o" in command
+        assert "--profile" in command
+        assert "fast" in command
+
+    # 2. Test timeout handling
+    with patch("workers.codex_cli_worker.run_native_agent") as run_native:
+        run_native.return_value = NativeAgentRunResult(
+            status="failure",
+            summary="timeout",
+            command="codex",
+            exit_code=1,
+            duration_seconds=1,
+            timed_out=True,
+        )
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    task_text="test", repo_url="url", runtime_mode=WorkerRuntimeMode.NATIVE_AGENT
+                )
+            )
+        )
+        assert result.status == "failure"
+        assert result.failure_kind == "timeout"
+        assert result.next_action_hint == "increase_budget_or_reduce_scope"
+
+    # 3. Test generic error handling
+    with patch("workers.codex_cli_worker.run_native_agent") as run_native:
+        run_native.return_value = NativeAgentRunResult(
+            status="error",
+            summary="boom",
+            command="codex",
+            exit_code=1,
+            duration_seconds=1,
+            timed_out=False,
+        )
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    task_text="test", repo_url="url", runtime_mode=WorkerRuntimeMode.NATIVE_AGENT
+                )
+            )
+        )
+        assert result.status == "error"
+        assert result.next_action_hint == "inspect_worker_configuration"
+
+    # 4. Test pre-execution cancellation
+    with patch("workers.codex_cli_worker.run_native_agent") as run_native:
+        # We call _execute_native_runtime directly to test the cancellation branch
+        worker_result = worker._execute_native_runtime(
+            WorkerRequest(task_text="test", repo_url="url"),
+            workspace=workspace,
+            runtime_settings=CliRuntimeSettings(),
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            system_prompt_override="test",
+            cancel_token=lambda: True,
+        )
+        assert worker_result.status == "error"
+        assert worker_result.failure_kind == "timeout"
+        assert not run_native.called

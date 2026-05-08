@@ -57,12 +57,12 @@ Granular tasks for the active and upcoming milestones:
 - [x] T-166: interaction response state machine hardening ([#174](https://github.com/natanayalo/code-agent/pull/174)) — fixed missing imports, corrected graph data structure inconsistencies for hashing, and repaired timeline emission.
 
 - [x] T-165: cancellation semantics hardening ([#173](https://github.com/natanayalo/code-agent/pull/173)) — enforced terminal status machine (FAILED for cancelled), added heartbeat-race abort guards, and ensured idempotent TASK_CANCELLED timeline event recording.
+- [x] T-172: codex native Docker sandbox-boundary alignment — documented and enforced runtime policy for containerized native runs where Codex Linux sandbox may be unavailable; using Docker as the primary boundary and running Codex with `--sandbox danger-full-access` in-container only for trusted repos matched via operator-controlled patterns.
 
 - [x] T-167: integration coverage expansion for existing cancel/interaction endpoints — added comprehensive integration tests for cancellation atomicity, terminality, and interaction cleanup.
 - [x] T-168: migration parity for task_cancelled timeline event — implemented migration for the new event type and verified upgrade path/constraint integrity.
 - [x] T-170: tracing/observability guardrails for native runs
 - [ ] T-171: local e2e runbook + compose/env verification
-- [ ] T-172: codex native Docker sandbox-boundary alignment — document and enforce runtime policy for containerized native runs where Codex Linux sandbox may be unavailable; use Docker as the primary boundary and run Codex with `--sandbox danger-full-access` in-container only for trusted repos, with explicit approval/risk guardrails per guidance ([agent approvals & security](https://developers.openai.com/codex/agent-approvals-security)).
 - [x] T-169: dashboard interaction/cancel UX stabilization ([#175](https://github.com/natanayalo/code-agent/pull/175)) — added task-detail interaction resolve/cancel operator controls with resilient API/error handling and dashboard test coverage.
 
 ### Milestone 17 Done (Published)

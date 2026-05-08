@@ -119,6 +119,12 @@ def test_settings_from_budget_applies_supported_runtime_overrides() -> None:
     assert settings.context_window_limit_tokens == 64000
 
 
+def test_runtime_settings_default_worker_timeout_is_600_seconds() -> None:
+    """Native execution default timeout should be increased to 600 seconds."""
+    settings = CliRuntimeSettings()
+    assert settings.worker_timeout_seconds == 600
+
+
 def test_settings_from_budget_accepts_fractional_numeric_strings_like_float_inputs() -> None:
     """Numeric strings should be coerced with the same truncation behavior as float inputs."""
     settings = settings_from_budget(

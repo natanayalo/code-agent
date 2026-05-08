@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from apps.observability import (
     SPAN_KIND_AGENT,
@@ -32,6 +32,7 @@ from sandbox import (
     WorkspaceManagerError,
     WorkspaceRequest,
 )
+from sandbox.policy import is_in_container
 from sandbox.redact import SecretRedactor
 from sandbox.workspace import _mask_url_credentials, default_workspace_root
 from tools import (
@@ -263,6 +264,7 @@ class CodexCliWorker(Worker):
         default_runtime_mode: WorkerRuntimeMode = WorkerRuntimeMode.TOOL_LOOP,
         native_sandbox_mode: str = DEFAULT_CODEX_NATIVE_SANDBOX_MODE,
         native_event_capture_enabled: bool = False,
+        trusted_repo_patterns: list[str] | None = None,
     ) -> None:
         self.runtime_adapter = runtime_adapter
         self.tool_registry = tool_registry or DEFAULT_TOOL_REGISTRY
@@ -282,6 +284,15 @@ class CodexCliWorker(Worker):
         self.default_runtime_mode = default_runtime_mode
         self.native_sandbox_mode = native_sandbox_mode.strip() or DEFAULT_CODEX_NATIVE_SANDBOX_MODE
         self.native_event_capture_enabled = native_event_capture_enabled
+        self.trusted_repo_patterns: list[re.Pattern[str]] = []
+        if trusted_repo_patterns:
+            for pattern in trusted_repo_patterns:
+                if not pattern or not pattern.strip():
+                    continue
+                try:
+                    self.trusted_repo_patterns.append(re.compile(pattern))
+                except re.error as exc:
+                    logger.warning("Ignoring malformed trusted repository pattern: %s", exc)
 
     async def run(
         self, request: WorkerRequest, *, system_prompt: str | None = None
@@ -596,17 +607,46 @@ class CodexCliWorker(Worker):
         request: WorkerRequest,
         final_message_path: Path,
         runtime_mode: WorkerRuntimeMode,
-    ) -> list[str]:
+    ) -> tuple[list[str], dict[str, Any]]:
         """Build a one-shot `codex exec` command for native-agent mode."""
         executable = getattr(self.runtime_adapter, "executable", "codex")
         model = getattr(self.runtime_adapter, "model", None)
         profile = getattr(self.runtime_adapter, "profile", None)
         read_only_requested = bool(request.constraints.get("read_only"))
-        sandbox_mode = (
-            "read-only"
-            if read_only_requested
-            else (self.native_sandbox_mode or DEFAULT_CODEX_NATIVE_SANDBOX_MODE)
+
+        # Sandbox selection policy (T-172)
+        in_container = is_in_container()
+        repo_trusted = False
+        repo_url = request.repo_url or ""
+        for pattern in self.trusted_repo_patterns:
+            if pattern.search(repo_url):
+                repo_trusted = True
+                break
+
+        if read_only_requested:
+            sandbox_mode = "read-only"
+        elif in_container and repo_trusted:
+            sandbox_mode = "danger-full-access"
+        else:
+            sandbox_mode = self.native_sandbox_mode or DEFAULT_CODEX_NATIVE_SANDBOX_MODE
+
+        logger.info(
+            "Selected Codex native sandbox mode: %s",
+            sandbox_mode,
+            extra={
+                "session_id": request.session_id,
+                "in_container": bool(in_container),
+                "repo_trusted": bool(repo_trusted),
+                "read_only_requested": bool(read_only_requested),
+            },
         )
+
+        sandbox_metadata = {
+            "sandbox_mode": sandbox_mode,
+            "in_container": in_container,
+            "repo_trusted": repo_trusted,
+            "read_only_requested": read_only_requested,
+        }
 
         command = [
             executable,
@@ -629,7 +669,7 @@ class CodexCliWorker(Worker):
         if self.native_event_capture_enabled and runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
             command.append("--json")
         command.append("-")
-        return command
+        return command, sandbox_metadata
 
     def _build_native_prompt(self, *, system_prompt: str, request: WorkerRequest) -> str:
         """Build the native-agent prompt packet for one-shot Codex execution."""
@@ -708,7 +748,7 @@ class CodexCliWorker(Worker):
             if self.native_event_capture_enabled
             else None
         )
-        command = self._build_native_command(
+        command, sandbox_metadata = self._build_native_command(
             workspace=workspace,
             request=request,
             final_message_path=final_message_path,
@@ -744,6 +784,7 @@ class CodexCliWorker(Worker):
                     "exit_code": native_result.exit_code,
                     "timed_out": native_result.timed_out,
                     "event_capture_enabled": self.native_event_capture_enabled,
+                    **sandbox_metadata,
                 },
             },
             commands_run=[
