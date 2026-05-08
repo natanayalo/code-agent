@@ -1131,8 +1131,7 @@ async def generate_task_spec(
         clarification_summary = "Task paused pending clarification before worker dispatch."
         if clarification_questions:
             clarification_summary = (
-                f"{clarification_summary} Clarification needed: "
-                f"{' '.join(clarification_questions)}"
+                f"{clarification_summary} Clarification needed: {' '.join(clarification_questions)}"
             )
         response["errors"] = [*state.errors, "task_spec_requires_clarification"]
         response["result"] = WorkerResult(
@@ -2533,8 +2532,7 @@ def verify_result(
         ).model_dump()
         repair_handoff_requested = True
         progress_message = (
-            "verification failed; queued bounded repair handoff "
-            f"({used_passes + 1}/{max_passes})"
+            f"verification failed; queued bounded repair handoff ({used_passes + 1}/{max_passes})"
         )
     elif had_verifier_repair_request:
         cleaned_constraints = _cleanup_verifier_repair_handoff_constraints(state.task.constraints)
@@ -2722,9 +2720,8 @@ def build_verify_result_node(
                 "Skipping verification node: no worker result available",
                 extra={"task_id": state.task.task_id},
             )
-            return {}
+            return verify_result(state)
 
-        deterministic_failed = False
         worker_failed = state.result.status != "success"
         tests_failed = any(t.status in ("failed", "error") for t in state.result.test_results)
 
@@ -2740,44 +2737,41 @@ def build_verify_result_node(
             )
             return verify_result(state)
 
-        # No need for another state.result is not None check here as we guarded above
-        if state.result.status == "failure":
-            deterministic_failed = True
-        elif any(r.status in {"failed", "error"} for r in state.result.test_results):
-            deterministic_failed = True
-
-        deterministic_verifier_outcome: (
-            tuple[Literal["passed", "failed", "warning"], str] | None
-        ) = None
+        deterministic_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str]
         independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = (
             None
         )
 
-        if not deterministic_failed:
-            # 2. Run explicit verification commands deterministically
+        # 2. Run explicit verification commands deterministically
+        verification_commands = resolve_verification_commands(state)
+        skipped_event: dict[str, Any] | None = None
+
+        if not verification_commands:
+            logger.info(
+                "Skipping deterministic verification: no commands provided by TaskSpec",
+                extra={"task_id": state.task.task_id},
+            )
+            skipped_event = _timeline_event(
+                state,
+                TimelineEventType.VERIFICATION_SKIPPED,
+                message="Deterministic verification skipped: no commands provided.",
+            )
+            deterministic_verifier_outcome = (
+                "passed",
+                "No explicit verification commands defined.",
+            )
+        else:
             deterministic_verifier_outcome = await run_deterministic_verification(
                 state,
                 worker_factory=available_workers,
             )
 
-            if deterministic_verifier_outcome[1] == "No explicit verification commands defined.":
-                logger.info(
-                    "Skipping deterministic verification: no commands provided by TaskSpec",
-                    extra={"task_id": state.task.task_id},
-                )
-                event_dict = _timeline_event(
-                    state,
-                    TimelineEventType.VERIFICATION_SKIPPED,
-                    message="Deterministic verification skipped: no commands provided.",
-                )
-                state.timeline_events.extend(event_dict.get("timeline_events", []))
-
-            # 3. Run LLM-based independent verifier if enabled and deterministic checks passed
-            if enable_independent_verifier and deterministic_verifier_outcome[0] != "failed":
-                independent_verifier_outcome = await run_independent_verifier(
-                    state,
-                    worker_factory=available_workers,
-                )
+        # 3. Run LLM-based independent verifier if enabled and deterministic checks passed
+        if enable_independent_verifier and deterministic_verifier_outcome[0] != "failed":
+            independent_verifier_outcome = await run_independent_verifier(
+                state,
+                worker_factory=available_workers,
+            )
 
         verification_brain_suggestion: VerificationBrainSuggestion | None = None
         verification_brain_report: VerificationBrainMergeReport | None = None
@@ -2813,7 +2807,7 @@ def build_verify_result_node(
                             ),
                             rationale=verification_brain_suggestion.rationale,
                         )
-        return verify_result(
+        response = verify_result(
             state,
             enable_independent_verifier=enable_independent_verifier,
             deterministic_verifier_outcome=deterministic_verifier_outcome,
@@ -2821,6 +2815,12 @@ def build_verify_result_node(
             verification_brain_suggestion=verification_brain_suggestion,
             verification_brain_report=verification_brain_report,
         )
+
+        if skipped_event:
+            skipped_events = skipped_event.get("timeline_events", [])
+            response["timeline_events"] = response.get("timeline_events", []) + skipped_events
+
+        return response
 
     return verify_result_node
 

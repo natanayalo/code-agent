@@ -83,6 +83,7 @@ class ShellWorker(Worker):
                 )
 
                 try:
+                    setup_commands: list[WorkerCommand] = []
                     # T-174: If a diff is provided (from a previous run), apply it before verifying.
                     diff_text = request.constraints.get("apply_diff_text")
                     if diff_text:
@@ -108,6 +109,13 @@ class ShellWorker(Worker):
                                 timeout_seconds=30,
                             )
                         )
+                        setup_commands.append(
+                            WorkerCommand(
+                                command=apply_result.command,
+                                exit_code=apply_result.exit_code,
+                                duration_seconds=apply_result.duration_seconds,
+                            )
+                        )
                         if apply_result.status != "success":
                             return WorkerResult(
                                 status="error",
@@ -116,6 +124,7 @@ class ShellWorker(Worker):
                                     f"{apply_result.summary}"
                                 ),
                                 failure_kind="sandbox_infra",
+                                commands_run=setup_commands,
                             )
 
                     # In SHELL mode, we treat task_text as the script content.
@@ -150,11 +159,12 @@ class ShellWorker(Worker):
                         summary=summary,
                         failure_kind=failure_kind,
                         commands_run=[
+                            *setup_commands,
                             WorkerCommand(
                                 command=native_result.command,
                                 exit_code=native_result.exit_code,
                                 duration_seconds=native_result.duration_seconds,
-                            )
+                            ),
                         ],
                         files_changed=native_result.files_changed,
                         artifacts=native_result.artifacts,
