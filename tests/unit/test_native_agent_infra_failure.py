@@ -186,6 +186,31 @@ sys.exit(137)
     assert "(killed)" not in result.summary.lower()
 
 
+def test_native_agent_runner_detects_signal_exit_code(tmp_path: Path, repo_path: Path) -> None:
+    """If stderr is empty but exit code matches a signal, it should be flagged as infra error."""
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-sigsegv-silent.py",
+        """#!/usr/bin/env python3
+import sys
+sys.exit(139)
+""",
+    )
+
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+
+    assert result.status == "error"
+    assert "SANDBOX_INFRA" in result.summary
+    assert "(sigsegv)" in result.summary.lower()
+
+
 def test_failure_taxonomy_classifies_infra_crash() -> None:
     """The taxonomy should recognize crash markers in the summary."""
     # Direct check of taxonomy logic

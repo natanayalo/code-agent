@@ -64,8 +64,7 @@ _CONTEXT_WINDOW_SUMMARY_MARKERS = (
     "prompt too long",
     "token limit",
 )
-INFRA_FAILURE_MARKERS = (
-    "sandbox_infra",
+INFRA_CRASH_MARKERS: Final = (
     "segmentation fault",
     "core dumped",
     "bus error",
@@ -76,10 +75,11 @@ INFRA_FAILURE_MARKERS = (
     "aborted",
     "killed",
 )
+_INFRA_SUMMARY_MARKERS: Final = ("sandbox_infra",) + INFRA_CRASH_MARKERS
 
 
 _INFRA_FAILURE_RE: Final = re.compile(
-    rf"\b({'|'.join(map(re.escape, INFRA_FAILURE_MARKERS))})\b", re.IGNORECASE
+    rf"\b({'|'.join(map(re.escape, _INFRA_SUMMARY_MARKERS))})\b", re.IGNORECASE
 )
 
 

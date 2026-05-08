@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shlex
 import shutil
 import subprocess
@@ -33,7 +34,7 @@ from sandbox.redact import SecretRedactor, redact_and_truncate_output, sanitize_
 from workers.adapter_utils import format_native_run_summary, truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
-from workers.failure_taxonomy import find_infra_failure_marker
+from workers.failure_taxonomy import INFRA_CRASH_MARKERS
 from workers.native_agent_models import NativeAgentRunResult
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,18 @@ _FINAL_MESSAGE_FIELDS: Final = (
     "content",
     "response",
 )
+
+_INFRA_FAILURE_PATTERN: Final = re.compile(
+    rf"\b({'|'.join(map(re.escape, INFRA_CRASH_MARKERS))})\b", re.IGNORECASE
+)
+
+_SIGNAL_EXIT_CODES: Final = {
+    132: "SIGILL",
+    134: "SIGABRT",
+    137: "SIGKILL",
+    138: "SIGBUS",
+    139: "SIGSEGV",
+}
 
 
 def _extract_final_message(raw_text: str) -> str | None:
@@ -522,10 +535,13 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 # from non-zero exit codes. Use centralized truncation helper to
                 # avoid performance issues with giant logs.
                 stderr_tail = truncate_detail_keep_tail(stderr_text, max_characters=4096)
-                marker = find_infra_failure_marker(stderr_tail)
-                if marker:
+                if match := _INFRA_FAILURE_PATTERN.search(stderr_tail):
                     status = "error"
-                    summary = f"SANDBOX_INFRA: detected shell crash ({marker})"
+                    summary = f"SANDBOX_INFRA: detected shell crash ({match.group(1).lower()})"
+                elif completed.returncode in _SIGNAL_EXIT_CODES:
+                    status = "error"
+                    sig_name = _SIGNAL_EXIT_CODES[completed.returncode]
+                    summary = f"SANDBOX_INFRA: detected shell crash ({sig_name})"
 
             return _finalize_native_agent_run(
                 request=request,
