@@ -36,3 +36,21 @@ class PathPolicy(SandboxModel):
                 continue
 
         return False
+
+
+def is_in_container() -> bool:
+    """Return True if the current process appears to be running inside a container."""
+    # Common indicator for Docker
+    if os.path.exists("/.dockerenv"):
+        return True
+
+    # Check cgroup for 'docker' or 'containerd'
+    cgroup_path = Path("/proc/1/cgroup")
+    if cgroup_path.exists():
+        try:
+            content = cgroup_path.read_text()
+            return "docker" in content or "containerd" in content or "kubepods" in content
+        except OSError:
+            pass
+
+    return False
