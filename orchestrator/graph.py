@@ -2266,6 +2266,8 @@ def verify_result(
     independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = None,
     verification_brain_suggestion: VerificationBrainSuggestion | None = None,
     verification_brain_report: VerificationBrainMergeReport | None = None,
+    extra_timeline_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]]
+    | None = None,
 ) -> dict[str, Any]:
     """Perform deterministic checks on the worker output before summarization."""
     state = _ensure_state(state_input)
@@ -2565,6 +2567,7 @@ def verify_result(
         **_timeline_events(
             state,
             (TimelineEventType.VERIFICATION_STARTED, None, None),
+            *(extra_timeline_events or []),
             (
                 TimelineEventType.VERIFICATION_COMPLETED,
                 report.summary,
@@ -2744,18 +2747,14 @@ def build_verify_result_node(
 
         # 2. Run explicit verification commands deterministically
         verification_commands = resolve_verification_commands(state)
-        skipped_event: dict[str, Any] | None = None
+        skipped_message: str | None = None
 
         if not verification_commands:
             logger.info(
                 "Skipping deterministic verification: no commands provided by TaskSpec",
                 extra={"task_id": state.task.task_id},
             )
-            skipped_event = _timeline_event(
-                state,
-                TimelineEventType.VERIFICATION_SKIPPED,
-                message="Deterministic verification skipped: no commands provided.",
-            )
+            skipped_message = "Deterministic verification skipped: no commands provided."
             deterministic_verifier_outcome = (
                 "passed",
                 "No explicit verification commands defined.",
@@ -2807,6 +2806,11 @@ def build_verify_result_node(
                             ),
                             rationale=verification_brain_suggestion.rationale,
                         )
+        # 5. Verify the result
+        extra_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]] = []
+        if skipped_message:
+            extra_events.append((TimelineEventType.VERIFICATION_SKIPPED, skipped_message, None))
+
         response = verify_result(
             state,
             enable_independent_verifier=enable_independent_verifier,
@@ -2814,11 +2818,8 @@ def build_verify_result_node(
             independent_verifier_outcome=independent_verifier_outcome,
             verification_brain_suggestion=verification_brain_suggestion,
             verification_brain_report=verification_brain_report,
+            extra_timeline_events=extra_events,
         )
-
-        if skipped_event:
-            skipped_events = skipped_event.get("timeline_events", [])
-            response["timeline_events"] = response.get("timeline_events", []) + skipped_events
 
         return response
 

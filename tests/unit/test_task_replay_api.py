@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,7 +27,7 @@ from workers import Worker, WorkerProfile, WorkerRequest, WorkerResult
 class _StaticWorker(Worker):
     """Worker double that returns a predefined result."""
 
-    async def run(self, request: WorkerRequest) -> WorkerResult:
+    async def run(self, request: WorkerRequest, **kwargs: Any) -> WorkerResult:
         return WorkerResult(
             status="success",
             summary="ok",
