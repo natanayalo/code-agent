@@ -129,10 +129,6 @@ def classify_failure_kind(
     if _contains_any(normalized_summary, _AUTH_SUMMARY_MARKERS):
         return "provider_auth"
 
-    # Infrastructure failures (crashes, OOM, etc).
-    marker = find_infra_failure_marker(normalized_summary)
-    if marker:
-        return "sandbox_infra"
     if _contains_any_in_commands(failed_commands, _TEST_COMMAND_MARKERS) or _contains_any(
         normalized_summary, _TEST_SUMMARY_MARKERS
     ):
@@ -141,6 +137,11 @@ def classify_failure_kind(
         normalized_summary, _COMPILE_SUMMARY_MARKERS
     ):
         return "compile"
+
+    # Infrastructure failures (crashes, OOM, etc).
+    marker = find_infra_failure_marker(normalized_summary)
+    if marker:
+        return "sandbox_infra"
     if stop_reason == "adapter_error":
         return "provider_error"
     if failed_commands:
