@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import shlex
 import shutil
 import subprocess
@@ -34,7 +33,7 @@ from sandbox.redact import SecretRedactor, redact_and_truncate_output, sanitize_
 from workers.adapter_utils import format_native_run_summary, truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
-from workers.failure_taxonomy import INFRA_FAILURE_MARKERS
+from workers.failure_taxonomy import find_infra_failure_marker
 from workers.native_agent_models import NativeAgentRunResult
 
 logger = logging.getLogger(__name__)
@@ -523,18 +522,10 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 # Use centralized truncation helper and limit search space to tail
                 # to avoid performance issues with giant logs.
                 stderr_tail = truncate_detail_keep_tail(stderr_text, max_characters=4096).lower()
-                for marker in INFRA_FAILURE_MARKERS:
-                    # Avoid false positives with substring matches (e.g. "fulfilled")
-                    # by checking for word boundaries for the "killed" marker.
-                    is_crash = (
-                        marker in stderr_tail
-                        if marker != "killed"
-                        else bool(re.search(r"\bkilled\b", stderr_tail))
-                    )
-                    if is_crash:
-                        status = "error"
-                        summary = f"SANDBOX_INFRA: detected shell crash ({marker})"
-                        break
+                marker = find_infra_failure_marker(stderr_tail)
+                if marker:
+                    status = "error"
+                    summary = f"SANDBOX_INFRA: detected shell crash ({marker})"
 
             return _finalize_native_agent_run(
                 request=request,

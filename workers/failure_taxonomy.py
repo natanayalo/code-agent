@@ -77,6 +77,21 @@ INFRA_FAILURE_MARKERS = (
 )
 
 
+def find_infra_failure_marker(text: str) -> str | None:
+    """Check if the text contains any infrastructure failure markers and return the first match."""
+    # We use regex word boundaries for "killed" to avoid false positives (e.g. "fulfilled").
+    normalized = text.lower()
+    for marker in INFRA_FAILURE_MARKERS:
+        is_match = (
+            marker in normalized
+            if marker != "killed"
+            else bool(re.search(r"\bkilled\b", normalized))
+        )
+        if is_match:
+            return marker
+    return None
+
+
 def classify_failure_kind(
     *,
     status: str,
@@ -116,15 +131,9 @@ def classify_failure_kind(
         return "provider_auth"
 
     # Infrastructure failures (crashes, OOM, etc).
-    # We use regex word boundaries for "killed" to avoid false positives (e.g. "fulfilled").
-    for marker in INFRA_FAILURE_MARKERS:
-        is_match = (
-            marker in normalized_summary
-            if marker != "killed"
-            else bool(re.search(r"\bkilled\b", normalized_summary))
-        )
-        if is_match:
-            return "sandbox_infra"
+    marker = find_infra_failure_marker(normalized_summary)
+    if marker:
+        return "sandbox_infra"
     if _contains_any_in_commands(failed_commands, _TEST_COMMAND_MARKERS) or _contains_any(
         normalized_summary, _TEST_SUMMARY_MARKERS
     ):
