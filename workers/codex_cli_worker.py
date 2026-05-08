@@ -292,7 +292,7 @@ class CodexCliWorker(Worker):
                 try:
                     self.trusted_repo_patterns.append(re.compile(pattern))
                 except re.error as exc:
-                    logger.warning("Ignoring invalid trusted repo pattern '%s': %s", pattern, exc)
+                    logger.warning("Ignoring malformed trusted repository pattern: %s", exc)
 
     async def run(
         self, request: WorkerRequest, *, system_prompt: str | None = None
@@ -631,13 +631,13 @@ class CodexCliWorker(Worker):
             sandbox_mode = self.native_sandbox_mode or DEFAULT_CODEX_NATIVE_SANDBOX_MODE
 
         logger.info(
-            "Selected Codex native sandbox mode",
+            "Selected Codex native sandbox mode: %s",
+            sandbox_mode,
             extra={
                 "session_id": request.session_id,
-                "sandbox_mode": sandbox_mode,
-                "in_container": in_container,
-                "repo_trusted": repo_trusted,
-                "read_only_requested": read_only_requested,
+                "in_container": bool(in_container),
+                "repo_trusted": bool(repo_trusted),
+                "read_only_requested": bool(read_only_requested),
             },
         )
 

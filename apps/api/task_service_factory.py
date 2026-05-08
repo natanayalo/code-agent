@@ -323,12 +323,8 @@ def build_task_service_from_env(
             resolved_env.get(NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR)
         ),
         trusted_repo_patterns=(
-            [
-                p.strip()
-                for p in resolved_env.get(CODEX_TRUSTED_REPO_PATTERNS_ENV_VAR, "").split(",")
-                if p.strip()
-            ]
-            if resolved_env.get(CODEX_TRUSTED_REPO_PATTERNS_ENV_VAR)
+            [p.strip() for p in s.split(",") if p.strip()]
+            if (s := resolved_env.get(CODEX_TRUSTED_REPO_PATTERNS_ENV_VAR))
             else None
         ),
     )

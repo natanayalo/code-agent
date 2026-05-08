@@ -1279,5 +1279,4 @@ def test_codex_cli_worker_handles_invalid_trusted_patterns(tmp_path: Path) -> No
         # Verify warning was logged for the invalid pattern
         assert mock_warning.called
         args = mock_warning.call_args[0]
-        assert "Ignoring invalid trusted repo pattern" in args[0]
-        assert "[invalid" in args[1]
+        assert "Ignoring malformed trusted repository pattern" in args[0]
