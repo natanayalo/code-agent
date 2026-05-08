@@ -541,7 +541,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 # Detect systemic infrastructure failures (shell crashes, OOM, etc)
                 # from non-zero exit codes. Use centralized truncation helper and
                 # limit search space to tail to avoid performance issues with giant logs.
-                stderr_tail = truncate_detail_keep_tail(stderr_text[-8192:], max_characters=4096)
+                stderr_tail = truncate_detail_keep_tail(stderr_text[-8192:], max_characters=8192)
                 if match := _INFRA_FAILURE_PATTERN.search(stderr_tail):
                     status = "error"
                     summary = f"SANDBOX_INFRA: detected shell crash ({match.group(1).lower()})"

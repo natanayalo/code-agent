@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Final
 
+from workers.adapter_utils import build_failure_summary
 from workers.base import FailureKind, WorkerCommand
 
 _TEST_COMMAND_MARKERS = (
@@ -103,9 +104,7 @@ def classify_failure_kind(
     if status == "success":
         return None
 
-    normalized_summary = (summary or "").lower()
-    if final_message:
-        normalized_summary = f"{final_message.lower()} {normalized_summary}".strip()
+    normalized_summary = build_failure_summary(summary=summary, final_message=final_message).lower()
 
     failed_commands = [
         command.command.lower() for command in (commands_run or []) if command.exit_code

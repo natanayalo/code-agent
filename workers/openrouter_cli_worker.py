@@ -32,6 +32,7 @@ from tools import (
     UnknownToolError,
     granted_permission_from_constraints,
 )
+from workers.adapter_utils import build_failure_summary
 from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import ArtifactReference, Worker, WorkerRequest, WorkerResult
 from workers.cli_runtime import (
@@ -175,7 +176,14 @@ def _worker_result_from_execution(
         budget_usage["post_run_lint_format"] = post_run_lint_format
     return WorkerResult(
         status=execution.status,
-        summary=execution.summary,
+        summary=build_failure_summary(
+            summary=execution.summary,
+            final_message=(
+                execution.messages[-1].content
+                if execution.messages and execution.messages[-1].role == "assistant"
+                else None
+            ),
+        ),
         failure_kind=classify_failure_kind(
             status=execution.status,
             stop_reason=execution.stop_reason,

@@ -97,3 +97,15 @@ def format_native_run_summary(
         return base
 
     return f"{base} {preview}".strip()
+
+
+def build_failure_summary(
+    *,
+    summary: str | None = None,
+    final_message: str | None = None,
+) -> str:
+    """Construct a unified failure summary from raw output and structured messages."""
+    normalized_summary = (summary or "").strip()
+    if final_message:
+        normalized_summary = f"{final_message.strip()} {normalized_summary}".strip()
+    return normalized_summary

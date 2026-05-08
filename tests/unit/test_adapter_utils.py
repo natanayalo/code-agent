@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 from workers.adapter_utils import (
+    build_failure_summary,
     coerce_bool,
     coerce_positive_int,
     normalize_prompt_override,
     truncate_detail_keep_head,
     truncate_detail_keep_tail,
 )
+
+
+def test_build_failure_summary_concatenates_inputs() -> None:
+    """The failure summary should combine final message and raw summary."""
+    assert build_failure_summary(summary="base", final_message="Final.") == "Final. base"
+    assert build_failure_summary(summary="base", final_message=None) == "base"
+    assert build_failure_summary(summary=None, final_message="Final.") == "Final."
+    assert build_failure_summary(summary="   ", final_message="Final.") == "Final."
+    assert build_failure_summary(summary="base", final_message="   ") == "base"
+    assert build_failure_summary(summary=None, final_message=None) == ""
 
 
 def test_coerce_positive_int_parses_supported_inputs() -> None:
