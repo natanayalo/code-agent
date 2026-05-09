@@ -33,6 +33,8 @@ TASK_ID_ATTRIBUTE: Final[str] = "code_agent.task_id"
 ATTEMPT_COUNT_ATTRIBUTE: Final[str] = "code_agent.attempt_count"
 CHANNEL_ATTRIBUTE: Final[str] = "code_agent.channel"
 OUTCOME_STATUS_ATTRIBUTE: Final[str] = "code_agent.outcome_status"
+ATTR_TASK_KIND: Final[str] = "code_agent.task_kind"
+ATTR_WORKER_ID: Final[str] = "code_agent.worker_id"
 MAX_SPAN_ATTRIBUTE_LENGTH: Final[int] = 12000
 
 # Native Agent Span Attributes
@@ -360,6 +362,7 @@ def get_centralized_span_status(
         # Explicit mapping ensures consistency and avoids "broad" dynamic lookups
         mapping = {
             "success": otel_trace.StatusCode.OK,
+            "completed": otel_trace.StatusCode.OK,
             "error": otel_trace.StatusCode.ERROR,
             "failure": otel_trace.StatusCode.ERROR,
             "failed": otel_trace.StatusCode.ERROR,
@@ -371,7 +374,10 @@ def get_centralized_span_status(
 
         # Default to UNSET for unknown statuses to avoid inaccurate reporting
         return otel_trace.Status(otel_trace.StatusCode.UNSET, description)
-    except (ImportError, Exception):
+    except ImportError:
+        return None
+    except Exception as exc:
+        logger.debug("Failed to map span status: %s", exc)
         return None
 
 
@@ -508,7 +514,11 @@ def set_span_status(status_code: Any, description: str | None = None) -> None:
                 # Use explicit whitelist to map strings to StatusCode enum
                 mapping = {
                     "OK": otel_trace.StatusCode.OK,
+                    "SUCCESS": otel_trace.StatusCode.OK,
+                    "COMPLETED": otel_trace.StatusCode.OK,
                     "ERROR": otel_trace.StatusCode.ERROR,
+                    "FAILURE": otel_trace.StatusCode.ERROR,
+                    "FAILED": otel_trace.StatusCode.ERROR,
                     "UNSET": otel_trace.StatusCode.UNSET,
                 }
                 status_code = mapping.get(status_code.upper(), otel_trace.StatusCode.UNSET)

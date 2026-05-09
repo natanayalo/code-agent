@@ -35,6 +35,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from apps.observability import (
+    ATTR_WORKER_ID,
     SPAN_KIND_AGENT,
     STATUS_ERROR,
     bind_current_trace_context,
@@ -1577,7 +1578,7 @@ class TaskExecutionService:
                 channel=persisted.channel,
             )
             with span_cm:
-                set_current_span_attribute("code_agent.worker_id", worker_id)
+                set_current_span_attribute(ATTR_WORKER_ID, worker_id)
                 set_span_input_output(input_data=submission.task_text)
                 await self._emit_progress(submission, persisted, phase="started")
                 await self._emit_progress(submission, persisted, phase="running")

@@ -15,6 +15,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from apps.observability import (
+    ATTR_TASK_KIND,
     SPAN_KIND_CHAIN,
     SPAN_KIND_TOOL,
     set_current_span_attribute,
@@ -926,7 +927,7 @@ def classify_task(state_input: OrchestratorState) -> dict[str, Any]:
     ):
         task_text = state.normalized_task_text or state.task.task_text
         task_kind = _classify_task_kind(task_text)
-        set_current_span_attribute("code_agent.task_kind", task_kind)
+        set_current_span_attribute(ATTR_TASK_KIND, task_kind)
         set_span_input_output(input_data=task_text, output_data={"task_kind": task_kind})
         return {
             "current_step": "classify_task",
@@ -1933,10 +1934,8 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
         attempt=state.attempt_count,
     ):
         worker_type = state.route.chosen_worker
-        if state.route.route_reason != "runtime_unavailable":
-            assert (
-                worker_type is not None
-            ), "choose_worker must set route.chosen_worker before dispatch."
+        if state.route.route_reason != "runtime_unavailable" and worker_type is None:
+            raise ValueError("choose_worker must set route.chosen_worker before dispatch.")
         dispatch = WorkerDispatch(
             worker_type=worker_type,
             worker_profile=state.route.chosen_profile,
