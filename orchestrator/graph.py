@@ -1084,6 +1084,9 @@ async def generate_task_spec(
                     tracer_name="orchestrator.graph",
                     span_name="orchestrator.node.generate_task_spec.brain",
                     attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                    task_id=state.task.task_id,
+                    session_id=state.session.session_id if state.session else None,
+                    attempt=state.attempt_count,
                 ):
                     suggestion = await orchestrator_brain.suggest_task_spec(
                         task=state.task,
@@ -1841,6 +1844,9 @@ def build_choose_worker_node(
                         tracer_name="orchestrator.graph",
                         span_name="orchestrator.node.choose_worker.brain",
                         attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                        task_id=state.task.task_id,
+                        session_id=state.session.session_id if state.session else None,
+                        attempt=state.attempt_count,
                     ):
                         suggestion = await orchestrator_brain.suggest_route(
                             state=state,
@@ -2859,6 +2865,9 @@ def build_verify_result_node(
                     tracer_name="orchestrator.graph",
                     span_name="orchestrator.node.verify_result.deterministic",
                     attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                    task_id=state.task.task_id,
+                    session_id=state.session.session_id if state.session else None,
+                    attempt=state.attempt_count,
                 ):
                     deterministic_verifier_outcome = await run_deterministic_verification(
                         state,
@@ -2875,6 +2884,9 @@ def build_verify_result_node(
                     tracer_name="orchestrator.graph",
                     span_name="orchestrator.node.verify_result.independent",
                     attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                    task_id=state.task.task_id,
+                    session_id=state.session.session_id if state.session else None,
+                    attempt=state.attempt_count,
                 ):
                     independent_verifier_outcome = await run_independent_verifier(
                         state,
@@ -2897,6 +2909,9 @@ def build_verify_result_node(
                             tracer_name="orchestrator.graph",
                             span_name="orchestrator.node.verify_result.brain",
                             attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                            task_id=state.task.task_id,
+                            session_id=state.session.session_id if state.session else None,
+                            attempt=state.attempt_count,
                         ):
                             verification_brain_suggestion = await suggest_verification(
                                 state=state,
