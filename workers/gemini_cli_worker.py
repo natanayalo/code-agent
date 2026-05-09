@@ -43,7 +43,7 @@ from tools import (
     UnknownToolError,
     granted_permission_from_constraints,
 )
-from workers.adapter_utils import format_native_run_summary
+from workers.adapter_utils import build_failure_summary, format_native_run_summary
 from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import (
     ArtifactReference,
@@ -53,6 +53,7 @@ from workers.base import (
     WorkerRequest,
     WorkerResult,
 )
+from workers.cli_adapter_utils import build_worker_result
 from workers.cli_runtime import (
     CliRuntimeAdapter,
     CliRuntimeExecutionResult,
@@ -200,22 +201,14 @@ def _worker_result_from_execution(
     budget_usage = execution.budget_ledger.model_dump(mode="json")
     if post_run_lint_format is not None:
         budget_usage["post_run_lint_format"] = post_run_lint_format
-    return WorkerResult(
-        status=execution.status,
-        summary=execution.summary,
-        failure_kind=classify_failure_kind(
-            status=execution.status,
-            stop_reason=execution.stop_reason,
-            summary=execution.summary,
-            commands_run=execution.commands_run,
-        ),
-        requested_permission=requested_permission,
-        budget_usage=budget_usage,
-        commands_run=execution.commands_run,
+    return build_worker_result(
+        execution=execution,
         files_changed=files_changed,
-        artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
+        requested_permission=requested_permission,
+        post_run_lint_format=post_run_lint_format,
         review_result=review_result,
         diff_text=diff_text,
+        artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
         next_action_hint=_next_action_hint(execution),
     )
 
@@ -651,11 +644,15 @@ class GeminiCliWorker(Worker):
         if native_result.timed_out:
             return "timeout"
 
-        summary = format_native_run_summary(native_result)
+        summary = build_failure_summary(
+            summary=format_native_run_summary(native_result),
+            final_message=native_result.final_message,
+        )
 
         classified = classify_failure_kind(
             status=native_result.status,
             summary=summary,
+            final_message=native_result.final_message,
             commands_run=[
                 WorkerCommand(
                     command=native_result.command,
@@ -728,7 +725,10 @@ class GeminiCliWorker(Worker):
             )
         )
 
-        summary = format_native_run_summary(native_result)
+        summary = build_failure_summary(
+            summary=format_native_run_summary(native_result),
+            final_message=native_result.final_message,
+        )
         result = WorkerResult(
             status=native_result.status,
             summary=summary,

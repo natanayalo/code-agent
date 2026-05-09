@@ -30,9 +30,10 @@ from apps.observability import (
     with_span_kind,
 )
 from sandbox.redact import SecretRedactor, redact_and_truncate_output, sanitize_command
-from workers.adapter_utils import format_native_run_summary
+from workers.adapter_utils import format_native_run_summary, truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
+from workers.failure_taxonomy import find_infra_failure_marker
 from workers.native_agent_models import NativeAgentRunResult
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,22 @@ _FINAL_MESSAGE_FIELDS: Final = (
     "content",
     "response",
 )
+
+
+_SIGNAL_EXIT_CODES: Final = {
+    132: "SIGILL",
+    -4: "SIGILL",
+    134: "SIGABRT",
+    -6: "SIGABRT",
+    137: "SIGKILL",
+    -9: "SIGKILL",
+    135: "SIGBUS",
+    138: "SIGBUS",
+    -7: "SIGBUS",
+    -10: "SIGBUS",
+    139: "SIGSEGV",
+    -11: "SIGSEGV",
+}
 
 
 def _extract_final_message(raw_text: str) -> str | None:
@@ -516,6 +533,18 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
             else:
                 summary = f"Native agent command exited with code {completed.returncode}."
                 status = "failure"
+
+                # Detect systemic infrastructure failures (shell crashes, OOM, etc)
+                # from non-zero exit codes. Use centralized truncation helper and
+                # limit search space to tail to avoid performance issues with giant logs.
+                stderr_tail = truncate_detail_keep_tail(stderr_text, max_characters=8192)
+                if marker := find_infra_failure_marker(stderr_tail):
+                    status = "error"
+                    summary = f"SANDBOX_INFRA: detected shell crash ({marker})"
+                elif completed.returncode in _SIGNAL_EXIT_CODES:
+                    status = "error"
+                    sig_name = _SIGNAL_EXIT_CODES[completed.returncode]
+                    summary = f"SANDBOX_INFRA: detected shell crash ({sig_name})"
 
             return _finalize_native_agent_run(
                 request=request,

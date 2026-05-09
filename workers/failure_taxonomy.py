@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import re
+from typing import Final
+
+from workers.adapter_utils import build_failure_summary
 from workers.base import FailureKind, WorkerCommand
 
 _TEST_COMMAND_MARKERS = (
@@ -61,6 +65,32 @@ _CONTEXT_WINDOW_SUMMARY_MARKERS = (
     "prompt too long",
     "token limit",
 )
+INFRA_CRASH_MARKERS: Final = (
+    "segmentation fault",
+    "core dumped",
+    "bus error",
+    "out of memory",
+    "oom-kill",
+    "killed by signal",
+    "illegal instruction",
+    "aborted",
+    "killed",
+    "syntax error: word unexpected",
+)
+_INFRA_SUMMARY_MARKERS: Final = ("sandbox_infra",) + INFRA_CRASH_MARKERS
+
+
+_INFRA_FAILURE_RE: Final = re.compile(
+    rf"\b({'|'.join(map(re.escape, _INFRA_SUMMARY_MARKERS))})\b", re.IGNORECASE
+)
+
+
+def find_infra_failure_marker(text: str) -> str | None:
+    """Check if the text contains any infrastructure failure markers and return the first match."""
+    match = _INFRA_FAILURE_RE.search(text)
+    if not match:
+        return None
+    return match.group(1).lower()
 
 
 def classify_failure_kind(
@@ -68,13 +98,15 @@ def classify_failure_kind(
     status: str,
     stop_reason: str | None = None,
     summary: str | None = None,
+    final_message: str | None = None,
     commands_run: list[WorkerCommand] | None = None,
 ) -> FailureKind | None:
     """Return a typed failure kind for a worker/runtime outcome."""
     if status == "success":
         return None
 
-    normalized_summary = (summary or "").lower()
+    normalized_summary = build_failure_summary(summary=summary, final_message=final_message).lower()
+
     failed_commands = [
         command.command.lower() for command in (commands_run or []) if command.exit_code
     ]
@@ -100,6 +132,13 @@ def classify_failure_kind(
         return "context_window"
     if _contains_any(normalized_summary, _AUTH_SUMMARY_MARKERS):
         return "provider_auth"
+
+    # Infrastructure failures (crashes, OOM, etc) take precedence over
+    # functional failures (test/compile) when a systemic crash is detected.
+    marker = find_infra_failure_marker(normalized_summary)
+    if marker:
+        return "sandbox_infra"
+
     if _contains_any_in_commands(failed_commands, _TEST_COMMAND_MARKERS) or _contains_any(
         normalized_summary, _TEST_SUMMARY_MARKERS
     ):

@@ -34,6 +34,7 @@ from tools import (
 )
 from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import ArtifactReference, Worker, WorkerRequest, WorkerResult
+from workers.cli_adapter_utils import build_worker_result
 from workers.cli_runtime import (
     CliRuntimeAdapter,
     CliRuntimeExecutionResult,
@@ -42,7 +43,6 @@ from workers.cli_runtime import (
     run_cli_runtime_loop,
     settings_from_budget,
 )
-from workers.failure_taxonomy import classify_failure_kind
 from workers.post_run_lint import (
     collect_changed_files_and_apply_post_run_lint_format,
 )
@@ -173,22 +173,14 @@ def _worker_result_from_execution(
     budget_usage = execution.budget_ledger.model_dump(mode="json")
     if post_run_lint_format is not None:
         budget_usage["post_run_lint_format"] = post_run_lint_format
-    return WorkerResult(
-        status=execution.status,
-        summary=execution.summary,
-        failure_kind=classify_failure_kind(
-            status=execution.status,
-            stop_reason=execution.stop_reason,
-            summary=execution.summary,
-            commands_run=execution.commands_run,
-        ),
-        requested_permission=requested_permission,
-        budget_usage=budget_usage,
-        commands_run=execution.commands_run,
+    return build_worker_result(
+        execution=execution,
         files_changed=files_changed,
-        artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
+        requested_permission=requested_permission,
+        post_run_lint_format=post_run_lint_format,
         review_result=review_result,
         diff_text=diff_text,
+        artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
         next_action_hint=_next_action_hint(execution),
     )
 

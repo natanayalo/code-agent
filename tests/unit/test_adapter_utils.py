@@ -3,12 +3,51 @@
 from __future__ import annotations
 
 from workers.adapter_utils import (
+    build_failure_summary,
     coerce_bool,
     coerce_positive_int,
     normalize_prompt_override,
     truncate_detail_keep_head,
     truncate_detail_keep_tail,
 )
+
+
+def test_build_failure_summary_concatenates_inputs() -> None:
+    """The failure summary should combine final message and raw summary."""
+    assert build_failure_summary(summary="base", final_message="Final.") == "Final. base"
+    assert build_failure_summary(summary="base", final_message=None) == "base"
+    assert build_failure_summary(summary=None, final_message="Final.") == "Final."
+    assert build_failure_summary(summary="   ", final_message="Final.") == "Final."
+    assert build_failure_summary(summary="base", final_message="   ") == "base"
+    assert build_failure_summary(summary=None, final_message=None) == ""
+
+    # Deduplication
+    assert (
+        build_failure_summary(summary="Native run complete.", final_message="Native run complete.")
+        == "Native run complete."
+    )
+    assert (
+        build_failure_summary(
+            summary="Partial summary.", final_message="This is a Partial summary."
+        )
+        == "This is a Partial summary."
+    )
+    assert (
+        build_failure_summary(summary="Final note.txt", final_message="Final") == "Final note.txt"
+    )
+
+
+def test_build_failure_summary_handles_mocks() -> None:
+    """The helper should be robust against MagicMocks from tests."""
+    from unittest.mock import MagicMock
+
+    mock_msg = MagicMock()
+    # If final_message is a mock, it should be ignored if it's not a string
+    assert build_failure_summary(summary="base", final_message=mock_msg) == "base"
+
+    mock_summary = MagicMock()
+    # If summary is a mock, it should be ignored if it's not a string
+    assert build_failure_summary(summary=mock_summary, final_message="Final.") == "Final."
 
 
 def test_coerce_positive_int_parses_supported_inputs() -> None:

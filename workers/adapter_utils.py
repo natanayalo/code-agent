@@ -97,3 +97,33 @@ def format_native_run_summary(
         return base
 
     return f"{base} {preview}".strip()
+
+
+def build_failure_summary(
+    *,
+    summary: str | None = None,
+    final_message: str | None = None,
+) -> str:
+    """Construct a unified failure summary from raw output and structured messages."""
+    # Ensure we only perform string operations if the inputs are actual strings.
+    # This prevents TypeErrors in tests when MagicMocks are passed as result fields.
+    safe_summary = summary if isinstance(summary, str) else None
+    safe_message = final_message if isinstance(final_message, str) else None
+
+    base = (safe_summary or "").strip()
+    if not safe_message:
+        return base
+
+    msg = safe_message.strip()
+    # Avoid duplication if the structured message is already contained in the raw summary
+    # or vice-versa (which can happen if the runtime loop uses the final message as summary).
+    if not msg:
+        return base
+    if not base:
+        return msg
+    if msg in base:
+        return base
+    if base in msg:
+        return msg
+
+    return f"{msg} {base}".strip()
