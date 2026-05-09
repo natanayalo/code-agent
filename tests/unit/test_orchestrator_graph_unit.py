@@ -2243,31 +2243,7 @@ def test_verify_result_with_brain_report() -> None:
 
 def test_verify_result_failure_kinds() -> None:
     """Verify that different failure labels map to correct failure kinds."""
-
-    def _check(label, expected_kind):
-        # Mock a failed item
-        from orchestrator.state import VerificationReportItem
-
-        with patch(
-            "orchestrator.graph.VerificationReportItem",
-            side_effect=lambda **kw: VerificationReportItem(**kw),
-        ):
-            # We need to bypass the deterministic checks and inject our items
-            # Or just call verify_result and see if it hits the labels
-            pass
-
-        # Actually, it's easier to just mock the items list if we can
-        # But items is internal.
-        # Let's try to trigger them via arguments or state if possible.
-        # Actually, verify_result calculates items from state.result.
-
-        # For 'file_changes', we need files_changed to be non-empty but status to be failure?
-        # No, 'file_changes' is added if state.result.status is failure but files changed.
-
-        # Let's just trust that the mapping logic is simple and I can add a test that exercises it.
-        pass
-
-    # Test worker_failure
+    # Test worker_failure (default when worker returns "failure" status)
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "do"},
@@ -2298,3 +2274,20 @@ def test_verify_result_failure_kinds() -> None:
     )
     res = verify_result(state, deterministic_verifier_outcome=("failed", "Command failed"))
     assert res["verification"]["failure_kind"] == "test_regression"
+
+    # Test no_changes (success status but no files changed)
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "do"},
+            "result": {
+                "status": "success",
+                "summary": "ok",
+                "commands_run": [],
+                "files_changed": [],
+                "artifacts": [],
+            },
+        }
+    )
+    res = verify_result(state)
+    assert res["verification"]["status"] == "warning"
+    assert res["verification"]["failure_kind"] is None

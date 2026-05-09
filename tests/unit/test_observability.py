@@ -1049,3 +1049,66 @@ def test_detach_trace_context_handles_errors() -> None:
 
     with patch("opentelemetry.context.detach", side_effect=AttributeError("no detach")):
         observability_module.detach_trace_context("mock-token")
+
+
+def test_get_centralized_span_status() -> None:
+    """Verify that result statuses map to correct OTel status codes."""
+    from opentelemetry import trace as otel_trace
+
+    # Success cases
+    s1 = observability_module.get_centralized_span_status("success")
+    assert s1.status_code == otel_trace.StatusCode.OK
+
+    s2 = observability_module.get_centralized_span_status("completed")
+    assert s2.status_code == otel_trace.StatusCode.OK
+
+    # Error cases
+    e1 = observability_module.get_centralized_span_status("error")
+    assert e1.status_code == otel_trace.StatusCode.ERROR
+
+    e2 = observability_module.get_centralized_span_status("failure")
+    assert e2.status_code == otel_trace.StatusCode.ERROR
+
+    e3 = observability_module.get_centralized_span_status("failed")
+    assert e3.status_code == otel_trace.StatusCode.ERROR
+
+    e4 = observability_module.get_centralized_span_status("cancelled")
+    assert e4.status_code == otel_trace.StatusCode.ERROR
+
+    # Unknown case
+    u1 = observability_module.get_centralized_span_status("unknown_status")
+    assert u1.status_code == otel_trace.StatusCode.UNSET
+
+
+def test_set_span_status_string_mapping() -> None:
+    """Verify that set_span_status correctly maps string input to OTel codes."""
+    from opentelemetry import trace as otel_trace
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.status = None
+
+        def is_recording(self) -> bool:
+            return True
+
+        def set_status(self, status):
+            self.status = status
+
+    span = _FakeSpan()
+    with patch("opentelemetry.trace.get_current_span", return_value=span):
+        # Test whitelisted strings
+        observability_module.set_span_status("SUCCESS")
+        assert span.status.status_code == otel_trace.StatusCode.OK
+
+        observability_module.set_span_status("COMPLETED")
+        assert span.status.status_code == otel_trace.StatusCode.OK
+
+        observability_module.set_span_status("FAILED")
+        assert span.status.status_code == otel_trace.StatusCode.ERROR
+
+        observability_module.set_span_status("CANCELLED")
+        assert span.status.status_code == otel_trace.StatusCode.ERROR
+
+        # Test fallback
+        observability_module.set_span_status("UNKNOWN")
+        assert span.status.status_code == otel_trace.StatusCode.UNSET

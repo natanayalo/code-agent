@@ -366,6 +366,7 @@ def get_centralized_span_status(
             "error": otel_trace.StatusCode.ERROR,
             "failure": otel_trace.StatusCode.ERROR,
             "failed": otel_trace.StatusCode.ERROR,
+            "cancelled": otel_trace.StatusCode.ERROR,
         }
 
         status_code = mapping.get(status.lower())
@@ -519,6 +520,7 @@ def set_span_status(status_code: Any, description: str | None = None) -> None:
                     "ERROR": otel_trace.StatusCode.ERROR,
                     "FAILURE": otel_trace.StatusCode.ERROR,
                     "FAILED": otel_trace.StatusCode.ERROR,
+                    "CANCELLED": otel_trace.StatusCode.ERROR,
                     "UNSET": otel_trace.StatusCode.UNSET,
                 }
                 status_code = mapping.get(status_code.upper(), otel_trace.StatusCode.UNSET)
