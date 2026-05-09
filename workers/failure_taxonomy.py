@@ -75,6 +75,7 @@ INFRA_CRASH_MARKERS: Final = (
     "illegal instruction",
     "aborted",
     "killed",
+    "syntax error: word unexpected",
 )
 _INFRA_SUMMARY_MARKERS: Final = ("sandbox_infra",) + INFRA_CRASH_MARKERS
 

@@ -296,3 +296,29 @@ def test_failure_taxonomy_classifies_infra_crash() -> None:
     assert find_infra_failure_marker("The omnibus was parked.") is None
     assert find_infra_failure_marker("aborted") == "aborted"
     assert find_infra_failure_marker("bus error") == "bus error"
+
+
+def test_native_agent_runner_detects_binary_arch_mismatch(tmp_path: Path, repo_path: Path) -> None:
+    """A binary architecture mismatch error in stderr should be flagged as an infra error."""
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-arch-error.py",
+        """#!/usr/bin/env python3
+import sys
+print("/bin/rg: 1: Syntax error: word unexpected (expecting \\")\\")", file=sys.stderr)
+sys.exit(2)
+""",
+    )
+
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+
+    assert result.status == "error"
+    assert "SANDBOX_INFRA" in result.summary
+    assert "syntax error: word unexpected" in result.summary.lower()
