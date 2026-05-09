@@ -351,6 +351,29 @@ def get_centralized_span_input_data(
     return attributes
 
 
+def _resolve_span_status_code(status: str) -> Any:
+    """Map a string status to an OpenTelemetry StatusCode enum value."""
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
+
+        mapping = {
+            "success": otel_trace.StatusCode.OK,
+            "completed": otel_trace.StatusCode.OK,
+            "ok": otel_trace.StatusCode.OK,
+            "error": otel_trace.StatusCode.ERROR,
+            "failure": otel_trace.StatusCode.ERROR,
+            "failed": otel_trace.StatusCode.ERROR,
+            "cancelled": otel_trace.StatusCode.ERROR,
+            "unset": otel_trace.StatusCode.UNSET,
+        }
+        return mapping.get(status.lower(), otel_trace.StatusCode.UNSET)
+    except ImportError:
+        return None
+    except Exception as exc:
+        logger.debug("Failed to resolve span status code: %s", exc)
+        return None
+
+
 def get_centralized_span_status(
     status: str,
     description: str | None = None,
@@ -359,22 +382,11 @@ def get_centralized_span_status(
     try:
         from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
 
-        # Explicit mapping ensures consistency and avoids "broad" dynamic lookups
-        mapping = {
-            "success": otel_trace.StatusCode.OK,
-            "completed": otel_trace.StatusCode.OK,
-            "error": otel_trace.StatusCode.ERROR,
-            "failure": otel_trace.StatusCode.ERROR,
-            "failed": otel_trace.StatusCode.ERROR,
-            "cancelled": otel_trace.StatusCode.ERROR,
-        }
-
-        status_code = mapping.get(status.lower())
+        status_code = _resolve_span_status_code(status)
         if status_code is not None:
             return otel_trace.Status(status_code, description)
 
-        # Default to UNSET for unknown statuses to avoid inaccurate reporting
-        return otel_trace.Status(otel_trace.StatusCode.UNSET, description)
+        return None
     except ImportError:
         return None
     except Exception as exc:
@@ -512,18 +524,10 @@ def set_span_status(status_code: Any, description: str | None = None) -> None:
         span = otel_trace.get_current_span()
         if span.is_recording():
             if isinstance(status_code, str):
-                # Use explicit whitelist to map strings to StatusCode enum
-                mapping = {
-                    "OK": otel_trace.StatusCode.OK,
-                    "SUCCESS": otel_trace.StatusCode.OK,
-                    "COMPLETED": otel_trace.StatusCode.OK,
-                    "ERROR": otel_trace.StatusCode.ERROR,
-                    "FAILURE": otel_trace.StatusCode.ERROR,
-                    "FAILED": otel_trace.StatusCode.ERROR,
-                    "CANCELLED": otel_trace.StatusCode.ERROR,
-                    "UNSET": otel_trace.StatusCode.UNSET,
-                }
-                status_code = mapping.get(status_code.upper(), otel_trace.StatusCode.UNSET)
+                status_code = _resolve_span_status_code(status_code)
+
+            if status_code is None:
+                return
 
             # If we don't have a Status object yet, create one
             # We check for .status_code attribute which is standard on OTEL Status objects
@@ -531,6 +535,8 @@ def set_span_status(status_code: Any, description: str | None = None) -> None:
                 status_code = otel_trace.Status(status_code, description)
 
             span.set_status(status_code)
+    except ImportError:
+        pass
     except Exception as exc:
         logger.debug("Failed to set span status: %s", exc)
 
