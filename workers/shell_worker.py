@@ -14,6 +14,7 @@ from sandbox import (
     WorkspaceManager,
     WorkspaceRequest,
 )
+from sandbox.redact import SecretRedactor
 from sandbox.workspace import default_workspace_root
 from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import FailureKind, Worker, WorkerCommand, WorkerRequest, WorkerResult
@@ -117,6 +118,7 @@ class ShellWorker(Worker):
                                 repo_path=workspace.repo_path,
                                 workspace_path=workspace.workspace_path,
                                 timeout_seconds=DEFAULT_GIT_APPLY_TIMEOUT_SECONDS,
+                                redactor=SecretRedactor(list((request.secrets or {}).values())),
                             )
                         )
                         setup_commands.append(
@@ -161,6 +163,7 @@ class ShellWorker(Worker):
                             workspace_path=workspace.workspace_path,
                             timeout_seconds=request.budget.get("worker_timeout_seconds", 300),
                             env=request.secrets,
+                            redactor=SecretRedactor(list((request.secrets or {}).values())),
                         )
                     )
 

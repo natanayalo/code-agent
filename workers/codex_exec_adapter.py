@@ -174,6 +174,8 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         system_prompt: str | None = None,
         prompt_override: str | None = None,
         working_directory: Path | None = None,
+        task_id: str | None = None,
+        session_id: str | None = None,
     ) -> CliRuntimeStep:
         """Ask the Codex CLI for the next runtime step."""
         override_prompt = normalize_prompt_override(prompt_override)
@@ -198,6 +200,8 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
                     tracer_name=TRACER_NAME,
                     span_name="codex.exec",
                     input_data=prompt,
+                    task_id=task_id,
+                    session_id=session_id,
                 ):
                     try:
                         completed = subprocess.run(

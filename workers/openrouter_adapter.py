@@ -217,6 +217,8 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         system_prompt: str | None = None,
         prompt_override: str | None = None,
         working_directory: Path | None = None,  # noqa: ARG002 - kept for interface symmetry
+        task_id: str | None = None,
+        session_id: str | None = None,
     ) -> CliRuntimeStep:
         """Ask OpenRouter for the next runtime step."""
         override_prompt = normalize_prompt_override(prompt_override)
@@ -269,6 +271,8 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
                 tracer_name=TRACER_NAME,
                 span_name="openrouter.chat",
                 input_data=request_messages,
+                task_id=task_id,
+                session_id=session_id,
             ):
                 response = self.client.chat.completions.create(
                     model=self.model,

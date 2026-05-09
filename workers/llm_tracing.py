@@ -25,6 +25,8 @@ def with_llm_span(
     tracer_name: str,
     span_name: str,
     input_data: Any,
+    task_id: str | None = None,
+    session_id: str | None = None,
 ) -> Iterator[None]:
     """Trace an LLM adapter turn and capture input payload attributes."""
 
@@ -32,6 +34,8 @@ def with_llm_span(
         tracer_name=tracer_name,
         span_name=span_name,
         attributes=with_span_kind(SPAN_KIND_LLM),
+        task_id=task_id,
+        session_id=session_id,
     ):
         set_span_input_output(input_data=input_data)
         try:

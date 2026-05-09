@@ -284,3 +284,37 @@ print("ok")
     assert result.status == "error"
     assert "failed while collecting artifacts" in result.summary
     assert "disk full" in result.summary
+
+
+def test_native_agent_runner_git_diff_failure(tmp_path: Path, monkeypatch) -> None:
+    """Verify handling of git diff failure."""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+
+    class _FakeCompleted:
+        returncode = 1
+        stdout = ""
+        stderr = "git error"
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _FakeCompleted())
+
+    from workers.native_agent_runner import _collect_diff_text
+
+    assert _collect_diff_text(repo_path=repo_path, timeout_seconds=10) is None
+
+
+def test_native_agent_runner_git_diff_exception(tmp_path: Path, monkeypatch) -> None:
+    """Verify handling of git diff exception."""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+
+    def _exploding_run(*a, **kw):
+        raise OSError("no git")
+
+    monkeypatch.setattr(subprocess, "run", _exploding_run)
+
+    from workers.native_agent_runner import _collect_diff_text
+
+    assert _collect_diff_text(repo_path=repo_path, timeout_seconds=10) is None

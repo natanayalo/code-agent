@@ -29,6 +29,10 @@ INPUT_VALUE_ATTRIBUTE: Final[str] = "input.value"
 INPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "input.mime_type"
 OUTPUT_VALUE_ATTRIBUTE: Final[str] = "output.value"
 OUTPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "output.mime_type"
+TASK_ID_ATTRIBUTE: Final[str] = "code_agent.task_id"
+ATTEMPT_COUNT_ATTRIBUTE: Final[str] = "code_agent.attempt_count"
+CHANNEL_ATTRIBUTE: Final[str] = "code_agent.channel"
+OUTCOME_STATUS_ATTRIBUTE: Final[str] = "code_agent.outcome_status"
 MAX_SPAN_ATTRIBUTE_LENGTH: Final[int] = 12000
 
 # Native Agent Span Attributes
@@ -329,13 +333,26 @@ def start_optional_span(
     tracer_name: str,
     span_name: str,
     attributes: Mapping[str, Any] | None = None,
+    task_id: str | None = None,
+    session_id: str | None = None,
+    attempt: int | None = None,
+    channel: str | None = None,
 ) -> Any:
     """Start a span when OTEL is available, otherwise return a no-op context manager."""
     try:
         from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
 
         tracer = otel_trace.get_tracer(tracer_name)
-        span_attributes = dict(attributes) if attributes is not None else None
+        span_attributes = dict(attributes) if attributes is not None else {}
+        if task_id:
+            span_attributes[TASK_ID_ATTRIBUTE] = task_id
+        if session_id:
+            span_attributes[SESSION_ID_ATTRIBUTE] = session_id
+        if attempt is not None:
+            span_attributes[ATTEMPT_COUNT_ATTRIBUTE] = attempt
+        if channel:
+            span_attributes[CHANNEL_ATTRIBUTE] = channel
+
         return tracer.start_as_current_span(span_name, attributes=span_attributes)
     except (ImportError, Exception):
         return nullcontext()
@@ -394,9 +411,9 @@ def set_span_input_output(
             output_str, output_mime_type = _serialize_span_payload(output_data)
             span.set_attribute(OUTPUT_VALUE_ATTRIBUTE, output_str)
             span.set_attribute(OUTPUT_MIME_TYPE_ATTRIBUTE, output_mime_type)
-    except (ImportError, Exception):
+    except Exception as exc:
         # Fail safe if tracing is not configured or JSON fails
-        pass
+        logger.debug("Failed to set span input/output: %s", exc)
 
 
 def set_optional_span_attribute(span: Any, key: str, value: Any) -> None:
@@ -408,8 +425,8 @@ def set_optional_span_attribute(span: Any, key: str, value: Any) -> None:
             return
         if hasattr(span, "set_attribute"):
             span.set_attribute(key, value)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to set optional span attribute '%s': %s", key, exc)
 
 
 def set_current_span_attribute(key: str, value: Any) -> None:
@@ -419,8 +436,8 @@ def set_current_span_attribute(key: str, value: Any) -> None:
 
         span = otel_trace.get_current_span()
         set_optional_span_attribute(span, key, value)
-    except (ImportError, Exception):
-        pass
+    except Exception as exc:
+        logger.debug("Failed to set current span attribute '%s': %s", key, exc)
 
 
 def record_span_exception(exc: Exception) -> None:
@@ -431,8 +448,8 @@ def record_span_exception(exc: Exception) -> None:
         span = otel_trace.get_current_span()
         if span.is_recording():
             span.record_exception(exc)
-    except (ImportError, Exception):
-        pass
+    except Exception as tracing_exc:
+        logger.debug("Failed to record span exception: %s", tracing_exc)
 
 
 def set_span_status(status_code: Any, description: str | None = None) -> None:
@@ -454,13 +471,34 @@ def set_span_status(status_code: Any, description: str | None = None) -> None:
                 status_code = otel_trace.Status(status_code, description)
 
             span.set_status(status_code)
-    except (ImportError, Exception):
-        pass
+    except Exception as exc:
+        logger.debug("Failed to set span status: %s", exc)
 
 
 def set_span_status_from_outcome(status: str, summary: str | None = None) -> None:
     """Set span status based on a standard outcome status (success/error/failure)."""
+    set_current_span_attribute(OUTCOME_STATUS_ATTRIBUTE, status)
     if status == "success":
         set_span_status(STATUS_OK)
-    else:
+    elif status == "error":
         set_span_status(STATUS_ERROR, summary)
+    else:
+        # Failure is often a policy or goal failure, not a system error
+        set_span_status(STATUS_OK, summary)
+
+
+def set_span_task_metadata(
+    task_id: str | None = None,
+    session_id: str | None = None,
+    attempt: int | None = None,
+    channel: str | None = None,
+) -> None:
+    """Set standardized task correlation attributes on the current span."""
+    if task_id:
+        set_current_span_attribute(TASK_ID_ATTRIBUTE, task_id)
+    if session_id:
+        set_current_span_attribute(SESSION_ID_ATTRIBUTE, session_id)
+    if attempt is not None:
+        set_current_span_attribute(ATTEMPT_COUNT_ATTRIBUTE, attempt)
+    if channel:
+        set_current_span_attribute(CHANNEL_ATTRIBUTE, channel)

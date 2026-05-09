@@ -14,6 +14,16 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from apps.observability import (
+    SPAN_KIND_CHAIN,
+    SPAN_KIND_TOOL,
+    STATUS_OK,
+    set_current_span_attribute,
+    set_span_input_output,
+    set_span_status,
+    set_span_task_metadata,
+    start_optional_span,
+)
 from db.base import utc_now
 from db.enums import TimelineEventType
 from orchestrator.brain import (
@@ -660,6 +670,7 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
 
     return WorkerRequest(
         session_id=state.session.session_id if state.session is not None else None,
+        task_id=state.task.task_id,
         repo_url=state.task.repo_url,
         branch=state.task.branch,
         task_text=task_text,
@@ -908,19 +919,32 @@ def ingest_task(state_input: OrchestratorState) -> dict[str, Any]:
 def classify_task(state_input: OrchestratorState) -> dict[str, Any]:
     """Classify the task into a coarse workflow category."""
     state = _ensure_state(state_input)
-    task_text = state.normalized_task_text or state.task.task_text
-    task_kind = _classify_task_kind(task_text)
-    return {
-        "current_step": "classify_task",
-        "task_kind": task_kind,
-        "progress_updates": _progress_update(state, f"task classified as {task_kind}"),
-        **_timeline_event(
-            state,
-            TimelineEventType.TASK_CLASSIFIED,
-            message=f"Task classified as {task_kind}.",
-            payload={"task_kind": task_kind},
-        ),
-    }
+    with start_optional_span(
+        tracer_name="orchestrator.graph",
+        span_name="orchestrator.node.classify_task",
+        attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+    ):
+        set_span_task_metadata(
+            task_id=state.task.task_id,
+            session_id=state.session.session_id if state.session else None,
+            attempt=state.attempt_count,
+        )
+        task_text = state.normalized_task_text or state.task.task_text
+        task_kind = _classify_task_kind(task_text)
+        set_current_span_attribute("code_agent.task_kind", task_kind)
+        set_span_input_output(input_data=task_text, output_data={"task_kind": task_kind})
+        set_span_status(STATUS_OK)
+        return {
+            "current_step": "classify_task",
+            "task_kind": task_kind,
+            "progress_updates": _progress_update(state, f"task classified as {task_kind}"),
+            **_timeline_event(
+                state,
+                TimelineEventType.TASK_CLASSIFIED,
+                message=f"Task classified as {task_kind}.",
+                payload={"task_kind": task_kind},
+            ),
+        }
 
 
 def _task_complexity_reason(state: OrchestratorState) -> str | None:
@@ -993,37 +1017,51 @@ def _build_task_plan(state: OrchestratorState, complexity_reason: str) -> TaskPl
 def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
     """Generate a structured plan only for tasks classified as complex."""
     state = _ensure_state(state_input)
-    complexity_reason = _task_complexity_reason(state)
-    if complexity_reason is None:
+    with start_optional_span(
+        tracer_name="orchestrator.graph",
+        span_name="orchestrator.node.plan_task",
+        attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+    ):
+        set_span_task_metadata(
+            task_id=state.task.task_id,
+            session_id=state.session.session_id if state.session else None,
+            attempt=state.attempt_count,
+        )
+        complexity_reason = _task_complexity_reason(state)
+        if complexity_reason is None:
+            set_span_input_output(input_data=state.task_kind, output_data="skipped")
+            set_span_status(STATUS_OK)
+            return {
+                "current_step": "plan_task",
+                "task_plan": None,
+                "progress_updates": _progress_update(
+                    state, "planning skipped: task is straightforward"
+                ),
+                **_timeline_event(
+                    state,
+                    TimelineEventType.TASK_PLANNED,
+                    message="Planning skipped for straightforward task.",
+                    payload={"planning": "skipped"},
+                ),
+            }
+
+        task_plan = _build_task_plan(state, complexity_reason)
+        set_span_input_output(input_data=state.task_kind, output_data=task_plan.model_dump())
+        set_span_status(STATUS_OK)
         return {
             "current_step": "plan_task",
-            "task_plan": None,
+            "task_plan": task_plan.model_dump(),
             "progress_updates": _progress_update(
-                state, "planning skipped: task is straightforward"
+                state,
+                f"structured plan generated ({complexity_reason})",
             ),
             **_timeline_event(
                 state,
                 TimelineEventType.TASK_PLANNED,
-                message="Planning skipped for straightforward task.",
-                payload={"planning": "skipped"},
+                message="Structured plan generated for complex task.",
+                payload={"planning": "generated", "complexity_reason": complexity_reason},
             ),
         }
-
-    task_plan = _build_task_plan(state, complexity_reason)
-    return {
-        "current_step": "plan_task",
-        "task_plan": task_plan.model_dump(),
-        "progress_updates": _progress_update(
-            state,
-            f"structured plan generated ({complexity_reason})",
-        ),
-        **_timeline_event(
-            state,
-            TimelineEventType.TASK_PLANNED,
-            message="Structured plan generated for complex task.",
-            payload={"planning": "generated", "complexity_reason": complexity_reason},
-        ),
-    }
 
 
 async def generate_task_spec(
@@ -1033,117 +1071,145 @@ async def generate_task_spec(
 ) -> dict[str, Any]:
     """Generate the structured task contract before memory loading and worker routing."""
     state = _ensure_state(state_input)
-    task_spec = build_task_spec_for_request(
-        state.task,
-        task_kind=state.task_kind,
-        task_plan=state.task_plan,
-    )
-    brain_report: TaskSpecBrainMergeReport | None = None
-    if orchestrator_brain is not None:
-        provider_name = type(orchestrator_brain).__name__
-        try:
-            suggestion = await orchestrator_brain.suggest_task_spec(
-                task=state.task,
-                task_kind=state.task_kind,
-                task_plan=state.task_plan,
-                task_spec=task_spec,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Orchestrator brain suggestion failed; falling back to deterministic TaskSpec.",
-                exc_info=True,
-                extra={
-                    "session_id": state.session.session_id if state.session is not None else None,
-                    "task_id": state.task.task_id,
-                    "brain_provider": provider_name,
-                },
-            )
-            detail = str(exc).strip()
-            brain_report = TaskSpecBrainMergeReport(
-                enabled=True,
-                provider=provider_name,
-                error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
-            )
-        else:
-            if suggestion is None:
-                brain_report = TaskSpecBrainMergeReport(
-                    enabled=True,
-                    provider=provider_name,
-                )
-            else:
-                task_spec, brain_report = apply_task_spec_brain_suggestion(
-                    task_spec=task_spec,
-                    suggestion=suggestion,
-                    provider=provider_name,
-                )
+    with start_optional_span(
+        tracer_name="orchestrator.graph",
+        span_name="orchestrator.node.generate_task_spec",
+        attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+    ):
+        set_span_task_metadata(
+            task_id=state.task.task_id,
+            session_id=state.session.session_id if state.session else None,
+            attempt=state.attempt_count,
+        )
+        task_spec = build_task_spec_for_request(
+            state.task,
+            task_kind=state.task_kind,
+            task_plan=state.task_plan,
+        )
+        brain_report: TaskSpecBrainMergeReport | None = None
+        if orchestrator_brain is not None:
+            provider_name = type(orchestrator_brain).__name__
+            with start_optional_span(
+                tracer_name="orchestrator.graph",
+                span_name="orchestrator.node.generate_task_spec.brain",
+                attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+            ):
+                try:
+                    suggestion = await orchestrator_brain.suggest_task_spec(
+                        task=state.task,
+                        task_kind=state.task_kind,
+                        task_plan=state.task_plan,
+                        task_spec=task_spec,
+                    )
+                    set_span_input_output(
+                        input_data=task_spec.model_dump(),
+                        output_data=suggestion.model_dump() if suggestion else None,
+                    )
+                    set_span_status(STATUS_OK)
+                except Exception as exc:
+                    logger.warning(
+                        "Orchestrator brain suggestion failed; falling back to "
+                        "deterministic TaskSpec.",
+                        exc_info=True,
+                        extra={
+                            "session_id": (
+                                state.session.session_id if state.session is not None else None
+                            ),
+                            "task_id": state.task.task_id,
+                            "brain_provider": provider_name,
+                        },
+                    )
+                    set_span_status(STATUS_OK, str(exc))
+                    detail = str(exc).strip()
+                    brain_report = TaskSpecBrainMergeReport(
+                        enabled=True,
+                        provider=provider_name,
+                        error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
+                    )
+                else:
+                    if suggestion is None:
+                        brain_report = TaskSpecBrainMergeReport(
+                            enabled=True,
+                            provider=provider_name,
+                        )
+                    else:
+                        task_spec, brain_report = apply_task_spec_brain_suggestion(
+                            task_spec=task_spec,
+                            suggestion=suggestion,
+                            provider=provider_name,
+                        )
 
-    policy_violations = validate_task_spec_policy(task_spec)
-    progress_message = "task spec generated"
-    if policy_violations:
-        progress_message = "task spec generated with policy warnings"
-    elif brain_report is not None and brain_report.applied:
-        progress_message = "task spec generated with brain enrichment"
-    elif task_spec.requires_clarification:
-        progress_message = "clarification required before execution"
+        policy_violations = validate_task_spec_policy(task_spec)
+        progress_message = "task spec generated"
+        if policy_violations:
+            progress_message = "task spec generated with policy warnings"
+        elif brain_report is not None and brain_report.applied:
+            progress_message = "task spec generated with brain enrichment"
+        elif task_spec.requires_clarification:
+            progress_message = "clarification required before execution"
 
-    event_payload: dict[str, Any] = {
-        "task_spec": task_spec.model_dump(mode="json"),
-        "policy_violations": policy_violations,
-    }
-    if brain_report is not None:
-        event_payload["brain"] = brain_report.model_dump(mode="json")
+        event_payload: dict[str, Any] = {
+            "task_spec": task_spec.model_dump(mode="json"),
+            "policy_violations": policy_violations,
+        }
+        if brain_report is not None:
+            event_payload["brain"] = brain_report.model_dump(mode="json")
 
-    response: dict[str, Any] = {
-        "current_step": "generate_task_spec",
-        "task_spec": task_spec.model_dump(),
-        "progress_updates": _progress_update(state, progress_message),
-        **_timeline_event(
-            state,
-            TimelineEventType.TASK_SPEC_GENERATED,
-            message="TaskSpec generated for worker routing.",
-            payload=event_payload,
-        ),
-    }
-    if policy_violations:
-        response["errors"] = [
-            *state.errors,
-            *(f"task_spec_policy:{violation}" for violation in policy_violations),
-        ]
-        response["result"] = WorkerResult(
-            status="error",
-            summary=(
-                "Task generation halted due to safety policy violations: "
-                f"{', '.join(policy_violations)}"
+        set_span_input_output(input_data=state.task_kind, output_data=event_payload)
+        set_span_status(STATUS_OK)
+
+        response: dict[str, Any] = {
+            "current_step": "generate_task_spec",
+            "task_spec": task_spec.model_dump(),
+            "progress_updates": _progress_update(state, progress_message),
+            **_timeline_event(
+                state,
+                TimelineEventType.TASK_SPEC_GENERATED,
+                message="TaskSpec generated for worker routing.",
+                payload=event_payload,
             ),
-            failure_kind="unknown",
-            commands_run=[],
-            files_changed=[],
-            test_results=[],
-            artifacts=[],
-            next_action_hint="halt_policy_violation",
-        )
-    elif task_spec.requires_clarification:
-        clarification_questions = [
-            question.strip()
-            for question in task_spec.clarification_questions
-            if isinstance(question, str) and question.strip()
-        ]
-        clarification_summary = "Task paused pending clarification before worker dispatch."
-        if clarification_questions:
-            clarification_summary = (
-                f"{clarification_summary} Clarification needed: {' '.join(clarification_questions)}"
+        }
+        if policy_violations:
+            response["errors"] = [
+                *state.errors,
+                *(f"task_spec_policy:{violation}" for violation in policy_violations),
+            ]
+            response["result"] = WorkerResult(
+                status="error",
+                summary=(
+                    "Task generation halted due to safety policy violations: "
+                    f"{', '.join(policy_violations)}"
+                ),
+                failure_kind="unknown",
+                commands_run=[],
+                files_changed=[],
+                test_results=[],
+                artifacts=[],
+                next_action_hint="halt_policy_violation",
             )
-        response["errors"] = [*state.errors, "task_spec_requires_clarification"]
-        response["result"] = WorkerResult(
-            status="failure",
-            summary=clarification_summary,
-            commands_run=[],
-            files_changed=[],
-            test_results=[],
-            artifacts=[],
-            next_action_hint="await_manual_follow_up",
-        )
-    return response
+        elif task_spec.requires_clarification:
+            clarification_questions = [
+                question.strip()
+                for question in task_spec.clarification_questions
+                if isinstance(question, str) and question.strip()
+            ]
+            clarification_summary = "Task paused pending clarification before worker dispatch."
+            if clarification_questions:
+                clarification_summary = (
+                    f"{clarification_summary} Clarification needed: "
+                    f"{' '.join(clarification_questions)}"
+                )
+            response["errors"] = [*state.errors, "task_spec_requires_clarification"]
+            response["result"] = WorkerResult(
+                status="failure",
+                summary=clarification_summary,
+                commands_run=[],
+                files_changed=[],
+                test_results=[],
+                artifacts=[],
+                next_action_hint="await_manual_follow_up",
+            )
+        return response
 
 
 def _route_after_generate_task_spec(state_input: OrchestratorState) -> str:
@@ -1765,89 +1831,155 @@ def build_choose_worker_node(
 
     async def choose_worker_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
-        route: RouteDecision | None = None
-        brain_report: RouteBrainMergeReport | None = None
-        routable_profiles = (
-            _routable_execution_profiles(state, available_profiles, available_workers)
-            if available_profiles
-            else {}
-        )
-        if orchestrator_brain is not None and _should_attempt_brain_route(state):
-            provider_name = type(orchestrator_brain).__name__
-            try:
-                suggestion = await orchestrator_brain.suggest_route(
-                    state=state,
-                    available_workers=available_workers,
+        with start_optional_span(
+            tracer_name="orchestrator.graph",
+            span_name="orchestrator.node.choose_worker",
+            attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+        ):
+            set_span_task_metadata(
+                task_id=state.task.task_id,
+                session_id=state.session.session_id if state.session else None,
+                attempt=state.attempt_count,
+            )
+            route: RouteDecision | None = None
+            brain_report: RouteBrainMergeReport | None = None
+            routable_profiles = (
+                _routable_execution_profiles(state, available_profiles, available_workers)
+                if available_profiles
+                else {}
+            )
+            if orchestrator_brain is not None and _should_attempt_brain_route(state):
+                provider_name = type(orchestrator_brain).__name__
+                with start_optional_span(
+                    tracer_name="orchestrator.graph",
+                    span_name="orchestrator.node.choose_worker.brain",
+                    attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                ):
+                    try:
+                        suggestion = await orchestrator_brain.suggest_route(
+                            state=state,
+                            available_workers=available_workers,
+                            available_profiles=available_profiles,
+                        )
+                        set_span_input_output(
+                            input_data=state.task_spec.model_dump() if state.task_spec else None,
+                            output_data=suggestion.model_dump() if suggestion else None,
+                        )
+                        set_span_status(STATUS_OK)
+                    except Exception as exc:
+                        detail = str(exc).strip()
+                        brain_report = RouteBrainMergeReport(
+                            enabled=True,
+                            provider=provider_name,
+                            error=(
+                                f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+                            ),
+                        )
+                        set_span_status(STATUS_OK, str(exc))
+                    else:
+                        if suggestion is None:
+                            brain_report = RouteBrainMergeReport(
+                                enabled=True,
+                                provider=provider_name,
+                            )
+                        else:
+                            route, brain_report = _apply_brain_route_suggestion(
+                                state=state,
+                                suggestion=suggestion,
+                                provider=provider_name,
+                                available_workers=available_workers,
+                                available_profiles=available_profiles,
+                                routable_profiles=routable_profiles,
+                            )
+
+            if route is None:
+                route = _compute_route_decision(
+                    state,
+                    available_workers,
                     available_profiles=available_profiles,
                 )
-            except Exception as exc:
-                detail = str(exc).strip()
-                brain_report = RouteBrainMergeReport(
-                    enabled=True,
-                    provider=provider_name,
-                    error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
-                )
-            else:
-                if suggestion is None:
-                    brain_report = RouteBrainMergeReport(
-                        enabled=True,
-                        provider=provider_name,
-                    )
-                else:
-                    route, brain_report = _apply_brain_route_suggestion(
-                        state=state,
-                        suggestion=suggestion,
-                        provider=provider_name,
-                        available_workers=available_workers,
-                        available_profiles=available_profiles,
-                        routable_profiles=routable_profiles,
-                    )
+            if brain_report is not None:
+                brain_report = _record_route_brain_final_choice(brain_report, route)
 
-        if route is None:
-            route = _compute_route_decision(
-                state,
-                available_workers,
-                available_profiles=available_profiles,
-            )
-        if brain_report is not None:
-            brain_report = _record_route_brain_final_choice(brain_report, route)
+            event_payload = route.model_dump(mode="json")
+            if brain_report is not None:
+                event_payload["brain"] = brain_report.model_dump(mode="json")
 
-        event_payload = route.model_dump(mode="json")
-        if brain_report is not None:
-            event_payload["brain"] = brain_report.model_dump(mode="json")
-        return {
-            "current_step": "choose_worker",
-            "route": route.model_dump(),
-            "progress_updates": _progress_update(
-                state,
-                f"worker selected: {route.chosen_worker} (reason: {route.route_reason})",
-            ),
-            **_timeline_event(
-                state,
-                TimelineEventType.WORKER_SELECTED,
-                message=f"Worker selected: {route.chosen_worker}",
-                payload=event_payload,
-            ),
-        }
+            set_span_input_output(input_data=state.task_kind, output_data=event_payload)
+            set_span_status(STATUS_OK)
+
+            return {
+                "current_step": "choose_worker",
+                "route": route.model_dump(),
+                "progress_updates": _progress_update(
+                    state,
+                    f"worker selected: {route.chosen_worker} (reason: {route.route_reason})",
+                ),
+                **_timeline_event(
+                    state,
+                    TimelineEventType.WORKER_SELECTED,
+                    message=f"Worker '{route.chosen_worker}' selected for task execution.",
+                    payload=event_payload,
+                ),
+            }
 
     return choose_worker_node
 
 
 def choose_worker(state_input: OrchestratorState) -> dict[str, Any]:
-    """Apply routing heuristics; treats all known workers as available.
-
-    Use build_choose_worker_node() when the graph knows which workers are wired in.
-    """
+    """Synchronous legacy wrapper for worker routing (used in unit tests)."""
     state = _ensure_state(state_input)
-    route = _compute_route_decision(state, frozenset(SUPPORTED_WORKER_TYPES))
+    route = _compute_route_decision(state, frozenset({"codex", "gemini", "openrouter"}))
     return {
         "current_step": "choose_worker",
         "route": route.model_dump(),
-        "progress_updates": _progress_update(
+        "progress_updates": _progress_update(state, f"worker {route.chosen_worker} chosen"),
+        **_timeline_event(
             state,
-            f"worker selected: {route.chosen_worker} (reason: {route.route_reason})",
+            TimelineEventType.WORKER_SELECTED,
+            message=f"Worker '{route.chosen_worker}' chosen ({route.route_reason}).",
+            payload={"route": route.model_dump()},
         ),
     }
+
+
+def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
+    """Transition to the blocking worker-dispatch phase."""
+    state = _ensure_state(state_input)
+    with start_optional_span(
+        tracer_name="orchestrator.graph",
+        span_name="orchestrator.node.dispatch_job",
+        attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+    ):
+        set_span_task_metadata(
+            task_id=state.task.task_id,
+            session_id=state.session.session_id if state.session else None,
+            attempt=state.attempt_count,
+        )
+        worker_type = state.route.chosen_worker
+        if state.route.route_reason != "runtime_unavailable":
+            assert (
+                worker_type is not None
+            ), "choose_worker must set route.chosen_worker before dispatch."
+        dispatch = WorkerDispatch(
+            worker_type=worker_type,
+            worker_profile=state.route.chosen_profile,
+            runtime_mode=state.route.runtime_mode,
+        )
+        set_span_input_output(input_data=state.task_kind, output_data=dispatch.model_dump())
+        set_span_status(STATUS_OK)
+        return {
+            "current_step": "dispatch_job",
+            "dispatch": dispatch.model_dump(),
+            "repair_handoff_requested": False,
+            "progress_updates": _progress_update(state, "worker dispatched"),
+            **_timeline_event(
+                state,
+                TimelineEventType.WORKER_DISPATCHED,
+                message=f"Dispatched attempt {state.attempt_count} to {worker_type}.",
+                payload={"attempt_count": state.attempt_count, "worker_type": worker_type},
+            ),
+        }
 
 
 def check_approval(state_input: OrchestratorState) -> dict[str, Any]:
@@ -1939,33 +2071,6 @@ def await_approval(state_input: OrchestratorState) -> dict[str, Any]:
             )
         )
     return response
-
-
-def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
-    """Record the chosen worker before awaiting execution."""
-    state = _ensure_state(state_input)
-    worker_type = state.route.chosen_worker
-    if state.route.route_reason != "runtime_unavailable":
-        assert (
-            worker_type is not None
-        ), "choose_worker must set route.chosen_worker before dispatch."
-    dispatch = WorkerDispatch(
-        worker_type=worker_type,
-        worker_profile=state.route.chosen_profile,
-        runtime_mode=state.route.runtime_mode,
-    )
-    return {
-        "current_step": "dispatch_job",
-        "dispatch": dispatch.model_dump(),
-        "repair_handoff_requested": False,
-        "progress_updates": _progress_update(state, "worker dispatched"),
-        **_timeline_event(
-            state,
-            TimelineEventType.WORKER_DISPATCHED,
-            message=f"Dispatched attempt {state.attempt_count} to {worker_type}.",
-            payload={"attempt_count": state.attempt_count, "worker_type": worker_type},
-        ),
-    }
 
 
 def build_await_result_node(
@@ -2708,120 +2813,182 @@ def build_verify_result_node(
 
     async def verify_result_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
-        logger.info(
-            "Entering verify_result_node",
-            extra={
-                "session_id": state.session.session_id if state.session else None,
-                "task_id": state.task.task_id,
-                "attempt": state.attempt_count,
-            },
-        )
-
-        # 1. Immediate deterministic checks (short-circuit if worker already failed)
-        if state.result is None:
-            logger.warning(
-                "Skipping verification node: no worker result available",
-                extra={"task_id": state.task.task_id},
+        with start_optional_span(
+            tracer_name="orchestrator.graph",
+            span_name="orchestrator.node.verify_result",
+            attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+        ):
+            set_span_task_metadata(
+                task_id=state.task.task_id,
+                session_id=state.session.session_id if state.session else None,
+                attempt=state.attempt_count,
             )
-            return verify_result(state)
-
-        worker_failed = state.result.status != "success"
-        tests_failed = any(t.status in ("failed", "error") for t in state.result.test_results)
-
-        if worker_failed or tests_failed:
             logger.info(
-                "Short-circuiting verification due to worker or test failure",
+                "Entering verify_result_node",
                 extra={
-                    "worker_status": state.result.status,
-                    "failed_tests": len(
-                        [t for t in state.result.test_results if t.status in ("failed", "error")]
-                    ),
+                    "session_id": state.session.session_id if state.session else None,
+                    "task_id": state.task.task_id,
+                    "attempt": state.attempt_count,
                 },
             )
-            return verify_result(state)
 
-        deterministic_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str]
-        independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = (
-            None
-        )
+            # 1. Immediate deterministic checks (short-circuit if worker already failed)
+            if state.result is None:
+                logger.warning(
+                    "Skipping verification node: no worker result available",
+                    extra={"task_id": state.task.task_id},
+                )
+                set_span_input_output(input_data="no_result", output_data="skipped")
+                set_span_status(STATUS_OK)
+                return verify_result(state)
 
-        # 2. Run explicit verification commands deterministically
-        verification_commands = resolve_verification_commands(state)
-        skipped_message: str | None = None
+            worker_failed = state.result.status != "success"
+            tests_failed = any(t.status in ("failed", "error") for t in state.result.test_results)
 
-        if not verification_commands:
-            logger.info(
-                "Skipping deterministic verification: no commands provided by TaskSpec",
-                extra={"task_id": state.task.task_id},
-            )
-            skipped_message = "Deterministic verification skipped: no commands provided."
-            deterministic_verifier_outcome = (
-                "passed",
-                "No explicit verification commands defined.",
-            )
-        else:
-            deterministic_verifier_outcome = await run_deterministic_verification(
-                state,
-                worker_factory=available_workers,
-            )
+            if worker_failed or tests_failed:
+                logger.info(
+                    "Short-circuiting verification due to worker or test failure",
+                    extra={
+                        "worker_status": state.result.status,
+                        "failed_tests": len(
+                            [
+                                t
+                                for t in state.result.test_results
+                                if t.status in ("failed", "error")
+                            ]
+                        ),
+                    },
+                )
+                set_span_input_output(input_data=state.result.status, output_data="short-circuited")
+                return verify_result(state)
 
-        # 3. Run LLM-based independent verifier if enabled and deterministic checks passed
-        if enable_independent_verifier and deterministic_verifier_outcome[0] != "failed":
-            independent_verifier_outcome = await run_independent_verifier(
-                state,
-                worker_factory=available_workers,
-            )
+            deterministic_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str]
+            independent_verifier_outcome: (
+                tuple[Literal["passed", "failed", "warning"], str] | None
+            ) = None
 
-        verification_brain_suggestion: VerificationBrainSuggestion | None = None
-        verification_brain_report: VerificationBrainMergeReport | None = None
+            # 2. Run explicit verification commands deterministically
+            verification_commands = resolve_verification_commands(state)
+            skipped_message: str | None = None
 
-        if orchestrator_brain is not None:
-            suggest_verification = getattr(orchestrator_brain, "suggest_verification", None)
-            if callable(suggest_verification):
-                provider_name = type(orchestrator_brain).__name__
-                try:
-                    verification_brain_suggestion = await suggest_verification(
-                        state=state,
-                        independent_verifier_outcome=independent_verifier_outcome,
+            if not verification_commands:
+                logger.info(
+                    "Skipping deterministic verification: no commands provided by TaskSpec",
+                    extra={"task_id": state.task.task_id},
+                )
+                skipped_message = "Deterministic verification skipped: no commands provided."
+                deterministic_verifier_outcome = (
+                    "passed",
+                    "No explicit verification commands defined.",
+                )
+            else:
+                with start_optional_span(
+                    tracer_name="orchestrator.graph",
+                    span_name="orchestrator.node.verify_result.deterministic",
+                    attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                ):
+                    deterministic_verifier_outcome = await run_deterministic_verification(
+                        state,
+                        worker_factory=available_workers,
                     )
-                except Exception as exc:
-                    detail = str(exc).strip()
-                    verification_brain_report = VerificationBrainMergeReport(
-                        enabled=True,
-                        provider=provider_name,
-                        error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
+                    set_span_input_output(
+                        input_data=verification_commands,
+                        output_data=deterministic_verifier_outcome,
                     )
-                else:
-                    if verification_brain_suggestion is None:
-                        verification_brain_report = VerificationBrainMergeReport(
-                            enabled=True,
-                            provider=provider_name,
-                        )
-                    else:
-                        verification_brain_report = VerificationBrainMergeReport(
-                            enabled=True,
-                            provider=provider_name,
-                            accept_warning_status=(
-                                verification_brain_suggestion.accept_warning_status
-                            ),
-                            rationale=verification_brain_suggestion.rationale,
-                        )
-        # 5. Verify the result
-        extra_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]] = []
-        if skipped_message:
-            extra_events.append((TimelineEventType.VERIFICATION_SKIPPED, skipped_message, None))
+                    set_span_status(STATUS_OK)
 
-        response = verify_result(
-            state,
-            enable_independent_verifier=enable_independent_verifier,
-            deterministic_verifier_outcome=deterministic_verifier_outcome,
-            independent_verifier_outcome=independent_verifier_outcome,
-            verification_brain_suggestion=verification_brain_suggestion,
-            verification_brain_report=verification_brain_report,
-            extra_timeline_events=extra_events,
-        )
+            # 3. Run LLM-based independent verifier if enabled and deterministic checks passed
+            if enable_independent_verifier and deterministic_verifier_outcome[0] != "failed":
+                with start_optional_span(
+                    tracer_name="orchestrator.graph",
+                    span_name="orchestrator.node.verify_result.independent",
+                    attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                ):
+                    independent_verifier_outcome = await run_independent_verifier(
+                        state,
+                        worker_factory=available_workers,
+                    )
+                    set_span_input_output(
+                        input_data=state.result.summary if state.result else None,
+                        output_data=independent_verifier_outcome,
+                    )
+                    set_span_status(STATUS_OK)
 
-        return response
+            verification_brain_suggestion: VerificationBrainSuggestion | None = None
+            verification_brain_report: VerificationBrainMergeReport | None = None
+
+            if orchestrator_brain is not None:
+                suggest_verification = getattr(orchestrator_brain, "suggest_verification", None)
+                if callable(suggest_verification):
+                    provider_name = type(orchestrator_brain).__name__
+                    with start_optional_span(
+                        tracer_name="orchestrator.graph",
+                        span_name="orchestrator.node.verify_result.brain",
+                        attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                    ):
+                        try:
+                            verification_brain_suggestion = await suggest_verification(
+                                state=state,
+                                independent_verifier_outcome=independent_verifier_outcome,
+                            )
+                            set_span_input_output(
+                                input_data=independent_verifier_outcome,
+                                output_data=(
+                                    verification_brain_suggestion.model_dump()
+                                    if verification_brain_suggestion
+                                    else None
+                                ),
+                            )
+                            set_span_status(STATUS_OK)
+                        except Exception as exc:
+                            detail = str(exc).strip()
+                            verification_brain_report = VerificationBrainMergeReport(
+                                enabled=True,
+                                provider=provider_name,
+                                error=(
+                                    f"{type(exc).__name__}: {detail}"
+                                    if detail
+                                    else type(exc).__name__
+                                ),
+                            )
+                            set_span_status(STATUS_OK, str(exc))
+                        else:
+                            if verification_brain_suggestion is None:
+                                verification_brain_report = VerificationBrainMergeReport(
+                                    enabled=True,
+                                    provider=provider_name,
+                                )
+                            else:
+                                verification_brain_report = VerificationBrainMergeReport(
+                                    enabled=True,
+                                    provider=provider_name,
+                                    applied=True,
+                                    accept_warning_status=(
+                                        verification_brain_suggestion.accept_warning_status
+                                    ),
+                                    rationale=verification_brain_suggestion.rationale,
+                                )
+            # 5. Verify the result
+            extra_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]] = []
+            if skipped_message:
+                extra_events.append((TimelineEventType.VERIFICATION_SKIPPED, skipped_message, None))
+
+            response = verify_result(
+                state,
+                enable_independent_verifier=enable_independent_verifier,
+                deterministic_verifier_outcome=deterministic_verifier_outcome,
+                independent_verifier_outcome=independent_verifier_outcome,
+                verification_brain_suggestion=verification_brain_suggestion,
+                verification_brain_report=verification_brain_report,
+                extra_timeline_events=extra_events,
+            )
+            set_span_input_output(
+                input_data=state.result.status if state.result else None,
+                output_data=response.get("verification"),
+            )
+
+            set_span_status(STATUS_OK)
+            return response
 
     return verify_result_node
 

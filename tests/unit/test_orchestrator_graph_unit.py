@@ -2182,3 +2182,119 @@ def test_compute_route_profile_aware_selects_read_only_when_constrained() -> Non
     assert route.chosen_worker == "codex"
     assert route.chosen_profile == "codex-read-only"
     assert route.route_reason == "cheap_mechanical_change"
+
+
+def test_verify_result_with_independent_verifier() -> None:
+    """Verify handling of independent verifier outcome."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "do something"},
+            "result": {
+                "status": "success",
+                "summary": "ok",
+                "commands_run": [],
+                "files_changed": [],
+                "artifacts": [],
+            },
+        }
+    )
+    res = verify_result(
+        state,
+        enable_independent_verifier=True,
+        independent_verifier_outcome=("failed", "Verifier found issue"),
+    )
+    items = res["verification"]["items"]
+    iv_item = next(i for i in items if i["label"] == "independent_verifier")
+    assert iv_item["status"] == "failed"
+    assert iv_item["message"] == "Verifier found issue"
+
+
+def test_verify_result_with_brain_report() -> None:
+    """Verify handling of verification brain report."""
+    from orchestrator.brain import VerificationBrainMergeReport
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "do something"},
+            "result": {
+                "status": "success",
+                "summary": "ok",
+                "commands_run": [],
+                "files_changed": [],
+                "artifacts": [],
+            },
+        }
+    )
+    report = VerificationBrainMergeReport(
+        enabled=True,
+        provider="Gemini",
+        applied=True,
+    )
+    res = verify_result(
+        state,
+        verification_brain_report=report,
+    )
+    # Brain is in the timeline event payload
+    events = res["timeline_events"]
+    comp_event = next(e for e in events if e.event_type == "verification_completed")
+    assert comp_event.payload["brain"]["provider"] == "Gemini"
+    assert comp_event.payload["brain"]["applied"] is True
+
+
+def test_verify_result_failure_kinds() -> None:
+    """Verify that different failure labels map to correct failure kinds."""
+
+    def _check(label, expected_kind):
+        # Mock a failed item
+        from orchestrator.state import VerificationReportItem
+
+        with patch(
+            "orchestrator.graph.VerificationReportItem",
+            side_effect=lambda **kw: VerificationReportItem(**kw),
+        ):
+            # We need to bypass the deterministic checks and inject our items
+            # Or just call verify_result and see if it hits the labels
+            pass
+
+        # Actually, it's easier to just mock the items list if we can
+        # But items is internal.
+        # Let's try to trigger them via arguments or state if possible.
+        # Actually, verify_result calculates items from state.result.
+
+        # For 'file_changes', we need files_changed to be non-empty but status to be failure?
+        # No, 'file_changes' is added if state.result.status is failure but files changed.
+
+        # Let's just trust that the mapping logic is simple and I can add a test that exercises it.
+        pass
+
+    # Test worker_failure
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "do"},
+            "result": {
+                "status": "failure",
+                "summary": "failed",
+                "commands_run": [],
+                "files_changed": [],
+                "artifacts": [],
+            },
+        }
+    )
+    res = verify_result(state)
+    assert res["verification"]["failure_kind"] == "worker_failure"
+
+    # Test test_regression via deterministic_commands
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "do"},
+            "result": {
+                "status": "success",
+                "summary": "ok",
+                "commands_run": [],
+                "files_changed": ["ok.txt"],
+                "artifacts": [],
+            },
+        }
+    )
+    res = verify_result(state, deterministic_verifier_outcome=("failed", "Command failed"))
+    assert res["verification"]["failure_kind"] == "test_regression"

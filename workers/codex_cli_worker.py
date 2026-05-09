@@ -424,6 +424,8 @@ class CodexCliWorker(Worker):
             runtime_settings = settings_from_budget(
                 request.budget,
                 defaults=self.runtime_settings,
+                task_id=request.task_id,
+                session_id=request.session_id,
             )
             granted_permission = granted_permission_from_constraints(request.constraints)
             bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
@@ -468,6 +470,7 @@ class CodexCliWorker(Worker):
         cancel_token: Callable[[], bool] | None,
     ) -> _RuntimeExecutionPhase:
         """Execute the main CLI loop and post-run review/lint phases."""
+        redactor = SecretRedactor(list((request.secrets or {}).values()))
         execution = run_cli_runtime_loop(
             self.runtime_adapter,
             runtime_setup.session,
@@ -477,7 +480,10 @@ class CodexCliWorker(Worker):
             granted_permission=runtime_setup.granted_permission,
             working_directory=workspace.repo_path,
             cancel_token=cancel_token,
+            task_id=request.task_id,
+            session_id=request.session_id,
             model_name=getattr(self.runtime_adapter, "model", None),
+            redactor=redactor,
         )
 
         files_changed, lint_format_result, lint_format_artifacts = (
@@ -528,6 +534,8 @@ class CodexCliWorker(Worker):
                 granted_permission=runtime_setup.granted_permission,
                 session=runtime_setup.session,
                 cancel_token=cancel_token,
+                task_id=request.task_id,
+                session_id=request.session_id,
                 model_name=getattr(self.runtime_adapter, "model", None),
                 adapter_failure_log_message=(
                     "Codex CLI worker self-review adapter failed; recording explicit "
@@ -774,6 +782,8 @@ class CodexCliWorker(Worker):
                 events_path=events_path,
                 collect_diff=True,
                 collect_changed_files=True,
+                task_id=request.task_id,
+                session_id=request.session_id,
                 redactor=SecretRedactor(list((request.secrets or {}).values())),
             )
         )
@@ -879,6 +889,8 @@ class CodexCliWorker(Worker):
                 runtime_settings = settings_from_budget(
                     request.budget,
                     defaults=self.runtime_settings,
+                    task_id=request.task_id,
+                    session_id=request.session_id,
                 )
                 result = self._execute_native_runtime(
                     request,
