@@ -357,13 +357,19 @@ def get_centralized_span_status(
     try:
         from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
 
-        if status == "success":
-            return otel_trace.Status(otel_trace.StatusCode.OK, description)
-        if status == "error":
-            return otel_trace.Status(otel_trace.StatusCode.ERROR, description)
+        # Explicit mapping ensures consistency and avoids "broad" dynamic lookups
+        mapping = {
+            "success": otel_trace.StatusCode.OK,
+            "error": otel_trace.StatusCode.ERROR,
+            "failure": otel_trace.StatusCode.OK,
+        }
 
-        # Failure is often a policy or goal failure, not a system error
-        return otel_trace.Status(otel_trace.StatusCode.OK, description)
+        status_code = mapping.get(status.lower())
+        if status_code is not None:
+            return otel_trace.Status(status_code, description)
+
+        # Default to UNSET for unknown statuses to avoid inaccurate reporting
+        return otel_trace.Status(otel_trace.StatusCode.UNSET, description)
     except (ImportError, Exception):
         return None
 
@@ -498,10 +504,13 @@ def set_span_status(status_code: Any, description: str | None = None) -> None:
         span = otel_trace.get_current_span()
         if span.is_recording():
             if isinstance(status_code, str):
-                # Map string to StatusCode enum
-                status_code = getattr(
-                    otel_trace.StatusCode, status_code.upper(), otel_trace.StatusCode.UNSET
-                )
+                # Use explicit whitelist to map strings to StatusCode enum
+                mapping = {
+                    "OK": otel_trace.StatusCode.OK,
+                    "ERROR": otel_trace.StatusCode.ERROR,
+                    "UNSET": otel_trace.StatusCode.UNSET,
+                }
+                status_code = mapping.get(status_code.upper(), otel_trace.StatusCode.UNSET)
 
             # If we don't have a Status object yet, create one
             # We check for .status_code attribute which is standard on OTEL Status objects

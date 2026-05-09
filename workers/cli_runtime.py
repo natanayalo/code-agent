@@ -993,7 +993,7 @@ def format_tool_observation(
         f"Duration seconds: {result.duration_seconds:.3f}",
         "Output:",
         "```text",
-        output if output != "<empty>" else "<no output>",
+        output if (output and output != "<empty>") else "<no output>",
         "```",
     ]
     return "\n".join(lines)
