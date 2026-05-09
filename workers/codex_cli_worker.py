@@ -11,10 +11,6 @@ from typing import Any, Protocol
 
 from apps.observability import (
     SPAN_KIND_AGENT,
-    STATUS_ERROR,
-    record_span_exception,
-    set_span_status,
-    set_span_status_from_outcome,
     start_optional_span,
     with_span_kind,
 )
@@ -305,14 +301,7 @@ class CodexCliWorker(Worker):
                     system_prompt_override=system_prompt,
                 )
 
-            try:
-                result = await run_sync_with_cancellable_executor(_run_sync)
-                set_span_status_from_outcome(result.status, result.summary)
-                return result
-            except Exception as exc:
-                record_span_exception(exc)
-                set_span_status(STATUS_ERROR, str(exc))
-                raise
+            return await run_sync_with_cancellable_executor(_run_sync)
 
     def _cleanup_workspace(
         self,

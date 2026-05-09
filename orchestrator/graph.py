@@ -17,10 +17,8 @@ from langgraph.types import interrupt
 from apps.observability import (
     SPAN_KIND_CHAIN,
     SPAN_KIND_TOOL,
-    STATUS_OK,
     set_current_span_attribute,
     set_span_input_output,
-    set_span_status,
     set_span_task_metadata,
     start_optional_span,
 )
@@ -933,7 +931,6 @@ def classify_task(state_input: OrchestratorState) -> dict[str, Any]:
         task_kind = _classify_task_kind(task_text)
         set_current_span_attribute("code_agent.task_kind", task_kind)
         set_span_input_output(input_data=task_text, output_data={"task_kind": task_kind})
-        set_span_status(STATUS_OK)
         return {
             "current_step": "classify_task",
             "task_kind": task_kind,
@@ -1030,7 +1027,6 @@ def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
         complexity_reason = _task_complexity_reason(state)
         if complexity_reason is None:
             set_span_input_output(input_data=state.task_kind, output_data="skipped")
-            set_span_status(STATUS_OK)
             return {
                 "current_step": "plan_task",
                 "task_plan": None,
@@ -1046,8 +1042,7 @@ def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
             }
 
         task_plan = _build_task_plan(state, complexity_reason)
-        set_span_input_output(input_data=state.task_kind, output_data=task_plan.model_dump())
-        set_span_status(STATUS_OK)
+        set_span_input_output(input_data=state.task.task_text, output_data=task_plan.model_dump())
         return {
             "current_step": "plan_task",
             "task_plan": task_plan.model_dump(),
@@ -1089,12 +1084,12 @@ async def generate_task_spec(
         brain_report: TaskSpecBrainMergeReport | None = None
         if orchestrator_brain is not None:
             provider_name = type(orchestrator_brain).__name__
-            with start_optional_span(
-                tracer_name="orchestrator.graph",
-                span_name="orchestrator.node.generate_task_spec.brain",
-                attributes={"openinference.span.kind": SPAN_KIND_TOOL},
-            ):
-                try:
+            try:
+                with start_optional_span(
+                    tracer_name="orchestrator.graph",
+                    span_name="orchestrator.node.generate_task_spec.brain",
+                    attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                ):
                     suggestion = await orchestrator_brain.suggest_task_spec(
                         task=state.task,
                         task_kind=state.task_kind,
@@ -1105,39 +1100,37 @@ async def generate_task_spec(
                         input_data=task_spec.model_dump(),
                         output_data=suggestion.model_dump() if suggestion else None,
                     )
-                    set_span_status(STATUS_OK)
-                except Exception as exc:
-                    logger.warning(
-                        "Orchestrator brain suggestion failed; falling back to "
-                        "deterministic TaskSpec.",
-                        exc_info=True,
-                        extra={
-                            "session_id": (
-                                state.session.session_id if state.session is not None else None
-                            ),
-                            "task_id": state.task.task_id,
-                            "brain_provider": provider_name,
-                        },
-                    )
-                    set_span_status(STATUS_OK, str(exc))
-                    detail = str(exc).strip()
+            except Exception as exc:
+                logger.warning(
+                    "Orchestrator brain suggestion failed; falling back to "
+                    "deterministic TaskSpec.",
+                    exc_info=True,
+                    extra={
+                        "session_id": (
+                            state.session.session_id if state.session is not None else None
+                        ),
+                        "task_id": state.task.task_id,
+                        "brain_provider": provider_name,
+                    },
+                )
+                detail = str(exc).strip()
+                brain_report = TaskSpecBrainMergeReport(
+                    enabled=True,
+                    provider=provider_name,
+                    error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
+                )
+            else:
+                if suggestion is None:
                     brain_report = TaskSpecBrainMergeReport(
                         enabled=True,
                         provider=provider_name,
-                        error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
                     )
                 else:
-                    if suggestion is None:
-                        brain_report = TaskSpecBrainMergeReport(
-                            enabled=True,
-                            provider=provider_name,
-                        )
-                    else:
-                        task_spec, brain_report = apply_task_spec_brain_suggestion(
-                            task_spec=task_spec,
-                            suggestion=suggestion,
-                            provider=provider_name,
-                        )
+                    task_spec, brain_report = apply_task_spec_brain_suggestion(
+                        task_spec=task_spec,
+                        suggestion=suggestion,
+                        provider=provider_name,
+                    )
 
         policy_violations = validate_task_spec_policy(task_spec)
         progress_message = "task spec generated"
@@ -1156,7 +1149,6 @@ async def generate_task_spec(
             event_payload["brain"] = brain_report.model_dump(mode="json")
 
         set_span_input_output(input_data=state.task_kind, output_data=event_payload)
-        set_span_status(STATUS_OK)
 
         response: dict[str, Any] = {
             "current_step": "generate_task_spec",
@@ -1850,12 +1842,12 @@ def build_choose_worker_node(
             )
             if orchestrator_brain is not None and _should_attempt_brain_route(state):
                 provider_name = type(orchestrator_brain).__name__
-                with start_optional_span(
-                    tracer_name="orchestrator.graph",
-                    span_name="orchestrator.node.choose_worker.brain",
-                    attributes={"openinference.span.kind": SPAN_KIND_TOOL},
-                ):
-                    try:
+                try:
+                    with start_optional_span(
+                        tracer_name="orchestrator.graph",
+                        span_name="orchestrator.node.choose_worker.brain",
+                        attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                    ):
                         suggestion = await orchestrator_brain.suggest_route(
                             state=state,
                             available_workers=available_workers,
@@ -1865,32 +1857,28 @@ def build_choose_worker_node(
                             input_data=state.task_spec.model_dump() if state.task_spec else None,
                             output_data=suggestion.model_dump() if suggestion else None,
                         )
-                        set_span_status(STATUS_OK)
-                    except Exception as exc:
-                        detail = str(exc).strip()
+                except Exception as exc:
+                    detail = str(exc).strip()
+                    brain_report = RouteBrainMergeReport(
+                        enabled=True,
+                        provider=provider_name,
+                        error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
+                    )
+                else:
+                    if suggestion is None:
                         brain_report = RouteBrainMergeReport(
                             enabled=True,
                             provider=provider_name,
-                            error=(
-                                f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
-                            ),
                         )
-                        set_span_status(STATUS_OK, str(exc))
                     else:
-                        if suggestion is None:
-                            brain_report = RouteBrainMergeReport(
-                                enabled=True,
-                                provider=provider_name,
-                            )
-                        else:
-                            route, brain_report = _apply_brain_route_suggestion(
-                                state=state,
-                                suggestion=suggestion,
-                                provider=provider_name,
-                                available_workers=available_workers,
-                                available_profiles=available_profiles,
-                                routable_profiles=routable_profiles,
-                            )
+                        route, brain_report = _apply_brain_route_suggestion(
+                            state=state,
+                            suggestion=suggestion,
+                            provider=provider_name,
+                            available_workers=available_workers,
+                            available_profiles=available_profiles,
+                            routable_profiles=routable_profiles,
+                        )
 
             if route is None:
                 route = _compute_route_decision(
@@ -1906,7 +1894,6 @@ def build_choose_worker_node(
                 event_payload["brain"] = brain_report.model_dump(mode="json")
 
             set_span_input_output(input_data=state.task_kind, output_data=event_payload)
-            set_span_status(STATUS_OK)
 
             return {
                 "current_step": "choose_worker",
@@ -1966,8 +1953,7 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
             worker_profile=state.route.chosen_profile,
             runtime_mode=state.route.runtime_mode,
         )
-        set_span_input_output(input_data=state.task_kind, output_data=dispatch.model_dump())
-        set_span_status(STATUS_OK)
+        set_span_input_output(input_data=state.task.task_text, output_data=state.route.model_dump())
         return {
             "current_step": "dispatch_job",
             "dispatch": dispatch.model_dump(),
@@ -2838,8 +2824,6 @@ def build_verify_result_node(
                     "Skipping verification node: no worker result available",
                     extra={"task_id": state.task.task_id},
                 )
-                set_span_input_output(input_data="no_result", output_data="skipped")
-                set_span_status(STATUS_OK)
                 return verify_result(state)
 
             worker_failed = state.result.status != "success"
@@ -2895,7 +2879,6 @@ def build_verify_result_node(
                         input_data=verification_commands,
                         output_data=deterministic_verifier_outcome,
                     )
-                    set_span_status(STATUS_OK)
 
             # 3. Run LLM-based independent verifier if enabled and deterministic checks passed
             if enable_independent_verifier and deterministic_verifier_outcome[0] != "failed":
@@ -2912,7 +2895,6 @@ def build_verify_result_node(
                         input_data=state.result.summary if state.result else None,
                         output_data=independent_verifier_outcome,
                     )
-                    set_span_status(STATUS_OK)
 
             verification_brain_suggestion: VerificationBrainSuggestion | None = None
             verification_brain_report: VerificationBrainMergeReport | None = None
@@ -2921,12 +2903,12 @@ def build_verify_result_node(
                 suggest_verification = getattr(orchestrator_brain, "suggest_verification", None)
                 if callable(suggest_verification):
                     provider_name = type(orchestrator_brain).__name__
-                    with start_optional_span(
-                        tracer_name="orchestrator.graph",
-                        span_name="orchestrator.node.verify_result.brain",
-                        attributes={"openinference.span.kind": SPAN_KIND_TOOL},
-                    ):
-                        try:
+                    try:
+                        with start_optional_span(
+                            tracer_name="orchestrator.graph",
+                            span_name="orchestrator.node.verify_result.brain",
+                            attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                        ):
                             verification_brain_suggestion = await suggest_verification(
                                 state=state,
                                 independent_verifier_outcome=independent_verifier_outcome,
@@ -2939,35 +2921,31 @@ def build_verify_result_node(
                                     else None
                                 ),
                             )
-                            set_span_status(STATUS_OK)
-                        except Exception as exc:
-                            detail = str(exc).strip()
+                    except Exception as exc:
+                        detail = str(exc).strip()
+                        verification_brain_report = VerificationBrainMergeReport(
+                            enabled=True,
+                            provider=provider_name,
+                            error=(
+                                f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
+                            ),
+                        )
+                    else:
+                        if verification_brain_suggestion is None:
                             verification_brain_report = VerificationBrainMergeReport(
                                 enabled=True,
                                 provider=provider_name,
-                                error=(
-                                    f"{type(exc).__name__}: {detail}"
-                                    if detail
-                                    else type(exc).__name__
-                                ),
                             )
-                            set_span_status(STATUS_OK, str(exc))
                         else:
-                            if verification_brain_suggestion is None:
-                                verification_brain_report = VerificationBrainMergeReport(
-                                    enabled=True,
-                                    provider=provider_name,
-                                )
-                            else:
-                                verification_brain_report = VerificationBrainMergeReport(
-                                    enabled=True,
-                                    provider=provider_name,
-                                    applied=True,
-                                    accept_warning_status=(
-                                        verification_brain_suggestion.accept_warning_status
-                                    ),
-                                    rationale=verification_brain_suggestion.rationale,
-                                )
+                            verification_brain_report = VerificationBrainMergeReport(
+                                enabled=True,
+                                provider=provider_name,
+                                applied=True,
+                                accept_warning_status=(
+                                    verification_brain_suggestion.accept_warning_status
+                                ),
+                                rationale=verification_brain_suggestion.rationale,
+                            )
             # 5. Verify the result
             extra_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]] = []
             if skipped_message:
@@ -2987,7 +2965,6 @@ def build_verify_result_node(
                 output_data=response.get("verification"),
             )
 
-            set_span_status(STATUS_OK)
             return response
 
     return verify_result_node
