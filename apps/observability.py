@@ -362,6 +362,7 @@ def get_centralized_span_status(
             "success": otel_trace.StatusCode.OK,
             "error": otel_trace.StatusCode.ERROR,
             "failure": otel_trace.StatusCode.ERROR,
+            "failed": otel_trace.StatusCode.ERROR,
         }
 
         status_code = mapping.get(status.lower())

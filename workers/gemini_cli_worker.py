@@ -11,6 +11,7 @@ from typing import Protocol
 
 from apps.observability import (
     SPAN_KIND_AGENT,
+    set_span_status_from_outcome,
     start_optional_span,
     with_span_kind,
 )
@@ -559,6 +560,8 @@ class GeminiCliWorker(Worker):
             result.summary = "CLI runtime loop was cancelled by the orchestrator timeout."
             result.failure_kind = "timeout"
             result.next_action_hint = "inspect_workspace_artifacts"
+
+        set_span_status_from_outcome(result.status, result.summary)
         return result
 
     def _resolve_runtime_mode(self, request: WorkerRequest) -> WorkerRuntimeMode:
@@ -758,6 +761,8 @@ class GeminiCliWorker(Worker):
             result.summary = "Gemini native-agent run was cancelled by the orchestrator timeout."
             result.failure_kind = "timeout"
             result.next_action_hint = "inspect_workspace_artifacts"
+
+        set_span_status_from_outcome(result.status, result.summary)
         return result
 
     def _run_sync(
