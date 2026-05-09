@@ -1929,7 +1929,7 @@ def build_choose_worker_node(
 def choose_worker(state_input: OrchestratorState) -> dict[str, Any]:
     """Synchronous legacy wrapper for worker routing (used in unit tests)."""
     state = _ensure_state(state_input)
-    route = _compute_route_decision(state, frozenset({"codex", "gemini", "openrouter"}))
+    route = _compute_route_decision(state, frozenset(SUPPORTED_WORKER_TYPES))
     return {
         "current_step": "choose_worker",
         "route": route.model_dump(),

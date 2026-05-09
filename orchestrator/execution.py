@@ -2772,7 +2772,6 @@ class TaskExecutionService:
                 attempt=persisted.attempt_count,
                 channel=persisted.channel,
             )
-            set_span_input_output(input_data=submission.task_text)
 
             graph_input = {
                 "session": SessionRef(
@@ -2805,11 +2804,6 @@ class TaskExecutionService:
                 "timeline_persisted_count": initial_persisted_count,
             }
 
-            set_span_task_metadata(
-                task_id=persisted.task_id,
-                session_id=persisted.session_id,
-                attempt=persisted.attempt_count,
-            )
             set_span_input_output(input_data=_summarize_graph_span_input(graph_input))
 
             raw_output = await self.graph.ainvoke(graph_input, config=config)
