@@ -47,7 +47,6 @@ from apps.observability import (
     set_span_input_output,
     set_span_status,
     set_span_status_from_outcome,
-    set_span_task_metadata,
     start_optional_span,
     with_restored_trace_context,
     with_span_kind,
@@ -1468,13 +1467,11 @@ class TaskExecutionService:
             tracer_name="orchestrator.execution",
             span_name="TaskExecutionService.submit_task",
             attributes=with_span_kind(SPAN_KIND_AGENT),
+            task_id=persisted.task_id,
+            session_id=persisted.session_id,
+            channel=persisted.channel,
         )
         with span_cm:
-            set_span_task_metadata(
-                task_id=persisted.task_id,
-                session_id=persisted.session_id,
-                channel=persisted.channel,
-            )
             set_span_input_output(input_data=submission.task_text)
             await self._run_blocking(self._mark_task_in_progress, task_id=persisted.task_id)
             await self._emit_progress(submission, persisted, phase="started")
@@ -1575,13 +1572,11 @@ class TaskExecutionService:
                 tracer_name="orchestrator.execution",
                 span_name="TaskExecutionService.run_queued_task",
                 attributes=with_span_kind(SPAN_KIND_AGENT),
+                task_id=persisted.task_id,
+                session_id=persisted.session_id,
+                channel=persisted.channel,
             )
             with span_cm:
-                set_span_task_metadata(
-                    task_id=persisted.task_id,
-                    session_id=persisted.session_id,
-                    channel=persisted.channel,
-                )
                 set_current_span_attribute("code_agent.worker_id", worker_id)
                 set_span_input_output(input_data=submission.task_text)
                 await self._emit_progress(submission, persisted, phase="started")
@@ -2764,15 +2759,12 @@ class TaskExecutionService:
                 else "orchestrator.graph.run"
             ),
             attributes=with_span_kind(SPAN_KIND_AGENT),
+            task_id=persisted.task_id,
+            session_id=persisted.session_id,
+            attempt=persisted.attempt_count,
+            channel=persisted.channel,
         )
         with span_cm:
-            set_span_task_metadata(
-                task_id=persisted.task_id,
-                session_id=persisted.session_id,
-                attempt=persisted.attempt_count,
-                channel=persisted.channel,
-            )
-
             graph_input = {
                 "session": SessionRef(
                     session_id=persisted.session_id,

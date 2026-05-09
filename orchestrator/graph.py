@@ -19,7 +19,6 @@ from apps.observability import (
     SPAN_KIND_TOOL,
     set_current_span_attribute,
     set_span_input_output,
-    set_span_task_metadata,
     start_optional_span,
 )
 from db.base import utc_now
@@ -921,12 +920,10 @@ def classify_task(state_input: OrchestratorState) -> dict[str, Any]:
         tracer_name="orchestrator.graph",
         span_name="orchestrator.node.classify_task",
         attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+        task_id=state.task.task_id,
+        session_id=state.session.session_id if state.session else None,
+        attempt=state.attempt_count,
     ):
-        set_span_task_metadata(
-            task_id=state.task.task_id,
-            session_id=state.session.session_id if state.session else None,
-            attempt=state.attempt_count,
-        )
         task_text = state.normalized_task_text or state.task.task_text
         task_kind = _classify_task_kind(task_text)
         set_current_span_attribute("code_agent.task_kind", task_kind)
@@ -1018,12 +1015,10 @@ def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
         tracer_name="orchestrator.graph",
         span_name="orchestrator.node.plan_task",
         attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+        task_id=state.task.task_id,
+        session_id=state.session.session_id if state.session else None,
+        attempt=state.attempt_count,
     ):
-        set_span_task_metadata(
-            task_id=state.task.task_id,
-            session_id=state.session.session_id if state.session else None,
-            attempt=state.attempt_count,
-        )
         complexity_reason = _task_complexity_reason(state)
         if complexity_reason is None:
             set_span_input_output(input_data=state.task_kind, output_data="skipped")
@@ -1070,12 +1065,10 @@ async def generate_task_spec(
         tracer_name="orchestrator.graph",
         span_name="orchestrator.node.generate_task_spec",
         attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+        task_id=state.task.task_id,
+        session_id=state.session.session_id if state.session else None,
+        attempt=state.attempt_count,
     ):
-        set_span_task_metadata(
-            task_id=state.task.task_id,
-            session_id=state.session.session_id if state.session else None,
-            attempt=state.attempt_count,
-        )
         task_spec = build_task_spec_for_request(
             state.task,
             task_kind=state.task_kind,
@@ -1827,12 +1820,10 @@ def build_choose_worker_node(
             tracer_name="orchestrator.graph",
             span_name="orchestrator.node.choose_worker",
             attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+            task_id=state.task.task_id,
+            session_id=state.session.session_id if state.session else None,
+            attempt=state.attempt_count,
         ):
-            set_span_task_metadata(
-                task_id=state.task.task_id,
-                session_id=state.session.session_id if state.session else None,
-                attempt=state.attempt_count,
-            )
             route: RouteDecision | None = None
             brain_report: RouteBrainMergeReport | None = None
             routable_profiles = (
@@ -1937,12 +1928,10 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
         tracer_name="orchestrator.graph",
         span_name="orchestrator.node.dispatch_job",
         attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+        task_id=state.task.task_id,
+        session_id=state.session.session_id if state.session else None,
+        attempt=state.attempt_count,
     ):
-        set_span_task_metadata(
-            task_id=state.task.task_id,
-            session_id=state.session.session_id if state.session else None,
-            attempt=state.attempt_count,
-        )
         worker_type = state.route.chosen_worker
         if state.route.route_reason != "runtime_unavailable":
             assert (
@@ -2803,12 +2792,10 @@ def build_verify_result_node(
             tracer_name="orchestrator.graph",
             span_name="orchestrator.node.verify_result",
             attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+            task_id=state.task.task_id,
+            session_id=state.session.session_id if state.session else None,
+            attempt=state.attempt_count,
         ):
-            set_span_task_metadata(
-                task_id=state.task.task_id,
-                session_id=state.session.session_id if state.session else None,
-                attempt=state.attempt_count,
-            )
             logger.info(
                 "Entering verify_result_node",
                 extra={
