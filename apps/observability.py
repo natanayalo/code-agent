@@ -328,6 +328,46 @@ def bind_current_trace_context(  # noqa: UP047
     return _wrapped
 
 
+def get_centralized_span_input_data(
+    *,
+    task_id: str | None = None,
+    session_id: str | None = None,
+    attempt: int | None = None,
+    channel: str | None = None,
+    extra_attributes: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Consolidate standard task correlation attributes into a span attribute dictionary."""
+    attributes = dict(extra_attributes) if extra_attributes is not None else {}
+    if task_id:
+        attributes[TASK_ID_ATTRIBUTE] = task_id
+    if session_id:
+        attributes[SESSION_ID_ATTRIBUTE] = session_id
+    if attempt is not None:
+        attributes[ATTEMPT_COUNT_ATTRIBUTE] = attempt
+    if channel:
+        attributes[CHANNEL_ATTRIBUTE] = channel
+    return attributes
+
+
+def get_centralized_span_status(
+    status: str,
+    description: str | None = None,
+) -> Any:
+    """Map a standard outcome status (success/error/failure) to an OpenTelemetry Status object."""
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
+
+        if status == "success":
+            return otel_trace.Status(otel_trace.StatusCode.OK, description)
+        if status == "error":
+            return otel_trace.Status(otel_trace.StatusCode.ERROR, description)
+
+        # Failure is often a policy or goal failure, not a system error
+        return otel_trace.Status(otel_trace.StatusCode.OK, description)
+    except (ImportError, Exception):
+        return None
+
+
 def start_optional_span(
     *,
     tracer_name: str,
@@ -343,15 +383,13 @@ def start_optional_span(
         from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
 
         tracer = otel_trace.get_tracer(tracer_name)
-        span_attributes = dict(attributes) if attributes is not None else {}
-        if task_id:
-            span_attributes[TASK_ID_ATTRIBUTE] = task_id
-        if session_id:
-            span_attributes[SESSION_ID_ATTRIBUTE] = session_id
-        if attempt is not None:
-            span_attributes[ATTEMPT_COUNT_ATTRIBUTE] = attempt
-        if channel:
-            span_attributes[CHANNEL_ATTRIBUTE] = channel
+        span_attributes = get_centralized_span_input_data(
+            task_id=task_id,
+            session_id=session_id,
+            attempt=attempt,
+            channel=channel,
+            extra_attributes=attributes,
+        )
 
         return tracer.start_as_current_span(span_name, attributes=span_attributes)
     except (ImportError, Exception):
@@ -478,13 +516,9 @@ def set_span_status(status_code: Any, description: str | None = None) -> None:
 def set_span_status_from_outcome(status: str, summary: str | None = None) -> None:
     """Set span status based on a standard outcome status (success/error/failure)."""
     set_current_span_attribute(OUTCOME_STATUS_ATTRIBUTE, status)
-    if status == "success":
-        set_span_status(STATUS_OK)
-    elif status == "error":
-        set_span_status(STATUS_ERROR, summary)
-    else:
-        # Failure is often a policy or goal failure, not a system error
-        set_span_status(STATUS_OK, summary)
+    status_obj = get_centralized_span_status(status, summary)
+    if status_obj:
+        set_span_status(status_obj)
 
 
 def set_span_task_metadata(

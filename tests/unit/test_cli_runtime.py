@@ -171,8 +171,7 @@ def test_format_bash_observation_truncates_long_output() -> None:
 
     assert "Command: cat README.md" in observation
     assert "Exit code: 0" in observation
-    assert "abcde" in observation
-    assert "[output truncated to 5 characters]" in observation
+    assert "[truncated]...fghij" in observation
 
 
 def test_run_cli_runtime_loop_uses_tool_client_timeout_and_metadata() -> None:

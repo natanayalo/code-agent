@@ -28,7 +28,12 @@ from apps.observability import (
     with_span_kind,
 )
 from sandbox import DockerShellCommandResult, DockerShellSessionError
-from sandbox.redact import SecretRedactor, redact_and_truncate_output, sanitize_command
+from sandbox.redact import (
+    SecretRedactor,
+    mask_url_credentials,
+    redact_and_truncate_output,
+    sanitize_command,
+)
 from tools import (
     DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS,
     DEFAULT_MCP_TOOL_CLIENT,
@@ -58,6 +63,7 @@ from tools.numeric import (
     coerce_non_negative_int_like,
     coerce_positive_int_like,
 )
+from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import WorkerCommand
 
 logger = logging.getLogger(__name__)
@@ -974,11 +980,12 @@ def format_tool_observation(
     redactor: SecretRedactor | None = None,
 ) -> str:
     """Render bounded shell output for adapter follow-up turns."""
-    output = redact_and_truncate_output(
-        result.output,
-        redactor=redactor,
-        limit_chars=max_characters,
-    )
+    sanitized = mask_url_credentials(result.output)
+    if redactor:
+        sanitized = redactor.redact(sanitized)
+
+    output = truncate_detail_keep_tail(sanitized, max_characters=max_characters)
+
     lines = [
         f"Tool result: {tool_name}",
         f"Command: {sanitize_command(result.command, redactor)}",
@@ -986,11 +993,9 @@ def format_tool_observation(
         f"Duration seconds: {result.duration_seconds:.3f}",
         "Output:",
         "```text",
-        output or "<no output>",
+        output if output != "<empty>" else "<no output>",
         "```",
     ]
-    if len(result.output) > max_characters:
-        lines.append(f"[output truncated to {max_characters} characters]")
     return "\n".join(lines)
 
 
