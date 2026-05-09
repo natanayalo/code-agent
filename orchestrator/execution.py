@@ -37,7 +37,6 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 from apps.observability import (
     ATTR_WORKER_ID,
     SPAN_KIND_AGENT,
-    STATUS_ERROR,
     bind_current_trace_context,
     capture_trace_context,
     is_tracing_enabled,
@@ -46,7 +45,6 @@ from apps.observability import (
     resolve_tracing_project_name,
     set_current_span_attribute,
     set_span_input_output,
-    set_span_status,
     set_span_status_from_outcome,
     start_optional_span,
     with_restored_trace_context,
@@ -1731,7 +1729,7 @@ class TaskExecutionService:
     def _update_span_status_from_state(self, state: OrchestratorState) -> None:
         """Update the current span status based on the orchestrator state outcomes."""
         if state.errors:
-            set_span_status(STATUS_ERROR, state.errors[0])
+            set_span_status_from_outcome("error", state.errors[0])
         elif state.result is not None:
             set_span_status_from_outcome(state.result.status, state.result.summary)
 
@@ -1739,7 +1737,7 @@ class TaskExecutionService:
         """Log and record a span error for a task execution failure."""
         logger.debug(f"Task execution failed: {exc}", exc_info=True)
         record_span_exception(exc)
-        set_span_status(STATUS_ERROR, str(exc))
+        set_span_status_from_outcome("error", str(exc))
 
     async def _heartbeat_loop(
         self,

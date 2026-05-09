@@ -351,29 +351,32 @@ def get_centralized_span_input_data(
     return attributes
 
 
-def get_centralized_result_mapping() -> dict[str, Any]:
+def get_centralized_result_mapping() -> dict[str, Any] | None:
     """Return the centralized mapping of string statuses to OpenTelemetry StatusCode enum values."""
-    from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
 
-    return {
-        "success": otel_trace.StatusCode.OK,
-        "completed": otel_trace.StatusCode.OK,
-        "ok": otel_trace.StatusCode.OK,
-        "error": otel_trace.StatusCode.ERROR,
-        "failure": otel_trace.StatusCode.ERROR,
-        "failed": otel_trace.StatusCode.ERROR,
-        "cancelled": otel_trace.StatusCode.ERROR,
-        "unset": otel_trace.StatusCode.UNSET,
-    }
+        return {
+            "success": otel_trace.StatusCode.OK,
+            "completed": otel_trace.StatusCode.OK,
+            "ok": otel_trace.StatusCode.OK,
+            "error": otel_trace.StatusCode.ERROR,
+            "failure": otel_trace.StatusCode.ERROR,
+            "failed": otel_trace.StatusCode.ERROR,
+            "cancelled": otel_trace.StatusCode.ERROR,
+            "unset": otel_trace.StatusCode.UNSET,
+        }
+    except ImportError:
+        return None
 
 
 def _resolve_span_status_code(status: str) -> Any:
     """Map a string status to an OpenTelemetry StatusCode enum value."""
     try:
         mapping = get_centralized_result_mapping()
+        if mapping is None:
+            return None
         return mapping.get(status.lower(), mapping["unset"])
-    except ImportError:
-        return None
     except Exception as exc:
         logger.debug("Failed to resolve span status code: %s", exc)
         return None
@@ -391,8 +394,6 @@ def get_centralized_span_status(
         if status_code is not None:
             return otel_trace.Status(status_code, description)
 
-        return None
-    except ImportError:
         return None
     except Exception as exc:
         logger.debug("Failed to map span status: %s", exc)

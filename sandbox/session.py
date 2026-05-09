@@ -15,10 +15,8 @@ from pydantic import Field
 from apps.observability import (
     OPENINFERENCE_SPAN_KIND_ATTRIBUTE,
     SPAN_KIND_TOOL,
-    STATUS_ERROR,
-    STATUS_OK,
     set_span_input_output,
-    set_span_status,
+    set_span_status_from_outcome,
     start_optional_span,
 )
 from sandbox.audit import capture_audit_artifacts
@@ -395,11 +393,11 @@ class DockerShellSession:
                         )
 
                     if stream.exit_code != 0:
-                        set_span_status(
-                            STATUS_ERROR, f"Command failed with exit code {stream.exit_code}"
+                        set_span_status_from_outcome(
+                            "failure", f"Command failed with exit code {stream.exit_code}"
                         )
                     else:
-                        set_span_status(STATUS_OK)
+                        set_span_status_from_outcome("success")
 
                     set_span_input_output(
                         input_data=None,

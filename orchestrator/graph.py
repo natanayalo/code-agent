@@ -20,6 +20,7 @@ from apps.observability import (
     SPAN_KIND_TOOL,
     set_current_span_attribute,
     set_span_input_output,
+    set_span_status_from_outcome,
     start_optional_span,
 )
 from db.base import utc_now
@@ -1143,6 +1144,7 @@ async def generate_task_spec(
             event_payload["brain"] = brain_report.model_dump(mode="json")
 
         set_span_input_output(input_data=state.task_kind, output_data=event_payload)
+        set_span_status_from_outcome("success")
 
         response: dict[str, Any] = {
             "current_step": "generate_task_spec",
@@ -1886,6 +1888,7 @@ def build_choose_worker_node(
                 event_payload["brain"] = brain_report.model_dump(mode="json")
 
             set_span_input_output(input_data=state.task_kind, output_data=event_payload)
+            set_span_status_from_outcome("success")
 
             return {
                 "current_step": "choose_worker",

@@ -22,7 +22,7 @@ from apps.observability import (
     NATIVE_AGENT_STDOUT_ATTRIBUTE,
     NATIVE_AGENT_TIMED_OUT_ATTRIBUTE,
     NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH,
-    SPAN_KIND_TOOL,
+    SPAN_KIND_AGENT,
     inject_w3c_trace_context_env,
     set_current_span_attribute,
     set_span_input_output,
@@ -411,7 +411,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
     with start_optional_span(
         tracer_name="workers.native_agent_runner",
         span_name="native_agent_run",
-        attributes=with_span_kind(SPAN_KIND_TOOL),
+        attributes=with_span_kind(SPAN_KIND_AGENT),
         task_id=request.task_id,
         session_id=request.session_id,
     ):
