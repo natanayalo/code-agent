@@ -35,9 +35,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from apps.observability import (
-    SESSION_ID_ATTRIBUTE,
+    ATTR_WORKER_ID,
     SPAN_KIND_AGENT,
-    STATUS_ERROR,
     bind_current_trace_context,
     capture_trace_context,
     is_tracing_enabled,
@@ -46,7 +45,6 @@ from apps.observability import (
     resolve_tracing_project_name,
     set_current_span_attribute,
     set_span_input_output,
-    set_span_status,
     set_span_status_from_outcome,
     start_optional_span,
     with_restored_trace_context,
@@ -1467,15 +1465,13 @@ class TaskExecutionService:
         span_cm = start_optional_span(
             tracer_name="orchestrator.execution",
             span_name="TaskExecutionService.submit_task",
-            attributes=with_span_kind(
-                SPAN_KIND_AGENT,
-                attributes={
-                    "code_agent.task_id": persisted.task_id,
-                    "code_agent.session_id": persisted.session_id,
-                },
-            ),
+            attributes=with_span_kind(SPAN_KIND_AGENT),
+            task_id=persisted.task_id,
+            session_id=persisted.session_id,
+            channel=persisted.channel,
         )
         with span_cm:
+            set_span_input_output(input_data=submission.task_text)
             await self._run_blocking(self._mark_task_in_progress, task_id=persisted.task_id)
             await self._emit_progress(submission, persisted, phase="started")
             await self._emit_progress(submission, persisted, phase="running")
@@ -1574,16 +1570,14 @@ class TaskExecutionService:
             span_cm = start_optional_span(
                 tracer_name="orchestrator.execution",
                 span_name="TaskExecutionService.run_queued_task",
-                attributes=with_span_kind(
-                    SPAN_KIND_AGENT,
-                    attributes={
-                        "code_agent.task_id": persisted.task_id,
-                        "code_agent.session_id": persisted.session_id,
-                        "code_agent.worker_id": worker_id,
-                    },
-                ),
+                attributes=with_span_kind(SPAN_KIND_AGENT),
+                task_id=persisted.task_id,
+                session_id=persisted.session_id,
+                channel=persisted.channel,
             )
             with span_cm:
+                set_current_span_attribute(ATTR_WORKER_ID, worker_id)
+                set_span_input_output(input_data=submission.task_text)
                 await self._emit_progress(submission, persisted, phase="started")
                 await self._emit_progress(submission, persisted, phase="running")
 
@@ -1735,7 +1729,7 @@ class TaskExecutionService:
     def _update_span_status_from_state(self, state: OrchestratorState) -> None:
         """Update the current span status based on the orchestrator state outcomes."""
         if state.errors:
-            set_span_status(STATUS_ERROR, state.errors[0])
+            set_span_status_from_outcome("error", state.errors[0])
         elif state.result is not None:
             set_span_status_from_outcome(state.result.status, state.result.summary)
 
@@ -1743,7 +1737,7 @@ class TaskExecutionService:
         """Log and record a span error for a task execution failure."""
         logger.debug(f"Task execution failed: {exc}", exc_info=True)
         record_span_exception(exc)
-        set_span_status(STATUS_ERROR, str(exc))
+        set_span_status_from_outcome("error", str(exc))
 
     async def _heartbeat_loop(
         self,
@@ -2763,51 +2757,45 @@ class TaskExecutionService:
                 if persisted.attempt_count > 1
                 else "orchestrator.graph.run"
             ),
-            attributes=with_span_kind(
-                SPAN_KIND_AGENT,
-                attributes={
-                    "code_agent.task_id": persisted.task_id,
-                    "code_agent.session_id": persisted.session_id,
-                    "code_agent.attempt_count": persisted.attempt_count,
-                    "code_agent.channel": persisted.channel,
-                },
-            ),
+            attributes=with_span_kind(SPAN_KIND_AGENT),
+            task_id=persisted.task_id,
+            session_id=persisted.session_id,
+            attempt=persisted.attempt_count,
+            channel=persisted.channel,
         )
-
-        graph_input = {
-            "session": SessionRef(
-                session_id=persisted.session_id,
-                user_id=persisted.user_id,
-                channel=persisted.channel,
-                external_thread_id=persisted.external_thread_id,
-                active_task_id=persisted.task_id,
-                status="active",
-            ).model_dump(),
-            "task": {
-                "task_id": persisted.task_id,
-                "task_text": submission.task_text,
-                "repo_url": submission.repo_url,
-                "branch": submission.branch,
-                "priority": submission.priority,
-                "worker_override": (
-                    submission.worker_override.value
-                    if submission.worker_override is not None
-                    else None
-                ),
-                "worker_profile_override": submission.worker_profile_override,
-                "constraints": dict(submission.constraints),
-                "budget": effective_budget,
-                "secrets": dict(submission.secrets),
-                "tools": submission.tools,
-            },
-            "task_spec": persisted.task_spec,
-            "attempt_count": persisted.attempt_count,
-            "timeline_persisted_count": initial_persisted_count,
-        }
-
         with span_cm:
+            graph_input = {
+                "session": SessionRef(
+                    session_id=persisted.session_id,
+                    user_id=persisted.user_id,
+                    channel=persisted.channel,
+                    external_thread_id=persisted.external_thread_id,
+                    active_task_id=persisted.task_id,
+                    status="active",
+                ).model_dump(),
+                "task": {
+                    "task_id": persisted.task_id,
+                    "task_text": submission.task_text,
+                    "repo_url": submission.repo_url,
+                    "branch": submission.branch,
+                    "priority": submission.priority,
+                    "worker_override": (
+                        submission.worker_override.value
+                        if submission.worker_override is not None
+                        else None
+                    ),
+                    "worker_profile_override": submission.worker_profile_override,
+                    "constraints": dict(submission.constraints),
+                    "budget": effective_budget,
+                    "secrets": dict(submission.secrets),
+                    "tools": submission.tools,
+                },
+                "task_spec": persisted.task_spec,
+                "attempt_count": persisted.attempt_count,
+                "timeline_persisted_count": initial_persisted_count,
+            }
+
             set_span_input_output(input_data=_summarize_graph_span_input(graph_input))
-            set_current_span_attribute(SESSION_ID_ATTRIBUTE, persisted.session_id)
 
             raw_output = await self.graph.ainvoke(graph_input, config=config)
             set_span_input_output(

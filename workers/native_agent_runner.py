@@ -23,6 +23,7 @@ from apps.observability import (
     NATIVE_AGENT_TIMED_OUT_ATTRIBUTE,
     NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH,
     SPAN_KIND_AGENT,
+    inject_w3c_trace_context_env,
     set_current_span_attribute,
     set_span_input_output,
     set_span_status_from_outcome,
@@ -34,6 +35,7 @@ from workers.adapter_utils import format_native_run_summary, truncate_detail_kee
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
 from workers.failure_taxonomy import find_infra_failure_marker
+from workers.llm_tracing import set_llm_span_output, with_llm_span
 from workers.native_agent_models import NativeAgentRunResult
 
 logger = logging.getLogger(__name__)
@@ -124,6 +126,8 @@ class NativeAgentRunRequest:
     events_path: Path | None = None
     collect_diff: bool = True
     collect_changed_files: bool = True
+    task_id: str | None = None
+    session_id: str | None = None
     redactor: SecretRedactor | None = None
 
 
@@ -404,11 +408,12 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
     stdout_text: str = ""
     stderr_text: str = ""
     artifacts: list[ArtifactReference] = []
-
     with start_optional_span(
         tracer_name="workers.native_agent_runner",
         span_name="native_agent_run",
         attributes=with_span_kind(SPAN_KIND_AGENT),
+        task_id=request.task_id,
+        session_id=request.session_id,
     ):
         _record_span_data(
             input_data=request.prompt,
@@ -419,16 +424,24 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
         )
 
         try:
-            completed = subprocess.run(
-                request.command,
-                input=request.prompt,
-                check=False,
-                capture_output=True,
-                text=True,
-                cwd=repo_path,
-                env=request.env,
-                timeout=request.timeout_seconds,
-            )
+            with with_llm_span(
+                tracer_name="workers.native_agent_runner",
+                span_name="native_agent_run.llm",
+                input_data=request.prompt,
+                task_id=request.task_id,
+                session_id=request.session_id,
+            ):
+                completed = subprocess.run(
+                    request.command,
+                    input=request.prompt,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    cwd=repo_path,
+                    env=inject_w3c_trace_context_env(request.env),
+                    timeout=request.timeout_seconds,
+                )
+                set_llm_span_output(completed.stdout)
             timed_out = False
         except subprocess.TimeoutExpired as exc:
             stdout_text = _normalize_stream_payload(exc.stdout)

@@ -421,6 +421,8 @@ class OpenRouterCliWorker(Worker):
             granted_permission=runtime_setup.granted_permission,
             working_directory=workspace.repo_path,
             cancel_token=cancel_token,
+            task_id=request.task_id,
+            session_id=request.session_id,
             model_name=getattr(self.runtime_adapter, "model", None),
         )
 
@@ -472,6 +474,8 @@ class OpenRouterCliWorker(Worker):
                 granted_permission=runtime_setup.granted_permission,
                 session=runtime_setup.session,
                 cancel_token=cancel_token,
+                task_id=request.task_id,
+                session_id=request.session_id,
                 model_name=getattr(self.runtime_adapter, "model", None),
                 adapter_failure_log_message=(
                     "OpenRouter CLI worker self-review adapter failed; recording explicit "

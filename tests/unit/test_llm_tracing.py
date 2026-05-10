@@ -17,10 +17,11 @@ def test_with_llm_span_sets_kind_and_input(monkeypatch) -> None:
         return {"openinference.span.kind": kind}
 
     @contextmanager
-    def _start_optional_span(*, tracer_name: str, span_name: str, attributes):
+    def _start_optional_span(*, tracer_name: str, span_name: str, attributes, **kwargs):
         recorded["tracer_name"] = tracer_name
         recorded["span_name"] = span_name
         recorded["attributes"] = attributes
+        recorded["kwargs"] = kwargs
         recorded["entered"] = True
         try:
             yield

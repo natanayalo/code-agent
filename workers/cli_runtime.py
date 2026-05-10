@@ -18,16 +18,19 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from apps.observability import (
     SPAN_KIND_AGENT,
     SPAN_KIND_TOOL,
-    STATUS_ERROR,
-    STATUS_OK,
     set_optional_span_attribute,
     set_span_input_output,
-    set_span_status,
     set_span_status_from_outcome,
     start_optional_span,
     with_span_kind,
 )
 from sandbox import DockerShellCommandResult, DockerShellSessionError
+from sandbox.redact import (
+    SecretRedactor,
+    mask_url_credentials,
+    redact_and_truncate_output,
+    sanitize_command,
+)
 from tools import (
     DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS,
     DEFAULT_MCP_TOOL_CLIENT,
@@ -57,6 +60,7 @@ from tools.numeric import (
     coerce_non_negative_int_like,
     coerce_positive_int_like,
 )
+from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import WorkerCommand
 
 logger = logging.getLogger(__name__)
@@ -228,6 +232,8 @@ class CliRuntimeStep(CliRuntimeModel):
 class CliRuntimeSettings(CliRuntimeModel):
     """Inner-loop safety settings for a CLI runtime worker."""
 
+    task_id: str | None = None
+    session_id: str | None = None
     max_iterations: int = Field(default=DEFAULT_MAX_ITERATIONS, ge=1)
     worker_timeout_seconds: int = Field(default=DEFAULT_WORKER_TIMEOUT_SECONDS, ge=1)
     command_timeout_seconds: int = Field(default=DEFAULT_COMMAND_TIMEOUT_SECONDS, ge=1)
@@ -313,6 +319,8 @@ class CliRuntimeAdapter(Protocol):
         system_prompt: str | None = None,
         prompt_override: str | None = None,
         working_directory: Path | None = None,
+        task_id: str | None = None,
+        session_id: str | None = None,
     ) -> CliRuntimeStep:
         """Return the next tool call or final answer."""
 
@@ -336,9 +344,15 @@ def settings_from_budget(
     budget: Mapping[str, Any],
     *,
     defaults: CliRuntimeSettings | None = None,
+    task_id: str | None = None,
+    session_id: str | None = None,
 ) -> CliRuntimeSettings:
     """Merge supported runtime safety overrides from a worker request budget."""
     resolved = (defaults or CliRuntimeSettings()).model_dump()
+    if task_id:
+        resolved["task_id"] = task_id
+    if session_id:
+        resolved["session_id"] = session_id
 
     max_iterations = coerce_positive_int_like(budget.get("max_iterations"))
     if max_iterations is not None:
@@ -960,21 +974,25 @@ def format_tool_observation(
     *,
     tool_name: str,
     max_characters: int,
+    redactor: SecretRedactor | None = None,
 ) -> str:
     """Render bounded shell output for adapter follow-up turns."""
-    output, truncated = _truncate_text(result.output, max_characters=max_characters)
+    sanitized = mask_url_credentials(result.output)
+    if redactor:
+        sanitized = redactor.redact(sanitized)
+
+    output = truncate_detail_keep_tail(sanitized, max_characters=max_characters)
+
     lines = [
         f"Tool result: {tool_name}",
-        f"Command: {result.command}",
+        f"Command: {sanitize_command(result.command, redactor)}",
         f"Exit code: {result.exit_code}",
         f"Duration seconds: {result.duration_seconds:.3f}",
         "Output:",
         "```text",
-        output or "<no output>",
+        output if (output and output != "<empty>") else "<no output>",
         "```",
     ]
-    if truncated:
-        lines.append(f"[output truncated to {max_characters} characters]")
     return "\n".join(lines)
 
 
@@ -1155,7 +1173,10 @@ def run_cli_runtime_loop(
     clock: Callable[[], float] = perf_counter,
     working_directory: Path | None = None,
     cancel_token: Callable[[], bool] | None = None,
+    task_id: str | None = None,
+    session_id: str | None = None,
     model_name: str | None = None,
+    redactor: SecretRedactor | None = None,
 ) -> CliRuntimeExecutionResult:
     """Drive the provider adapter through a bounded multi-turn shell loop."""
     started_at = clock()
@@ -1189,6 +1210,8 @@ def run_cli_runtime_loop(
             tracer_name=TRACER_NAME,
             span_name=turn_name,
             attributes=with_span_kind(SPAN_KIND_AGENT),
+            task_id=settings.task_id,
+            session_id=settings.session_id,
         ) as turn_span:
             # Attach turn input to the current span for request/response visibility.
             last_msg_content = messages[-1].content if messages else "Task started"
@@ -1294,6 +1317,8 @@ def run_cli_runtime_loop(
                     tuple(messages_for_adapter),
                     system_prompt=system_prompt,
                     working_directory=working_directory,
+                    task_id=settings.task_id,
+                    session_id=settings.session_id,
                 )
             except Exception as exc:
                 logger.exception("CLI runtime adapter failed", extra={"iteration": iteration})
@@ -1500,6 +1525,8 @@ def run_cli_runtime_loop(
                 tracer_name=TRACER_NAME,
                 span_name=f"tool.{tool.name}",
                 attributes=with_span_kind(SPAN_KIND_TOOL),
+                task_id=settings.task_id,
+                session_id=settings.session_id,
             ) as span:
                 set_optional_span_attribute(span, "tool.name", tool.name)
                 set_optional_span_attribute(span, "tool.input", command)
@@ -1514,12 +1541,19 @@ def run_cli_runtime_loop(
                             clock=clock,
                         ),
                     )
-                    set_span_input_output(input_data=None, output_data=shell_result.output)
+                    set_span_input_output(
+                        input_data=None,
+                        output_data=redact_and_truncate_output(
+                            shell_result.output,
+                            redactor=redactor,
+                            limit_chars=settings.max_observation_characters,
+                        ),
+                    )
                     if shell_result.exit_code == 0:
-                        set_span_status(STATUS_OK)
+                        set_span_status_from_outcome("success")
                     else:
-                        set_span_status(
-                            STATUS_ERROR, f"Command failed with exit code {shell_result.exit_code}"
+                        set_span_status_from_outcome(
+                            "failure", f"Command failed with exit code {shell_result.exit_code}"
                         )
                 except DockerShellSessionError as exc:
                     return _finalize_execution_result(
@@ -1587,6 +1621,7 @@ def run_cli_runtime_loop(
                             shell_result,
                             tool_name=tool.name,
                             max_characters=settings.max_observation_characters,
+                            redactor=redactor,
                         ),
                     )
                 )
@@ -1618,13 +1653,11 @@ def run_cli_runtime_loop(
                         )
                     )
                     stall_correction_injected_at = iteration
-                    set_span_status(STATUS_OK)
                     continue
                 if (
                     stall_correction_injected_at is not None
                     and iteration - stall_correction_injected_at <= settings.stall_correction_turns
                 ):
-                    set_span_status(STATUS_OK)
                     continue
                 _update_budget_ledger(
                     budget_ledger,
@@ -1655,7 +1688,6 @@ def run_cli_runtime_loop(
                     messages=messages,
                     budget_ledger=budget_ledger,
                 )
-            set_span_status(STATUS_OK)
 
     exhausted_without_progress = commands_run and commands_with_writes == 0
     return CliRuntimeExecutionResult(

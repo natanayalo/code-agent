@@ -193,3 +193,45 @@ async def test_shell_worker_handles_cancellation(
         assert result.status == "error"
         assert result.failure_kind == "timeout"
         assert "cancelled" in result.summary.lower()
+
+
+@pytest.mark.anyio
+async def test_shell_worker_missing_repo_url(shell_worker):
+    request = WorkerRequest(
+        session_id="test-session",
+        repo_url=None,
+        branch="main",
+        task_text="echo hello",
+    )
+    result = await shell_worker.run(request)
+    assert result.status == "error"
+    assert "requires a repo_url" in result.summary
+
+
+@pytest.mark.anyio
+async def test_shell_worker_timed_out(
+    shell_worker, mock_workspace_manager, mock_container_manager, workspace_handle
+):
+    request = WorkerRequest(
+        session_id="test-session",
+        repo_url="https://example.com/repo.git",
+        branch="main",
+        task_text="sleep 10",
+    )
+    mock_workspace_manager.create_workspace.return_value = workspace_handle
+    mock_container = MagicMock()
+    mock_container_manager.start.return_value = mock_container
+
+    native_result = NativeAgentRunResult(
+        status="error",
+        summary="Timed out.",
+        command="sleep 10",
+        exit_code=None,
+        duration_seconds=1.0,
+        timed_out=True,
+    )
+
+    with patch("workers.shell_worker.run_native_agent", return_value=native_result):
+        result = await shell_worker.run(request)
+        assert result.status == "error"
+        assert result.failure_kind == "timeout"

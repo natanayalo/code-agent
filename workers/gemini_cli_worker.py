@@ -11,9 +11,6 @@ from typing import Protocol
 
 from apps.observability import (
     SPAN_KIND_AGENT,
-    STATUS_ERROR,
-    record_span_exception,
-    set_span_status,
     set_span_status_from_outcome,
     start_optional_span,
     with_span_kind,
@@ -293,14 +290,7 @@ class GeminiCliWorker(Worker):
                     system_prompt_override=system_prompt,
                 )
 
-            try:
-                result = await run_sync_with_cancellable_executor(_run_sync)
-                set_span_status_from_outcome(result.status, result.summary)
-                return result
-            except Exception as exc:
-                record_span_exception(exc)
-                set_span_status(STATUS_ERROR, str(exc))
-                raise
+            return await run_sync_with_cancellable_executor(_run_sync)
 
     def _cleanup_workspace(
         self,
@@ -413,6 +403,8 @@ class GeminiCliWorker(Worker):
             runtime_settings = settings_from_budget(
                 request.budget,
                 defaults=self.runtime_settings,
+                task_id=request.task_id,
+                session_id=request.session_id,
             )
             granted_permission = granted_permission_from_constraints(request.constraints)
             bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
@@ -457,6 +449,7 @@ class GeminiCliWorker(Worker):
         cancel_token: Callable[[], bool] | None,
     ) -> _RuntimeExecutionPhase:
         """Execute the main CLI loop and post-run review/lint phases."""
+        redactor = SecretRedactor(list((request.secrets or {}).values()))
         execution = run_cli_runtime_loop(
             self.runtime_adapter,
             runtime_setup.session,
@@ -466,7 +459,10 @@ class GeminiCliWorker(Worker):
             granted_permission=runtime_setup.granted_permission,
             working_directory=workspace.repo_path,
             cancel_token=cancel_token,
+            task_id=request.task_id,
+            session_id=request.session_id,
             model_name=getattr(self.runtime_adapter, "model", None),
+            redactor=redactor,
         )
 
         files_changed, lint_format_result, lint_format_artifacts = (
@@ -517,6 +513,8 @@ class GeminiCliWorker(Worker):
                 granted_permission=runtime_setup.granted_permission,
                 session=runtime_setup.session,
                 cancel_token=cancel_token,
+                task_id=request.task_id,
+                session_id=request.session_id,
                 model_name=getattr(self.runtime_adapter, "model", None),
                 adapter_failure_log_message=(
                     "Gemini CLI worker self-review adapter failed; recording explicit "
@@ -562,6 +560,8 @@ class GeminiCliWorker(Worker):
             result.summary = "CLI runtime loop was cancelled by the orchestrator timeout."
             result.failure_kind = "timeout"
             result.next_action_hint = "inspect_workspace_artifacts"
+
+        set_span_status_from_outcome(result.status, result.summary)
         return result
 
     def _resolve_runtime_mode(self, request: WorkerRequest) -> WorkerRuntimeMode:
@@ -721,6 +721,8 @@ class GeminiCliWorker(Worker):
                 env=self._native_run_env(),
                 collect_diff=True,
                 collect_changed_files=True,
+                task_id=request.task_id,
+                session_id=request.session_id,
                 redactor=SecretRedactor(list((request.secrets or {}).values())),
             )
         )
@@ -759,6 +761,8 @@ class GeminiCliWorker(Worker):
             result.summary = "Gemini native-agent run was cancelled by the orchestrator timeout."
             result.failure_kind = "timeout"
             result.next_action_hint = "inspect_workspace_artifacts"
+
+        set_span_status_from_outcome(result.status, result.summary)
         return result
 
     def _run_sync(
@@ -825,6 +829,8 @@ class GeminiCliWorker(Worker):
                 runtime_settings = settings_from_budget(
                     request.budget,
                     defaults=self.runtime_settings,
+                    task_id=request.task_id,
+                    session_id=request.session_id,
                 )
                 result = self._execute_native_runtime(
                     request,

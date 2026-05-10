@@ -57,6 +57,7 @@ class WorkerRequest(WorkerModel):
     """Normalized task input passed from the orchestrator to a worker."""
 
     session_id: str | None = None
+    task_id: str | None = None
     repo_url: str | None = None
     branch: str | None = None
     task_text: str = Field(min_length=1)

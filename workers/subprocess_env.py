@@ -41,6 +41,9 @@ _BASE_ALLOWED_ENV_KEYS = frozenset(
         "XDG_DATA_HOME",
         "XDG_STATE_HOME",
         "XDG_RUNTIME_DIR",
+        "TRACEPARENT",
+        "TRACESTATE",
+        "BAGGAGE",
     }
 )
 _BASE_ALLOWED_ENV_PREFIXES = ("LC_",)

@@ -795,3 +795,320 @@ def test_set_span_status_invokes_otel_set_status() -> None:
     assert span.status is not None
     mock_status_cls.assert_called_once()
     assert span.status == mock_status_cls.return_value
+
+
+def test_set_span_task_metadata(mock_otel) -> None:
+    """Verify that task metadata is correctly set on the current span."""
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.attributes: dict[str, Any] = {}
+
+        def is_recording(self) -> bool:
+            return True
+
+        def set_attribute(self, key: str, value: Any) -> None:
+            self.attributes[key] = value
+
+    span = _FakeSpan()
+
+    with patch("opentelemetry.trace.get_current_span", return_value=span):
+        observability_module.set_span_task_metadata(
+            task_id="t-123",
+            session_id="s-456",
+            attempt=2,
+            channel="slack",
+        )
+
+    assert span.attributes[observability_module.TASK_ID_ATTRIBUTE] == "t-123"
+    assert span.attributes[observability_module.SESSION_ID_ATTRIBUTE] == "s-456"
+    assert span.attributes[observability_module.ATTEMPT_COUNT_ATTRIBUTE] == 2
+    assert span.attributes[observability_module.CHANNEL_ATTRIBUTE] == "slack"
+
+
+def test_set_span_status_from_outcome_success() -> None:
+    """Verify TaskStatus.COMPLETED maps to STATUS_OK."""
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.status: Any = None
+
+        def is_recording(self) -> bool:
+            return True
+
+        def set_status(self, status: Any) -> None:
+            self.status = status
+
+    span = _FakeSpan()
+
+    with patch("opentelemetry.trace.Status") as mock_status_cls:
+        with patch("opentelemetry.trace.get_current_span", return_value=span):
+            observability_module.set_span_status_from_outcome("success")
+
+    mock_status_cls.assert_called_once()
+    args, _ = mock_status_cls.call_args
+    # STATUS_OK is "OK", which getattr(StatusCode, "OK") should return something
+    # We just care that it was called
+    assert args[1] is None
+
+
+def test_set_span_status_from_outcome_failure() -> None:
+    """Verify TaskStatus.FAILED maps to STATUS_ERROR."""
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.status: Any = None
+
+        def is_recording(self) -> bool:
+            return True
+
+        def set_status(self, status: Any) -> None:
+            self.status = status
+
+    span = _FakeSpan()
+
+    with patch("opentelemetry.trace.Status") as mock_status_cls:
+        with patch("opentelemetry.trace.get_current_span", return_value=span):
+            observability_module.set_span_status_from_outcome("failed")
+
+    mock_status_cls.assert_called_once()
+
+
+def test_truncate_span_payload() -> None:
+    """Test standardized truncation logic."""
+    limit = observability_module.MAX_SPAN_ATTRIBUTE_LENGTH
+    short_text = "abc"
+    assert observability_module._truncate_span_payload(short_text) == short_text
+
+    long_text = "x" * (limit + 10)
+    truncated = observability_module._truncate_span_payload(long_text)
+    assert len(truncated) > limit
+    assert "... (truncated to 12000 chars)" in truncated
+    assert truncated.startswith("x" * limit)
+
+
+def test_serialize_span_payload_json() -> None:
+    """Test JSON serialization and MIME type."""
+    payload = {"a": 1}
+    truncated, mime = observability_module._serialize_span_payload(payload)
+    assert truncated == '{"a": 1}'
+    assert mime == "application/json"
+
+
+def test_serialize_span_payload_text() -> None:
+    """Test plain text serialization."""
+    payload = 123
+    truncated, mime = observability_module._serialize_span_payload(payload)
+    assert truncated == "123"
+    assert mime == "text/plain"
+
+
+def test_set_span_input_output_handles_exceptions(mock_otel) -> None:
+    """Verify fail-safe behavior when serialization fails."""
+
+    class _ExplodingSpan:
+        def is_recording(self) -> bool:
+            return True
+
+        def set_attribute(self, key: str, value: Any) -> None:
+            raise RuntimeError("crash")
+
+    span = _ExplodingSpan()
+    with patch("opentelemetry.trace.get_current_span", return_value=span):
+        # Should not raise
+        observability_module.set_span_input_output("input", "output")
+
+
+def test_set_optional_span_attribute_noop_cases() -> None:
+    """Verify set_optional_span_attribute ignores None or non-recording spans."""
+    # None span
+    observability_module.set_optional_span_attribute(None, "key", "val")
+
+    # Non-recording span
+    class _NonRecordingSpan:
+        def is_recording(self) -> bool:
+            return False
+
+        def set_attribute(self, k, v):
+            pytest.fail("Should not call set_attribute")
+
+    observability_module.set_optional_span_attribute(_NonRecordingSpan(), "key", "val")
+
+
+def test_set_span_status_from_outcome_error() -> None:
+    """Verify status 'error' maps to STATUS_ERROR."""
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.status: Any = None
+
+        def is_recording(self) -> bool:
+            return True
+
+        def set_status(self, status: Any) -> None:
+            self.status = status
+
+    span = _FakeSpan()
+    with patch("opentelemetry.trace.Status") as mock_status_cls:
+        with patch("opentelemetry.trace.get_current_span", return_value=span):
+            observability_module.set_span_status_from_outcome("error", "some error")
+    mock_status_cls.assert_called_once()
+
+
+def test_set_span_status_handles_exception(mock_otel) -> None:
+    """Verify set_span_status fail-safe."""
+
+    class _ExplodingSpan:
+        def is_recording(self) -> bool:
+            return True
+
+        def set_status(self, status):
+            raise RuntimeError("crash")
+
+    span = _ExplodingSpan()
+    with patch("opentelemetry.trace.get_current_span", return_value=span):
+        observability_module.set_span_status("OK")
+
+
+def test_set_optional_span_attribute_handles_exception() -> None:
+    """Verify set_optional_span_attribute fail-safe."""
+
+    class _ExplodingSpan:
+        def is_recording(self) -> bool:
+            return True
+
+        def set_attribute(self, k, v):
+            raise RuntimeError("crash")
+
+    observability_module.set_optional_span_attribute(_ExplodingSpan(), "key", "val")
+
+
+def test_set_span_input_output_noop_when_not_recording(mock_otel) -> None:
+    """Verify set_span_input_output skips non-recording spans."""
+
+    class _NonRecordingSpan:
+        def is_recording(self) -> bool:
+            return False
+
+        def set_attribute(self, k, v):
+            pytest.fail("Should not call")
+
+    with patch("opentelemetry.trace.get_current_span", return_value=_NonRecordingSpan()):
+        observability_module.set_span_input_output("in", "out")
+
+
+def test_record_span_exception_handles_exception(mock_otel) -> None:
+    """Verify record_span_exception fail-safe."""
+
+    class _ExplodingSpan:
+        def is_recording(self) -> bool:
+            return True
+
+        def record_exception(self, e):
+            raise RuntimeError("crash")
+
+    with patch("opentelemetry.trace.get_current_span", return_value=_ExplodingSpan()):
+        observability_module.record_span_exception(RuntimeError("boom"))
+
+
+def test_set_current_span_attribute_handles_exception() -> None:
+    """Verify set_current_span_attribute fail-safe."""
+    with patch("opentelemetry.trace.get_current_span", side_effect=RuntimeError("crash")):
+        observability_module.set_current_span_attribute("key", "val")
+
+
+def test_load_tracing_dependencies_handles_import_error() -> None:
+    """Verify _load_tracing_dependencies returns None on ImportError."""
+    real_import = builtins.__import__
+
+    def _exploding_import(name, *args, **kwargs):
+        if "opentelemetry" in name or "phoenix" in name:
+            raise ImportError("absent")
+        return real_import(name, *args, **kwargs)
+
+    with patch("builtins.__import__", side_effect=_exploding_import):
+        assert observability_module._load_tracing_dependencies() is None
+
+
+def test_capture_trace_context_without_deps() -> None:
+    """Verify capture_trace_context returns empty dict when deps missing."""
+    with patch.object(observability_module, "_load_tracing_dependencies", return_value=None):
+        assert observability_module.capture_trace_context() == {}
+
+
+def test_restore_trace_context_without_deps() -> None:
+    """Verify restore_trace_context returns None when deps missing."""
+    with patch.object(observability_module, "_load_tracing_dependencies", return_value=None):
+        assert observability_module.restore_trace_context({"traceparent": "00-1-2-01"}) is None
+
+
+def test_detach_trace_context_handles_errors() -> None:
+    """Verify detach_trace_context fail-safe for RuntimeError."""
+    with patch("opentelemetry.context.detach", side_effect=RuntimeError("detached already")):
+        observability_module.detach_trace_context("mock-token")
+
+    with patch("opentelemetry.context.detach", side_effect=AttributeError("no detach")):
+        observability_module.detach_trace_context("mock-token")
+
+
+def test_get_centralized_span_status() -> None:
+    """Verify that result statuses map to correct OTel status codes."""
+    from opentelemetry import trace as otel_trace
+
+    # Success cases
+    s1 = observability_module.get_centralized_span_status("success")
+    assert s1.status_code == otel_trace.StatusCode.OK
+
+    s2 = observability_module.get_centralized_span_status("completed")
+    assert s2.status_code == otel_trace.StatusCode.OK
+
+    # Error cases
+    e1 = observability_module.get_centralized_span_status("error")
+    assert e1.status_code == otel_trace.StatusCode.ERROR
+
+    e2 = observability_module.get_centralized_span_status("failure")
+    assert e2.status_code == otel_trace.StatusCode.ERROR
+
+    e3 = observability_module.get_centralized_span_status("failed")
+    assert e3.status_code == otel_trace.StatusCode.ERROR
+
+    e4 = observability_module.get_centralized_span_status("cancelled")
+    assert e4.status_code == otel_trace.StatusCode.ERROR
+
+    # Unknown case
+    u1 = observability_module.get_centralized_span_status("unknown_status")
+    assert u1.status_code == otel_trace.StatusCode.UNSET
+
+
+def test_set_span_status_string_mapping() -> None:
+    """Verify that set_span_status correctly maps string input to OTel codes."""
+    from opentelemetry import trace as otel_trace
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.status = None
+
+        def is_recording(self) -> bool:
+            return True
+
+        def set_status(self, status):
+            self.status = status
+
+    span = _FakeSpan()
+    with patch("opentelemetry.trace.get_current_span", return_value=span):
+        # Test whitelisted strings
+        observability_module.set_span_status("SUCCESS")
+        assert span.status.status_code == otel_trace.StatusCode.OK
+
+        observability_module.set_span_status("COMPLETED")
+        assert span.status.status_code == otel_trace.StatusCode.OK
+
+        observability_module.set_span_status("FAILED")
+        assert span.status.status_code == otel_trace.StatusCode.ERROR
+
+        observability_module.set_span_status("CANCELLED")
+        assert span.status.status_code == otel_trace.StatusCode.ERROR
+
+        # Test fallback
+        observability_module.set_span_status("UNKNOWN")
+        assert span.status.status_code == otel_trace.StatusCode.UNSET

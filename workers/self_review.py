@@ -271,6 +271,8 @@ def run_shared_self_review_fix_loop(
     granted_permission: ToolPermissionLevel,
     session: ShellSessionProtocol,
     cancel_token: Callable[[], bool] | None = None,
+    task_id: str | None = None,
+    session_id: str | None = None,
     model_name: str | None = None,
     adapter_failure_log_message: str | None = None,
     adapter_failure_logger: logging.Logger | None = None,
@@ -308,12 +310,16 @@ def run_shared_self_review_fix_loop(
                 tracer_name=TRACER_NAME,
                 span_name=turn_name,
                 attributes=with_span_kind(SPAN_KIND_AGENT),
+                task_id=task_id,
+                session_id=session_id,
             ):
                 set_span_input_output(input_data=review_prompt)
                 review_step = runtime_adapter.next_step(
                     (),
                     prompt_override=review_prompt,
                     working_directory=repo_path,
+                    task_id=task_id,
+                    session_id=session_id,
                 )
                 if review_step.kind == "final" and review_step.final_output:
                     set_span_input_output(input_data=None, output_data=review_step.final_output)
@@ -373,6 +379,8 @@ def run_shared_self_review_fix_loop(
             granted_permission=granted_permission,
             working_directory=repo_path,
             cancel_token=cancel_token,
+            task_id=task_id,
+            session_id=session_id,
             model_name=model_name,
         )
         merge_budget_ledgers(execution.budget_ledger, follow_up_execution.budget_ledger)

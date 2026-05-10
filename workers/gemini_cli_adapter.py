@@ -201,6 +201,8 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         system_prompt: str | None = None,
         prompt_override: str | None = None,
         working_directory: Path | None = None,  # noqa: ARG002 — context only, not used by CLI
+        task_id: str | None = None,
+        session_id: str | None = None,
     ) -> CliRuntimeStep:
         """Ask the Gemini CLI for the next runtime step."""
         override_prompt = normalize_prompt_override(prompt_override)
@@ -228,6 +230,8 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 tracer_name=TRACER_NAME,
                 span_name="gemini.chat",
                 input_data=prompt,
+                task_id=task_id,
+                session_id=session_id,
             ):
                 completed = subprocess.run(
                     command,

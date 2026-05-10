@@ -72,6 +72,8 @@ class _ScriptedAdapter:
         system_prompt: str | None = None,
         prompt_override: str | None = None,
         working_directory: Path | None = None,
+        task_id: str | None = None,
+        session_id: str | None = None,
     ) -> CliRuntimeStep:
         self.calls.append(list(messages))
         self.prompt_overrides.append(prompt_override)
