@@ -132,7 +132,7 @@ def extract_json_block(text: str) -> str:
                 raw_json = stripped[i : i + end_idx].strip()
                 # Unwrapping: if the JSON is a dict with exactly one known wrapper key,
                 # look inside it.
-                data = json.loads(raw_json)
+                data = obj
                 if (
                     isinstance(data, dict)
                     and len(data) == 1
