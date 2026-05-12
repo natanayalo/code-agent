@@ -22,6 +22,8 @@ _COMPLEX_TASK_PATTERN = re.compile(
     rf"(?<![\w-])(?:{'|'.join(re.escape(marker) for marker in COMPLEX_TASK_MARKERS)})(?![\w-])"
 )
 
+MINIMUM_MEANINGFUL_SUMMARY_LENGTH: Final[int] = 100
+
 
 def _default_worker_result_provider(request: WorkerRequest) -> WorkerResult:
     """Return a fake successful worker result for the skeleton happy path."""
@@ -185,7 +187,7 @@ def _has_meaningful_deliverable(state: OrchestratorState) -> bool:
         return True
 
     # T-117: Substantial summaries also count as deliverables for informative tasks
-    if state.result.summary and len(state.result.summary) > 100:
+    if state.result.summary and len(state.result.summary) > MINIMUM_MEANINGFUL_SUMMARY_LENGTH:
         return True
 
     non_log_artifacts = [

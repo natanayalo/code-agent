@@ -120,23 +120,18 @@ def extract_json_block(text: str) -> str:
     # 2. Try to find the first '{' and use a decoder to get the first valid object.
     # This prevents "Extra data" errors when models append prose or extra JSON
     # after the main payload.
-    first_brace = stripped.find("{")
-    if first_brace != -1:
-        candidate = stripped[first_brace:]
-        raw_json = None
-        try:
-            decoder = json.JSONDecoder()
-            _, idx = decoder.raw_decode(candidate)
-            raw_json = candidate[:idx].strip()
-        except json.JSONDecodeError:
-            # Fall back to greedy match if raw_decode fails
-            last_brace = stripped.rfind("}")
-            if last_brace != -1 and last_brace > first_brace:
-                raw_json = stripped[first_brace : last_brace + 1].strip()
-
-        if raw_json:
-            # Unwrapping: if the JSON is a dict with exactly one known wrapper key, look inside it.
+    # We iterate backwards to find the last valid JSON object, which is
+    # usually the intended payload.
+    decoder = json.JSONDecoder()
+    for i in range(len(stripped) - 1, -1, -1):
+        if stripped[i] == "{":
             try:
+                obj, end_idx = decoder.raw_decode(stripped[i:])
+                # Verify that the content after the JSON block is only whitespace/punctuation
+                # (or we just trust the last one found from the end)
+                raw_json = stripped[i : i + end_idx].strip()
+                # Unwrapping: if the JSON is a dict with exactly one known wrapper key,
+                # look inside it.
                 data = json.loads(raw_json)
                 if (
                     isinstance(data, dict)
@@ -150,8 +145,8 @@ def extract_json_block(text: str) -> str:
                             inner if isinstance(inner, str) else json.dumps(inner)
                         )
                 return raw_json
-            except Exception:
-                return raw_json
+            except (json.JSONDecodeError, ValueError):
+                continue
 
     # 3. Fall back to the original stripped text (let json.loads handle errors)
     return stripped

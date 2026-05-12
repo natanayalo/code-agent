@@ -673,6 +673,7 @@ def verify_result(
             progress_message = "verification failed after bounded repair attempts"
             updated_result = state.result.model_copy(
                 update={
+                    "status": "failure",
                     "summary": _manual_verifier_handoff_summary(
                         state.result.summary,
                         used_passes=used_passes,
