@@ -554,12 +554,13 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                           className="task-interaction-textarea"
                           placeholder="Type your response here..."
                           value={interactionResponses[interaction.interaction_id] || ''}
-                          onChange={(e) =>
-                            setInteractionResponses({
-                              ...interactionResponses,
-                              [interaction.interaction_id]: e.target.value,
-                            })
-                          }
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setInteractionResponses((prev) => ({
+                              ...prev,
+                              [interaction.interaction_id]: val,
+                            }));
+                          }}
                           disabled={isSubmittingAction || isTaskTerminal}
                         />
                       </div>

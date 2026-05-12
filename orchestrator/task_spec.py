@@ -21,6 +21,7 @@ from orchestrator.constants import (
     RISK_ORDER,
     VALID_DELIVERY_MODES,
 )
+from orchestrator.nodes.utils import _dedupe_preserving_order
 from orchestrator.state import (
     TaskDeliveryMode,
     TaskPlan,
@@ -51,11 +52,6 @@ def _coerce_string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
-
-
-def _dedupe_preserving_order(values: list[str]) -> list[str]:
-    """Return unique values while preserving first-seen ordering."""
-    return list(dict.fromkeys(values))
 
 
 def _append_unique(base: list[str], additions: list[str]) -> tuple[list[str], list[str]]:

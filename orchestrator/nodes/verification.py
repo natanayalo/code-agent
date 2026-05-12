@@ -337,6 +337,17 @@ def build_verify_result_node(
                             accept_warning_status=verification_brain_suggestion.accept_warning_status,
                         )
 
+            # 5. Verify the result
+            extra_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]] = []
+            if not verification_commands:
+                extra_events.append(
+                    (
+                        TimelineEventType.VERIFICATION_SKIPPED,
+                        "Deterministic verification skipped: no commands provided by TaskSpec.",
+                        None,
+                    )
+                )
+
             return verify_result(
                 state,
                 enable_independent_verifier=enable_independent_verifier,
@@ -345,6 +356,7 @@ def build_verify_result_node(
                 independent_verifier_reason_code=independent_verifier_reason_code,
                 verification_brain_suggestion=verification_brain_suggestion,
                 verification_brain_report=verification_brain_report,
+                extra_timeline_events=extra_events,
             )
 
     return verify_result_node
