@@ -18,9 +18,7 @@ from orchestrator.graph import (
     _coerce_approval_decision,
     _compute_route_decision,
     _default_worker_result_provider,
-    _has_meaningful_deliverable,
     _is_interaction_requirement_resolved,
-    _requires_deliverable_evidence,
     _resolve_orchestrator_timeout_seconds,
     _route_after_review_result,
     _task_requires_approval,
@@ -31,11 +29,16 @@ from orchestrator.graph import (
     choose_worker,
     dispatch_job,
     generate_task_spec,
+    plan_task,
     summarize_result,
     verify_result,
 )
-from orchestrator.nodes.ingestion import plan_task
-from orchestrator.nodes.utils import _classify_task_kind, _ensure_state
+from orchestrator.nodes.utils import (
+    _classify_task_kind,
+    _ensure_state,
+    _has_meaningful_deliverable,
+    _requires_deliverable_evidence,
+)
 from orchestrator.state import OrchestratorState
 from orchestrator.task_spec import is_destructive_task
 from workers import Worker, WorkerProfile, WorkerRequest, WorkerResult

@@ -143,3 +143,54 @@ def _task_complexity_reason(state: OrchestratorState) -> str | None:
     if _COMPLEX_TASK_PATTERN.search(task_text):
         return "multi_file_task"
     return None
+
+
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    """Return unique values while preserving first-seen ordering."""
+    return list(dict.fromkeys(values))
+
+
+def _requires_deliverable_evidence(state: OrchestratorState) -> bool:
+    """Return whether this task should fail when no concrete deliverable is produced."""
+    task_type = state.task_spec.task_type if state.task_spec is not None else None
+    # For now, only implementation-heavy tasks strictly require file/artifact changes.
+    # Pure investigations or reviews might only result in a summary.
+    # bugfix and refactor tasks strongly imply file changes.
+    if task_type in {"bugfix", "refactor"}:
+        return True
+
+    task_text = (state.normalized_task_text or state.task.task_text).lower()
+    # Strong implementation keywords that should almost always result in a file change.
+    implementation_keywords = (
+        "fix",
+        "implement",
+        "patch",
+        "refactor",
+        "modify",
+        "remove",
+        "delete",
+    )
+    return any(keyword in task_text for keyword in implementation_keywords)
+
+
+def _has_meaningful_deliverable(state: OrchestratorState) -> bool:
+    """Return True if worker output contains concrete deliverable signals."""
+    if state.result is None:
+        return False
+    if state.result.files_changed:
+        return True
+    if state.result.diff_text:
+        return True
+    if state.result.json_payload:
+        return True
+
+    # T-117: Substantial summaries also count as deliverables for informative tasks
+    if state.result.summary and len(state.result.summary) > 100:
+        return True
+
+    non_log_artifacts = [
+        artifact
+        for artifact in state.result.artifacts
+        if (artifact.artifact_type or "").lower() not in {"log", "workspace"}
+    ]
+    return bool(non_log_artifacts)
