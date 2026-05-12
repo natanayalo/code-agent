@@ -120,10 +120,10 @@ def extract_json_block(text: str) -> str:
     # 2. Try to find the first '{' and use a decoder to get the first valid object.
     # This prevents "Extra data" errors when models append prose or extra JSON
     # after the main payload.
-    # We iterate backwards to find the last valid JSON object, which is
+    # We iterate forwards to find the first valid JSON object, which is
     # usually the intended payload.
     decoder = json.JSONDecoder()
-    for i in range(len(stripped) - 1, -1, -1):
+    for i in range(len(stripped)):
         if stripped[i] == "{":
             try:
                 obj, end_idx = decoder.raw_decode(stripped[i:])
@@ -148,7 +148,13 @@ def extract_json_block(text: str) -> str:
             except (json.JSONDecodeError, ValueError):
                 continue
 
-    # 3. Fall back to the original stripped text (let json.loads handle errors)
+    # 3. Fall back to greedy brace matching for malformed but potentially parseable JSON
+    start_idx = stripped.find("{")
+    end_idx = stripped.rfind("}")
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        return stripped[start_idx : end_idx + 1]
+
+    # 4. Final fallback to the original stripped text
     return stripped
 
 

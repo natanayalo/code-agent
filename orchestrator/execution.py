@@ -1025,11 +1025,13 @@ def _terminal_follow_up_status(
         return TaskStatus.IN_PROGRESS
     if state.approval.status == "rejected":
         return TaskStatus.FAILED
-    if state.approval.status == "pending" or state.current_step in {
-        "await_clarification",
-        "await_permission",
-        "await_permission_escalation",
-    }:
+    is_clarification_gate = state.current_step in {"generate_task_spec", "await_clarification"}
+    if (
+        state.approval.status == "pending"
+        or (is_clarification_gate and state.task_spec and state.task_spec.requires_clarification)
+        or state.current_step
+        in {"await_clarification", "await_permission", "await_permission_escalation"}
+    ):
         return TaskStatus.PENDING
     return TaskStatus.FAILED
 
@@ -1428,11 +1430,11 @@ class TaskExecutionService:
                     logger.info(
                         "Deleted retained sandbox workspace",
                         extra={
+                            "worker_run_id": worker_run.id,
                             "workspace_id": worker_run.workspace_id,
-                            "run_id": worker_run.id,
                         },
                     )
-                deleted_runs += 1
+                    deleted_runs += 1
 
         if deleted_runs:
             logger.info(
