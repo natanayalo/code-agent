@@ -50,6 +50,9 @@ from orchestrator.nodes.verification import (
     VERIFIER_REPAIR_REQUEST_CONSTRAINT,
     build_verify_result_node,
 )
+from orchestrator.nodes.verification import (
+    verify_result as verify_result,
+)
 from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, review_result
 from orchestrator.state import (
     SUPPORTED_WORKER_TYPES,
@@ -764,8 +767,7 @@ async def generate_task_spec(
                     )
             except Exception as exc:
                 logger.warning(
-                    "Orchestrator brain suggestion failed; falling back to "
-                    "deterministic TaskSpec.",
+                    "Orchestrator brain suggestion failed; falling back to deterministic TaskSpec.",
                     exc_info=True,
                     extra={
                         "session_id": (
