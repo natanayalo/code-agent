@@ -360,6 +360,7 @@ def get_centralized_result_mapping() -> dict[str, Any] | None:
             "success": otel_trace.StatusCode.OK,
             "completed": otel_trace.StatusCode.OK,
             "ok": otel_trace.StatusCode.OK,
+            "blocked_on_clarification": otel_trace.StatusCode.UNSET,
             "error": otel_trace.StatusCode.ERROR,
             "failure": otel_trace.StatusCode.ERROR,
             "failed": otel_trace.StatusCode.ERROR,

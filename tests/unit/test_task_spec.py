@@ -154,6 +154,49 @@ def test_apply_task_spec_brain_suggestion_clamps_unsafe_overrides() -> None:
     assert validate_task_spec_policy(merged) == []
 
 
+def test_build_task_spec_caps_and_dedupes_clarification_questions() -> None:
+    """Clarification questions should be bounded to avoid overwhelming operators."""
+    spec = build_task_spec(
+        task_text="Investigate flaky tests",
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="main",
+        constraints={
+            "clarification_questions": [
+                "Q1?",
+                "Q2?",
+                "Q1?",
+                "Q3?",
+                "Q4?",
+            ]
+        },
+    )
+
+    assert spec.clarification_questions == ["Q1?", "Q2?", "Q3?"]
+
+
+def test_apply_task_spec_brain_suggestion_caps_clarification_questions() -> None:
+    """Brain suggestions cannot grow clarification prompts beyond the cap."""
+    spec = build_task_spec(
+        task_text="Investigate flaky tests",
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="main",
+        constraints={"clarification_questions": ["Base Q1?", "Base Q2?"]},
+    )
+    suggestion = TaskSpecBrainSuggestion(
+        clarification_questions=["New Q3?", "Dropped Q4?"],
+        rationale="Need additional context.",
+    )
+
+    merged, report = apply_task_spec_brain_suggestion(
+        task_spec=spec,
+        suggestion=suggestion,
+        provider="FakeBrain",
+    )
+
+    assert merged.clarification_questions == ["Base Q1?", "Base Q2?", "New Q3?"]
+    assert report.added_clarification_questions == ["New Q3?"]
+
+
 @pytest.mark.asyncio
 async def test_rule_based_orchestrator_brain_escalates_urgent_low_risk_task() -> None:
     """Urgent low-risk asks should trigger medium-risk escalation suggestion."""

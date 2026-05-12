@@ -712,6 +712,31 @@ button {
   gap: var(--spacing-sm);
 }
 
+.task-interaction-input {
+  margin-top: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.task-interaction-textarea {
+  width: 100%;
+  min-height: 100px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background-color: rgba(15, 23, 42, 0.85);
+  color: var(--color-text-primary);
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  font-family: inherit;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.task-interaction-textarea:focus {
+  outline: none;
+  border-color: rgba(56, 189, 248, 0.6);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.12);
+}
+
 .task-timeline-list,
 .task-command-list,
 .task-artifact-list {

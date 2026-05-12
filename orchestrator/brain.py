@@ -30,7 +30,7 @@ from workers.base import Worker, WorkerProfile, WorkerRequest
 logger = logging.getLogger(__name__)
 
 DEFAULT_ROUTE_BRAIN_TIMEOUT_SECONDS = 120
-DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS = 90
+DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS = 120
 DEFAULT_ROUTE_PLANNER_PROFILE = "gemini-native-planner"
 DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS: Final = 5
 
@@ -101,11 +101,14 @@ _ROUTE_MAX_SUMMARY_PREVIEW_CHARS = 300
 _RULES_RATIONALE = "rules_v1"
 
 
-def _unwrap_markdown_json_fence(text: str) -> str:
-    """Extract JSON payload from a fenced markdown block when present."""
+def extract_json_block(text: str) -> str:
+    """Extract a JSON payload from markdown fences or the first balanced { ... } block."""
     stripped = text.strip()
     if not stripped:
         return stripped
+
+    # 1. Try to find the last markdown fenced block first
+    # (models often emit examples before final output)
     fenced_matches = re.findall(
         r"```(?:json)?\s*(.*?)```",
         stripped,
@@ -113,6 +116,44 @@ def _unwrap_markdown_json_fence(text: str) -> str:
     )
     if fenced_matches:
         return fenced_matches[-1].strip()
+
+    # 2. Try to find the first '{' and use a decoder to get the first valid object.
+    # This prevents "Extra data" errors when models append prose or extra JSON
+    # after the main payload.
+    first_brace = stripped.find("{")
+    if first_brace != -1:
+        candidate = stripped[first_brace:]
+        raw_json = None
+        try:
+            decoder = json.JSONDecoder()
+            _, idx = decoder.raw_decode(candidate)
+            raw_json = candidate[:idx].strip()
+        except json.JSONDecodeError:
+            # Fall back to greedy match if raw_decode fails
+            last_brace = stripped.rfind("}")
+            if last_brace != -1 and last_brace > first_brace:
+                raw_json = stripped[first_brace : last_brace + 1].strip()
+
+        if raw_json:
+            # Unwrapping: if the JSON is a dict with exactly one known wrapper key, look inside it.
+            try:
+                data = json.loads(raw_json)
+                if (
+                    isinstance(data, dict)
+                    and len(data) == 1
+                    and next(iter(data)) in {"response", "content", "summary"}
+                ):
+                    inner = data[next(iter(data))]
+                    if isinstance(inner, str | dict):
+                        # Recurse or return the inner value
+                        return extract_json_block(
+                            inner if isinstance(inner, str) else json.dumps(inner)
+                        )
+                return raw_json
+            except Exception:
+                return raw_json
+
+    # 3. Fall back to the original stripped text (let json.loads handle errors)
     return stripped
 
 
@@ -387,6 +428,8 @@ class RuleBasedOrchestratorBrain:
             tools=task.tools,
             worker_profile=self.planner_profile,
             runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            response_format="json",
+            response_schema=TaskSpecBrainSuggestion.model_json_schema(),
         )
 
         try:
@@ -412,16 +455,22 @@ class RuleBasedOrchestratorBrain:
             )
             return None
 
-        raw_summary = (result.summary or "").strip()
-        if not raw_summary:
-            return None
+        data = result.json_payload
+        if not data:
+            raw_summary = (result.summary or "").strip()
+            if not raw_summary:
+                return None
+            normalized_json = extract_json_block(raw_summary)
+            try:
+                data = json.loads(normalized_json)
+            except Exception as exc:
+                logger.warning(f"Failed to parse brain task spec suggestion: {exc}")
+                return None
 
-        normalized_json = _unwrap_markdown_json_fence(raw_summary)
         try:
-            data = json.loads(normalized_json)
             return TaskSpecBrainSuggestion.model_validate(data)
         except Exception as exc:
-            logger.warning(f"Failed to parse brain task spec suggestion: {exc}")
+            logger.warning(f"Failed to validate brain task spec suggestion: {exc}")
             return None
 
     @staticmethod
@@ -520,9 +569,11 @@ class RuleBasedOrchestratorBrain:
             constraints=constraints,
             budget=budget,
             secrets={},
-            tools=state.task.tools,
+            tools=[],
             worker_profile=self.planner_profile,
             runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            response_format="json",
+            response_schema=RouteBrainSuggestion.model_json_schema(),
         )
 
         try:
@@ -530,42 +581,32 @@ class RuleBasedOrchestratorBrain:
                 self.planner_timeout_seconds + DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS
             ):
                 result = await self.planner_worker.run(request, system_prompt=_ROUTE_SYSTEM_PROMPT)
-        except TimeoutError as exc:  # pragma: no cover - covered via tests with stubs
-            raise RuntimeError(
-                f"planner route recommendation timed out after {self.planner_timeout_seconds}s"
-            ) from exc
-        except asyncio.CancelledError:  # pragma: no cover - passthrough
+        except asyncio.CancelledError:
             raise
-        except Exception as exc:  # pragma: no cover - covered via tests with stubs
-            raise RuntimeError(
-                "planner route recommendation failed: "
-                f"{type(exc).__name__}: {str(exc).strip() or 'no detail'}"
-            ) from exc
+        except Exception as exc:
+            logger.warning(
+                "planner route recommendation failed: %s: %s",
+                type(exc).__name__,
+                str(exc),
+            )
+            return None
 
         if result.status != "success":
-            preview = (result.summary or "no summary").strip().replace("\n", " ")
-            if len(preview) > _ROUTE_MAX_SUMMARY_PREVIEW_CHARS:
-                preview = preview[:_ROUTE_MAX_SUMMARY_PREVIEW_CHARS] + "..."
-            raise RuntimeError(
-                "planner route recommendation returned non-success status "
-                f"'{result.status}': {preview}"
-            )
+            return None
 
-        raw_summary = (result.summary or "").strip()
-        if not raw_summary:
-            raise RuntimeError("planner route recommendation returned an empty summary")
-
-        normalized_json = _unwrap_markdown_json_fence(raw_summary)
-        try:
-            payload = json.loads(normalized_json)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                "planner route recommendation returned invalid JSON: "
-                f"{str(exc).strip() or 'parse error'}"
-            ) from exc
+        payload = result.json_payload
+        if not payload:
+            raw_summary = (result.summary or "").strip()
+            if not raw_summary:
+                return None
+            normalized_json = extract_json_block(raw_summary)
+            try:
+                payload = json.loads(normalized_json)
+            except json.JSONDecodeError:
+                return None
 
         if not isinstance(payload, dict):
-            raise RuntimeError("planner route recommendation returned a non-object JSON payload")
+            return None
 
         raw_suggested_profile = payload.get("suggested_profile")
         suggested_profile = (
@@ -591,9 +632,7 @@ class RuleBasedOrchestratorBrain:
             and suggestion.suggested_profile is None
             and suggestion.suggested_retry_strategy is None
         ):
-            raise RuntimeError(
-                "planner route recommendation omitted worker/profile and retry strategy hints"
-            )
+            return None
         return suggestion
 
     async def suggest_verification(
@@ -669,9 +708,11 @@ class RuleBasedOrchestratorBrain:
             constraints=constraints,
             budget=budget,
             secrets={},
-            tools=state.task.tools,
+            tools=[],
             worker_profile=self.planner_profile,
             runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            response_format="json",
+            response_schema=VerificationBrainSuggestion.model_json_schema(),
         )
 
         try:
@@ -682,45 +723,32 @@ class RuleBasedOrchestratorBrain:
                     request,
                     system_prompt=_VERIFICATION_SYSTEM_PROMPT,
                 )
-        except TimeoutError as exc:  # pragma: no cover - covered via tests with stubs
-            raise RuntimeError(
-                "planner verification recommendation timed out after "
-                f"{self.planner_timeout_seconds}s"
-            ) from exc
-        except asyncio.CancelledError:  # pragma: no cover - passthrough
+        except asyncio.CancelledError:
             raise
-        except Exception as exc:  # pragma: no cover - covered via tests with stubs
-            raise RuntimeError(
-                "planner verification recommendation failed: "
-                f"{type(exc).__name__}: {str(exc).strip() or 'no detail'}"
-            ) from exc
+        except Exception as exc:
+            logger.warning(
+                "planner verification recommendation failed: %s: %s",
+                type(exc).__name__,
+                str(exc),
+            )
+            return None
 
         if result.status != "success":
-            preview = (result.summary or "no summary").strip().replace("\n", " ")
-            if len(preview) > _ROUTE_MAX_SUMMARY_PREVIEW_CHARS:
-                preview = preview[:_ROUTE_MAX_SUMMARY_PREVIEW_CHARS] + "..."
-            raise RuntimeError(
-                "planner verification recommendation returned non-success status "
-                f"'{result.status}': {preview}"
-            )
+            return None
 
-        raw_summary = (result.summary or "").strip()
-        if not raw_summary:
-            raise RuntimeError("planner verification recommendation returned an empty summary")
-
-        normalized_json = _unwrap_markdown_json_fence(raw_summary)
-        try:
-            payload = json.loads(normalized_json)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                "planner verification recommendation returned invalid JSON: "
-                f"{str(exc).strip() or 'parse error'}"
-            ) from exc
+        payload = result.json_payload
+        if not payload:
+            raw_summary = (result.summary or "").strip()
+            if not raw_summary:
+                return None
+            normalized_json = extract_json_block(raw_summary)
+            try:
+                payload = json.loads(normalized_json)
+            except json.JSONDecodeError:
+                return None
 
         if not isinstance(payload, dict):
-            raise RuntimeError(
-                "planner verification recommendation returned a non-object JSON payload"
-            )
+            return None
 
         accept_warning_status = payload.get("accept_warning_status")
         if not isinstance(accept_warning_status, bool):

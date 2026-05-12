@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
+from typing import Any, Literal
 from unittest.mock import patch
 
 from sandbox import (
@@ -74,6 +75,8 @@ class _ScriptedAdapter:
         working_directory: Path | None = None,
         task_id: str | None = None,
         session_id: str | None = None,
+        response_format: Literal["text", "json"] = "text",
+        response_schema: dict[str, Any] | None = None,
     ) -> CliRuntimeStep:
         self.calls.append(list(messages))
         self.prompt_overrides.append(prompt_override)

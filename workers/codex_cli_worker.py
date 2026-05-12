@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Callable
@@ -474,6 +475,8 @@ class CodexCliWorker(Worker):
             session_id=request.session_id,
             model_name=getattr(self.runtime_adapter, "model", None),
             redactor=redactor,
+            response_format=request.response_format,
+            response_schema=request.response_schema,
         )
 
         files_changed, lint_format_result, lint_format_artifacts = (
@@ -600,6 +603,7 @@ class CodexCliWorker(Worker):
         request: WorkerRequest,
         final_message_path: Path,
         runtime_mode: WorkerRuntimeMode,
+        output_schema_path: Path | None = None,
     ) -> tuple[list[str], dict[str, Any]]:
         """Build a one-shot `codex exec` command for native-agent mode."""
         executable = getattr(self.runtime_adapter, "executable", "codex")
@@ -659,6 +663,8 @@ class CodexCliWorker(Worker):
             command.extend(["--model", str(model)])
         if profile:
             command.extend(["--profile", str(profile)])
+        if output_schema_path:
+            command.extend(["--output-schema", str(output_schema_path)])
         if self.native_event_capture_enabled and runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
             command.append("--json")
         command.append("-")
@@ -677,6 +683,15 @@ class CodexCliWorker(Worker):
                 "and any remaining blocker."
             )
         )
+        if request.response_schema:
+            import json as json_lib
+
+            schema_json = json_lib.dumps(request.response_schema, indent=2)
+            output_instructions += (
+                f"\n\nCRITICAL: Your final response MUST be a single JSON object strictly matching "
+                f"this JSON schema:\n{schema_json}\n"
+                "Do not include any prose, markdown fences, or extra characters."
+            )
 
         sections = [
             system_prompt.strip(),
@@ -754,11 +769,23 @@ class CodexCliWorker(Worker):
             if self.native_event_capture_enabled
             else None
         )
+        output_schema_path = (
+            workspace.workspace_path / ".code-agent" / "native-response.schema.json"
+            if request.response_schema
+            else None
+        )
+        if output_schema_path:
+            output_schema_path.write_text(
+                json.dumps(request.response_schema, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+
         command, sandbox_metadata = self._build_native_command(
             workspace=workspace,
             request=request,
             final_message_path=final_message_path,
             runtime_mode=runtime_mode,
+            output_schema_path=output_schema_path,
         )
         native_result = run_native_agent(
             NativeAgentRunRequest(
@@ -777,6 +804,8 @@ class CodexCliWorker(Worker):
                 task_id=request.task_id,
                 session_id=request.session_id,
                 redactor=SecretRedactor(list((request.secrets or {}).values())),
+                response_format=request.response_format,
+                response_schema=request.response_schema,
             )
         )
 
@@ -808,6 +837,7 @@ class CodexCliWorker(Worker):
             files_changed=native_result.files_changed,
             artifacts=[*_workspace_artifacts(workspace), *native_result.artifacts],
             diff_text=native_result.diff_text,
+            json_payload=native_result.json_payload,
             next_action_hint=self._native_next_action_hint(native_result),
         )
         if cancel_token and cancel_token():

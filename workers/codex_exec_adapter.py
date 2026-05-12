@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Final
+from typing import Any, Final, Literal
 
 from workers.adapter_parsing import parse_cli_runtime_step_or_final
 from workers.adapter_prompts import (
@@ -176,6 +176,8 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         working_directory: Path | None = None,
         task_id: str | None = None,
         session_id: str | None = None,
+        response_format: Literal["text", "json"] = "text",
+        response_schema: dict[str, Any] | None = None,
     ) -> CliRuntimeStep:
         """Ask the Codex CLI for the next runtime step."""
         override_prompt = normalize_prompt_override(prompt_override)

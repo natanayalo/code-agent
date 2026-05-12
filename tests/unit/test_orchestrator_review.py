@@ -632,6 +632,45 @@ async def test_review_result_requests_single_repair_handoff_for_actionable_findi
 
 
 @pytest.mark.anyio
+async def test_review_result_does_not_request_handoff_when_explicitly_disabled():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "constraints": {"independent_review_enable_repair_handoff": False},
+            },
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "done"},
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+    mock_reviewer = AsyncMock()
+    mock_reviewer.run.return_value = WorkerResult(
+        status="success",
+        summary=json.dumps(
+            {
+                "summary": "Found issues",
+                "confidence": 0.9,
+                "outcome": "findings",
+                "findings": [
+                    {
+                        "title": "High severity bug",
+                        "category": "logic",
+                        "confidence": 0.92,
+                        "file_path": "main.py",
+                        "line_start": 10,
+                        "severity": "high",
+                        "why_it_matters": "Behavior can break",
+                    }
+                ],
+            }
+        ),
+    )
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    assert "repair_handoff_requested" not in res
+
+
+@pytest.mark.anyio
 async def test_review_result_cleans_repair_handoff_constraints_after_repair_pass():
     state = OrchestratorState.model_validate(
         {

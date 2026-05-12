@@ -142,14 +142,14 @@ def test_suggest_route_rejects_empty_summary() -> None:
         planner_worker=_StaticWorker(WorkerResult(status="success", summary=""))
     )
 
-    with pytest.raises(RuntimeError, match="empty summary"):
-        asyncio.run(
-            brain.suggest_route(
-                state=_state(),
-                available_workers=frozenset({"codex"}),
-                available_profiles=None,
-            )
+    suggestion = asyncio.run(
+        brain.suggest_route(
+            state=_state(),
+            available_workers=frozenset({"codex"}),
+            available_profiles=None,
         )
+    )
+    assert suggestion is None
 
 
 def test_suggest_route_rejects_malformed_json() -> None:
@@ -157,14 +157,14 @@ def test_suggest_route_rejects_malformed_json() -> None:
         planner_worker=_StaticWorker(WorkerResult(status="success", summary="not-json"))
     )
 
-    with pytest.raises(RuntimeError, match="invalid JSON"):
-        asyncio.run(
-            brain.suggest_route(
-                state=_state(),
-                available_workers=frozenset({"codex"}),
-                available_profiles=None,
-            )
+    suggestion = asyncio.run(
+        brain.suggest_route(
+            state=_state(),
+            available_workers=frozenset({"codex"}),
+            available_profiles=None,
         )
+    )
+    assert suggestion is None
 
 
 def test_suggest_route_rejects_non_success_worker_result() -> None:
@@ -174,14 +174,14 @@ def test_suggest_route_rejects_non_success_worker_result() -> None:
         )
     )
 
-    with pytest.raises(RuntimeError, match="non-success status"):
-        asyncio.run(
-            brain.suggest_route(
-                state=_state(),
-                available_workers=frozenset({"codex"}),
-                available_profiles=None,
-            )
+    suggestion = asyncio.run(
+        brain.suggest_route(
+            state=_state(),
+            available_workers=frozenset({"codex"}),
+            available_profiles=None,
         )
+    )
+    assert suggestion is None
 
 
 def test_suggest_route_surfaces_unavailable_planner_profile() -> None:
@@ -194,27 +194,27 @@ def test_suggest_route_surfaces_unavailable_planner_profile() -> None:
         )
     )
 
-    with pytest.raises(RuntimeError, match="non-success status"):
-        asyncio.run(
-            brain.suggest_route(
-                state=_state(),
-                available_workers=frozenset({"codex"}),
-                available_profiles=None,
-            )
+    suggestion = asyncio.run(
+        brain.suggest_route(
+            state=_state(),
+            available_workers=frozenset({"codex"}),
+            available_profiles=None,
         )
+    )
+    assert suggestion is None
 
 
 def test_suggest_route_surfaces_worker_exception() -> None:
     brain = RuleBasedOrchestratorBrain(planner_worker=_ExplodingWorker())
 
-    with pytest.raises(RuntimeError, match="planner crashed"):
-        asyncio.run(
-            brain.suggest_route(
-                state=_state(),
-                available_workers=frozenset({"codex"}),
-                available_profiles=None,
-            )
+    suggestion = asyncio.run(
+        brain.suggest_route(
+            state=_state(),
+            available_workers=frozenset({"codex"}),
+            available_profiles=None,
         )
+    )
+    assert suggestion is None
 
 
 def test_suggest_route_times_out_when_planner_slow() -> None:
@@ -223,14 +223,14 @@ def test_suggest_route_times_out_when_planner_slow() -> None:
         planner_timeout_seconds=1,
     )
 
-    with pytest.raises(RuntimeError, match="timed out"):
-        asyncio.run(
-            brain.suggest_route(
-                state=_state(),
-                available_workers=frozenset({"codex"}),
-                available_profiles=None,
-            )
+    suggestion = asyncio.run(
+        brain.suggest_route(
+            state=_state(),
+            available_workers=frozenset({"codex"}),
+            available_profiles=None,
         )
+    )
+    assert suggestion is None
 
 
 def test_suggest_verification_parses_plain_json_payload() -> None:
@@ -322,6 +322,51 @@ def test_suggest_verification_context_counts_failed_and_error_tests() -> None:
     assert match is not None
     payload = json.loads(match.group(1))
     assert payload["failed_tests_count"] == 2
+
+
+def test_suggest_route_rejects_non_object_json_payload() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(WorkerResult(status="success", summary='["not-object"]'))
+    )
+    suggestion = asyncio.run(
+        brain.suggest_route(
+            state=_state(),
+            available_workers=frozenset({"codex"}),
+            available_profiles=None,
+        )
+    )
+    assert suggestion is None
+
+
+def test_suggest_verification_returns_none_for_non_object_payload() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(WorkerResult(status="success", summary='["bad"]'))
+    )
+    suggestion = asyncio.run(
+        brain.suggest_verification(
+            state=_state(),
+            independent_verifier_outcome=None,
+        )
+    )
+    assert suggestion is None
+
+
+def test_suggest_task_spec_returns_none_on_validation_failure() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(
+            WorkerResult(status="success", summary='{"accept_warning_status": true}')
+        )
+    )
+    task_spec = TaskSpec(goal="g")
+    suggestion = asyncio.run(
+        brain.suggest_task_spec(
+            task=TaskRequest(task_text="hello"),
+            task_kind="implementation",
+            task_plan=None,
+            task_spec=task_spec,
+        )
+    )
+    assert suggestion is None
 
 
 def test_suggest_route_serializes_complex_payload() -> None:
@@ -563,11 +608,11 @@ def test_suggest_route_rejects_rationale_only_payload() -> None:
         )
     )
 
-    with pytest.raises(RuntimeError, match="omitted worker/profile and retry strategy hints"):
-        asyncio.run(
-            brain.suggest_route(
-                state=_state(),
-                available_workers=frozenset({"codex"}),
-                available_profiles=None,
-            )
+    suggestion = asyncio.run(
+        brain.suggest_route(
+            state=_state(),
+            available_workers=frozenset({"codex"}),
+            available_profiles=None,
         )
+    )
+    assert suggestion is None

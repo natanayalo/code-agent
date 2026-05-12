@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 from contextlib import nullcontext
 from pathlib import Path
+from typing import Any, Literal
 
 from sandbox import DockerShellCommandResult, DockerShellSessionError
 from tools import (
@@ -50,6 +51,8 @@ class _ScriptedAdapter:
         working_directory: Path | None = None,
         task_id: str | None = None,
         session_id: str | None = None,
+        response_format: Literal["text", "json"] = "text",
+        response_schema: dict[str, Any] | None = None,
     ) -> CliRuntimeStep:
         self.calls.append(list(messages))
         if not self._steps:

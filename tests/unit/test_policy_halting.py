@@ -111,4 +111,4 @@ async def test_generate_task_spec_halts_on_clarification_requirement(monkeypatch
     assert result.status == "failure"
     assert "pending clarification" in (result.summary or "")
     assert result.next_action_hint == "await_manual_follow_up"
-    assert "task_spec_requires_clarification" in response["errors"]
+    assert "blocked_on_clarification" in response["errors"]

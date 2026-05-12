@@ -71,6 +71,7 @@ function buildLatestRun(overrides: Partial<NonNullable<TaskSnapshot['latest_run'
 describe('TaskDetailPanel', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it('does not emit duplicate-key warnings for repeated list items', () => {
@@ -601,6 +602,9 @@ describe('TaskDetailPanel', () => {
       <TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} onRefresh={onRefresh} />
     );
 
+    const textarea = screen.getByPlaceholderText(/type your response here/i);
+    fireEvent.change(textarea, { target: { value: 'Test answer' } });
+
     fireEvent.click(screen.getByRole('button', { name: 'Resolve' }));
 
     await waitFor(() => expect(api.recordInteractionResponse).toHaveBeenCalledTimes(1));
@@ -616,6 +620,42 @@ describe('TaskDetailPanel', () => {
       })
     );
     expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it('captures and sends answer text for clarification interactions', async () => {
+    vi.mocked(api.recordInteractionResponse).mockResolvedValue(baseTask);
+    const task = buildTask({
+      pending_interactions: [
+        {
+          interaction_id: 'interaction-clarify',
+          interaction_type: 'clarification',
+          status: 'pending',
+          summary: 'Need more details',
+          data: {},
+          response_data: null,
+          created_at: '2026-04-28T00:00:00.000Z',
+          updated_at: '2026-04-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    const textarea = screen.getByPlaceholderText(/type your response here/i);
+    fireEvent.change(textarea, { target: { value: 'Use the main branch' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve' }));
+
+    await waitFor(() => expect(api.recordInteractionResponse).toHaveBeenCalledTimes(1));
+    expect(api.recordInteractionResponse).toHaveBeenCalledWith(
+      'task-1',
+      'interaction-clarify',
+      expect.objectContaining({
+        response_data: expect.objectContaining({
+          answer: 'Use the main branch',
+        }),
+      })
+    );
   });
 
   it('shows interaction resolve errors and recovers loading state', async () => {
@@ -636,6 +676,9 @@ describe('TaskDetailPanel', () => {
     });
 
     render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    const textarea = screen.getByPlaceholderText(/type your response here/i);
+    fireEvent.change(textarea, { target: { value: 'Test answer' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Resolve' }));
 

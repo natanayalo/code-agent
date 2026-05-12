@@ -369,7 +369,7 @@ def test_gemini_adapter_from_env_uses_defaults_for_missing_vars() -> None:
 
     assert adapter.executable == "gemini"
     assert adapter.model is None
-    assert adapter.request_timeout_seconds == 120
+    assert adapter.request_timeout_seconds == 300
 
 
 def test_gemini_adapter_scopes_constructor_default_env(monkeypatch) -> None:

@@ -106,6 +106,30 @@ def test_openrouter_adapter_next_step_requests_chat_completion(
     assert fake_client.calls[0]["response_format"] == {"type": "json_object"}
 
 
+def test_openrouter_adapter_next_step_uses_json_schema_response_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_client: _FakeOpenAI | None = None
+
+    def _fake_openai(**kwargs):
+        nonlocal fake_client
+        fake_client = _FakeOpenAI(**kwargs)
+        return fake_client
+
+    monkeypatch.setattr("workers.openrouter_adapter.OpenAI", _fake_openai)
+    adapter = OpenRouterCliRuntimeAdapter(api_key="test-key")
+
+    adapter.next_step(
+        [CliRuntimeMessage(role="system", content="Proceed")],
+        response_format="json",
+        response_schema={"type": "object", "properties": {"ok": {"type": "boolean"}}},
+    )
+
+    assert fake_client is not None
+    response_format = fake_client.calls[0]["response_format"]
+    assert response_format["type"] == "json_schema"
+
+
 def test_openrouter_adapter_next_step_role_native_mode_uses_structured_messages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

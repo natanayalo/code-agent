@@ -834,6 +834,9 @@ class HumanInteractionRepository:
             pending_rows = [
                 row for row in interaction_rows if row.status == HumanInteractionStatus.PENDING
             ]
+            resolved_rows = [
+                row for row in interaction_rows if row.status == HumanInteractionStatus.RESOLVED
+            ]
             active_rows = [
                 row for row in interaction_rows if row.status != HumanInteractionStatus.CANCELLED
             ]
@@ -844,6 +847,21 @@ class HumanInteractionRepository:
                 continue
 
             summary, data = desired_payload
+            desired_resume_token = data.get("resume_token") if isinstance(data, Mapping) else None
+
+            # If this logical checkpoint was already resolved (same resume token),
+            # don't reopen it as pending due to wording drift in questions/summary.
+            if isinstance(desired_resume_token, str) and desired_resume_token.strip():
+                resolved_same_token = any(
+                    isinstance(row.data, Mapping)
+                    and row.data.get("resume_token") == desired_resume_token
+                    for row in resolved_rows
+                )
+                if resolved_same_token:
+                    for duplicate in pending_rows:
+                        duplicate.status = HumanInteractionStatus.CANCELLED
+                    continue
+
             if pending_rows:
                 primary = pending_rows[0]
                 primary.summary = summary

@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
+from typing import Any, Literal
 from unittest.mock import patch
 
 import pytest
@@ -69,6 +70,8 @@ class _ScriptedAdapter:
         working_directory: Path | None = None,
         task_id: str | None = None,
         session_id: str | None = None,
+        response_format: Literal["text", "json"] = "text",
+        response_schema: dict[str, Any] | None = None,
     ) -> CliRuntimeStep:
         self.calls.append(list(messages))
         self.prompt_overrides.append(prompt_override)
@@ -1375,3 +1378,94 @@ def test_codex_cli_worker_native_overrides_and_failures(tmp_path: Path) -> None:
         assert worker_result.status == "error"
         assert worker_result.failure_kind == "timeout"
         assert not run_native.called
+
+
+def test_codex_native_command_includes_output_schema_path(tmp_path: Path) -> None:
+    workspace = _workspace_handle(tmp_path)
+    worker = CodexCliWorker(
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(
+            DockerSandboxContainer(
+                container_name="native-schema", image="python:3.12", workspace=workspace
+            )
+        ),
+        runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")]),
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+        native_event_capture_enabled=False,
+    )
+    request = WorkerRequest(
+        task_text="x", repo_url="https://example.com/repo.git", response_schema={"type": "object"}
+    )
+    command, _ = worker._build_native_command(
+        workspace=workspace,
+        request=request,
+        final_message_path=workspace.workspace_path / "final.json",
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        output_schema_path=workspace.workspace_path / "schema.json",
+    )
+    assert "--output-schema" in command
+
+
+def test_codex_native_prompt_includes_response_schema_instructions(tmp_path: Path) -> None:
+    workspace = _workspace_handle(tmp_path)
+    worker = CodexCliWorker(
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(
+            DockerSandboxContainer(
+                container_name="native-prompt", image="python:3.12", workspace=workspace
+            )
+        ),
+        runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")]),
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+        native_event_capture_enabled=False,
+    )
+    prompt = worker._build_native_prompt(
+        system_prompt="sys",
+        request=WorkerRequest(
+            task_text="Implement task",
+            repo_url="https://example.com/repo.git",
+            response_schema={"type": "object"},
+        ),
+    )
+    assert "CRITICAL: Your final response MUST be a single JSON object" in prompt
+    assert '"type": "object"' in prompt
+
+
+def test_codex_native_runtime_writes_response_schema_file(tmp_path: Path) -> None:
+    workspace = _workspace_handle(tmp_path)
+    worker = CodexCliWorker(
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(
+            DockerSandboxContainer(
+                container_name="native-write-schema", image="python:3.12", workspace=workspace
+            )
+        ),
+        runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")]),
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+        native_event_capture_enabled=False,
+    )
+    with patch("workers.codex_cli_worker.run_native_agent") as run_native:
+        run_native.return_value = NativeAgentRunResult(
+            status="success",
+            summary='{"ok":true}',
+            command="codex",
+            exit_code=0,
+            duration_seconds=1.0,
+            timed_out=False,
+        )
+        result = worker._execute_native_runtime(
+            WorkerRequest(
+                task_text="x",
+                repo_url="https://example.com/repo.git",
+                response_schema={"type": "object"},
+            ),
+            workspace=workspace,
+            runtime_settings=CliRuntimeSettings(),
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            system_prompt_override="sys",
+            cancel_token=None,
+        )
+    schema_path = workspace.workspace_path / ".code-agent" / "native-response.schema.json"
+    assert schema_path.exists()
+    assert json.loads(schema_path.read_text(encoding="utf-8")) == {"type": "object"}
+    assert result.status == "success"

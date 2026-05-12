@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from workers.base import ArtifactReference
 
@@ -24,3 +24,4 @@ class NativeAgentRunResult:
     artifacts: list[ArtifactReference] = field(default_factory=list)
     stdout: str = ""
     stderr: str = ""
+    json_payload: dict[str, Any] | None = None

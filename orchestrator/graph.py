@@ -15,7 +15,6 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from apps.observability import (
-    ATTR_TASK_KIND,
     SPAN_KIND_CHAIN,
     SPAN_KIND_TOOL,
     set_current_span_attribute,
@@ -23,7 +22,6 @@ from apps.observability import (
     set_span_status_from_outcome,
     start_optional_span,
 )
-from db.base import utc_now
 from db.enums import TimelineEventType
 from orchestrator.brain import (
     OrchestratorBrain,
@@ -38,6 +36,19 @@ from orchestrator.constants import (
     HIGH_QUALITY_REQUEST_MARKERS,
     LOW_COST_REQUEST_MARKERS,
 )
+from orchestrator.nodes.ingestion import classify_task, ingest_task, plan_task
+from orchestrator.nodes.utils import (
+    CODEX_WORKER,
+    GEMINI_WORKER,
+    OPENROUTER_WORKER,
+    _available_workers,
+    _ensure_state,
+    _progress_update,
+    _task_complexity_reason,
+    _timeline_event,
+    _timeline_events,
+)
+from orchestrator.nodes.verification import build_verify_result_node
 from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, review_result
 from orchestrator.state import (
     SUPPORTED_WORKER_TYPES,
@@ -45,9 +56,6 @@ from orchestrator.state import (
     OrchestratorState,
     RouteDecision,
     SessionStateUpdate,
-    TaskPlan,
-    TaskPlanStep,
-    TaskTimelineEventState,
     VerificationFailureKind,
     VerificationReport,
     VerificationReportItem,
@@ -64,8 +72,6 @@ from orchestrator.task_spec import (
 )
 from orchestrator.verification import (
     resolve_verification_commands,
-    run_deterministic_verification,
-    run_independent_verifier,
 )
 from tools import coerce_permission_level
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
@@ -73,9 +79,7 @@ from workers import ArtifactReference, Worker, WorkerProfile, WorkerRequest, Wor
 
 logger = logging.getLogger(__name__)
 
-GEMINI_WORKER: Final[WorkerType] = "gemini"
-CODEX_WORKER: Final[WorkerType] = "codex"
-OPENROUTER_WORKER: Final[WorkerType] = "openrouter"
+# [Moved to orchestrator/nodes/utils.py]
 
 ORCHESTRATOR_NODE_SEQUENCE = (
     "ingest_task",
@@ -345,72 +349,10 @@ async def _await_worker_with_timeout(
     return result, "worker result received"
 
 
-def _ensure_state(state: OrchestratorState | dict[str, Any]) -> OrchestratorState:
-    """Normalize raw graph input into the typed orchestrator state."""
-    if isinstance(state, OrchestratorState):
-        return state
-    return OrchestratorState.model_validate(state)
+# [Moved to orchestrator/nodes/utils.py]
 
 
-def _progress_update(state: OrchestratorState, message: str) -> list[str]:
-    """Append a progress message while preserving prior updates."""
-    return [*state.progress_updates, message]
-
-
-def _timeline_events(
-    state: OrchestratorState,
-    *events: tuple[TimelineEventType, str | None, dict[str, Any] | None],
-) -> dict[str, Any]:
-    """Create one or more structured timeline events for state merging.
-
-    Returns a dictionary intended for dictionary spreading (**) into the node response.
-    Includes both the list of events and the monotonic count delta.
-    """
-    last_event = next(
-        (e for e in reversed(state.timeline_events) if e.attempt_number == state.attempt_count),
-        None,
-    )
-    if last_event:
-        base_seq = last_event.sequence_number + 1
-    else:
-        base_seq = state.timeline_persisted_count
-
-    now = utc_now()
-
-    return {
-        "timeline_events": [
-            TaskTimelineEventState(
-                event_type=str(etype),
-                attempt_number=state.attempt_count,
-                sequence_number=base_seq + i,
-                message=msg,
-                payload=payload,
-                created_at=now,
-            )
-            for i, (etype, msg, payload) in enumerate(events)
-        ],
-    }
-
-
-def _timeline_event(
-    state: OrchestratorState,
-    event_type: TimelineEventType,
-    *,
-    message: str | None = None,
-    payload: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Shorthand for a single timeline event emission."""
-    return _timeline_events(state, (event_type, message, payload))
-
-
-def _classify_task_kind(task_text: str) -> str:
-    """Apply a small heuristic classifier for the workflow skeleton."""
-    normalized_text = task_text.lower()
-    if any(keyword in normalized_text for keyword in ("refactor", "architecture", "design")):
-        return "architecture"
-    if any(keyword in normalized_text for keyword in ("investigate", "debug", "analyze")):
-        return "ambiguous"
-    return "implementation"
+# [Moved to orchestrator/nodes/utils.py]
 
 
 def _is_already_approved(state: OrchestratorState) -> bool:
@@ -469,7 +411,27 @@ def _is_interaction_requirement_resolved(
     content_hash = compute_interaction_content_hash(interaction_type, summary, dict(data))
     interactions = state.task.constraints.get("interactions") or {}
     resolved = interactions.get(content_hash)
-    return bool(resolved and resolved.get("status") == "resolved")
+    if resolved and resolved.get("status") == "resolved":
+        return True
+
+    # Allow resolved interaction continuity by resume token so small wording/question
+    # changes across retries do not repeatedly gate the same checkpoint.
+    requested_resume_token = data.get("resume_token")
+    if not isinstance(requested_resume_token, str) or not requested_resume_token.strip():
+        return False
+    for interaction in interactions.values():
+        if not isinstance(interaction, Mapping):
+            continue
+        if interaction.get("status") != "resolved":
+            continue
+        if str(interaction.get("interaction_type") or "") != interaction_type:
+            continue
+        interaction_data = interaction.get("data")
+        if not isinstance(interaction_data, Mapping):
+            continue
+        if interaction_data.get("resume_token") == requested_resume_token:
+            return True
+    return False
 
 
 def _build_approval_checkpoint(state: OrchestratorState) -> ApprovalCheckpoint:
@@ -698,33 +660,7 @@ def _default_worker_result_provider(request: WorkerRequest) -> WorkerResult:
     )
 
 
-class _DefaultFakeWorker(Worker):
-    """Fallback worker used until a real provider-specific adapter exists."""
-
-    async def run(
-        self,
-        request: WorkerRequest,
-        *,
-        system_prompt: str | None = None,
-    ) -> WorkerResult:
-        return _default_worker_result_provider(request)
-
-
-def _available_workers(
-    worker: Worker | None = None,
-    gemini_worker: Worker | None = None,
-    openrouter_worker: Worker | None = None,
-    shell_worker: Worker | None = None,
-) -> dict[str, Worker]:
-    """Return the workers that are actually wired into the graph."""
-    result: dict[str, Worker] = {CODEX_WORKER: worker or _DefaultFakeWorker()}
-    if gemini_worker is not None:
-        result[GEMINI_WORKER] = gemini_worker
-    if openrouter_worker is not None:
-        result[OPENROUTER_WORKER] = openrouter_worker
-    if shell_worker is not None:
-        result["shell"] = shell_worker
-    return result
+# [Moved to orchestrator/nodes/utils.py]
 
 
 def _execution_profile_sort_key(profile: WorkerProfile) -> tuple[int, int, str]:
@@ -764,7 +700,7 @@ def _routable_execution_profiles(
     available_workers: frozenset[str],
 ) -> dict[str, WorkerProfile]:
     """Filter available profiles to those compatible with the task request."""
-    SUPPORTED_RUNTIME_MODES: Final = {"native_agent", "tool_loop"}
+    SUPPORTED_RUNTIME_MODES: Final = {"native_agent", "tool_loop", "reviewer_only", "planner_only"}
     delivery_mode = state.task_spec.delivery_mode if state.task_spec is not None else None
     requires_read_only = bool(state.task.constraints.get("read_only"))
 
@@ -774,7 +710,9 @@ def _routable_execution_profiles(
             continue
         if profile.runtime_mode not in SUPPORTED_RUNTIME_MODES:
             continue
-        if profile.capability_tags and "execution" not in profile.capability_tags:
+        if profile.capability_tags and not any(
+            tag in profile.capability_tags for tag in ["execution", "review", "planning"]
+        ):
             continue
 
         # Strict mutation policy matching:
@@ -897,163 +835,6 @@ def _worker_missing_routable_profile_result(
         artifacts=[],
         next_action_hint="configure_requested_worker_profile",
     )
-
-
-def ingest_task(state_input: OrchestratorState) -> dict[str, Any]:
-    """Normalize the incoming task text before classification."""
-    state = _ensure_state(state_input)
-    normalized_task_text = state.task.task_text.strip()
-    return {
-        "current_step": "ingest_task",
-        "normalized_task_text": normalized_task_text,
-        "progress_updates": _progress_update(state, "task ingested"),
-        **_timeline_event(
-            state,
-            TimelineEventType.TASK_INGESTED,
-            message="Task text normalized.",
-        ),
-    }
-
-
-def classify_task(state_input: OrchestratorState) -> dict[str, Any]:
-    """Classify the task into a coarse workflow category."""
-    state = _ensure_state(state_input)
-    with start_optional_span(
-        tracer_name="orchestrator.graph",
-        span_name="orchestrator.node.classify_task",
-        attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
-        task_id=state.task.task_id,
-        session_id=state.session.session_id if state.session else None,
-        attempt=state.attempt_count,
-    ):
-        task_text = state.normalized_task_text or state.task.task_text
-        task_kind = _classify_task_kind(task_text)
-        set_current_span_attribute(ATTR_TASK_KIND, task_kind)
-        set_span_input_output(input_data=task_text, output_data={"task_kind": task_kind})
-        return {
-            "current_step": "classify_task",
-            "task_kind": task_kind,
-            "progress_updates": _progress_update(state, f"task classified as {task_kind}"),
-            **_timeline_event(
-                state,
-                TimelineEventType.TASK_CLASSIFIED,
-                message=f"Task classified as {task_kind}.",
-                payload={"task_kind": task_kind},
-            ),
-        }
-
-
-def _task_complexity_reason(state: OrchestratorState) -> str | None:
-    """Return a reason when the task should receive a structured plan."""
-    task_kind = state.task_kind
-    if task_kind == "architecture":
-        return "architectural_task"
-    if task_kind == "ambiguous":
-        return "ambiguous_task"
-    task_text = (state.normalized_task_text or state.task.task_text).lower()
-    if _COMPLEX_TASK_PATTERN.search(task_text):
-        return "multi_file_task"
-    return None
-
-
-def _build_task_plan(state: OrchestratorState, complexity_reason: str) -> TaskPlan:
-    """Create an ordered, structured decomposition for complex tasks."""
-    task_text = state.normalized_task_text or state.task.task_text
-    normalized_task_text = " ".join(task_text.split())
-    task_text_preview = normalized_task_text[:100] + (
-        "..." if len(normalized_task_text) > 100 else ""
-    )
-    # TODO(T-108 follow-up): replace this static scaffold with dynamic task-specific
-    # decomposition once planner heuristics (or a planner model call) are introduced.
-    step_one_title = "Inspect Relevant Code Paths"
-    step_one_outcome = "Identify the exact files, interfaces, and tests to touch."
-    step_two_title = "Implement the Smallest Safe Slice"
-    step_two_outcome = (
-        "Apply the minimal change set that satisfies the task without widening scope."
-    )
-
-    if complexity_reason == "architectural_task":
-        step_one_title = "Inspect Architectural Boundaries"
-        step_one_outcome = "Identify impacted modules, interfaces, and coupling constraints."
-    elif complexity_reason == "ambiguous_task":
-        step_one_title = "Investigate Root Cause and Scope"
-        step_one_outcome = "Narrow ambiguity into a concrete file-level implementation target."
-    elif complexity_reason == "multi_file_task":
-        step_two_title = "Sequence Multi-file Changes Safely"
-        step_two_outcome = (
-            "Apply coherent edits across files while preserving interface consistency."
-        )
-
-    return TaskPlan(
-        triggered=True,
-        complexity_reason=complexity_reason,
-        steps=[
-            TaskPlanStep(
-                step_id="1",
-                title=step_one_title,
-                expected_outcome=step_one_outcome,
-            ),
-            TaskPlanStep(
-                step_id="2",
-                title=step_two_title,
-                expected_outcome=step_two_outcome,
-            ),
-            TaskPlanStep(
-                step_id="3",
-                title="Verify and Summarize",
-                expected_outcome=(
-                    "Run focused checks proving "
-                    f"'{task_text_preview}' is satisfied and summarize outcomes."
-                ),
-            ),
-        ],
-    )
-
-
-def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
-    """Generate a structured plan only for tasks classified as complex."""
-    state = _ensure_state(state_input)
-    with start_optional_span(
-        tracer_name="orchestrator.graph",
-        span_name="orchestrator.node.plan_task",
-        attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
-        task_id=state.task.task_id,
-        session_id=state.session.session_id if state.session else None,
-        attempt=state.attempt_count,
-    ):
-        complexity_reason = _task_complexity_reason(state)
-        if complexity_reason is None:
-            set_span_input_output(input_data=state.task_kind, output_data="skipped")
-            return {
-                "current_step": "plan_task",
-                "task_plan": None,
-                "progress_updates": _progress_update(
-                    state, "planning skipped: task is straightforward"
-                ),
-                **_timeline_event(
-                    state,
-                    TimelineEventType.TASK_PLANNED,
-                    message="Planning skipped for straightforward task.",
-                    payload={"planning": "skipped"},
-                ),
-            }
-
-        task_plan = _build_task_plan(state, complexity_reason)
-        set_span_input_output(input_data=state.task.task_text, output_data=task_plan.model_dump())
-        return {
-            "current_step": "plan_task",
-            "task_plan": task_plan.model_dump(),
-            "progress_updates": _progress_update(
-                state,
-                f"structured plan generated ({complexity_reason})",
-            ),
-            **_timeline_event(
-                state,
-                TimelineEventType.TASK_PLANNED,
-                message="Structured plan generated for complex task.",
-                payload={"planning": "generated", "complexity_reason": complexity_reason},
-            ),
-        }
 
 
 async def generate_task_spec(
@@ -1190,10 +971,11 @@ async def generate_task_spec(
                     f"{clarification_summary} Clarification needed: "
                     f"{' '.join(clarification_questions)}"
                 )
-            response["errors"] = [*state.errors, "task_spec_requires_clarification"]
+            response["errors"] = [*state.errors, "blocked_on_clarification"]
             response["result"] = WorkerResult(
                 status="failure",
                 summary=clarification_summary,
+                failure_kind="unknown",
                 commands_run=[],
                 files_changed=[],
                 test_results=[],
@@ -1226,7 +1008,9 @@ def _route_after_generate_task_spec(state_input: OrchestratorState) -> str:
             summary=summary,
             data=data,
         ):
+            set_current_span_attribute("code_agent.clarification_resolved", True)
             return "load_memory"
+        set_current_span_attribute("code_agent.clarification_resolved", False)
         return "await_clarification"
     return "load_memory"
 
@@ -1252,12 +1036,22 @@ def await_clarification(state_input: OrchestratorState) -> dict[str, Any]:
         summary=summary,
         data=data,
     ):
+        set_current_span_attribute("code_agent.clarification_resolved", True)
         return {
             "current_step": "await_clarification",
             "progress_updates": _progress_update(state, "clarification already resolved"),
         }
 
     # Otherwise, interrupt for operator input.
+    interactions = state.task.constraints.get("interactions") or {}
+    clarification_round = 0
+    for interaction in interactions.values():
+        if not isinstance(interaction, Mapping):
+            continue
+        if interaction.get("interaction_type") == "clarification":
+            clarification_round += 1
+    set_current_span_attribute("code_agent.clarification_round", clarification_round + 1)
+    set_current_span_attribute("code_agent.clarification_resolved", False)
     task_text = state.normalized_task_text or state.task.task_text
     interrupt(
         {
@@ -2344,6 +2138,52 @@ def _route_after_review_result(state_input: OrchestratorState) -> str:
     return "summarize_result"
 
 
+def _requires_deliverable_evidence(state: OrchestratorState) -> bool:
+    """Return whether this task should fail when no concrete deliverable is produced."""
+    task_type = state.task_spec.task_type if state.task_spec is not None else None
+    # For now, only implementation-heavy tasks strictly require file/artifact changes.
+    # Pure investigations or reviews might only result in a summary.
+    # bugfix and refactor tasks strongly imply file changes.
+    if task_type in {"bugfix", "refactor"}:
+        return True
+
+    task_text = (state.normalized_task_text or state.task.task_text).lower()
+    # Strong implementation keywords that should almost always result in a file change.
+    implementation_keywords = (
+        "fix",
+        "implement",
+        "patch",
+        "refactor",
+        "modify",
+        "remove",
+        "delete",
+    )
+    return any(keyword in task_text for keyword in implementation_keywords)
+
+
+def _has_meaningful_deliverable(state: OrchestratorState) -> bool:
+    """Return True if worker output contains concrete deliverable signals."""
+    if state.result is None:
+        return False
+    if state.result.files_changed:
+        return True
+    if state.result.diff_text:
+        return True
+    if state.result.json_payload:
+        return True
+
+    # T-117: Substantial summaries also count as deliverables for informative tasks
+    if state.result.summary and len(state.result.summary) > 100:
+        return True
+
+    non_log_artifacts = [
+        artifact
+        for artifact in state.result.artifacts
+        if (artifact.artifact_type or "").lower() not in {"log", "workspace"}
+    ]
+    return bool(non_log_artifacts)
+
+
 def verify_result(
     state_input: OrchestratorState,
     *,
@@ -2352,6 +2192,7 @@ def verify_result(
         tuple[Literal["passed", "failed", "warning"], str] | None
     ) = None,
     independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = None,
+    independent_verifier_reason_code: str | None = None,
     verification_brain_suggestion: VerificationBrainSuggestion | None = None,
     verification_brain_report: VerificationBrainMergeReport | None = None,
     extra_timeline_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]]
@@ -2428,13 +2269,26 @@ def verify_result(
 
     # 3. File Changes
     if state.result.status == "success" and not state.result.files_changed:
-        items.append(
-            VerificationReportItem(
-                label="file_changes",
-                status="warning",
-                message="Worker reported success but no files were changed.",
+        if _requires_deliverable_evidence(state) and not _has_meaningful_deliverable(state):
+            items.append(
+                VerificationReportItem(
+                    label="file_changes",
+                    status="failed",
+                    message=(
+                        "Worker reported success but did not produce a concrete deliverable "
+                        "(files/artifacts/diff)."
+                    ),
+                    reason_code="incomplete_delivery",
+                )
             )
-        )
+        else:
+            items.append(
+                VerificationReportItem(
+                    label="file_changes",
+                    status="warning",
+                    message="Worker reported success but no files were changed.",
+                )
+            )
     elif state.result.status != "success" and state.result.files_changed:
         items.append(
             VerificationReportItem(
@@ -2523,6 +2377,7 @@ def verify_result(
                 label="independent_verifier",
                 status=independent_status,
                 message=independent_summary,
+                reason_code=independent_verifier_reason_code,
             )
         )
 
@@ -2568,7 +2423,21 @@ def verify_result(
         elif "deterministic_commands" in failed_labels:
             report_failure_kind = "test_regression"
         elif "file_changes" in failed_labels:
-            report_failure_kind = "scope_mismatch"
+            file_change_failure = next(
+                (
+                    item
+                    for item in items
+                    if item.label == "file_changes" and item.status == "failed"
+                ),
+                None,
+            )
+            if (
+                file_change_failure is not None
+                and file_change_failure.reason_code == "incomplete_delivery"
+            ):
+                report_failure_kind = "incomplete_delivery"
+            else:
+                report_failure_kind = "scope_mismatch"
         elif "command_audit" in failed_labels:
             report_failure_kind = "risky_command"
         elif "worker_status" in failed_labels:
@@ -2643,6 +2512,20 @@ def verify_result(
             ).model_dump()
         else:
             progress_message = f"verification {report_status} after bounded repair handoff"
+
+    if (
+        report.status == "failed"
+        and not repair_handoff_requested
+        and state.result.status == "success"
+        and updated_result is None
+    ):
+        updated_result = state.result.model_copy(
+            update={
+                "status": "failure",
+                "failure_kind": "unknown",
+                "next_action_hint": "await_manual_follow_up",
+            }
+        ).model_dump()
 
     verification_payload = report.model_dump()
     if brain_report is not None:
@@ -2777,201 +2660,6 @@ def build_review_result_node(
         return await review_result(state, worker_factory=available_workers)
 
     return review_result_node
-
-
-def build_verify_result_node(
-    *,
-    enable_independent_verifier: bool = False,
-    worker: Worker | None = None,
-    gemini_worker: Worker | None = None,
-    openrouter_worker: Worker | None = None,
-    shell_worker: Worker | None = None,
-    orchestrator_brain: OrchestratorBrain | None = None,
-) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
-    """Create the verification node with optional independent verifier execution."""
-
-    available_workers = _available_workers(
-        worker, gemini_worker, openrouter_worker, shell_worker=shell_worker
-    )
-
-    async def verify_result_node(state_input: OrchestratorState) -> dict[str, Any]:
-        state = _ensure_state(state_input)
-        with start_optional_span(
-            tracer_name="orchestrator.graph",
-            span_name="orchestrator.node.verify_result",
-            attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
-            task_id=state.task.task_id,
-            session_id=state.session.session_id if state.session else None,
-            attempt=state.attempt_count,
-        ):
-            logger.info(
-                "Entering verify_result_node",
-                extra={
-                    "session_id": state.session.session_id if state.session else None,
-                    "task_id": state.task.task_id,
-                    "attempt": state.attempt_count,
-                },
-            )
-
-            # 1. Immediate deterministic checks (short-circuit if worker already failed)
-            if state.result is None:
-                logger.warning(
-                    "Skipping verification node: no worker result available",
-                    extra={"task_id": state.task.task_id},
-                )
-                return verify_result(state)
-
-            worker_failed = state.result.status != "success"
-            tests_failed = any(t.status in ("failed", "error") for t in state.result.test_results)
-
-            if worker_failed or tests_failed:
-                logger.info(
-                    "Short-circuiting verification due to worker or test failure",
-                    extra={
-                        "worker_status": state.result.status,
-                        "failed_tests": len(
-                            [
-                                t
-                                for t in state.result.test_results
-                                if t.status in ("failed", "error")
-                            ]
-                        ),
-                    },
-                )
-                set_span_input_output(input_data=state.result.status, output_data="short-circuited")
-                return verify_result(state)
-
-            deterministic_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str]
-            independent_verifier_outcome: (
-                tuple[Literal["passed", "failed", "warning"], str] | None
-            ) = None
-
-            # 2. Run explicit verification commands deterministically
-            verification_commands = resolve_verification_commands(state)
-            skipped_message: str | None = None
-
-            if not verification_commands:
-                logger.info(
-                    "Skipping deterministic verification: no commands provided by TaskSpec",
-                    extra={"task_id": state.task.task_id},
-                )
-                skipped_message = "Deterministic verification skipped: no commands provided."
-                deterministic_verifier_outcome = (
-                    "passed",
-                    "No explicit verification commands defined.",
-                )
-            else:
-                with start_optional_span(
-                    tracer_name="orchestrator.graph",
-                    span_name="orchestrator.node.verify_result.deterministic",
-                    attributes={"openinference.span.kind": SPAN_KIND_TOOL},
-                    task_id=state.task.task_id,
-                    session_id=state.session.session_id if state.session else None,
-                    attempt=state.attempt_count,
-                ):
-                    deterministic_verifier_outcome = await run_deterministic_verification(
-                        state,
-                        worker_factory=available_workers,
-                    )
-                    set_span_input_output(
-                        input_data=verification_commands,
-                        output_data=deterministic_verifier_outcome,
-                    )
-
-            # 3. Run LLM-based independent verifier if enabled and deterministic checks passed
-            if enable_independent_verifier and deterministic_verifier_outcome[0] != "failed":
-                with start_optional_span(
-                    tracer_name="orchestrator.graph",
-                    span_name="orchestrator.node.verify_result.independent",
-                    attributes={"openinference.span.kind": SPAN_KIND_TOOL},
-                    task_id=state.task.task_id,
-                    session_id=state.session.session_id if state.session else None,
-                    attempt=state.attempt_count,
-                ):
-                    independent_verifier_outcome = await run_independent_verifier(
-                        state,
-                        worker_factory=available_workers,
-                    )
-                    set_span_input_output(
-                        input_data=state.result.summary if state.result else None,
-                        output_data=independent_verifier_outcome,
-                    )
-
-            verification_brain_suggestion: VerificationBrainSuggestion | None = None
-            verification_brain_report: VerificationBrainMergeReport | None = None
-
-            if orchestrator_brain is not None:
-                suggest_verification = getattr(orchestrator_brain, "suggest_verification", None)
-                if callable(suggest_verification):
-                    provider_name = type(orchestrator_brain).__name__
-                    try:
-                        with start_optional_span(
-                            tracer_name="orchestrator.graph",
-                            span_name="orchestrator.node.verify_result.brain",
-                            attributes={"openinference.span.kind": SPAN_KIND_TOOL},
-                            task_id=state.task.task_id,
-                            session_id=state.session.session_id if state.session else None,
-                            attempt=state.attempt_count,
-                        ):
-                            verification_brain_suggestion = await suggest_verification(
-                                state=state,
-                                independent_verifier_outcome=independent_verifier_outcome,
-                            )
-                            set_span_input_output(
-                                input_data=independent_verifier_outcome,
-                                output_data=(
-                                    verification_brain_suggestion.model_dump()
-                                    if verification_brain_suggestion
-                                    else None
-                                ),
-                            )
-                    except Exception as exc:
-                        detail = str(exc).strip()
-                        verification_brain_report = VerificationBrainMergeReport(
-                            enabled=True,
-                            provider=provider_name,
-                            error=(
-                                f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
-                            ),
-                        )
-                    else:
-                        if verification_brain_suggestion is None:
-                            verification_brain_report = VerificationBrainMergeReport(
-                                enabled=True,
-                                provider=provider_name,
-                            )
-                        else:
-                            verification_brain_report = VerificationBrainMergeReport(
-                                enabled=True,
-                                provider=provider_name,
-                                applied=True,
-                                accept_warning_status=(
-                                    verification_brain_suggestion.accept_warning_status
-                                ),
-                                rationale=verification_brain_suggestion.rationale,
-                            )
-            # 5. Verify the result
-            extra_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]] = []
-            if skipped_message:
-                extra_events.append((TimelineEventType.VERIFICATION_SKIPPED, skipped_message, None))
-
-            response = verify_result(
-                state,
-                enable_independent_verifier=enable_independent_verifier,
-                deterministic_verifier_outcome=deterministic_verifier_outcome,
-                independent_verifier_outcome=independent_verifier_outcome,
-                verification_brain_suggestion=verification_brain_suggestion,
-                verification_brain_report=verification_brain_report,
-                extra_timeline_events=extra_events,
-            )
-            set_span_input_output(
-                input_data=state.result.status if state.result else None,
-                output_data=response.get("verification"),
-            )
-
-            return response
-
-    return verify_result_node
 
 
 def build_orchestrator_graph(

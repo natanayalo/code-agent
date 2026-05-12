@@ -370,6 +370,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
   const [cancelError, setCancelError] = React.useState<string | null>(null);
   const [interactionError, setInteractionError] = React.useState<string | null>(null);
   const [resolvingInteractionId, setResolvingInteractionId] = React.useState<string | null>(null);
+  const [interactionResponses, setInteractionResponses] = React.useState<Record<string, string>>({});
   const run = task?.latest_run ?? null;
   const runCommands = React.useMemo(() => run?.commands_run ?? [], [run]);
   const changedFiles = React.useMemo(() => run?.files_changed ?? [], [run]);
@@ -446,7 +447,13 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
         response_data: {
           source: 'dashboard_operator',
           action: 'resolve',
+          answer: interactionResponses[interactionId] || '',
         },
+      });
+      setInteractionResponses((prev) => {
+        const next = { ...prev };
+        delete next[interactionId];
+        return next;
       });
       onRefresh?.();
     } catch (resolveError) {
@@ -541,12 +548,34 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                       {interaction.summary}
                     </p>
                     <p className="task-detail-muted">Status: {formatLabel(interaction.status)}</p>
+                    {interaction.interaction_type === 'clarification' && (
+                      <div className="task-interaction-input">
+                        <textarea
+                          className="task-interaction-textarea"
+                          placeholder="Type your response here..."
+                          value={interactionResponses[interaction.interaction_id] || ''}
+                          onChange={(e) =>
+                            setInteractionResponses({
+                              ...interactionResponses,
+                              [interaction.interaction_id]: e.target.value,
+                            })
+                          }
+                          disabled={isSubmittingAction || isTaskTerminal}
+                        />
+                      </div>
+                    )}
                     <div className="task-interaction-actions">
                       <button
                         type="button"
                         className="btn btn-approve"
                         onClick={() => handleResolveInteraction(interaction.interaction_id)}
-                        disabled={isSubmittingAction || loading || isTaskTerminal}
+                        disabled={
+                          isSubmittingAction ||
+                          loading ||
+                          isTaskTerminal ||
+                          (interaction.interaction_type === 'clarification' &&
+                            !(interactionResponses[interaction.interaction_id] || '').trim())
+                        }
                       >
                         {resolvingInteractionId === interaction.interaction_id
                           ? 'Resolving...'

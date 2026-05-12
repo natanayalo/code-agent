@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Final
+from typing import Any, Final, Literal
 
 from workers.adapter_parsing import final_cli_runtime_step, parse_cli_runtime_step_or_final
 from workers.adapter_prompts import (
@@ -38,7 +38,7 @@ from workers.prompt import build_runtime_adapter_tool_guidance_lines
 from workers.subprocess_env import build_gemini_subprocess_env
 
 DEFAULT_GEMINI_EXECUTABLE: Final[str] = "gemini"
-DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS: Final[int] = 120
+DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS: Final[int] = 300
 _DETAIL_PREVIEW_CHARACTERS: Final[int] = 1200
 
 GEMINI_EXECUTABLE_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_CLI_BIN"
@@ -203,6 +203,8 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         working_directory: Path | None = None,  # noqa: ARG002 — context only, not used by CLI
         task_id: str | None = None,
         session_id: str | None = None,
+        response_format: Literal["text", "json"] = "text",
+        response_schema: dict[str, Any] | None = None,
     ) -> CliRuntimeStep:
         """Ask the Gemini CLI for the next runtime step."""
         override_prompt = normalize_prompt_override(prompt_override)
