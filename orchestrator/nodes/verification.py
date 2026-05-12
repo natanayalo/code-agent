@@ -145,6 +145,7 @@ def _manual_verifier_handoff_summary(
     existing_summary: str | None,
     *,
     used_passes: int,
+    json_payload: dict[str, Any] | None = None,
 ) -> str:
     """Append a human-readable handoff note once verifier repair attempts are exhausted."""
     attempt_label = "attempt" if used_passes == 1 else "attempts"
@@ -152,8 +153,16 @@ def _manual_verifier_handoff_summary(
         "Verification is still failing after "
         f"{used_passes} bounded repair {attempt_label}; manual follow-up is required."
     )
-    if isinstance(existing_summary, str) and existing_summary.strip():
-        return f"{existing_summary.rstrip()}\n\n{handoff_note}"
+
+    summary = existing_summary or ""
+    if json_payload and "final_message" in json_payload:
+        msg = json_payload["final_message"]
+        if isinstance(msg, str) and msg.strip():
+            if msg.strip() not in summary:
+                summary = f"{summary.rstrip()}\n\nWorker message: {msg.strip()}"
+
+    if summary.strip():
+        return f"{summary.strip()}\n\n{handoff_note}"
     return handoff_note
 
 
@@ -674,9 +683,11 @@ def verify_result(
             updated_result = state.result.model_copy(
                 update={
                     "status": "failure",
+                    "failure_kind": state.result.failure_kind or "unknown",
                     "summary": _manual_verifier_handoff_summary(
                         state.result.summary,
                         used_passes=used_passes,
+                        json_payload=state.result.json_payload,
                     ),
                     "next_action_hint": "await_manual_follow_up",
                 }
