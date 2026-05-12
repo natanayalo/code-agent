@@ -164,6 +164,7 @@ def _requires_deliverable_evidence(state: OrchestratorState) -> bool:
     task_text = (state.normalized_task_text or state.task.task_text).lower()
     # Strong implementation keywords that should almost always result in a file change.
     implementation_keywords = (
+        "add",
         "fix",
         "implement",
         "patch",
