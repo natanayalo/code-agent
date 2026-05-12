@@ -33,6 +33,12 @@ FailureKind = Literal[
     "context_window",
     "provider_error",
     "provider_auth",
+    "incomplete_delivery",
+    "test_regression",
+    "scope_mismatch",
+    "infra_verifier_unavailable",
+    "risky_command",
+    "worker_failure",
     "unknown",
 ]
 
