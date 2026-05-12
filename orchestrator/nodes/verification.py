@@ -265,20 +265,12 @@ def build_verify_result_node(
                     session_id=state.session.session_id if state.session else None,
                     attempt=state.attempt_count,
                 ):
-                    independent_verifier_result = await run_independent_verifier(
+                    status, summary, reason_code = await run_independent_verifier(
                         state,
                         worker_factory=available_workers,
                     )
-                    (
-                        independent_verifier_outcome,
-                        independent_verifier_reason_code,
-                    ) = (
-                        (
-                            independent_verifier_result[0],
-                            independent_verifier_result[1],
-                        ),
-                        independent_verifier_result[2],
-                    )
+                    independent_verifier_outcome = (status, summary)
+                    independent_verifier_reason_code = reason_code
                     set_span_input_output(
                         input_data=state.result.summary if state.result else None,
                         output_data={
