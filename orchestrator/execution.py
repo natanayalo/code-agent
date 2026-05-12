@@ -859,8 +859,10 @@ def _summarize_graph_span_output(raw_output: object) -> dict[str, Any]:
     review = _extract_graph_payload(payload.get("review"))
     verification = _extract_graph_payload(payload.get("verification"))
     task = _extract_graph_payload(payload.get("task"))
-    constraints = task.get("constraints") if isinstance(task.get("constraints"), Mapping) else {}
-    interactions = constraints.get("interactions") if isinstance(constraints, Mapping) else {}
+    constraints = task.get("constraints")
+    if not isinstance(constraints, Mapping):
+        constraints = {}
+    interactions = constraints.get("interactions")
     clarification_round = 0
     clarification_resolved = False
     if isinstance(interactions, Mapping):
