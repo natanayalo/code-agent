@@ -1025,12 +1025,11 @@ def _terminal_follow_up_status(
         return TaskStatus.IN_PROGRESS
     if state.approval.status == "rejected":
         return TaskStatus.FAILED
-    if (
-        state.approval.status == "pending"
-        or (state.task_spec is not None and state.task_spec.requires_clarification)
-        or state.current_step
-        in {"await_clarification", "await_permission", "await_permission_escalation"}
-    ):
+    if state.approval.status == "pending" or state.current_step in {
+        "await_clarification",
+        "await_permission",
+        "await_permission_escalation",
+    }:
         return TaskStatus.PENDING
     return TaskStatus.FAILED
 
