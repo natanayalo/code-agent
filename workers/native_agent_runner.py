@@ -575,7 +575,8 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 elif "tool" in stderr_tail.lower() and "not found" in stderr_tail.lower():
                     status = "error"
                     truncated_stderr = truncate_detail_keep_tail(stderr_tail, max_characters=1024)
-                    last_line = truncated_stderr.strip().splitlines()[-1]
+                    lines = truncated_stderr.strip().splitlines()
+                    last_line = lines[-1] if lines else "unknown error"
                     summary = f"SANDBOX_INFRA: tool registry mismatch detected ({last_line})"
                 elif completed.returncode in _SIGNAL_EXIT_CODES:
                     status = "error"

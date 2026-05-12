@@ -51,6 +51,7 @@ _VERIFIER_REPAIRABLE_FAILURE_KINDS: Final = frozenset(
     {
         "test_regression",
         "scope_mismatch",
+        "incomplete_delivery",
         "worker_failure",
         "unknown",
     }
@@ -683,7 +684,7 @@ def verify_result(
             updated_result = state.result.model_copy(
                 update={
                     "status": "failure",
-                    "failure_kind": state.result.failure_kind or "unknown",
+                    "failure_kind": state.result.failure_kind or report.failure_kind or "unknown",
                     "summary": _manual_verifier_handoff_summary(
                         state.result.summary,
                         used_passes=used_passes,
@@ -704,7 +705,8 @@ def verify_result(
         updated_result = state.result.model_copy(
             update={
                 "status": "failure",
-                "failure_kind": "unknown",
+                "failure_kind": report.failure_kind or "unknown",
+                "summary": f"{report.summary}\n\n{state.result.summary or ''}".strip(),
                 "next_action_hint": "await_manual_follow_up",
             }
         ).model_dump()

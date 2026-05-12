@@ -371,6 +371,13 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
   const [interactionError, setInteractionError] = React.useState<string | null>(null);
   const [resolvingInteractionId, setResolvingInteractionId] = React.useState<string | null>(null);
   const [interactionResponses, setInteractionResponses] = React.useState<Record<string, string>>({});
+
+  React.useEffect(() => {
+    setCancelError(null);
+    setInteractionError(null);
+    setResolvingInteractionId(null);
+    setInteractionResponses({});
+  }, [task?.task_id]);
   const run = task?.latest_run ?? null;
   const runCommands = React.useMemo(() => run?.commands_run ?? [], [run]);
   const changedFiles = React.useMemo(() => run?.files_changed ?? [], [run]);
