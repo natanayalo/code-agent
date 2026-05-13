@@ -21,6 +21,7 @@ from orchestrator.constants import (
     RISK_ORDER,
     VALID_DELIVERY_MODES,
 )
+from orchestrator.nodes.utils import _dedupe_preserving_order
 from orchestrator.state import (
     TaskDeliveryMode,
     TaskPlan,
@@ -29,6 +30,8 @@ from orchestrator.state import (
     TaskSpec,
     TaskSpecType,
 )
+
+MAX_CLARIFICATION_QUESTIONS = 3
 
 
 def _normalized_text(text: str) -> str:
@@ -51,11 +54,6 @@ def _coerce_string_list(value: object) -> list[str]:
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
-def _dedupe_preserving_order(values: list[str]) -> list[str]:
-    """Return unique values while preserving first-seen ordering."""
-    return list(dict.fromkeys(values))
-
-
 def _append_unique(base: list[str], additions: list[str]) -> tuple[list[str], list[str]]:
     """Append non-empty additions while reporting only newly inserted values."""
     merged = list(base)
@@ -65,6 +63,11 @@ def _append_unique(base: list[str], additions: list[str]) -> tuple[list[str], li
             merged.append(value)
             added.append(value)
     return merged, added
+
+
+def _normalize_clarification_questions(questions: list[str]) -> list[str]:
+    """Trim, dedupe, and cap clarification questions to avoid operator overload."""
+    return _dedupe_preserving_order(_coerce_string_list(questions))[:MAX_CLARIFICATION_QUESTIONS]
 
 
 def _resolve_task_type(task_text: str, task_kind: str | None) -> TaskSpecType:
@@ -223,7 +226,9 @@ def build_task_spec(
         )
 
     requires_clarification = _requires_clarification(normalized_task_text, task_kind)
-    clarification_questions = _coerce_string_list(task_constraints.get("clarification_questions"))
+    clarification_questions = _normalize_clarification_questions(
+        _coerce_string_list(task_constraints.get("clarification_questions"))
+    )
     if requires_clarification and not clarification_questions:
         clarification_questions = [
             "What exact repo, files, behavior, or failure should the worker target?"
@@ -251,7 +256,7 @@ def build_task_spec(
         verification_commands=_coerce_string_list(task_constraints.get("verification_commands")),
         expected_artifacts=expected_artifacts,
         requires_clarification=requires_clarification,
-        clarification_questions=list(dict.fromkeys(clarification_questions)),
+        clarification_questions=clarification_questions,
         requires_permission=requires_permission,
         permission_reason=permission_reason,
         delivery_mode=delivery_mode,
@@ -298,6 +303,12 @@ def apply_task_spec_brain_suggestion(
         list(task_spec.clarification_questions),
         _coerce_string_list(suggestion.clarification_questions),
     )
+    clarification_questions = _normalize_clarification_questions(clarification_questions)
+    added_clarification_questions = [
+        question
+        for question in added_clarification_questions
+        if question in clarification_questions
+    ]
     verification_commands, added_verification_commands = _append_unique(
         list(task_spec.verification_commands),
         _coerce_string_list(suggestion.verification_commands),

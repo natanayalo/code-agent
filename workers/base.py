@@ -33,6 +33,12 @@ FailureKind = Literal[
     "context_window",
     "provider_error",
     "provider_auth",
+    "incomplete_delivery",
+    "test_regression",
+    "scope_mismatch",
+    "infra_verifier_unavailable",
+    "risky_command",
+    "worker_failure",
     "unknown",
 ]
 
@@ -70,6 +76,8 @@ class WorkerRequest(WorkerModel):
     budget: dict[str, Any] = Field(default_factory=dict)
     worker_profile: str | None = None
     runtime_mode: WorkerRuntimeMode | None = None
+    response_format: Literal["text", "json"] = "text"
+    response_schema: dict[str, Any] | None = None
 
 
 class WorkerProfile(WorkerModel):
@@ -142,6 +150,7 @@ class WorkerResult(WorkerModel):
     artifacts: list[ArtifactReference] = Field(default_factory=list)
     review_result: ReviewResult | None = None
     diff_text: str | None = None
+    json_payload: dict[str, Any] | None = None
     next_action_hint: str | None = None
 
     @model_validator(mode="after")

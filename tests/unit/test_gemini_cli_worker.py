@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import Any, Literal
 from unittest.mock import patch
 
 from db.enums import WorkerRuntimeMode
@@ -68,6 +69,8 @@ class _ScriptedAdapter:
         working_directory: Path | None = None,
         task_id: str | None = None,
         session_id: str | None = None,
+        response_format: Literal["text", "json"] = "text",
+        response_schema: dict[str, Any] | None = None,
     ) -> CliRuntimeStep:
         self.calls.append(list(messages))
         self.prompt_overrides.append(prompt_override)
@@ -648,6 +651,7 @@ def test_gemini_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path)
                     branch="main",
                     task_text="Apply a small native worker change",
                     runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                    response_format="json",
                 )
             )
         )
@@ -768,8 +772,8 @@ def test_gemini_cli_worker_warns_when_legacy_tool_loop_mode_is_used(tmp_path: Pa
     assert any("tool_loop runtime mode is deprecated" in message for message in warning_messages)
 
 
-def test_gemini_cli_worker_rejects_non_execution_runtime_modes(tmp_path: Path) -> None:
-    """Planner/reviewer runtime modes should fail fast for Gemini execution worker."""
+def test_gemini_cli_worker_supports_specialist_runtime_modes(tmp_path: Path) -> None:
+    """Specialist runtime modes (reviewer, planner) should be supported by Gemini worker."""
     workspace = _make_workspace(tmp_path)
     container = _make_container(workspace)
     workspace_manager = _FakeWorkspaceManager(workspace)
@@ -779,23 +783,56 @@ def test_gemini_cli_worker_rejects_non_execution_runtime_modes(tmp_path: Path) -
         workspace_manager=workspace_manager,
         container_manager=container_manager,
     )
-
-    result = asyncio.run(
-        worker.run(
-            WorkerRequest(
-                session_id="session-bad-runtime",
-                repo_url="https://example.com/repo.git",
-                branch="main",
-                task_text="Do not execute",
-                runtime_mode=WorkerRuntimeMode.PLANNER_ONLY,
-            )
-        )
+    native_result = NativeAgentRunResult(
+        status="success",
+        summary="Specialist run completed.",
+        command="gemini ...",
+        exit_code=0,
+        duration_seconds=0.5,
+        timed_out=False,
+        final_message="OK",
+        stdout="{}",
+        stderr="",
     )
 
-    assert result.status == "failure"
-    assert result.failure_kind == "provider_error"
-    assert "does not support runtime mode" in (result.summary or "")
-    assert workspace_manager.cleanup_requests == [(workspace, False)]
+    with patch(
+        "workers.gemini_cli_worker.run_native_agent",
+        return_value=native_result,
+    ) as _:
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-specialist",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Review this code",
+                    runtime_mode=WorkerRuntimeMode.REVIEWER_ONLY,
+                )
+            )
+        )
+
+    assert result.status == "success"
+
+
+def test_gemini_native_prompt_includes_schema_and_planner_role(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    worker = GeminiCliWorker(
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(_make_container(workspace)),
+        runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")]),
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+    )
+    prompt = worker._build_native_prompt(
+        system_prompt="sys",
+        request=WorkerRequest(
+            task_text="Plan this task",
+            repo_url="https://example.com/repo.git",
+            response_schema={"type": "object"},
+        ),
+        runtime_mode=WorkerRuntimeMode.PLANNER_ONLY,
+    )
+    assert "Specialist Role: Planner" in prompt
+    assert "CRITICAL: Your final response MUST be a single JSON object" in prompt
 
 
 def test_gemini_cli_worker_runtime_error_is_mapped_to_workspace_error(tmp_path: Path) -> None:

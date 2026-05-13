@@ -15,15 +15,15 @@ from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.graph import (
     _await_worker_with_timeout,
     _build_worker_request,
-    _classify_task_kind,
     _coerce_approval_decision,
     _compute_route_decision,
     _default_worker_result_provider,
-    _ensure_state,
+    _is_interaction_requirement_resolved,
     _resolve_orchestrator_timeout_seconds,
     _route_after_review_result,
     _task_requires_approval,
     await_approval,
+    await_clarification,
     await_permission_escalation,
     build_choose_worker_node,
     choose_worker,
@@ -32,6 +32,12 @@ from orchestrator.graph import (
     plan_task,
     summarize_result,
     verify_result,
+)
+from orchestrator.nodes.utils import (
+    _classify_task_kind,
+    _ensure_state,
+    _has_meaningful_deliverable,
+    _requires_deliverable_evidence,
 )
 from orchestrator.state import OrchestratorState
 from orchestrator.task_spec import is_destructive_task
@@ -616,6 +622,122 @@ def test_compute_route_profile_override_allows_explicit_legacy_tool_loop_opt_in(
     assert route.runtime_mode == "tool_loop"
     assert route.route_reason == "manual_profile_override"
     assert route.override_applied is True
+
+
+def test_interaction_requirement_resolved_by_resume_token_fallback() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Need clarification",
+                "constraints": {
+                    "interactions": {
+                        "old-hash": {
+                            "status": "resolved",
+                            "interaction_type": "clarification",
+                            "data": {"resume_token": "clarification-task-1", "questions": ["old"]},
+                        }
+                    }
+                },
+            }
+        }
+    )
+    assert _is_interaction_requirement_resolved(
+        state,
+        interaction_type="clarification",
+        summary="Task requires clarification before execution can continue.",
+        data={
+            "source": "task_spec",
+            "resume_token": "clarification-task-1",
+            "questions": ["new wording"],
+        },
+    )
+
+
+def test_interaction_requirement_not_resolved_without_resume_token() -> None:
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "Need clarification", "constraints": {"interactions": {}}}}
+    )
+    assert (
+        _is_interaction_requirement_resolved(
+            state,
+            interaction_type="clarification",
+            summary="Task requires clarification before execution can continue.",
+            data={"source": "task_spec", "questions": ["q"]},
+        )
+        is False
+    )
+
+
+def test_interaction_requirement_ignores_invalid_interaction_shapes() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Need clarification",
+                "constraints": {
+                    "interactions": {
+                        "x": "not-a-map",
+                        "y": {
+                            "status": "resolved",
+                            "interaction_type": "clarification",
+                            "data": "oops",
+                        },
+                    }
+                },
+            }
+        }
+    )
+    assert (
+        _is_interaction_requirement_resolved(
+            state,
+            interaction_type="clarification",
+            summary="Task requires clarification before execution can continue.",
+            data={"resume_token": "clarification-task-1"},
+        )
+        is False
+    )
+
+
+def test_deliverable_evidence_and_meaningful_deliverable_helpers() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "fix the bug", "constraints": {}},
+            "task_spec": {"goal": "g", "task_type": "bugfix"},
+        }
+    )
+    assert _requires_deliverable_evidence(state) is True
+    assert _has_meaningful_deliverable(state) is False
+
+    state.result = WorkerResult(status="success", summary="x" * 120, files_changed=[], artifacts=[])
+    assert _has_meaningful_deliverable(state) is True
+
+
+def test_await_clarification_returns_resolved_without_interrupt() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_id": "task-1",
+                "task_text": "Need clarification",
+                "constraints": {
+                    "interactions": {
+                        "resolved-hash": {
+                            "status": "resolved",
+                            "interaction_type": "clarification",
+                            "data": {"resume_token": "clarification-task-1"},
+                        },
+                        "noise": "not-a-map",
+                    }
+                },
+            },
+            "task_spec": {
+                "goal": "g",
+                "requires_clarification": True,
+                "clarification_questions": ["new question wording"],
+            },
+        }
+    )
+    result = await_clarification(state)
+    assert result["current_step"] == "await_clarification"
+    assert "clarification already resolved" in result["progress_updates"][-1]
 
 
 def test_compute_route_profile_override_unavailable_fails_explicitly() -> None:
@@ -2291,3 +2413,50 @@ def test_verify_result_failure_kinds() -> None:
     res = verify_result(state)
     assert res["verification"]["status"] == "warning"
     assert res["verification"]["failure_kind"] is None
+
+
+def test_verify_result_allows_no_files_for_review_tasks() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Review orchestrator quality and compare patterns"},
+            "result": {
+                "status": "success",
+                "summary": "Completed.",
+                "commands_run": [],
+                "files_changed": [],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    res = verify_result(state)
+    assert res["verification"]["status"] == "warning"
+    assert res["verification"]["failure_kind"] is None
+    file_changes = next(i for i in res["verification"]["items"] if i["label"] == "file_changes")
+    assert file_changes["status"] == "warning"
+    # Result status should NOT be forced to failure
+    assert res.get("result") is None or res["result"]["status"] == "success"
+
+
+def test_verify_result_attaches_independent_verifier_reason_code() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Implement change"},
+            "result": {
+                "status": "success",
+                "summary": "Completed.",
+                "commands_run": [],
+                "files_changed": ["orchestrator/graph.py"],
+                "test_results": [],
+                "artifacts": [],
+            },
+        }
+    )
+    res = verify_result(
+        state,
+        enable_independent_verifier=True,
+        independent_verifier_outcome=("warning", "Verifier infra unavailable"),
+        independent_verifier_reason_code="infra_verifier_unavailable",
+    )
+    item = next(i for i in res["verification"]["items"] if i["label"] == "independent_verifier")
+    assert item["reason_code"] == "infra_verifier_unavailable"

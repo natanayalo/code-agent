@@ -97,17 +97,18 @@ async def test_run_independent_verifier_returns_warning_on_timeout_if_tests_pass
     mock_worker = AsyncMock()
     mock_worker.run.side_effect = TimeoutError()
 
-    status, summary = await verification_module.run_independent_verifier(
+    status, summary, reason_code = await verification_module.run_independent_verifier(
         state,
         worker_factory={"codex": mock_worker},
     )
 
     assert status == "warning"
     assert "but internal tests passed" in summary
+    assert reason_code == "infra_verifier_unavailable"
 
 
 @pytest.mark.anyio
-async def test_run_independent_verifier_returns_failed_on_timeout_if_tests_failed() -> None:
+async def test_run_independent_verifier_returns_warning_on_timeout_if_tests_failed() -> None:
     state = _state()
     # Add failing test results
     state.result.test_results = [TestResult(name="test1", status="failed")]
@@ -115,14 +116,15 @@ async def test_run_independent_verifier_returns_failed_on_timeout_if_tests_faile
     mock_worker = AsyncMock()
     mock_worker.run.side_effect = TimeoutError()
 
-    status, summary = await verification_module.run_independent_verifier(
+    status, summary, reason_code = await verification_module.run_independent_verifier(
         state,
         worker_factory={"codex": mock_worker},
     )
 
-    assert status == "failed"
+    assert status == "warning"
     assert "Independent verifier timed out" in summary
     assert "but internal tests passed" not in summary
+    assert reason_code == "infra_verifier_unavailable"
 
 
 @pytest.mark.anyio

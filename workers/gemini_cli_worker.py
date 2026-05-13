@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Callable
@@ -463,6 +464,8 @@ class GeminiCliWorker(Worker):
             session_id=request.session_id,
             model_name=getattr(self.runtime_adapter, "model", None),
             redactor=redactor,
+            response_format=request.response_format,
+            response_schema=request.response_schema,
         )
 
         files_changed, lint_format_result, lint_format_artifacts = (
@@ -596,7 +599,7 @@ class GeminiCliWorker(Worker):
         command = [
             executable,
             "--output-format",
-            "json",
+            request.response_format if request.response_format == "json" else "text",
             "--approval-mode",
             approval_mode,
         ]
@@ -606,7 +609,9 @@ class GeminiCliWorker(Worker):
             command.append("--sandbox")
         return command
 
-    def _build_native_prompt(self, *, system_prompt: str, request: WorkerRequest) -> str:
+    def _build_native_prompt(
+        self, *, system_prompt: str, request: WorkerRequest, runtime_mode: WorkerRuntimeMode
+    ) -> str:
         """Build the native-agent prompt packet for one-shot Gemini execution."""
         task_text = request.task_text.strip()
         delivery_mode = (request.task_spec or {}).get("delivery_mode", "workspace")
@@ -619,9 +624,33 @@ class GeminiCliWorker(Worker):
                 "and any remaining blocker."
             )
         )
+        if request.response_schema:
+            schema_json = json.dumps(request.response_schema, indent=2)
+            output_instructions += (
+                f"\n\nCRITICAL: Your final response MUST be a single JSON object strictly matching "
+                f"this JSON schema:\n{schema_json}\n"
+                "Do not include any prose, markdown fences, or extra characters."
+            )
+
+        role_instructions = ""
+        if runtime_mode == WorkerRuntimeMode.REVIEWER_ONLY:
+            role_instructions = (
+                "## Specialist Role: Reviewer\n"
+                "You are operating as a dedicated code reviewer. Focus on qualitative "
+                "assessment, correctness, and architectural alignment. Do not perform "
+                "implementation unless strictly required to verify a finding."
+            )
+        elif runtime_mode == WorkerRuntimeMode.PLANNER_ONLY:
+            role_instructions = (
+                "## Specialist Role: Planner\n"
+                "You are operating as a dedicated task planner. Your goal is to break "
+                "down the request into actionable steps. Do not execute the changes; "
+                "provide the blueprint."
+            )
 
         sections = [
             system_prompt.strip(),
+            role_instructions,
             "## Native Execution Task",
             task_text,
             "## Output",
@@ -703,7 +732,9 @@ class GeminiCliWorker(Worker):
                 tool_registry=self.tool_registry,
             )
         )
-        prompt = self._build_native_prompt(system_prompt=system_prompt, request=request)
+        prompt = self._build_native_prompt(
+            system_prompt=system_prompt, request=request, runtime_mode=runtime_mode
+        )
         command = self._build_native_command(
             request=request,
             runtime_mode=runtime_mode,
@@ -724,6 +755,8 @@ class GeminiCliWorker(Worker):
                 task_id=request.task_id,
                 session_id=request.session_id,
                 redactor=SecretRedactor(list((request.secrets or {}).values())),
+                response_format=request.response_format,
+                response_schema=request.response_schema,
             )
         )
 
@@ -754,6 +787,7 @@ class GeminiCliWorker(Worker):
             files_changed=native_result.files_changed,
             artifacts=[*_workspace_artifacts(workspace), *native_result.artifacts],
             diff_text=native_result.diff_text,
+            json_payload=native_result.json_payload,
             next_action_hint=self._native_next_action_hint(native_result),
         )
         if cancel_token and cancel_token():
@@ -825,7 +859,11 @@ class GeminiCliWorker(Worker):
                         "runtime_mode": runtime_mode.value,
                     },
                 )
-            if runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
+            if runtime_mode in {
+                WorkerRuntimeMode.NATIVE_AGENT,
+                WorkerRuntimeMode.REVIEWER_ONLY,
+                WorkerRuntimeMode.PLANNER_ONLY,
+            }:
                 runtime_settings = settings_from_budget(
                     request.budget,
                     defaults=self.runtime_settings,

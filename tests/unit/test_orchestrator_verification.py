@@ -65,21 +65,21 @@ async def test_run_independent_verifier_uses_native_read_only_request() -> None:
         summary='{"status":"passed","summary":"all checks passed"}',
     )
 
-    status, summary = await verification_module.run_independent_verifier(
+    status, summary, reason_code = await verification_module.run_independent_verifier(
         state,
         worker_factory={"codex": mock_worker},
     )
 
     assert status == "passed"
     assert summary == "all checks passed"
+    assert reason_code is None
 
     args, kwargs = mock_worker.run.call_args
     request = args[0]
     assert request.constraints["read_only"] is True
     assert request.runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
     assert request.budget["worker_timeout_seconds"] == 90
-    assert "system_prompt" in kwargs
-    assert "strict read-only mode" in kwargs["system_prompt"]
+    assert "strict read-only mode" in request.task_text
 
 
 @pytest.mark.anyio
@@ -91,13 +91,14 @@ async def test_run_independent_verifier_parses_fenced_json_summary() -> None:
         summary='```json\n{"status":"warning","summary":"could not run full suite"}\n```',
     )
 
-    status, summary = await verification_module.run_independent_verifier(
+    status, summary, reason_code = await verification_module.run_independent_verifier(
         state,
         worker_factory={"gemini": mock_worker},
     )
 
     assert status == "warning"
     assert summary == "could not run full suite"
+    assert reason_code is None
 
 
 @pytest.mark.anyio
@@ -112,38 +113,80 @@ async def test_run_independent_verifier_parses_multiple_fenced_blocks() -> None:
         ),
     )
 
-    status, summary = await verification_module.run_independent_verifier(
+    status, summary, reason_code = await verification_module.run_independent_verifier(
         state,
         worker_factory={"gemini": mock_worker},
     )
 
     assert status == "passed"
     assert summary == "structured payload"
+    assert reason_code is None
 
 
 @pytest.mark.anyio
-async def test_run_independent_verifier_infrastructure_exception_is_failed() -> None:
+async def test_run_independent_verifier_infrastructure_exception_is_warning() -> None:
     state = _state()
     mock_worker = AsyncMock()
     mock_worker.run.side_effect = RuntimeError("boom")
 
-    status, summary = await verification_module.run_independent_verifier(
+    status, summary, reason_code = await verification_module.run_independent_verifier(
         state,
         worker_factory={"codex": mock_worker},
     )
 
-    assert status == "failed"
+    assert status == "warning"
     assert "infrastructure error" in summary
+    assert reason_code == "infra_verifier_unavailable"
 
 
 @pytest.mark.anyio
 async def test_run_independent_verifier_reports_warning_when_worker_missing() -> None:
     state = _state()
 
-    status, summary = await verification_module.run_independent_verifier(
+    status, summary, reason_code = await verification_module.run_independent_verifier(
         state,
         worker_factory={},
     )
 
     assert status == "warning"
     assert "no verifier worker configured" in summary
+    assert reason_code == "no_verifier_worker"
+
+
+@pytest.mark.anyio
+async def test_run_independent_verifier_no_result_returns_warning() -> None:
+    state = _state()
+    state.result = None
+    status, summary, reason_code = await verification_module.run_independent_verifier(
+        state,
+        worker_factory={"codex": AsyncMock()},
+    )
+    assert status == "warning"
+    assert "no worker result available" in summary
+    assert reason_code == "no_result"
+
+
+@pytest.mark.anyio
+async def test_run_independent_verifier_non_success_timeout_failure_kind_maps_to_warning() -> None:
+    state = _state()
+    mock_worker = AsyncMock()
+    mock_worker.run.return_value = WorkerResult(
+        status="failure",
+        failure_kind="timeout",
+        summary="timed out",
+    )
+    status, summary, reason_code = await verification_module.run_independent_verifier(
+        state,
+        worker_factory={"codex": mock_worker},
+    )
+    assert status == "warning"
+    assert "could not complete" in summary
+    assert reason_code == "infra_verifier_unavailable"
+
+
+def test_parse_verifier_result_falls_back_to_text_summary() -> None:
+    status, summary = verification_module._parse_verifier_result(  # noqa: SLF001
+        WorkerResult(status="success", summary="looks good overall")
+    )
+    assert status in {"passed", "warning"}
+    assert "unstructured output" in summary

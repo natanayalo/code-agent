@@ -321,6 +321,8 @@ class CliRuntimeAdapter(Protocol):
         working_directory: Path | None = None,
         task_id: str | None = None,
         session_id: str | None = None,
+        response_format: Literal["text", "json"] = "text",
+        response_schema: dict[str, Any] | None = None,
     ) -> CliRuntimeStep:
         """Return the next tool call or final answer."""
 
@@ -1177,6 +1179,8 @@ def run_cli_runtime_loop(
     session_id: str | None = None,
     model_name: str | None = None,
     redactor: SecretRedactor | None = None,
+    response_format: Literal["text", "json"] = "text",
+    response_schema: dict[str, Any] | None = None,
 ) -> CliRuntimeExecutionResult:
     """Drive the provider adapter through a bounded multi-turn shell loop."""
     started_at = clock()
@@ -1319,6 +1323,8 @@ def run_cli_runtime_loop(
                     working_directory=working_directory,
                     task_id=settings.task_id,
                     session_id=settings.session_id,
+                    response_format=response_format,
+                    response_schema=response_schema,
                 )
             except Exception as exc:
                 logger.exception("CLI runtime adapter failed", extra={"iteration": iteration})

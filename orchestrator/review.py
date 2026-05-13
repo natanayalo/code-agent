@@ -333,7 +333,13 @@ def _repair_handoff_update(
         return None
 
     constraints = state.task.constraints
-    if constraints.get(ENABLE_REPAIR_HANDOFF_CONSTRAINT) is not True:
+    enable_handoff = constraints.get(ENABLE_REPAIR_HANDOFF_CONSTRAINT)
+
+    # Enable by default for high-severity findings if not explicitly disabled
+    has_high_severity = any(f.severity in ("high", "critical") for f in parsed_review.findings)
+    if enable_handoff is False:
+        return None
+    if enable_handoff is not True and not has_high_severity:
         return None
 
     max_passes, used_passes = _resolve_repair_handoff_budget(constraints)

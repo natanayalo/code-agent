@@ -112,12 +112,16 @@ def build_role_description_section(request: WorkerRequest) -> str:
 def build_available_tools_section(
     tool_registry: ToolRegistry | None = None,
     tool_client: McpToolClient | None = None,
+    allowed_tool_names: set[str] | None = None,
 ) -> str:
     """Render the configured worker tool surface."""
     resolved_client = tool_client or (
         DEFAULT_MCP_TOOL_CLIENT if tool_registry is None else tool_registry.mcp_client
     )
     tools = resolved_client.list_tool_definitions()
+    if allowed_tool_names is not None:
+        tools = tuple(tool for tool in tools if tool.name in allowed_tool_names)
+
     if not tools:
         return "## Available Tools\n- No tools configured."
     tool_sections = [_render_tool_definition(tool) for tool in tools]
@@ -834,10 +838,39 @@ def build_system_prompt(
     tool_client: McpToolClient | None = None,
 ) -> str:
     """Assemble the structured system prompt for a coding worker run."""
+    from tools.policy import (
+        ToolPermissionLevel,
+        granted_permission_from_constraints,
+        permission_allows,
+    )
+
     is_native = request.runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
+    permission_level = granted_permission_from_constraints(request.constraints)
+    if request.constraints.get("read_only"):
+        # Ensure we don't upgrade a more restrictive permission (unlikely but safe)
+        from tools.policy import permission_rank
+
+        if permission_rank(permission_level) > permission_rank(ToolPermissionLevel.READ_ONLY):
+            permission_level = ToolPermissionLevel.READ_ONLY
+
+    # Resolve the set of tools that should be visible in the prompt
+    allowed_tool_names: set[str] | None = None
+    if tool_registry is not None:
+        all_tools = tool_registry.list_tools()
+        # Primary filter: only show tools that are permitted at the current level
+        permitted_tools = [
+            t for t in all_tools if permission_allows(permission_level, t.required_permission)
+        ]
+        # Secondary filter: if request explicitly asked for a subset, use that
+        if request.tools is not None:
+            requested_names = set(request.tools)
+            permitted_tools = [t for t in permitted_tools if t.name in requested_names]
+
+        allowed_tool_names = {t.name for t in permitted_tools}
+
     sections = [
         build_role_description_section(request),
-        build_available_tools_section(tool_registry, tool_client) if not is_native else "",
+        build_available_tools_section(tool_registry, tool_client, allowed_tool_names),
         _build_repo_context_section_with_guidance(
             workspace_path,
             omit_dir_listing=is_native,

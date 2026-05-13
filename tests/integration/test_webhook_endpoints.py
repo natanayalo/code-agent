@@ -76,7 +76,7 @@ def client(session_factory) -> Iterator[TestClient]:
             summary="Webhook task completed.",
             budget_usage={"iterations_used": 1, "tool_calls_used": 1},
             commands_run=[],
-            files_changed=[],
+            files_changed=["README.md"],
             artifacts=[],
             next_action_hint=None,
         )
@@ -245,7 +245,7 @@ def test_webhook_accepts_worker_profile_override_for_explicit_legacy_opt_in(
             summary="Webhook task completed through explicit legacy profile override.",
             budget_usage={"iterations_used": 1, "tool_calls_used": 1},
             commands_run=[],
-            files_changed=[],
+            files_changed=["README.md"],
             artifacts=[],
             next_action_hint=None,
         )
@@ -319,7 +319,7 @@ def test_webhook_rejects_unknown_worker_profile_override(session_factory) -> Non
             summary="ok",
             budget_usage={},
             commands_run=[],
-            files_changed=[],
+            files_changed=["README.md"],
             artifacts=[],
             next_action_hint=None,
         )
@@ -613,7 +613,7 @@ def test_webhook_rejects_missing_auth_header(session_factory) -> None:
             summary="Webhook task completed.",
             budget_usage={},
             commands_run=[],
-            files_changed=[],
+            files_changed=["README.md"],
             artifacts=[],
             next_action_hint=None,
         )
@@ -639,7 +639,7 @@ def test_webhook_rejects_invalid_auth_header(session_factory) -> None:
             summary="Webhook task completed.",
             budget_usage={},
             commands_run=[],
-            files_changed=[],
+            files_changed=["README.md"],
             artifacts=[],
             next_action_hint=None,
         )

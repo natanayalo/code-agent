@@ -35,7 +35,7 @@ class MockBrain(OrchestratorBrain):
 
 class StaticWorker(Worker):
     async def run(self, request: WorkerRequest, **kwargs) -> WorkerResult:
-        return WorkerResult(status="success", summary="done")
+        return WorkerResult(status="success", summary="done", files_changed=["README.md"])
 
 
 @pytest.fixture
@@ -175,13 +175,14 @@ def test_content_change_re_pauses(client: TestClient, brain: MockBrain, session_
     # Run orchestrator
     asyncio.run(service.run_queued_task(task_id=task_id, worker_id="test"))
 
-    # Verify it PAUSED AGAIN because the hash mismatched
+    # Verify it does not pause again: resolved clarification carries forward
+    # via stable resume-token continuity even if question wording changes.
     resp = client.get(f"/tasks/{task_id}", headers=headers)
-    assert resp.json()["status"] == "pending"
+    assert resp.json()["status"] == "completed"
 
     with session_scope(session_factory) as session:
         interactions = HumanInteractionRepository(session).list_by_task(task_id=task_id)
-        # Should have 2 interactions now (one resolved, one pending)
+        # The same logical checkpoint should not be reopened when resume_token continuity
+        # indicates it was already resolved.
         pending = [i for i in interactions if i.status == HumanInteractionStatus.PENDING]
-        assert len(pending) == 1
-        assert pending[0].data["questions"] == ["What shade of red?"]
+        assert len(pending) == 0

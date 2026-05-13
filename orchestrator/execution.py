@@ -858,6 +858,35 @@ def _summarize_graph_span_output(raw_output: object) -> dict[str, Any]:
     result = _extract_graph_payload(payload.get("result"))
     review = _extract_graph_payload(payload.get("review"))
     verification = _extract_graph_payload(payload.get("verification"))
+    task = _extract_graph_payload(payload.get("task"))
+    constraints = task.get("constraints")
+    if not isinstance(constraints, Mapping):
+        constraints = {}
+    interactions = constraints.get("interactions")
+    clarification_round = 0
+    clarification_resolved = False
+    if isinstance(interactions, Mapping):
+        for interaction in interactions.values():
+            if not isinstance(interaction, Mapping):
+                continue
+            if interaction.get("interaction_type") == "clarification":
+                clarification_round += 1
+                if interaction.get("status") == "resolved":
+                    clarification_resolved = True
+    verification_items = verification.get("items") if isinstance(verification, Mapping) else None
+    delivery_contract_passed = None
+    if isinstance(verification_items, list):
+        for item in verification_items:
+            if not isinstance(item, Mapping):
+                continue
+            if item.get("label") == "file_changes":
+                if item.get("status") == "failed" and item.get("reason_code") in {
+                    "incomplete_delivery",
+                    "scope_mismatch",
+                }:
+                    delivery_contract_passed = False
+                elif item.get("status") in {"passed", "warning"}:
+                    delivery_contract_passed = True
 
     summary: dict[str, Any] = {
         "current_step": payload.get("current_step"),
@@ -867,6 +896,10 @@ def _summarize_graph_span_output(raw_output: object) -> dict[str, Any]:
         "result_status": result.get("status"),
         "review_outcome": review.get("outcome"),
         "verification_status": verification.get("status"),
+        "verifier_failure_kind": verification.get("failure_kind"),
+        "clarification_round": clarification_round or None,
+        "clarification_resolved": clarification_resolved if clarification_round else None,
+        "delivery_contract_passed": delivery_contract_passed,
         "error_count": (
             len(payload.get("errors", [])) if isinstance(payload.get("errors"), list) else None
         ),
@@ -992,9 +1025,15 @@ def _terminal_follow_up_status(
         return TaskStatus.IN_PROGRESS
     if state.approval.status == "rejected":
         return TaskStatus.FAILED
-    if state.result is not None and state.result.failure_kind == "permission_denied":
-        return TaskStatus.FAILED
-    return TaskStatus.PENDING
+    is_clarification_gate = state.current_step in {"generate_task_spec", "await_clarification"}
+    if (
+        state.approval.status == "pending"
+        or (is_clarification_gate and state.task_spec and state.task_spec.requires_clarification)
+        or state.current_step
+        in {"await_clarification", "await_permission", "await_permission_escalation"}
+    ):
+        return TaskStatus.PENDING
+    return TaskStatus.FAILED
 
 
 def _completion_progress_phase(task_snapshot: TaskSnapshot) -> ProgressPhase:
@@ -1044,13 +1083,27 @@ def _serialize_verification_report(report: object | None) -> dict[str, Any] | No
     """Normalize verification state from either a Pydantic model or a raw mapping."""
     if report is None:
         return None
+
+    def _drop_none_reason_codes(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            output: dict[str, Any] = {}
+            for key, item in value.items():
+                if key == "reason_code" and item is None:
+                    continue
+                output[str(key)] = _drop_none_reason_codes(item)
+            return output
+        if isinstance(value, list):
+            return [_drop_none_reason_codes(item) for item in value]
+        return value
+
     if hasattr(report, "model_dump"):
         serialized = report.model_dump(mode="json")
+        serialized = _drop_none_reason_codes(serialized)
         if serialized.get("failure_kind") is None:
             serialized.pop("failure_kind", None)
         return serialized
     if isinstance(report, Mapping):
-        return dict(report)
+        return _drop_none_reason_codes(dict(report))
     raise TypeError(f"Unsupported verification report type: {type(report).__name__}")
 
 
@@ -1377,11 +1430,11 @@ class TaskExecutionService:
                     logger.info(
                         "Deleted retained sandbox workspace",
                         extra={
+                            "worker_run_id": worker_run.id,
                             "workspace_id": worker_run.workspace_id,
-                            "run_id": worker_run.id,
                         },
                     )
-                deleted_runs += 1
+                    deleted_runs += 1
 
         if deleted_runs:
             logger.info(
@@ -1728,7 +1781,9 @@ class TaskExecutionService:
 
     def _update_span_status_from_state(self, state: OrchestratorState) -> None:
         """Update the current span status based on the orchestrator state outcomes."""
-        if state.errors:
+        if "blocked_on_clarification" in state.errors:
+            set_span_status_from_outcome("blocked_on_clarification", "awaiting clarification")
+        elif state.errors:
             set_span_status_from_outcome("error", state.errors[0])
         elif state.result is not None:
             set_span_status_from_outcome(state.result.status, state.result.summary)
@@ -2236,6 +2291,8 @@ class TaskExecutionService:
                     "response_data": response.response_data,
                     "interaction_id": interaction.id,
                     "interaction_type": interaction.interaction_type,
+                    "summary": interaction.summary,
+                    "data": dict(interaction.data or {}) if interaction.data is not None else {},
                 }
                 constraints["interactions"] = interactions
 

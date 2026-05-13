@@ -76,3 +76,47 @@ def test_build_system_prompt_omits_verbose_json_bloats(tmp_path) -> None:
 
     # Filtered constraints should be present
     assert '"risk_level": "low"' in prompt
+
+
+def test_build_system_prompt_filters_tools_by_permission(tmp_path) -> None:
+    """System prompt should only list tools permitted by the current constraints."""
+    from tools import DEFAULT_TOOL_REGISTRY, EXECUTE_BASH_TOOL_NAME, VIEW_FILE_TOOL_NAME
+
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    # Read-only request
+    request_ro = WorkerRequest(
+        task_text="Check status",
+        repo_url="https://example.com/repo.git",
+        constraints={"read_only": True},
+    )
+    prompt_ro = build_system_prompt(request_ro, tmp_path, tool_registry=DEFAULT_TOOL_REGISTRY)
+
+    assert f"### `{VIEW_FILE_TOOL_NAME}`" in prompt_ro
+    assert f"### `{EXECUTE_BASH_TOOL_NAME}`" not in prompt_ro
+
+    # Write request
+    request_rw = WorkerRequest(
+        task_text="Fix bug",
+        repo_url="https://example.com/repo.git",
+        constraints={"read_only": False},
+    )
+    prompt_rw = build_system_prompt(request_rw, tmp_path, tool_registry=DEFAULT_TOOL_REGISTRY)
+
+    assert f"### `{VIEW_FILE_TOOL_NAME}`" in prompt_rw
+    assert f"### `{EXECUTE_BASH_TOOL_NAME}`" in prompt_rw
+
+
+def test_build_system_prompt_honors_explicit_requested_tool_subset(tmp_path) -> None:
+    from tools import DEFAULT_TOOL_REGISTRY, VIEW_FILE_TOOL_NAME
+
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Inspect files only",
+        repo_url="https://example.com/repo.git",
+        constraints={"read_only": False},
+        tools=[VIEW_FILE_TOOL_NAME],
+    )
+    prompt = build_system_prompt(request, tmp_path, tool_registry=DEFAULT_TOOL_REGISTRY)
+    assert f"### `{VIEW_FILE_TOOL_NAME}`" in prompt
+    assert "execute_bash" not in prompt

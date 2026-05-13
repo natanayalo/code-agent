@@ -29,6 +29,7 @@ def mock_runner():
         result.files_changed = []
         result.artifacts = []
         result.diff_text = ""
+        result.json_payload = None
         mock_run.return_value = result
         yield mock_run
 

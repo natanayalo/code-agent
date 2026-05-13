@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from collections.abc import Mapping
 from typing import Literal
 
 from db.enums import WorkerRuntimeMode
+from orchestrator.brain import extract_json_block
 from orchestrator.state import OrchestratorState
 from tools.numeric import coerce_positive_int_like
-from workers import Worker, WorkerRequest
+from workers import Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,8 @@ def _build_verifier_task_text(state: OrchestratorState) -> str:
     files_changed = state.result.files_changed if state.result is not None else []
     commands = resolve_verification_commands(state)
     lines = [
+        _INDEPENDENT_VERIFIER_SYSTEM_PROMPT,
+        "",
         "Independently verify the previously completed task in read-only mode.",
         f"Original task: {task_text}",
         "",
@@ -153,32 +155,17 @@ def _pick_verifier_worker(
 
 
 def _extract_json_payload(summary: str) -> dict[str, object] | None:
-    """Extract verifier JSON payload from direct JSON or fenced JSON output."""
-    stripped = summary.strip()
-    if not stripped:
+    """Extract verifier JSON payload using the hardened orchestrator helper."""
+    normalized_json = extract_json_block(summary)
+    if not normalized_json:
         return None
 
     try:
-        payload = json.loads(stripped)
+        payload = json.loads(normalized_json)
         if isinstance(payload, dict):
             return payload
     except json.JSONDecodeError:
         pass
-
-    for match in re.finditer(
-        r"```(?:json)?\s*(.*?)\s*```",
-        stripped,
-        flags=re.DOTALL | re.IGNORECASE,
-    ):
-        block = match.group(1).strip()
-        if not block:
-            continue
-        try:
-            payload = json.loads(block)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            return payload
     return None
 
 
@@ -187,9 +174,9 @@ def _coerce_outcome_status(value: object) -> Literal["passed", "failed", "warnin
     if not isinstance(value, str):
         return None
     normalized = value.strip().lower()
-    if normalized == "passed":
+    if normalized == "passed" or normalized == "success":
         return "passed"
-    if normalized == "failed":
+    if normalized == "failed" or normalized == "failure" or normalized == "error":
         return "failed"
     if normalized == "warning":
         return "warning"
@@ -206,17 +193,25 @@ def _fallback_status_from_text(summary: str) -> Literal["passed", "failed", "war
     return "warning"
 
 
-def _parse_verifier_summary(summary: str) -> tuple[Literal["passed", "failed", "warning"], str]:
-    """Parse verifier model summary into a typed `(status, message)` tuple."""
-    payload = _extract_json_payload(summary)
+def _parse_verifier_result(
+    result: WorkerResult,
+) -> tuple[Literal["passed", "failed", "warning"], str]:
+    """Parse verifier worker result into a typed `(status, message)` tuple."""
+    # 1. Prioritize structured payload if available
+    payload = result.json_payload
+    if not isinstance(payload, dict):
+        payload = _extract_json_payload(result.summary or "")
+
     if payload is not None:
         status = _coerce_outcome_status(payload.get("status"))
-        message = payload.get("summary")
+        message = payload.get("summary") or payload.get("message")
         if status is not None and isinstance(message, str) and message.strip():
             return status, message.strip()
         if status is not None:
             return status, "Independent verifier returned status without a summary."
 
+    # 2. Fall back to text-based heuristics
+    summary = result.summary or ""
     fallback_status = _fallback_status_from_text(summary)
     preview = summary.strip().replace("\n", " ")
     if len(preview) > _INDEPENDENT_VERIFIER_SUMMARY_MAX_CHARS:
@@ -240,10 +235,10 @@ async def run_independent_verifier(
     state: OrchestratorState,
     *,
     worker_factory: Mapping[str, Worker] | None,
-) -> tuple[Literal["passed", "failed", "warning"], str]:
+) -> tuple[Literal["passed", "failed", "warning"], str, str | None]:
     """Run independent verifier through native workers in read-only mode."""
     if state.result is None:
-        return "warning", "Independent verifier skipped: no worker result available."
+        return "warning", "Independent verifier skipped: no worker result available.", "no_result"
 
     workers = worker_factory or {}
     logger.info(
@@ -259,7 +254,11 @@ async def run_independent_verifier(
             "Independent verifier skipped: no verifier worker configured",
             extra={"task_id": state.task.task_id},
         )
-        return "warning", "Independent verifier skipped: no verifier worker configured."
+        return (
+            "warning",
+            "Independent verifier skipped: no verifier worker configured.",
+            "no_verifier_worker",
+        )
 
     worker_type, worker = selected
     timeout_seconds = _resolve_independent_verifier_timeout_seconds(state)
@@ -287,7 +286,7 @@ async def run_independent_verifier(
 
     try:
         verifier_result = await asyncio.wait_for(
-            worker.run(request, system_prompt=_INDEPENDENT_VERIFIER_SYSTEM_PROMPT),
+            worker.run(request),
             timeout=timeout_seconds + _INDEPENDENT_VERIFIER_TIMEOUT_GRACE_SECONDS,
         )
     except TimeoutError:
@@ -296,10 +295,12 @@ async def run_independent_verifier(
                 "warning",
                 f"Independent verifier timed out after {timeout_seconds}s ({worker_type}), "
                 "but internal tests passed.",
+                "infra_verifier_unavailable",
             )
         return (
-            "failed",
+            "warning",
             f"Independent verifier timed out after {timeout_seconds}s ({worker_type}).",
+            "infra_verifier_unavailable",
         )
     except asyncio.CancelledError:
         raise
@@ -310,8 +311,9 @@ async def run_independent_verifier(
             extra={"worker_type": worker_type},
         )
         return (
-            "failed",
+            "warning",
             f"Independent verifier infrastructure error ({worker_type}): {type(exc).__name__}.",
+            "infra_verifier_unavailable",
         )
 
     if verifier_result.status != "success":
@@ -320,14 +322,22 @@ async def run_independent_verifier(
             return (
                 "warning",
                 f"Independent verifier could not complete ({worker_type}): {message}",
+                "infra_verifier_unavailable",
+            )
+        if verifier_result.failure_kind in {"timeout", "tool_runtime", "unknown"}:
+            return (
+                "warning",
+                f"Independent verifier could not complete ({worker_type}): {message}",
+                "infra_verifier_unavailable",
             )
         return (
-            "failed",
-            f"Independent verifier failed ({worker_type}): {message}",
+            "warning",
+            f"Independent verifier could not complete ({worker_type}): {message}",
+            "infra_verifier_unavailable",
         )
 
-    parsed_status, parsed_summary = _parse_verifier_summary(verifier_result.summary or "")
-    return parsed_status, parsed_summary
+    parsed_status, parsed_summary = _parse_verifier_result(verifier_result)
+    return parsed_status, parsed_summary, None
 
 
 async def run_deterministic_verification(

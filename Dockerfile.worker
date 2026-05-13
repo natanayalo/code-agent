@@ -32,6 +32,8 @@ RUN set -eu; \
     npm cache clean --force && \
     rm -rf /var/lib/apt/lists/*
 
+RUN mkdir -p /root/.gemini/tmp/bin && ln -sf /usr/bin/rg /root/.gemini/tmp/bin/rg
+
 COPY pyproject.toml poetry.lock /app/
 
 RUN set -eu; \

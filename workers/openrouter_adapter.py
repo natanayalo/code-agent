@@ -7,7 +7,7 @@ import os
 import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Any, Final, Literal, cast
 
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
@@ -219,6 +219,8 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         working_directory: Path | None = None,  # noqa: ARG002 - kept for interface symmetry
         task_id: str | None = None,
         session_id: str | None = None,
+        response_format: Literal["text", "json"] = "text",
+        response_schema: dict[str, Any] | None = None,
     ) -> CliRuntimeStep:
         """Ask OpenRouter for the next runtime step."""
         override_prompt = normalize_prompt_override(prompt_override)
@@ -274,10 +276,21 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
                 task_id=task_id,
                 session_id=session_id,
             ):
+                resolved_response_format: dict[str, Any] = {"type": "json_object"}
+                if response_format == "json" and response_schema:
+                    resolved_response_format = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "structured_output",
+                            "strict": True,
+                            "schema": response_schema,
+                        },
+                    }
+
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=request_messages,
-                    response_format={"type": "json_object"},
+                    response_format=cast(Any, resolved_response_format),
                 )
 
                 content: str | None = None

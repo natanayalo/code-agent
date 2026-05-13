@@ -10,6 +10,10 @@ WORKDIR /app
 COPY cert.pem* /app/
 
 RUN set -eu; \
+    apt-get update && apt-get install -y --no-install-recommends \
+        ripgrep \
+        procps \
+    && rm -rf /var/lib/apt/lists/*; \
     if [ -f /app/cert.pem ]; then \
         cp /app/cert.pem /usr/local/share/ca-certificates/code-agent-local.crt; \
         update-ca-certificates; \

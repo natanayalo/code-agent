@@ -10,7 +10,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 from apps.observability import (
     DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS,
@@ -91,10 +91,8 @@ def _extract_final_message(raw_text: str) -> str | None:
     if isinstance(payload, dict):
         for field_name in _FINAL_MESSAGE_FIELDS:
             raw_value = payload.get(field_name)
-            if isinstance(raw_value, str):
-                normalized = raw_value.strip()
-                if normalized:
-                    return normalized
+            if raw_value is None:
+                continue
 
             # Handle structured error payloads (parity with previous GeminiCliWorker logic)
             if field_name == "error" and isinstance(raw_value, dict):
@@ -106,6 +104,13 @@ def _extract_final_message(raw_text: str) -> str | None:
                     return err_msg
                 if isinstance(err_type, str):
                     return err_type
+
+            if isinstance(raw_value, str):
+                normalized = raw_value.strip()
+                if normalized:
+                    return normalized
+            if isinstance(raw_value, dict):
+                return json.dumps(raw_value)
 
     return candidate
 
@@ -129,6 +134,8 @@ class NativeAgentRunRequest:
     task_id: str | None = None
     session_id: str | None = None
     redactor: SecretRedactor | None = None
+    response_format: Literal["text", "json"] = "text"
+    response_schema: dict[str, Any] | None = None
 
 
 def _normalize_stream_payload(payload: str | bytes | None) -> str:
@@ -332,6 +339,7 @@ def _finalize_native_agent_run(
     diff_text: str | None = None,
     files_changed: list[str] | None = None,
     artifacts: list[ArtifactReference] | None = None,
+    json_payload: dict[str, Any] | None = None,
 ) -> NativeAgentRunResult:
     """Centralize NativeAgentRunResult construction and standardized span metadata recording."""
     elapsed = time.perf_counter() - started_at
@@ -348,6 +356,7 @@ def _finalize_native_agent_run(
         artifacts=artifacts or [],
         stdout=stdout,
         stderr=stderr,
+        json_payload=json_payload,
     )
 
     # Standardized Tracing Metadata
@@ -372,6 +381,9 @@ def _finalize_native_agent_run(
             stderr, redactor=request.redactor, limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
         ),
     )
+    if result.json_payload:
+        # Record structured output for observability (parity with backup branch)
+        set_current_span_attribute("llm.json_output", json.dumps(result.json_payload))
 
     redacted_status_summary = redact_and_truncate_output(
         run_summary, redactor=request.redactor, limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
@@ -554,10 +566,37 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 if marker := find_infra_failure_marker(stderr_tail):
                     status = "error"
                     summary = f"SANDBOX_INFRA: detected shell crash ({marker})"
+                elif "requires user confirmation" in stderr_tail.lower():
+                    status = "error"
+                    summary = (
+                        "SANDBOX_INFRA: shell command blocked (requires user confirmation "
+                        "in non-interactive mode)"
+                    )
+                elif "tool" in stderr_tail.lower() and "not found" in stderr_tail.lower():
+                    status = "error"
+                    truncated_stderr = truncate_detail_keep_tail(stderr_tail, max_characters=1024)
+                    lines = truncated_stderr.strip().splitlines()
+                    last_line = lines[-1] if lines else "unknown error"
+                    summary = f"SANDBOX_INFRA: tool registry mismatch detected ({last_line})"
                 elif completed.returncode in _SIGNAL_EXIT_CODES:
                     status = "error"
                     sig_name = _SIGNAL_EXIT_CODES[completed.returncode]
                     summary = f"SANDBOX_INFRA: detected shell crash ({sig_name})"
+
+            # Extract structured payload for trace and debugging
+            json_payload = None
+            for text_source in [summary, stdout_text]:
+                if not text_source:
+                    continue
+                try:
+                    unwrapped = _extract_final_message(text_source)
+                    if unwrapped:
+                        candidate = json.loads(unwrapped)
+                        if isinstance(candidate, dict):
+                            json_payload = candidate
+                            break
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    continue
 
             return _finalize_native_agent_run(
                 request=request,
@@ -573,6 +612,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 diff_text=diff_text,
                 files_changed=files_changed,
                 artifacts=artifacts,
+                json_payload=json_payload,
             )
         except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as exc:
             logger.debug("Native agent runner artifact collection failed: %s", exc)

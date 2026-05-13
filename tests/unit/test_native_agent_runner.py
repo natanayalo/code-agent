@@ -171,6 +171,79 @@ raise SystemExit(7)
     assert result.artifacts[1].name == "native-agent-stderr"
 
 
+def test_native_agent_runner_marks_confirmation_block_as_infra_error(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-confirmation.py",
+        """#!/usr/bin/env python3
+import sys
+print("requires user confirmation", file=sys.stderr)
+raise SystemExit(1)
+""",
+    )
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+    assert result.status == "error"
+    assert "requires user confirmation" in result.summary
+
+
+def test_native_agent_runner_marks_tool_not_found_as_infra_error(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-missing-tool.py",
+        """#!/usr/bin/env python3
+import sys
+print("tool foo not found", file=sys.stderr)
+raise SystemExit(2)
+""",
+    )
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+    assert result.status == "error"
+    assert "tool registry mismatch" in result.summary
+
+
+def test_native_agent_runner_extracts_json_payload_from_summary_or_stdout(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-json-payload.py",
+        """#!/usr/bin/env python3
+print('{"final_output":{"status":"passed","summary":"structured"}}')
+""",
+    )
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+    assert result.status == "success"
+    assert result.json_payload == {"status": "passed", "summary": "structured"}
+
+
 def test_native_agent_runner_handles_timeout(tmp_path: Path) -> None:
     """Timeouts should return structured error results."""
     repo_path = tmp_path / "repo"
@@ -249,6 +322,40 @@ def test_read_final_message_is_bounded(tmp_path: Path) -> None:
     assert parsed is not None
     assert parsed.endswith("[final message truncated for safety]")
     assert len(parsed) < len(oversized)
+
+
+def test_extract_final_message_handles_dict_payload_values() -> None:
+    payload = '{"final_output":{"status":"passed","summary":"ok"}}'
+    assert native_runner._extract_final_message(payload) == '{"status": "passed", "summary": "ok"}'  # noqa: SLF001
+
+
+def test_finalize_native_agent_run_emits_llm_json_output_attribute(monkeypatch) -> None:
+    captured: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        native_runner,
+        "set_current_span_attribute",
+        lambda key, value: captured.append((key, str(value))),
+    )
+    req = NativeAgentRunRequest(
+        command=["echo", "ok"],
+        prompt="task",
+        repo_path=Path("."),
+        workspace_path=Path("."),
+    )
+    native_runner._finalize_native_agent_run(  # noqa: SLF001
+        request=req,
+        status="success",
+        summary="ok",
+        final_message="ok",
+        command_text="echo ok",
+        exit_code=0,
+        started_at=0.0,
+        timed_out=False,
+        stdout="",
+        stderr="",
+        json_payload={"status": "passed"},
+    )
+    assert any(k == "llm.json_output" for k, _ in captured)
 
 
 def test_native_agent_runner_returns_structured_error_on_artifact_failure(

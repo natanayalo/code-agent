@@ -239,6 +239,99 @@ def test_orchestrator_graph_runs_one_verifier_repair_handoff_then_stops() -> Non
     )
 
 
+def test_orchestrator_graph_clarification_resume_token_resolution_allows_progress() -> None:
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=["artifacts/review.md"],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary="Done",
+        )
+    )
+    graph = build_orchestrator_graph(worker=worker)
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_id": "task-clar-1",
+                    "task_text": "Review orchestrator and summarize findings",
+                    "constraints": {
+                        "interactions": {
+                            "old-hash": {
+                                "status": "resolved",
+                                "interaction_type": "clarification",
+                                "data": {
+                                    "source": "task_spec",
+                                    "resume_token": "clarification-task-clar-1",
+                                    "questions": ["old question"],
+                                },
+                            }
+                        }
+                    },
+                },
+                "task_spec": {
+                    "goal": "Review orchestrator and summarize findings",
+                    "task_type": "investigation",
+                    "risk_level": "low",
+                    "delivery_mode": "workspace",
+                    "forbidden_actions": ["hardcode_secrets"],
+                    "requires_clarification": True,
+                    "clarification_questions": ["new question wording"],
+                    "requires_permission": False,
+                },
+                "task_kind": "implementation",
+                "session": {
+                    "session_id": "s1",
+                    "user_id": "u1",
+                    "channel": "http",
+                    "external_thread_id": "t1",
+                },
+            }
+        )
+    )
+    state = OrchestratorState.model_validate(raw_output)
+    assert state.result is not None
+    assert state.result.status == "success"
+    assert len(worker.requests) == 1
+
+
+def test_orchestrator_graph_review_task_without_deliverable_fails() -> None:
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=[],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary="Completed.",
+        )
+    )
+    graph = build_orchestrator_graph(worker=worker)
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": (
+                        "Review the orchestrator implementation and compare to best practices"
+                    ),
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                }
+            }
+        )
+    )
+    state = OrchestratorState.model_validate(raw_output)
+    assert state.verification is not None
+    assert state.verification.status == "failed"
+    assert state.verification.failure_kind == "incomplete_delivery"
+    assert state.result is not None
+    assert state.result.status == "failure"
+
+
 def test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint(
     tmp_path: Path,
 ) -> None:

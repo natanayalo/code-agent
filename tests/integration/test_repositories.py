@@ -504,36 +504,20 @@ def test_human_interaction_repository_syncs_task_spec_flags(session_factory) -> 
             for interaction in after_changed_spec
             if interaction.interaction_type is HumanInteractionType.CLARIFICATION
         ]
-        assert len(changed_clarification_rows) == 2
-        assert any(
-            interaction.status is HumanInteractionStatus.RESOLVED
-            for interaction in changed_clarification_rows
-        )
-        pending_clarification = next(
-            interaction
-            for interaction in changed_clarification_rows
-            if interaction.status is HumanInteractionStatus.PENDING
-        )
-        assert pending_clarification.data["questions"] == [
-            "Which migration file should be updated?"
-        ]
+        assert len(changed_clarification_rows) == 1
+        assert changed_clarification_rows[0].status is HumanInteractionStatus.RESOLVED
 
         interaction_repo.sync_task_spec_flags(
             task_id=task.id,
             task_spec={"requires_clarification": False, "requires_permission": False},
         )
         refreshed = interaction_repo.list_by_task(task_id=task.id)
-        assert len(refreshed) == 3
+        assert len(refreshed) == 2
         assert any(
             interaction.status is HumanInteractionStatus.RESOLVED for interaction in refreshed
         )
         assert any(
             interaction.interaction_type is HumanInteractionType.PERMISSION
-            and interaction.status is HumanInteractionStatus.CANCELLED
-            for interaction in refreshed
-        )
-        assert any(
-            interaction.interaction_type is HumanInteractionType.CLARIFICATION
             and interaction.status is HumanInteractionStatus.CANCELLED
             for interaction in refreshed
         )

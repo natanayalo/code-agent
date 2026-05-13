@@ -75,7 +75,7 @@ def client(session_factory) -> Iterator[TestClient]:
             summary="Telegram task completed.",
             budget_usage={"iterations_used": 1, "tool_calls_used": 1},
             commands_run=[],
-            files_changed=[],
+            files_changed=["README.md"],
             artifacts=[],
             next_action_hint=None,
         )
@@ -340,7 +340,7 @@ def test_telegram_webhook_rejects_missing_secret_header_when_configured(
             summary="Telegram task completed.",
             budget_usage={},
             commands_run=[],
-            files_changed=[],
+            files_changed=["README.md"],
             artifacts=[],
             next_action_hint=None,
         )
@@ -368,7 +368,7 @@ def test_telegram_webhook_accepts_matching_secret_header_when_configured(
             summary="Telegram task completed.",
             budget_usage={},
             commands_run=[],
-            files_changed=[],
+            files_changed=["README.md"],
             artifacts=[],
             next_action_hint=None,
         )

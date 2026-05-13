@@ -28,6 +28,8 @@ MemoryCategory = Literal["personal", "project"]
 VerificationFailureKind = Literal[
     "test_regression",
     "scope_mismatch",
+    "incomplete_delivery",
+    "infra_verifier_unavailable",
     "risky_command",
     "worker_failure",
     "timeout",
@@ -212,6 +214,7 @@ class VerificationReportItem(OrchestratorModel):
     label: str = Field(min_length=1)
     status: Literal["passed", "failed", "warning"]
     message: str | None = None
+    reason_code: str | None = None
 
 
 class VerificationReport(OrchestratorModel):
