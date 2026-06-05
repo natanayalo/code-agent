@@ -81,6 +81,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "task_classified",
             "task_planned",
             "task_spec_generated",
+            "task_spec_and_route_generated",
             "memory_loaded",
             "worker_selected",
             "approval_requested",
@@ -95,6 +96,9 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "task_completed",
             "task_failed",
             "task_cancelled",
+            "workspace_provisioned",
+            "environment_initialized",
+            "infra_failure",
         },
     },
 }

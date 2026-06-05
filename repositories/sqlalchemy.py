@@ -1031,7 +1031,7 @@ class WorkerRunRepository:
         statement = (
             select(WorkerRun)
             .where(WorkerRun.task_id == task_id)
-            .order_by(WorkerRun.started_at.asc())
+            .order_by(WorkerRun.started_at.asc(), WorkerRun.id.asc())
         )
         return list(self.session.scalars(statement))
 
