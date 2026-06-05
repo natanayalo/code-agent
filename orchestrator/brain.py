@@ -132,14 +132,8 @@ def extract_json_block(text: str) -> str:
                     pass
             return candidate
         except json.JSONDecodeError:
-            # Some wrappers encode fenced JSON as escaped text inside a JSON string.
-            # Example: "\\n{\\\"key\\\":\\\"value\\\"}\\n"
-            try:
-                unescaped, _ = json.JSONDecoder().raw_decode(candidate.strip())
-                return unescaped
-            except json.JSONDecodeError as err:
-                logger.debug("Failed to decode JSON: %s", err)
-                return candidate
+            # Let it fall through to step 2 which parses the outer wrapper
+            pass
 
     # 2. Try to find the first '{' and use a decoder to get the first valid object.
     # This prevents "Extra data" errors when models append prose or extra JSON
@@ -339,11 +333,8 @@ def _extract_unified_payload_from_summary(summary: str) -> Mapping[str, Any] | N
         try:
             payload = json.loads(candidate_text)
         except json.JSONDecodeError:
-            try:
-                payload, _ = json.JSONDecoder().raw_decode(candidate_text.strip())
-            except json.JSONDecodeError as err:
-                logger.debug("Failed to decode JSON payload: %s", err)
-                continue
+            # It may be escaped inside a wrapper, let it fall through
+            continue
 
         if isinstance(payload, str):
             try:
