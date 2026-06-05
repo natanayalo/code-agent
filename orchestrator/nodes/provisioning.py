@@ -66,7 +66,7 @@ def build_provision_workspace_node(
         # If workspace_id is already set in the dispatch, we reuse it.
         # Note: We currently scope this to the task attempt in the graph transitions.
         if state.dispatch.workspace_id:
-            return {"current_step": "provision_workspace"}
+            return {"current_step": "provision_workspace", "result": None}
 
         workspace_task_id = (
             state.task.task_id or f"task-{state.session.session_id if state.session else 'unknown'}"
@@ -124,7 +124,7 @@ def build_init_environment_node(
 
         if not shell_worker:
             logger.warning("init_environment skipped: shell_worker is not configured.")
-            return {"current_step": "init_environment"}
+            return {"current_step": "init_environment", "result": None}
         workspace_id = state.dispatch.workspace_id
         if not workspace_id:
             raise RuntimeError("init_environment called before provision_workspace")
@@ -164,7 +164,8 @@ def build_init_environment_node(
                 env_marker_missing = True
 
         has_success_flag = any(
-            e.event_type == TimelineEventType.ENVIRONMENT_INITIALIZED.value
+            (e.event_type.value if hasattr(e.event_type, "value") else e.event_type)
+            == TimelineEventType.ENVIRONMENT_INITIALIZED.value
             for e in state.timeline_events
         )
 
@@ -176,7 +177,7 @@ def build_init_environment_node(
             # If we already have a success flag and markers exist, we can skip.
             # (Note: Current graph always routes here. We rely on
             # command-level idempotency otherwise).
-            return {"current_step": "init_environment"}
+            return {"current_step": "init_environment", "result": None}
 
         if (repo_path / "uv.lock").exists():
             setup_command = "command -v uv >/dev/null 2>&1 || pip install uv && uv sync"
@@ -236,7 +237,7 @@ def build_init_environment_node(
             setup_command = "make setup"
 
         if not setup_command:
-            return {"current_step": "init_environment"}
+            return {"current_step": "init_environment", "result": None}
 
         logger.info(
             "Initializing environment in shared workspace",

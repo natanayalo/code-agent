@@ -745,7 +745,7 @@ class RuleBasedOrchestratorBrain:
             attempts_map: dict[int, dict[str, Any]] = {}
             for evt in state.timeline_events:
                 a_num = evt.attempt_number
-                if a_num is None or a_num >= state.attempt_count:
+                if a_num is None or a_num >= state.attempt_count - 1:
                     continue
                 if a_num not in attempts_map:
                     attempts_map[a_num] = {
