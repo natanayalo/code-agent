@@ -54,10 +54,10 @@ sys.exit(0)
 
     with pytest.MonkeyPatch.context() as mp:
         current_path = os.environ.get("PATH", "")
-        mp.setenv(
-            "PATH",
-            f"{bin_dir}:{tmp_path}:{current_path}" if current_path else f"{bin_dir}:{tmp_path}",
-        )
+        new_path = f"{bin_dir}{os.pathsep}{tmp_path}"
+        if current_path:
+            new_path += f"{os.pathsep}{current_path}"
+        mp.setenv("PATH", new_path)
 
         request = WorkerRequest(
             task_text="Refactor this",
@@ -112,10 +112,10 @@ sys.exit(1)
 
     with pytest.MonkeyPatch.context() as mp:
         current_path = os.environ.get("PATH", "")
-        mp.setenv(
-            "PATH",
-            f"{bin_dir}:{tmp_path}:{current_path}" if current_path else f"{bin_dir}:{tmp_path}",
-        )
+        new_path = f"{bin_dir}{os.pathsep}{tmp_path}"
+        if current_path:
+            new_path += f"{os.pathsep}{current_path}"
+        mp.setenv("PATH", new_path)
 
         request = WorkerRequest(
             task_text="Refactor this",

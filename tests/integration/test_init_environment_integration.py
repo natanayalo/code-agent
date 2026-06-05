@@ -134,8 +134,8 @@ async def test_init_environment_integration_poetry(tmp_path: Path):
     result = await node(state)
 
     # 5. Verify results
-    if not result or result.get("result", {}).get("status") != "success":
-        res = result.get("result", {}) if result else {}
+    res = (result or {}).get("result") or {}
+    if res.get("status") != "success":
         summary = res.get("summary", "unknown failure")
         stdout = res.get("stdout", "n/a")
         stderr = res.get("stderr", "n/a")
