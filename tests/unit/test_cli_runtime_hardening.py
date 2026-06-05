@@ -51,6 +51,10 @@ async def test_init_environment_node_no_shell_worker(tmp_path: Path) -> None:
     result = await node(state)
     assert result["current_step"] == "init_environment"
     assert result.get("result") is None
+
+
+@pytest.mark.asyncio
+async def test_init_environment_node_no_markers(tmp_path: Path) -> None:
     """Verify that the node does nothing if no markers are found."""
     manager = MagicMock()
     handle = MagicMock()

@@ -152,16 +152,14 @@ def build_init_environment_node(
             or (repo_path / "pyproject.toml").exists()
             or (repo_path / "uv.lock").exists()
             or (repo_path / "requirements.txt").exists()
-        ):
-            if not (repo_path / ".venv").exists():
-                env_marker_missing = True
-        elif (
+        ) and not (repo_path / ".venv").exists():
+            env_marker_missing = True
+        if (
             (repo_path / "package-lock.json").exists()
             or (repo_path / "yarn.lock").exists()
             or (repo_path / "pnpm-lock.yaml").exists()
-        ):
-            if not (repo_path / "node_modules").exists():
-                env_marker_missing = True
+        ) and not (repo_path / "node_modules").exists():
+            env_marker_missing = True
 
         has_success_flag = any(
             (e.event_type.value if hasattr(e.event_type, "value") else e.event_type)
