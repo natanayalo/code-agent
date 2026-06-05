@@ -128,10 +128,10 @@ def extract_json_block(text: str) -> str:
                 try:
                     json.loads(parsed)
                     return parsed
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, TypeError):
                     pass
             return candidate
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             # Let it fall through to step 2 which parses the outer wrapper
             pass
 
