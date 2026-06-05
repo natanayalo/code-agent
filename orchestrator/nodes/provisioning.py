@@ -318,27 +318,22 @@ def build_init_environment_node(
             )
 
             if hardening_result.stdout and "hardened:" in hardening_result.stdout:
-                # Extract the list of patterns that were added
-                raw_list = hardening_result.stdout.split("hardened:")[1].strip()
-                missing_ignores = [p.strip() for p in raw_list.split(" ") if p.strip()]
+                import re
+
+                for line in (hardening_result.stdout or "").splitlines():
+                    match = re.search(r"\bhardened:(.*)", line)
+                    if match:
+                        raw_list = match.group(1).strip()
+                        missing_ignores = [p.strip() for p in raw_list.split(" ") if p.strip()]
+                        break
 
         init_msg = f"Environment initialized successfully via: {setup_command}"
-        extra_events = []
         if missing_ignores:
             hardening_msg = (
                 f"Proactively hardened .gitignore by adding: {', '.join(missing_ignores)}"
             )
             logger.info(f"Task {state.task.task_id}: {hardening_msg}")
             init_msg += f" ({hardening_msg})"
-            # We also add a specific event for the hardening action
-            extra_events.append(
-                _timeline_event(
-                    state,
-                    TimelineEventType.ENVIRONMENT_INITIALIZED,  # Reuse or just stick to one
-                    message=hardening_msg,
-                    payload={"hardened_patterns": missing_ignores},
-                )
-            )
 
         response = {
             "current_step": "init_environment",

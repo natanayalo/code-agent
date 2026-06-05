@@ -120,7 +120,8 @@ def _is_placeholder_verification_command(command: str) -> bool:
     stripped = command.strip()
     if not stripped:
         return False
-    if re.search(r"<[a-zA-Z0-9_\s-]+>", stripped):
+    match = re.search(r"<([a-zA-Z0-9_\s-]+)>", stripped)
+    if match and not (match.group(1).startswith(" ") or match.group(1).endswith(" ")):
         return True
     lowered = stripped.lower()
     if "<project-specific" in lowered or "<project specific" in lowered:
