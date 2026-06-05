@@ -29,6 +29,7 @@ from workers.adapter_utils import (
     truncate_detail_keep_tail,
 )
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
+from workers.constants import DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS
 from workers.llm_tracing import (
     normalize_llm_output,
     set_llm_span_output,
@@ -38,7 +39,6 @@ from workers.prompt import build_runtime_adapter_tool_guidance_lines
 from workers.subprocess_env import build_gemini_subprocess_env
 
 DEFAULT_GEMINI_EXECUTABLE: Final[str] = "gemini"
-DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS: Final[int] = 300
 _DETAIL_PREVIEW_CHARACTERS: Final[int] = 1200
 
 GEMINI_EXECUTABLE_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_CLI_BIN"

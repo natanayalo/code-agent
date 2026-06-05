@@ -32,7 +32,6 @@ from sandbox.redact import (
     sanitize_command,
 )
 from tools import (
-    DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS,
     DEFAULT_MCP_TOOL_CLIENT,
     EXECUTE_BROWSER_TOOL_NAME,
     EXECUTE_GIT_TOOL_NAME,
@@ -62,27 +61,29 @@ from tools.numeric import (
 )
 from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import WorkerCommand
+from workers.constants import (
+    DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS,
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
+    DEFAULT_CONDENSED_SUMMARY_MAX_DECISIONS,
+    DEFAULT_CONDENSED_SUMMARY_MAX_ERRORS,
+    DEFAULT_CONDENSED_SUMMARY_MAX_FILE_HINTS,
+    DEFAULT_CONTEXT_CONDENSER_RECENT_MESSAGES,
+    DEFAULT_CONTEXT_CONDENSER_SUMMARY_MAX_CHARACTERS,
+    DEFAULT_CONTEXT_CONDENSER_THRESHOLD_CHARACTERS,
+    DEFAULT_CONTEXT_WINDOW_WARNING_RATIO,
+    DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN,
+    DEFAULT_MAX_ITERATIONS,
+    DEFAULT_MAX_OBSERVATION_CHARACTERS,
+    DEFAULT_MAX_REPEATED_FILE_READS,
+    DEFAULT_STALL_CORRECTION_TURNS,
+    DEFAULT_STALL_WINDOW_ITERATIONS,
+    DEFAULT_WORKER_TIMEOUT_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
 
 TRACER_NAME: Final[str] = "workers.cli_runtime"
 
-DEFAULT_MAX_ITERATIONS = 8
-DEFAULT_WORKER_TIMEOUT_SECONDS = 600
-DEFAULT_COMMAND_TIMEOUT_SECONDS = DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS
-DEFAULT_MAX_OBSERVATION_CHARACTERS = 4000
-DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS = 10
-DEFAULT_CONTEXT_CONDENSER_THRESHOLD_CHARACTERS = 12000
-DEFAULT_CONTEXT_CONDENSER_RECENT_MESSAGES = 6
-DEFAULT_CONTEXT_CONDENSER_SUMMARY_MAX_CHARACTERS = 1500
-DEFAULT_CONTEXT_WINDOW_WARNING_RATIO = 0.8
-DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN = 4
-DEFAULT_CONDENSED_SUMMARY_MAX_DECISIONS = 5
-DEFAULT_CONDENSED_SUMMARY_MAX_FILE_HINTS = 8
-DEFAULT_CONDENSED_SUMMARY_MAX_ERRORS = 3
-DEFAULT_STALL_WINDOW_ITERATIONS = 3
-DEFAULT_MAX_REPEATED_FILE_READS = 3
-DEFAULT_STALL_CORRECTION_TURNS = 1
 MODEL_CONTEXT_WINDOW_TOKENS: dict[str, int] = {
     "gpt-5.4": 272000,
     "gemini-2.5-pro": 1048576,
@@ -237,6 +238,7 @@ class CliRuntimeSettings(CliRuntimeModel):
     max_iterations: int = Field(default=DEFAULT_MAX_ITERATIONS, ge=1)
     worker_timeout_seconds: int = Field(default=DEFAULT_WORKER_TIMEOUT_SECONDS, ge=1)
     command_timeout_seconds: int = Field(default=DEFAULT_COMMAND_TIMEOUT_SECONDS, ge=1)
+    read_only: bool = False
     max_tool_calls: int | None = Field(default=None, ge=0)
     max_shell_commands: int | None = Field(default=None, ge=0)
     max_retries: int | None = Field(default=None, ge=0)
@@ -348,6 +350,7 @@ def settings_from_budget(
     defaults: CliRuntimeSettings | None = None,
     task_id: str | None = None,
     session_id: str | None = None,
+    read_only: bool = False,
 ) -> CliRuntimeSettings:
     """Merge supported runtime safety overrides from a worker request budget."""
     resolved = (defaults or CliRuntimeSettings()).model_dump()
@@ -355,6 +358,8 @@ def settings_from_budget(
         resolved["task_id"] = task_id
     if session_id:
         resolved["session_id"] = session_id
+    if read_only:
+        resolved["read_only"] = True
 
     max_iterations = coerce_positive_int_like(budget.get("max_iterations"))
     if max_iterations is not None:
@@ -1444,11 +1449,23 @@ def run_cli_runtime_loop(
                     stop_reason="adapter_error",
                     iteration=iteration,
                 )
-            permission_decision = resolve_bash_command_permission(
-                command,
-                tool,
-                granted_permission=granted_permission,
-            )
+
+            # Enforcement: Check read_only policy (T-178)
+            if settings.read_only and not _looks_read_only_command(command):
+                permission_decision = ToolPermissionDecision(
+                    tool_name=tool.name,
+                    command=command,
+                    granted_permission=ToolPermissionLevel.READ_ONLY,
+                    required_permission=ToolPermissionLevel.WORKSPACE_WRITE,
+                    allowed=False,
+                    reason="Command blocked by read-only enforcement policy.",
+                )
+            else:
+                permission_decision = resolve_bash_command_permission(
+                    command,
+                    tool,
+                    granted_permission=granted_permission,
+                )
             if not permission_decision.allowed:
                 # Update context with the latest decision before finalizing
                 context = _ResultContext(

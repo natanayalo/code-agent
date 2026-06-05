@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -126,6 +128,8 @@ def _slugify(value: str) -> str:
 
 def _workspace_task_id(request: WorkerRequest) -> str:
     """Build a readable workspace task identifier from the worker request."""
+    if request.task_id:
+        return request.task_id
     source = request.session_id or request.task_text
     return f"gemini-cli-{_slugify(source)}"
 
@@ -139,6 +143,71 @@ def _workspace_artifacts(workspace: WorkspaceHandle) -> list[ArtifactReference]:
             artifact_type="workspace",
         )
     ]
+
+
+def _prepare_workspace_gemini_home(
+    *,
+    workspace_path: Path,
+    source_gemini_home: Path | None = None,
+) -> None:
+    """Best-effort sync of Gemini auth/config into isolated workspace HOME."""
+    candidates: list[Path] = []
+    if source_gemini_home is not None:
+        candidates.append(source_gemini_home)
+    env_gemini_home = os.environ.get("GEMINI_HOME")
+    if env_gemini_home:
+        candidates.append(Path(env_gemini_home))
+    candidates.extend([Path.home() / ".gemini", Path("/root/.gemini")])
+
+    resolved_source: Path | None = None
+    for candidate in candidates:
+        expanded = candidate.expanduser()
+        if expanded.exists() and expanded.is_dir():
+            resolved_source = expanded
+            break
+
+    if resolved_source is None:
+        return
+
+    agent_home = workspace_path / ".agent_home"
+    agent_home.mkdir(parents=True, exist_ok=True)
+    target = agent_home / ".gemini"
+    target_settings = target / "settings.json"
+    if target.exists():
+        # Repair stale or partial workspace state: if the auth settings file is
+        # missing, refresh the target from the resolved source.
+        if target_settings.exists():
+            return
+        try:
+            if target.is_symlink() or target.is_file():
+                target.unlink()
+            else:
+                shutil.rmtree(target)
+        except OSError:
+            logger.warning(
+                "Failed to reset stale workspace Gemini home before sync",
+                extra={"target": str(target)},
+                exc_info=True,
+            )
+            return
+
+    try:
+        target.symlink_to(resolved_source, target_is_directory=True)
+        return
+    except OSError:
+        logger.info(
+            "Falling back to copy for workspace Gemini home sync",
+            extra={"source": str(resolved_source), "target": str(target)},
+        )
+
+    try:
+        shutil.copytree(resolved_source, target)
+    except OSError:
+        logger.warning(
+            "Failed to sync Gemini home into workspace agent home",
+            extra={"source": str(resolved_source), "target": str(target)},
+            exc_info=True,
+        )
 
 
 def _apply_cleanup_outcome(result: WorkerResult, *, workspace_deleted: bool) -> WorkerResult:
@@ -208,6 +277,7 @@ def _worker_result_from_execution(
         diff_text=diff_text,
         artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
         next_action_hint=_next_action_hint(execution),
+        workspace_id=workspace.workspace_id,
     )
 
 
@@ -364,8 +434,16 @@ class GeminiCliWorker(Worker):
         branch: str | None,
         *,
         workspace_task_id: str,
+        workspace_id: str | None = None,
     ) -> WorkspaceHandle:
-        """Create the sandbox workspace for this run."""
+        """Create or retrieve the sandbox workspace for this run."""
+        if workspace_id:
+            return self.workspace_manager.get_workspace(
+                workspace_id,
+                repo_url=repo_url,
+                branch=branch,
+                task_id=workspace_task_id,
+            )
         return self.workspace_manager.create_workspace(
             WorkspaceRequest(
                 task_id=workspace_task_id,
@@ -392,10 +470,21 @@ class GeminiCliWorker(Worker):
             available_secrets=request.secrets,
         )
 
+        # Determine if network should be enabled (T-143 escalation policy)
+        network_enabled = request.network_enabled
+        if not network_enabled:
+            granted_permission = granted_permission_from_constraints(request.constraints)
+            if granted_permission == ToolPermissionLevel.NETWORKED_WRITE:
+                for name in tool_names:
+                    if (tool := self.tool_registry.get_tool(name)) and tool.network_required:
+                        network_enabled = True
+                        break
+
         container = self.container_manager.start(
             DockerSandboxContainerRequest(
                 workspace=workspace,
                 environment=scoped_secrets,
+                network_enabled=network_enabled,
             )
         )
         session: ShellSessionProtocol | None = None
@@ -406,6 +495,7 @@ class GeminiCliWorker(Worker):
                 defaults=self.runtime_settings,
                 task_id=request.task_id,
                 session_id=request.session_id,
+                read_only=request.read_only,
             )
             granted_permission = granted_permission_from_constraints(request.constraints)
             bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
@@ -595,7 +685,12 @@ class GeminiCliWorker(Worker):
         executable = getattr(self.runtime_adapter, "executable", "gemini")
         model = getattr(self.runtime_adapter, "model", None)
         read_only_requested = bool(request.constraints.get("read_only"))
-        approval_mode = "plan" if read_only_requested else DEFAULT_GEMINI_NATIVE_APPROVAL_MODE
+        is_native = runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
+        approval_mode = (
+            "plan"
+            if read_only_requested
+            else ("yolo" if is_native else DEFAULT_GEMINI_NATIVE_APPROVAL_MODE)
+        )
         command = [
             executable,
             "--output-format",
@@ -626,10 +721,10 @@ class GeminiCliWorker(Worker):
         )
         if request.response_schema:
             schema_json = json.dumps(request.response_schema, indent=2)
-            output_instructions += (
-                f"\n\nCRITICAL: Your final response MUST be a single JSON object strictly matching "
-                f"this JSON schema:\n{schema_json}\n"
-                "Do not include any prose, markdown fences, or extra characters."
+            output_instructions = (
+                "Return exactly one JSON object that strictly matches this JSON schema:\n"
+                f"{schema_json}\n"
+                "Do not include markdown fences, explanatory prose, or extra keys."
             )
 
         role_instructions = ""
@@ -789,6 +884,8 @@ class GeminiCliWorker(Worker):
             diff_text=native_result.diff_text,
             json_payload=native_result.json_payload,
             next_action_hint=self._native_next_action_hint(native_result),
+            stdout=native_result.stdout,
+            stderr=native_result.stderr,
         )
         if cancel_token and cancel_token():
             result.status = "error"
@@ -829,6 +926,7 @@ class GeminiCliWorker(Worker):
                 repo_url,
                 request.branch,
                 workspace_task_id=workspace_task_id,
+                workspace_id=request.workspace_id,
             )
         except (WorkspaceManagerError, OSError) as exc:
             logger.exception(
@@ -848,6 +946,7 @@ class GeminiCliWorker(Worker):
         session: ShellSessionProtocol | None = None
 
         try:
+            _prepare_workspace_gemini_home(workspace_path=workspace.workspace_path)
             runtime_mode = self._resolve_runtime_mode(request)
             if runtime_mode == WorkerRuntimeMode.TOOL_LOOP:
                 logger.warning(

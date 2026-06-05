@@ -1,0 +1,41 @@
+"""Shared constants and default settings for coding workers."""
+
+from typing import Final
+
+# --- Global Worker Limits ---
+DEFAULT_MAX_ITERATIONS: Final[int] = 8
+DEFAULT_WORKER_TIMEOUT_SECONDS: Final[int] = 600
+
+# --- Provider Turn Timeouts ---
+# These govern how long we wait for a single LLM response (one turn).
+DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS: Final[int] = 600
+DEFAULT_CODEX_REQUEST_TIMEOUT_SECONDS: Final[int] = 120
+DEFAULT_OPENROUTER_REQUEST_TIMEOUT_SECONDS: Final[int] = 120
+
+# --- Orchestrator & Brain Timeouts ---
+# These govern high-level orchestration nodes.
+DEFAULT_ORCHESTRATOR_GRACE_SECONDS: Final[int] = 30
+DEFAULT_BRAIN_TIMEOUT_SECONDS: Final[int] = 300
+DEFAULT_VERIFIER_TIMEOUT_SECONDS: Final[int] = 120
+DEFAULT_REVIEW_TIMEOUT_SECONDS: Final[int] = 120
+
+# --- Command & Tool Timeouts ---
+# These govern individual operations inside the sandbox.
+DEFAULT_COMMAND_TIMEOUT_SECONDS: Final[int] = 60
+DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS: Final[int] = 10
+DEFAULT_DIFF_TIMEOUT_SECONDS: Final[int] = 15
+DEFAULT_GIT_APPLY_TIMEOUT_SECONDS: Final[int] = 60
+
+# --- Observation & Context Limits ---
+DEFAULT_MAX_OBSERVATION_CHARACTERS: Final[int] = 4000
+DEFAULT_CONTEXT_CONDENSER_THRESHOLD_CHARACTERS: Final[int] = 12000
+DEFAULT_CONTEXT_CONDENSER_RECENT_MESSAGES: Final[int] = 6
+DEFAULT_CONTEXT_CONDENSER_SUMMARY_MAX_CHARACTERS: Final[int] = 1500
+DEFAULT_CONTEXT_WINDOW_WARNING_RATIO: Final[float] = 0.8
+DEFAULT_ESTIMATED_CHARACTERS_PER_TOKEN: Final[int] = 4
+DEFAULT_CONDENSED_SUMMARY_MAX_DECISIONS: Final[int] = 5
+DEFAULT_CONDENSED_SUMMARY_MAX_FILE_HINTS: Final[int] = 8
+DEFAULT_CONDENSED_SUMMARY_MAX_ERRORS: Final[int] = 3
+DEFAULT_STALL_WINDOW_ITERATIONS: Final[int] = 3
+DEFAULT_MAX_REPEATED_FILE_READS: Final[int] = 3
+DEFAULT_STALL_CORRECTION_TURNS: Final[int] = 1

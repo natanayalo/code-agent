@@ -34,6 +34,7 @@ from workers.adapter_utils import (
     truncate_detail_keep_head,
 )
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
+from workers.constants import DEFAULT_OPENROUTER_REQUEST_TIMEOUT_SECONDS
 from workers.llm_tracing import (
     normalize_llm_output,
     set_llm_span_output,
@@ -43,7 +44,6 @@ from workers.prompt import build_runtime_adapter_tool_guidance_lines
 
 DEFAULT_OPENROUTER_BASE_URL: Final[str] = "https://openrouter.ai/api/v1"
 DEFAULT_OPENROUTER_MODEL: Final[str] = "anthropic/claude-3.5-sonnet"
-DEFAULT_OPENROUTER_REQUEST_TIMEOUT_SECONDS: Final[int] = 120
 DEFAULT_OPENROUTER_HTTP_REFERER: Final[str] = "https://github.com/natanayalo/code-agent"
 DEFAULT_OPENROUTER_X_TITLE: Final[str] = "code-agent"
 _DETAIL_PREVIEW_CHARACTERS: Final[int] = 1200
