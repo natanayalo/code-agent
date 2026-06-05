@@ -93,6 +93,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "worker_error",
             "verification_started",
             "verification_completed",
+            "verification_skipped",
             "task_completed",
             "task_failed",
             "task_cancelled",

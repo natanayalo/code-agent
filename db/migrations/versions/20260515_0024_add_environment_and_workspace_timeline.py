@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+import sqlalchemy as sa
 from alembic import op
 
 revision = "20260515_0024"
@@ -62,8 +63,6 @@ def _check_condition(column_name: str, values: Iterable[str]) -> str:
 
 def upgrade() -> None:
     with op.batch_alter_table("task_timeline_events") as batch_op:
-        import sqlalchemy as sa
-
         batch_op.alter_column("event_type", type_=sa.String(length=64))
         batch_op.drop_constraint(op.f("ck_task_timeline_events_event_type"), type_="check")
         batch_op.create_check_constraint(
