@@ -145,7 +145,7 @@ async def test_init_environment_integration_poetry(tmp_path: Path):
     poetry_toml_path = workspace.workspace_path / "poetry.toml"
     assert poetry_toml_path.exists(), "poetry.toml should be created in the workspace"
 
-    content = poetry_toml_path.read_text()
+    content = poetry_toml_path.read_text(encoding="utf-8")
     assert "in-project = true" in content, "poetry.toml should have in-project = true"
 
     # Check that .venv was created
