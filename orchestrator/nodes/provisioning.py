@@ -157,7 +157,7 @@ def build_init_environment_node(
         if not env_marker_missing and state.task.constraints.get("skip_init_if_completed", True):
             # If we already have a success flag and markers exist, we can potentially skip.
             # (Note: Current graph always routes here, we rely on command-level idempotency).
-            pass
+            return {"current_step": "init_environment"}
 
         if (repo_path / "uv.lock").exists():
             setup_command = "command -v uv >/dev/null 2>&1 || pip install uv && uv sync"

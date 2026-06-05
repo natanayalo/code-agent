@@ -2988,7 +2988,7 @@ class TaskExecutionService:
                     "sequence_number": e.sequence_number,
                     "message": e.message,
                     "payload": e.payload,
-                    "created_at": e.created_at,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
                 }
                 for e in timeline_events
             ]
