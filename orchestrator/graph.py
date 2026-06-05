@@ -1382,6 +1382,8 @@ def _get_previously_failed_workers(state: OrchestratorState) -> set[WorkerType]:
     attempts_dispatched: dict[int, WorkerType] = {}
 
     for event in state.timeline_events:
+        if event.attempt_number is None:
+            continue
         evt_type = (
             event.event_type.value if hasattr(event.event_type, "value") else event.event_type
         )

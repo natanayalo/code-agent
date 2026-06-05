@@ -29,7 +29,9 @@ def _should_skip_gitignore_hardening(state: OrchestratorState) -> bool:
     if (state.task.constraints or {}).get("read_only") is True:
         return True
 
-    profile_name = (state.route.chosen_profile or state.dispatch.worker_profile or "").lower()
+    route_profile = state.route.chosen_profile if state.route else None
+    dispatch_profile = state.dispatch.worker_profile if state.dispatch else None
+    profile_name = (route_profile or dispatch_profile or "").lower()
     if "read-only" in profile_name or "read_only" in profile_name:
         return True
 
