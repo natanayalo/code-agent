@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -120,8 +119,7 @@ def _is_placeholder_verification_command(command: str) -> bool:
     stripped = command.strip()
     if not stripped:
         return False
-    match = re.search(r"<([a-zA-Z0-9_\s-]+)>", stripped)
-    if match and not (match.group(1).startswith(" ") or match.group(1).endswith(" ")):
+    if stripped.startswith("<") and stripped.endswith(">"):
         return True
     lowered = stripped.lower()
     if "<project-specific" in lowered or "<project specific" in lowered:

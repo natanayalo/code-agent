@@ -979,6 +979,7 @@ class RuleBasedOrchestratorBrain:
             planner_failures: list[dict[str, str]] = []
             successful_planner: str | None = None
             for i, worker in enumerate(planners):
+                result = None
                 worker_name = worker.__class__.__name__
                 try:
                     async with asyncio.timeout(

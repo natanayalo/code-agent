@@ -143,7 +143,12 @@ def build_init_environment_node(
 
         # Force re-init if the environment marker is missing
         env_marker_missing = False
-        if (repo_path / "poetry.lock").exists() or (repo_path / "pyproject.toml").exists():
+        if (
+            (repo_path / "poetry.lock").exists()
+            or (repo_path / "pyproject.toml").exists()
+            or (repo_path / "uv.lock").exists()
+            or (repo_path / "requirements.txt").exists()
+        ):
             if not (repo_path / ".venv").exists():
                 env_marker_missing = True
         elif (
