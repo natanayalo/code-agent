@@ -156,6 +156,7 @@ def test_build_task_service_from_env_enables_orchestrator_brain_flag(
         {
             "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
             "CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED": "1",
+            "CODE_AGENT_GEMINI_CLI_BIN": "/usr/local/bin/gemini",
             "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
         },
         outbound_http_clients=outbound_http_clients,

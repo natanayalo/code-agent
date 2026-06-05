@@ -523,6 +523,8 @@ def add_current_span_event(name: str, attributes: Mapping[str, Any] | None = Non
         if not span.is_recording():
             return
         span.add_event(name, attributes=dict(attributes or {}))
+    except ImportError:
+        pass
     except Exception as exc:
         logger.debug("Failed to add current span event '%s': %s", name, exc)
 

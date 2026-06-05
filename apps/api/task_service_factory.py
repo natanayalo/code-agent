@@ -423,6 +423,7 @@ def build_task_service_from_env(
                 fallback_planners=[w for w in [codex_worker, openrouter_worker] if w is not None],
             )
             if _is_enabled(resolved_env.get(ORCHESTRATOR_BRAIN_ENABLED_ENV_VAR))
+            and gemini_worker is not None
             else None
         ),
         progress_notifier=CompositeProgressNotifier(progress_notifiers),
