@@ -344,6 +344,13 @@ def _extract_unified_payload_from_summary(summary: str) -> Mapping[str, Any] | N
                 payload = json.loads(unescaped)
             except Exception:
                 continue
+
+        if isinstance(payload, str):
+            try:
+                payload, _ = json.JSONDecoder().raw_decode(payload.strip())
+            except Exception as e:
+                logger.debug("Failed to decode payload: %s", e)
+
         if isinstance(payload, dict):
             unwrapped = _unwrap_payload_wrapper(payload)
             if _looks_like_unified_payload(unwrapped):
