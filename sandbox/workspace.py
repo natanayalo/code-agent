@@ -222,9 +222,13 @@ class WorkspaceManager:
                         branch=request.branch,
                         cleanup_policy=request.cleanup_policy or self.cleanup_policy,
                     )
+                elif any(workspace_path.iterdir()):
+                    raise WorkspaceManagerError(
+                        f"Workspace directory exists and is not empty: {workspace_id}"
+                    )
                 else:
                     logger.info(
-                        "Workspace directory %s exists but is empty. Proceeding with clone.",
+                        "Workspace directory %s exists and is empty. Proceeding with clone.",
                         workspace_id,
                     )
             else:

@@ -546,7 +546,7 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         task_spec=state.task_spec.model_dump(mode="json") if state.task_spec is not None else None,
         constraints=dict(state.task.constraints),
         budget=dict(state.task.budget),
-        secrets=dict(state.task.secrets | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
+        secrets=dict((state.task.secrets or {}) | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
         tools=state.task.tools,
         worker_profile=worker_profile,
         runtime_mode=state.dispatch.runtime_mode or state.route.runtime_mode,

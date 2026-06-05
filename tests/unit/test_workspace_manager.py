@@ -166,7 +166,7 @@ def test_create_workspace_cleans_up_on_failure(tmp_path: Path) -> None:
     assert not list(tmp_path.iterdir())
 
 
-def test_create_workspace_allows_existing_directory(
+def test_create_workspace_raises_on_existing_non_empty_directory_without_git(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     manager = WorkspaceManager(tmp_path)
@@ -183,10 +183,12 @@ def test_create_workspace_allows_existing_directory(
     (workspace_dir / "dummy").touch()
 
     request = WorkspaceRequest(task_id="test", repo_url="http://fake")
-    # Should NOT raise now, should reuse
-    handle = manager.create_workspace(request)
-    assert handle.workspace_id == "workspace-existing"
-    assert handle.workspace_path == workspace_dir
+    # Should raise error since directory is not empty and has no .git
+    with pytest.raises(
+        WorkspaceManagerError,
+        match="Workspace directory exists and is not empty: workspace-existing",
+    ):
+        manager.create_workspace(request)
 
 
 def test_create_workspace_uses_request_cleanup_policy(tmp_path: Path) -> None:

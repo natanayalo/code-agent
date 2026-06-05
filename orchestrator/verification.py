@@ -334,7 +334,7 @@ async def run_independent_verifier(
         task_spec=state.task_spec.model_dump(mode="json") if state.task_spec is not None else None,
         constraints=constraints,
         budget=budget,
-        secrets=dict(state.task.secrets | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
+        secrets=dict((state.task.secrets or {}) | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
         tools=state.task.tools,
         runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
     )
