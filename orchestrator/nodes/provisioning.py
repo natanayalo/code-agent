@@ -154,9 +154,19 @@ def build_init_environment_node(
             if not (repo_path / "node_modules").exists():
                 env_marker_missing = True
 
-        if not env_marker_missing and state.task.constraints.get("skip_init_if_completed", True):
-            # If we already have a success flag and markers exist, we can potentially skip.
-            # (Note: Current graph always routes here, we rely on command-level idempotency).
+        has_success_flag = any(
+            e.event_type == TimelineEventType.ENVIRONMENT_INITIALIZED.value
+            for e in state.timeline_events
+        )
+
+        if (
+            not env_marker_missing
+            and has_success_flag
+            and state.task.constraints.get("skip_init_if_completed", True)
+        ):
+            # If we already have a success flag and markers exist, we can skip.
+            # (Note: Current graph always routes here. We rely on
+            # command-level idempotency otherwise).
             return {"current_step": "init_environment"}
 
         if (repo_path / "uv.lock").exists():
