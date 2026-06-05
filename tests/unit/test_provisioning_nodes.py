@@ -288,8 +288,8 @@ async def test_init_environment_node_fails_on_missing_lockfile(tmp_path: Path) -
 
     result = await node(state)
 
-    assert result["result"]["status"] == "error"
-    assert "Missing lockfile" in result["result"]["summary"]
+    assert result["result"].status == "error"
+    assert "Missing lockfile" in result["result"].summary
     shell_worker.run.assert_not_called()
 
 
@@ -364,8 +364,8 @@ async def test_init_environment_node_fails_on_requirements_without_override(tmp_
 
     result = await node(state)
 
-    assert result["result"]["status"] == "error"
-    assert "Missing lockfile" in result["result"]["summary"]
+    assert result["result"].status == "error"
+    assert "Missing lockfile" in result["result"].summary
     shell_worker.run.assert_not_called()
 
 
@@ -598,6 +598,6 @@ async def test_init_environment_node_fails_on_npm_no_lock_without_override(tmp_p
         dispatch={"workspace_id": "ws-1"},
     )
     result = await node(state)
-    assert result["result"]["status"] == "error"
-    assert "Missing lockfile" in result["result"]["summary"]
+    assert result["result"].status == "error"
+    assert "Missing lockfile" in result["result"].summary
     shell_worker.run.assert_not_called()

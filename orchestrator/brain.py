@@ -639,7 +639,7 @@ class RuleBasedOrchestratorBrain:
             response_format="json",
             response_schema=_strict_json_schema(TaskSpecBrainSuggestion),
         )
-
+        result = None
         for i, worker in enumerate(planners):
             try:
                 async with asyncio.timeout(
@@ -650,7 +650,6 @@ class RuleBasedOrchestratorBrain:
                 if result.status == "success":
                     break
 
-                set_span_status_from_outcome(result.status, result.summary)
                 logger.warning(
                     f"planner task spec enrichment returned non-success status '{result.status}' "
                     f"({worker.__class__.__name__})"
@@ -667,10 +666,12 @@ class RuleBasedOrchestratorBrain:
 
             # If we're at the last worker and it failed, we'll return None
             if i == len(planners) - 1:
+                if result is not None:
+                    set_span_status_from_outcome(result.status, result.summary)
                 return None
 
         # If we broke out of the loop, result should be set and successful
-        if result.status != "success":
+        if result is None or result.status != "success":
             return None
 
         data = result.json_payload
@@ -838,7 +839,7 @@ class RuleBasedOrchestratorBrain:
             response_format="json",
             response_schema=_strict_json_schema(RouteBrainSuggestion),
         )
-
+        result = None
         for i, worker in enumerate(planners):
             try:
                 async with asyncio.timeout(
@@ -848,7 +849,6 @@ class RuleBasedOrchestratorBrain:
 
                 if result.status == "success":
                     break
-                set_span_status_from_outcome(result.status, result.summary)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -860,9 +860,11 @@ class RuleBasedOrchestratorBrain:
                 )
 
             if i == len(planners) - 1:
+                if result is not None:
+                    set_span_status_from_outcome(result.status, result.summary)
                 return None
 
-        if result.status != "success":
+        if result is None or result.status != "success":
             return None
 
         payload = result.json_payload

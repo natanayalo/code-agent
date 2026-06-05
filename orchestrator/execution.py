@@ -2940,9 +2940,13 @@ class TaskExecutionService:
                 last_run = runs[-1]
                 last_run_dispatch = {
                     "run_id": last_run.id,
-                    "worker_type": last_run.worker_type.value
-                    if hasattr(last_run.worker_type, "value")
-                    else str(last_run.worker_type),
+                    "worker_type": (
+                        last_run.worker_type.value
+                        if last_run.worker_type and hasattr(last_run.worker_type, "value")
+                        else str(last_run.worker_type)
+                        if last_run.worker_type
+                        else None
+                    ),
                     "worker_profile": last_run.worker_profile,
                     "runtime_mode": (
                         last_run.runtime_mode.value

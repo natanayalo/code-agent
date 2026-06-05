@@ -376,7 +376,7 @@ def _init_fail(state: OrchestratorState, message: str) -> dict[str, Any]:
             status="error",
             summary=message,
             failure_kind="sandbox_infra",
-        ).model_dump(),
+        ),
         "progress_updates": _progress_update(state, "environment initialization aborted"),
         **_timeline_event(
             state,
