@@ -9,7 +9,7 @@ import pytest
 from orchestrator.brain import (
     RouteBrainSuggestion,
     TaskSpecBrainSuggestion,
-    VerificationBrainSuggestion,
+    UnifiedOrchestratorSuggestion,
 )
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.graph import (
@@ -26,6 +26,7 @@ from orchestrator.graph import (
     await_clarification,
     await_permission_escalation,
     build_choose_worker_node,
+    build_generate_task_spec_and_route_node,
     choose_worker,
     dispatch_job,
     generate_task_spec,
@@ -166,6 +167,27 @@ def test_build_worker_request_from_state():
     assert request.budget == {"max_minutes": 15}
     assert request.worker_profile == "codex-native-executor"
     assert request.runtime_mode == "native_agent"
+
+
+def test_build_worker_request_does_not_infer_read_only_from_profile_name() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Smoke test: print PWD and HOME only, then exit.",
+                "constraints": {"requires_approval": False},
+            },
+            "route": {
+                "chosen_worker": "codex",
+                "chosen_profile": "codex-native-executor-read-only",
+                "runtime_mode": "native_agent",
+            },
+        }
+    )
+
+    request = _build_worker_request(state)
+
+    assert request.worker_profile == "codex-native-executor-read-only"
+    assert request.constraints == {"requires_approval": False}
 
 
 def test_build_worker_request_prefers_review_repair_handoff_text():
@@ -366,6 +388,103 @@ async def test_generate_task_spec_brain_failures_fall_back_to_deterministic_spec
     brain_payload = res["timeline_events"][0].payload["brain"]
     assert brain_payload["provider"] == "_ExplodingBrain"
     assert "RuntimeError: brain unavailable" == brain_payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_generate_task_spec_brain_fallback_emits_normalized_attributes() -> None:
+    class _ExplodingBrain:
+        async def suggest_task_spec(self, **kwargs):
+            del kwargs
+            raise RuntimeError("brain unavailable")
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Add API pagination"},
+            "task_kind": "implementation",
+        }
+    )
+    with patch("orchestrator.graph.set_current_span_attribute") as mock_set_attr:
+        await generate_task_spec(state, orchestrator_brain=_ExplodingBrain())
+
+    attrs = {call.args[0]: call.args[1] for call in mock_set_attr.call_args_list}
+    assert attrs["code_agent.fallback.used"] is True
+    assert attrs["code_agent.fallback.from"] == "_ExplodingBrain"
+    assert attrs["code_agent.fallback.to"] == "deterministic_task_spec"
+    assert attrs["code_agent.fallback.reason_code"] == "brain_error"
+
+
+@pytest.mark.asyncio
+async def test_generate_task_spec_and_route_node_applies_unified_brain_route() -> None:
+    class _Brain:
+        async def suggest_task_spec_and_route(self, **kwargs):
+            del kwargs
+            return UnifiedOrchestratorSuggestion(
+                assumptions=[],
+                acceptance_criteria=[],
+                non_goals=[],
+                clarification_questions=[],
+                verification_commands=[],
+                suggested_worker="gemini",
+                suggested_profile="gemini-native-executor-read-only",
+                suggested_retry_strategy=None,
+                rationale="u",
+            )
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "print pwd/home"},
+            "task_kind": "implementation",
+        }
+    )
+    profiles = {
+        "gemini-native-executor-read-only": WorkerProfile(
+            name="gemini-native-executor-read-only",
+            worker_type="gemini",
+            runtime_mode="native_agent",
+            mutation_policy="read_only",
+            capability_tags=["execution"],
+        )
+    }
+    node = build_generate_task_spec_and_route_node(
+        _ALL_WORKERS,
+        available_profiles=profiles,
+        orchestrator_brain=_Brain(),
+    )
+    res = await node(state)
+
+    assert res["current_step"] == "generate_task_spec_and_route"
+    assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["chosen_profile"] == "gemini-native-executor-read-only"
+
+
+@pytest.mark.asyncio
+async def test_generate_task_spec_and_route_node_fails_when_unified_method_missing() -> None:
+    class _LegacyOnlyBrain:
+        async def suggest_task_spec(self, **kwargs):
+            del kwargs
+            return None
+
+        async def suggest_route(self, **kwargs):
+            del kwargs
+            return None
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "print pwd/home"},
+            "task_kind": "implementation",
+        }
+    )
+    node = build_generate_task_spec_and_route_node(
+        _ALL_WORKERS,
+        orchestrator_brain=_LegacyOnlyBrain(),
+    )
+    res = await node(state)
+
+    assert res["current_step"] == "generate_task_spec_and_route"
+    assert res["result"].status == "error"
+    assert "brain_unified_method_missing" in res["errors"]
+    assert res["timeline_events"][0].event_type == "task_spec_and_route_generated"
+    assert res["timeline_events"][0].payload["error_reason_code"] == "brain_unified_method_missing"
 
 
 def test_plan_task_complexity_marker_uses_word_boundaries():
@@ -987,7 +1106,7 @@ def test_compute_route_uses_worker_failure_kind_when_verifier_failure_kind_does_
     )
     route = _compute_route_decision(state, _ALL_WORKERS)
     assert route.chosen_worker == "gemini"
-    assert route.route_reason == "previous_worker_failed"
+    assert route.route_reason == "verifier_failed_previous_run"
 
 
 def test_compute_route_retries_same_worker_for_environment_failure_kind():
@@ -1668,7 +1787,7 @@ def test_route_after_review_result_dispatches_on_repair_handoff():
         {"task": {"task_text": "demo"}, "repair_handoff_requested": True}
     )
 
-    assert _route_after_review_result(state) == "dispatch_job"
+    assert _route_after_review_result(state) == "provision_workspace"
 
 
 def test_route_after_review_result_summarizes_without_repair_handoff():
@@ -1842,63 +1961,6 @@ def test_verify_result_warning_no_changes():
     assert res["verification"]["items"][2]["status"] == "warning"
 
 
-def test_verify_result_accepts_warning_status_from_brain_hint() -> None:
-    state = OrchestratorState.model_validate(
-        {
-            "task": {"task_text": "demo"},
-            "result": {
-                "status": "success",
-                "files_changed": [],
-                "test_results": [{"name": "test1", "status": "passed"}],
-                "commands_run": [],
-            },
-        }
-    )
-
-    res = verify_result(
-        state,
-        verification_brain_suggestion=VerificationBrainSuggestion(
-            accept_warning_status=True,
-            rationale="Warnings are acceptable for this documentation-only task.",
-        ),
-    )
-
-    assert res["verification"]["status"] == "passed"
-    assert res["progress_updates"][-1] == "verification passed via brain warning-acceptance hint"
-    brain_payload = res["timeline_events"][1].payload["brain"]
-    assert brain_payload["applied"] is True
-    assert brain_payload["accept_warning_status"] is True
-    assert brain_payload["final_verification_status"] == "passed"
-
-
-def test_verify_result_rejects_brain_warning_acceptance_for_failed_checks() -> None:
-    state = OrchestratorState.model_validate(
-        {
-            "task": {"task_text": "demo"},
-            "result": {
-                "status": "success",
-                "files_changed": ["file1.py"],
-                "test_results": [{"name": "test1", "status": "failed"}],
-                "commands_run": [],
-            },
-        }
-    )
-
-    res = verify_result(
-        state,
-        verification_brain_suggestion=VerificationBrainSuggestion(
-            accept_warning_status=True,
-            rationale="Try to continue despite failures.",
-        ),
-    )
-
-    assert res["verification"]["status"] == "failed"
-    brain_payload = res["timeline_events"][1].payload["brain"]
-    assert brain_payload["applied"] is False
-    assert brain_payload["ignored_fields"] == ["accept_warning_status"]
-    assert brain_payload["final_verification_status"] == "failed"
-
-
 def test_verify_result_failed_with_changes():
     state = OrchestratorState.model_validate(
         {
@@ -2049,6 +2111,11 @@ def test_verify_result_queues_bounded_repair_handoff_after_verifier_failure() ->
     repair_text = constraints["independent_verifier_repair_request"]
     assert "Apply targeted code fixes for failed verification checks." in repair_text
     assert "pytest -q tests/unit" in repair_text
+    assert (
+        "Light investigation is allowed only when directly tied to explaining "
+        "a failed verification check." in repair_text
+    )
+    assert "Do not perform broad repo debugging" in repair_text
 
 
 def test_verify_result_verifier_repair_budget_is_decoupled_from_max_retries() -> None:
@@ -2254,8 +2321,8 @@ def test_verify_result_warns_when_independent_verifier_command_is_unsafe(tmp_pat
     assert res["verification"]["status"] == "warning"
 
 
-def test_compute_route_profile_aware_filters_read_only_when_mutations_allowed() -> None:
-    """Read-only profiles should be filtered out when the task allows mutations."""
+def test_compute_route_profile_aware_allows_read_only_when_mutations_allowed() -> None:
+    """Read-only profiles remain routable even when task is not explicitly read-only."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "fix helper"}, "task_kind": "implementation"}
     )
@@ -2275,10 +2342,9 @@ def test_compute_route_profile_aware_filters_read_only_when_mutations_allowed() 
         available_profiles=profiles,
     )
 
-    # Should NOT select the read-only profile because task is NOT read-only.
     assert route.chosen_worker == "codex"
-    assert route.chosen_profile is None
-    assert route.route_reason == "runtime_unavailable"
+    assert route.chosen_profile == "codex-read-only"
+    assert route.route_reason == "cheap_mechanical_change"
 
 
 def test_compute_route_profile_aware_selects_read_only_when_constrained() -> None:
@@ -2306,6 +2372,93 @@ def test_compute_route_profile_aware_selects_read_only_when_constrained() -> Non
     assert route.route_reason == "cheap_mechanical_change"
 
 
+def test_compute_route_profile_aware_keeps_shell_smoke_on_normal_executor() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Smoke test: print PWD and HOME only, then exit."},
+            "task_spec": {
+                "goal": "Smoke test: print PWD and HOME only, then exit.",
+                "allowed_actions": ["read_repo_files", "run_non_destructive_checks"],
+                "delivery_mode": "summary",
+            },
+        }
+    )
+    profiles = {
+        "codex-native-executor": WorkerProfile(
+            name="codex-native-executor",
+            worker_type="codex",
+            runtime_mode="native_agent",
+            mutation_policy="patch_allowed",
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
+        ),
+        "codex-native-executor-read-only": WorkerProfile(
+            name="codex-native-executor-read-only",
+            worker_type="codex",
+            runtime_mode="native_agent",
+            mutation_policy="read_only",
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
+        ),
+    }
+
+    route = _compute_route_decision(
+        state,
+        frozenset({"codex"}),
+        available_profiles=profiles,
+    )
+
+    assert route.chosen_worker == "codex"
+    assert route.chosen_profile == "codex-native-executor"
+    assert route.route_reason == "cheap_mechanical_change"
+
+
+def test_build_choose_worker_node_applies_brain_read_only_profile_on_mutable_task() -> None:
+    class _Brain:
+        def suggest_task_spec(self, **kwargs):
+            del kwargs
+            return None
+
+        async def suggest_route(self, **kwargs):
+            del kwargs
+            return RouteBrainSuggestion(
+                suggested_worker="gemini",
+                suggested_profile="gemini-native-executor-read-only",
+                rationale="Use read-only executor for this command-only task.",
+            )
+
+    state = OrchestratorState.model_validate(
+        {"task": {"task_text": "print PWD and HOME"}, "task_kind": "implementation"}
+    )
+    profiles = {
+        "gemini-native-executor-read-only": WorkerProfile(
+            name="gemini-native-executor-read-only",
+            worker_type="gemini",
+            runtime_mode="native_agent",
+            mutation_policy="read_only",
+            capability_tags=["execution"],
+        ),
+        "codex-native-executor": WorkerProfile(
+            name="codex-native-executor",
+            worker_type="codex",
+            runtime_mode="native_agent",
+            mutation_policy="patch_allowed",
+            capability_tags=["execution"],
+        ),
+    }
+
+    node = build_choose_worker_node(
+        _ALL_WORKERS,
+        available_profiles=profiles,
+        orchestrator_brain=_Brain(),
+    )
+    res = asyncio.run(node(state))
+
+    assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["chosen_profile"] == "gemini-native-executor-read-only"
+    assert res["route"]["route_reason"] == "brain_recommendation"
+
+
 def test_verify_result_with_independent_verifier() -> None:
     """Verify handling of independent verifier outcome."""
     state = OrchestratorState.model_validate(
@@ -2329,38 +2482,6 @@ def test_verify_result_with_independent_verifier() -> None:
     iv_item = next(i for i in items if i["label"] == "independent_verifier")
     assert iv_item["status"] == "failed"
     assert iv_item["message"] == "Verifier found issue"
-
-
-def test_verify_result_with_brain_report() -> None:
-    """Verify handling of verification brain report."""
-    from orchestrator.brain import VerificationBrainMergeReport
-
-    state = OrchestratorState.model_validate(
-        {
-            "task": {"task_text": "do something"},
-            "result": {
-                "status": "success",
-                "summary": "ok",
-                "commands_run": [],
-                "files_changed": [],
-                "artifacts": [],
-            },
-        }
-    )
-    report = VerificationBrainMergeReport(
-        enabled=True,
-        provider="Gemini",
-        applied=True,
-    )
-    res = verify_result(
-        state,
-        verification_brain_report=report,
-    )
-    # Brain is in the timeline event payload
-    events = res["timeline_events"]
-    comp_event = next(e for e in events if e.event_type == "verification_completed")
-    assert comp_event.payload["brain"]["provider"] == "Gemini"
-    assert comp_event.payload["brain"]["applied"] is True
 
 
 def test_verify_result_failure_kinds() -> None:
@@ -2460,3 +2581,100 @@ def test_verify_result_attaches_independent_verifier_reason_code() -> None:
     )
     item = next(i for i in res["verification"]["items"] if i["label"] == "independent_verifier")
     assert item["reason_code"] == "infra_verifier_unavailable"
+
+
+def test_dispatch_job_preserves_workspace_id() -> None:
+    from orchestrator.graph import dispatch_job
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "route": {
+                "chosen_worker": "codex",
+                "route_reason": "cheap_mechanical_change",
+            },
+            "dispatch": {"workspace_id": "ws_123"},
+        }
+    )
+    res = dispatch_job(state)
+    assert res["dispatch"]["workspace_id"] == "ws_123"
+
+
+def test_dispatch_job_raises_value_error_if_no_worker() -> None:
+    from orchestrator.graph import dispatch_job
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "route": {
+                "chosen_worker": None,
+                "route_reason": "some_reason",
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="choose_worker must set route.chosen_worker"):
+        dispatch_job(state)
+
+
+def test_route_after_await_permission_escalation_routing() -> None:
+    from orchestrator.graph import _route_after_await_permission_escalation
+
+    # No result means approved/escalated but no outcome yet, route to provision
+    state_no_result = OrchestratorState.model_validate({"task": {"task_text": "demo"}})
+    assert _route_after_await_permission_escalation(state_no_result) == "provision_workspace"
+
+    # Result exists means it failed before escalation or something?
+    # Actually, if result exists, it routes to verify_result
+    state_with_result = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {"status": "failure", "summary": "fail", "failure_kind": "unknown"},
+        }
+    )
+    assert _route_after_await_permission_escalation(state_with_result) == "verify_result"
+
+
+def test_route_after_init_environment_routing() -> None:
+    from orchestrator.graph import _route_after_init_environment
+    from workers.base import WorkerResult
+
+    # Success routes to dispatch_job
+    state_success = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": WorkerResult(status="success", summary="done"),
+        }
+    )
+    assert _route_after_init_environment(state_success) == "dispatch_job"
+
+    # Failure routes to summarize_result (blocking)
+    state_failure = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": WorkerResult(status="failure", summary="failed"),
+        }
+    )
+    assert _route_after_init_environment(state_failure) == "summarize_result"
+
+    # Error routes to summarize_result (blocking)
+    state_error = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": WorkerResult(status="error", summary="error"),
+        }
+    )
+    assert _route_after_init_environment(state_error) == "summarize_result"
+
+    # Interrupt result (failure + next_action_hint="await_manual_follow_up")
+    # MUST also block strictly if it reached this node (P1 finding).
+    state_interrupt = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": WorkerResult(
+                status="failure",
+                summary="interrupted",
+                next_action_hint="await_manual_follow_up",
+            ),
+        }
+    )
+    assert _route_after_init_environment(state_interrupt) == "summarize_result"

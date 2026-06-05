@@ -40,6 +40,7 @@ def _container_handle(tmp_path: Path) -> DockerSandboxContainer:
         workspace=_workspace_handle(tmp_path),
         container_name="sandbox-workspace-task-45",
         image="python:3.12-slim",
+        working_dir=str(tmp_path / "workspace-task-45"),
     )
 
 

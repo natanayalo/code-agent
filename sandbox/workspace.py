@@ -12,10 +12,10 @@ import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
-from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from sandbox.constants import DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS
 from sandbox.redact import mask_url_credentials as _mask_url_credentials
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,11 @@ class CommandRunner(Protocol):
     """Protocol for running external commands."""
 
     def __call__(
-        self, command: list[str], *, cwd: Path | None = None, timeout: int = 300
+        self,
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        timeout: int = DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS,
     ) -> None: ...
 
 
@@ -92,8 +96,11 @@ def _slugify_workspace_owner(value: str) -> str:
 
 
 def _build_workspace_id(task_id: str) -> str:
-    """Generate a readable unique workspace identifier."""
-    return f"workspace-{_slugify_task_id(task_id)}-{uuid4().hex[:8]}"
+    """Generate a readable deterministic workspace identifier for a task."""
+    import hashlib
+
+    task_hash = hashlib.sha256(task_id.encode()).hexdigest()[:8]
+    return f"workspace-{_slugify_task_id(task_id)}-{task_hash}"
 
 
 def default_workspace_root(env: Mapping[str, str] | None = None) -> Path:
@@ -132,7 +139,12 @@ def _should_delete_workspace(policy: WorkspaceCleanupPolicy, *, succeeded: bool)
     return not policy.retain_on_failure
 
 
-def _run_command(command: list[str], *, cwd: Path | None = None, timeout: int = 300) -> None:
+def _run_command(
+    command: list[str],
+    *,
+    cwd: Path | None = None,
+    timeout: int = DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS,
+) -> None:
     """Run a command and raise a workspace-specific error on failure."""
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
@@ -167,7 +179,7 @@ class WorkspaceManager:
         root_dir: str | Path,
         *,
         cleanup_policy: WorkspaceCleanupPolicy | None = None,
-        command_timeout: int = 300,
+        command_timeout: int = DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS,
         command_runner: CommandRunner | None = None,
     ) -> None:
         self.root_dir = Path(root_dir).expanduser().resolve()
@@ -181,7 +193,8 @@ class WorkspaceManager:
 
         workspace_id = _build_workspace_id(request.task_id)
         workspace_path = self.root_dir / workspace_id
-        repo_path = workspace_path / "repo"
+        # T-180: Merge workspace root and repository root for path consistency
+        repo_path = workspace_path
 
         logger.info(
             "Creating sandbox workspace",
@@ -194,9 +207,38 @@ class WorkspaceManager:
         )
 
         try:
-            workspace_path.mkdir(parents=False, exist_ok=False)
+            if workspace_path.exists():
+                if (workspace_path / ".git").is_dir():
+                    logger.info(
+                        "Reusing existing workspace directory",
+                        extra={"workspace_id": workspace_id, "task_id": request.task_id},
+                    )
+                    return WorkspaceHandle(
+                        workspace_id=workspace_id,
+                        task_id=request.task_id,
+                        workspace_path=workspace_path,
+                        repo_path=repo_path,
+                        repo_url=request.repo_url,
+                        branch=request.branch,
+                        cleanup_policy=request.cleanup_policy or self.cleanup_policy,
+                    )
+                elif any(workspace_path.iterdir()):
+                    raise WorkspaceManagerError(
+                        f"Workspace directory exists and is not empty: {workspace_id}"
+                    )
+                else:
+                    logger.info(
+                        "Workspace directory %s exists and is empty. Proceeding with clone.",
+                        workspace_id,
+                    )
+            else:
+                workspace_path.mkdir(parents=False)
         except FileExistsError:
-            raise WorkspaceManagerError(f"Workspace directory already exists: {workspace_id}")
+            # Race condition check
+            if any(workspace_path.iterdir()):
+                raise WorkspaceManagerError(f"Failed to create workspace directory: {workspace_id}")
+        except Exception as exc:
+            raise WorkspaceManagerError(f"Failed to prepare workspace directory: {exc}")
 
         try:
             self._command_runner(
@@ -219,6 +261,36 @@ class WorkspaceManager:
             repo_url=request.repo_url,
             branch=request.branch,
             cleanup_policy=request.cleanup_policy or self.cleanup_policy,
+        )
+
+    def get_workspace(
+        self,
+        workspace_id: str,
+        *,
+        repo_url: str | None = None,
+        branch: str | None = None,
+        task_id: str | None = None,
+    ) -> WorkspaceHandle:
+        """Retrieve a handle for an existing workspace without re-cloning."""
+        workspace_path = (self.root_dir / workspace_id).resolve()
+        if not workspace_path.is_relative_to(self.root_dir) or workspace_path == self.root_dir:
+            raise WorkspaceManagerError(f"Refusing to access path outside root: {workspace_path}")
+
+        if not workspace_path.is_dir():
+            raise WorkspaceManagerError(f"Workspace directory missing: {workspace_id}")
+
+        repo_path = workspace_path
+
+        # Note: We trust the caller for repo_url/branch/task_id if they provide them,
+        # otherwise we just pass back what we can resolve.
+        return WorkspaceHandle(
+            workspace_id=workspace_id,
+            task_id=task_id or "unknown",
+            workspace_path=workspace_path,
+            repo_path=repo_path,
+            repo_url=repo_url or "unknown",
+            branch=branch,
+            cleanup_policy=self.cleanup_policy,
         )
 
     def cleanup_workspace(self, workspace: WorkspaceHandle, *, succeeded: bool) -> bool:

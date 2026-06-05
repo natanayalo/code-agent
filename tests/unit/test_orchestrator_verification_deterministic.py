@@ -9,7 +9,7 @@ import pytest
 import orchestrator.verification as verification_module
 from db.enums import WorkerRuntimeMode
 from orchestrator.state import OrchestratorState
-from workers import TestResult, WorkerResult
+from workers import WorkerResult, WorkerTestResult
 
 
 def _state() -> OrchestratorState:
@@ -55,13 +55,14 @@ async def test_run_deterministic_verification_passes_script_to_shell_worker() ->
         summary="Commands passed.",
     )
 
-    status, summary = await verification_module.run_deterministic_verification(
+    status, summary, metadata = await verification_module.run_deterministic_verification(
         state,
         worker_factory={"shell": mock_worker},
     )
 
     assert status == "passed"
     assert "Explicit verification commands passed." in summary
+    assert metadata is None
 
     args, _ = mock_worker.run.call_args
     request = args[0]
@@ -79,20 +80,21 @@ async def test_run_deterministic_verification_fails_on_worker_failure() -> None:
         summary="Tests failed.",
     )
 
-    status, summary = await verification_module.run_deterministic_verification(
+    status, summary, metadata = await verification_module.run_deterministic_verification(
         state,
         worker_factory={"shell": mock_worker},
     )
 
     assert status == "failed"
     assert "Deterministic verification failed: Tests failed." in summary
+    assert metadata is None
 
 
 @pytest.mark.anyio
 async def test_run_independent_verifier_returns_warning_on_timeout_if_tests_passed() -> None:
     state = _state()
     # Add passing test results
-    state.result.test_results = [TestResult(name="test1", status="passed")]
+    state.result.test_results = [WorkerTestResult(name="test1", status="passed")]
 
     mock_worker = AsyncMock()
     mock_worker.run.side_effect = TimeoutError()
@@ -111,7 +113,7 @@ async def test_run_independent_verifier_returns_warning_on_timeout_if_tests_pass
 async def test_run_independent_verifier_returns_warning_on_timeout_if_tests_failed() -> None:
     state = _state()
     # Add failing test results
-    state.result.test_results = [TestResult(name="test1", status="failed")]
+    state.result.test_results = [WorkerTestResult(name="test1", status="failed")]
 
     mock_worker = AsyncMock()
     mock_worker.run.side_effect = TimeoutError()
@@ -132,7 +134,7 @@ async def test_run_deterministic_verification_returns_warning_on_no_result() -> 
     state = _state()
     state.result = None
 
-    status, summary = await verification_module.run_deterministic_verification(
+    status, summary, _ = await verification_module.run_deterministic_verification(
         state, worker_factory={}
     )
 
@@ -144,7 +146,7 @@ async def test_run_deterministic_verification_returns_warning_on_no_result() -> 
 async def test_run_deterministic_verification_returns_warning_on_missing_shell_worker() -> None:
     state = _state()
 
-    status, summary = await verification_module.run_deterministic_verification(
+    status, summary, _ = await verification_module.run_deterministic_verification(
         state, worker_factory={"codex": AsyncMock()}
     )
 
@@ -155,11 +157,11 @@ async def test_run_deterministic_verification_returns_warning_on_missing_shell_w
 @pytest.mark.anyio
 async def test_run_deterministic_verification_handles_timeout_with_passing_tests() -> None:
     state = _state()
-    state.result.test_results = [TestResult(name="t1", status="passed")]
+    state.result.test_results = [WorkerTestResult(name="t1", status="passed")]
     mock_worker = AsyncMock()
     mock_worker.run.side_effect = TimeoutError()
 
-    status, summary = await verification_module.run_deterministic_verification(
+    status, summary, _ = await verification_module.run_deterministic_verification(
         state,
         worker_factory={"shell": mock_worker},
     )
@@ -171,11 +173,11 @@ async def test_run_deterministic_verification_handles_timeout_with_passing_tests
 @pytest.mark.anyio
 async def test_run_deterministic_verification_handles_timeout_with_failing_tests() -> None:
     state = _state()
-    state.result.test_results = [TestResult(name="t1", status="failed")]
+    state.result.test_results = [WorkerTestResult(name="t1", status="failed")]
     mock_worker = AsyncMock()
     mock_worker.run.side_effect = TimeoutError()
 
-    status, summary = await verification_module.run_deterministic_verification(
+    status, summary, _ = await verification_module.run_deterministic_verification(
         state,
         worker_factory={"shell": mock_worker},
     )
@@ -190,7 +192,7 @@ async def test_run_deterministic_verification_handles_infra_error() -> None:
     mock_worker = AsyncMock()
     mock_worker.run.side_effect = RuntimeError("Broken")
 
-    status, summary = await verification_module.run_deterministic_verification(
+    status, summary, _ = await verification_module.run_deterministic_verification(
         state,
         worker_factory={"shell": mock_worker},
     )
@@ -204,7 +206,7 @@ async def test_run_deterministic_verification_returns_passed_on_no_commands() ->
     state = _state()
     state.task_spec.verification_commands = []
 
-    status, summary = await verification_module.run_deterministic_verification(
+    status, summary, _ = await verification_module.run_deterministic_verification(
         state, worker_factory={}
     )
 
@@ -245,3 +247,42 @@ def test_resolve_verification_commands_prefers_task_spec() -> None:
 
     cmds = verification_module.resolve_verification_commands(state)
     assert cmds == ["task-cmd"]
+
+
+def test_split_verification_commands_filters_placeholder_templates() -> None:
+    placeholder = (
+        "<project-specific smoke test command that exercises the task and confirms only "
+        "PWD and HOME are emitted>"
+    )
+    executable, placeholders = verification_module.split_verification_commands(
+        [
+            "pwd",
+            placeholder,
+            "printf '%s\\n' \"$HOME\"",
+        ]
+    )
+    assert executable == ["pwd", "printf '%s\\n' \"$HOME\""]
+    assert placeholders == [placeholder]
+
+
+@pytest.mark.anyio
+async def test_run_deterministic_verification_skips_placeholder_only_commands() -> None:
+    state = _state()
+    placeholder = (
+        "<project-specific smoke test command that exercises the task and confirms only "
+        "PWD and HOME are emitted>"
+    )
+    state.task_spec.verification_commands = [placeholder]
+    mock_worker = AsyncMock()
+
+    status, summary, metadata = await verification_module.run_deterministic_verification(
+        state,
+        worker_factory={"shell": mock_worker},
+    )
+
+    assert status == "warning"
+    assert "placeholder" in summary.lower()
+    assert metadata is not None
+    assert metadata["skip_reason_code"] == "verification_commands_placeholder_only"
+    assert metadata["placeholder_count"] == 1
+    mock_worker.run.assert_not_called()

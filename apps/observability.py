@@ -6,7 +6,7 @@ import importlib.metadata
 import json
 import logging
 import os
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from functools import wraps
@@ -101,7 +101,10 @@ def is_tracing_enabled(environ: Mapping[str, str] | None = None) -> bool:
     value = env.get(ENABLE_TRACING_ENV_VAR)
     if value is None:
         return False
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    normalized = value.strip().lower()
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return normalized in {"1", "true", "yes", "on"}
 
 
 def _clean(value: str | None) -> str | None:
@@ -304,7 +307,7 @@ def detach_trace_context(token: Any) -> None:
 
 
 @contextmanager
-def with_restored_trace_context(context: dict[str, str] | None) -> Iterator[None]:
+def with_restored_trace_context(context: dict[str, str] | None) -> Generator[None, None, None]:
     """Context manager that restores and reliably detaches trace context."""
     token = restore_trace_context(context)
     try:
@@ -339,7 +342,7 @@ def get_centralized_span_input_data(
     extra_attributes: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Consolidate standard task correlation attributes into a span attribute dictionary."""
-    attributes = dict(extra_attributes) if extra_attributes is not None else {}
+    attributes: dict[str, Any] = dict(extra_attributes) if extra_attributes is not None else {}
     if task_id:
         attributes[TASK_ID_ATTRIBUTE] = task_id
     if session_id:
@@ -509,6 +512,21 @@ def set_current_span_attribute(key: str, value: Any) -> None:
         set_optional_span_attribute(span, key, value)
     except Exception as exc:
         logger.debug("Failed to set current span attribute '%s': %s", key, exc)
+
+
+def add_current_span_event(name: str, attributes: Mapping[str, Any] | None = None) -> None:
+    """Add a structured event to the current span when tracing is available."""
+    try:
+        from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
+
+        span = otel_trace.get_current_span()
+        if not span.is_recording():
+            return
+        span.add_event(name, attributes=dict(attributes or {}))
+    except ImportError:
+        pass
+    except Exception as exc:
+        logger.debug("Failed to add current span event '%s': %s", name, exc)
 
 
 def record_span_exception(exc: Exception) -> None:

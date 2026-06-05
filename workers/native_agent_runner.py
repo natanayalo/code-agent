@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -23,6 +25,8 @@ from apps.observability import (
     NATIVE_AGENT_TIMED_OUT_ATTRIBUTE,
     NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH,
     SPAN_KIND_AGENT,
+    SPAN_KIND_LLM,
+    add_current_span_event,
     inject_w3c_trace_context_env,
     set_current_span_attribute,
     set_span_input_output,
@@ -34,6 +38,15 @@ from sandbox.redact import SecretRedactor, redact_and_truncate_output, sanitize_
 from workers.adapter_utils import format_native_run_summary, truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
+from workers.constants import (
+    DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS as DEFAULT_NATIVE_AGENT_CHANGED_FILES_TIMEOUT_SECONDS,
+)
+from workers.constants import (
+    DEFAULT_DIFF_TIMEOUT_SECONDS as DEFAULT_NATIVE_AGENT_DIFF_TIMEOUT_SECONDS,
+)
+from workers.constants import (
+    DEFAULT_WORKER_TIMEOUT_SECONDS as DEFAULT_NATIVE_AGENT_TIMEOUT_SECONDS,
+)
 from workers.failure_taxonomy import find_infra_failure_marker
 from workers.llm_tracing import set_llm_span_output, with_llm_span
 from workers.native_agent_models import NativeAgentRunResult
@@ -41,9 +54,6 @@ from workers.native_agent_models import NativeAgentRunResult
 logger = logging.getLogger(__name__)
 _JSON_DECODER = json.JSONDecoder()
 
-DEFAULT_NATIVE_AGENT_TIMEOUT_SECONDS = 600
-DEFAULT_NATIVE_AGENT_DIFF_TIMEOUT_SECONDS = 15
-DEFAULT_NATIVE_AGENT_CHANGED_FILES_TIMEOUT_SECONDS = 10
 DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR = ".code-agent/native-agent-runner"
 DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS = 1000
 _STDOUT_FALLBACK_TRUNCATION_NOTE = "[stdout truncated for summary]\n"
@@ -55,6 +65,84 @@ _FINAL_MESSAGE_FIELDS: Final = (
     "content",
     "response",
 )
+_LLM_WRAPPER_PAYLOAD_KEYS: Final[tuple[str, ...]] = ("response", "content", "summary")
+_LLM_METADATA_ATTR_PREFIX: Final[str] = "code_agent.native.llm_wrapper"
+_JSON_PAYLOAD_ATTR_PREFIX: Final[str] = "code_agent.native.json_payload"
+_LLM_WRAPPER_METADATA_KEYS: Final[frozenset[str]] = frozenset(
+    {"session_id", "stats", "models", "tools", "files"}
+)
+_TELEMETRY_ONLY_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "api",
+        "byName",
+        "cached",
+        "candidates",
+        "files",
+        "input",
+        "models",
+        "prompt",
+        "roles",
+        "stats",
+        "thoughts",
+        "tokens",
+        "tool",
+        "tools",
+        "total",
+        "totalCalls",
+        "totalDecisions",
+        "totalDurationMs",
+        "totalErrors",
+        "totalFail",
+        "totalLatencyMs",
+        "totalRequests",
+        "totalSuccess",
+    }
+)
+_FENCED_JSON_BLOCK_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"```(?:json)?\s*(?P<body>.*?)```",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Standardized system environment variables that are safe to propagate to the sandbox.
+SAFE_SYSTEM_ENV_ALLOWLIST: Final[frozenset[str]] = frozenset(
+    {
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "TERM",
+        "PYTHONPATH",
+        "PYTHONUNBUFFERED",
+        "PYTHONDONTWRITEBYTECODE",
+        "PIP_CERT",
+        "SSL_CERT_FILE",
+        "GPG_KEY",
+        "PYTHON_VERSION",
+        "PYTHON_SHA256",
+        "PWD",
+        "USER",
+        "HOSTNAME",
+    }
+)
+
+# Environment variable prefixes that must never be passed to the sandbox
+# unless explicitly overridden.
+SENSITIVE_ENV_PREFIX_DENYLIST: Final[frozenset[str]] = frozenset(
+    {
+        "AWS_",
+        "GCP_",
+        "OTEL_",
+        "PHOENIX_",
+        "DATABASE_",
+        "POSTGRES_",
+        "TELEGRAM_",
+        "GEMINI_",
+        "OPENROUTER_",
+        "CODE_AGENT_",
+    }
+)
+
+# Explicit auth-home keys that are safe to propagate even when HOME is isolated.
+ALLOWED_AUTH_HOME_KEYS: Final[frozenset[str]] = frozenset({"CODEX_HOME", "GEMINI_HOME"})
 
 
 _SIGNAL_EXIT_CODES: Final = {
@@ -71,6 +159,39 @@ _SIGNAL_EXIT_CODES: Final = {
     139: "SIGSEGV",
     -11: "SIGSEGV",
 }
+
+
+def _detect_reason_code(
+    *,
+    status: Literal["success", "failure", "error"],
+    timed_out: bool,
+    exit_code: int | None,
+    summary: str,
+    stderr: str,
+) -> tuple[str, str]:
+    """Return stable reason_code/reason_detail for native run observability."""
+    if timed_out:
+        return "timeout", "command_timeout"
+    if status == "success":
+        return "ok", "completed"
+
+    detail = summary.strip().lower()
+    stderr_l = stderr.lower()
+    if "auth method" in detail or "gemini_api_key" in stderr_l:
+        return "auth_missing", "missing_auth_configuration"
+    if "requires user confirmation" in detail:
+        return "approval_blocked_noninteractive", "requires_user_confirmation"
+    if "tool registry mismatch" in detail:
+        return "tool_registry_mismatch", "tool_not_found"
+    if "shell crash" in detail or "sandbox_infra" in detail:
+        return "sandbox_infra_crash", "shell_crash_detected"
+    if "could not start" in detail:
+        return "process_start_failure", "process_could_not_start"
+    if "failed while collecting artifacts" in detail:
+        return "artifact_collection_failure", "artifact_collection_failed"
+    if exit_code not in (None, 0):
+        return "nonzero_exit", f"exit_code_{exit_code}"
+    return "unknown_error", "unclassified_failure"
 
 
 def _extract_final_message(raw_text: str) -> str | None:
@@ -136,6 +257,7 @@ class NativeAgentRunRequest:
     redactor: SecretRedactor | None = None
     response_format: Literal["text", "json"] = "text"
     response_schema: dict[str, Any] | None = None
+    span_kind: str = SPAN_KIND_LLM
 
 
 def _normalize_stream_payload(payload: str | bytes | None) -> str:
@@ -324,6 +446,180 @@ def _record_span_data(
     set_span_input_output(input_data=redacted_input, output_data=redacted_output)
 
 
+def _split_llm_output_and_metadata(raw_output: str) -> tuple[Any, dict[str, Any] | None]:
+    """Return (payload_for_output_value, wrapper_metadata) for CLI JSON envelopes."""
+    text = raw_output.strip()
+    if not text:
+        return raw_output, None
+
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return raw_output, None
+
+    if not isinstance(parsed, dict):
+        return parsed, None
+
+    parsed_keys = set(parsed)
+    payload_key = next(
+        (
+            key
+            for key in _LLM_WRAPPER_PAYLOAD_KEYS
+            if key in parsed
+            and (key == "response" or bool(parsed_keys.intersection(_LLM_WRAPPER_METADATA_KEYS)))
+        ),
+        None,
+    )
+    if payload_key is None:
+        return parsed, None
+
+    payload = parsed.get(payload_key)
+    if isinstance(payload, str):
+        candidate = payload.strip()
+        if candidate:
+            try:
+                payload = json.loads(candidate)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                payload = payload
+    metadata = {k: v for k, v in parsed.items() if k != payload_key}
+    return payload, metadata or None
+
+
+def _schema_property_names(response_schema: dict[str, Any] | None) -> frozenset[str]:
+    if not response_schema:
+        return frozenset()
+    properties = response_schema.get("properties")
+    if not isinstance(properties, dict):
+        return frozenset()
+    return frozenset(str(key) for key in properties)
+
+
+def _json_payload_rejection_reason(
+    payload: dict[str, Any],
+    *,
+    response_schema: dict[str, Any] | None,
+    response_format: Literal["text", "json"],
+) -> str | None:
+    keys = set(payload)
+    if keys and keys <= _TELEMETRY_ONLY_KEYS:
+        return "telemetry_only"
+
+    schema_keys = _schema_property_names(response_schema)
+    if response_format == "json" and schema_keys and not keys.intersection(schema_keys):
+        return "schema_key_mismatch"
+
+    return None
+
+
+def _parse_json_dict(text: str) -> dict[str, Any] | None:
+    try:
+        candidate = json.loads(text.strip())
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return candidate if isinstance(candidate, dict) else None
+
+
+def _parse_json_dict_from_value(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    return _parse_json_dict(value)
+
+
+def _iter_fenced_json_dicts(text: str) -> list[dict[str, Any]]:
+    return [
+        payload
+        for match in _FENCED_JSON_BLOCK_PATTERN.finditer(text)
+        if (payload := _parse_json_dict(match.group("body"))) is not None
+    ]
+
+
+def _iter_embedded_json_dicts(text: str) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    pos = text.find("{")
+    while pos != -1:
+        try:
+            candidate, end_idx = _JSON_DECODER.raw_decode(text[pos:])
+        except (json.JSONDecodeError, ValueError):
+            pos = text.find("{", pos + 1)
+            continue
+        if isinstance(candidate, dict):
+            payloads.append(candidate)
+        pos = text.find("{", pos + max(end_idx, 1))
+    return payloads
+
+
+def _select_json_payload(
+    candidates: list[tuple[str, dict[str, Any]]],
+    *,
+    response_schema: dict[str, Any] | None,
+    response_format: Literal["text", "json"],
+) -> tuple[dict[str, Any] | None, str | None, str | None]:
+    rejected_reason: str | None = None
+    for source, payload in candidates:
+        rejection_reason = _json_payload_rejection_reason(
+            payload,
+            response_schema=response_schema,
+            response_format=response_format,
+        )
+        if rejection_reason is None:
+            return payload, source, None
+        rejected_reason = rejected_reason or rejection_reason
+    return None, None, rejected_reason
+
+
+def _extract_business_json_payload(
+    *,
+    final_message: str | None,
+    stdout_text: str,
+    response_format: Literal["text", "json"],
+    response_schema: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, str | None, str | None]:
+    """Extract model business JSON while rejecting CLI telemetry envelopes."""
+    candidates: list[tuple[str, dict[str, Any]]] = []
+
+    if final_message:
+        if payload := _parse_json_dict(final_message):
+            candidates.append(("final_message", payload))
+
+    wrapper_payload = _parse_json_dict(stdout_text)
+    if wrapper_payload is not None:
+        for key in _LLM_WRAPPER_PAYLOAD_KEYS:
+            if key not in wrapper_payload:
+                continue
+            if payload := _parse_json_dict_from_value(wrapper_payload[key]):
+                candidates.append((f"stdout_wrapper.{key}", payload))
+
+    for source_text_name, source_text in (
+        ("final_message", final_message or ""),
+        ("stdout", stdout_text),
+    ):
+        if not source_text:
+            continue
+        candidates.extend(
+            (f"{source_text_name}.fenced_json", payload)
+            for payload in reversed(_iter_fenced_json_dicts(source_text))
+        )
+
+    for source_text_name, source_text in (
+        ("final_message", final_message or ""),
+        ("stdout", stdout_text),
+    ):
+        if not source_text:
+            continue
+        candidates.extend(
+            (f"{source_text_name}.embedded_json", payload)
+            for payload in reversed(_iter_embedded_json_dicts(source_text))
+        )
+
+    return _select_json_payload(
+        candidates,
+        response_schema=response_schema,
+        response_format=response_format,
+    )
+
+
 def _finalize_native_agent_run(
     request: NativeAgentRunRequest,
     *,
@@ -340,6 +636,8 @@ def _finalize_native_agent_run(
     files_changed: list[str] | None = None,
     artifacts: list[ArtifactReference] | None = None,
     json_payload: dict[str, Any] | None = None,
+    json_payload_source: str | None = None,
+    json_payload_rejected_reason: str | None = None,
 ) -> NativeAgentRunResult:
     """Centralize NativeAgentRunResult construction and standardized span metadata recording."""
     elapsed = time.perf_counter() - started_at
@@ -361,11 +659,32 @@ def _finalize_native_agent_run(
 
     # Standardized Tracing Metadata
     run_summary = format_native_run_summary(result)
+    reason_code, reason_detail = _detect_reason_code(
+        status=status,
+        timed_out=timed_out,
+        exit_code=exit_code,
+        summary=summary,
+        stderr=stderr,
+    )
     _record_span_data(
         output_data=run_summary,
         redactor=request.redactor,
     )
+    # New canonical native telemetry attributes.
+    set_current_span_attribute("code_agent.native.outcome_status", result.status)
+    set_current_span_attribute("code_agent.native.reason_code", reason_code)
+    set_current_span_attribute("code_agent.native.reason_detail", reason_detail)
+    set_current_span_attribute(
+        "code_agent.native.command", sanitize_command(command_text, request.redactor)
+    )
+    set_current_span_attribute("code_agent.native.timed_out", timed_out)
+    set_current_span_attribute("code_agent.native.duration_seconds", elapsed)
+    set_current_span_attribute(
+        "code_agent.native.event_capture_enabled", request.events_path is not None
+    )
+    set_current_span_attribute("code_agent.native.artifact_root_present", bool(artifacts))
     if result.exit_code is not None:
+        set_current_span_attribute("code_agent.native.exit_code", result.exit_code)
         set_current_span_attribute(NATIVE_AGENT_EXIT_CODE_ATTRIBUTE, result.exit_code)
     set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, timed_out)
     set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, elapsed)
@@ -384,6 +703,41 @@ def _finalize_native_agent_run(
     if result.json_payload:
         # Record structured output for observability (parity with backup branch)
         set_current_span_attribute("llm.json_output", json.dumps(result.json_payload))
+        if json_payload_source:
+            set_current_span_attribute(f"{_JSON_PAYLOAD_ATTR_PREFIX}_source", json_payload_source)
+        set_current_span_attribute(
+            f"{_JSON_PAYLOAD_ATTR_PREFIX}_keys",
+            ",".join(sorted(result.json_payload)),
+        )
+        add_current_span_event(
+            "code_agent.native.json_payload_extracted",
+            {
+                "source": json_payload_source or "unknown",
+                "keys_count": len(result.json_payload),
+            },
+        )
+    elif json_payload_rejected_reason:
+        set_current_span_attribute(
+            f"{_JSON_PAYLOAD_ATTR_PREFIX}_rejected_reason",
+            json_payload_rejected_reason,
+        )
+        add_current_span_event(
+            "code_agent.native.json_payload_rejected",
+            {"reason": json_payload_rejected_reason},
+        )
+
+    run_completed_payload: dict[str, str | int | float | bool] = {
+        "status": result.status,
+        "reason_code": reason_code,
+        "timed_out": timed_out,
+        "duration_seconds": elapsed,
+        "has_json_payload": bool(result.json_payload),
+        "has_final_message": bool(final_message),
+        "files_changed_count": len(files_changed or []),
+    }
+    if result.exit_code is not None:
+        run_completed_payload["exit_code"] = result.exit_code
+    add_current_span_event("code_agent.native.run_completed", run_completed_payload)
 
     redacted_status_summary = redact_and_truncate_output(
         run_summary, redactor=request.redactor, limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
@@ -416,7 +770,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
 
     command_text = shlex.join(request.command)
     started_at = time.perf_counter()
-    completed: subprocess.CompletedProcess | None = None
+    completed: subprocess.CompletedProcess[str] | None = None
     stdout_text: str = ""
     stderr_text: str = ""
     artifacts: list[ArtifactReference] = []
@@ -436,60 +790,224 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
         )
 
         try:
-            with with_llm_span(
-                tracer_name="workers.native_agent_runner",
-                span_name="native_agent_run.llm",
-                input_data=request.prompt,
-                task_id=request.task_id,
-                session_id=request.session_id,
-            ):
-                completed = subprocess.run(
-                    request.command,
-                    input=request.prompt,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    cwd=repo_path,
-                    env=inject_w3c_trace_context_env(request.env),
-                    timeout=request.timeout_seconds,
-                )
-                set_llm_span_output(completed.stdout)
-            timed_out = False
-        except subprocess.TimeoutExpired as exc:
-            stdout_text = _normalize_stream_payload(exc.stdout)
-            stderr_text = _normalize_stream_payload(exc.stderr)
-            try:
-                artifacts.extend(
-                    _collect_standard_artifacts(
-                        artifact_root=artifact_root,
-                        stdout_text=stdout_text,
-                        stderr_text=stderr_text,
-                        events_path=events_path,
-                    )
-                )
-            except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as exc:
-                logger.debug("Native agent runner failed to collect timeout artifacts: %s", exc)
-                logger.exception(
-                    "Native agent runner failed while collecting timeout artifacts.",
-                    extra={"command": command_text},
-                )
+            max_retries = 2
+            retry_count = 0
 
-            return _finalize_native_agent_run(
-                request=request,
-                status="error",
-                summary=f"Native agent command timed out after {request.timeout_seconds}s.",
-                command_text=command_text,
-                started_at=started_at,
-                timed_out=True,
-                stdout=stdout_text,
-                stderr=stderr_text,
-                artifacts=artifacts,
-            )
+            while retry_count <= max_retries:
+                try:
+                    with with_llm_span(
+                        tracer_name="workers.native_agent_runner",
+                        span_name=f"native_agent_run.{request.span_kind.lower()}",
+                        input_data=request.prompt,
+                        task_id=request.task_id,
+                        session_id=request.session_id,
+                        kind=request.span_kind,
+                    ):
+                        # 1. Start with a minimal environment from the allowlist
+                        effective_env: dict[str, str] = {
+                            k: v
+                            for k, v in os.environ.items()
+                            if k.upper() in SAFE_SYSTEM_ENV_ALLOWLIST
+                        }
+
+                        # 2. Build a workspace-local HOME path we enforce later.
+                        #    Keeping the value here avoids recomputing and ensures
+                        #    the final force-overrides can always re-assert it.
+                        agent_home = request.workspace_path / ".agent_home"
+                        agent_home.mkdir(parents=True, exist_ok=True)
+                        agent_home_value = str(agent_home)
+                        effective_env["HOME"] = agent_home_value
+
+                        # 3. Merge request.env after filtering against the sensitive denylist
+                        if request.env:
+                            for k, v in request.env.items():
+                                k_upper = k.upper()
+                                if k_upper == "HOME":
+                                    logger.warning(
+                                        "Native agent runner dropped protected environment key: %s",
+                                        k,
+                                    )
+                                    continue
+                                if k_upper in ALLOWED_AUTH_HOME_KEYS:
+                                    effective_env[k] = v
+                                    continue
+                                is_denied = any(
+                                    k_upper.startswith(prefix)
+                                    for prefix in SENSITIVE_ENV_PREFIX_DENYLIST
+                                )
+                                if is_denied:
+                                    logger.warning(
+                                        "Native agent runner dropped sensitive environment key: %s",
+                                        k,
+                                    )
+                                    continue
+                                effective_env[k] = v
+
+                        # 4. Apply force-set isolation overrides (MUST win over request.env)
+                        effective_env.update(
+                            {
+                                "HOME": agent_home_value,
+                                "CODEX_HOME": "/root/.codex",
+                                "GEMINI_HOME": "/root/.gemini",
+                                "CODE_AGENT_ENABLE_TRACING": "0",
+                                "CODE_AGENT_ENABLE_TASK_SERVICE": "0",
+                                "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED": "0",
+                                "DATABASE_URL": f"sqlite:///{request.workspace_path.as_posix()}/.sandbox.db",
+                                "TELEGRAM_BOT_TOKEN": "",
+                            }
+                        )
+
+                        completed = subprocess.run(
+                            request.command,
+                            input=request.prompt,
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                            cwd=repo_path,
+                            env=inject_w3c_trace_context_env(effective_env),
+                            timeout=request.timeout_seconds,
+                        )
+                        llm_output, llm_metadata = _split_llm_output_and_metadata(
+                            completed.stdout or ""
+                        )
+                        set_llm_span_output(llm_output)
+                        if llm_metadata is not None:
+                            set_current_span_attribute(
+                                f"{_LLM_METADATA_ATTR_PREFIX}.present",
+                                True,
+                            )
+                            if isinstance(llm_metadata.get("session_id"), str):
+                                set_current_span_attribute(
+                                    f"{_LLM_METADATA_ATTR_PREFIX}.session_id",
+                                    llm_metadata["session_id"],
+                                )
+                            set_current_span_attribute(
+                                f"{_LLM_METADATA_ATTR_PREFIX}.json",
+                                truncate_detail_keep_tail(
+                                    json.dumps(llm_metadata, default=str),
+                                    max_characters=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH,
+                                ),
+                            )
+                            add_current_span_event(
+                                "code_agent.native.metadata_detected",
+                                {
+                                    "has_session_id": isinstance(
+                                        llm_metadata.get("session_id"), str
+                                    ),
+                                    "metadata_keys_count": len(llm_metadata),
+                                },
+                            )
+
+                    # Check for network-like errors in stdout/stderr even if it finished
+                    output_text = (completed.stdout or "") + (completed.stderr or "")
+                    if (
+                        any(
+                            err in output_text
+                            for err in ["ECONNRESET", "socket hang up", "ETIMEDOUT"]
+                        )
+                        and retry_count < max_retries
+                    ):
+                        retry_count += 1
+                        wait_seconds = 2**retry_count
+                        logger.warning(
+                            "Native agent encountered network error, retrying...",
+                            extra={
+                                "retry_count": retry_count,
+                                "wait_seconds": wait_seconds,
+                                "command": command_text,
+                            },
+                        )
+                        add_current_span_event(
+                            "code_agent.native.run_retry",
+                            {
+                                "retry_count": retry_count,
+                                "wait_seconds": wait_seconds,
+                                "retry_reason": "network_error",
+                            },
+                        )
+                        time.sleep(wait_seconds)
+                        continue
+
+                    timed_out = False
+                    break
+                except subprocess.TimeoutExpired as exc:
+                    stdout_text = _normalize_stream_payload(exc.stdout)
+                    stderr_text = _normalize_stream_payload(exc.stderr)
+                    output_text = stdout_text + stderr_text
+
+                    if (
+                        any(
+                            err in output_text
+                            for err in ["ECONNRESET", "socket hang up", "ETIMEDOUT"]
+                        )
+                        and retry_count < max_retries
+                    ):
+                        retry_count += 1
+                        wait_seconds = 2**retry_count
+                        logger.warning(
+                            "Native agent timed out with network error, retrying...",
+                            extra={
+                                "retry_count": retry_count,
+                                "wait_seconds": wait_seconds,
+                                "command": command_text,
+                            },
+                        )
+                        add_current_span_event(
+                            "code_agent.native.run_retry",
+                            {
+                                "retry_count": retry_count,
+                                "wait_seconds": wait_seconds,
+                                "retry_reason": "network_timeout",
+                            },
+                        )
+                        time.sleep(wait_seconds)
+                        continue
+
+                    try:
+                        artifacts.extend(
+                            _collect_standard_artifacts(
+                                artifact_root=artifact_root,
+                                stdout_text=stdout_text,
+                                stderr_text=stderr_text,
+                                events_path=events_path,
+                            )
+                        )
+                    except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as e:
+                        logger.debug(
+                            "Native agent runner failed to collect timeout artifacts: %s", e
+                        )
+                        logger.exception(
+                            "Native agent runner failed while collecting timeout artifacts.",
+                            extra={"command": command_text},
+                        )
+
+                    return _finalize_native_agent_run(
+                        request=request,
+                        status="error",
+                        summary=f"Native agent command timed out after {request.timeout_seconds}s.",
+                        command_text=command_text,
+                        started_at=started_at,
+                        timed_out=True,
+                        stdout=stdout_text,
+                        stderr=stderr_text,
+                        artifacts=artifacts,
+                    )
         except OSError as exc:
             return _finalize_native_agent_run(
                 request=request,
                 status="error",
                 summary=(f"Native agent command could not start `{request.command[0]}`: {exc}"),
+                command_text=command_text,
+                started_at=started_at,
+                timed_out=False,
+            )
+
+        if completed is None:
+            # Should be unreachable if the loop exited via break
+            return _finalize_native_agent_run(
+                request=request,
+                status="error",
+                summary="Native agent runner failed unexpectedly (process result missing).",
                 command_text=command_text,
                 started_at=started_at,
                 timed_out=False,
@@ -583,20 +1101,14 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                     sig_name = _SIGNAL_EXIT_CODES[completed.returncode]
                     summary = f"SANDBOX_INFRA: detected shell crash ({sig_name})"
 
-            # Extract structured payload for trace and debugging
-            json_payload = None
-            for text_source in [summary, stdout_text]:
-                if not text_source:
-                    continue
-                try:
-                    unwrapped = _extract_final_message(text_source)
-                    if unwrapped:
-                        candidate = json.loads(unwrapped)
-                        if isinstance(candidate, dict):
-                            json_payload = candidate
-                            break
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    continue
+            json_payload, json_payload_source, json_payload_rejected_reason = (
+                _extract_business_json_payload(
+                    final_message=final_message,
+                    stdout_text=stdout_text,
+                    response_format=request.response_format,
+                    response_schema=request.response_schema,
+                )
+            )
 
             return _finalize_native_agent_run(
                 request=request,
@@ -613,6 +1125,8 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 files_changed=files_changed,
                 artifacts=artifacts,
                 json_payload=json_payload,
+                json_payload_source=json_payload_source,
+                json_payload_rejected_reason=json_payload_rejected_reason,
             )
         except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as exc:
             logger.debug("Native agent runner artifact collection failed: %s", exc)

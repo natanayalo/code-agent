@@ -4,10 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from orchestrator.brain import VerificationBrainSuggestion
 from orchestrator.nodes.verification import build_verify_result_node
 from orchestrator.state import OrchestratorState
-from workers import WorkerResult
+from workers import WorkerResult, WorkerTestResult
 
 
 def _state() -> OrchestratorState:
@@ -39,7 +38,7 @@ async def test_verify_node_short_circuits_when_result_missing(
 
 
 @pytest.mark.anyio
-async def test_verify_node_handles_independent_verifier_and_brain_exception(
+async def test_verify_node_handles_independent_verifier_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _state()
@@ -48,47 +47,29 @@ async def test_verify_node_handles_independent_verifier_and_brain_exception(
         status="success",
         summary="ok",
         files_changed=["a.py"],
-        test_results=[],
+        test_results=[WorkerTestResult(name="t1", status="passed")],
         commands_run=[],
     )
 
     monkeypatch.setattr(
         "orchestrator.nodes.verification.run_deterministic_verification",
-        AsyncMock(return_value=("passed", "ok")),
+        AsyncMock(return_value=("passed", "ok", None)),
     )
+
+    # Test warning status
     monkeypatch.setattr(
         "orchestrator.nodes.verification.run_independent_verifier",
         AsyncMock(return_value=("warning", "infra unavailable", "infra_verifier_unavailable")),
     )
-
-    class _Brain:
-        async def suggest_verification(self, **kwargs):
-            raise RuntimeError("boom")
-
-    node = build_verify_result_node(enable_independent_verifier=True, orchestrator_brain=_Brain())
+    node = build_verify_result_node(enable_independent_verifier=True)
     response = await node(state)
     assert response["verification"]["status"] == "warning"
 
-
-@pytest.mark.anyio
-async def test_verify_node_records_brain_report_when_suggestion_present(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    state = _state()
-    state.task_spec.verification_commands = ["pytest -q"]  # type: ignore[union-attr]
-    monkeypatch.setattr(
-        "orchestrator.nodes.verification.run_deterministic_verification",
-        AsyncMock(return_value=("passed", "ok")),
-    )
+    # Test passed status
     monkeypatch.setattr(
         "orchestrator.nodes.verification.run_independent_verifier",
         AsyncMock(return_value=("passed", "ok", None)),
     )
-
-    class _Brain:
-        async def suggest_verification(self, **kwargs):
-            return VerificationBrainSuggestion(accept_warning_status=True, rationale="safe")
-
-    node = build_verify_result_node(enable_independent_verifier=True, orchestrator_brain=_Brain())
+    node = build_verify_result_node(enable_independent_verifier=True)
     response = await node(state)
-    assert response["verification"]["status"] in {"passed", "warning"}
+    assert response["verification"]["status"] == "passed"

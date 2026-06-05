@@ -10,15 +10,24 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
+from apps.observability import (
+    OPENINFERENCE_SPAN_KIND_ATTRIBUTE,
+    SPAN_KIND_TOOL,
+    set_span_input_output,
+    start_optional_span,
+)
 from orchestrator.state import OrchestratorState
-from workers import Worker, WorkerRequest
+from tools import ToolPermissionLevel
+from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
+from workers import Worker, WorkerRequest, WorkerRuntimeMode
+from workers.constants import DEFAULT_REVIEW_TIMEOUT_SECONDS
 from workers.prompt import build_review_prompt
 from workers.review import ReviewFinding, ReviewResult, SuppressedReviewFinding
 from workers.review_context import pack_reviewer_context
 from workers.self_review import parse_review_result
 
 logger = logging.getLogger(__name__)
-DEFAULT_INDEPENDENT_REVIEW_TIMEOUT_SECONDS = 120
+DEFAULT_INDEPENDENT_REVIEW_TIMEOUT_SECONDS = DEFAULT_REVIEW_TIMEOUT_SECONDS
 DEFAULT_REVIEW_MIN_CONFIDENCE = 0.65
 DEFAULT_INDEPENDENT_REVIEW_MAX_REPAIR_PASSES = 1
 DEFAULT_REVIEW_MIN_CONFIDENCE_BY_SEVERITY: dict[str, float] = {
@@ -39,64 +48,14 @@ SKIP_INDEPENDENT_REVIEW_CONSTRAINT = "skip_independent_review"
 ENABLE_REPAIR_HANDOFF_CONSTRAINT = "independent_review_enable_repair_handoff"
 
 
-def _coerce_positive_int_like(value: object) -> int | None:
-    """Parse a positive integer-like input, otherwise return None."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value > 0 else None
-    if isinstance(value, float):
-        try:
-            parsed = int(value)
-        except (OverflowError, ValueError):
-            return None
-        return parsed if parsed > 0 else None
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        try:
-            parsed = int(float(stripped))
-        except (OverflowError, ValueError):
-            return None
-        return parsed if parsed > 0 else None
-    return None
-
-
-def _coerce_non_negative_int_like(value: object) -> int | None:
-    """Parse a non-negative integer-like input, otherwise return None."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value >= 0 else None
-    if isinstance(value, float):
-        try:
-            parsed = int(value)
-        except (OverflowError, ValueError):
-            return None
-        return parsed if parsed >= 0 else None
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return None
-        try:
-            parsed = int(float(stripped))
-        except (OverflowError, ValueError):
-            return None
-        return parsed if parsed >= 0 else None
-    return None
-
-
 def _resolve_review_timeout_seconds(state: OrchestratorState) -> int:
     """Resolve timeout for independent review calls."""
     budget = state.task.budget if isinstance(state.task.budget, dict) else {}
-    explicit_timeout = _coerce_positive_int_like(budget.get("independent_review_timeout_seconds"))
-    if explicit_timeout is not None:
-        return explicit_timeout
-    orchestrator_timeout = _coerce_positive_int_like(budget.get("orchestrator_timeout_seconds"))
-    if orchestrator_timeout is not None:
-        return orchestrator_timeout
-    return DEFAULT_INDEPENDENT_REVIEW_TIMEOUT_SECONDS
+    return (
+        coerce_positive_int_like(budget.get("independent_review_timeout_seconds"))
+        or coerce_positive_int_like(budget.get("orchestrator_timeout_seconds"))
+        or DEFAULT_INDEPENDENT_REVIEW_TIMEOUT_SECONDS
+    )
 
 
 def _coerce_probability(value: object) -> float | None:
@@ -146,9 +105,8 @@ def _coerce_string_set(value: object) -> set[str]:
 def _review_min_confidence_by_severity(constraints: Mapping[str, Any]) -> dict[str, float]:
     """Resolve severity-specific review confidence thresholds with safe defaults."""
     resolved = dict(DEFAULT_REVIEW_MIN_CONFIDENCE_BY_SEVERITY)
-    has_explicit_global = "independent_review_min_confidence" in constraints
     explicit_global = _coerce_probability(constraints.get("independent_review_min_confidence"))
-    if has_explicit_global and explicit_global is not None:
+    if explicit_global is not None:
         resolved = {severity: explicit_global for severity in SEVERITY_RANK}
     raw_thresholds = constraints.get("independent_review_min_confidence_by_severity")
     if not isinstance(raw_thresholds, Mapping):
@@ -276,10 +234,10 @@ def _session_state_for_review_context(state: OrchestratorState) -> Mapping[str, 
 
 def _resolve_repair_handoff_budget(constraints: Mapping[str, Any]) -> tuple[int, int]:
     """Resolve bounded independent-review repair-loop settings."""
-    max_passes = _coerce_non_negative_int_like(constraints.get(REPAIR_MAX_PASSES_CONSTRAINT))
+    max_passes = coerce_non_negative_int_like(constraints.get(REPAIR_MAX_PASSES_CONSTRAINT))
     if max_passes is None:
         max_passes = DEFAULT_INDEPENDENT_REVIEW_MAX_REPAIR_PASSES
-    used_passes = _coerce_non_negative_int_like(constraints.get(REPAIR_PASSES_USED_CONSTRAINT))
+    used_passes = coerce_non_negative_int_like(constraints.get(REPAIR_PASSES_USED_CONSTRAINT))
     if used_passes is None:
         used_passes = 0
     return max_passes, used_passes
@@ -418,7 +376,8 @@ async def review_result(
         task_text=state.normalized_task_text or state.task.task_text,
         worker_summary=state.result.summary or "",
         files_changed=state.result.files_changed,
-        diff_text=state.result.diff_text or "",
+        # T-065: Omit diff_text to encourage tool-based exploration as per user feedback.
+        diff_text=None,
         commands_run=state.result.commands_run,
         verifier_report=state.verification.model_dump() if state.verification else None,
         session_state=_session_state_for_review_context(state),
@@ -431,51 +390,98 @@ async def review_result(
         task_text=state.normalized_task_text or state.task.task_text,
     )
 
-    # 3. Choose reviewer worker
-    # Prefer gemini for review if available, otherwise use the chosen worker
-    workers = worker_factory or {}
-    reviewer_type = "gemini" if "gemini" in workers else state.dispatch.worker_type
-    if not reviewer_type or reviewer_type not in workers:
+    # 3. Choose reviewer worker candidates
+    reviewer_workers: list[tuple[str, Worker]] = []
+    available_workers = worker_factory or {}
+    if "gemini" in available_workers:
+        reviewer_workers.append(("gemini", available_workers["gemini"]))
+    if "codex" in available_workers:
+        reviewer_workers.append(("codex", available_workers["codex"]))
+    if not reviewer_workers and state.dispatch.worker_type is not None:
+        dw_type = state.dispatch.worker_type
+        if dw_type in available_workers:
+            reviewer_workers.append((dw_type, available_workers[dw_type]))
+
+    if not reviewer_workers:
         logger.warning("No suitable reviewer worker found, skipping independent review.")
         return {"current_step": "review_result"}
-    if reviewer_type == state.dispatch.worker_type:
-        logger.warning(
-            "Independent review is using the same worker type as execution (%s).",
-            reviewer_type,
-        )
 
-    worker = workers[reviewer_type]
+    # 4. Run the review pass with fallback
+    constraints = dict(state.task.constraints)
+    constraints["read_only"] = False
+    # T-181: Allow reviewer to keep workspace_write permission if granted.
+    if constraints.get("granted_permission") != ToolPermissionLevel.WORKSPACE_WRITE:
+        constraints.pop("granted_permission", None)
 
-    # 4. Run the review pass
     review_request = WorkerRequest(
         session_id=state.session.session_id if state.session else None,
         repo_url=state.task.repo_url,
         branch=state.task.branch,
-        task_text="Perform an independent review of the changes.",
+        task_text=(
+            "Perform an independent review of the changes in the workspace. "
+            "Use your tools (git diff, read_file) to inspect the modified files "
+            "and their impact before providing your final review findings."
+        ),
         memory_context=state.memory.model_dump(),
-        constraints=dict(state.task.constraints),
+        constraints=constraints,
         budget=dict(state.task.budget),
-        secrets=dict(state.task.secrets),
+        secrets=dict((state.task.secrets or {}) | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
         tools=state.task.tools,
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
     )
 
-    try:
-        # We use the system_prompt override to perform a single-shot review
-        review_run_result = await asyncio.wait_for(
-            worker.run(review_request, system_prompt=review_prompt),
-            timeout=_resolve_review_timeout_seconds(state),
-        )
-        if review_run_result.status != "success":
+    for i, (worker_type, worker) in enumerate(reviewer_workers):
+        if worker_type == state.dispatch.worker_type:
             logger.warning(
-                "Independent review worker returned non-success status: %s",
-                review_run_result.status,
+                f"Independent review is using the same worker type as execution ({worker_type})."
             )
 
-        # 5. Parse findings
-        parsed_review = parse_review_result(review_run_result.summary or "")
-        if parsed_review is None:
-            logger.warning("Independent review output could not be parsed into ReviewResult.")
-        if parsed_review:
+        try:
+            with start_optional_span(
+                tracer_name="orchestrator.review",
+                span_name=f"independent_reviewer.{worker_type}",
+                task_id=state.task.task_id,
+                session_id=state.session.session_id if state.session else None,
+                attempt=state.attempt_count,
+                attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
+            ):
+                # We use the system_prompt override to perform a single-shot review
+                review_run_result = await asyncio.wait_for(
+                    worker.run(review_request, system_prompt=review_prompt),
+                    timeout=_resolve_review_timeout_seconds(state),
+                )
+                set_span_input_output(input_data=None, output_data=review_run_result.summary)
+
+            if review_run_result.status != "success":
+                logger.warning(
+                    "Independent review worker returned non-success status: %s",
+                    review_run_result.status,
+                    extra={"task_id": state.task.task_id, "worker_type": worker_type},
+                )
+
+            # 5. Parse findings
+            parsed_review = parse_review_result(review_run_result.summary or "")
+            if parsed_review is None:
+                logger.warning("Independent review output could not be parsed into ReviewResult.")
+                if i < len(reviewer_workers) - 1 and (
+                    review_run_result.status != "success"
+                    or review_run_result.failure_kind
+                    in {
+                        "provider_error",
+                        "provider_auth",
+                        "sandbox_infra",
+                        "timeout",
+                        "model_error",
+                        "unknown",
+                    }
+                ):
+                    logger.info(
+                        f"Retrying independent review with next worker after {worker_type} failure",
+                        extra={"task_id": state.task.task_id},
+                    )
+                    continue
+                return {"current_step": "review_result"}
+
             # Inject the correct reviewer kind if parser missed it
             if parsed_review.reviewer_kind != "independent_reviewer":
                 parsed_review = parsed_review.model_copy(
@@ -494,11 +500,15 @@ async def review_result(
                 "review": parsed_review.model_dump(),
                 "progress_updates": [*state.progress_updates, "independent review completed"],
             }
-    except TimeoutError:
-        logger.warning("Independent review pass timed out and was skipped.")
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        logger.exception("Independent review pass failed unexpectedly.")
+        except TimeoutError:
+            logger.warning("Independent review pass timed out and was skipped.")
+            if i < len(reviewer_workers) - 1:
+                continue
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(f"Independent review pass failed unexpectedly for {worker_type}.")
+            if i < len(reviewer_workers) - 1:
+                continue
 
     return {"current_step": "review_result"}

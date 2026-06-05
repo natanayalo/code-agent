@@ -18,8 +18,7 @@ def test_final_cli_runtime_step_wraps_output() -> None:
 def test_parse_cli_runtime_step_or_final_parses_valid_step_json() -> None:
     """Valid CliRuntimeStep payload should be returned unchanged."""
     payload = (
-        '{"kind":"tool_call","tool_name":"execute_bash",'
-        '"tool_input":"ls -la","final_output":null}'
+        '{"kind":"tool_call","tool_name":"execute_bash","tool_input":"ls -la","final_output":null}'
     )
 
     step = parse_cli_runtime_step_or_final(payload)

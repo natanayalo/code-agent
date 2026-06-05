@@ -150,7 +150,7 @@ def test_persistent_shell_session_preserves_state_across_commands(tmp_path: Path
 
         assert first.exit_code == 0
         assert second.exit_code == 0
-        assert second.output.strip() == "hello:/workspace/repo/.git"
+        assert second.output.strip() == f"hello:{workspace.repo_path.resolve()}/.git"
         assert third.exit_code == 0
         assert fourth.output == "notes\n"
         assert (workspace.repo_path / "session-output.txt").read_text(encoding="utf-8") == (

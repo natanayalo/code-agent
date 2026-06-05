@@ -18,10 +18,10 @@ from sandbox import (
     WorkspaceManagerError,
 )
 from tools import DEFAULT_TOOL_REGISTRY
-from workers import GeminiCliWorker, WorkerRequest
+from workers import GeminiCliWorker, WorkerRequest, WorkerResult
 from workers.base import ArtifactReference
 from workers.cli_runtime import CliRuntimeMessage, CliRuntimeSettings, CliRuntimeStep
-from workers.gemini_cli_worker import _workspace_task_id
+from workers.gemini_cli_worker import _prepare_workspace_gemini_home, _workspace_task_id
 from workers.native_agent_runner import NativeAgentRunResult
 
 
@@ -110,6 +110,7 @@ def _make_workspace(tmp_path: Path) -> WorkspaceHandle:
 
 def _make_container(workspace: WorkspaceHandle) -> DockerSandboxContainer:
     return DockerSandboxContainer(
+        working_dir="/workspace",
         container_name="test-gemini-container",
         image="python:3.12-slim",
         workspace=workspace,
@@ -637,6 +638,10 @@ def test_gemini_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path)
         ],
         stdout='{"response":"Native run complete.","stats":{}}',
         stderr="",
+        json_payload={
+            "suggested_worker": "gemini",
+            "suggested_profile": "gemini-native-executor-read-only",
+        },
     )
 
     with patch(
@@ -658,6 +663,10 @@ def test_gemini_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path)
 
     assert result.status == "success"
     assert result.summary == "Native run complete."
+    assert result.json_payload == {
+        "suggested_worker": "gemini",
+        "suggested_profile": "gemini-native-executor-read-only",
+    }
     assert result.files_changed == ["note.txt"]
     assert result.diff_text == "diff --git a/note.txt b/note.txt"
     assert result.budget_usage is not None
@@ -670,7 +679,7 @@ def test_gemini_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path)
     assert "--output-format" in command
     assert command[command.index("--output-format") + 1] == "json"
     assert "--approval-mode" in command
-    assert command[command.index("--approval-mode") + 1] == "default"
+    assert command[command.index("--approval-mode") + 1] == "yolo"
     assert "--prompt" not in command
     assert "--sandbox" in command
     native_request = run_native.call_args.args[0]
@@ -832,7 +841,7 @@ def test_gemini_native_prompt_includes_schema_and_planner_role(tmp_path: Path) -
         runtime_mode=WorkerRuntimeMode.PLANNER_ONLY,
     )
     assert "Specialist Role: Planner" in prompt
-    assert "CRITICAL: Your final response MUST be a single JSON object" in prompt
+    assert "Return exactly one JSON object that strictly matches this JSON schema" in prompt
 
 
 def test_gemini_cli_worker_runtime_error_is_mapped_to_workspace_error(tmp_path: Path) -> None:
@@ -863,3 +872,133 @@ def test_gemini_cli_worker_runtime_error_is_mapped_to_workspace_error(tmp_path: 
     assert result.status == "error"
     assert "adapter exploded" in (result.summary or "")
     assert result.next_action_hint == "inspect_worker_configuration"
+
+
+def test_gemini_cli_worker_auto_enables_network(tmp_path: Path) -> None:
+    """Worker should auto-enable network when tools require it and permission is granted."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    container_manager = _FakeContainerManager(container)
+
+    # Use a tool that requires network
+    from tools import EXECUTE_GITHUB_TOOL_NAME, ToolPermissionLevel
+
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=container_manager,
+        session_factory=lambda _, **__: _FakeSession(
+            {
+                _git_status_command(container.working_dir): DockerShellCommandResult(
+                    command=_git_status_command(container.working_dir),
+                    exit_code=0,
+                    output="",
+                    duration_seconds=0.0,
+                )
+            }
+        ),
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+    )
+
+    asyncio.run(
+        worker.run(
+            WorkerRequest(
+                task_text="create pr",
+                repo_url="https://example.com/repo.git",
+                tools=[EXECUTE_GITHUB_TOOL_NAME],
+                constraints={"granted_permission": ToolPermissionLevel.NETWORKED_WRITE},
+            )
+        )
+    )
+
+    assert container_manager.start_requests[0].network_enabled is True
+
+
+def test_prepare_workspace_gemini_home_creates_workspace_mapping(tmp_path: Path) -> None:
+    workspace_path = tmp_path / "workspace"
+    source_gemini_home = tmp_path / "root-gemini"
+    workspace_path.mkdir(parents=True)
+    source_gemini_home.mkdir(parents=True)
+    (source_gemini_home / "settings.json").write_text('{"auth":"ok"}', encoding="utf-8")
+
+    _prepare_workspace_gemini_home(
+        workspace_path=workspace_path,
+        source_gemini_home=source_gemini_home,
+    )
+
+    target = workspace_path / ".agent_home" / ".gemini"
+    assert target.exists()
+    assert (target / "settings.json").read_text(encoding="utf-8") == '{"auth":"ok"}'
+
+
+def test_prepare_workspace_gemini_home_uses_gemini_home_env(tmp_path: Path, monkeypatch) -> None:
+    workspace_path = tmp_path / "workspace"
+    source_gemini_home = tmp_path / "custom-gemini-home"
+    workspace_path.mkdir(parents=True)
+    source_gemini_home.mkdir(parents=True)
+    (source_gemini_home / "settings.json").write_text('{"auth":"env"}', encoding="utf-8")
+    monkeypatch.setenv("GEMINI_HOME", str(source_gemini_home))
+
+    _prepare_workspace_gemini_home(workspace_path=workspace_path)
+
+    target = workspace_path / ".agent_home" / ".gemini"
+    assert target.exists()
+    assert (target / "settings.json").read_text(encoding="utf-8") == '{"auth":"env"}'
+
+
+def test_prepare_workspace_gemini_home_repairs_stale_target_missing_settings(
+    tmp_path: Path,
+) -> None:
+    workspace_path = tmp_path / "workspace"
+    source_gemini_home = tmp_path / "root-gemini"
+    workspace_path.mkdir(parents=True)
+    source_gemini_home.mkdir(parents=True)
+    (source_gemini_home / "settings.json").write_text('{"auth":"ok"}', encoding="utf-8")
+
+    stale_target = workspace_path / ".agent_home" / ".gemini"
+    stale_target.mkdir(parents=True)
+    (stale_target / "history").mkdir(parents=True)
+
+    _prepare_workspace_gemini_home(
+        workspace_path=workspace_path,
+        source_gemini_home=source_gemini_home,
+    )
+
+    target = workspace_path / ".agent_home" / ".gemini"
+    assert target.exists()
+    assert (target / "settings.json").read_text(encoding="utf-8") == '{"auth":"ok"}'
+
+
+def test_gemini_cli_worker_run_prepares_workspace_home_before_native_dispatch(
+    tmp_path: Path,
+) -> None:
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: _FakeSession({}),
+    )
+
+    with (
+        patch("workers.gemini_cli_worker._prepare_workspace_gemini_home") as prepare_home,
+        patch.object(
+            worker,
+            "_execute_native_runtime",
+            return_value=WorkerResult(status="success", summary="ok"),
+        ) as execute_native,
+    ):
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    task_text="run",
+                    repo_url="https://example.com/repo.git",
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                )
+            )
+        )
+
+    assert result.status == "success"
+    prepare_home.assert_called_once_with(workspace_path=workspace.workspace_path)
+    execute_native.assert_called_once()

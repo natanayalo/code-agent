@@ -142,6 +142,22 @@ def _resolve_delivery_mode(task_text: str, constraints: Mapping[str, Any]) -> Ta
     return "workspace"
 
 
+def _is_pwd_home_smoke_task(task_text: str) -> bool:
+    """Detect the common read-only environment smoke check used by operators."""
+    normalized = task_text.lower()
+    has_env_targets = (
+        re.search(r"\bpwd\b", normalized) is not None
+        and re.search(r"\bhome\b", normalized) is not None
+    )
+    if not has_env_targets:
+        return False
+    asks_to_print = contains_marker(normalized, ("print", "echo", "show"))
+    bounded_to_check = (
+        "smoke test" in normalized or "then exit" in normalized or "only" in normalized
+    )
+    return asks_to_print and bounded_to_check
+
+
 def _requires_clarification(task_text: str, task_kind: str | None) -> bool:
     """Flag raw asks that are too underspecified for reliable autonomous execution."""
     normalized = task_text.lower().strip()
@@ -163,6 +179,9 @@ def build_task_spec(
     normalized_task_text = _normalized_text(task_text)
     task_constraints: Mapping[str, Any] = constraints or {}
     task_type = _resolve_task_type(normalized_task_text, task_kind)
+    is_no_modification_smoke = _is_pwd_home_smoke_task(normalized_task_text)
+    if is_no_modification_smoke:
+        task_type = "maintenance"
     risk_level = _resolve_risk_level(
         task_text=normalized_task_text,
         constraints=task_constraints,
@@ -170,6 +189,8 @@ def build_task_spec(
         task_plan=task_plan,
     )
     delivery_mode = _resolve_delivery_mode(normalized_task_text, task_constraints)
+    if is_no_modification_smoke and delivery_mode == "workspace":
+        delivery_mode = "summary"
 
     assumptions = _coerce_string_list(task_constraints.get("assumptions"))
     if not repo_url:
@@ -187,6 +208,7 @@ def build_task_spec(
     non_goals.extend(
         [
             "Do not make unrelated refactors.",
+            *(["Do not create or modify any files."] if is_no_modification_smoke else []),
             (
                 "Do not change auth, secrets, billing, sandbox policy, or deployment "
                 "permissions without explicit approval."
@@ -196,9 +218,10 @@ def build_task_spec(
 
     allowed_actions = [
         "read_repo_files",
-        "modify_workspace_files",
         "run_non_destructive_checks",
     ]
+    if not is_no_modification_smoke:
+        allowed_actions.insert(1, "modify_workspace_files")
     if delivery_mode in {"branch", "draft_pr"}:
         allowed_actions.append("prepare_branch_delivery")
     if delivery_mode == "draft_pr":
@@ -253,7 +276,10 @@ def build_task_spec(
         task_type=task_type,
         allowed_actions=allowed_actions,
         forbidden_actions=list(dict.fromkeys(forbidden_actions)),
-        verification_commands=_coerce_string_list(task_constraints.get("verification_commands")),
+        verification_commands=(
+            _coerce_string_list(task_constraints.get("verification_commands"))
+            or (['printf \'%s\\n%s\\n\' "$PWD" "$HOME"'] if is_no_modification_smoke else [])
+        ),
         expected_artifacts=expected_artifacts,
         requires_clarification=requires_clarification,
         clarification_questions=clarification_questions,

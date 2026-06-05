@@ -64,10 +64,12 @@ def client(session_factory) -> Iterator[TestClient]:
             session_factory=session_factory,
             worker=_StaticWorker(),
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     with TestClient(app) as test_client:
-        test_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        test_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         yield test_client
 
 
@@ -165,10 +167,12 @@ def test_replay_with_worker_profile_override(
                 ),
             },
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     with TestClient(app) as profiled_client:
-        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        profiled_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         source_id = _create_and_complete_task(profiled_client)
 
         replay_response = profiled_client.post(
@@ -207,10 +211,12 @@ def test_replay_rejects_unknown_worker_profile_override(
                 ),
             },
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     with TestClient(app) as profiled_client:
-        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        profiled_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         source_id = _create_and_complete_task(profiled_client)
 
         replay_response = profiled_client.post(
@@ -293,7 +299,7 @@ def test_replay_unauthenticated_returns_401(session_factory) -> None:
             session_factory=session_factory,
             worker=_StaticWorker(),
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     with TestClient(app) as client:
         response = client.post("/tasks/some-task/replay")

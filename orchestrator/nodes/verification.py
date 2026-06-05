@@ -13,14 +13,9 @@ from apps.observability import (
     start_optional_span,
 )
 from db.enums import TimelineEventType
-from orchestrator.brain import (
-    OrchestratorBrain,
-    VerificationBrainMergeReport,
-    VerificationBrainSuggestion,
-)
+from orchestrator.brain import OrchestratorBrain
 from orchestrator.nodes.utils import (
     _available_workers,
-    _dedupe_preserving_order,
     _ensure_state,
     _has_meaningful_deliverable,
     _progress_update,
@@ -137,6 +132,11 @@ def _build_verifier_repair_task_text(
         [
             "",
             "After applying fixes, run the smallest relevant verification commands and summarize.",
+            (
+                "Light investigation is allowed only when directly tied to explaining "
+                "a failed verification check."
+            ),
+            "Do not perform broad repo debugging, unrelated root-cause exploration, or refactors.",
         ]
     )
     return "\n".join(lines)
@@ -230,6 +230,7 @@ def build_verify_result_node(
                 return verify_result(state)
 
             deterministic_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str]
+            deterministic_verifier_metadata: dict[str, Any] | None = None
             independent_verifier_outcome: (
                 tuple[Literal["passed", "failed", "warning"], str] | None
             ) = None
@@ -256,13 +257,24 @@ def build_verify_result_node(
                     session_id=state.session.session_id if state.session else None,
                     attempt=state.attempt_count,
                 ):
-                    deterministic_verifier_outcome = await run_deterministic_verification(
+                    (
+                        deterministic_verifier_status,
+                        deterministic_verifier_summary,
+                        deterministic_verifier_metadata,
+                    ) = await run_deterministic_verification(
                         state,
                         worker_factory=available_workers,
                     )
+                    deterministic_verifier_outcome = (
+                        deterministic_verifier_status,
+                        deterministic_verifier_summary,
+                    )
                     set_span_input_output(
                         input_data=verification_commands,
-                        output_data=deterministic_verifier_outcome,
+                        output_data={
+                            "outcome": deterministic_verifier_outcome,
+                            "metadata": deterministic_verifier_metadata,
+                        },
                     )
 
             # 3. Run LLM-based independent verifier if enabled and deterministic checks passed
@@ -289,56 +301,6 @@ def build_verify_result_node(
                         },
                     )
 
-            verification_brain_suggestion: VerificationBrainSuggestion | None = None
-            verification_brain_report: VerificationBrainMergeReport | None = None
-
-            if orchestrator_brain is not None:
-                provider_name = type(orchestrator_brain).__name__
-                try:
-                    with start_optional_span(
-                        tracer_name="orchestrator.graph",
-                        span_name="orchestrator.node.verify_result.brain",
-                        attributes={"openinference.span.kind": SPAN_KIND_TOOL},
-                        task_id=state.task.task_id,
-                        session_id=state.session.session_id if state.session else None,
-                        attempt=state.attempt_count,
-                    ):
-                        verification_brain_suggestion = (
-                            await orchestrator_brain.suggest_verification(
-                                state=state,
-                                independent_verifier_outcome=independent_verifier_outcome,
-                            )
-                        )
-                        set_span_input_output(
-                            input_data=independent_verifier_outcome,
-                            output_data=(
-                                verification_brain_suggestion.model_dump()
-                                if verification_brain_suggestion
-                                else None
-                            ),
-                        )
-                except Exception as exc:
-                    detail = str(exc).strip()
-                    verification_brain_report = VerificationBrainMergeReport(
-                        enabled=True,
-                        provider=provider_name,
-                        error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
-                    )
-                else:
-                    if verification_brain_suggestion is None:
-                        verification_brain_report = VerificationBrainMergeReport(
-                            enabled=True,
-                            provider=provider_name,
-                            rationale="Brain declined to provide verification guidance.",
-                        )
-                    else:
-                        verification_brain_report = VerificationBrainMergeReport(
-                            enabled=True,
-                            provider=provider_name,
-                            rationale=verification_brain_suggestion.rationale,
-                            accept_warning_status=verification_brain_suggestion.accept_warning_status,
-                        )
-
             # 5. Verify the result
             extra_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]] = []
             if not verification_commands:
@@ -349,15 +311,28 @@ def build_verify_result_node(
                         None,
                     )
                 )
+            elif deterministic_verifier_metadata is not None:
+                extra_events.append(
+                    (
+                        TimelineEventType.VERIFICATION_SKIPPED
+                        if deterministic_verifier_metadata.get("skip_reason_code")
+                        else TimelineEventType.VERIFICATION_STARTED,
+                        (
+                            "Deterministic verification skipped due to placeholder-only commands."
+                            if deterministic_verifier_metadata.get("skip_reason_code")
+                            else "Deterministic verification filtered placeholder commands."
+                        ),
+                        {"deterministic_verification": deterministic_verifier_metadata},
+                    )
+                )
 
             return verify_result(
                 state,
                 enable_independent_verifier=enable_independent_verifier,
                 deterministic_verifier_outcome=deterministic_verifier_outcome,
+                deterministic_verifier_metadata=deterministic_verifier_metadata,
                 independent_verifier_outcome=independent_verifier_outcome,
                 independent_verifier_reason_code=independent_verifier_reason_code,
-                verification_brain_suggestion=verification_brain_suggestion,
-                verification_brain_report=verification_brain_report,
                 extra_timeline_events=extra_events,
             )
 
@@ -371,10 +346,9 @@ def verify_result(
     deterministic_verifier_outcome: (
         tuple[Literal["passed", "failed", "warning"], str] | None
     ) = None,
+    deterministic_verifier_metadata: dict[str, Any] | None = None,
     independent_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None = None,
     independent_verifier_reason_code: str | None = None,
-    verification_brain_suggestion: VerificationBrainSuggestion | None = None,
-    verification_brain_report: VerificationBrainMergeReport | None = None,
     extra_timeline_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]]
     | None = None,
 ) -> dict[str, Any]:
@@ -444,6 +418,11 @@ def verify_result(
                 label="deterministic_commands",
                 status=status,
                 message=summary,
+                reason_code=(
+                    deterministic_verifier_metadata.get("skip_reason_code")
+                    if isinstance(deterministic_verifier_metadata, dict)
+                    else None
+                ),
             )
         )
 
@@ -570,29 +549,6 @@ def verify_result(
     else:
         report_status = "passed"
 
-    brain_report = verification_brain_report
-    if verification_brain_suggestion is not None:
-        if brain_report is None:
-            brain_report = VerificationBrainMergeReport(
-                enabled=True,
-                accept_warning_status=verification_brain_suggestion.accept_warning_status,
-                rationale=verification_brain_suggestion.rationale,
-            )
-        ignored_fields = list(brain_report.ignored_fields)
-        applied = brain_report.applied
-        if verification_brain_suggestion.accept_warning_status is True:
-            if report_status == "warning":
-                report_status = "passed"
-                applied = True
-            else:
-                ignored_fields.append("accept_warning_status")
-        brain_report = brain_report.model_copy(
-            update={
-                "applied": applied,
-                "ignored_fields": _dedupe_preserving_order(ignored_fields),
-            }
-        )
-
     report_failure_kind: VerificationFailureKind | None = None
     if report_status == "failed":
         failed_labels = {item.label for item in items if item.status == "failed"}
@@ -631,17 +587,7 @@ def verify_result(
         failure_kind=report_failure_kind,
         items=items,
     )
-    if brain_report is not None:
-        brain_report = brain_report.model_copy(update={"final_verification_status": report.status})
     progress_message = f"verification {report_status}"
-    if (
-        brain_report is not None
-        and brain_report.applied
-        and report.status == "passed"
-        and verification_brain_suggestion is not None
-        and verification_brain_suggestion.accept_warning_status is True
-    ):
-        progress_message = "verification passed via brain warning-acceptance hint"
     updated_task: dict[str, Any] | None = None
     updated_result: dict[str, Any] | None = None
     repair_handoff_requested = False
@@ -712,8 +658,8 @@ def verify_result(
         ).model_dump()
 
     verification_payload = report.model_dump()
-    if brain_report is not None:
-        verification_payload["brain"] = brain_report.model_dump(mode="json")
+    if deterministic_verifier_metadata is not None:
+        verification_payload["deterministic_verification"] = deterministic_verifier_metadata
 
     response: dict[str, Any] = {
         "current_step": "verify_result",

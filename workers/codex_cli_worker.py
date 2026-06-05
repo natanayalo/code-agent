@@ -126,6 +126,8 @@ def _slugify(value: str) -> str:
 
 def _workspace_task_id(request: WorkerRequest) -> str:
     """Build a readable workspace task identifier from the worker request."""
+    if request.task_id:
+        return request.task_id
     source = request.session_id or request.task_text
     return f"codex-cli-{_slugify(source)}"
 
@@ -208,6 +210,7 @@ def _worker_result_from_execution(
         diff_text=diff_text,
         artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
         next_action_hint=_next_action_hint(execution),
+        workspace_id=workspace.workspace_id,
     )
 
 
@@ -403,10 +406,21 @@ class CodexCliWorker(Worker):
             available_secrets=request.secrets,
         )
 
+        # Determine if network should be enabled (T-143 escalation policy)
+        network_enabled = request.network_enabled
+        if not network_enabled:
+            granted_permission = granted_permission_from_constraints(request.constraints)
+            if granted_permission == ToolPermissionLevel.NETWORKED_WRITE:
+                for name in tool_names:
+                    if (tool := self.tool_registry.get_tool(name)) and tool.network_required:
+                        network_enabled = True
+                        break
+
         container = self.container_manager.start(
             DockerSandboxContainerRequest(
                 workspace=workspace,
                 environment=scoped_secrets,
+                network_enabled=network_enabled,
             )
         )
         session: ShellSessionProtocol | None = None
@@ -632,9 +646,9 @@ class CodexCliWorker(Worker):
             sandbox_mode,
             extra={
                 "session_id": request.session_id,
-                "in_container": bool(in_container),
-                "repo_trusted": bool(repo_trusted),
-                "read_only_requested": bool(read_only_requested),
+                "in_container": in_container,
+                "repo_trusted": repo_trusted,
+                "read_only_requested": read_only_requested,
             },
         )
 
@@ -687,10 +701,10 @@ class CodexCliWorker(Worker):
             import json as json_lib
 
             schema_json = json_lib.dumps(request.response_schema, indent=2)
-            output_instructions += (
-                f"\n\nCRITICAL: Your final response MUST be a single JSON object strictly matching "
-                f"this JSON schema:\n{schema_json}\n"
-                "Do not include any prose, markdown fences, or extra characters."
+            output_instructions = (
+                "Return exactly one JSON object that strictly matches this JSON schema:\n"
+                f"{schema_json}\n"
+                "Do not include markdown fences, explanatory prose, or extra keys."
             )
 
         sections = [
@@ -839,6 +853,8 @@ class CodexCliWorker(Worker):
             diff_text=native_result.diff_text,
             json_payload=native_result.json_payload,
             next_action_hint=self._native_next_action_hint(native_result),
+            stdout=native_result.stdout,
+            stderr=native_result.stderr,
         )
         if cancel_token and cancel_token():
             result.status = "error"

@@ -100,6 +100,8 @@ def _slugify(value: str) -> str:
 
 def _workspace_task_id(request: WorkerRequest) -> str:
     """Build a readable workspace task identifier from the worker request."""
+    if request.task_id:
+        return request.task_id
     source = request.session_id or request.task_text
     return f"openrouter-cli-{_slugify(source)}"
 
@@ -182,6 +184,7 @@ def _worker_result_from_execution(
         diff_text=diff_text,
         artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
         next_action_hint=_next_action_hint(execution),
+        workspace_id=workspace.workspace_id,
     )
 
 

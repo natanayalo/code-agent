@@ -23,6 +23,7 @@ def build_worker_result(
     diff_text: str | None = None,
     artifacts: list[ArtifactReference] | None = None,
     next_action_hint: str | None = None,
+    workspace_id: str | None = None,
 ) -> WorkerResult:
     """Construct a standardized WorkerResult from CLI runtime execution outputs."""
     final_message = (
@@ -60,4 +61,5 @@ def build_worker_result(
         review_result=review_result,
         diff_text=diff_text,
         next_action_hint=next_action_hint,
+        workspace_id=workspace_id,
     )

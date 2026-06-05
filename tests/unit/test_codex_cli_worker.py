@@ -96,7 +96,7 @@ class _FakeSession:
 
 def _workspace_handle(tmp_path: Path) -> WorkspaceHandle:
     workspace_path = tmp_path / "workspace-task-47"
-    repo_path = workspace_path / "repo"
+    repo_path = workspace_path
     repo_path.mkdir(parents=True)
     (repo_path / "AGENTS.md").write_text("Prefer small diffs.\n", encoding="utf-8")
     (repo_path / "README.md").write_text("# Demo repo\n", encoding="utf-8")
@@ -120,7 +120,7 @@ def _command_result(command: str, *, output: str, exit_code: int = 0) -> DockerS
     )
 
 
-def _git_status_command(container_workdir: str = "/workspace/repo") -> str:
+def _git_status_command(container_workdir: str = "/workspace") -> str:
     return f"git -C {container_workdir} status --porcelain=v1 -z --untracked-files=all"
 
 
@@ -167,6 +167,7 @@ def test_codex_cli_worker_requires_repo_url(tmp_path: Path) -> None:
     """The CLI worker should fail fast when it cannot provision a workspace."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-47",
         image="python:3.12-slim",
@@ -190,6 +191,7 @@ def test_codex_validate_request_phase_returns_none_for_valid_repo_url(tmp_path: 
     """The request-validation phase should pass through when repo_url is present."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-47",
         image="python:3.12-slim",
@@ -214,6 +216,7 @@ def test_codex_cli_worker_runs_the_shared_runtime_and_retains_the_workspace(
     """The CLI worker should drive the shared runtime through workspace and container setup."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-47",
         image="python:3.12-slim",
@@ -294,6 +297,7 @@ def test_codex_cli_worker_skips_changed_file_collection_when_tool_does_not_expec
     """Changed-file collection should be driven by the registered tool metadata."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-47",
         image="python:3.12-slim",
@@ -335,6 +339,7 @@ def test_codex_cli_worker_uses_the_full_git_status_timeout_budget(tmp_path: Path
     """Changed-file collection should use the runtime timeout, not the bash tool timeout."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-47",
         image="python:3.12-slim",
@@ -389,13 +394,18 @@ def test_codex_cli_worker_runs_post_run_lint_and_appends_command_artifacts(
         encoding="utf-8",
     )
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-47",
         image="python:3.12-slim",
     )
     git_status_command = _git_status_command(container.working_dir)
-    lint_format_command = "cd /workspace/repo && ruff format -- workers/codex_cli_worker.py"
-    lint_check_command = "cd /workspace/repo && ruff check --fix -- workers/codex_cli_worker.py"
+    lint_format_command = (
+        f"cd {container.working_dir} && ruff format -- workers/codex_cli_worker.py"
+    )
+    lint_check_command = (
+        f"cd {container.working_dir} && ruff check --fix -- workers/codex_cli_worker.py"
+    )
     session = _FakeSession(
         {
             git_status_command: _command_result(
@@ -445,6 +455,7 @@ def test_codex_cli_worker_requests_higher_permission_for_blocked_commands(tmp_pa
     """Permission-required runtime failures should map to a clear worker follow-up hint."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-47",
         image="python:3.12-slim",
@@ -489,6 +500,7 @@ async def test_codex_cli_worker_returns_partial_result_on_cancellation(tmp_path:
     """The CLI worker should catch cancellation and return the partial runtime state."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-cancel",
         image="python:3.12-slim",
@@ -552,6 +564,7 @@ def test_codex_cli_worker_scopes_and_injects_secrets(tmp_path: Path) -> None:
     """The worker should scope secrets for the container and pass all secrets for redaction."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-secrets",
         image="python:3.12-slim",
@@ -612,6 +625,7 @@ def test_codex_cli_worker_records_no_findings_self_review(tmp_path: Path) -> Non
     """Successful runs should persist an explicit no-findings self-review payload."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-self-review",
         image="python:3.12-slim",
@@ -667,6 +681,7 @@ def test_codex_cli_worker_checks_cancel_before_self_review(tmp_path: Path) -> No
     """The self-review coordinator should honor cancellation before review starts."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-cancel-review",
         image="python:3.12-slim",
@@ -711,6 +726,7 @@ def test_codex_cli_worker_stops_container_when_setup_fails_after_start(tmp_path:
     """Setup failures after container start should still clean up the started container."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-setup-fail",
         image="python:3.12-slim",
@@ -747,6 +763,7 @@ def test_codex_cli_worker_fixes_review_findings_with_bounded_retry(tmp_path: Pat
     """Actionable self-review findings should trigger a bounded follow-up fix loop."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-self-review-fix",
         image="python:3.12-slim",
@@ -820,6 +837,7 @@ def test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_path: 
     """Lint artifacts from each lint pass should be preserved on the final worker result."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-self-review-lint-artifacts",
         image="python:3.12-slim",
@@ -923,6 +941,7 @@ def test_codex_cli_worker_respects_zero_fix_retry_limit(tmp_path: Path) -> None:
     """When fix retries are disabled, findings should be reported without re-entry."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-self-review-zero-fix",
         image="python:3.12-slim",
@@ -977,6 +996,7 @@ def test_codex_cli_worker_allows_opt_out_of_self_review(tmp_path: Path) -> None:
     """Self-review should be skipped when explicitly disabled via constraints."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-self-review-skip",
         image="python:3.12-slim",
@@ -1021,6 +1041,7 @@ def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) 
     adapter.sandbox_mode = "read-only"
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-native-mode",
         image="python:3.12-slim",
@@ -1052,6 +1073,7 @@ def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) 
         ],
         stdout='{"event":"turn.completed"}\n',
         stderr="",
+        json_payload={"status": "passed", "summary": "structured"},
     )
 
     with patch(
@@ -1072,6 +1094,7 @@ def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) 
 
     assert result.status == "success"
     assert result.summary == "Native run complete."
+    assert result.json_payload == {"status": "passed", "summary": "structured"}
     assert result.files_changed == ["note.txt"]
     assert result.diff_text == "diff --git a/note.txt b/note.txt"
     assert result.budget_usage is not None
@@ -1091,6 +1114,7 @@ def test_codex_cli_worker_warns_when_legacy_tool_loop_mode_is_used(tmp_path: Pat
     """Tool-loop execution should emit a deprecation warning for observability."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-tool-loop-warning",
         image="python:3.12-slim",
@@ -1136,6 +1160,7 @@ def test_codex_cli_worker_rejects_non_execution_runtime_modes(tmp_path: Path) ->
     """Planner/reviewer runtime modes should fail fast for Codex execution worker."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-unsupported-mode",
         image="python:3.12-slim",
@@ -1170,6 +1195,7 @@ def test_codex_cli_worker_native_mode_honors_read_only_constraint(tmp_path: Path
     """Native mode should force read-only sandbox when the task constraint requires it."""
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
+        working_dir="/workspace",
         workspace=workspace,
         container_name="sandbox-workspace-task-native-read-only",
         image="python:3.12-slim",
@@ -1243,6 +1269,7 @@ def test_codex_cli_worker_native_sandbox_logic(tmp_path: Path) -> None:
         (True, "https://github.com/untrusted/repo", False, "workspace-write"),
         (False, "https://github.com/trusted/repo", False, "workspace-write"),
         (True, "https://github.com/trusted/repo", True, "read-only"),
+        (False, "https://github.com/trusted/repo", True, "read-only"),
     ]
 
     for in_container, repo_url, read_only, expected_sandbox in scenarios:
@@ -1386,7 +1413,10 @@ def test_codex_native_command_includes_output_schema_path(tmp_path: Path) -> Non
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(
             DockerSandboxContainer(
-                container_name="native-schema", image="python:3.12", workspace=workspace
+                working_dir="/workspace",
+                container_name="native-schema",
+                image="python:3.12",
+                workspace=workspace,
             )
         ),
         runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")]),
@@ -1412,7 +1442,10 @@ def test_codex_native_prompt_includes_response_schema_instructions(tmp_path: Pat
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(
             DockerSandboxContainer(
-                container_name="native-prompt", image="python:3.12", workspace=workspace
+                working_dir="/workspace",
+                container_name="native-prompt",
+                image="python:3.12",
+                workspace=workspace,
             )
         ),
         runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")]),
@@ -1427,7 +1460,7 @@ def test_codex_native_prompt_includes_response_schema_instructions(tmp_path: Pat
             response_schema={"type": "object"},
         ),
     )
-    assert "CRITICAL: Your final response MUST be a single JSON object" in prompt
+    assert "Return exactly one JSON object that strictly matches this JSON schema" in prompt
     assert '"type": "object"' in prompt
 
 
@@ -1437,7 +1470,10 @@ def test_codex_native_runtime_writes_response_schema_file(tmp_path: Path) -> Non
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(
             DockerSandboxContainer(
-                container_name="native-write-schema", image="python:3.12", workspace=workspace
+                working_dir="/workspace",
+                container_name="native-write-schema",
+                image="python:3.12",
+                workspace=workspace,
             )
         ),
         runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")]),
@@ -1469,3 +1505,46 @@ def test_codex_native_runtime_writes_response_schema_file(tmp_path: Path) -> Non
     assert schema_path.exists()
     assert json.loads(schema_path.read_text(encoding="utf-8")) == {"type": "object"}
     assert result.status == "success"
+
+
+def test_codex_cli_worker_auto_enables_network(tmp_path: Path) -> None:
+    """Worker should auto-enable network when tools require it and permission is granted."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        working_dir="/workspace",
+        workspace=workspace,
+        container_name="sandbox-workspace-task-47",
+        image="python:3.12-slim",
+    )
+    container_manager = _FakeContainerManager(container)
+
+    # Use a tool that requires network
+    from tools import EXECUTE_GITHUB_TOOL_NAME, ToolPermissionLevel
+
+    worker = CodexCliWorker(
+        runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=container_manager,
+        session_factory=lambda started_container, **_: _FakeSession(
+            {
+                _git_status_command(container.working_dir): _command_result(
+                    _git_status_command(container.working_dir),
+                    output="",
+                )
+            }
+        ),
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+    )
+
+    asyncio.run(
+        worker.run(
+            WorkerRequest(
+                task_text="create pr",
+                repo_url="https://example.com/repo.git",
+                tools=[EXECUTE_GITHUB_TOOL_NAME],
+                constraints={"granted_permission": ToolPermissionLevel.NETWORKED_WRITE},
+            )
+        )
+    )
+
+    assert container_manager.start_requests[0].network_enabled is True
