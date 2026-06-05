@@ -110,6 +110,7 @@ def _make_workspace(tmp_path: Path) -> WorkspaceHandle:
 
 def _make_container(workspace: WorkspaceHandle) -> DockerSandboxContainer:
     return DockerSandboxContainer(
+        working_dir="/workspace",
         container_name="test-gemini-container",
         image="python:3.12-slim",
         workspace=workspace,
