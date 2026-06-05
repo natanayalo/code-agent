@@ -46,6 +46,10 @@ def test_bootstrap_tracing_skipped_when_disabled(mock_load_deps) -> None:
 @patch("apps.observability._load_tracing_dependencies")
 def test_bootstrap_tracing_called_when_enabled(mock_load_deps) -> None:
     """Verify that tracing bootstrap proceeds when enabled."""
+    import apps.observability
+
+    apps.observability._bootstrap_complete = False
+
     mock_deps = MagicMock()
     mock_load_deps.return_value = mock_deps
 
@@ -58,6 +62,5 @@ def test_bootstrap_tracing_called_when_enabled(mock_load_deps) -> None:
     result = configure_tracing_from_env(service_name="test-service", environ=env)
 
     assert result.enabled is True
-    assert result.reason in {"configured", "already_configured"}
-    # Registration SHOULD be called (or already configured)
-    assert mock_deps.register_fn.called or result.reason == "already_configured"
+    assert result.reason == "configured"
+    mock_deps.register_fn.assert_called_once()

@@ -53,7 +53,7 @@ def _run_git(command: list[str], *, cwd: Path) -> str:
 
 def _create_poetry_repo(repo_path: Path) -> None:
     repo_path.mkdir(parents=True, exist_ok=True)
-    _run_git(["git", "init", "--initial-branch=main"], cwd=repo_path)
+    _run_git(["git", "init"], cwd=repo_path)
 
     pyproject = """[tool.poetry]
 name = "test-project"

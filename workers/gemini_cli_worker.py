@@ -166,7 +166,7 @@ def _prepare_workspace_gemini_home(
             if expanded.exists() and expanded.is_dir():
                 resolved_source = expanded
                 break
-        except PermissionError:
+        except OSError:
             continue
 
     if resolved_source is None:
