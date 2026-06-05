@@ -157,7 +157,11 @@ def _prepare_workspace_gemini_home(
     env_gemini_home = os.environ.get("GEMINI_HOME")
     if env_gemini_home:
         candidates.append(Path(env_gemini_home))
-    candidates.extend([Path.home() / ".gemini", Path("/root/.gemini")])
+    try:
+        candidates.append(Path.home() / ".gemini")
+    except Exception:
+        pass
+    candidates.append(Path("/root/.gemini"))
 
     resolved_source: Path | None = None
     for candidate in candidates:

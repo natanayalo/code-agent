@@ -44,7 +44,7 @@ def _should_skip_gitignore_hardening(state: OrchestratorState) -> bool:
     ):
         return True
 
-    no_goal_text = " ".join(state.task_spec.non_goals).lower()
+    no_goal_text = " ".join(state.task_spec.non_goals or []).lower()
     if "do not modify any files" in no_goal_text:
         return True
     if "no files" in no_goal_text and "modified" in no_goal_text:
@@ -186,14 +186,6 @@ def build_init_environment_node(
                 "command -v poetry >/dev/null 2>&1 || pip install poetry && "
                 "poetry config virtualenvs.in-project true --local && poetry install"
             )
-        elif (repo_path / "requirements.txt").exists():
-            if allow_non_reproducible:
-                setup_command = "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
-            else:
-                return _init_fail(
-                    state,
-                    "Missing lockfile (poetry.lock or uv.lock) for deterministic Python install.",
-                )
         elif (repo_path / "pnpm-lock.yaml").exists():
             setup_command = (
                 "command -v pnpm >/dev/null 2>&1 || npm install -g pnpm && "
@@ -206,6 +198,18 @@ def build_init_environment_node(
             )
         elif (repo_path / "package-lock.json").exists():
             setup_command = "npm ci"
+        elif (repo_path / "Cargo.toml").exists():
+            setup_command = "cargo fetch"
+        elif (repo_path / "go.mod").exists():
+            setup_command = "go mod download"
+        elif (repo_path / "requirements.txt").exists():
+            if allow_non_reproducible:
+                setup_command = "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+            else:
+                return _init_fail(
+                    state,
+                    "Missing lockfile (poetry.lock or uv.lock) for deterministic Python install.",
+                )
         elif (repo_path / "pyproject.toml").exists():
             if allow_non_reproducible:
                 # Fallback to poetry if pyproject exists but no lockfile
@@ -229,10 +233,6 @@ def build_init_environment_node(
                         "for deterministic Node install."
                     ),
                 )
-        elif (repo_path / "Cargo.toml").exists():
-            setup_command = "cargo fetch"
-        elif (repo_path / "go.mod").exists():
-            setup_command = "go mod download"
         elif (repo_path / "Makefile").exists():
             setup_command = "make setup"
 
