@@ -442,6 +442,7 @@ async def review_result(
                 span_name=f"independent_reviewer.{worker_type}",
                 task_id=state.task.task_id,
                 session_id=state.session.session_id if state.session else None,
+                attempt=state.attempt_count,
                 attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
             ):
                 # We use the system_prompt override to perform a single-shot review

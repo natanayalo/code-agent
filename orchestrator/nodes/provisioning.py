@@ -26,7 +26,7 @@ _READ_ONLY_HARDENING_SKIP_REASON = "read_only_or_no_modification_task"
 
 def _should_skip_gitignore_hardening(state: OrchestratorState) -> bool:
     """Return whether environment self-healing should avoid repo file edits."""
-    if state.task.constraints.get("read_only") is True:
+    if (state.task.constraints or {}).get("read_only") is True:
         return True
 
     profile_name = (state.route.chosen_profile or state.dispatch.worker_profile or "").lower()
@@ -139,7 +139,9 @@ def build_init_environment_node(
 
         # Selection Policy (T-178)
         setup_command = None
-        allow_non_reproducible = state.task.constraints.get("allow_non_reproducible_install", False)
+        allow_non_reproducible = (state.task.constraints or {}).get(
+            "allow_non_reproducible_install", False
+        )
 
         # Force re-init if the environment marker is missing
         env_marker_missing = False
@@ -167,7 +169,7 @@ def build_init_environment_node(
         if (
             not env_marker_missing
             and has_success_flag
-            and state.task.constraints.get("skip_init_if_completed", True)
+            and (state.task.constraints or {}).get("skip_init_if_completed", True)
         ):
             # If we already have a success flag and markers exist, we can skip.
             # (Note: Current graph always routes here. We rely on
@@ -244,7 +246,7 @@ def build_init_environment_node(
 
         # Run the setup via shell_worker
         # T-182: Ensure poetry knows about the local venv in the init container.
-        init_secrets = dict(state.task.secrets)
+        init_secrets = dict(state.task.secrets or {})
         init_secrets["POETRY_VIRTUALENVS_IN_PROJECT"] = "true"
 
         request = WorkerRequest(
@@ -305,7 +307,7 @@ def build_init_environment_node(
             'if [ -n "$MISSING" ]; then echo "hardened:$MISSING"; fi'
         )
 
-        missing_ignores = []
+        missing_ignores: list[str] = []
         hardening_skipped_reason = None
         if _should_skip_gitignore_hardening(state):
             hardening_skipped_reason = _READ_ONLY_HARDENING_SKIP_REASON
@@ -329,7 +331,7 @@ def build_init_environment_node(
                     match = re.search(r"\bhardened:(.*)", line)
                     if match:
                         raw_list = match.group(1).strip()
-                        missing_ignores = [p.strip() for p in raw_list.split(" ") if p.strip()]
+                        missing_ignores = raw_list.split()
                         break
 
         init_msg = f"Environment initialized successfully via: {setup_command}"

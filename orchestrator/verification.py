@@ -346,6 +346,7 @@ async def run_independent_verifier(
                 span_name=f"independent_verifier.{worker_type}",
                 task_id=state.task.task_id,
                 session_id=state.session.session_id if state.session else None,
+                attempt=state.attempt_count,
                 attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
             ):
                 set_span_input_output(input_data=request.task_text)
@@ -532,6 +533,7 @@ async def run_deterministic_verification(
             span_name="deterministic_verification",
             task_id=state.task.task_id,
             session_id=state.session.session_id if state.session else None,
+            attempt=state.attempt_count,
             attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
         ):
             set_span_input_output(input_data=script)
