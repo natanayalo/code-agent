@@ -87,12 +87,14 @@ def client(session_factory) -> Iterator[TestClient]:
             worker=worker,
             progress_notifier=notifier,
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     app.state.test_worker = worker
     app.state.test_notifier = notifier
     with TestClient(app) as test_client:
-        test_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        test_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         yield test_client
 
 
@@ -280,13 +282,15 @@ def test_webhook_accepts_worker_profile_override_for_explicit_legacy_opt_in(
                 ),
             },
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     app.state.test_worker = worker
     app.state.test_notifier = notifier
 
     with TestClient(app) as profiled_client:
-        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        profiled_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         response = profiled_client.post(
             "/webhook",
             json={
@@ -343,11 +347,13 @@ def test_webhook_rejects_unknown_worker_profile_override(session_factory) -> Non
                 ),
             },
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
 
     with TestClient(app) as profiled_client:
-        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        profiled_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         response = profiled_client.post(
             "/webhook",
             json={
@@ -596,7 +602,7 @@ def test_webhook_unconfigured_service_returns_503(client: TestClient) -> None:
     with TestClient(app) as bare_client:
         response = bare_client.post(
             "/webhook",
-            headers={"X-Webhook-Token": "test-shared-secret"},
+            headers={"X-Webhook-Token": ("a" * 32)},  # gitleaks:allow
             json={"task_text": "run tests"},
         )
     assert response.status_code == 503
@@ -620,7 +626,7 @@ def test_webhook_rejects_missing_auth_header(session_factory) -> None:
     )
     app = create_app(
         task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
 
     with TestClient(app) as client:
@@ -646,7 +652,7 @@ def test_webhook_rejects_invalid_auth_header(session_factory) -> None:
     )
     app = create_app(
         task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
 
     with TestClient(app) as client:

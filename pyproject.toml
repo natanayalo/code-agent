@@ -71,3 +71,6 @@ version_provider = "pep621"
 version_scheme = "semver"
 tag_format = "$version"
 update_changelog_on_bump = false
+
+[tool.pyright]
+exclude = ["**/__pyrefly_virtual__/**"]

@@ -71,10 +71,12 @@ def client(session_factory, slow_worker) -> TestClient:
             session_factory=session_factory,
             worker=slow_worker,
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     with TestClient(app) as test_client:
-        test_client.headers["X-Webhook-Token"] = "test-secret"
+        test_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         yield test_client
 
 

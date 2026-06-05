@@ -156,6 +156,7 @@ def test_build_task_service_from_env_enables_orchestrator_brain_flag(
         {
             "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
             "CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED": "1",
+            "CODE_AGENT_GEMINI_CLI_BIN": "/usr/local/bin/gemini",
             "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
         },
         outbound_http_clients=outbound_http_clients,
@@ -188,7 +189,7 @@ def test_build_task_service_from_env_wires_planner_worker_into_orchestrator_brai
         assert service is not None
         assert isinstance(service.orchestrator_brain, RuleBasedOrchestratorBrain)
         assert service.gemini_worker is not None
-        assert service.orchestrator_brain.planner_worker is service.gemini_worker
+        assert service.orchestrator_brain.primary_planner is service.gemini_worker
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
@@ -577,7 +578,7 @@ def test_create_app_uses_env_bootstrap_when_no_task_service_is_injected(
     monkeypatch.setattr("apps.api.main.build_task_service_from_env", _build_task_service_from_env)
     monkeypatch.setattr(
         "apps.api.main.build_api_auth_config_from_env",
-        lambda: ApiAuthConfig(shared_secret="test-shared-secret"),
+        lambda: ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
 
     app = create_app()
@@ -610,7 +611,7 @@ def test_create_app_bootstraps_observability_on_startup(monkeypatch) -> None:
     monkeypatch.setattr("apps.api.main.build_task_service_from_env", lambda **_: sentinel)
     monkeypatch.setattr(
         "apps.api.main.build_api_auth_config_from_env",
-        lambda: ApiAuthConfig(shared_secret="test-shared-secret"),
+        lambda: ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
 
     app = create_app()

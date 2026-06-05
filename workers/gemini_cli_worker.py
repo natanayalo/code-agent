@@ -162,9 +162,12 @@ def _prepare_workspace_gemini_home(
     resolved_source: Path | None = None
     for candidate in candidates:
         expanded = candidate.expanduser()
-        if expanded.exists() and expanded.is_dir():
-            resolved_source = expanded
-            break
+        try:
+            if expanded.exists() and expanded.is_dir():
+                resolved_source = expanded
+                break
+        except OSError:
+            continue
 
     if resolved_source is None:
         return
