@@ -58,7 +58,6 @@ from db.enums import (
     TaskStatus,
     TimelineEventType,
     WorkerRunStatus,
-    WorkerRuntimeMode,
     WorkerType,
 )
 from db.models import HumanInteraction, PersonalMemory, ProjectMemory, Task, User, WorkerRun
@@ -89,6 +88,7 @@ from repositories import (
     WorkerRunRepository,
     session_scope,
 )
+from sandbox import WorkspaceManager
 from tools import coerce_permission_level
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
 from workers import ArtifactReference, Worker, WorkerProfile, WorkerResult
@@ -279,7 +279,7 @@ def shutdown_callback_dns_executor() -> None:
 
 def _heartbeat_interval_seconds(*, lease_seconds: int) -> float:
     """Choose a lease heartbeat cadence that scales with lease duration."""
-    bounded_lease = max(1, int(lease_seconds))
+    bounded_lease = max(1, lease_seconds)
     return max(1.0, min(10.0, bounded_lease / 3.0))
 
 
@@ -613,6 +613,9 @@ class _PersistedTaskContext:
     attempt_count: int
     task_spec: dict[str, Any] | None = None
     trace_context: dict[str, str] = field(default_factory=dict)
+    last_run_dispatch: dict[str, Any] | None = None
+    last_run_result: dict[str, Any] | None = None
+    timeline_events: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -997,6 +1000,7 @@ def _normalize_orchestrator_graph_output(raw_output: object) -> object:
         )
         normalized["result"] = WorkerResult(
             status="failure",
+            failure_kind="interaction",
             summary=_interrupt_summary(payloads),
             requested_permission=requested_permission,
             commands_run=[],
@@ -1025,7 +1029,11 @@ def _terminal_follow_up_status(
         return TaskStatus.IN_PROGRESS
     if state.approval.status == "rejected":
         return TaskStatus.FAILED
-    is_clarification_gate = state.current_step in {"generate_task_spec", "await_clarification"}
+    is_clarification_gate = state.current_step in {
+        "generate_task_spec",
+        "generate_task_spec_and_route",
+        "await_clarification",
+    }
     if (
         state.approval.status == "pending"
         or (is_clarification_gate and state.task_spec and state.task_spec.requires_clarification)
@@ -1331,13 +1339,14 @@ class TaskExecutionService:
         self.enable_independent_verifier = enable_independent_verifier
         self.orchestrator_brain = orchestrator_brain
         self.progress_notifier = progress_notifier
-        self.default_task_max_attempts = max(1, int(default_task_max_attempts))
+        self.default_task_max_attempts = max(1, default_task_max_attempts)
         self.workspace_root = None
         if workspace_root is not None:
             self.workspace_root = Path(workspace_root).expanduser().resolve()
-        self.retention_seconds = (
-            None if retention_seconds is None else max(0, int(retention_seconds))
+        self.workspace_manager = (
+            WorkspaceManager(self.workspace_root) if self.workspace_root else None
         )
+        self.retention_seconds = None if retention_seconds is None else max(0, retention_seconds)
         self.checkpoint_path = checkpoint_path
         self._checkpointer: BaseCheckpointSaver | None = None
         self._checkpointer_cm: AbstractAsyncContextManager[BaseCheckpointSaver] | None = None
@@ -1352,6 +1361,7 @@ class TaskExecutionService:
                 gemini_worker=self.gemini_worker,
                 openrouter_worker=self.openrouter_worker,
                 shell_worker=self.shell_worker,
+                workspace_manager=self.workspace_manager,
                 worker_profiles=self.worker_profiles,
                 enable_worker_profiles=self.enable_worker_profiles,
                 enable_independent_verifier=self.enable_independent_verifier,
@@ -1479,11 +1489,21 @@ class TaskExecutionService:
         task_snapshot = self.get_task(task_id)
         if task_snapshot is None:
             raise RuntimeError(f"Persisted task '{task_id}' could not be reloaded.")
-        return CreateTaskOutcome(
+        outcome = CreateTaskOutcome(
             task_snapshot=task_snapshot,
             persisted=persisted,
             duplicate=duplicate_task_id is not None,
         )
+        if outcome.duplicate:
+            logger.warning(
+                "Duplicate task delivery detected and deduplicated",
+                extra={
+                    "task_id": task_id,
+                    "delivery_id": delivery_key.delivery_id if delivery_key else None,
+                    "channel": delivery_key.channel if delivery_key else None,
+                },
+            )
+        return outcome
 
     def _normalize_and_validate_submission(self, submission: TaskSubmission) -> TaskSubmission:
         """Normalize execution overrides and validate profile selections before persistence."""
@@ -2317,7 +2337,7 @@ class TaskExecutionService:
                 event_type = (
                     TimelineEventType.APPROVAL_GRANTED
                     if interaction.interaction_type == HumanInteractionType.PERMISSION
-                    else TimelineEventType.TASK_SPEC_GENERATED
+                    else TimelineEventType.TASK_SPEC_AND_ROUTE_GENERATED
                 )
                 timeline_repo.create_next_for_attempt(
                     task_id=task_id,
@@ -2849,6 +2869,9 @@ class TaskExecutionService:
                 },
                 "task_spec": persisted.task_spec,
                 "attempt_count": persisted.attempt_count,
+                "dispatch": persisted.last_run_dispatch or {},
+                "result": persisted.last_run_result,
+                "timeline_events": persisted.timeline_events,
                 "timeline_persisted_count": initial_persisted_count,
             }
 
@@ -2908,6 +2931,68 @@ class TaskExecutionService:
                     display_name=user.display_name,
                 ),
             )
+            # T-044: Restore previous worker context to ensure retry/escalation policies
+            # can function across turns/interrupts.
+            runs = WorkerRunRepository(session).list_by_task(task_id)
+            last_run_dispatch = None
+            last_run_result = None
+            if runs:
+                last_run = runs[-1]
+                last_run_dispatch = {
+                    "run_id": last_run.id,
+                    "worker_type": last_run.worker_type.value
+                    if hasattr(last_run.worker_type, "value")
+                    else str(last_run.worker_type),
+                    "worker_profile": last_run.worker_profile,
+                    "runtime_mode": (
+                        last_run.runtime_mode.value
+                        if last_run.runtime_mode and hasattr(last_run.runtime_mode, "value")
+                        else str(last_run.runtime_mode)
+                        if last_run.runtime_mode
+                        else None
+                    ),
+                    "workspace_id": last_run.workspace_id,
+                }
+
+                failure_kind = None
+                if last_run.verifier_outcome:
+                    failure_kind = last_run.verifier_outcome.get("failure_kind")
+
+                if not failure_kind and last_run.status == WorkerRunStatus.FAILURE:
+                    # Heuristic: if status is failed but verifier didn't run, check stop_reason
+                    failure_kind = "unknown"
+
+                last_run_result = {
+                    "status": last_run.status.value
+                    if hasattr(last_run.status, "value")
+                    else str(last_run.status),
+                    "summary": last_run.summary,
+                    "failure_kind": failure_kind,
+                    "workspace_id": last_run.workspace_id,
+                    "requested_permission": last_run.requested_permission,
+                    "budget_usage": last_run.budget_usage,
+                    "commands_run": last_run.commands_run or [],
+                    "files_changed": last_run.files_changed or [],
+                    "test_results": [],
+                    "artifacts": [],
+                }
+
+            # T-090: Load full timeline events for history-aware nodes (e.g. rotation guards)
+            timeline_events = TaskTimelineRepository(session).list_by_task(task_id)
+            serialized_events = [
+                {
+                    "event_type": e.event_type.value
+                    if hasattr(e.event_type, "value")
+                    else str(e.event_type),
+                    "attempt_number": e.attempt_number,
+                    "sequence_number": e.sequence_number,
+                    "message": e.message,
+                    "payload": e.payload,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                }
+                for e in timeline_events
+            ]
+
             persisted = _PersistedTaskContext(
                 user_id=user.id,
                 session_id=conversation_session.id,
@@ -2917,6 +3002,9 @@ class TaskExecutionService:
                 attempt_count=task.attempt_count,
                 task_spec=dict(task.task_spec) if isinstance(task.task_spec, dict) else None,
                 trace_context=dict(task.trace_context or {}),
+                last_run_dispatch=last_run_dispatch,
+                last_run_result=last_run_result,
+                timeline_events=serialized_events,
             )
             return submission, persisted
 
@@ -3078,7 +3166,7 @@ class TaskExecutionService:
             if state.route.chosen_worker is not None and state.route.route_reason is not None:
                 task.chosen_worker = cast(WorkerType, state.route.chosen_worker)
                 task.chosen_profile = state.route.chosen_profile
-                task.runtime_mode = cast(WorkerRuntimeMode | None, state.route.runtime_mode)
+                task.runtime_mode = state.route.runtime_mode
                 task.route_reason = state.route.route_reason
 
             if state.task_spec is not None:
@@ -3086,7 +3174,7 @@ class TaskExecutionService:
             if isinstance(task.task_spec, Mapping):
                 interaction_repo.sync_task_spec_flags(task_id=task_id, task_spec=task.task_spec)
 
-            task.status = cast(TaskStatus, force_task_status or _task_status_from_result(state))
+            task.status = force_task_status or _task_status_from_result(state)
 
             approval = state.approval
             if approval.required:
@@ -3144,7 +3232,12 @@ class TaskExecutionService:
                 summary=result.summary if result is not None else "Worker did not return a result.",
                 requested_permission=result.requested_permission if result is not None else None,
                 budget_usage=result.budget_usage if result is not None else None,
-                verifier_outcome=_serialize_verification_report(state.verification),
+                verifier_outcome=_serialize_verification_report(state.verification)
+                or (
+                    {"failure_kind": result.failure_kind}
+                    if result and result.failure_kind
+                    else None
+                ),
                 commands_run=[
                     command.model_dump(mode="json")
                     for command in (result.commands_run if result is not None else [])
@@ -3249,8 +3342,8 @@ class TaskQueueWorker:
     ) -> None:
         self.service = service
         self.worker_id = worker_id or f"worker-{uuid4().hex[:8]}"
-        self.poll_interval_seconds = max(0.25, float(poll_interval_seconds))
-        self.lease_seconds = max(15, int(lease_seconds))
+        self.poll_interval_seconds = max(0.25, poll_interval_seconds)
+        self.lease_seconds = max(15, lease_seconds)
 
     async def run_forever(self) -> None:
         """Poll for queued tasks indefinitely."""

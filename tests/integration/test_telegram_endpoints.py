@@ -86,12 +86,14 @@ def client(session_factory) -> Iterator[TestClient]:
             worker=worker,
             progress_notifier=notifier,
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     app.state.test_worker = worker
     app.state.test_notifier = notifier
     with TestClient(app) as test_client:
-        test_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        test_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         yield test_client
 
 
@@ -347,7 +349,9 @@ def test_telegram_webhook_rejects_missing_secret_header_when_configured(
     )
     app = create_app(
         task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
-        auth_config=ApiAuthConfig(telegram_webhook_secret="telegram-secret"),
+        auth_config=ApiAuthConfig(
+            telegram_webhook_secret=("a" * 32)  # gitleaks:allow
+        ),
     )
 
     with TestClient(app) as client:
@@ -375,13 +379,17 @@ def test_telegram_webhook_accepts_matching_secret_header_when_configured(
     )
     app = create_app(
         task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
-        auth_config=ApiAuthConfig(telegram_webhook_secret="telegram-secret"),
+        auth_config=ApiAuthConfig(
+            telegram_webhook_secret=("a" * 32)  # gitleaks:allow
+        ),
     )
 
     with TestClient(app) as client:
         response = client.post(
             "/telegram/webhook",
-            headers={"X-Telegram-Bot-Api-Secret-Token": "telegram-secret"},
+            headers={
+                "X-Telegram-Bot-Api-Secret-Token": ("a" * 32)  # gitleaks:allow
+            },
             json=_text_update("Run the linter"),
         )
         _run_one_queued_task(client)

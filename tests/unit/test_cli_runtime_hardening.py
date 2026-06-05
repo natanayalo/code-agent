@@ -50,7 +50,7 @@ async def test_init_environment_node_no_shell_worker(tmp_path: Path) -> None:
 
     result = await node(state)
     assert result["current_step"] == "init_environment"
-    assert "result" not in result
+    assert result.get("result") is None
     """Verify that the node does nothing if no markers are found."""
     manager = MagicMock()
     handle = MagicMock()
@@ -67,7 +67,7 @@ async def test_init_environment_node_no_shell_worker(tmp_path: Path) -> None:
     result = await node(state)
 
     assert result["current_step"] == "init_environment"
-    assert "result" not in result
+    assert result.get("result") is None
     shell_worker.run.assert_not_called()
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -59,10 +59,12 @@ def client(session_factory) -> Iterator[TestClient]:
             session_factory=session_factory,
             worker=StaticWorker(),
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     with TestClient(app) as test_client:
-        test_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        test_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         yield test_client
 
 
@@ -277,7 +279,7 @@ def test_list_tasks_includes_approval_context(client: TestClient, session_factor
         run = WorkerRun(
             task_id=task.id,
             worker_type=WorkerType.CODEX,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
             status=WorkerRunStatus.FAILURE,
             requested_permission="dangerous_shell",
         )

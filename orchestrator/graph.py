@@ -7,7 +7,7 @@ import base64
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, cast
 
 from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -17,6 +17,7 @@ from langgraph.types import interrupt
 from apps.observability import (
     SPAN_KIND_CHAIN,
     SPAN_KIND_TOOL,
+    add_current_span_event,
     set_current_span_attribute,
     set_span_input_output,
     set_span_status_from_outcome,
@@ -28,6 +29,7 @@ from orchestrator.brain import (
     RouteBrainMergeReport,
     RouteBrainSuggestion,
     TaskSpecBrainMergeReport,
+    TaskSpecBrainSuggestion,
 )
 from orchestrator.constants import (
     COMPLEX_TASK_MARKERS,
@@ -35,6 +37,10 @@ from orchestrator.constants import (
     LOW_COST_REQUEST_MARKERS,
 )
 from orchestrator.nodes.ingestion import classify_task, ingest_task, plan_task
+from orchestrator.nodes.provisioning import (
+    build_init_environment_node,
+    build_provision_workspace_node,
+)
 from orchestrator.nodes.utils import (
     CODEX_WORKER,
     GEMINI_WORKER,
@@ -71,9 +77,14 @@ from orchestrator.task_spec import (
     is_destructive_task,
     validate_task_spec_policy,
 )
+from sandbox import WorkspaceManager
 from tools import coerce_permission_level
 from tools.numeric import coerce_positive_int_like
 from workers import ArtifactReference, Worker, WorkerProfile, WorkerRequest, WorkerResult
+from workers.constants import (
+    DEFAULT_ORCHESTRATOR_GRACE_SECONDS,
+    DEFAULT_WORKER_TIMEOUT_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,12 +95,14 @@ ORCHESTRATOR_NODE_SEQUENCE = (
     "classify_task",
     "plan_task",
     "generate_task_spec",
+    "generate_task_spec_and_route",
     "await_clarification",
     "load_memory",
-    "choose_worker",
     "await_permission",
     "check_approval",
     "await_approval",
+    "provision_workspace",
+    "init_environment",
     "dispatch_job",
     "await_result",
     "verify_result",
@@ -102,8 +115,10 @@ _COMPLEX_TASK_PATTERN = re.compile(
     rf"(?<![\w-])(?:{'|'.join(re.escape(marker) for marker in COMPLEX_TASK_MARKERS)})(?![\w-])"
 )
 
-DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = 330
-ORCHESTRATOR_TIMEOUT_GRACE_SECONDS = 30
+DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = (
+    DEFAULT_WORKER_TIMEOUT_SECONDS + DEFAULT_ORCHESTRATOR_GRACE_SECONDS
+)
+ORCHESTRATOR_TIMEOUT_GRACE_SECONDS = DEFAULT_ORCHESTRATOR_GRACE_SECONDS
 _WORKER_FAILURE_REROUTE_KINDS = frozenset(
     {
         "compile",
@@ -112,9 +127,12 @@ _WORKER_FAILURE_REROUTE_KINDS = frozenset(
         "context_window",
         "provider_error",
         "unknown",
+        "timeout",
     }
 )
-_VERIFICATION_FAILURE_REROUTE_KINDS = frozenset({"test_regression", "scope_mismatch", "unknown"})
+_VERIFICATION_FAILURE_REROUTE_KINDS = frozenset(
+    {"test_regression", "scope_mismatch", "unknown", "timeout", "worker_failure"}
+)
 _WORKER_FAILURE_RETRY_SAME_WORKER_KINDS = frozenset(
     {
         "sandbox_infra",
@@ -446,7 +464,7 @@ def _build_approval_checkpoint(state: OrchestratorState) -> ApprovalCheckpoint:
 def _route_after_check_approval(state_input: OrchestratorState) -> str:
     """Route either to the approval interrupt or straight to dispatch."""
     state = _ensure_state(state_input)
-    return "await_approval" if state.approval.required else "dispatch_job"
+    return "await_approval" if state.approval.required else "provision_workspace"
 
 
 def _coerce_approval_decision(resume_value: Any) -> bool:
@@ -471,7 +489,7 @@ def _coerce_approval_decision(resume_value: Any) -> bool:
 def _route_after_await_approval(state_input: OrchestratorState) -> str:
     """Continue to dispatch only when the destructive action was approved."""
     state = _ensure_state(state_input)
-    return "dispatch_job" if state.approval.status == "approved" else "summarize_result"
+    return "provision_workspace" if state.approval.status == "approved" else "summarize_result"
 
 
 def _normalize_repair_task_text(value: object) -> str | None:
@@ -515,6 +533,8 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
     elif normalized_review_repair_task_text:
         task_text = normalized_review_repair_task_text
 
+    worker_profile = state.dispatch.worker_profile or state.route.chosen_profile
+
     return WorkerRequest(
         session_id=state.session.session_id if state.session is not None else None,
         task_id=state.task.task_id,
@@ -526,10 +546,11 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         task_spec=state.task_spec.model_dump(mode="json") if state.task_spec is not None else None,
         constraints=dict(state.task.constraints),
         budget=dict(state.task.budget),
-        secrets=dict(state.task.secrets),
+        secrets=dict(state.task.secrets | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
         tools=state.task.tools,
-        worker_profile=state.dispatch.worker_profile or state.route.chosen_profile,
+        worker_profile=worker_profile,
         runtime_mode=state.dispatch.runtime_mode or state.route.runtime_mode,
+        workspace_id=state.dispatch.workspace_id,
     )
 
 
@@ -601,15 +622,14 @@ def _routable_execution_profiles(
         ):
             continue
 
-        # Strict mutation policy matching:
-        # 1. If task is read-only, only read-only profiles are allowed.
-        # 2. If task allows mutations, only patch-allowed profiles are allowed.
+        # Mutation policy matching:
+        # 1. If task is explicitly read-only, only read-only profiles are allowed.
+        # 2. If task allows mutations, both patch-allowed and read-only execution profiles
+        #    remain routable (read-only execution is a safe subset).
         if requires_read_only and profile.mutation_policy != "read_only":
             continue
-        if not requires_read_only and profile.mutation_policy == "read_only":
-            continue
 
-        if delivery_mode and profile.supported_delivery_modes:
+        if delivery_mode and delivery_mode != "summary" and profile.supported_delivery_modes:
             if delivery_mode not in profile.supported_delivery_modes:
                 continue
         selected[name] = profile
@@ -744,8 +764,13 @@ async def generate_task_spec(
             task_plan=state.task_plan,
         )
         brain_report: TaskSpecBrainMergeReport | None = None
+        set_current_span_attribute(
+            "code_agent.brain.task_spec.enabled",
+            orchestrator_brain is not None,
+        )
         if orchestrator_brain is not None:
             provider_name = type(orchestrator_brain).__name__
+            set_current_span_attribute("code_agent.brain.task_spec.provider", provider_name)
             try:
                 with start_optional_span(
                     tracer_name="orchestrator.graph",
@@ -795,6 +820,45 @@ async def generate_task_spec(
                         suggestion=suggestion,
                         provider=provider_name,
                     )
+        if brain_report is not None:
+            fallback_reason_code = (
+                "brain_error"
+                if brain_report.error
+                else ("brain_not_applied" if not brain_report.applied else "brain_applied")
+            )
+            fallback_reason_detail = (
+                brain_report.error
+                if brain_report.error
+                else ("no_suggestion_or_clamped" if not brain_report.applied else "applied")
+            )
+            set_current_span_attribute("code_agent.brain.task_spec.attempted", True)
+            set_current_span_attribute("code_agent.brain.task_spec.applied", brain_report.applied)
+            set_current_span_attribute("code_agent.brain.task_spec.error", bool(brain_report.error))
+            set_current_span_attribute(
+                "code_agent.brain.task_spec.fallback_reason", fallback_reason_code
+            )
+            set_current_span_attribute(
+                "code_agent.brain.task_spec.fallback_reason_detail", fallback_reason_detail
+            )
+            set_current_span_attribute("code_agent.fallback.used", True)
+            set_current_span_attribute("code_agent.fallback.from", brain_report.provider or "brain")
+            set_current_span_attribute("code_agent.fallback.to", "deterministic_task_spec")
+            set_current_span_attribute("code_agent.fallback.reason_code", fallback_reason_code)
+            if brain_report.error:
+                set_current_span_attribute(
+                    "code_agent.brain.task_spec.error_message", brain_report.error
+                )
+            add_current_span_event(
+                "code_agent.brain.task_spec.outcome",
+                {
+                    "provider": brain_report.provider or "unknown",
+                    "applied": brain_report.applied,
+                    "error": bool(brain_report.error),
+                    "fallback_reason": fallback_reason_code,
+                    "fallback_reason_detail": fallback_reason_detail,
+                    "ignored_fields_count": len(brain_report.ignored_fields),
+                },
+            )
 
         policy_violations = validate_task_spec_policy(task_spec)
         progress_message = "task spec generated"
@@ -868,6 +932,317 @@ async def generate_task_spec(
                 next_action_hint="await_manual_follow_up",
             )
         return response
+
+
+def build_generate_task_spec_and_route_node(
+    available_workers: frozenset[str],
+    *,
+    available_profiles: Mapping[str, WorkerProfile] | None = None,
+    orchestrator_brain: OrchestratorBrain | None = None,
+) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
+    """Build one node that derives TaskSpec and route in a single brain call."""
+
+    async def generate_task_spec_and_route_node(state_input: OrchestratorState) -> dict[str, Any]:
+        state = _ensure_state(state_input)
+        with start_optional_span(
+            tracer_name="orchestrator.graph",
+            span_name="orchestrator.node.generate_task_spec_and_route",
+            attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+            task_id=state.task.task_id,
+            session_id=state.session.session_id if state.session else None,
+            attempt=state.attempt_count,
+        ):
+            task_spec = build_task_spec_for_request(
+                state.task,
+                task_kind=state.task_kind,
+                task_plan=state.task_plan,
+            )
+            state_for_route = state.model_copy(update={"task_spec": task_spec})
+            route = _compute_route_decision(
+                state_for_route,
+                available_workers,
+                available_profiles=available_profiles,
+            )
+
+            task_spec_brain_report: TaskSpecBrainMergeReport | None = None
+            route_brain_report: RouteBrainMergeReport | None = None
+            unified_attempted = False
+            if orchestrator_brain is not None and _should_attempt_brain_route(state):
+                unified_attempted = True
+                provider_name = type(orchestrator_brain).__name__
+                unified_method = getattr(orchestrator_brain, "suggest_task_spec_and_route", None)
+                if not callable(unified_method):
+                    task_spec_brain_report = TaskSpecBrainMergeReport(
+                        enabled=True,
+                        provider=provider_name,
+                        error=(
+                            "RuntimeError: orchestrator_brain_missing_unified_method: "
+                            "suggest_task_spec_and_route"
+                        ),
+                    )
+                    route_brain_report = RouteBrainMergeReport(
+                        enabled=True,
+                        provider=provider_name,
+                        error=(
+                            "RuntimeError: orchestrator_brain_missing_unified_method: "
+                            "suggest_task_spec_and_route"
+                        ),
+                    )
+                    failure_event_payload = {
+                        "task_spec": task_spec.model_dump(mode="json"),
+                        "route": route.model_dump(mode="json"),
+                        "policy_violations": [],
+                        "brain": {
+                            "task_spec": task_spec_brain_report.model_dump(mode="json"),
+                            "route": route_brain_report.model_dump(mode="json"),
+                            "applied": False,
+                            "error": True,
+                        },
+                        "error_reason_code": "brain_unified_method_missing",
+                    }
+                    set_span_input_output(
+                        input_data=state.task_kind,
+                        output_data=failure_event_payload,
+                    )
+                    set_span_status_from_outcome("failure")
+                    return {
+                        "current_step": "generate_task_spec_and_route",
+                        "task_spec": task_spec.model_dump(),
+                        "route": route.model_dump(),
+                        "errors": [*state.errors, "brain_unified_method_missing"],
+                        "result": WorkerResult(
+                            status="error",
+                            summary=(
+                                "Orchestrator brain is enabled but does not implement "
+                                "suggest_task_spec_and_route."
+                            ),
+                            failure_kind="unknown",
+                            commands_run=[],
+                            files_changed=[],
+                            test_results=[],
+                            artifacts=[],
+                            next_action_hint="update_orchestrator_brain_provider",
+                        ),
+                        "progress_updates": _progress_update(
+                            state, "task generation failed: unified brain method missing"
+                        ),
+                        **_timeline_event(
+                            state,
+                            TimelineEventType.TASK_SPEC_AND_ROUTE_GENERATED,
+                            message=(
+                                "TaskSpec and route generation failed: unified brain method "
+                                "missing."
+                            ),
+                            payload=failure_event_payload,
+                        ),
+                    }
+
+                try:
+                    with start_optional_span(
+                        tracer_name="orchestrator.graph",
+                        span_name="orchestrator.node.generate_task_spec_and_route.brain",
+                        attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+                        task_id=state.task.task_id,
+                        session_id=state.session.session_id if state.session else None,
+                        attempt=state.attempt_count,
+                    ):
+                        suggestion = await unified_method(
+                            state=state,
+                            task_spec=task_spec,
+                            available_workers=available_workers,
+                            available_profiles=available_profiles,
+                        )
+                        set_span_input_output(
+                            input_data=task_spec.model_dump(),
+                            output_data=suggestion.model_dump() if suggestion else None,
+                        )
+                except (RuntimeError, AttributeError, TypeError) as exc:
+                    logger.debug("Failed to execute unified brain method: %s", exc, exc_info=True)
+                    detail = str(exc).strip()
+                    task_spec_brain_report = TaskSpecBrainMergeReport(
+                        enabled=True,
+                        provider=provider_name,
+                        error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
+                    )
+                    route_brain_report = RouteBrainMergeReport(
+                        enabled=True,
+                        provider=provider_name,
+                        error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
+                    )
+
+                else:
+                    if suggestion is None:
+                        task_spec_brain_report = TaskSpecBrainMergeReport(
+                            enabled=True,
+                            provider=provider_name,
+                        )
+                        route_brain_report = RouteBrainMergeReport(
+                            enabled=True,
+                            provider=provider_name,
+                        )
+                    else:
+                        task_spec_suggestion = TaskSpecBrainSuggestion(
+                            assumptions=suggestion.assumptions,
+                            acceptance_criteria=suggestion.acceptance_criteria,
+                            non_goals=suggestion.non_goals,
+                            clarification_questions=suggestion.clarification_questions,
+                            verification_commands=suggestion.verification_commands,
+                            suggested_risk_level=suggestion.suggested_risk_level,
+                            suggested_task_type=suggestion.suggested_task_type,
+                            suggested_delivery_mode=suggestion.suggested_delivery_mode,
+                            rationale=suggestion.rationale,
+                        )
+                        task_spec, task_spec_brain_report = apply_task_spec_brain_suggestion(
+                            task_spec=task_spec,
+                            suggestion=task_spec_suggestion,
+                            provider=provider_name,
+                        )
+                        state_for_route = state.model_copy(update={"task_spec": task_spec})
+                        routable_profiles = (
+                            _routable_execution_profiles(
+                                state_for_route, available_profiles, available_workers
+                            )
+                            if available_profiles
+                            else {}
+                        )
+                        route_suggestion = RouteBrainSuggestion(
+                            suggested_worker=suggestion.suggested_worker,
+                            suggested_profile=suggestion.suggested_profile,
+                            suggested_retry_strategy=suggestion.suggested_retry_strategy,
+                            rationale=suggestion.rationale,
+                        )
+                        brain_route, route_brain_report = _apply_brain_route_suggestion(
+                            state=state_for_route,
+                            suggestion=route_suggestion,
+                            provider=provider_name,
+                            available_workers=available_workers,
+                            available_profiles=available_profiles,
+                            routable_profiles=routable_profiles,
+                        )
+                        if brain_route is not None:
+                            route = brain_route
+
+            if route_brain_report is not None:
+                route_brain_report = _record_route_brain_final_choice(route_brain_report, route)
+
+            if unified_attempted:
+                task_applied = bool(task_spec_brain_report and task_spec_brain_report.applied)
+                route_applied = bool(route_brain_report and route_brain_report.applied)
+                has_error = bool(
+                    (task_spec_brain_report and task_spec_brain_report.error)
+                    or (route_brain_report and route_brain_report.error)
+                )
+                if has_error:
+                    fallback_reason = "full_fallback_error"
+                elif task_applied and route_applied:
+                    fallback_reason = "brain_applied"
+                elif task_applied and not route_applied:
+                    fallback_reason = "route_only_clamped"
+                elif not task_applied and route_applied:
+                    fallback_reason = "task_spec_only_clamped"
+                else:
+                    fallback_reason = "full_fallback_clamped"
+                set_current_span_attribute(
+                    "code_agent.fallback.used", fallback_reason != "brain_applied"
+                )
+                set_current_span_attribute("code_agent.fallback.from", "unified_brain")
+                set_current_span_attribute("code_agent.fallback.to", "deterministic_clamps")
+                set_current_span_attribute("code_agent.fallback.reason_code", fallback_reason)
+
+            policy_violations = validate_task_spec_policy(task_spec)
+            progress_message = "task spec and route generated"
+            if policy_violations:
+                progress_message = "task spec generated with policy warnings"
+            elif task_spec.requires_clarification:
+                progress_message = "clarification required before execution"
+
+            event_payload: dict[str, Any] = {
+                "task_spec": task_spec.model_dump(mode="json"),
+                "route": route.model_dump(mode="json"),
+                "policy_violations": policy_violations,
+            }
+            if task_spec_brain_report is not None or route_brain_report is not None:
+                event_payload["brain"] = {
+                    "task_spec": (
+                        task_spec_brain_report.model_dump(mode="json")
+                        if task_spec_brain_report is not None
+                        else None
+                    ),
+                    "route": (
+                        route_brain_report.model_dump(mode="json")
+                        if route_brain_report is not None
+                        else None
+                    ),
+                    "applied": bool(
+                        (task_spec_brain_report and task_spec_brain_report.applied)
+                        or (route_brain_report and route_brain_report.applied)
+                    ),
+                    "error": bool(
+                        (task_spec_brain_report and task_spec_brain_report.error)
+                        or (route_brain_report and route_brain_report.error)
+                    ),
+                }
+
+            set_span_input_output(input_data=state.task_kind, output_data=event_payload)
+            set_span_status_from_outcome("success")
+
+            response: dict[str, Any] = {
+                "current_step": "generate_task_spec_and_route",
+                "task_spec": task_spec.model_dump(),
+                "route": route.model_dump(),
+                "progress_updates": _progress_update(state, progress_message),
+                **_timeline_event(
+                    state,
+                    TimelineEventType.TASK_SPEC_AND_ROUTE_GENERATED,
+                    message="TaskSpec and route generated for worker dispatch.",
+                    payload=event_payload,
+                ),
+            }
+
+            if policy_violations:
+                response["errors"] = [
+                    *state.errors,
+                    *(f"task_spec_policy:{violation}" for violation in policy_violations),
+                ]
+                response["result"] = WorkerResult(
+                    status="error",
+                    summary=(
+                        "Task generation halted due to safety policy violations: "
+                        f"{', '.join(policy_violations)}"
+                    ),
+                    failure_kind="unknown",
+                    commands_run=[],
+                    files_changed=[],
+                    test_results=[],
+                    artifacts=[],
+                    next_action_hint="halt_policy_violation",
+                )
+            elif task_spec.requires_clarification:
+                clarification_questions = [
+                    question.strip()
+                    for question in task_spec.clarification_questions
+                    if isinstance(question, str) and question.strip()
+                ]
+                clarification_summary = "Task paused pending clarification before worker dispatch."
+                if clarification_questions:
+                    clarification_summary = (
+                        f"{clarification_summary} Clarification needed: "
+                        f"{' '.join(clarification_questions)}"
+                    )
+                response["errors"] = [*state.errors, "blocked_on_clarification"]
+                response["result"] = WorkerResult(
+                    status="failure",
+                    summary=clarification_summary,
+                    failure_kind="unknown",
+                    commands_run=[],
+                    files_changed=[],
+                    test_results=[],
+                    artifacts=[],
+                    next_action_hint="await_manual_follow_up",
+                )
+            return response
+
+    return generate_task_spec_and_route_node
 
 
 def _route_after_generate_task_spec(state_input: OrchestratorState) -> str:
@@ -1001,6 +1376,44 @@ def _route_by_preference(
     )
 
 
+def _get_previously_failed_workers(state: OrchestratorState) -> set[WorkerType]:
+    """Scan timeline history to find workers that have already failed in this task (T-071)."""
+    failed_workers: set[WorkerType] = set()
+    attempts_dispatched: dict[int, WorkerType] = {}
+
+    for event in state.timeline_events:
+        if event.attempt_number is None:
+            continue
+        evt_type = (
+            event.event_type.value if hasattr(event.event_type, "value") else event.event_type
+        )
+        if evt_type == "worker_dispatched":
+            worker_type = (event.payload or {}).get("worker_type")
+            if worker_type:
+                attempts_dispatched[event.attempt_number] = cast(WorkerType, worker_type)
+        elif evt_type in {
+            "worker_failed",
+            "worker_error",
+        }:
+            failed_worker = attempts_dispatched.get(event.attempt_number)
+            if failed_worker:
+                failed_workers.add(failed_worker)
+        elif evt_type == "worker_completed":
+            status = (event.payload or {}).get("status")
+            if status != "success":
+                failed_worker = attempts_dispatched.get(event.attempt_number)
+                if failed_worker:
+                    failed_workers.add(failed_worker)
+        elif evt_type == "verification_completed":
+            status = (event.payload or {}).get("status")
+            if status == "failed":
+                failed_worker = attempts_dispatched.get(event.attempt_number)
+                if failed_worker:
+                    failed_workers.add(failed_worker)
+
+    return failed_workers
+
+
 def _compute_legacy_route_decision(
     state: OrchestratorState,
     available_workers: frozenset[str],
@@ -1049,15 +1462,38 @@ def _compute_legacy_route_decision(
             )
 
         if escalation_reason is not None:
+            previously_failed = _get_previously_failed_workers(state)
+
+            # T-071: rotate through all supported worker types before repeating any.
             alternates = tuple(
                 worker for worker in SUPPORTED_WORKER_TYPES if worker != prior_worker
             )
 
+            # Pass 1: try untried alternates first.
+            for alternate in alternates:
+                if alternate not in available_workers or alternate in previously_failed:
+                    continue
+                logger.info(
+                    "Routing to untried alternate worker due to prior failure",
+                    extra={
+                        "prior_worker": prior_worker,
+                        "alternate_worker": alternate,
+                        "reason": escalation_reason,
+                        "previously_failed": sorted(list(previously_failed)),
+                    },
+                )
+                return RouteDecision(
+                    chosen_worker=alternate,
+                    route_reason=escalation_reason,
+                    override_applied=False,
+                )
+
+            # Pass 2: fallback to any available alternate if all have been tried.
             for alternate in alternates:
                 if alternate not in available_workers:
                     continue
                 logger.info(
-                    "Routing to alternate worker due to prior failure",
+                    "Routing to previously-tried alternate worker as all candidates have failed",
                     extra={
                         "prior_worker": prior_worker,
                         "alternate_worker": alternate,
@@ -1069,6 +1505,7 @@ def _compute_legacy_route_decision(
                     route_reason=escalation_reason,
                     override_applied=False,
                 )
+
             desired_alternate = alternates[0]
             # Alternate unavailable — fail explicitly rather than blind retry of the failed worker.
             logger.warning(
@@ -1291,18 +1728,45 @@ def _route_for_worker(
 
 def _resolve_brain_retry_context(state: OrchestratorState) -> tuple[WorkerType | None, str | None]:
     """Resolve deterministic retry context from prior verification or worker failures."""
+    # T-090: Use timeline events as the high-fidelity source of truth for history
     prior_worker = state.dispatch.worker_type
+
+    # Check timeline for the absolute last worker dispatched
+    recent_dispatches = [
+        e.payload.get("worker_type")
+        for e in state.timeline_events
+        if (e.event_type.value if hasattr(e.event_type, "value") else e.event_type)
+        == "worker_dispatched"
+        and e.payload
+        and "worker_type" in e.payload
+    ]
+    if recent_dispatches:
+        # The last event in the list is the most recent dispatch
+        prior_worker = cast(WorkerType, recent_dispatches[-1])
+
     if state.attempt_count <= 0 or prior_worker is None:
         return None, None
     if state.verification is not None and state.verification.status == "failed":
         verification_failure_kind = state.verification.failure_kind or "unknown"
         if verification_failure_kind in _VERIFICATION_FAILURE_REROUTE_KINDS:
+            logger.info(
+                "Orchestrator resolved retry context: escalate_to_alternate (verification failure)",
+                extra={"failure_kind": verification_failure_kind, "prior_worker": prior_worker},
+            )
             return prior_worker, "escalate_to_alternate"
     if state.result is not None and state.result.status != "success":
         failure_kind = state.result.failure_kind or "unknown"
         if failure_kind in _WORKER_FAILURE_REROUTE_KINDS:
+            logger.info(
+                "Orchestrator resolved retry context: escalate_to_alternate (worker failure)",
+                extra={"failure_kind": failure_kind, "prior_worker": prior_worker},
+            )
             return prior_worker, "escalate_to_alternate"
         if failure_kind in _WORKER_FAILURE_RETRY_SAME_WORKER_KINDS:
+            logger.info(
+                "Orchestrator resolved retry context: retry_same_worker",
+                extra={"failure_kind": failure_kind, "prior_worker": prior_worker},
+            )
             return prior_worker, "retry_same_worker"
     return prior_worker, None
 
@@ -1560,6 +2024,36 @@ def build_choose_worker_node(
                     available_workers,
                     available_profiles=available_profiles,
                 )
+
+            # T-044: Strict enforcement of worker rotation on timeout/reroute-kind failures.
+            # Even if deterministic logic falls back, ensure we don't accidentally stick to
+            # the failed worker.
+            prior_worker, allowed_strategy = _resolve_brain_retry_context(state)
+            if (
+                allowed_strategy == "escalate_to_alternate"
+                and route.chosen_worker == prior_worker
+                and route.route_reason != "runtime_unavailable"
+            ):
+                alternates = [
+                    w
+                    for w in SUPPORTED_WORKER_TYPES
+                    if w != prior_worker and w in available_workers
+                ]
+                if alternates:
+                    new_worker = alternates[0]
+                    logger.info(
+                        "Enforcing worker rotation on timeout/failure override",
+                        extra={"prior_worker": prior_worker, "new_worker": new_worker},
+                    )
+                    route = (
+                        _route_for_worker(
+                            worker_type=new_worker,
+                            reason="previous_worker_failed",
+                            available_profiles=available_profiles,
+                            routable_profiles=routable_profiles,
+                        )
+                        or route
+                    )
             if brain_report is not None:
                 brain_report = _record_route_brain_final_choice(brain_report, route)
 
@@ -1623,6 +2117,7 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
             worker_type=worker_type,
             worker_profile=state.route.chosen_profile,
             runtime_mode=state.route.runtime_mode,
+            workspace_id=state.dispatch.workspace_id,
         )
         set_span_input_output(input_data=state.task.task_text, output_data=state.route.model_dump())
         return {
@@ -1734,11 +2229,14 @@ def build_await_result_node(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
+    shell_worker: Worker | None = None,
     *,
     available_profile_names: frozenset[str] = frozenset(),
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around the workers wired into the graph."""
-    available_workers = _available_workers(worker, gemini_worker, openrouter_worker)
+    available_workers = _available_workers(
+        worker, gemini_worker, openrouter_worker, shell_worker=shell_worker
+    )
 
     async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
@@ -1787,6 +2285,8 @@ def build_await_result_node(
                     session_id=request.session_id,
                     timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
                 )
+                if result.workspace_id is None and state.dispatch.workspace_id:
+                    result = result.model_copy(update={"workspace_id": state.dispatch.workspace_id})
                 progress_updates = _progress_update(state, progress_message)
         return {
             "current_step": "await_result",
@@ -2006,7 +2506,7 @@ def _route_after_await_permission_escalation(state_input: OrchestratorState) -> 
     """Route back to dispatch if approved, else verify failure through verification."""
     state = _ensure_state(state_input)
     if state.result is None:
-        return "dispatch_job"
+        return "provision_workspace"
     return "verify_result"
 
 
@@ -2014,11 +2514,20 @@ def _route_after_review_result(state_input: OrchestratorState) -> str:
     """Route to a bounded repair handoff when independent review requested it."""
     state = _ensure_state(state_input)
     if state.repair_handoff_requested:
-        return "dispatch_job"
+        return "provision_workspace"
     return "summarize_result"
 
 
 # Moved to orchestrator/nodes/verification.py and utils.py
+
+
+def _route_after_init_environment(
+    state: OrchestratorState,
+) -> Literal["dispatch_job", "summarize_result"]:
+    """Route after environment initialization, failing fast if setup errored."""
+    if state.result is not None and state.result.status != "success":
+        return "summarize_result"
+    return "dispatch_job"
 
 
 def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
@@ -2117,9 +2626,12 @@ def build_review_result_node(
     worker: Worker | None = None,
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
+    shell_worker: Worker | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the review-result node around the workers wired into the graph."""
-    available_workers = _available_workers(worker, gemini_worker, openrouter_worker)
+    available_workers = _available_workers(
+        worker, gemini_worker, openrouter_worker, shell_worker=shell_worker
+    )
 
     async def review_result_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
@@ -2134,6 +2646,7 @@ def build_orchestrator_graph(
     gemini_worker: Worker | None = None,
     openrouter_worker: Worker | None = None,
     shell_worker: Worker | None = None,
+    workspace_manager: WorkspaceManager | None = None,
     worker_profiles: Mapping[str, WorkerProfile] | None = None,
     enable_worker_profiles: bool = False,
     enable_independent_verifier: bool = False,
@@ -2144,38 +2657,51 @@ def build_orchestrator_graph(
 ) -> Any:
     """Build and compile the linear LangGraph happy-path skeleton."""
     builder = StateGraph(OrchestratorState)
-    builder.add_node("ingest_task", RunnableLambda(ingest_task))
-    builder.add_node("classify_task", RunnableLambda(classify_task))
-    builder.add_node("plan_task", RunnableLambda(plan_task))
-
-    async def _generate_task_spec_node(state_input: OrchestratorState) -> dict[str, Any]:
-        return await generate_task_spec(
-            state_input,
-            orchestrator_brain=orchestrator_brain,
-        )
-
-    builder.add_node("generate_task_spec", RunnableLambda(_generate_task_spec_node))
-    builder.add_node("await_clarification", RunnableLambda(await_clarification))
-    builder.add_node("load_memory", RunnableLambda(load_memory))
     available_workers: frozenset[str] = frozenset(
-        _available_workers(worker, gemini_worker, openrouter_worker).keys()
+        _available_workers(
+            worker, gemini_worker, openrouter_worker, shell_worker=shell_worker
+        ).keys()
     )
     available_profiles = dict(worker_profiles or {})
     active_profiles = available_profiles if enable_worker_profiles else None
     profile_names = frozenset(available_profiles.keys()) if enable_worker_profiles else frozenset()
+
+    builder.add_node("ingest_task", RunnableLambda(ingest_task))
+    builder.add_node("classify_task", RunnableLambda(classify_task))
+    builder.add_node("plan_task", RunnableLambda(plan_task))
+
     builder.add_node(
-        "choose_worker",
+        "generate_task_spec_and_route",
         RunnableLambda(
-            build_choose_worker_node(
+            build_generate_task_spec_and_route_node(
                 available_workers,
                 available_profiles=active_profiles,
                 orchestrator_brain=orchestrator_brain,
             )
         ),
     )
+    builder.add_node("await_clarification", RunnableLambda(await_clarification))
+    builder.add_node("load_memory", RunnableLambda(load_memory))
     builder.add_node("await_permission", RunnableLambda(await_permission))
     builder.add_node("check_approval", RunnableLambda(check_approval))
     builder.add_node("await_approval", RunnableLambda(await_approval))
+    builder.add_node(
+        "provision_workspace",
+        RunnableLambda(build_provision_workspace_node(workspace_manager=workspace_manager))
+        if workspace_manager
+        else RunnableLambda(lambda state: {"current_step": "provision_workspace", "result": None}),
+    )
+    builder.add_node(
+        "init_environment",
+        RunnableLambda(
+            build_init_environment_node(
+                workspace_manager=workspace_manager,
+                shell_worker=shell_worker,
+            )
+        )
+        if workspace_manager
+        else RunnableLambda(lambda state: {"current_step": "init_environment", "result": None}),
+    )
     builder.add_node("dispatch_job", RunnableLambda(dispatch_job))
     builder.add_node(
         "await_result",
@@ -2184,6 +2710,7 @@ def build_orchestrator_graph(
                 worker,
                 gemini_worker,
                 openrouter_worker,
+                shell_worker=shell_worker,
                 available_profile_names=profile_names,
             )
         ),
@@ -2197,22 +2724,25 @@ def build_orchestrator_graph(
                 worker=worker,
                 gemini_worker=gemini_worker,
                 openrouter_worker=openrouter_worker,
+                shell_worker=shell_worker,
                 orchestrator_brain=orchestrator_brain,
             )
         ),
     )
     builder.add_node(
         "review_result",
-        RunnableLambda(build_review_result_node(worker, gemini_worker, openrouter_worker)),
+        RunnableLambda(
+            build_review_result_node(worker, gemini_worker, openrouter_worker, shell_worker)
+        ),
     )
     builder.add_node("summarize_result", RunnableLambda(summarize_result))
     builder.add_node("persist_memory", RunnableLambda(persist_memory))
     builder.add_edge(START, "ingest_task")
     builder.add_edge("ingest_task", "classify_task")
     builder.add_edge("classify_task", "plan_task")
-    builder.add_edge("plan_task", "generate_task_spec")
+    builder.add_edge("plan_task", "generate_task_spec_and_route")
     builder.add_conditional_edges(
-        "generate_task_spec",
+        "generate_task_spec_and_route",
         _route_after_generate_task_spec,
         {
             "await_clarification": "await_clarification",
@@ -2221,20 +2751,28 @@ def build_orchestrator_graph(
         },
     )
     builder.add_edge("await_clarification", "load_memory")
-    builder.add_edge("load_memory", "choose_worker")
-    builder.add_edge("choose_worker", "await_permission")
+    builder.add_edge("load_memory", "await_permission")
     builder.add_edge("await_permission", "check_approval")
     builder.add_conditional_edges(
         "check_approval",
         _route_after_check_approval,
         {
             "await_approval": "await_approval",
-            "dispatch_job": "dispatch_job",
+            "provision_workspace": "provision_workspace",
         },
     )
     builder.add_conditional_edges(
         "await_approval",
         _route_after_await_approval,
+        {
+            "provision_workspace": "provision_workspace",
+            "summarize_result": "summarize_result",
+        },
+    )
+    builder.add_edge("provision_workspace", "init_environment")
+    builder.add_conditional_edges(
+        "init_environment",
+        _route_after_init_environment,
         {
             "dispatch_job": "dispatch_job",
             "summarize_result": "summarize_result",
@@ -2253,7 +2791,7 @@ def build_orchestrator_graph(
         "await_permission_escalation",
         _route_after_await_permission_escalation,
         {
-            "dispatch_job": "dispatch_job",
+            "provision_workspace": "provision_workspace",
             "verify_result": "verify_result",
         },
     )
@@ -2262,7 +2800,7 @@ def build_orchestrator_graph(
         "review_result",
         _route_after_review_result,
         {
-            "dispatch_job": "dispatch_job",
+            "provision_workspace": "provision_workspace",
             "summarize_result": "summarize_result",
         },
     )

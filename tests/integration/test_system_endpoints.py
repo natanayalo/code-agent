@@ -15,7 +15,7 @@ from apps.api.main import create_app
 
 @pytest.fixture
 def auth_config() -> ApiAuthConfig:
-    return ApiAuthConfig(shared_secret="test-secret")
+    return ApiAuthConfig(shared_secret=("a" * 32))  # gitleaks:allow
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def test_list_tools_returns_registry(client: TestClient) -> None:
     """The /system/tools endpoint returns the tools registry."""
     response = client.get(
         "/system/tools",
-        headers={API_SHARED_SECRET_HEADER: "test-secret"},
+        headers={API_SHARED_SECRET_HEADER: ("a" * 32)},  # gitleaks:allow
     )
     assert response.status_code == status.HTTP_200_OK
     tools = response.json()
@@ -52,7 +52,7 @@ def test_get_sandbox_status_returns_config(
 
     response = client.get(
         "/system/sandbox",
-        headers={API_SHARED_SECRET_HEADER: "test-secret"},
+        headers={API_SHARED_SECRET_HEADER: ("a" * 32)},  # gitleaks:allow
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
