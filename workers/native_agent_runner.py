@@ -852,7 +852,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                                 "CODE_AGENT_ENABLE_TRACING": "0",
                                 "CODE_AGENT_ENABLE_TASK_SERVICE": "0",
                                 "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED": "0",
-                                "DATABASE_URL": f"sqlite:///{request.workspace_path}/.sandbox.db",
+                                "DATABASE_URL": f"sqlite:///{request.workspace_path.as_posix()}/.sandbox.db",
                                 "TELEGRAM_BOT_TOKEN": "",
                             }
                         )

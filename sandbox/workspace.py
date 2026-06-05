@@ -231,7 +231,7 @@ class WorkspaceManager:
                 workspace_path.mkdir(parents=False)
         except FileExistsError:
             # Race condition check
-            if not any(workspace_path.iterdir()):
+            if any(workspace_path.iterdir()):
                 raise WorkspaceManagerError(f"Failed to create workspace directory: {workspace_id}")
         except Exception as exc:
             raise WorkspaceManagerError(f"Failed to prepare workspace directory: {exc}")
