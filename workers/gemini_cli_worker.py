@@ -176,7 +176,7 @@ def _prepare_workspace_gemini_home(
     agent_home.mkdir(parents=True, exist_ok=True)
     target = agent_home / ".gemini"
     target_settings = target / "settings.json"
-    if target.exists():
+    if target.exists() or target.is_symlink():
         # Repair stale or partial workspace state: if the auth settings file is
         # missing, refresh the target from the resolved source.
         if target_settings.exists():
