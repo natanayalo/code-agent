@@ -394,8 +394,12 @@ def test_codex_cli_worker_runs_post_run_lint_and_appends_command_artifacts(
         image="python:3.12-slim",
     )
     git_status_command = _git_status_command(container.working_dir)
-    lint_format_command = "cd /workspace && ruff format -- workers/codex_cli_worker.py"
-    lint_check_command = "cd /workspace && ruff check --fix -- workers/codex_cli_worker.py"
+    lint_format_command = (
+        f"cd {container.working_dir} && ruff format -- workers/codex_cli_worker.py"
+    )
+    lint_check_command = (
+        f"cd {container.working_dir} && ruff check --fix -- workers/codex_cli_worker.py"
+    )
     session = _FakeSession(
         {
             git_status_command: _command_result(
