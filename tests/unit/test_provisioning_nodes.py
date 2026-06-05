@@ -380,7 +380,7 @@ async def test_init_environment_node_missing_shell_worker() -> None:
     )
     result = await node(state)
     assert result["current_step"] == "init_environment"
-    assert "result" not in result
+    assert result.get("result") is None
 
 
 @pytest.mark.asyncio
@@ -517,7 +517,7 @@ async def test_init_environment_node_no_setup_file(tmp_path: Path) -> None:
     )
     result = await node(state)
     assert result["current_step"] == "init_environment"
-    assert "result" not in result
+    assert result.get("result") is None
     shell_worker.run.assert_not_called()
 
 
