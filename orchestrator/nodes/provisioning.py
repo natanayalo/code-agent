@@ -265,7 +265,14 @@ def build_init_environment_node(
 
         set_span_input_output(input_data=setup_command)
         set_current_span_attribute(OPENINFERENCE_SPAN_KIND_ATTRIBUTE, SPAN_KIND_TOOL)
-        result = await shell_worker.run(request)
+        try:
+            result = await shell_worker.run(request)
+        except RuntimeError as exc:
+            logger.debug("Shell worker execution failed: %s", exc)
+            return _init_fail(
+                state,
+                f"Environment setup failed with exception: {type(exc).__name__}: {exc}",
+            )
 
         # Propagate execution details to the trace for better visibility (T-180 parity)
         if result.stdout:
@@ -314,27 +321,34 @@ def build_init_environment_node(
         if _should_skip_gitignore_hardening(state):
             hardening_skipped_reason = _READ_ONLY_HARDENING_SKIP_REASON
         else:
-            hardening_result = await shell_worker.run(
-                WorkerRequest(
-                    session_id=state.session.session_id if state.session else None,
-                    task_id=state.task.task_id,
-                    repo_url=state.task.repo_url,
-                    branch=state.task.branch,
-                    workspace_id=workspace_id,
-                    task_text=hardening_script,
-                    budget={"worker_timeout_seconds": 15},
+            try:
+                hardening_result = await shell_worker.run(
+                    WorkerRequest(
+                        session_id=state.session.session_id if state.session else None,
+                        task_id=state.task.task_id,
+                        repo_url=state.task.repo_url,
+                        branch=state.task.branch,
+                        workspace_id=workspace_id,
+                        task_text=hardening_script,
+                        budget={"worker_timeout_seconds": 15},
+                    )
                 )
-            )
 
-            if hardening_result.stdout and "hardened:" in hardening_result.stdout:
-                import re
+                if (
+                    hardening_result.status == "success"
+                    and hardening_result.stdout
+                    and "hardened:" in hardening_result.stdout
+                ):
+                    import re
 
-                for line in (hardening_result.stdout or "").splitlines():
-                    match = re.search(r"\bhardened:(.*)", line)
-                    if match:
-                        raw_list = match.group(1).strip()
-                        missing_ignores = raw_list.split()
-                        break
+                    for line in (hardening_result.stdout or "").splitlines():
+                        match = re.search(r"\bhardened:(.*)", line)
+                        if match:
+                            raw_list = match.group(1).strip()
+                            missing_ignores = raw_list.split()
+                            break
+            except RuntimeError as exc:
+                logger.debug("Gitignore self-healing failed: %s", exc)
 
         init_msg = f"Environment initialized successfully via: {setup_command}"
         if missing_ignores:

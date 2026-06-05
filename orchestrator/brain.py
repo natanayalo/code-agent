@@ -135,10 +135,10 @@ def extract_json_block(text: str) -> str:
             # Some wrappers encode fenced JSON as escaped text inside a JSON string.
             # Example: "\\n{\\\"key\\\":\\\"value\\\"}\\n"
             try:
-                unescaped = json.loads(f'"{candidate}"').strip()
-                json.loads(unescaped)
+                unescaped, _ = json.JSONDecoder().raw_decode(candidate.strip())
                 return unescaped
-            except Exception:
+            except json.JSONDecodeError as err:
+                logger.debug("Failed to decode JSON: %s", err)
                 return candidate
 
     # 2. Try to find the first '{' and use a decoder to get the first valid object.
@@ -340,9 +340,9 @@ def _extract_unified_payload_from_summary(summary: str) -> Mapping[str, Any] | N
             payload = json.loads(candidate_text)
         except json.JSONDecodeError:
             try:
-                unescaped = json.loads(f'"{candidate_text}"').strip()
-                payload = json.loads(unescaped)
-            except Exception:
+                payload, _ = json.JSONDecoder().raw_decode(candidate_text.strip())
+            except json.JSONDecodeError as err:
+                logger.debug("Failed to decode JSON payload: %s", err)
                 continue
 
         if isinstance(payload, str):
