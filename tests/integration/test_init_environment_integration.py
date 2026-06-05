@@ -134,11 +134,11 @@ async def test_init_environment_integration_poetry(tmp_path: Path):
     result = await node(state)
 
     # 5. Verify results
-    res = (result or {}).get("result") or {}
-    if res.get("status") != "success":
-        summary = res.get("summary", "unknown failure")
-        stdout = res.get("stdout", "n/a")
-        stderr = res.get("stderr", "n/a")
+    res = (result or {}).get("result")
+    if not res or res.status != "success":
+        summary = res.summary if res else "unknown failure"
+        stdout = getattr(res, "stdout", "n/a") if res else "n/a"
+        stderr = getattr(res, "stderr", "n/a") if res else "n/a"
         pytest.fail(f"init_environment failed: {summary}\nSTDOUT: {stdout}\nSTDERR: {stderr}")
 
     # Check that poetry.toml was created (persistent config)

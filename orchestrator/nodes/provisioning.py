@@ -158,6 +158,7 @@ def build_init_environment_node(
             (repo_path / "package-lock.json").exists()
             or (repo_path / "yarn.lock").exists()
             or (repo_path / "pnpm-lock.yaml").exists()
+            or (repo_path / "package.json").exists()
         ) and not (repo_path / "node_modules").exists():
             env_marker_missing = True
 
@@ -303,7 +304,7 @@ def build_init_environment_node(
         # Consolidate checks into a single command to reduce container overhead
         hardening_script = (
             f"MISSING=''; for p in {patterns_str}; do "
-            'if ! git check-ignore -q "$p"; then '
+            'if ! git check-ignore -q "$p" 2>/dev/null; then '
             'echo "$p" >> .gitignore; MISSING="$MISSING $p"; fi; done; '
             'if [ -n "$MISSING" ]; then echo "hardened:$MISSING"; fi'
         )

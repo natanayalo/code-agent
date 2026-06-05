@@ -551,6 +551,7 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         worker_profile=worker_profile,
         runtime_mode=state.dispatch.runtime_mode or state.route.runtime_mode,
         workspace_id=state.dispatch.workspace_id,
+        read_only=state.task.constraints.get("read_only", False),
     )
 
 
