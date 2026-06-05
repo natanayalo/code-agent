@@ -1370,24 +1370,27 @@ def _get_previously_failed_workers(state: OrchestratorState) -> set[WorkerType]:
     attempts_dispatched: dict[int, WorkerType] = {}
 
     for event in state.timeline_events:
-        if event.event_type == TimelineEventType.WORKER_DISPATCHED:
+        evt_type = (
+            event.event_type.value if hasattr(event.event_type, "value") else event.event_type
+        )
+        if evt_type == "worker_dispatched":
             worker_type = (event.payload or {}).get("worker_type")
             if worker_type:
                 attempts_dispatched[event.attempt_number] = cast(WorkerType, worker_type)
-        elif event.event_type in {
-            TimelineEventType.WORKER_FAILED,
-            TimelineEventType.WORKER_ERROR,
+        elif evt_type in {
+            "worker_failed",
+            "worker_error",
         }:
             failed_worker = attempts_dispatched.get(event.attempt_number)
             if failed_worker:
                 failed_workers.add(failed_worker)
-        elif event.event_type == TimelineEventType.WORKER_COMPLETED:
+        elif evt_type == "worker_completed":
             status = (event.payload or {}).get("status")
             if status != "success":
                 failed_worker = attempts_dispatched.get(event.attempt_number)
                 if failed_worker:
                     failed_workers.add(failed_worker)
-        elif event.event_type == TimelineEventType.VERIFICATION_COMPLETED:
+        elif evt_type == "verification_completed":
             status = (event.payload or {}).get("status")
             if status == "failed":
                 failed_worker = attempts_dispatched.get(event.attempt_number)
@@ -1718,7 +1721,10 @@ def _resolve_brain_retry_context(state: OrchestratorState) -> tuple[WorkerType |
     recent_dispatches = [
         e.payload.get("worker_type")
         for e in state.timeline_events
-        if e.event_type == "worker_dispatched" and e.payload and "worker_type" in e.payload
+        if (e.event_type.value if hasattr(e.event_type, "value") else e.event_type)
+        == "worker_dispatched"
+        and e.payload
+        and "worker_type" in e.payload
     ]
     if recent_dispatches:
         # The last event in the list is the most recent dispatch

@@ -130,7 +130,7 @@ def extract_json_block(text: str) -> str:
             # Example: "\\n{\\\"key\\\":\\\"value\\\"}\\n"
             try:
                 unescaped = bytes(candidate, "utf-8").decode("unicode_escape").strip()
-            except UnicodeDecodeError:
+            except Exception:
                 return candidate
             try:
                 json.loads(unescaped)
@@ -1006,7 +1006,6 @@ class RuleBasedOrchestratorBrain:
                         str(exc),
                     )
                 if i == len(planners) - 1:
-                    planners = []
                     break
 
             if planner_failures:
