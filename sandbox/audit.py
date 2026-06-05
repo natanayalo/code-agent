@@ -17,6 +17,39 @@ logger = logging.getLogger(__name__)
 _ARTIFACT_ROOT_DIR = "artifacts"
 _ARTIFACT_RUN_DIR_PREFIX = "command-"
 
+_IGNORED_PATH_SEGMENTS: typing.Final[set[str]] = {
+    ".cache",
+    ".pytest_cache",
+    "__pycache__",
+    ".venv",
+    ".poetry",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".git",
+    "node_modules",
+    ".DS_Store",
+    "Thumbs.db",
+    ".idea",
+    ".vscode",
+    "target",  # Rust
+    ".npm",
+    ".yarn",
+    ".coverage",
+    ".env",  # Usually sensitive/transient
+}
+
+
+def _should_ignore_path(path: str) -> bool:
+    """Check if a path should be ignored in changed-file reports (noise filtering)."""
+    if path.startswith(f"{_ARTIFACT_ROOT_DIR}/") or path == _ARTIFACT_ROOT_DIR:
+        return True
+
+    parts = Path(path).parts
+    for part in parts:
+        if part in _IGNORED_PATH_SEGMENTS:
+            return True
+    return False
+
 
 def run_git_command(
     command: list[str],
@@ -172,8 +205,14 @@ def capture_audit_artifacts(
         status_entries = parse_git_status_entries(
             status_result.stdout.decode("utf-8", errors="replace")
         )
-        files_changed = list(dict.fromkeys(path for _status, path in status_entries))
-        untracked_files = [path for status, path in status_entries if status == "??"]
+        files_changed = list(
+            dict.fromkeys(path for _status, path in status_entries if not _should_ignore_path(path))
+        )
+        untracked_files = [
+            path
+            for status, path in status_entries
+            if status == "??" and not _should_ignore_path(path)
+        ]
         changed_files_content = (
             redactor.redact(format_changed_files(files_changed))
             if redactor

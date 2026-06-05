@@ -88,7 +88,9 @@ def test_workspace_manager_uses_injected_command_runner(tmp_path: Path) -> None:
         del cwd
         del timeout
         captured_commands.append(command)
-        Path(command[-1]).mkdir(parents=True, exist_ok=False)
+        # T-180: The workspace_path is now pre-created by the manager,
+        # so we allow it to exist in the fake runner.
+        Path(command[-1]).mkdir(parents=True, exist_ok=True)
 
     manager = WorkspaceManager(tmp_path, command_runner=fake_runner)
     workspace = manager.create_workspace(
@@ -164,22 +166,27 @@ def test_create_workspace_cleans_up_on_failure(tmp_path: Path) -> None:
     assert not list(tmp_path.iterdir())
 
 
-def test_create_workspace_raises_on_existing_directory(
+def test_create_workspace_allows_existing_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     manager = WorkspaceManager(tmp_path)
 
     def mock_build_workspace_id(task_id: str) -> str:
-        return "workspace-collision"
+        return "workspace-existing"
 
     manager._command_runner = lambda cmd, **kwargs: None
     monkeypatch.setattr(workspace_module, "_build_workspace_id", mock_build_workspace_id)
 
-    (tmp_path / "workspace-collision").mkdir()
+    workspace_dir = tmp_path / "workspace-existing"
+    workspace_dir.mkdir()
+    # Add a dummy file to make it non-empty
+    (workspace_dir / "dummy").touch()
 
     request = WorkspaceRequest(task_id="test", repo_url="http://fake")
-    with pytest.raises(WorkspaceManagerError, match="Workspace directory already exists"):
-        manager.create_workspace(request)
+    # Should NOT raise now, should reuse
+    handle = manager.create_workspace(request)
+    assert handle.workspace_id == "workspace-existing"
+    assert handle.workspace_path == workspace_dir
 
 
 def test_create_workspace_uses_request_cleanup_policy(tmp_path: Path) -> None:
@@ -214,7 +221,7 @@ def test_cleanup_workspace_refuses_outside_root(tmp_path: Path) -> None:
         workspace_id="test-1",
         task_id="test",
         workspace_path=tmp_path.parent,
-        repo_path=tmp_path.parent / "repo",
+        repo_path=tmp_path.parent,
         repo_url="http://fake",
         cleanup_policy=WorkspaceCleanupPolicy(),
     )

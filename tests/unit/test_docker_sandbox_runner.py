@@ -63,7 +63,7 @@ def _initialize_repo(repo_path: Path) -> None:
 
 def _workspace_handle(tmp_path: Path, *, initialize_git: bool = False) -> WorkspaceHandle:
     workspace_path = tmp_path / "workspace-task-31"
-    repo_path = workspace_path / "repo"
+    repo_path = workspace_path
     repo_path.mkdir(parents=True)
     if initialize_git:
         _initialize_repo(repo_path)
@@ -130,9 +130,9 @@ def test_build_docker_run_command_mounts_workspace_and_disables_network(tmp_path
         "--cpus",
         "1.0",
         "--workdir",
-        "/workspace/repo",
+        str(request.workspace.workspace_path.resolve()),
         "--mount",
-        f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
+        f"type=bind,source={request.workspace.workspace_path.resolve()},target={request.workspace.workspace_path.resolve()}",
     ]
     try:
         uid = os.getuid()
@@ -145,6 +145,8 @@ def test_build_docker_run_command_mounts_workspace_and_disables_network(tmp_path
         [
             "--network",
             "none",
+            "--env",
+            f"HOME={request.workspace.workspace_path.resolve()}",
             "--env",
             "PYTHONUNBUFFERED=1",
             "python:3.12-slim",
@@ -203,11 +205,13 @@ def test_build_docker_run_command_skips_user_mapping_on_windows(
         "--cpus",
         "1.0",
         "--workdir",
-        "/workspace/repo",
+        str(request.workspace.workspace_path.resolve()),
         "--mount",
-        f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
+        f"type=bind,source={request.workspace.workspace_path.resolve()},target={request.workspace.workspace_path.resolve()}",
         "--network",
         "none",
+        "--env",
+        f"HOME={request.workspace.workspace_path.resolve()}",
         "alpine",
         "echo",
         "test",
@@ -705,11 +709,11 @@ def test_runner_redacts_secrets(tmp_path: Path) -> None:
 
 def test_build_docker_run_command_enforces_path_policy(tmp_path: Path) -> None:
     """The runner should reject requests whose working directory is denied by policy."""
-    policy = PathPolicy(denied_prefixes=["/workspace/repo"])
+    policy = PathPolicy(denied_prefixes=["/workspace"])
     request = DockerSandboxCommand(
         workspace=_workspace_handle(tmp_path),
         command=["ls"],
-        working_dir="/workspace/repo",
+        working_dir="/workspace",
         path_policy=policy,
     )
 

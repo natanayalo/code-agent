@@ -25,12 +25,12 @@ class DockerContainerCommandRunner(Protocol):
 
 
 class DockerSandboxContainerRequest(SandboxModel):
-    """A request to start a long-lived Docker container for a workspace."""
+    """Request to start a persistent sandbox container."""
 
     workspace: WorkspaceHandle
     image: str | None = None
     environment: dict[str, str] = Field(default_factory=dict)
-    working_dir: str = "/workspace/repo"
+    working_dir: str | None = None
     network_enabled: bool = False
     memory_limit: str | None = "1g"
     cpu_limit: float | None = 1.0
@@ -47,7 +47,7 @@ class DockerSandboxContainer(SandboxModel):
     workspace: WorkspaceHandle
     container_name: str
     image: str
-    working_dir: str = "/workspace/repo"
+    working_dir: str = "/workspace"
     environment: dict[str, str] = Field(default_factory=dict)
     network_enabled: bool = False
     memory_limit: str | None = "1g"
@@ -90,12 +90,17 @@ def _build_docker_container_run_command(
             f"Workspace path contains a comma which is incompatible with "
             f"the --mount syntax: {workspace_path}"
         )
+    target_path = str(workspace_path)
+    working_dir = request.working_dir
+    if working_dir is None or working_dir == "/workspace":
+        working_dir = target_path
+
     command.extend(
         [
             "--workdir",
-            request.working_dir,
+            working_dir,
             "--mount",
-            f"type=bind,source={workspace_path},target=/workspace",
+            f"type=bind,source={workspace_path},target={target_path}",
         ]
     )
 
@@ -108,7 +113,13 @@ def _build_docker_container_run_command(
 
     if not request.network_enabled:
         command.extend(["--network", "none"])
-    for key, value in sorted(request.environment.items()):
+
+    # T-182: Ensure a writable HOME for tools like poetry/npm
+    effective_env = dict(request.environment)
+    if "HOME" not in effective_env:
+        effective_env["HOME"] = working_dir
+
+    for key, value in sorted(effective_env.items()):
         command.extend(["--env", f"{key}={value}"])
     command.append(image)
     command.extend(request.keepalive_command)
@@ -213,7 +224,7 @@ class DockerSandboxContainerManager:
             workspace=request.workspace,
             container_name=build_container_name(request.workspace),
             image=image,
-            working_dir=request.working_dir,
+            working_dir=request.working_dir or str(request.workspace.workspace_path.resolve()),
             environment=dict(request.environment),
             network_enabled=request.network_enabled,
             memory_limit=request.memory_limit,
