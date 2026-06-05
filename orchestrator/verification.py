@@ -120,12 +120,10 @@ def _is_placeholder_verification_command(command: str) -> bool:
     stripped = command.strip()
     if not stripped:
         return False
-    if re.fullmatch(r"<[^>]+>", stripped):
+    if re.search(r"<[a-zA-Z0-9_\s-]+>", stripped):
         return True
     lowered = stripped.lower()
-    if "<project-specific" in lowered:
-        return True
-    if "<project specific" in lowered:
+    if "<project-specific" in lowered or "<project specific" in lowered:
         return True
     return False
 
@@ -521,7 +519,7 @@ async def run_deterministic_verification(
         repo_url=state.task.repo_url,
         branch=state.task.branch,
         workspace_id=workspace_id,
-        read_only=False,
+        read_only=state.task.constraints.get("read_only", False),
         task_text=script,
         budget={"worker_timeout_seconds": timeout_seconds},
         secrets=dict(state.task.secrets),

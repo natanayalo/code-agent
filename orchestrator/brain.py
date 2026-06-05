@@ -123,7 +123,13 @@ def extract_json_block(text: str) -> str:
     if fenced_matches:
         candidate = fenced_matches[-1].strip()
         try:
-            json.loads(candidate)
+            parsed = json.loads(candidate)
+            if isinstance(parsed, str):
+                try:
+                    json.loads(parsed)
+                    return parsed
+                except json.JSONDecodeError:
+                    pass
             return candidate
         except json.JSONDecodeError:
             # Some wrappers encode fenced JSON as escaped text inside a JSON string.
@@ -978,7 +984,10 @@ class RuleBasedOrchestratorBrain:
                     async with asyncio.timeout(
                         self.planner_timeout_seconds + DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS
                     ):
-                        result = await worker.run(request, system_prompt=_TASK_SPEC_SYSTEM_PROMPT)
+                        result = await worker.run(
+                            request,
+                            system_prompt=_TASK_SPEC_SYSTEM_PROMPT + "\n\n" + _ROUTE_SYSTEM_PROMPT,
+                        )
                     if result.status == "success":
                         successful_planner = worker_name
                         break

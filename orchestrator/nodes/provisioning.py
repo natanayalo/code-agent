@@ -146,7 +146,11 @@ def build_init_environment_node(
         if (repo_path / "poetry.lock").exists() or (repo_path / "pyproject.toml").exists():
             if not (repo_path / ".venv").exists():
                 env_marker_missing = True
-        elif (repo_path / "package-lock.json").exists() or (repo_path / "yarn.lock").exists():
+        elif (
+            (repo_path / "package-lock.json").exists()
+            or (repo_path / "yarn.lock").exists()
+            or (repo_path / "pnpm-lock.yaml").exists()
+        ):
             if not (repo_path / "node_modules").exists():
                 env_marker_missing = True
 
