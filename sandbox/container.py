@@ -47,7 +47,7 @@ class DockerSandboxContainer(SandboxModel):
     workspace: WorkspaceHandle
     container_name: str
     image: str
-    working_dir: str = "/workspace"
+    working_dir: str
     environment: dict[str, str] = Field(default_factory=dict)
     network_enabled: bool = False
     memory_limit: str | None = "1g"
@@ -220,11 +220,15 @@ class DockerSandboxContainerManager:
                 f"({build_container_name(request.workspace)}): {message}"
             )
 
+        working_dir = request.working_dir
+        if working_dir is None or working_dir == "/workspace":
+            working_dir = str(request.workspace.workspace_path.resolve())
+
         return DockerSandboxContainer(
             workspace=request.workspace,
             container_name=build_container_name(request.workspace),
             image=image,
-            working_dir=request.working_dir or str(request.workspace.workspace_path.resolve()),
+            working_dir=working_dir,
             environment=dict(request.environment),
             network_enabled=request.network_enabled,
             memory_limit=request.memory_limit,

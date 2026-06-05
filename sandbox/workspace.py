@@ -208,9 +208,9 @@ class WorkspaceManager:
 
         try:
             if workspace_path.exists():
-                if any(workspace_path.iterdir()):
+                if (workspace_path / ".git").is_dir():
                     logger.info(
-                        "Reusing existing non-empty workspace directory",
+                        "Reusing existing workspace directory",
                         extra={"workspace_id": workspace_id, "task_id": request.task_id},
                     )
                     return WorkspaceHandle(
@@ -272,7 +272,7 @@ class WorkspaceManager:
         if not workspace_path.is_relative_to(self.root_dir) or workspace_path == self.root_dir:
             raise WorkspaceManagerError(f"Refusing to access path outside root: {workspace_path}")
 
-        if not workspace_path.exists():
+        if not workspace_path.is_dir():
             raise WorkspaceManagerError(f"Workspace directory missing: {workspace_id}")
 
         repo_path = workspace_path
