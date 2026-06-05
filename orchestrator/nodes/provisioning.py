@@ -312,6 +312,8 @@ def build_init_environment_node(
         hardening_script = (
             f"MISSING=''; for p in {patterns_str}; do "
             'if ! git check-ignore -q "$p" 2>/dev/null; then '
+            'if [ -f .gitignore ] && [ -n "$(tail -c1 .gitignore 2>/dev/null)" ]; '
+            'then echo "" >> .gitignore; fi; '
             'echo "$p" >> .gitignore; MISSING="$MISSING $p"; fi; done; '
             'if [ -n "$MISSING" ]; then echo "hardened:$MISSING"; fi'
         )

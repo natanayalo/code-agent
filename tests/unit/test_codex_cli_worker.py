@@ -1268,7 +1268,7 @@ def test_codex_cli_worker_native_sandbox_logic(tmp_path: Path) -> None:
         (True, "https://github.com/trusted/repo", False, "danger-full-access"),
         (True, "https://github.com/untrusted/repo", False, "workspace-write"),
         (False, "https://github.com/trusted/repo", False, "workspace-write"),
-        (True, "https://github.com/trusted/repo", True, "danger-full-access"),
+        (True, "https://github.com/trusted/repo", True, "read-only"),
         (False, "https://github.com/trusted/repo", True, "read-only"),
     ]
 

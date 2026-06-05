@@ -634,10 +634,10 @@ class CodexCliWorker(Worker):
                 repo_trusted = True
                 break
 
-        if in_container and repo_trusted:
-            sandbox_mode = "danger-full-access"
-        elif read_only_requested:
+        if read_only_requested:
             sandbox_mode = "read-only"
+        elif in_container and repo_trusted:
+            sandbox_mode = "danger-full-access"
         else:
             sandbox_mode = self.native_sandbox_mode or DEFAULT_CODEX_NATIVE_SANDBOX_MODE
 
