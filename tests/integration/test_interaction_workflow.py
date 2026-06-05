@@ -8,7 +8,11 @@ from apps.api.auth import API_SHARED_SECRET_HEADER, ApiAuthConfig
 from apps.api.main import create_app
 from db.base import Base
 from db.enums import HumanInteractionStatus, HumanInteractionType
-from orchestrator.brain import OrchestratorBrain, TaskSpecBrainSuggestion
+from orchestrator.brain import (
+    OrchestratorBrain,
+    TaskSpecBrainSuggestion,
+    UnifiedOrchestratorSuggestion,
+)
 from orchestrator.execution import TaskExecutionService
 from repositories import (
     HumanInteractionRepository,
@@ -31,6 +35,23 @@ class MockBrain(OrchestratorBrain):
 
     async def suggest_verification(self, **kwargs):
         return None
+
+    async def suggest_task_spec_and_route(self, **kwargs) -> UnifiedOrchestratorSuggestion | None:
+        del kwargs
+        return UnifiedOrchestratorSuggestion(
+            assumptions=self.suggestion.assumptions,
+            acceptance_criteria=self.suggestion.acceptance_criteria,
+            non_goals=self.suggestion.non_goals,
+            clarification_questions=self.suggestion.clarification_questions,
+            verification_commands=self.suggestion.verification_commands,
+            suggested_risk_level=self.suggestion.suggested_risk_level,
+            suggested_task_type=self.suggestion.suggested_task_type,
+            suggested_delivery_mode=self.suggestion.suggested_delivery_mode,
+            suggested_worker=None,
+            suggested_profile=None,
+            suggested_retry_strategy=None,
+            rationale=self.suggestion.rationale,
+        )
 
 
 class StaticWorker(Worker):
@@ -62,14 +83,19 @@ def client(session_factory, brain) -> TestClient:
         orchestrator_brain=brain,
         checkpoint_path=":memory:",  # Use in-memory sqlite for checkpoints too
     )
-    app = create_app(task_service=service, auth_config=ApiAuthConfig(shared_secret="test-secret"))
+    app = create_app(
+        task_service=service,
+        auth_config=ApiAuthConfig(
+            shared_secret=("a" * 32)  # gitleaks:allow
+        ),  # gitleaks:allow
+    )
     # Ensure lifespan runs so app.state is populated
     with TestClient(app) as test_client:
         yield test_client
 
 
 def test_clarification_workflow(client: TestClient, brain: MockBrain, session_factory):
-    headers = {API_SHARED_SECRET_HEADER: "test-secret"}
+    headers = {API_SHARED_SECRET_HEADER: ("a" * 32)}  # gitleaks:allow
 
     # 1. Trigger clarification requirement
     brain.suggestion = TaskSpecBrainSuggestion(clarification_questions=["Which color?"])
@@ -111,7 +137,7 @@ def test_clarification_workflow(client: TestClient, brain: MockBrain, session_fa
 
 
 def test_permission_workflow_skips_approval(client: TestClient, brain: MockBrain, session_factory):
-    headers = {API_SHARED_SECRET_HEADER: "test-secret"}
+    headers = {API_SHARED_SECRET_HEADER: ("a" * 32)}  # gitleaks:allow
 
     # 1. Trigger permission requirement
     brain.suggestion = TaskSpecBrainSuggestion(suggested_risk_level="high")
@@ -146,7 +172,7 @@ def test_permission_workflow_skips_approval(client: TestClient, brain: MockBrain
 
 
 def test_content_change_re_pauses(client: TestClient, brain: MockBrain, session_factory):
-    headers = {API_SHARED_SECRET_HEADER: "test-secret"}
+    headers = {API_SHARED_SECRET_HEADER: ("a" * 32)}  # gitleaks:allow
 
     # 1. Resolve one clarification
     brain.suggestion = TaskSpecBrainSuggestion(clarification_questions=["What color?"])

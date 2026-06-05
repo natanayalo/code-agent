@@ -20,6 +20,7 @@ from apps.observability import (
     start_optional_span,
 )
 from sandbox.audit import capture_audit_artifacts
+from sandbox.constants import DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS
 from sandbox.container import DockerSandboxContainer
 from sandbox.policy import PathPolicy
 from sandbox.redact import (
@@ -91,7 +92,9 @@ class _ExitMarkerStream:
         """Read the next available chunk without waiting for EOF when possible."""
         read1 = getattr(self._stream, "read1", None)
         if callable(read1):
-            return read1(65536)
+            chunk = read1(65536)
+            if isinstance(chunk, bytes):
+                return chunk
         return self._stream.read(65536)
 
     def _try_extract_marker(self) -> tuple[int, int] | None:
@@ -112,7 +115,7 @@ class _ExitMarkerStream:
             ) from exc
         return marker_index, newline_index + 1
 
-    def read(self, n: int = -1) -> bytes:
+    def read(self, size: int = -1, /) -> bytes:
         if self._exhausted:
             return b""
 
@@ -121,7 +124,7 @@ class _ExitMarkerStream:
             if marker_span is not None:
                 marker_index, marker_end = marker_span
                 if marker_index > 0:
-                    chunk_size = marker_index if n < 0 else min(n, marker_index)
+                    chunk_size = marker_index if size < 0 else min(size, marker_index)
                     chunk = bytes(self._tail[:chunk_size])
                     del self._tail[:chunk_size]
                     return chunk
@@ -133,7 +136,7 @@ class _ExitMarkerStream:
             safe_keep = max(len(self._marker_prefix), 1)
             emit_len = len(self._tail) - safe_keep
             if emit_len > 0:
-                chunk_size = emit_len if n < 0 else min(n, emit_len)
+                chunk_size = emit_len if size < 0 else min(size, emit_len)
                 chunk = bytes(self._tail[:chunk_size])
                 del self._tail[:chunk_size]
                 return chunk
@@ -141,7 +144,7 @@ class _ExitMarkerStream:
             chunk = self._read_from_stream()
             if chunk == b"":
                 if self._tail:
-                    chunk_size = len(self._tail) if n < 0 else min(n, len(self._tail))
+                    chunk_size = len(self._tail) if size < 0 else min(size, len(self._tail))
                     buffered = bytes(self._tail[:chunk_size])
                     del self._tail[:chunk_size]
                     if not self._tail:
@@ -271,7 +274,7 @@ class DockerShellSession:
         self,
         command: str,
         *,
-        timeout_seconds: int = 300,
+        timeout_seconds: int = DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS,
         capture_audit: bool = True,
     ) -> DockerShellCommandResult:
         """Execute one shell command while preserving session state for later commands."""

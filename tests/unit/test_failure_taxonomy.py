@@ -80,3 +80,25 @@ def test_classify_failure_kind_matches_typeerror_summary() -> None:
         summary="TypeError: unsupported operand type(s)",
     )
     assert failure_kind == "compile"
+
+
+def test_classify_failure_kind_provider_capacity_error() -> None:
+    failure_kind = classify_failure_kind(
+        status="error",
+        summary=(
+            "RESOURCE_EXHAUSTED: No capacity available for model gemini-3-flash-preview "
+            "on the server"
+        ),
+    )
+    assert failure_kind == "provider_error"
+
+
+def test_classify_failure_kind_unauthorized_auth_error() -> None:
+    failure_kind = classify_failure_kind(
+        status="error",
+        summary=(
+            "Request had invalid authentication credentials. Expected OAuth 2 access token, "
+            "login cookie or other valid authentication credential. (status: 401)"
+        ),
+    )
+    assert failure_kind == "provider_auth"

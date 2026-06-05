@@ -22,6 +22,7 @@ from apps.observability import (
     start_optional_span,
 )
 from sandbox.audit import capture_audit_artifacts
+from sandbox.constants import DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS
 from sandbox.container import build_container_name
 from sandbox.policy import PathPolicy
 from sandbox.redact import (
@@ -64,8 +65,8 @@ class DockerSandboxCommand(SandboxModel):
     command: list[str] = Field(min_length=1)
     image: str | None = None
     environment: dict[str, str] = Field(default_factory=dict)
-    working_dir: str = "/workspace/repo"
-    timeout_seconds: int = Field(default=300, ge=1)
+    working_dir: str = "/workspace"
+    timeout_seconds: int = Field(default=DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS, ge=1)
     network_enabled: bool = False
     memory_limit: str | None = "1g"
     cpu_limit: float | None = 1.0
@@ -165,12 +166,17 @@ def _build_docker_run_command(
             f"Workspace path contains a comma which is incompatible with "
             f"the --mount syntax: {workspace_path}"
         )
+    target_path = str(workspace_path)
+    working_dir = request.working_dir
+    if working_dir is None or working_dir == "/workspace":
+        working_dir = target_path
+
     command.extend(
         [
             "--workdir",
-            request.working_dir,
+            working_dir,
             "--mount",
-            f"type=bind,source={workspace_path},target=/workspace",
+            f"type=bind,source={workspace_path},target={target_path}",
         ]
     )
 
@@ -187,6 +193,8 @@ def _build_docker_run_command(
     # Inject W3C trace context from the current context if available, enabling
     # unified tracing across service/sandbox boundaries.
     effective_env = inject_w3c_trace_context_env(request.environment)
+    if "HOME" not in effective_env:
+        effective_env["HOME"] = working_dir
 
     for key, value in sorted(effective_env.items()):
         command.extend(["--env", f"{key}={value}"])

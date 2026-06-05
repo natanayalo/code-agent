@@ -91,6 +91,7 @@ class TimelineEventType(StrEnum):
     TASK_CLASSIFIED = "task_classified"
     TASK_PLANNED = "task_planned"
     TASK_SPEC_GENERATED = "task_spec_generated"
+    TASK_SPEC_AND_ROUTE_GENERATED = "task_spec_and_route_generated"
     MEMORY_LOADED = "memory_loaded"
     WORKER_SELECTED = "worker_selected"
     APPROVAL_REQUESTED = "approval_requested"
@@ -106,6 +107,9 @@ class TimelineEventType(StrEnum):
     TASK_COMPLETED = "task_completed"
     TASK_FAILED = "task_failed"
     TASK_CANCELLED = "task_cancelled"
+    WORKSPACE_PROVISIONED = "workspace_provisioned"
+    ENVIRONMENT_INITIALIZED = "environment_initialized"
+    INFRA_FAILURE = "infra_failure"
 
 
 def build_sql_enum(enum_class: type[StrEnum], *, name: str) -> SQLAlchemyEnum:

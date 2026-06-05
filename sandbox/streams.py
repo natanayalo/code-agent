@@ -13,7 +13,7 @@ MAX_OUTPUT_SIZE_BYTES = 2 * 1024 * 1024  # 2 MB
 class ByteReadStream(Protocol):
     """Minimal protocol for objects that expose byte reads."""
 
-    def read(self, size: int = -1) -> bytes: ...
+    def read(self, size: int = -1, /) -> bytes: ...
 
 
 def read_stream_bounded(

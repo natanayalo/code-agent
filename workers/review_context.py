@@ -40,21 +40,19 @@ def _truncate_at_line_boundary(
     return f"{prefix}{marker}"
 
 
-def pack_reviewer_context(
+def pack_inspection_context(
     *,
     task_text: str,
     worker_summary: str,
     files_changed: Sequence[str],
-    diff_text: str,
+    diff_text: str | None = None,
     commands_run: Sequence[WorkerCommand] = (),
+    inspection_commands: Sequence[str] | None = None,
     verifier_report: Mapping[str, Any] | None = None,
     session_state: Mapping[str, Any] | None = None,
     max_characters: int = DEFAULT_REVIEW_PACKET_MAX_CHARACTERS,
 ) -> str:
-    """Assemble a deterministic, bounded review packet centered on changed code."""
-    # This is a specialized version of the self-review packet builder
-    # that can be used by both the orchestrator and internal worker loops.
-
+    """Assemble a deterministic, bounded inspection packet (review or verification)."""
     normalized_files = sorted({path.strip() for path in files_changed if path.strip()})
     if len(normalized_files) > DEFAULT_REVIEW_PACKET_MAX_FILES:
         visible_files = normalized_files[:DEFAULT_REVIEW_PACKET_MAX_FILES]
@@ -76,8 +74,6 @@ def pack_reviewer_context(
         )
     command_summary_block = "\n".join(command_lines) or "- <none>"
 
-    diff_fence = markdown_fence_for_content(diff_text)
-
     sections: list[str] = [
         "### Task Objective",
         task_text.strip() or "<empty>",
@@ -92,6 +88,15 @@ def pack_reviewer_context(
         command_summary_block,
     ]
 
+    if inspection_commands:
+        sections.extend(
+            [
+                "",
+                "### Suggested Verification Commands",
+                *[f"- {cmd}" for cmd in inspection_commands],
+            ]
+        )
+
     if verifier_report:
         report_json = json.dumps(dict(verifier_report), indent=2, sort_keys=True)
         sections.extend(["", "### Verifier Report", report_json])
@@ -102,8 +107,11 @@ def pack_reviewer_context(
 
     base_packet = "\n".join(sections).strip()
 
-    diff_header = "\n\n### Diff Excerpt\n"
+    if diff_text is None:
+        return base_packet
 
+    diff_fence = markdown_fence_for_content(diff_text)
+    diff_header = "\n\n### Diff Excerpt\n"
     truncation_marker = "\n... (truncated)"
     diff_open = f"{diff_fence}diff\n"
     diff_close = f"\n{diff_fence}"
@@ -144,3 +152,8 @@ def pack_reviewer_context(
     )
 
     return base_packet + diff_header + diff_open + truncated_diff + diff_close
+
+
+def pack_reviewer_context(*args: Any, **kwargs: Any) -> str:
+    """Deprecated: Use pack_inspection_context instead."""
+    return pack_inspection_context(*args, **kwargs)

@@ -65,10 +65,12 @@ def client(session_factory) -> Iterator[TestClient]:
             session_factory=session_factory,
             worker=worker,
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     with TestClient(app) as test_client:
-        test_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        test_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         yield test_client
 
 
@@ -89,7 +91,7 @@ def test_get_metrics_requires_auth(session_factory) -> None:
                 )
             ),
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     with TestClient(app) as client:
         # No header
@@ -103,7 +105,7 @@ def test_get_metrics_requires_auth(session_factory) -> None:
 
 def test_get_metrics_allows_cookie_auth(session_factory) -> None:
     """The metrics endpoint should allow authentication via dashboard session cookie."""
-    shared_secret = "test-shared-secret"
+    shared_secret = "a" * 32  # gitleaks:allow
     app = create_app(
         task_service=TaskExecutionService(
             session_factory=session_factory,

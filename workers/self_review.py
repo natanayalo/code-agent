@@ -27,6 +27,9 @@ from workers.cli_runtime import (
     ShellSessionProtocol,
     run_cli_runtime_loop,
 )
+from workers.constants import (
+    DEFAULT_DIFF_TIMEOUT_SECONDS as DEFAULT_SELF_REVIEW_DIFF_TIMEOUT_SECONDS,
+)
 from workers.markdown import markdown_fence_for_content
 from workers.post_run_lint import merge_post_run_lint_results
 from workers.prompt import build_review_prompt
@@ -36,7 +39,6 @@ TRACER_NAME: Final[str] = "workers.self_review"
 
 DEFAULT_SELF_REVIEW_MAX_FIX_ITERATIONS = 2
 DEFAULT_SELF_REVIEW_DIFF_MAX_CHARACTERS = 12000
-DEFAULT_SELF_REVIEW_DIFF_TIMEOUT_SECONDS = 15
 DEFAULT_REVIEW_PACKET_MAX_CHARACTERS = 12000
 DEFAULT_REVIEW_PACKET_MAX_FILES = 8
 DEFAULT_REVIEW_PACKET_MAX_COMMANDS = 12

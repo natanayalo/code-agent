@@ -18,11 +18,17 @@ def mock_tracing():
         patch("workers.native_agent_runner.start_optional_span") as mock_start,
         patch("workers.native_agent_runner.set_current_span_attribute") as mock_set_attr,
         patch("workers.native_agent_runner.set_span_input_output") as mock_set_io,
+        patch("workers.native_agent_runner.add_current_span_event") as mock_add_event,
     ):
         span = MagicMock()
         mock_start.return_value.__enter__.return_value = span
 
-        yield {"span": span, "set_attr": mock_set_attr, "set_io": mock_set_io}
+        yield {
+            "span": span,
+            "set_attr": mock_set_attr,
+            "set_io": mock_set_io,
+            "add_event": mock_add_event,
+        }
 
 
 def test_run_native_agent_emits_redacted_span(tmp_path: Path, mock_tracing) -> None:
@@ -105,6 +111,8 @@ def test_run_native_agent_truncates_noisy_streams(tmp_path: Path, mock_tracing) 
                 repo_path=repo_path,
                 workspace_path=tmp_path,
                 timeout_seconds=10,
+                collect_diff=False,
+                collect_changed_files=False,
             )
         )
 
@@ -150,3 +158,90 @@ def test_run_native_agent_sets_error_status_on_timeout(tmp_path: Path, mock_trac
     # Status should be set
     mock_set_status.assert_called_once()
     assert mock_set_status.call_args[0][0] == "error"
+
+
+def test_run_native_agent_splits_llm_wrapper_output_and_metadata(
+    tmp_path: Path, mock_tracing
+) -> None:
+    """Wrapper metadata should go to span attributes while output.value keeps only response."""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+
+    wrapper_stdout = (
+        '{"session_id":"sess-123","response":"{\\"ok\\":true}","stats":{"tools":{"totalCalls":0}}}'
+    )
+
+    def side_effect(*args, **kwargs):
+        completed = MagicMock()
+        completed.returncode = 0
+        if kwargs.get("text"):
+            completed.stdout = wrapper_stdout
+            completed.stderr = ""
+        else:
+            completed.stdout = b""
+            completed.stderr = b""
+        return completed
+
+    with patch("subprocess.run", side_effect=side_effect):
+        run_native_agent(
+            NativeAgentRunRequest(
+                command=["echo", "ok"],
+                prompt="task",
+                repo_path=repo_path,
+                workspace_path=tmp_path,
+                timeout_seconds=10,
+                collect_diff=False,
+                collect_changed_files=False,
+            )
+        )
+
+    outputs = [call.kwargs.get("output_data") for call in mock_tracing["set_io"].call_args_list]
+    assert '{"ok":true}' in outputs
+
+    attr_calls = {call.args[0]: call.args[1] for call in mock_tracing["set_attr"].call_args_list}
+    assert attr_calls["code_agent.native.llm_wrapper.present"] is True
+    assert attr_calls["code_agent.native.llm_wrapper.session_id"] == "sess-123"
+    assert "stats" in attr_calls["code_agent.native.llm_wrapper.json"]
+    event_names = [call.args[0] for call in mock_tracing["add_event"].call_args_list]
+    assert "code_agent.native.metadata_detected" in event_names
+
+
+def test_run_native_agent_emits_retry_event_for_network_error(tmp_path: Path, mock_tracing) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    responses = [
+        ("", "socket hang up"),
+        ("ok", ""),
+    ]
+
+    def side_effect(*args, **kwargs):
+        completed = MagicMock()
+        completed.returncode = 0
+        stdout, stderr = responses.pop(0)
+        if kwargs.get("text"):
+            completed.stdout = stdout
+            completed.stderr = stderr
+        else:
+            completed.stdout = b""
+            completed.stderr = b""
+        return completed
+
+    with patch("subprocess.run", side_effect=side_effect):
+        run_native_agent(
+            NativeAgentRunRequest(
+                command=["echo", "ok"],
+                prompt="task",
+                repo_path=repo_path,
+                workspace_path=tmp_path,
+                timeout_seconds=10,
+                collect_diff=False,
+                collect_changed_files=False,
+            )
+        )
+
+    retry_events = [
+        call
+        for call in mock_tracing["add_event"].call_args_list
+        if call.args[0] == "code_agent.native.run_retry"
+    ]
+    assert retry_events

@@ -24,7 +24,9 @@ _REVIEW_ROLE_SECTION = "\n".join(
     [
         "## Review Role",
         "You are the review worker for code-agent.",
-        "Focus on high-confidence, actionable findings grounded in the supplied context.",
+        "Focus on high-confidence, actionable findings grounded in the workspace state.",
+        "You have full tool access; use `git diff`, `read_file`, and other tools to inspect ",
+        "the changes and their impact before finalizing your review.",
         "Prefer precision over recall and skip style-only or speculative comments.",
         "Do not propose broad rewrites when a focused finding is sufficient.",
     ]
@@ -61,7 +63,7 @@ _REVIEW_OUTPUT_CONTRACT_TEMPLATE = "\n".join(
         "Rules:",
         "- Use outcome `no_findings` with an empty `findings` list when nothing actionable exists.",
         "- Use outcome `findings` only when at least one concrete actionable finding exists.",
-        "- Keep findings bounded to the supplied review context packet.",
+        "- Base your findings on the actual file contents and diff observed via tools.",
     ]
 )
 _TRUNCATED_MARKER = "\n... (truncated)"
@@ -93,20 +95,24 @@ def _fenced_text_block_overhead(label: str, content: str, *, fence: str | None =
 
 def build_role_description_section(request: WorkerRequest) -> str:
     """Describe the worker's job and guardrails."""
-    is_read_only = bool(request.constraints.get("read_only"))
+    is_read_only = request.read_only or bool(request.constraints.get("read_only"))
     permissions = "read" if is_read_only else "read/write"
     action = "analyze files" if is_read_only else "make smallest safe changes"
     mutation_guard = " Do not modify files." if is_read_only else ""
 
-    return "\n".join(
-        [
-            "## Role",
-            f"You are the coding execution worker with {permissions} permissions. "
-            f"Work inside the repository, {action}.{mutation_guard}"
-            "Your first action MUST be to read `AGENTS.md` to understand repository policy. "
-            "Keep reasoning grounded in observed state. Do not bypass sandbox rules.",
-        ]
-    )
+    role_lines = [
+        "## Role",
+        f"You are the coding execution worker with {permissions} permissions. "
+        f"Work inside the repository, {action}.{mutation_guard}"
+        "Your first action MUST be to read `AGENTS.md` to understand repository policy. "
+        "Keep reasoning grounded in observed state. Do not bypass sandbox rules.",
+    ]
+    if request.runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
+        role_lines.append(
+            "You have full autonomy as a native agent. Use your internal tools, reasoning, "
+            "and execution loop to achieve the task objective."
+        )
+    return "\n".join(role_lines)
 
 
 def build_available_tools_section(
@@ -460,7 +466,7 @@ def read_workspace_agents_assets_guidance(
             if summary_line is None:
                 continue
             lines.append(summary_line)
-            if current_characters:
+            if current_characters > 0:
                 current_characters += 1
             current_characters += len(summary_line)
             if current_characters > max_characters:
@@ -846,7 +852,7 @@ def build_system_prompt(
 
     is_native = request.runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
     permission_level = granted_permission_from_constraints(request.constraints)
-    if request.constraints.get("read_only"):
+    if request.read_only or bool(request.constraints.get("read_only")):
         # Ensure we don't upgrade a more restrictive permission (unlikely but safe)
         from tools.policy import permission_rank
 
@@ -870,7 +876,9 @@ def build_system_prompt(
 
     sections = [
         build_role_description_section(request),
-        build_available_tools_section(tool_registry, tool_client, allowed_tool_names),
+        build_available_tools_section(tool_registry, tool_client, allowed_tool_names)
+        if not is_native
+        else "",
         _build_repo_context_section_with_guidance(
             workspace_path,
             omit_dir_listing=is_native,

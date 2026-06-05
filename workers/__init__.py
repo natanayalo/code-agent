@@ -4,7 +4,6 @@ from workers.base import (
     SUPPORTED_WORKER_TYPES,
     ArtifactReference,
     FailureKind,
-    TestResult,
     Worker,
     WorkerCapabilityTag,
     WorkerCommand,
@@ -16,6 +15,7 @@ from workers.base import (
     WorkerResult,
     WorkerRuntimeMode,
     WorkerSelfReviewPolicy,
+    WorkerTestResult,
     WorkerType,
 )
 from workers.codex_cli_worker import CodexCliWorker
@@ -46,7 +46,7 @@ __all__ = [
     "ReviewFinding",
     "ReviewResult",
     "SUPPORTED_WORKER_TYPES",
-    "TestResult",
+    "WorkerTestResult",
     "Worker",
     "WorkerCapabilityTag",
     "WorkerCommand",

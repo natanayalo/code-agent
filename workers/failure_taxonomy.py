@@ -54,7 +54,9 @@ _COMPILE_SUMMARY_MARKERS = (
 _AUTH_SUMMARY_MARKERS = (
     "api key",
     "authentication failed",
+    "invalid authentication credentials",
     "invalid credentials",
+    "oauth 2",
     "token expired",
     "unauthorized",
 )
@@ -64,6 +66,13 @@ _CONTEXT_WINDOW_SUMMARY_MARKERS = (
     "maximum context",
     "prompt too long",
     "token limit",
+)
+_PROVIDER_CAPACITY_MARKERS = (
+    "429",
+    "model capacity",
+    "no capacity available",
+    "rate limit",
+    "resource exhausted",
 )
 INFRA_CRASH_MARKERS: Final = (
     "segmentation fault",
@@ -132,6 +141,8 @@ def classify_failure_kind(
         return "context_window"
     if _contains_any(normalized_summary, _AUTH_SUMMARY_MARKERS):
         return "provider_auth"
+    if _contains_any(normalized_summary, _PROVIDER_CAPACITY_MARKERS):
+        return "provider_error"
 
     # Infrastructure failures (crashes, OOM, etc) take precedence over
     # functional failures (test/compile) when a systemic crash is detected.

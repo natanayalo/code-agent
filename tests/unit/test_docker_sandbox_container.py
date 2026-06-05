@@ -25,7 +25,7 @@ from sandbox.workspace import WorkspaceCleanupPolicy, WorkspaceHandle
 
 def _workspace_handle(tmp_path: Path) -> WorkspaceHandle:
     workspace_path = tmp_path / "workspace-task-45"
-    repo_path = workspace_path / "repo"
+    repo_path = workspace_path
     repo_path.mkdir(parents=True)
     return WorkspaceHandle(
         workspace_id="workspace-task-45",
@@ -58,9 +58,9 @@ def test_build_docker_container_run_command_detaches_and_mounts_workspace(tmp_pa
         "--cpus",
         "1.0",
         "--workdir",
-        "/workspace/repo",
+        str(request.workspace.workspace_path.resolve()),
         "--mount",
-        f"type=bind,source={request.workspace.workspace_path.resolve()},target=/workspace",
+        f"type=bind,source={request.workspace.workspace_path.resolve()},target={request.workspace.workspace_path.resolve()}",
     ]
     assert command[: len(expected_prefix)] == expected_prefix
     assert command[-3:] == ["python:3.12-slim", "sleep", "infinity"]
@@ -71,7 +71,7 @@ def test_build_docker_container_run_command_detaches_and_mounts_workspace(tmp_pa
 def test_build_docker_container_run_command_raises_on_comma_in_path(tmp_path: Path) -> None:
     """Workspace paths containing commas should fail fast before docker run."""
     workspace_path = tmp_path / "work,space"
-    repo_path = workspace_path / "repo"
+    repo_path = workspace_path
     repo_path.mkdir(parents=True)
     request = DockerSandboxContainerRequest(
         workspace=WorkspaceHandle(
@@ -151,6 +151,7 @@ def test_container_manager_reconnect_raises_for_stopped_container(tmp_path: Path
         workspace=workspace,
         container_name=build_container_name(workspace),
         image="python:3.12-slim",
+        working_dir=str(workspace.workspace_path.resolve()),
     )
 
     def fake_runner(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
@@ -208,6 +209,7 @@ def test_container_manager_stop_ignores_missing_container(tmp_path: Path) -> Non
         workspace=workspace,
         container_name=build_container_name(workspace),
         image="python:3.12-slim",
+        working_dir=str(workspace.workspace_path.resolve()),
     )
     manager = DockerSandboxContainerManager(
         command_runner=lambda command, timeout: subprocess.CompletedProcess(
@@ -228,6 +230,7 @@ def test_container_manager_stop_raises_for_other_remove_errors(tmp_path: Path) -
         workspace=workspace,
         container_name=build_container_name(workspace),
         image="python:3.12-slim",
+        working_dir=str(workspace.workspace_path.resolve()),
     )
     manager = DockerSandboxContainerManager(
         command_runner=lambda command, timeout: subprocess.CompletedProcess(
