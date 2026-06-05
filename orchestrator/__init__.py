@@ -25,7 +25,7 @@ from orchestrator.state import (
     WorkerDispatch,
     WorkflowStep,
 )
-from workers import ArtifactReference, TestResult, WorkerCommand, WorkerResult
+from workers import ArtifactReference, WorkerCommand, WorkerResult, WorkerTestResult
 
 __all__ = [
     "ApprovalCheckpoint",
@@ -47,7 +47,7 @@ __all__ = [
     "TaskRequest",
     "TaskSpec",
     "TaskSubmission",
-    "TestResult",
+    "WorkerTestResult",
     "WorkerCommand",
     "WorkerDispatch",
     "WorkerRunSnapshot",

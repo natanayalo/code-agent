@@ -1009,6 +1009,45 @@ def test_create_task_outcome_returns_existing_task_for_duplicate_delivery() -> N
         assert len(tasks) == 1
 
 
+def test_create_task_outcome_logs_warning_on_duplicate_delivery(caplog) -> None:
+    """Duplicate delivery should emit a structured warning log with delivery context."""
+    import logging
+
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Dedup log test",
+        session=execution_module.SubmissionSession(
+            channel="webhook",
+            external_user_id="webhook:user:1",
+            external_thread_id="webhook:thread:1",
+        ),
+    )
+    delivery_key = execution_module.DeliveryKey(channel="webhook", delivery_id="dedup-key-abc")
+
+    # First submission - should not warn
+    service.create_task_outcome(submission, delivery_key=delivery_key)
+
+    # Second submission - should trigger a warning
+    with caplog.at_level(logging.WARNING, logger="orchestrator.execution"):
+        service.create_task_outcome(submission, delivery_key=delivery_key)
+
+    assert any(
+        "Duplicate task delivery detected" in record.message and record.levelno == logging.WARNING
+        for record in caplog.records
+    )
+
+
 def test_create_task_outcome_recovers_stale_delivery_without_task_id() -> None:
     """A stale delivery claim without a linked task should be recoverable on retry."""
     engine = create_engine_from_url(

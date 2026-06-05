@@ -54,3 +54,19 @@ def test_pack_reviewer_context_preserves_base_sections_under_low_budget() -> Non
     assert "Objective text" in packet
     assert "### Worker Summary" in packet
     assert "### Diff Excerpt" in packet
+
+
+def test_pack_reviewer_context_handles_omitted_diff() -> None:
+    packet = pack_reviewer_context(
+        task_text="Objective text",
+        worker_summary="Worker summary",
+        files_changed=["a.py"],
+        diff_text=None,
+    )
+
+    assert "### Task Objective" in packet
+    assert "Objective text" in packet
+    assert "### Worker Summary" in packet
+    assert "### Changed Files" in packet
+    assert "- a.py" in packet
+    assert "### Diff Excerpt" not in packet

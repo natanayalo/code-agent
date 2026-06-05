@@ -231,10 +231,12 @@ def _coerce_optional_str(value: object) -> str | None:
 def _coerce_optional_float(value: object) -> float | None:
     if value is None:
         return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    if isinstance(value, int | float | str):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _coerce_optional_bool(value: object) -> bool | None:
@@ -246,11 +248,13 @@ def _coerce_optional_bool(value: object) -> bool | None:
 def _coerce_non_negative_int(value: object) -> int:
     if value is None:
         return 0
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return 0
-    return max(parsed, 0)
+    if isinstance(value, int | float | str):
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return 0
+        return max(parsed, 0)
+    return 0
 
 
 def _parse_optional_review_outcome(raw_outcome: dict[str, object]) -> ReviewOutcome | None:
@@ -309,7 +313,10 @@ def _report_from_payload(payload: dict[str, object]) -> EvaluationReport:
             )
         )
 
-    reported_total_cases = int(payload.get("total_cases", len(parsed_results)))
+    raw_total = payload.get("total_cases")
+    reported_total_cases = (
+        _coerce_non_negative_int(raw_total) if raw_total is not None else len(parsed_results)
+    )
     if len(parsed_results) != reported_total_cases:
         raise ValueError(
             "Baseline report total_cases does not match results length: "
@@ -319,10 +326,10 @@ def _report_from_payload(payload: dict[str, object]) -> EvaluationReport:
     return EvaluationReport(
         suite_name=str(payload.get("suite_name", "baseline")),
         total_cases=reported_total_cases,
-        passed_cases=int(payload.get("passed_cases", 0)),
-        failed_cases=int(payload.get("failed_cases", 0)),
-        total_score=int(payload.get("total_score", 0)),
-        max_score=int(payload.get("max_score", 0)),
+        passed_cases=_coerce_non_negative_int(payload.get("passed_cases")),
+        failed_cases=_coerce_non_negative_int(payload.get("failed_cases")),
+        total_score=_coerce_non_negative_int(payload.get("total_score")),
+        max_score=_coerce_non_negative_int(payload.get("max_score")),
         results=tuple(parsed_results),
         review_metrics=_parse_optional_review_metrics(payload),
         profile=_parse_optional_profile(payload),

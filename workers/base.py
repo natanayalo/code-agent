@@ -39,6 +39,7 @@ FailureKind = Literal[
     "infra_verifier_unavailable",
     "risky_command",
     "worker_failure",
+    "interaction",
     "unknown",
 ]
 
@@ -66,6 +67,8 @@ class WorkerRequest(WorkerModel):
     task_id: str | None = None
     repo_url: str | None = None
     branch: str | None = None
+    workspace_id: str | None = None
+    read_only: bool = False
     task_text: str = Field(min_length=1)
     memory_context: dict[str, Any] = Field(default_factory=dict)
     task_plan: dict[str, Any] | None = None
@@ -78,6 +81,8 @@ class WorkerRequest(WorkerModel):
     runtime_mode: WorkerRuntimeMode | None = None
     response_format: Literal["text", "json"] = "text"
     response_schema: dict[str, Any] | None = None
+    network_enabled: bool = False
+    image: str | None = None
 
 
 class WorkerProfile(WorkerModel):
@@ -119,7 +124,7 @@ class WorkerCommand(WorkerModel):
     stderr_artifact_uri: str | None = None
 
 
-class TestResult(WorkerModel):
+class WorkerTestResult(WorkerModel):
     """A summarized test result emitted by a worker."""
 
     name: str
@@ -142,16 +147,19 @@ class WorkerResult(WorkerModel):
     status: Literal["success", "failure", "error"]
     summary: str | None = None
     failure_kind: FailureKind | None = None
+    workspace_id: str | None = None
     requested_permission: str | None = None
     budget_usage: dict[str, Any] | None = None
     commands_run: list[WorkerCommand] = Field(default_factory=list)
     files_changed: list[str] = Field(default_factory=list)
-    test_results: list[TestResult] = Field(default_factory=list)
+    test_results: list[WorkerTestResult] = Field(default_factory=list)
     artifacts: list[ArtifactReference] = Field(default_factory=list)
     review_result: ReviewResult | None = None
     diff_text: str | None = None
     json_payload: dict[str, Any] | None = None
     next_action_hint: str | None = None
+    stdout: Any | None = None
+    stderr: Any | None = None
 
     @model_validator(mode="after")
     def _normalize_failure_kind(self) -> WorkerResult:

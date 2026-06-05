@@ -96,7 +96,7 @@ class _FakeSession:
 
 def _workspace_handle(tmp_path: Path) -> WorkspaceHandle:
     workspace_path = tmp_path / "workspace-task-47"
-    repo_path = workspace_path / "repo"
+    repo_path = workspace_path
     repo_path.mkdir(parents=True)
     (repo_path / "AGENTS.md").write_text("Prefer small diffs.\n", encoding="utf-8")
     (repo_path / "README.md").write_text("# Demo repo\n", encoding="utf-8")
@@ -120,7 +120,7 @@ def _command_result(command: str, *, output: str, exit_code: int = 0) -> DockerS
     )
 
 
-def _git_status_command(container_workdir: str = "/workspace/repo") -> str:
+def _git_status_command(container_workdir: str = "/workspace") -> str:
     return f"git -C {container_workdir} status --porcelain=v1 -z --untracked-files=all"
 
 
@@ -394,8 +394,12 @@ def test_codex_cli_worker_runs_post_run_lint_and_appends_command_artifacts(
         image="python:3.12-slim",
     )
     git_status_command = _git_status_command(container.working_dir)
-    lint_format_command = "cd /workspace/repo && ruff format -- workers/codex_cli_worker.py"
-    lint_check_command = "cd /workspace/repo && ruff check --fix -- workers/codex_cli_worker.py"
+    lint_format_command = (
+        f"cd {container.working_dir} && ruff format -- workers/codex_cli_worker.py"
+    )
+    lint_check_command = (
+        f"cd {container.working_dir} && ruff check --fix -- workers/codex_cli_worker.py"
+    )
     session = _FakeSession(
         {
             git_status_command: _command_result(
@@ -1052,6 +1056,7 @@ def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) 
         ],
         stdout='{"event":"turn.completed"}\n',
         stderr="",
+        json_payload={"status": "passed", "summary": "structured"},
     )
 
     with patch(
@@ -1072,6 +1077,7 @@ def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) 
 
     assert result.status == "success"
     assert result.summary == "Native run complete."
+    assert result.json_payload == {"status": "passed", "summary": "structured"}
     assert result.files_changed == ["note.txt"]
     assert result.diff_text == "diff --git a/note.txt b/note.txt"
     assert result.budget_usage is not None
@@ -1242,7 +1248,8 @@ def test_codex_cli_worker_native_sandbox_logic(tmp_path: Path) -> None:
         (True, "https://github.com/trusted/repo", False, "danger-full-access"),
         (True, "https://github.com/untrusted/repo", False, "workspace-write"),
         (False, "https://github.com/trusted/repo", False, "workspace-write"),
-        (True, "https://github.com/trusted/repo", True, "read-only"),
+        (True, "https://github.com/trusted/repo", True, "danger-full-access"),
+        (False, "https://github.com/trusted/repo", True, "read-only"),
     ]
 
     for in_container, repo_url, read_only, expected_sandbox in scenarios:
@@ -1427,7 +1434,7 @@ def test_codex_native_prompt_includes_response_schema_instructions(tmp_path: Pat
             response_schema={"type": "object"},
         ),
     )
-    assert "CRITICAL: Your final response MUST be a single JSON object" in prompt
+    assert "Return exactly one JSON object that strictly matches this JSON schema" in prompt
     assert '"type": "object"' in prompt
 
 
@@ -1469,3 +1476,45 @@ def test_codex_native_runtime_writes_response_schema_file(tmp_path: Path) -> Non
     assert schema_path.exists()
     assert json.loads(schema_path.read_text(encoding="utf-8")) == {"type": "object"}
     assert result.status == "success"
+
+
+def test_codex_cli_worker_auto_enables_network(tmp_path: Path) -> None:
+    """Worker should auto-enable network when tools require it and permission is granted."""
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        workspace=workspace,
+        container_name="sandbox-workspace-task-47",
+        image="python:3.12-slim",
+    )
+    container_manager = _FakeContainerManager(container)
+
+    # Use a tool that requires network
+    from tools import EXECUTE_GITHUB_TOOL_NAME, ToolPermissionLevel
+
+    worker = CodexCliWorker(
+        runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=container_manager,
+        session_factory=lambda started_container, **_: _FakeSession(
+            {
+                _git_status_command(container.working_dir): _command_result(
+                    _git_status_command(container.working_dir),
+                    output="",
+                )
+            }
+        ),
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+    )
+
+    asyncio.run(
+        worker.run(
+            WorkerRequest(
+                task_text="create pr",
+                repo_url="https://example.com/repo.git",
+                tools=[EXECUTE_GITHUB_TOOL_NAME],
+                constraints={"granted_permission": ToolPermissionLevel.NETWORKED_WRITE},
+            )
+        )
+    )
+
+    assert container_manager.start_requests[0].network_enabled is True

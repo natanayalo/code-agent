@@ -33,7 +33,7 @@ def workspace_handle():
         workspace_id="test-workspace",
         task_id="test-task",
         workspace_path="/tmp/workspace",
-        repo_path="/tmp/repo",
+        repo_path="/tmp/workspace",
         repo_url="https://example.com/repo.git",
         cleanup_policy=WorkspaceCleanupPolicy(),
     )
@@ -56,6 +56,7 @@ async def test_shell_worker_run_success(
 
     mock_container = MagicMock()
     mock_container.container_name = "test-container"
+    mock_container.working_dir = "/workspace"
     mock_container_manager.start.return_value = mock_container
 
     native_result = NativeAgentRunResult(
@@ -74,7 +75,16 @@ async def test_shell_worker_run_success(
         assert result.summary == "Command passed."
         mock_run.assert_called_once()
         args, _ = mock_run.call_args
-        assert args[0].command == ["docker", "exec", "-i", "test-container", "/bin/sh", "-e"]
+        assert args[0].command == [
+            "docker",
+            "exec",
+            "-i",
+            "-w",
+            "/workspace",
+            "test-container",
+            "/bin/sh",
+            "-e",
+        ]
         assert args[0].prompt == "echo hello"
 
 
@@ -94,6 +104,7 @@ async def test_shell_worker_applies_diff(
     mock_workspace_manager.create_workspace.return_value = workspace_handle
     mock_container = MagicMock()
     mock_container.container_name = "test-container"
+    mock_container.working_dir = "/workspace"
     mock_container_manager.start.return_value = mock_container
 
     apply_result = NativeAgentRunResult(
@@ -144,6 +155,7 @@ async def test_shell_worker_handles_apply_failure(
     mock_workspace_manager.create_workspace.return_value = workspace_handle
     mock_container = MagicMock()
     mock_container.container_name = "test-container"
+    mock_container.working_dir = "/workspace"
     mock_container_manager.start.return_value = mock_container
 
     apply_result = NativeAgentRunResult(
@@ -179,6 +191,7 @@ async def test_shell_worker_handles_cancellation(
     mock_workspace_manager.create_workspace.return_value = workspace_handle
     mock_container = MagicMock()
     mock_container.container_name = "test-container"
+    mock_container.working_dir = "/workspace"
     mock_container_manager.start.return_value = mock_container
 
     # Patch run_sync_with_cancellable_executor to inject cancel=True
@@ -235,3 +248,37 @@ async def test_shell_worker_timed_out(
         result = await shell_worker.run(request)
         assert result.status == "error"
         assert result.failure_kind == "timeout"
+
+
+@pytest.mark.anyio
+async def test_shell_worker_passes_network_enabled(
+    shell_worker, mock_workspace_manager, mock_container_manager, workspace_handle
+):
+    request = WorkerRequest(
+        session_id="test-session",
+        repo_url="https://example.com/repo.git",
+        branch="main",
+        task_text="poetry install",
+        network_enabled=True,
+    )
+
+    mock_workspace_manager.create_workspace.return_value = workspace_handle
+    mock_container = MagicMock()
+    mock_container_manager.start.return_value = mock_container
+
+    native_result = NativeAgentRunResult(
+        status="success",
+        summary="Done",
+        command="poetry install",
+        exit_code=0,
+        duration_seconds=1.0,
+        timed_out=False,
+    )
+
+    with patch("workers.shell_worker.run_native_agent", return_value=native_result):
+        await shell_worker.run(request)
+
+        # Verify container manager was started with network_enabled=True
+        mock_container_manager.start.assert_called_once()
+        container_request = mock_container_manager.start.call_args[0][0]
+        assert container_request.network_enabled is True

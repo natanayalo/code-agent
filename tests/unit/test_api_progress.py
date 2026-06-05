@@ -275,7 +275,7 @@ def test_format_telegram_message_for_awaiting_approval_phase() -> None:
     )
 
     assert _format_telegram_message(event) == (
-        "Task task-1 is awaiting approval.\n\n" "Run paused pending permission escalation approval."
+        "Task task-1 is awaiting approval.\n\nRun paused pending permission escalation approval."
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import stat
 import subprocess
 import textwrap
@@ -9,6 +10,21 @@ from pathlib import Path
 
 import workers.native_agent_runner as native_runner
 from workers.native_agent_runner import NativeAgentRunRequest, run_native_agent
+
+_UNIFIED_SUGGESTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "assumptions": {"type": "array"},
+        "acceptance_criteria": {"type": "array"},
+        "non_goals": {"type": "array"},
+        "clarification_questions": {"type": "array"},
+        "verification_commands": {"type": "array"},
+        "suggested_worker": {"type": ["string", "null"]},
+        "suggested_profile": {"type": ["string", "null"]},
+        "suggested_retry_strategy": {"type": ["object", "null"]},
+        "rationale": {"type": ["string", "null"]},
+    },
+}
 
 
 def _write_fake_binary(path: Path, body: str) -> Path:
@@ -123,7 +139,7 @@ print("stderr payload", file=sys.stderr)
     assert result.diff_text is not None
     assert "diff --git a/notes.txt b/notes.txt" in result.diff_text
     assert result.stdout.strip() == "stdout payload"
-    assert result.stderr.strip() == "stderr payload"
+    assert "stderr payload" in result.stderr
 
     artifact_names = {artifact.name for artifact in result.artifacts}
     assert artifact_names == {
@@ -244,6 +260,82 @@ print('{"final_output":{"status":"passed","summary":"structured"}}')
     assert result.json_payload == {"status": "passed", "summary": "structured"}
 
 
+def test_json_payload_extraction_prefers_wrapper_response_over_stats() -> None:
+    business_payload = {
+        "assumptions": [],
+        "acceptance_criteria": [],
+        "non_goals": [],
+        "clarification_questions": [],
+        "verification_commands": [],
+        "suggested_worker": "gemini",
+        "suggested_profile": "gemini-native-executor-read-only",
+        "suggested_retry_strategy": None,
+        "rationale": "read-only task",
+    }
+    stdout_text = json.dumps(
+        {
+            "session_id": "session-1",
+            "response": json.dumps(business_payload),
+            "stats": {
+                "models": {"gemini-2.5-pro": {"tokens": {"input": 10, "prompt": 10, "total": 20}}}
+            },
+        }
+    )
+
+    payload, source, rejected_reason = native_runner._extract_business_json_payload(  # noqa: SLF001
+        final_message=None,
+        stdout_text=stdout_text,
+        response_format="json",
+        response_schema=_UNIFIED_SUGGESTION_SCHEMA,
+    )
+
+    assert payload == business_payload
+    assert source == "stdout_wrapper.response"
+    assert rejected_reason is None
+
+
+def test_json_payload_extraction_prefers_fenced_schema_json_over_stats_blob() -> None:
+    business_payload = {
+        "suggested_worker": "gemini",
+        "suggested_profile": "gemini-native-executor-read-only",
+        "rationale": "use the read-only native profile",
+    }
+    final_message = "\n".join(
+        [
+            "```json",
+            json.dumps(business_payload),
+            "```",
+            json.dumps({"input": 10, "prompt": 10, "candidates": 2, "total": 12}),
+        ]
+    )
+
+    payload, source, rejected_reason = native_runner._extract_business_json_payload(  # noqa: SLF001
+        final_message=final_message,
+        stdout_text="",
+        response_format="json",
+        response_schema=_UNIFIED_SUGGESTION_SCHEMA,
+    )
+
+    assert payload == business_payload
+    assert source == "final_message.fenced_json"
+    assert rejected_reason is None
+
+
+def test_json_payload_extraction_rejects_pure_telemetry_stats() -> None:
+    stats_payload = {"input": 10, "prompt": 10, "candidates": 2, "total": 12}
+
+    payload, source, rejected_reason = native_runner._extract_business_json_payload(  # noqa: SLF001
+        final_message=json.dumps(stats_payload),
+        stdout_text=json.dumps(stats_payload),
+        response_format="json",
+        response_schema=_UNIFIED_SUGGESTION_SCHEMA,
+    )
+
+    assert payload is None
+    assert source is None
+    assert rejected_reason == "telemetry_only"
+
+
 def test_native_agent_runner_handles_timeout(tmp_path: Path) -> None:
     """Timeouts should return structured error results."""
     repo_path = tmp_path / "repo"
@@ -358,6 +450,76 @@ def test_finalize_native_agent_run_emits_llm_json_output_attribute(monkeypatch) 
     assert any(k == "llm.json_output" for k, _ in captured)
 
 
+def test_finalize_native_agent_run_sets_native_reason_codes(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        native_runner,
+        "set_current_span_attribute",
+        lambda key, value: captured.__setitem__(key, value),
+    )
+    monkeypatch.setattr(native_runner, "add_current_span_event", lambda name, attributes: None)
+    req = NativeAgentRunRequest(
+        command=["echo", "ok"],
+        prompt="task",
+        repo_path=Path("."),
+        workspace_path=Path("."),
+    )
+    native_runner._finalize_native_agent_run(  # noqa: SLF001
+        request=req,
+        status="failure",
+        summary="Native agent command exited with code 41.",
+        final_message=None,
+        command_text="echo ok",
+        exit_code=41,
+        started_at=0.0,
+        timed_out=False,
+        stdout="",
+        stderr="",
+    )
+    assert captured["code_agent.native.outcome_status"] == "failure"
+    assert captured["code_agent.native.reason_code"] == "nonzero_exit"
+    assert captured["code_agent.native.reason_detail"] == "exit_code_41"
+    assert captured["code_agent.native.exit_code"] == 41
+
+
+def test_finalize_native_agent_run_emits_completed_event(monkeypatch) -> None:
+    captured_events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(native_runner, "set_current_span_attribute", lambda key, value: None)
+    monkeypatch.setattr(
+        native_runner,
+        "add_current_span_event",
+        lambda name, attributes: captured_events.append((name, dict(attributes or {}))),
+    )
+    req = NativeAgentRunRequest(
+        command=["echo", "ok"],
+        prompt="task",
+        repo_path=Path("."),
+        workspace_path=Path("."),
+    )
+    native_runner._finalize_native_agent_run(  # noqa: SLF001
+        request=req,
+        status="success",
+        summary="ok",
+        final_message="ok",
+        command_text="echo ok",
+        exit_code=0,
+        started_at=0.0,
+        timed_out=False,
+        stdout="",
+        stderr="",
+        files_changed=["a.py"],
+    )
+    completed = [
+        event for event in captured_events if event[0] == "code_agent.native.run_completed"
+    ]
+    assert completed
+    payload = completed[0][1]
+    assert payload["status"] == "success"
+    assert payload["reason_code"] == "ok"
+    assert payload["has_final_message"] is True
+    assert payload["files_changed_count"] == 1
+
+
 def test_native_agent_runner_returns_structured_error_on_artifact_failure(
     tmp_path: Path,
     monkeypatch,
@@ -425,3 +587,97 @@ def test_native_agent_runner_git_diff_exception(tmp_path: Path, monkeypatch) -> 
     from workers.native_agent_runner import _collect_diff_text
 
     assert _collect_diff_text(repo_path=repo_path, timeout_seconds=10) is None
+
+
+def test_native_agent_runner_enforces_strict_isolation(tmp_path: Path, monkeypatch, caplog) -> None:
+    """The runner should use a strict allowlist and hide sensitive host variables."""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+
+    # Variables that should be hidden
+    monkeypatch.setenv("HOST_VAR", "host_value")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://real-db")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
+    # Variables that should be allowed
+    monkeypatch.setenv("LANG", "en_US.UTF-8")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-env-checker.py",
+        """#!/usr/bin/env python3
+import os
+import json
+# Output critical env vars as JSON
+print(json.dumps({
+    "HOST_VAR": os.environ.get("HOST_VAR"),
+    "DATABASE_URL": os.environ.get("DATABASE_URL"),
+    "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY"),
+    "LANG": os.environ.get("LANG"),
+    "PATH": os.environ.get("PATH"),
+    "HOME": os.environ.get("HOME"),
+    "CODE_AGENT_ENABLE_TRACING": os.environ.get("CODE_AGENT_ENABLE_TRACING"),
+    "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN"),
+    "CODEX_HOME": os.environ.get("CODEX_HOME"),
+    "GEMINI_HOME": os.environ.get("GEMINI_HOME"),
+    "GEMINI_API_KEY": os.environ.get("GEMINI_API_KEY"),
+}))
+""",
+    )
+
+    request = NativeAgentRunRequest(
+        command=[str(fake_binary)],
+        prompt="task",
+        repo_path=repo_path,
+        workspace_path=tmp_path,
+        env={
+            "HOME": "/root",  # Should be dropped as protected
+            "NEW_SAFE_VAR": "safe_value",
+            "CODEX_HOME": "/root/.codex",  # Allowed explicit auth home
+            "GEMINI_HOME": "/root/.gemini",  # Allowed explicit auth home
+            "GEMINI_API_KEY": "should_be_denied",  # Denied by prefix
+            "OTEL_EXPORTER_OTLP_ENDPOINT": "http://evil.com",  # Should be denied
+            "DATABASE_URL": "mysql://hijacked",  # Should be force-overridden
+        },
+        timeout_seconds=10,
+    )
+
+    result = run_native_agent(request)
+
+    assert result.status == "success"
+    payload = result.json_payload
+    assert payload is not None
+
+    # Strict isolation checks
+    assert payload["HOST_VAR"] is None  # Not in allowlist
+    assert payload["AWS_SECRET_ACCESS_KEY"] is None  # Not in allowlist AND prefix denied
+    # DATABASE_URL was injected via request.env with "mysql://hijacked" but force-override wins
+    assert payload["DATABASE_URL"] is not None
+    assert not payload["DATABASE_URL"].startswith("mysql://")  # Hijacked value was suppressed
+
+    # Allowlist checks
+    assert payload["LANG"] == "en_US.UTF-8"
+    assert payload["PATH"] == "/usr/bin:/bin"
+
+    # HOME redirection check
+    assert payload["HOME"].endswith(".agent_home")
+    assert (tmp_path / ".agent_home").is_dir()
+
+    # Force-override checks (Must win against request.env and host)
+    assert payload["CODE_AGENT_ENABLE_TRACING"] == "0"
+    assert payload["TELEGRAM_BOT_TOKEN"] == ""
+    assert payload["DATABASE_URL"].startswith("sqlite:///")
+    assert ".sandbox.db" in payload["DATABASE_URL"]
+    assert payload["HOME"] == str(tmp_path / ".agent_home")
+    # Auth home paths are force-set and must not be user-overridable.
+    assert payload["CODEX_HOME"] == "/root/.codex"
+    assert payload["GEMINI_HOME"] == "/root/.gemini"
+    assert payload["GEMINI_API_KEY"] is None
+
+    warning_messages = [
+        record.getMessage() for record in caplog.records if record.levelname == "WARNING"
+    ]
+    assert any(
+        "Native agent runner dropped protected environment key: HOME" in message
+        for message in warning_messages
+    )

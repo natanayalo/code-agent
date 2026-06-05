@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -24,13 +24,14 @@ def with_llm_span(
     input_data: Any,
     task_id: str | None = None,
     session_id: str | None = None,
-) -> Iterator[None]:
-    """Trace an LLM adapter turn and capture input payload attributes."""
+    kind: str = SPAN_KIND_LLM,
+) -> Generator[None, None, None]:
+    """Trace an LLM or Tool adapter turn and capture input payload attributes."""
 
     with start_optional_span(
         tracer_name=tracer_name,
         span_name=span_name,
-        attributes=with_span_kind(SPAN_KIND_LLM),
+        attributes=with_span_kind(kind),
         task_id=task_id,
         session_id=session_id,
     ):

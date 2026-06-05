@@ -30,6 +30,22 @@ def test_build_task_spec_for_simple_feature_task() -> None:
     assert validate_task_spec_policy(spec) == []
 
 
+def test_build_task_spec_marks_pwd_home_smoke_as_no_modification_summary() -> None:
+    spec = build_task_spec(
+        task_text="Smoke test: print PWD and HOME only, then exit.",
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="master",
+    )
+
+    assert spec.task_type == "maintenance"
+    assert spec.delivery_mode == "summary"
+    assert "modify_workspace_files" not in spec.allowed_actions
+    assert "Do not create or modify any files." in spec.non_goals
+    assert spec.verification_commands == ['printf \'%s\\n%s\\n\' "$PWD" "$HOME"']
+    assert spec.expected_artifacts == ["summary"]
+    assert validate_task_spec_policy(spec) == []
+
+
 def test_build_task_spec_flags_ambiguous_task_for_clarification() -> None:
     """Underspecified ambiguous asks should surface precise clarification needs."""
     spec = build_task_spec(

@@ -15,7 +15,7 @@ from evaluation.harness import (
 from orchestrator import OrchestratorState, build_orchestrator_graph
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.task_spec import is_destructive_task
-from workers import ArtifactReference, TestResult, Worker, WorkerRequest, WorkerResult
+from workers import ArtifactReference, Worker, WorkerRequest, WorkerResult, WorkerTestResult
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +46,10 @@ class _FrozenOutcomeWorker(Worker):
             )
 
         if outcome.tests_passed is None:
-            test_results: list[TestResult] = []
+            test_results: list[WorkerTestResult] = []
         else:
             test_results = [
-                TestResult(
+                WorkerTestResult(
                     name="frozen-eval",
                     status="passed" if outcome.tests_passed else "failed",
                     details="deterministic replay outcome",

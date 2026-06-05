@@ -97,11 +97,13 @@ def client(session_factory) -> Iterator[TestClient]:
             worker=worker,
             checkpoint_path="test_checkpoints.sqlite",
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     app.state.test_worker = worker
     with TestClient(app) as test_client:
-        test_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        test_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         yield test_client
 
 
@@ -244,12 +246,14 @@ def test_task_endpoints_expose_profile_and_runtime_metadata_when_profile_routing
                 )
             },
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     app.state.test_worker = worker
 
     with TestClient(app) as profiled_client:
-        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        profiled_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         response = profiled_client.post(
             "/tasks",
             json={
@@ -345,12 +349,14 @@ def test_task_endpoints_accept_worker_profile_override_for_explicit_legacy_opt_i
                 ),
             },
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     app.state.test_worker = worker
 
     with TestClient(app) as profiled_client:
-        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        profiled_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         response = profiled_client.post(
             "/tasks",
             json={
@@ -414,11 +420,13 @@ def test_task_endpoints_reject_unknown_worker_profile_override(session_factory) 
                 ),
             },
         ),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
 
     with TestClient(app) as profiled_client:
-        profiled_client.headers["X-Webhook-Token"] = "test-shared-secret"
+        profiled_client.headers["X-Webhook-Token"] = (
+            "a" * 32  # gitleaks:allow
+        )
         response = profiled_client.post(
             "/tasks",
             json={
@@ -617,7 +625,7 @@ def test_task_routes_require_a_configured_task_service() -> None:
     with TestClient(app) as client:
         response = client.post(
             "/tasks",
-            headers={"X-Webhook-Token": "test-shared-secret"},
+            headers={"X-Webhook-Token": ("a" * 32)},  # gitleaks:allow
             json={"task_text": "Run the task API"},
         )
 
@@ -702,7 +710,7 @@ def test_task_routes_reject_missing_auth_header(session_factory) -> None:
     )
     app = create_app(
         task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
 
     with TestClient(app) as client:
@@ -732,7 +740,7 @@ def test_task_routes_reject_invalid_auth_header(session_factory) -> None:
     )
     app = create_app(
         task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
-        auth_config=ApiAuthConfig(shared_secret="test-shared-secret"),
+        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
 
     with TestClient(app) as client:
@@ -779,7 +787,8 @@ def test_task_routes_fail_closed_when_service_is_injected_without_auth_config(
 def test_task_creation_with_cookie_auth(client: TestClient, session_factory) -> None:
     """Task creation should work with a valid session cookie and Origin header."""
     auth_config = ApiAuthConfig(
-        shared_secret="test-secret", allowed_origins=["http://localhost:3000"]
+        shared_secret=("a" * 32),  # gitleaks:allow
+        allowed_origins=["http://localhost:3000"],
     )
     worker = client.app.state.test_worker
     app = create_app(
@@ -800,7 +809,8 @@ def test_task_creation_with_cookie_auth(client: TestClient, session_factory) -> 
 def test_task_creation_csrf_rejection(client: TestClient, session_factory) -> None:
     """Cookie-based task creation should fail without a trusted Origin."""
     auth_config = ApiAuthConfig(
-        shared_secret="test-secret", allowed_origins=["http://localhost:3000"]
+        shared_secret=("a" * 32),  # gitleaks:allow
+        allowed_origins=["http://localhost:3000"],
     )
     worker = client.app.state.test_worker
     app = create_app(
@@ -827,7 +837,8 @@ def test_task_creation_csrf_rejection(client: TestClient, session_factory) -> No
 def test_auth_precedence_invalid_header(client: TestClient, session_factory) -> None:
     """If an invalid header is provided, fail even if a valid cookie is present."""
     auth_config = ApiAuthConfig(
-        shared_secret="test-secret", allowed_origins=["http://localhost:3000"]
+        shared_secret=("a" * 32),  # gitleaks:allow
+        allowed_origins=["http://localhost:3000"],
     )
     worker = client.app.state.test_worker
     app = create_app(
@@ -851,7 +862,8 @@ def test_auth_precedence_invalid_header(client: TestClient, session_factory) -> 
 def test_csrf_normalization_edge_cases(client: TestClient, session_factory) -> None:
     """CSRF protection should handle trailing slashes and default ports."""
     auth_config = ApiAuthConfig(
-        shared_secret="test-secret", allowed_origins=["http://localhost:3000"]
+        shared_secret=("a" * 32),  # gitleaks:allow
+        allowed_origins=["http://localhost:3000"],
     )
     worker = client.app.state.test_worker
     app = create_app(

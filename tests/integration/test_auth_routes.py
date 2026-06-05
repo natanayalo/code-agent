@@ -16,7 +16,7 @@ from apps.api.main import create_app
 @pytest.fixture
 def auth_config() -> ApiAuthConfig:
     return ApiAuthConfig(
-        shared_secret="test-secret",
+        shared_secret=("a" * 32),  # gitleaks:allow
         allowed_origins=["http://localhost:3000"],
     )
 
@@ -30,7 +30,10 @@ def client(auth_config: ApiAuthConfig) -> Iterator[TestClient]:
 
 def test_login_success(client: TestClient) -> None:
     """Valid secret should set a session cookie."""
-    response = client.post("/auth/login", json={"secret": "test-secret"})
+    response = client.post(
+        "/auth/login",
+        json={"secret": ("a" * 32)},  # gitleaks:allow
+    )  # gitleaks:allow
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert DASHBOARD_COOKIE_NAME in response.cookies
@@ -51,7 +54,7 @@ def test_login_invalid_secret(client: TestClient) -> None:
 def test_logout_success(client: TestClient) -> None:
     """Logout should clear the session cookie."""
     # First login
-    client.post("/auth/login", json={"secret": "test-secret"})
+    client.post("/auth/login", json={"secret": ("a" * 32)})  # gitleaks:allow
     assert DASHBOARD_COOKIE_NAME in client.cookies
 
     # Then logout (needs CSRF protection if using cookie)
@@ -72,7 +75,7 @@ def test_auth_status(client: TestClient) -> None:
     assert response.json()["authenticated"] is False
 
     # Login
-    client.post("/auth/login", json={"secret": "test-secret"})
+    client.post("/auth/login", json={"secret": ("a" * 32)})  # gitleaks:allow
 
     # Now authenticated
     response = client.get("/auth/status")
@@ -90,7 +93,7 @@ def test_auth_status(client: TestClient) -> None:
 
 def test_csrf_protection_on_logout(client: TestClient) -> None:
     """Logout should fail if CSRF origin is missing or untrusted."""
-    client.post("/auth/login", json={"secret": "test-secret"})
+    client.post("/auth/login", json={"secret": ("a" * 32)})  # gitleaks:allow
 
     # Missing Origin/Referer
     response = client.post("/auth/logout")
@@ -111,7 +114,11 @@ def test_invalid_sub_claim(client: TestClient) -> None:
         "exp": now + 3600,
         "sub": "not-an-operator",
     }
-    invalid_token = jwt.encode(payload, "test-secret", algorithm=JWT_ALGORITHM)
+    invalid_token = jwt.encode(
+        payload,
+        ("a" * 32),  # gitleaks:allow
+        algorithm=JWT_ALGORITHM,
+    )  # gitleaks:allow
 
     client.cookies.set(DASHBOARD_COOKIE_NAME, invalid_token)
     response = client.get("/auth/status")
@@ -123,7 +130,7 @@ def test_proxy_secure_cookie(client: TestClient) -> None:
     """X-Forwarded-Proto: https should trigger Secure cookie attribute."""
     response = client.post(
         "/auth/login",
-        json={"secret": "test-secret"},
+        json={"secret": ("a" * 32)},  # gitleaks:allow
         headers={"X-Forwarded-Proto": "https"},
     )
     assert response.status_code == 200

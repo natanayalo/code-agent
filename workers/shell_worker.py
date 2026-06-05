@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Final
 
+from apps.observability import SPAN_KIND_TOOL
 from sandbox import (
     DockerSandboxContainerManager,
     DockerSandboxContainerRequest,
@@ -18,14 +18,13 @@ from sandbox.redact import SecretRedactor
 from sandbox.workspace import default_workspace_root
 from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import FailureKind, Worker, WorkerCommand, WorkerRequest, WorkerResult
+from workers.constants import DEFAULT_GIT_APPLY_TIMEOUT_SECONDS
 from workers.native_agent_runner import (
     NativeAgentRunRequest,
     run_native_agent,
 )
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_GIT_APPLY_TIMEOUT_SECONDS: Final = 60
 
 
 class ShellWorker(Worker):
@@ -69,14 +68,22 @@ class ShellWorker(Worker):
             )
 
         def _run_sync(cancel_requested: Callable[[], bool]) -> WorkerResult:
-            workspace = self.workspace_manager.create_workspace(
-                WorkspaceRequest(
-                    task_id=f"shell-{request.session_id or 'run'}",
-                    repo_url=request.repo_url,  # type: ignore[arg-type]
+            if request.workspace_id:
+                workspace = self.workspace_manager.get_workspace(
+                    request.workspace_id,
+                    repo_url=request.repo_url,
                     branch=request.branch,
-                    cleanup_policy=self.cleanup_policy,
+                    task_id=request.task_id or f"shell-{request.session_id or 'run'}",
                 )
-            )
+            else:
+                workspace = self.workspace_manager.create_workspace(
+                    WorkspaceRequest(
+                        task_id=request.task_id or f"shell-{request.session_id or 'run'}",
+                        repo_url=request.repo_url,  # type: ignore[arg-type]
+                        branch=request.branch,
+                        cleanup_policy=self.cleanup_policy,
+                    )
+                )
 
             if cancel_requested():
                 return WorkerResult(
@@ -89,7 +96,9 @@ class ShellWorker(Worker):
                 container = self.container_manager.start(
                     DockerSandboxContainerRequest(
                         workspace=workspace,
+                        image=request.image,
                         environment=request.secrets,
+                        network_enabled=request.network_enabled,
                     )
                 )
 
@@ -109,6 +118,8 @@ class ShellWorker(Worker):
                                     "docker",
                                     "exec",
                                     "-i",
+                                    "-w",
+                                    container.working_dir,
                                     container.container_name,
                                     "git",
                                     "apply",
@@ -119,6 +130,7 @@ class ShellWorker(Worker):
                                 workspace_path=workspace.workspace_path,
                                 timeout_seconds=DEFAULT_GIT_APPLY_TIMEOUT_SECONDS,
                                 redactor=SecretRedactor(list((request.secrets or {}).values())),
+                                span_kind=SPAN_KIND_TOOL,
                             )
                         )
                         setup_commands.append(
@@ -154,6 +166,8 @@ class ShellWorker(Worker):
                                 "docker",
                                 "exec",
                                 "-i",
+                                "-w",
+                                container.working_dir,
                                 container.container_name,
                                 "/bin/sh",
                                 "-e",
@@ -164,6 +178,7 @@ class ShellWorker(Worker):
                             timeout_seconds=request.budget.get("worker_timeout_seconds", 300),
                             env=request.secrets,
                             redactor=SecretRedactor(list((request.secrets or {}).values())),
+                            span_kind=SPAN_KIND_TOOL,
                         )
                     )
 
@@ -208,6 +223,8 @@ class ShellWorker(Worker):
                         files_changed=native_result.files_changed,
                         artifacts=native_result.artifacts,
                         diff_text=native_result.diff_text,
+                        stdout=native_result.stdout,
+                        stderr=native_result.stderr,
                     )
                 finally:
                     self.container_manager.stop(container)

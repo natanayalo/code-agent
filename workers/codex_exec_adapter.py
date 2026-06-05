@@ -24,13 +24,14 @@ from workers.adapter_utils import (
     truncate_detail_keep_tail,
 )
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
+from workers.constants import DEFAULT_CODEX_REQUEST_TIMEOUT_SECONDS
 from workers.llm_tracing import set_llm_span_output, with_llm_span
 from workers.prompt import build_runtime_adapter_tool_guidance_lines
 from workers.subprocess_env import build_codex_subprocess_env
 
 DEFAULT_CODEX_EXECUTABLE: Final[str] = "codex"
 DEFAULT_CODEX_SANDBOX_MODE: Final[str] = "read-only"
-DEFAULT_CODEX_REQUEST_TIMEOUT_SECONDS: Final[int] = 120
+
 _DETAIL_PREVIEW_CHARACTERS: Final[int] = 1200
 
 CODEX_EXECUTABLE_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_CLI_BIN"
