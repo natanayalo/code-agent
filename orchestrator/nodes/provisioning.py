@@ -276,7 +276,7 @@ def build_init_environment_node(
         if result.status != "success":
             return {
                 "current_step": "init_environment",
-                "result": result.model_dump(),
+                "result": result,
                 "progress_updates": _progress_update(state, "environment initialization failed"),
                 **_timeline_event(
                     state,
@@ -345,7 +345,7 @@ def build_init_environment_node(
 
         response = {
             "current_step": "init_environment",
-            "result": result.model_dump(),
+            "result": result,
             "progress_updates": _progress_update(state, "environment initialized"),
             **_timeline_event(
                 state,

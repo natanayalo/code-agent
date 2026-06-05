@@ -131,8 +131,8 @@ async def test_init_environment_node_fails_on_missing_node_lockfile(tmp_path: Pa
     )
 
     result = await node(state)
-    assert result["result"]["status"] == "error"
-    assert "Missing lockfile" in result["result"]["summary"]
+    assert result["result"].status == "error"
+    assert "Missing lockfile" in result["result"].summary
 
 
 def test_provision_workspace_node_logic(tmp_path: Path) -> None:

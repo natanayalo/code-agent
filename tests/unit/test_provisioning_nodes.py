@@ -313,8 +313,8 @@ async def test_init_environment_node_fails_on_worker_error(tmp_path: Path) -> No
 
     result = await node(state)
 
-    assert result["result"]["status"] == "failure"
-    assert result["result"]["summary"] == "install failed"
+    assert result["result"].status == "failure"
+    assert result["result"].summary == "install failed"
 
 
 @pytest.mark.asyncio
