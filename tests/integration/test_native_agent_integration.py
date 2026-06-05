@@ -1,3 +1,4 @@
+import os
 import stat
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -52,7 +53,8 @@ sys.exit(0)
     # We'll patch the environment used by run_native_agent.
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setenv("PATH", f"{bin_dir}:{tmp_path}")
+        current_path = os.environ.get("PATH", "")
+        mp.setenv("PATH", f"{bin_dir}:{tmp_path}:{current_path}")
 
         request = WorkerRequest(
             task_text="Refactor this",
@@ -106,7 +108,8 @@ sys.exit(1)
     )
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setenv("PATH", f"{bin_dir}:{tmp_path}")
+        current_path = os.environ.get("PATH", "")
+        mp.setenv("PATH", f"{bin_dir}:{tmp_path}:{current_path}")
 
         request = WorkerRequest(
             task_text="Refactor this",

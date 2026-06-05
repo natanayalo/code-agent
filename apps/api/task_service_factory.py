@@ -418,7 +418,10 @@ def build_task_service_from_env(
             resolved_env.get(INDEPENDENT_VERIFIER_ENABLED_ENV_VAR)
         ),
         orchestrator_brain=(
-            RuleBasedOrchestratorBrain(planner_worker=gemini_worker)
+            RuleBasedOrchestratorBrain(
+                planner_worker=gemini_worker,
+                fallback_planners=[w for w in [codex_worker, openrouter_worker] if w is not None],
+            )
             if _is_enabled(resolved_env.get(ORCHESTRATOR_BRAIN_ENABLED_ENV_VAR))
             else None
         ),
