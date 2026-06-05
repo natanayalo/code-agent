@@ -970,6 +970,73 @@ def build_generate_task_spec_and_route_node(
             if orchestrator_brain is not None and _should_attempt_brain_route(state):
                 unified_attempted = True
                 provider_name = type(orchestrator_brain).__name__
+                unified_method = getattr(orchestrator_brain, "suggest_task_spec_and_route", None)
+                if not callable(unified_method):
+                    task_spec_brain_report = TaskSpecBrainMergeReport(
+                        enabled=True,
+                        provider=provider_name,
+                        error=(
+                            "RuntimeError: orchestrator_brain_missing_unified_method: "
+                            "suggest_task_spec_and_route"
+                        ),
+                    )
+                    route_brain_report = RouteBrainMergeReport(
+                        enabled=True,
+                        provider=provider_name,
+                        error=(
+                            "RuntimeError: orchestrator_brain_missing_unified_method: "
+                            "suggest_task_spec_and_route"
+                        ),
+                    )
+                    failure_event_payload = {
+                        "task_spec": task_spec.model_dump(mode="json"),
+                        "route": route.model_dump(mode="json"),
+                        "policy_violations": [],
+                        "brain": {
+                            "task_spec": task_spec_brain_report.model_dump(mode="json"),
+                            "route": route_brain_report.model_dump(mode="json"),
+                            "applied": False,
+                            "error": True,
+                        },
+                        "error_reason_code": "brain_unified_method_missing",
+                    }
+                    set_span_input_output(
+                        input_data=state.task_kind,
+                        output_data=failure_event_payload,
+                    )
+                    set_span_status_from_outcome("failure")
+                    return {
+                        "current_step": "generate_task_spec_and_route",
+                        "task_spec": task_spec.model_dump(),
+                        "route": route.model_dump(),
+                        "errors": [*state.errors, "brain_unified_method_missing"],
+                        "result": WorkerResult(
+                            status="error",
+                            summary=(
+                                "Orchestrator brain is enabled but does not implement "
+                                "suggest_task_spec_and_route."
+                            ),
+                            failure_kind="unknown",
+                            commands_run=[],
+                            files_changed=[],
+                            test_results=[],
+                            artifacts=[],
+                            next_action_hint="update_orchestrator_brain_provider",
+                        ),
+                        "progress_updates": _progress_update(
+                            state, "task generation failed: unified brain method missing"
+                        ),
+                        **_timeline_event(
+                            state,
+                            TimelineEventType.TASK_SPEC_AND_ROUTE_GENERATED,
+                            message=(
+                                "TaskSpec and route generation failed: unified brain method "
+                                "missing."
+                            ),
+                            payload=failure_event_payload,
+                        ),
+                    }
+
                 try:
                     with start_optional_span(
                         tracer_name="orchestrator.graph",
@@ -979,14 +1046,6 @@ def build_generate_task_spec_and_route_node(
                         session_id=state.session.session_id if state.session else None,
                         attempt=state.attempt_count,
                     ):
-                        unified_method = getattr(
-                            orchestrator_brain, "suggest_task_spec_and_route", None
-                        )
-                        if not callable(unified_method):
-                            raise RuntimeError(
-                                "orchestrator_brain_missing_unified_method:"
-                                " suggest_task_spec_and_route"
-                            )
                         suggestion = await unified_method(
                             state=state,
                             task_spec=task_spec,
@@ -997,7 +1056,8 @@ def build_generate_task_spec_and_route_node(
                             input_data=task_spec.model_dump(),
                             output_data=suggestion.model_dump() if suggestion else None,
                         )
-                except Exception as exc:
+                except (RuntimeError, AttributeError, TypeError) as exc:
+                    logger.debug("Failed to execute unified brain method: %s", exc, exc_info=True)
                     detail = str(exc).strip()
                     task_spec_brain_report = TaskSpecBrainMergeReport(
                         enabled=True,
@@ -1009,55 +1069,7 @@ def build_generate_task_spec_and_route_node(
                         provider=provider_name,
                         error=(f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__),
                     )
-                    if "orchestrator_brain_missing_unified_method" in detail:
-                        failure_event_payload = {
-                            "task_spec": task_spec.model_dump(mode="json"),
-                            "route": route.model_dump(mode="json"),
-                            "policy_violations": [],
-                            "brain": {
-                                "task_spec": task_spec_brain_report.model_dump(mode="json"),
-                                "route": route_brain_report.model_dump(mode="json"),
-                                "applied": False,
-                                "error": True,
-                            },
-                            "error_reason_code": "brain_unified_method_missing",
-                        }
-                        set_span_input_output(
-                            input_data=state.task_kind,
-                            output_data=failure_event_payload,
-                        )
-                        set_span_status_from_outcome("failure")
-                        return {
-                            "current_step": "generate_task_spec_and_route",
-                            "task_spec": task_spec.model_dump(),
-                            "route": route.model_dump(),
-                            "errors": [*state.errors, "brain_unified_method_missing"],
-                            "result": WorkerResult(
-                                status="error",
-                                summary=(
-                                    "Orchestrator brain is enabled but does not implement "
-                                    "suggest_task_spec_and_route."
-                                ),
-                                failure_kind="unknown",
-                                commands_run=[],
-                                files_changed=[],
-                                test_results=[],
-                                artifacts=[],
-                                next_action_hint="update_orchestrator_brain_provider",
-                            ),
-                            "progress_updates": _progress_update(
-                                state, "task generation failed: unified brain method missing"
-                            ),
-                            **_timeline_event(
-                                state,
-                                TimelineEventType.TASK_SPEC_AND_ROUTE_GENERATED,
-                                message=(
-                                    "TaskSpec and route generation failed: unified brain method "
-                                    "missing."
-                                ),
-                                payload=failure_event_payload,
-                            ),
-                        }
+
                 else:
                     if suggestion is None:
                         task_spec_brain_report = TaskSpecBrainMergeReport(
