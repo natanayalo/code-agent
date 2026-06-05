@@ -35,8 +35,6 @@ def test_looks_read_only_command_edge_cases() -> None:
     assert _looks_read_only_command("   ") is True
     assert _looks_read_only_command("\n\t") is True
 
-    assert _looks_read_only_command("\n\t") is True
-
 
 @pytest.mark.asyncio
 async def test_init_environment_node_no_shell_worker(tmp_path: Path) -> None:

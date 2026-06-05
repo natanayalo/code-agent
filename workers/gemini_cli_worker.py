@@ -184,7 +184,11 @@ def _prepare_workspace_gemini_home(
         # Repair stale or partial workspace state: if the auth settings file is
         # missing, refresh the target from the resolved source.
         if target_settings.exists():
-            return
+            try:
+                if not target.is_symlink() or os.readlink(target) == str(resolved_source):
+                    return
+            except OSError:
+                pass
         try:
             if target.is_symlink() or target.is_file():
                 target.unlink()

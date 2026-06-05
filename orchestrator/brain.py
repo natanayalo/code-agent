@@ -630,8 +630,8 @@ class RuleBasedOrchestratorBrain:
             response_format="json",
             response_schema=_strict_json_schema(TaskSpecBrainSuggestion),
         )
-        result = None
         for i, worker in enumerate(planners):
+            result = None
             try:
                 async with asyncio.timeout(
                     DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS + DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS
@@ -830,8 +830,8 @@ class RuleBasedOrchestratorBrain:
             response_format="json",
             response_schema=_strict_json_schema(RouteBrainSuggestion),
         )
-        result = None
         for i, worker in enumerate(planners):
+            result = None
             try:
                 async with asyncio.timeout(
                     self.planner_timeout_seconds + DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS
