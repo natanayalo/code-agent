@@ -618,6 +618,145 @@ def test_task_approval_endpoint_rejects_tasks_not_waiting_for_decision(client: T
     assert "not currently awaiting" in not_waiting_response.json()["detail"].lower()
 
 
+def test_task_replay_endpoint_creates_replayable_task_with_provenance(
+    client: TestClient,
+    session_factory,
+) -> None:
+    """Replaying a terminal task should create a fresh queued task with audit provenance."""
+    response = client.post(
+        "/tasks",
+        json={
+            "task_text": "Create a note and report the result",
+            "constraints": {"assumptions": ["original run"]},
+            "budget": {"max_iterations": 3},
+            "session": {
+                "channel": "http",
+                "external_user_id": "http:test-user-replay",
+                "external_thread_id": "thread-replay",
+            },
+        },
+    )
+    assert response.status_code == 202
+    source_task_id = response.json()["task_id"]
+
+    _run_one_queued_task(client)
+
+    replay_response = client.post(
+        f"/tasks/{source_task_id}/replay",
+        json={
+            "constraints": {"assumptions": ["second pass"]},
+            "budget": {"max_iterations": 6},
+        },
+    )
+
+    assert replay_response.status_code == 201
+    replay_payload = replay_response.json()
+    replay_task_id = replay_payload["task_id"]
+
+    assert replay_task_id != source_task_id
+    assert replay_payload["status"] == "pending"
+    assert replay_payload["latest_run"] is None
+
+    with session_scope(session_factory) as session:
+        source_task = TaskRepository(session).get(source_task_id)
+        replayed_task = TaskRepository(session).get(replay_task_id)
+
+        assert source_task is not None
+        assert replayed_task is not None
+        assert replayed_task.task_text == source_task.task_text
+        assert replayed_task.constraints["replayed_from"] == [source_task_id]
+        assert replayed_task.constraints["assumptions"] == ["second pass"]
+        assert replayed_task.budget["max_iterations"] == 6
+
+    _run_one_queued_task(client)
+
+    completed = client.get(f"/tasks/{replay_task_id}")
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "completed"
+
+    worker = client.app.state.test_worker
+    assert len(worker.requests) == 2
+
+
+def test_task_replay_endpoint_rejects_non_terminal_source_task(
+    client: TestClient,
+    session_factory,
+) -> None:
+    """Replay should fail closed when the source task has not reached a terminal state."""
+    response = client.post(
+        "/tasks",
+        json={
+            "task_text": "Create a note and report the result",
+            "session": {
+                "channel": "http",
+                "external_user_id": "http:test-user-replay-pending",
+                "external_thread_id": "thread-replay-pending",
+            },
+        },
+    )
+    assert response.status_code == 202
+    task_id = response.json()["task_id"]
+
+    replay_response = client.post(f"/tasks/{task_id}/replay", json={})
+
+    assert replay_response.status_code == 409
+    assert "cannot be replayed" in replay_response.json()["detail"].lower()
+
+    with session_scope(session_factory) as session:
+        listed = TaskRepository(session).list_by_session(response.json()["session_id"])
+        assert [task.id for task in listed] == [task_id]
+
+
+def test_interaction_response_endpoint_requeues_permission_gated_task(
+    client: TestClient,
+    session_factory,
+) -> None:
+    """Resolving a permission interaction should clear the gate and resume the queued task."""
+    response = client.post(
+        "/tasks",
+        json={
+            "task_text": "Delete all local files",
+            "session": {
+                "channel": "http",
+                "external_user_id": "http:test-user-interaction",
+                "external_thread_id": "thread-interaction",
+            },
+        },
+    )
+    assert response.status_code == 202
+    task_id = response.json()["task_id"]
+    pending = response.json()["pending_interactions"]
+    assert len(pending) == 1
+
+    interaction_id = pending[0]["interaction_id"]
+    interaction_response = client.post(
+        f"/tasks/{task_id}/interactions/{interaction_id}/response",
+        json={"response_data": {"approved": True}},
+    )
+
+    assert interaction_response.status_code == 200
+    interaction_payload = interaction_response.json()
+    assert interaction_payload["status"] == "pending"
+    assert interaction_payload["pending_interaction_count"] == 0
+    assert interaction_payload["pending_interactions"] == []
+    assert interaction_payload["latest_run"] is None
+    assert any(
+        event["event_type"] == "approval_granted" for event in interaction_payload["timeline"]
+    )
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(task_id)
+        assert task is not None
+        assert task.constraints["requires_approval"] is False
+        assert task.constraints["approval"]["status"] == "approved"
+
+    _run_one_queued_task(client)
+
+    resumed = client.get(f"/tasks/{task_id}")
+    assert resumed.status_code == 200
+    assert resumed.json()["status"] == "completed"
+
+
 def test_task_routes_require_a_configured_task_service() -> None:
     """The default app should fail clearly until the task service is wired in."""
     app = create_app()

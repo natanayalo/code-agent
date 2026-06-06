@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from db.base import Base
@@ -226,6 +227,90 @@ def test_session_state_repository_merges_updates(session):
         "workers/codex_worker.py",
         "repositories/sqlalchemy.py",
     ]
+
+
+def test_session_state_repository_upsert_raises_when_race_recovery_cannot_reload(session):
+    """If an insert race still cannot reload state, the repository should re-raise the DB error."""
+    user_repo = UserRepository(session)
+    user = user_repo.create(external_user_id="user_race")
+    conv_session = SessionRepository(session).create(
+        user_id=user.id,
+        channel="test",
+        external_thread_id="thread_race",
+    )
+    state_repo = SessionStateRepository(session)
+
+    original_get = state_repo.get
+    get_calls = 0
+
+    def stale_get(session_id: str):
+        nonlocal get_calls
+        get_calls += 1
+        if get_calls == 1:
+            return None
+        return original_get(session_id)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(state_repo, "get", stale_get)
+    monkeypatch.setattr(
+        session,
+        "flush",
+        lambda: (_ for _ in ()).throw(IntegrityError("insert", {}, Exception("boom"))),
+    )
+
+    try:
+        with pytest.raises(IntegrityError):
+            state_repo.upsert(session_id=conv_session.id, active_goal="race")
+    finally:
+        monkeypatch.undo()
+
+
+def test_personal_memory_upsert_raises_when_duplicate_recovery_still_finds_no_row(session):
+    """Personal memory races should re-raise when recovery cannot find the winning row."""
+    user_repo = UserRepository(session)
+    user = user_repo.create(external_user_id="user_personal_raise")
+    memory_repo = PersonalMemoryRepository(session)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(memory_repo, "get", lambda **_: None)
+    monkeypatch.setattr(
+        session,
+        "flush",
+        lambda: (_ for _ in ()).throw(IntegrityError("insert", {}, Exception("boom"))),
+    )
+
+    try:
+        with pytest.raises(IntegrityError):
+            memory_repo.upsert(
+                user_id=user.id,
+                memory_key="editor",
+                value={"theme": "dark"},
+            )
+    finally:
+        monkeypatch.undo()
+
+
+def test_project_memory_upsert_raises_when_duplicate_recovery_still_finds_no_row(session):
+    """Project memory races should re-raise when recovery cannot find the winning row."""
+    memory_repo = ProjectMemoryRepository(session)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(memory_repo, "get", lambda **_: None)
+    monkeypatch.setattr(
+        session,
+        "flush",
+        lambda: (_ for _ in ()).throw(IntegrityError("insert", {}, Exception("boom"))),
+    )
+
+    try:
+        with pytest.raises(IntegrityError):
+            memory_repo.upsert(
+                repo_url="https://github.com/org/repo",
+                memory_key="build_cmd",
+                value={"cmd": "make build"},
+            )
+    finally:
+        monkeypatch.undo()
 
 
 def test_session_state_update_defaults_to_optional_fields():
