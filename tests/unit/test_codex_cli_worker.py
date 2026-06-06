@@ -1294,7 +1294,7 @@ def test_codex_cli_worker_native_sandbox_logic(tmp_path: Path) -> None:
             assert command[command.index("--sandbox") + 1] == expected_sandbox
             assert result.budget_usage["native_agent"]["sandbox_mode"] == expected_sandbox
             assert result.budget_usage["native_agent"]["in_container"] == in_container
-            assert result.budget_usage["native_agent"]["repo_trusted"] == (
+            assert result.budget_usage["native_agent"]["repo_approved"] == (
                 repo_url == "https://github.com/trusted/repo"
             )
 

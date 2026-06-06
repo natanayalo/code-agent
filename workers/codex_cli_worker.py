@@ -627,16 +627,16 @@ class CodexCliWorker(Worker):
 
         # Sandbox selection policy (T-172)
         in_container = is_in_container()
-        repo_trusted = False
+        repo_approved = False
         repo_url = request.repo_url or ""
         for pattern in self.trusted_repo_patterns:
             if pattern.search(repo_url):
-                repo_trusted = True
+                repo_approved = True
                 break
 
         if read_only_requested:
             sandbox_mode = "read-only"
-        elif in_container and repo_trusted:
+        elif in_container and repo_approved:
             sandbox_mode = "danger-full-access"
         else:
             sandbox_mode = self.native_sandbox_mode or DEFAULT_CODEX_NATIVE_SANDBOX_MODE
@@ -647,7 +647,7 @@ class CodexCliWorker(Worker):
             extra={
                 "session_id": request.session_id,
                 "in_container": in_container,
-                "repo_trusted": repo_trusted,
+                "repo_approved": repo_approved,
                 "read_only_requested": read_only_requested,
             },
         )
@@ -655,7 +655,7 @@ class CodexCliWorker(Worker):
         sandbox_metadata = {
             "sandbox_mode": sandbox_mode,
             "in_container": in_container,
-            "repo_trusted": repo_trusted,
+            "repo_approved": repo_approved,
             "read_only_requested": read_only_requested,
         }
 

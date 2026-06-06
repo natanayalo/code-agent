@@ -38,7 +38,7 @@ The `CodexCliWorker` uses the following logic to select the sandbox mode:
 ```python
 if read_only_requested:
     sandbox_mode = "read-only"
-elif in_container and repo_trusted:
+elif in_container and repo_approved:
     sandbox_mode = "danger-full-access"
 else:
     sandbox_mode = "workspace-write"
