@@ -7,8 +7,11 @@ import pytest
 from orchestrator.brain import RuleBasedOrchestratorBrain, TaskSpecBrainSuggestion
 from orchestrator.state import TaskRequest
 from orchestrator.task_spec import (
+    _max_risk,
     apply_task_spec_brain_suggestion,
     build_task_spec,
+    build_task_spec_for_request,
+    contains_marker,
     validate_task_spec_policy,
 )
 
@@ -46,6 +49,18 @@ def test_build_task_spec_marks_pwd_home_smoke_as_no_modification_summary() -> No
     assert validate_task_spec_policy(spec) == []
 
 
+def test_contains_marker_handles_empty_marker_sets_and_word_boundaries() -> None:
+    """Marker detection should fail closed for empty sets and ignore partial-word matches."""
+    assert contains_marker("Open a PR for this change", ()) is False
+    assert contains_marker("surprising", ("pr",)) is False
+    assert contains_marker("Open a PR for this change", ("pr",)) is True
+
+
+def test_max_risk_defaults_to_low_for_unrecognized_inputs() -> None:
+    """Unknown risk hints should fail closed to the safest default classification."""
+    assert _max_risk("unexpected", "custom") == "low"
+
+
 def test_build_task_spec_flags_ambiguous_task_for_clarification() -> None:
     """Underspecified ambiguous asks should surface precise clarification needs."""
     spec = build_task_spec(
@@ -61,6 +76,31 @@ def test_build_task_spec_flags_ambiguous_task_for_clarification() -> None:
         "What exact repo, files, behavior, or failure should the worker target?"
     ]
     assert "No repository URL was provided" in spec.assumptions[0]
+    assert validate_task_spec_policy(spec) == []
+
+
+@pytest.mark.parametrize(
+    ("task_text", "expected_type", "expected_risk"),
+    [
+        ("Update README docs for local setup", "docs", "low"),
+        ("Address requested changes from the PR", "review_fix", "medium"),
+        ("Refresh CI dependency pins", "maintenance", "low"),
+    ],
+)
+def test_build_task_spec_classifies_marker_driven_task_types(
+    task_text: str,
+    expected_type: str,
+    expected_risk: str,
+) -> None:
+    """Classification markers should map critical task shapes into the right TaskSpec buckets."""
+    spec = build_task_spec(
+        task_text=task_text,
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="main",
+    )
+
+    assert spec.task_type == expected_type
+    assert spec.risk_level == expected_risk
     assert validate_task_spec_policy(spec) == []
 
 
@@ -80,6 +120,20 @@ def test_build_task_spec_requires_permission_for_destructive_task() -> None:
     assert validate_task_spec_policy(spec) == []
 
 
+def test_build_task_spec_treats_explicit_destructive_constraint_as_high_risk() -> None:
+    """Operator-supplied destructive hints should trigger the same approval guard as markers."""
+    spec = build_task_spec(
+        task_text="Refresh generated output",
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="main",
+        constraints={"destructive_action": True},
+    )
+
+    assert spec.risk_level == "high"
+    assert spec.requires_permission is True
+    assert spec.permission_reason == "Task is classified as high risk."
+
+
 def test_build_task_spec_marks_complex_refactor_as_medium_risk() -> None:
     """Complex multi-file refactors should be visible to routing and operator UI."""
     spec = build_task_spec(
@@ -95,6 +149,43 @@ def test_build_task_spec_marks_complex_refactor_as_medium_risk() -> None:
     assert spec.delivery_mode == "draft_pr"
     assert "draft_pr_link" in spec.expected_artifacts
     assert spec.requires_permission is False
+    assert validate_task_spec_policy(spec) == []
+
+
+@pytest.mark.parametrize(
+    ("task_text", "expected_delivery_mode"),
+    [
+        ("Prepare a branch for the fix", "branch"),
+        ("Open a draft PR once the fix is ready", "draft_pr"),
+        ("Investigate the failure and send a summary only", "summary"),
+    ],
+)
+def test_build_task_spec_detects_delivery_mode_markers(
+    task_text: str,
+    expected_delivery_mode: str,
+) -> None:
+    """Delivery markers should change expected artifacts and operator handoff semantics."""
+    spec = build_task_spec(
+        task_text=task_text,
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="main",
+        constraints={"delivery_mode": "unsupported-mode"},
+    )
+
+    assert spec.delivery_mode == expected_delivery_mode
+
+
+def test_build_task_spec_escalates_critical_risk_requests() -> None:
+    """Secret/auth/deploy asks should be gated as critical-risk work."""
+    spec = build_task_spec(
+        task_text="Rotate secrets before the production deploy",
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="main",
+    )
+
+    assert spec.risk_level == "critical"
+    assert spec.requires_permission is True
+    assert spec.permission_reason == "Task is classified as critical risk."
     assert validate_task_spec_policy(spec) == []
 
 
@@ -211,6 +302,62 @@ def test_apply_task_spec_brain_suggestion_caps_clarification_questions() -> None
 
     assert merged.clarification_questions == ["Base Q1?", "Base Q2?", "New Q3?"]
     assert report.added_clarification_questions == ["New Q3?"]
+
+
+def test_build_task_spec_for_request_preserves_normalized_request_fields() -> None:
+    """TaskRequest wrappers should produce the same persisted TaskSpec contract as direct calls."""
+    request = TaskRequest(
+        task_text="Open a draft PR for the README docs",
+        repo_url="https://github.com/natanayalo/code-agent",
+        branch="docs/update-readme",
+        constraints={"verification_commands": ["pytest tests/unit/test_task_spec.py -q"]},
+    )
+
+    spec = build_task_spec_for_request(request, task_kind=None, task_plan=None)
+
+    assert spec.goal == "Open a draft PR for the README docs"
+    assert spec.repo_url == request.repo_url
+    assert spec.target_branch == request.branch
+    assert spec.task_type == "docs"
+    assert spec.delivery_mode == "draft_pr"
+    assert spec.verification_commands == ["pytest tests/unit/test_task_spec.py -q"]
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_violation"),
+    [
+        (
+            {"requires_clarification": True, "clarification_questions": []},
+            "clarification_required_without_questions",
+        ),
+        (
+            {"risk_level": "critical", "requires_permission": False},
+            "high_risk_without_permission_gate",
+        ),
+        (
+            {"requires_permission": True, "permission_reason": None},
+            "permission_required_without_reason",
+        ),
+        (
+            {"forbidden_actions": []},
+            "missing_secret_hardcode_forbidden_action",
+        ),
+    ],
+)
+def test_validate_task_spec_policy_reports_missing_safety_guards(
+    overrides: dict[str, object],
+    expected_violation: str,
+) -> None:
+    """Policy validation should flag each missing safety guard independently."""
+    baseline = build_task_spec(
+        task_text="Implement the requested change",
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="main",
+    )
+
+    candidate = baseline.model_copy(update=overrides)
+
+    assert validate_task_spec_policy(candidate) == [expected_violation]
 
 
 @pytest.mark.asyncio

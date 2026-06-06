@@ -1,0 +1,250 @@
+"""Focused regression tests for run_queued_task heartbeat and load-guard paths."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import UTC, datetime
+
+import pytest
+from sqlalchemy.pool import StaticPool
+
+from db.base import Base
+from db.enums import TaskStatus
+from orchestrator import execution as execution_module
+from repositories import create_engine_from_url, create_session_factory
+from workers import Worker, WorkerRequest, WorkerResult
+
+
+class _StaticWorker(Worker):
+    """Minimal worker double used only to initialize the execution service."""
+
+    async def run(self, request: WorkerRequest) -> WorkerResult:
+        return WorkerResult(status="success", summary=f"stubbed: {request.task_text}")
+
+
+class _RecordingProgressNotifier:
+    """Capture progress events emitted by the execution service."""
+
+    def __init__(self) -> None:
+        self.events: list[execution_module.ProgressEvent] = []
+
+    async def notify(
+        self,
+        *,
+        submission: execution_module.TaskSubmission,
+        event: execution_module.ProgressEvent,
+    ) -> None:
+        self.events.append(event)
+
+
+def _make_task_service(
+    *, notifier: _RecordingProgressNotifier | None = None
+) -> execution_module.TaskExecutionService:
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    return execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+        progress_notifier=notifier,
+    )
+
+
+def _persisted_context() -> execution_module._PersistedTaskContext:
+    return execution_module._PersistedTaskContext(
+        user_id="user-1",
+        session_id="session-1",
+        channel="http",
+        external_thread_id="thread-1",
+        task_id="task-1",
+        attempt_count=1,
+        trace_context={},
+    )
+
+
+def _task_snapshot(
+    *,
+    status: str,
+    last_error: str | None = None,
+) -> execution_module.TaskSnapshot:
+    timestamp = datetime.now(UTC)
+    summary = execution_module.TaskSummarySnapshot(
+        task_id="task-1",
+        session_id="session-1",
+        status=status,
+        task_text="Run queued task",
+        created_at=timestamp,
+        updated_at=timestamp,
+        last_error=last_error,
+    )
+    return execution_module.TaskSnapshot(**summary.model_dump())
+
+
+@pytest.mark.anyio
+async def test_run_queued_task_skips_missing_persisted_submission(caplog, monkeypatch) -> None:
+    """Queue workers should bail out cleanly when the claimed task no longer reloads."""
+    notifier = _RecordingProgressNotifier()
+    service = _make_task_service(notifier=notifier)
+
+    async def fake_run_blocking(func, /, *args, **kwargs):
+        assert getattr(func, "__name__", "") == "_load_submission_for_task"
+        return None
+
+    monkeypatch.setattr(service, "_run_blocking", fake_run_blocking)
+
+    with caplog.at_level(logging.WARNING, logger="orchestrator.execution"):
+        await service.run_queued_task(task_id="missing-task", worker_id="worker-a")
+
+    assert "Skipping queued task run: task no longer exists" in caplog.text
+    assert notifier.events == []
+
+
+@pytest.mark.anyio
+async def test_run_queued_task_aborts_cleanly_when_task_was_cancelled(monkeypatch) -> None:
+    """If heartbeat ends first and the task was cancelled, execution should stop without requeue."""
+    notifier = _RecordingProgressNotifier()
+    service = _make_task_service(notifier=notifier)
+    submission = execution_module.TaskSubmission(task_text="Cancelled task")
+    persisted = _persisted_context()
+    release_calls: list[str] = []
+
+    async def fake_run_blocking(func, /, *args, **kwargs):
+        name = getattr(func, "__name__", "")
+        if name == "_load_submission_for_task":
+            return submission, persisted
+        if name == "get_task":
+            return _task_snapshot(
+                status=TaskStatus.FAILED.value,
+                last_error="Task cancelled by operator.",
+            )
+        return func(*args, **kwargs)
+
+    async def fake_run_orchestrator(
+        _submission: execution_module.TaskSubmission,
+        _persisted: execution_module._PersistedTaskContext,
+    ):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise
+
+    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_run_blocking", fake_run_blocking)
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(
+        service, "_release_task_failure", lambda **kwargs: release_calls.append("failure")
+    )
+    monkeypatch.setattr(
+        service, "_release_task_terminal_failure", lambda **kwargs: release_calls.append("terminal")
+    )
+
+    await service.run_queued_task(task_id="task-1", worker_id="worker-a")
+
+    assert [event.phase for event in notifier.events] == ["started", "running"]
+    assert release_calls == []
+
+
+@pytest.mark.anyio
+async def test_run_queued_task_aborts_cleanly_when_lease_is_lost(monkeypatch, caplog) -> None:
+    """Stop execution cleanly when heartbeat ends before cancellation is requested."""
+    notifier = _RecordingProgressNotifier()
+    service = _make_task_service(notifier=notifier)
+    submission = execution_module.TaskSubmission(task_text="Lease lost task")
+    persisted = _persisted_context()
+    release_calls: list[str] = []
+
+    async def fake_run_blocking(func, /, *args, **kwargs):
+        name = getattr(func, "__name__", "")
+        if name == "_load_submission_for_task":
+            return submission, persisted
+        if name == "get_task":
+            return _task_snapshot(status=TaskStatus.IN_PROGRESS.value, last_error=None)
+        return func(*args, **kwargs)
+
+    async def fake_run_orchestrator(
+        _submission: execution_module.TaskSubmission,
+        _persisted: execution_module._PersistedTaskContext,
+    ):
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise
+
+    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_run_blocking", fake_run_blocking)
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(
+        service, "_release_task_failure", lambda **kwargs: release_calls.append("failure")
+    )
+    monkeypatch.setattr(
+        service, "_release_task_terminal_failure", lambda **kwargs: release_calls.append("terminal")
+    )
+
+    with caplog.at_level(logging.WARNING, logger="orchestrator.execution"):
+        await service.run_queued_task(task_id="task-1", worker_id="worker-a")
+
+    assert "Task execution aborted: lease lost or stolen" in caplog.text
+    assert [event.phase for event in notifier.events] == ["started", "running"]
+    assert release_calls == []
+
+
+@pytest.mark.anyio
+async def test_run_queued_task_aborts_when_orchestrator_completes_after_cancellation_request(
+    monkeypatch, caplog
+) -> None:
+    """If cancellation loses the race, the heartbeat failure should still win over the result."""
+    notifier = _RecordingProgressNotifier()
+    service = _make_task_service(notifier=notifier)
+    submission = execution_module.TaskSubmission(task_text="Late cancel task")
+    persisted = _persisted_context()
+    persist_calls: list[str] = []
+
+    async def fake_run_blocking(func, /, *args, **kwargs):
+        name = getattr(func, "__name__", "")
+        if name == "_load_submission_for_task":
+            return submission, persisted
+        if name == "get_task":
+            raise AssertionError("task snapshot should not reload on heartbeat abort")
+        return func(*args, **kwargs)
+
+    async def fake_run_orchestrator(
+        _submission: execution_module.TaskSubmission,
+        _persisted: execution_module._PersistedTaskContext,
+    ) -> object:
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            return object()
+
+    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
+        return None
+
+    monkeypatch.setattr(service, "_run_blocking", fake_run_blocking)
+    monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
+    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(
+        service,
+        "_persist_execution_outcome",
+        lambda **kwargs: persist_calls.append("persisted"),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="orchestrator.execution"):
+        await service.run_queued_task(task_id="task-1", worker_id="worker-a")
+
+    assert (
+        "Orchestrator task completed despite cancellation request. "
+        "Aborting due to heartbeat failure." in caplog.text
+    )
+    assert [event.phase for event in notifier.events] == ["started", "running"]
+    assert persist_calls == []

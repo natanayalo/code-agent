@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base, utc_now
@@ -121,6 +124,62 @@ def test_create_next_for_attempt_assigns_monotonic_sequence_numbers(session_fact
 
         assert first.sequence_number == 0
         assert second.sequence_number == 1
+
+
+def test_create_next_for_attempt_retries_after_integrity_error(session_factory) -> None:
+    """Sequence creation should retry bounded conflicts before succeeding."""
+    with session_scope(session_factory) as session:
+        task_repo = TaskRepository(session)
+        timeline_repo = TaskTimelineRepository(session)
+
+        task = task_repo.create(
+            session_id="session-retry",
+            task_text="Retry sequence insert",
+        )
+        real_create = timeline_repo.create
+        attempts = {"count": 0}
+
+        def flaky_create(*args, **kwargs):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise IntegrityError("insert", {}, Exception("duplicate"))
+            return real_create(*args, **kwargs)
+
+        with patch.object(timeline_repo, "create", side_effect=flaky_create):
+            event = timeline_repo.create_next_for_attempt(
+                task_id=task.id,
+                attempt_number=0,
+                event_type=TimelineEventType.TASK_INGESTED,
+                message="Recovered after retry",
+            )
+
+        assert attempts["count"] == 2
+        assert event.sequence_number == 0
+
+
+def test_create_next_for_attempt_raises_after_max_retries(session_factory) -> None:
+    """Bounded retry logic should re-raise when sequence conflicts keep recurring."""
+    with session_scope(session_factory) as session:
+        task_repo = TaskRepository(session)
+        timeline_repo = TaskTimelineRepository(session)
+
+        task = task_repo.create(
+            session_id="session-retry-fail",
+            task_text="Retry sequence insert failure",
+        )
+
+        with patch.object(
+            timeline_repo,
+            "create",
+            side_effect=IntegrityError("insert", {}, Exception("duplicate")),
+        ):
+            with pytest.raises(IntegrityError):
+                timeline_repo.create_next_for_attempt(
+                    task_id=task.id,
+                    attempt_number=0,
+                    event_type=TimelineEventType.TASK_INGESTED,
+                    max_retries=1,
+                )
 
 
 def test_timeline_event_type_validation() -> None:

@@ -10,10 +10,13 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from cryptography.fernet import Fernet
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base, utc_now
@@ -23,6 +26,7 @@ from db.enums import (
     HumanInteractionType,
     TaskStatus,
     WorkerRunStatus,
+    WorkerRuntimeMode,
     WorkerType,
 )
 from db.models import HumanInteraction, Task, User
@@ -43,6 +47,8 @@ from repositories import (
     ArtifactRepository,
     HumanInteractionRepository,
     InboundDeliveryRepository,
+    PersonalMemoryRepository,
+    ProjectMemoryRepository,
     SessionRepository,
     SessionStateRepository,
     TaskRepository,
@@ -107,6 +113,52 @@ class _RecordingProgressNotifier:
         event: execution_module.ProgressEvent,
     ) -> None:
         self.events.append(event)
+
+
+def _build_state(
+    *,
+    result: WorkerResult | None = None,
+    chosen_worker: str | None = "codex",
+    dispatch_worker_type: str | None = "codex",
+    approval_required: bool = False,
+    approval_status: str = "pending",
+) -> OrchestratorState:
+    return OrchestratorState(
+        current_step="persist_memory",
+        session=SessionRef(
+            session_id="session-1",
+            user_id="user-1",
+            channel="http",
+            external_thread_id="thread-1",
+        ),
+        task=TaskRequest(task_text="Run the task"),
+        normalized_task_text="Run the task",
+        task_kind="implementation",
+        memory=MemoryContext(),
+        route=RouteDecision(
+            chosen_worker=chosen_worker,
+            route_reason="cheap_mechanical_change" if chosen_worker else None,
+            override_applied=False,
+        ),
+        approval=ApprovalCheckpoint(required=approval_required, status=approval_status),
+        dispatch=WorkerDispatch(worker_type=dispatch_worker_type),
+        result=result,
+    )
+
+
+def _make_task_service() -> tuple[execution_module.TaskExecutionService, object]:
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    return service, session_factory
 
 
 def test_validate_callback_url_accepts_hostname_with_public_resolution(monkeypatch) -> None:
@@ -395,6 +447,397 @@ def test_apply_execution_budget_policy_drops_invalid_capped_values() -> None:
 
     assert "max_minutes" not in budget
     assert "max_observation_characters" not in budget
+
+
+def test_deep_merge_strips_reserved_keys_recursively() -> None:
+    """Reserved keys should be removed even when they appear in nested dict/list overrides."""
+    target = {"constraints": {"existing": True}, "items": [{"keep": 1}]}
+    source = {
+        "constraints": {
+            "nested": {"allowed": "yes", "approval": {"status": "forbidden"}},
+            "approval": {"status": "forbidden"},
+        },
+        "items": [{"worker_profile_override": "codex-tool-loop", "keep": 2}],
+    }
+
+    merged = execution_module._deep_merge(
+        target,
+        source,
+        reserved_keys={"approval", "worker_profile_override"},
+    )
+
+    assert merged == {
+        "constraints": {"existing": True, "nested": {"allowed": "yes"}},
+        "items": [{"keep": 2}],
+    }
+
+
+def test_execution_mapping_helpers_cover_fallback_paths(caplog: pytest.LogCaptureFixture) -> None:
+    """Execution helpers should map statuses deterministically and log safe worker fallbacks."""
+    unknown_status_state = _build_state(result=WorkerResult(status="failure"))
+    unknown_status_state.result = SimpleNamespace(status="mystery")  # type: ignore[assignment]
+
+    with caplog.at_level(logging.WARNING):
+        route_fallback = execution_module._worker_type_for_persistence(
+            _build_state(result=WorkerResult(status="failure"), dispatch_worker_type=None)
+        )
+        default_fallback = execution_module._worker_type_for_persistence(
+            _build_state(
+                result=WorkerResult(status="failure"),
+                chosen_worker=None,
+                dispatch_worker_type=None,
+            )
+        )
+
+    assert execution_module._enum_value(None) is None
+    assert execution_module._enum_value(TaskStatus.COMPLETED) == "completed"
+    assert execution_module._enum_value(123) == "123"
+    assert (
+        execution_module._task_status_from_result(
+            _build_state(approval_required=True, approval_status="pending")
+        )
+        is TaskStatus.PENDING
+    )
+    assert execution_module._task_status_from_result(_build_state(result=None)) is TaskStatus.FAILED
+    assert (
+        execution_module._task_status_from_result(
+            _build_state(result=WorkerResult(status="success"))
+        )
+        is TaskStatus.COMPLETED
+    )
+    assert (
+        execution_module._worker_run_status_from_result(_build_state(result=None))
+        is WorkerRunStatus.ERROR
+    )
+    assert (
+        execution_module._worker_run_status_from_result(
+            _build_state(result=WorkerResult(status="failure"))
+        )
+        is WorkerRunStatus.FAILURE
+    )
+    assert (
+        execution_module._worker_run_status_from_result(unknown_status_state)
+        is WorkerRunStatus.ERROR
+    )
+    assert route_fallback is WorkerType.CODEX
+    assert default_fallback is WorkerType.CODEX
+    assert "route fallback" in caplog.text
+    assert "codex default" in caplog.text
+
+
+def test_interrupt_helpers_normalize_payloads_and_summaries() -> None:
+    """Interrupt normalization should handle mapping/object inputs and readable summaries."""
+
+    class _InterruptObject:
+        def __init__(self, value):
+            self.value = value
+
+    assert execution_module._interrupt_payload_from_object(
+        {"value": {"approval_type": "manual"}}
+    ) == {"approval_type": "manual"}
+    assert execution_module._interrupt_payload_from_object({"reason": "Need approval"}) == {
+        "reason": "Need approval"
+    }
+    assert execution_module._interrupt_payload_from_object(
+        _InterruptObject({"approval_type": "permission_escalation"})
+    ) == {"approval_type": "permission_escalation"}
+    assert (
+        execution_module._interrupt_payload_from_object(_InterruptObject("not-a-mapping")) is None
+    )
+
+    permission_summary = execution_module._interrupt_summary(
+        [
+            {
+                "approval_type": "permission_escalation",
+                "requested_permission": "workspace_write",
+                "reason": "Needs elevated access.",
+            }
+        ]
+    )
+    typed_summary = execution_module._interrupt_summary([{"approval_type": "manual_review"}])
+    fallback_summary = execution_module._interrupt_summary([{}])
+
+    assert "workspace_write" in permission_summary
+    assert permission_summary.endswith("Needs elevated access.")
+    assert typed_summary == "Run paused pending manual review approval."
+    assert fallback_summary == "Run paused pending manual approval."
+
+
+def test_trace_and_phoenix_helpers_cover_cache_and_fallback_paths(monkeypatch) -> None:
+    """Tracing helpers should parse traceparent values and fall back safely on lookup failures."""
+    execution_module._PHOENIX_PROJECT_ID_CACHE = None
+    execution_module._PHOENIX_LAST_FAILURE = 0
+    execution_module._clear_tracing_config_cache()
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return b'{"data":{"id":"project-123"}}'
+
+    monkeypatch.setattr(
+        execution_module.urllib.request,
+        "urlopen",
+        lambda url, timeout: _Response(),
+    )
+
+    assert execution_module._get_trace_id_from_context(None) is None
+    assert (
+        execution_module._get_trace_id_from_context({"traceparent": "00-abc123-def456-01"})
+        == "abc123"
+    )
+    assert execution_module._get_trace_id_from_context({"traceparent": "malformed"}) is None
+    assert execution_module._get_project_id("http://phoenix:6006", "code-agent") == "project-123"
+    assert execution_module._get_project_id("http://phoenix:6006", "code-agent") == "project-123"
+
+    execution_module._PHOENIX_PROJECT_ID_CACHE = None
+    execution_module._PHOENIX_LAST_FAILURE = time.time()
+    assert (
+        execution_module._get_project_id("http://phoenix:6006", "fallback-name") == "fallback-name"
+    )
+
+
+def test_snapshot_mapping_helpers_include_working_context_and_memory_metadata() -> None:
+    """Snapshot mappers should surface loaded session context and skeptical memory metadata."""
+    service, session_factory = _make_task_service()
+
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(
+            external_user_id="user:snapshots",
+            display_name="Snapshot User",
+        )
+        conversation = SessionRepository(session).create(
+            user_id=user.id,
+            channel="http",
+            external_thread_id="thread-snapshots",
+        )
+        SessionStateRepository(session).upsert(
+            session_id=conversation.id,
+            active_goal="Harden execution snapshots",
+            decisions_made={"path": "unit"},
+            identified_risks={"scope": "service"},
+            files_touched=["orchestrator/execution.py"],
+        )
+        personal_memory = PersonalMemoryRepository(session).upsert(
+            user_id=user.id,
+            memory_key="style",
+            value={"tone": "concise"},
+            source="user_instruction",
+            confidence=0.9,
+            scope="global",
+            requires_verification=False,
+        )
+        project_memory = ProjectMemoryRepository(session).upsert(
+            repo_url="https://github.com/example/repo",
+            memory_key="build_cmd",
+            value={"cmd": "pytest"},
+            source="repo_analysis",
+            confidence=0.8,
+            scope="repo",
+        )
+
+        loaded = SessionRepository(session).list_all(limit=10, offset=0)[0]
+        session_snapshot = service._map_session_to_snapshot(loaded)
+        personal_snapshot = service._map_personal_memory_to_snapshot(personal_memory)
+        project_snapshot = service._map_project_memory_to_snapshot(project_memory)
+
+    unloaded_snapshot = service._map_session_to_snapshot(
+        ConversationSession(
+            id="session-unloaded",
+            user_id=user.id,
+            channel="http",
+            external_thread_id="thread-unloaded",
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+    )
+
+    assert session_snapshot.working_context is not None
+    assert session_snapshot.working_context.active_goal == "Harden execution snapshots"
+    assert session_snapshot.working_context.decisions_made == {"path": "unit"}
+    assert session_snapshot.working_context.identified_risks == {"scope": "service"}
+    assert session_snapshot.working_context.files_touched == ["orchestrator/execution.py"]
+    assert unloaded_snapshot.working_context is None
+    assert personal_snapshot.source == "user_instruction"
+    assert personal_snapshot.value == {"tone": "concise"}
+    assert personal_snapshot.requires_verification is False
+    assert project_snapshot.repo_url == "https://github.com/example/repo"
+    assert project_snapshot.value == {"cmd": "pytest"}
+    assert project_snapshot.scope == "repo"
+
+
+def test_record_interaction_response_resolves_permission_and_emits_timeline() -> None:
+    """Resolving a permission interaction should requeue the task and satisfy approval state."""
+    service, session_factory = _make_task_service()
+    task_snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="Need elevated permission",
+            constraints={"requires_approval": True},
+        )
+    )
+
+    with session_scope(session_factory) as session:
+        HumanInteractionRepository(session).sync_task_spec_flags(
+            task_id=task_snapshot.task_id,
+            task_spec={
+                "requires_permission": True,
+                "permission_reason": "Need workspace write access.",
+                "risk_level": "high",
+            },
+        )
+        permission_interaction = next(
+            row
+            for row in HumanInteractionRepository(session).list_by_task(
+                task_id=task_snapshot.task_id
+            )
+            if row.interaction_type is HumanInteractionType.PERMISSION
+        )
+
+    refreshed = service.record_interaction_response(
+        task_snapshot.task_id,
+        permission_interaction.id,
+        execution_module.InteractionResponse(response_data={"approved": True}),
+    )
+
+    assert refreshed is not None
+    assert refreshed.status == TaskStatus.PENDING.value
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(task_snapshot.task_id)
+        assert task is not None
+        assert task.status is TaskStatus.PENDING
+        assert task.next_attempt_at is not None
+        constraints = dict(task.constraints or {})
+        assert constraints["requires_approval"] is False
+        assert constraints["approval"]["status"] == "approved"
+        assert constraints["approval"]["source"] == "orchestrator"
+        assert len(constraints["interactions"]) == 1
+        interaction_payload = next(iter(constraints["interactions"].values()))
+        assert interaction_payload["status"] == "resolved"
+        assert interaction_payload["response_data"] == {"approved": True}
+        timeline = service.get_task(task_snapshot.task_id).timeline
+        assert any(event.event_type == "approval_granted" for event in timeline)
+
+
+def test_record_interaction_response_handles_missing_and_already_terminal_rows() -> None:
+    """Interaction responses should fail closed for missing tasks and be idempotent."""
+    service, session_factory = _make_task_service()
+    assert (
+        service.record_interaction_response(
+            "missing-task",
+            "missing-interaction",
+            execution_module.InteractionResponse(response_data={"answer": "none"}),
+        )
+        is None
+    )
+
+    task_snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(task_text="Already answered interaction")
+    )
+    with session_scope(session_factory) as session:
+        original_task = TaskRepository(session).get(task_snapshot.task_id)
+        assert original_task is not None
+        original_next_attempt_at = original_task.next_attempt_at
+    with session_scope(session_factory) as session:
+        interaction = HumanInteraction(
+            task_id=task_snapshot.task_id,
+            interaction_type=HumanInteractionType.CLARIFICATION,
+            status=HumanInteractionStatus.RESOLVED,
+            summary="Already resolved",
+            data={"source": "task_spec", "resume_token": "clarification"},
+            response_data={"answer": "done"},
+        )
+        session.add(interaction)
+        session.flush()
+        interaction_id = interaction.id
+
+    refreshed = service.record_interaction_response(
+        task_snapshot.task_id,
+        interaction_id,
+        execution_module.InteractionResponse(response_data={"answer": "done"}),
+    )
+
+    assert refreshed is not None
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(task_snapshot.task_id)
+        assert task is not None
+        assert dict(task.constraints or {}) == {}
+        assert task.next_attempt_at == original_next_attempt_at
+
+
+def test_get_operational_metrics_returns_service_aggregation() -> None:
+    """Direct service metrics should aggregate task and run state consistently."""
+    service, session_factory = _make_task_service()
+    now = utc_now()
+
+    with session_scope(session_factory) as session:
+        task_repo = TaskRepository(session)
+        run_repo = WorkerRunRepository(session)
+
+        completed = task_repo.create(
+            session_id="session-1",
+            task_text="done",
+            status=TaskStatus.COMPLETED,
+        )
+        completed.attempt_count = 2
+        failed = task_repo.create(
+            session_id="session-1",
+            task_text="failed",
+            status=TaskStatus.FAILED,
+        )
+        failed.attempt_count = 1
+        session.flush()
+
+        run_repo.create(
+            task_id=completed.id,
+            worker_type=WorkerType.CODEX,
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            started_at=now - timedelta(seconds=20),
+            finished_at=now - timedelta(seconds=10),
+            status=WorkerRunStatus.SUCCESS,
+        )
+        run_repo.create(
+            task_id=failed.id,
+            worker_type=WorkerType.GEMINI,
+            runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
+            started_at=now - timedelta(seconds=30),
+            finished_at=now - timedelta(seconds=5),
+            status=WorkerRunStatus.FAILURE,
+        )
+
+    metrics = service.get_operational_metrics(window_hours=0)
+
+    assert metrics.total_tasks == 2
+    assert metrics.retried_tasks == 1
+    assert metrics.retry_rate == 0.5
+    assert metrics.status_counts["completed"] == 1
+    assert metrics.worker_usage == {"codex": 1, "gemini": 1}
+    assert metrics.runtime_mode_usage == {"native_agent": 1, "tool_loop": 1}
+    assert metrics.legacy_tool_loop_usage == {"gemini": 1}
+    assert metrics.avg_duration_seconds == 17.5
+    assert metrics.success_rate == 0.5
+
+
+def test_replay_task_returns_not_found_when_source_submission_cannot_be_reloaded(
+    monkeypatch,
+) -> None:
+    """Replay should fail clearly when the source task exists but its session context is missing."""
+    service, session_factory = _make_task_service()
+    snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="Replay me"))
+    with session_scope(session_factory) as session:
+        TaskRepository(session).update_status(task_id=snapshot.task_id, status=TaskStatus.COMPLETED)
+
+    monkeypatch.setattr(service, "_load_submission_for_task", lambda task_id: None)
+
+    result = service.replay_task(source_task_id=snapshot.task_id)
+
+    assert result.status == "not_found"
+    assert result.task_snapshot is None
+    assert "could not be resolved for replay" in (result.detail or "")
 
 
 def test_task_execution_service_reuses_one_compiled_graph(
@@ -763,6 +1206,66 @@ def test_summarize_graph_span_output_emits_compact_result_status() -> None:
     }
 
 
+def test_graph_payload_helpers_cover_models_and_delivery_contract_edges() -> None:
+    """Graph payload helpers should normalize models, malformed outputs, and delivery checks."""
+    model_payload = execution_module._extract_graph_payload(TaskRequest(task_text="Model payload"))
+    assert model_payload["task_text"] == "Model payload"
+    assert execution_module._extract_graph_payload(42) == {}
+    assert execution_module._summarize_graph_span_output(42) == {"output_type": "int"}
+
+    summary = execution_module._summarize_graph_span_output(
+        {
+            "task": {
+                "constraints": {
+                    "interactions": {
+                        "skip": "not-a-mapping",
+                        "first": {"interaction_type": "clarification", "status": "pending"},
+                        "second": {"interaction_type": "clarification", "status": "resolved"},
+                    }
+                }
+            },
+            "verification": {
+                "status": "failed",
+                "failure_kind": "delivery_contract",
+                "items": [
+                    "ignore-me",
+                    {
+                        "label": "file_changes",
+                        "status": "failed",
+                        "reason_code": "incomplete_delivery",
+                    },
+                ],
+            },
+        }
+    )
+
+    assert summary == {
+        "verification_status": "failed",
+        "verifier_failure_kind": "delivery_contract",
+        "clarification_round": 2,
+        "clarification_resolved": True,
+        "delivery_contract_passed": False,
+    }
+
+
+def test_summarize_graph_span_output_marks_delivery_contract_passed_for_warning_items() -> None:
+    """Delivery-contract verification should pass for warning/passed file-change checks."""
+    summary = execution_module._summarize_graph_span_output(
+        {
+            "verification": {
+                "items": [
+                    {
+                        "label": "file_changes",
+                        "status": "warning",
+                    }
+                ]
+            }
+        }
+    )
+
+    assert summary == {"delivery_contract_passed": True}
+
+
 def test_normalize_orchestrator_output_canonicalizes_requested_permission() -> None:
     """Interrupt permission payloads should be normalized to explicit permission classes."""
     raw_output = {
@@ -1093,6 +1596,61 @@ def test_create_task_outcome_recovers_stale_delivery_without_task_id() -> None:
         )
         assert delivery is not None
         assert delivery.task_id == outcome.task_snapshot.task_id
+
+
+def test_link_delivery_to_task_reraises_when_duplicate_row_disappears() -> None:
+    """Delivery dedupe should re-raise if the conflicting row cannot be reloaded."""
+    service, _ = _make_task_service()
+
+    @contextmanager
+    def _nested():
+        yield
+
+    class _MissingDeliveryRepo:
+        def __init__(self) -> None:
+            self.session = SimpleNamespace(begin_nested=_nested)
+
+        def create(self, **kwargs) -> None:
+            raise IntegrityError("insert", {}, Exception("duplicate"))
+
+        def get_by_channel_delivery(self, **kwargs):
+            return None
+
+    with pytest.raises(IntegrityError):
+        service._link_delivery_to_task(
+            delivery_repo=_MissingDeliveryRepo(),
+            delivery_key=execution_module.DeliveryKey(channel="telegram", delivery_id="gone"),
+            task_id="task-1",
+        )
+
+
+def test_link_delivery_to_task_fails_when_retry_leaves_row_unassigned() -> None:
+    """Delivery dedupe should fail loudly if retry still leaves the row without a task id."""
+    service, _ = _make_task_service()
+
+    @contextmanager
+    def _nested():
+        yield
+
+    class _UnassignedDeliveryRepo:
+        def __init__(self) -> None:
+            self.session = SimpleNamespace(begin_nested=_nested)
+
+        def create(self, **kwargs) -> None:
+            raise IntegrityError("insert", {}, Exception("duplicate"))
+
+        def get_by_channel_delivery(self, **kwargs):
+            return SimpleNamespace(task_id=None)
+
+        def attach_task_if_unassigned(self, **kwargs):
+            return None
+
+    with pytest.raises(RuntimeError, match="without a task_id after dedupe retry"):
+        service._link_delivery_to_task(
+            delivery_repo=_UnassignedDeliveryRepo(),
+            delivery_key=execution_module.DeliveryKey(channel="telegram", delivery_id="stuck"),
+            task_id="task-1",
+        )
 
 
 def test_create_task_persists_task_spec_human_interactions() -> None:
@@ -1571,6 +2129,35 @@ async def test_submit_task_emits_failed_notification_when_snapshot_reload_fails(
     assert notifier.events[-1].summary == (
         "Task execution failed and the final snapshot could not be reloaded."
     )
+
+
+@pytest.mark.anyio
+async def test_emit_progress_swallows_notifier_failures(caplog) -> None:
+    """Best-effort progress notification failures should never bubble into task execution."""
+
+    class _FailingNotifier:
+        async def notify(self, **kwargs) -> None:
+            raise RuntimeError("progress notifier boom")
+
+    service, _ = _make_task_service()
+    service.progress_notifier = _FailingNotifier()
+
+    with caplog.at_level(logging.WARNING, logger="orchestrator.execution"):
+        await service._emit_progress(
+            execution_module.TaskSubmission(task_text="Notify operator"),
+            execution_module._PersistedTaskContext(
+                user_id="user-1",
+                session_id="session-1",
+                channel="http",
+                external_thread_id="thread-1",
+                task_id="task-1",
+                attempt_count=1,
+            ),
+            phase="running",
+            summary="still working",
+        )
+
+    assert "Progress notification failed" in caplog.text
 
 
 def test_persist_execution_outcome_creates_error_worker_run_without_result() -> None:
@@ -2282,6 +2869,49 @@ def test_load_submission_for_task_restores_execution_overrides_and_budget() -> N
     assert submission.worker_profile_override == "gemini-tool-loop-executor"
     assert submission.constraints == {"requires_approval": True, "approval_reason": "manual gate"}
     assert submission.budget == {"max_iterations": 5}
+
+
+def test_load_submission_for_task_returns_none_when_persisted_scaffolding_is_missing() -> None:
+    """Queued task reloads should fail closed when task, session, or user rows disappear."""
+    service, session_factory = _make_task_service()
+
+    assert service._load_submission_for_task(task_id="missing-task") is None
+
+    missing_session_snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="Missing session",
+            session=execution_module.SubmissionSession(
+                channel="http",
+                external_user_id="user-missing-session",
+                external_thread_id="thread-missing-session",
+            ),
+        )
+    )
+    with session_scope(session_factory) as session:
+        session.execute(
+            text("DELETE FROM sessions WHERE id = :session_id"),
+            {"session_id": missing_session_snapshot.session_id},
+        )
+    assert service._load_submission_for_task(task_id=missing_session_snapshot.task_id) is None
+
+    missing_user_snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="Missing user",
+            session=execution_module.SubmissionSession(
+                channel="http",
+                external_user_id="user-missing-user",
+                external_thread_id="thread-missing-user",
+            ),
+        )
+    )
+    with session_scope(session_factory) as session:
+        conversation_session = SessionRepository(session).get(missing_user_snapshot.session_id)
+        assert conversation_session is not None
+        session.execute(
+            text("DELETE FROM users WHERE id = :user_id"),
+            {"user_id": conversation_session.user_id},
+        )
+    assert service._load_submission_for_task(task_id=missing_user_snapshot.task_id) is None
 
 
 def test_create_task_recovers_from_duplicate_user_and_session_race(monkeypatch) -> None:
