@@ -40,7 +40,7 @@ from workers.llm_tracing import (
     set_llm_span_output,
     with_llm_span,
 )
-from workers.prompt import build_runtime_adapter_tool_guidance_lines
+from workers.prompt_tools import build_runtime_adapter_tool_guidance_lines
 
 DEFAULT_OPENROUTER_BASE_URL: Final[str] = "https://openrouter.ai/api/v1"
 DEFAULT_OPENROUTER_MODEL: Final[str] = "anthropic/claude-3.5-sonnet"

@@ -2,33 +2,34 @@
 
 from __future__ import annotations
 
-import asyncio
-import logging
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+import asyncio  # noqa: E402
+import logging  # noqa: E402
+from collections.abc import AsyncIterator  # noqa: E402
+from contextlib import asynccontextmanager  # noqa: E402
+from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI  # noqa: E402
 
-from apps.api.auth import (
+from apps.api.auth import (  # noqa: E402
     API_SHARED_SECRET_ENV_VAR,
     ApiAuthConfig,
     build_api_auth_config_from_env,
 )
-from apps.api.config import SystemConfig
-from apps.api.progress import create_outbound_http_clients
-from apps.api.routes.auth import router as auth_router
-from apps.api.routes.health import router as health_router
-from apps.api.routes.knowledge_base import router as knowledge_base_router
-from apps.api.routes.metrics import router as metrics_router
-from apps.api.routes.sessions import router as sessions_router
-from apps.api.routes.system import router as system_router
-from apps.api.routes.tasks import router as tasks_router
-from apps.api.routes.telegram import router as telegram_router
-from apps.api.routes.webhook import router as webhook_router
-from apps.api.task_service_factory import build_task_service_from_env
-from apps.observability import configure_tracing_from_env
-from apps.runtime import RUN_API_ENV_VAR, should_run_api
-from orchestrator.execution import (
+from apps.api.config import SystemConfig  # noqa: E402
+from apps.api.progress import create_outbound_http_clients  # noqa: E402
+from apps.api.routes.auth import router as auth_router  # noqa: E402
+from apps.api.routes.health import router as health_router  # noqa: E402
+from apps.api.routes.knowledge_base import router as knowledge_base_router  # noqa: E402
+from apps.api.routes.metrics import router as metrics_router  # noqa: E402
+from apps.api.routes.sessions import router as sessions_router  # noqa: E402
+from apps.api.routes.system import router as system_router  # noqa: E402
+from apps.api.routes.tasks import router as tasks_router  # noqa: E402
+from apps.api.routes.telegram import router as telegram_router  # noqa: E402
+from apps.api.routes.webhook import router as webhook_router  # noqa: E402
+from apps.api.task_service_factory import build_task_service_from_env  # noqa: E402
+from apps.observability import configure_tracing_from_env  # noqa: E402
+from apps.runtime import RUN_API_ENV_VAR, should_run_api  # noqa: E402
+from orchestrator.execution import (  # noqa: E402
     TaskExecutionService,
     bootstrap_phoenix_project_id,
     shutdown_callback_dns_executor,
@@ -37,13 +38,41 @@ from orchestrator.execution import (
 logger = logging.getLogger(__name__)
 
 
-def create_app(
-    *,
-    task_service: TaskExecutionService | None = None,
-    auth_config: ApiAuthConfig | None = None,
-) -> FastAPI:
-    """Create a FastAPI app with optional task-execution dependencies."""
+def _validate_security_config(app: FastAPI) -> None:
+    """Validate critical security configurations at startup."""
+    # Startup validation for dashboard auth
+    if app.state.api_auth_config.shared_secret and not app.state.api_auth_config.allowed_origins:
+        logger.warning(
+            "DASHBOARD AUTH WARNING: CODE_AGENT_ALLOWED_ORIGINS is not set. "
+            "Dashboard login will succeed, but all state-changing actions "
+            "(approval, replay, etc.) "
+            "will fail due to mandatory CSRF protection. "
+            "Set CODE_AGENT_ALLOWED_ORIGINS to the dashboard URL (e.g., http://localhost:3000)."
+        )
 
+    if app.state.task_service is not None and app.state.api_auth_config.shared_secret is None:
+        raise RuntimeError(
+            "Task service bootstrap requires "
+            f"{API_SHARED_SECRET_ENV_VAR} to protect /tasks and /webhook."
+        )
+
+    # Verify secret encryption is active (Phase 4 security hardening)
+    if (
+        app.state.task_service is not None
+        and not app.state.task_service.is_secret_encryption_active()
+    ):
+        logger.critical(
+            "SECURITY WARNING: CODE_AGENT_ENCRYPTION_KEY is not set. "
+            "Task secrets will be stored in PLAIN TEXT. "
+            "To enable encryption, set CODE_AGENT_ENCRYPTION_KEY to a "
+            "Base64-encoded 32-byte key (e.g., via "
+            "'cryptography.fernet.Fernet.generate_key()')."
+        )
+
+
+def _build_lifespan(
+    task_service: TaskExecutionService | None, auth_config: ApiAuthConfig | None
+) -> Any:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if not should_run_api():
@@ -63,43 +92,10 @@ def create_app(
                 )
                 app.state.system_config = SystemConfig.load_from_env()
 
-                # Startup validation for dashboard auth
-                if (
-                    app.state.api_auth_config.shared_secret
-                    and not app.state.api_auth_config.allowed_origins
-                ):
-                    logger.warning(
-                        "DASHBOARD AUTH WARNING: CODE_AGENT_ALLOWED_ORIGINS is not set. "
-                        "Dashboard login will succeed, but all state-changing actions "
-                        "(approval, replay, etc.) "
-                        "will fail due to mandatory CSRF protection. "
-                        "Set CODE_AGENT_ALLOWED_ORIGINS to the dashboard URL (e.g., http://localhost:3000)."
-                    )
-
                 app.state.task_service = build_task_service_from_env(
                     outbound_http_clients=outbound_http_clients
                 )
-                if (
-                    app.state.task_service is not None
-                    and app.state.api_auth_config.shared_secret is None
-                ):
-                    raise RuntimeError(
-                        "Task service bootstrap requires "
-                        f"{API_SHARED_SECRET_ENV_VAR} to protect /tasks and /webhook."
-                    )
-
-                # Verify secret encryption is active (Phase 4 security hardening)
-                if (
-                    app.state.task_service is not None
-                    and not app.state.task_service.is_secret_encryption_active()
-                ):
-                    logger.critical(
-                        "SECURITY WARNING: CODE_AGENT_ENCRYPTION_KEY is not set. "
-                        "Task secrets will be stored in PLAIN TEXT. "
-                        "To enable encryption, set CODE_AGENT_ENCRYPTION_KEY to a "
-                        "Base64-encoded 32-byte key (e.g., via "
-                        "'cryptography.fernet.Fernet.generate_key()')."
-                    )
+                _validate_security_config(app)
 
                 if app.state.task_service is not None:
                     async with app.state.task_service:
@@ -128,12 +124,10 @@ def create_app(
             finally:
                 shutdown_callback_dns_executor()
 
-    app = FastAPI(
-        title="code-agent",
-        version="0.1.0",
-        description="Bootstrap API for the code-agent service.",
-        lifespan=lifespan,
-    )
+    return lifespan
+
+
+def _register_routers(app: FastAPI) -> None:
     app.include_router(health_router)
     app.include_router(metrics_router)
     app.include_router(auth_router)
@@ -143,6 +137,21 @@ def create_app(
     app.include_router(knowledge_base_router)
     app.include_router(webhook_router)
     app.include_router(telegram_router)
+
+
+def create_app(
+    *,
+    task_service: TaskExecutionService | None = None,
+    auth_config: ApiAuthConfig | None = None,
+) -> FastAPI:
+    """Create a FastAPI app with optional task-execution dependencies."""
+    app = FastAPI(
+        title="code-agent",
+        version="0.1.0",
+        description="Bootstrap API for the code-agent service.",
+        lifespan=_build_lifespan(task_service, auth_config),
+    )
+    _register_routers(app)
     return app
 
 

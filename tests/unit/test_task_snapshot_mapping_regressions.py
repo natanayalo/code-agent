@@ -168,68 +168,77 @@ def test_map_task_to_summary_defaults_pending_count_to_zero_without_preloaded_re
     assert summary.latest_run_id is None
 
 
+def _setup_legacy_task(session):
+    user = UserRepository(session).create(external_user_id="snapshot-user", display_name="Snap")
+    conversation_session = SessionRepository(session).create(
+        user_id=user.id,
+        channel="http",
+        external_thread_id="thread-snapshot",
+    )
+    return TaskRepository(session).create(
+        session_id=conversation_session.id,
+        task_text="Map legacy snapshot state",
+        status="completed",
+        task_spec="legacy-task-spec",
+    ), conversation_session.id
+
+
+def _setup_legacy_run(session, task_id, session_id, base_time, attempt_count):
+    run = WorkerRunRepository(session).create(
+        task_id=task_id,
+        session_id=session_id,
+        worker_type="codex",
+        started_at=base_time,
+        finished_at=base_time + timedelta(seconds=5),
+        status="success",
+        verifier_outcome={
+            "status": "warning",
+            "items": [
+                {"label": "lint", "status": "warning"},
+                {"id": "explicit-id", "label": "tests", "status": "passed"},
+                "non-dict-item",
+            ],
+        },
+        commands_run=[
+            {"command": "pytest", "exit_code": 0},
+            "non-dict-command",
+        ],
+        files_changed_count=1,
+        files_changed=["note.txt"],
+        artifact_index=[
+            {
+                "name": "stdout.log",
+                "uri": "artifacts/stdout.log",
+                "artifact_type": "log",
+            },
+            {"name": "summary"},
+            "non-dict-artifact",
+        ],
+    )
+    ArtifactRepository(session).create(
+        run_id=run.id,
+        artifact_type=ArtifactType.RESULT_SUMMARY,
+        name="result.md",
+        uri="artifacts/result.md",
+        artifact_metadata={"kind": "summary"},
+    )
+    TaskTimelineRepository(session).create_next_for_attempt(
+        task_id=task_id,
+        attempt_number=attempt_count,
+        event_type=TimelineEventType.TASK_COMPLETED,
+        message="Task completed successfully.",
+    )
+    return run
+
+
 def test_map_task_to_snapshot_backfills_legacy_run_ids_and_handles_legacy_task_spec() -> None:
     """Snapshot mapping should stabilize legacy run payloads without breaking old task rows."""
     service, session_factory = _make_task_service()
     base_time = datetime(2026, 2, 1, tzinfo=UTC)
 
     with session_scope(session_factory) as session:
-        user = UserRepository(session).create(external_user_id="snapshot-user", display_name="Snap")
-        conversation_session = SessionRepository(session).create(
-            user_id=user.id,
-            channel="http",
-            external_thread_id="thread-snapshot",
-        )
-        task = TaskRepository(session).create(
-            session_id=conversation_session.id,
-            task_text="Map legacy snapshot state",
-            status="completed",
-            task_spec="legacy-task-spec",
-        )
-        run = WorkerRunRepository(session).create(
-            task_id=task.id,
-            session_id=conversation_session.id,
-            worker_type="codex",
-            started_at=base_time,
-            finished_at=base_time + timedelta(seconds=5),
-            status="success",
-            verifier_outcome={
-                "status": "warning",
-                "items": [
-                    {"label": "lint", "status": "warning"},
-                    {"id": "explicit-id", "label": "tests", "status": "passed"},
-                    "non-dict-item",
-                ],
-            },
-            commands_run=[
-                {"command": "pytest", "exit_code": 0},
-                "non-dict-command",
-            ],
-            files_changed_count=1,
-            files_changed=["note.txt"],
-            artifact_index=[
-                {
-                    "name": "stdout.log",
-                    "uri": "artifacts/stdout.log",
-                    "artifact_type": "log",
-                },
-                {"name": "summary"},
-                "non-dict-artifact",
-            ],
-        )
-        ArtifactRepository(session).create(
-            run_id=run.id,
-            artifact_type=ArtifactType.RESULT_SUMMARY,
-            name="result.md",
-            uri="artifacts/result.md",
-            artifact_metadata={"kind": "summary"},
-        )
-        TaskTimelineRepository(session).create_next_for_attempt(
-            task_id=task.id,
-            attempt_number=task.attempt_count,
-            event_type=TimelineEventType.TASK_COMPLETED,
-            message="Task completed successfully.",
-        )
+        task, session_id = _setup_legacy_task(session)
+        run = _setup_legacy_run(session, task.id, session_id, base_time, task.attempt_count)  # noqa: F841
         session.flush()
 
         loaded_task = session.scalar(

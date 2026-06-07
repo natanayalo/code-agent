@@ -6,7 +6,7 @@ import logging
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 from urllib.parse import quote
 
 from apps.api.progress import (
@@ -146,6 +146,47 @@ def _resolve_default_runtime_mode(
     return runtime_mode
 
 
+def _add_worker_profiles(
+    profiles: dict[str, WorkerProfile],
+    worker_type: WorkerType,
+    runtime_mode: WorkerRuntimeMode,
+    *,
+    legacy_mode: bool = False,
+) -> None:
+    """Helper to add standard and read-only profiles for a worker."""
+    profile_name = (
+        f"{worker_type}-native-executor"
+        if runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
+        else f"{worker_type}-tool-loop-executor"
+    )
+    metadata = {"legacy_mode": True} if legacy_mode else {}
+    # Standard profile
+    profiles[profile_name] = WorkerProfile(
+        name=profile_name,
+        worker_type=worker_type,
+        runtime_mode=runtime_mode,
+        capability_tags=["execution"],
+        supported_delivery_modes=["workspace", "branch", "draft_pr"],
+        permission_profile="workspace_write",
+        mutation_policy="patch_allowed",
+        self_review_policy="on_failure",
+        metadata=metadata,
+    )
+    # Read-only profile
+    ro_name = f"{profile_name}-read-only"
+    profiles[ro_name] = WorkerProfile(
+        name=ro_name,
+        worker_type=worker_type,
+        runtime_mode=runtime_mode,
+        capability_tags=["execution"],
+        supported_delivery_modes=["workspace", "branch", "draft_pr"],
+        permission_profile="read_only",
+        mutation_policy="read_only",
+        self_review_policy="on_failure",
+        metadata=metadata,
+    )
+
+
 def _build_default_worker_profiles(
     *,
     include_gemini: bool,
@@ -156,53 +197,14 @@ def _build_default_worker_profiles(
     """Build the default executable profile map for routing decisions."""
     profiles: dict[str, WorkerProfile] = {}
 
-    def _add_profiles(
-        worker_type: WorkerType,
-        runtime_mode: WorkerRuntimeMode,
-        *,
-        legacy_mode: bool = False,
-    ) -> None:
-        """Helper to add standard and read-only profiles for a worker."""
-        profile_name = (
-            f"{worker_type}-native-executor"
-            if runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
-            else f"{worker_type}-tool-loop-executor"
-        )
-        metadata = {"legacy_mode": True} if legacy_mode else {}
-        # Standard profile
-        profiles[profile_name] = WorkerProfile(
-            name=profile_name,
-            worker_type=worker_type,
-            runtime_mode=runtime_mode,
-            capability_tags=["execution"],
-            supported_delivery_modes=["workspace", "branch", "draft_pr"],
-            permission_profile="workspace_write",
-            mutation_policy="patch_allowed",
-            self_review_policy="on_failure",
-            metadata=metadata,
-        )
-        # Read-only profile
-        ro_name = f"{profile_name}-read-only"
-        profiles[ro_name] = WorkerProfile(
-            name=ro_name,
-            worker_type=worker_type,
-            runtime_mode=runtime_mode,
-            capability_tags=["execution"],
-            supported_delivery_modes=["workspace", "branch", "draft_pr"],
-            permission_profile="read_only",
-            mutation_policy="read_only",
-            self_review_policy="on_failure",
-            metadata=metadata,
-        )
-
-    _add_profiles("codex", WorkerRuntimeMode.NATIVE_AGENT)
+    _add_worker_profiles(profiles, "codex", WorkerRuntimeMode.NATIVE_AGENT)
     if include_codex_legacy_tool_loop:
-        _add_profiles("codex", WorkerRuntimeMode.TOOL_LOOP, legacy_mode=True)
+        _add_worker_profiles(profiles, "codex", WorkerRuntimeMode.TOOL_LOOP, legacy_mode=True)
 
     if include_gemini:
-        _add_profiles("gemini", WorkerRuntimeMode.NATIVE_AGENT)
+        _add_worker_profiles(profiles, "gemini", WorkerRuntimeMode.NATIVE_AGENT)
         if include_gemini_legacy_tool_loop:
-            _add_profiles("gemini", WorkerRuntimeMode.TOOL_LOOP, legacy_mode=True)
+            _add_worker_profiles(profiles, "gemini", WorkerRuntimeMode.TOOL_LOOP, legacy_mode=True)
         # Add specialized profiles for Gemini (T-142)
         profiles[GEMINI_NATIVE_PLANNER_PROFILE] = WorkerProfile(
             name=GEMINI_NATIVE_PLANNER_PROFILE,
@@ -265,61 +267,16 @@ def _database_url_from_env(environ: Mapping[str, str]) -> str | None:
     )
 
 
-def build_task_service_from_env(
-    environ: Mapping[str, str] | None = None,
-    *,
-    outbound_http_clients: OutboundHttpClients | None = None,
-) -> TaskExecutionService | None:
-    """Build the real task service when the app is explicitly configured for it."""
-    resolved_env = os.environ if environ is None else environ
-    if not _is_enabled(resolved_env.get(ENABLE_TASK_SERVICE_ENV_VAR)):
-        return None
-
-    database_url = _database_url_from_env(resolved_env)
-    if database_url is None:
-        raise RuntimeError(
-            "Task service bootstrap was enabled, but no database configuration was provided. "
-            f"Set {DATABASE_URL_ENV_VAR} or the {DATABASE_HOST_ENV_VAR}/"
-            f"{DATABASE_PORT_ENV_VAR}/{DATABASE_NAME_ENV_VAR}/"
-            f"{DATABASE_USER_ENV_VAR}/{DATABASE_PASSWORD_ENV_VAR} variables."
-        )
-
-    if database_url.startswith("sqlite"):
-        engine = create_engine_from_url(
-            database_url,
-            connect_args={"check_same_thread": False},
-        )
-    else:
-        engine = create_engine_from_url(database_url)
-    session_factory = create_session_factory(engine)
-    sandbox_image = resolved_env.get(SANDBOX_IMAGE_ENV_VAR)
-    resolved_sandbox_image = sandbox_image.strip() if sandbox_image else ""
-    container_manager = (
-        DockerSandboxContainerManager(default_image=resolved_sandbox_image)
-        if resolved_sandbox_image
-        else DockerSandboxContainerManager()
-    )
-
-    workspace_root = resolved_env.get(WORKSPACE_ROOT_ENV_VAR)
-    if workspace_root is None or not workspace_root.strip():
-        resolved_workspace_root = default_workspace_root().resolve()
-    else:
-        resolved_workspace_root = Path(workspace_root).expanduser().resolve()
-
+def _build_codex_worker(
+    resolved_env: Mapping[str, str], container_manager: DockerSandboxContainerManager
+) -> CodexCliWorker:
     codex_runtime_mode = _resolve_default_runtime_mode(
         resolved_env.get(CODEX_RUNTIME_MODE_ENV_VAR),
         default=WorkerRuntimeMode.NATIVE_AGENT,
         worker_name="Codex",
         env_var_name=CODEX_RUNTIME_MODE_ENV_VAR,
     )
-    gemini_runtime_mode = _resolve_default_runtime_mode(
-        resolved_env.get(GEMINI_RUNTIME_MODE_ENV_VAR),
-        default=WorkerRuntimeMode.NATIVE_AGENT,
-        worker_name="Gemini",
-        env_var_name=GEMINI_RUNTIME_MODE_ENV_VAR,
-    )
-
-    codex_worker = CodexCliWorker(
+    return CodexCliWorker(
         runtime_adapter=CodexExecCliRuntimeAdapter.from_env(resolved_env),
         container_manager=container_manager,
         default_runtime_mode=codex_runtime_mode,
@@ -336,61 +293,44 @@ def build_task_service_from_env(
             else None
         ),
     )
-    gemini_worker: GeminiCliWorker | None = None
-    openrouter_worker: OpenRouterCliWorker | None = None
-    if any(
+
+
+def _build_gemini_worker(
+    resolved_env: Mapping[str, str], container_manager: DockerSandboxContainerManager
+) -> GeminiCliWorker | None:
+    if not any(
         resolved_env.get(k)
         for k in (GEMINI_EXECUTABLE_ENV_VAR, GEMINI_MODEL_ENV_VAR, GEMINI_TIMEOUT_ENV_VAR)
     ):
-        gemini_worker = GeminiCliWorker(
-            runtime_adapter=GeminiCliRuntimeAdapter.from_env(resolved_env),
-            container_manager=container_manager,
-            default_runtime_mode=gemini_runtime_mode,
-            native_sandbox_enabled=_is_enabled(
-                resolved_env.get(GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR)
-            ),
-        )
+        return None
+    gemini_runtime_mode = _resolve_default_runtime_mode(
+        resolved_env.get(GEMINI_RUNTIME_MODE_ENV_VAR),
+        default=WorkerRuntimeMode.NATIVE_AGENT,
+        worker_name="Gemini",
+        env_var_name=GEMINI_RUNTIME_MODE_ENV_VAR,
+    )
+    return GeminiCliWorker(
+        runtime_adapter=GeminiCliRuntimeAdapter.from_env(resolved_env),
+        container_manager=container_manager,
+        default_runtime_mode=gemini_runtime_mode,
+        native_sandbox_enabled=_is_enabled(resolved_env.get(GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR)),
+    )
+
+
+def _build_openrouter_worker(
+    resolved_env: Mapping[str, str], container_manager: DockerSandboxContainerManager
+) -> OpenRouterCliWorker | None:
     if resolved_env.get(OPENROUTER_API_KEY_ENV_VAR):
-        openrouter_worker = OpenRouterCliWorker(
+        return OpenRouterCliWorker(
             runtime_adapter=OpenRouterCliRuntimeAdapter.from_env(resolved_env),
             container_manager=container_manager,
         )
-    shell_worker = ShellWorker(
-        workspace_root=resolved_workspace_root,
-        container_manager=container_manager,
-    )
-    enable_worker_profiles = _is_enabled(resolved_env.get(WORKER_PROFILES_ENABLED_ENV_VAR))
-    worker_profiles: dict[str, WorkerProfile] | None = None
-    if enable_worker_profiles:
-        codex_legacy_tool_loop_requested = _is_enabled(
-            resolved_env.get(CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR)
-        )
-        gemini_legacy_tool_loop_requested = gemini_worker is not None and _is_enabled(
-            resolved_env.get(GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR)
-        )
-        if codex_legacy_tool_loop_requested:
-            logger.warning(
-                "Ignoring CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED for execution workers; "
-                "Codex worker is native-only."
-            )
-        if gemini_legacy_tool_loop_requested:
-            logger.warning(
-                "Ignoring CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED for execution workers; "
-                "Gemini worker is native-only."
-            )
-        worker_profiles = _build_default_worker_profiles(
-            include_gemini=gemini_worker is not None,
-            include_openrouter=(
-                openrouter_worker is not None
-                and _is_enabled(resolved_env.get(OPENROUTER_ENABLED_ENV_VAR))
-            ),
-            include_codex_legacy_tool_loop=False,
-            include_gemini_legacy_tool_loop=False,
-        )
-    if outbound_http_clients is None:
-        raise RuntimeError(
-            "Task service bootstrap requires shared outbound HTTP clients for notifier delivery."
-        )
+    return None
+
+
+def _build_progress_notifiers(
+    resolved_env: Mapping[str, str], outbound_http_clients: OutboundHttpClients
+) -> list[ProgressNotifier]:
     progress_notifiers: list[ProgressNotifier] = [
         WebhookCallbackProgressNotifier(client=outbound_http_clients.webhook)
     ]
@@ -406,6 +346,112 @@ def build_task_service_from_env(
                 ),
             )
         )
+    return progress_notifiers
+
+
+def _build_session_factory(resolved_env: Mapping[str, str]) -> Any:
+    database_url = _database_url_from_env(resolved_env)
+    if database_url is None:
+        raise RuntimeError(
+            "Task service bootstrap was enabled, but no database configuration was provided. "
+            f"Set {DATABASE_URL_ENV_VAR} or the {DATABASE_HOST_ENV_VAR}/"
+            f"{DATABASE_PORT_ENV_VAR}/{DATABASE_NAME_ENV_VAR}/"
+            f"{DATABASE_USER_ENV_VAR}/{DATABASE_PASSWORD_ENV_VAR} variables."
+        )
+
+    if database_url.startswith("sqlite"):
+        engine = create_engine_from_url(
+            database_url,
+            connect_args={"check_same_thread": False},
+        )
+    else:
+        engine = create_engine_from_url(database_url)
+    return create_session_factory(engine)
+
+
+def _build_container_manager(resolved_env: Mapping[str, str]) -> DockerSandboxContainerManager:
+    sandbox_image = resolved_env.get(SANDBOX_IMAGE_ENV_VAR)
+    resolved_sandbox_image = sandbox_image.strip() if sandbox_image else ""
+    return (
+        DockerSandboxContainerManager(default_image=resolved_sandbox_image)
+        if resolved_sandbox_image
+        else DockerSandboxContainerManager()
+    )
+
+
+def _resolve_workspace_root(resolved_env: Mapping[str, str]) -> Path:
+    workspace_root = resolved_env.get(WORKSPACE_ROOT_ENV_VAR)
+    if workspace_root is None or not workspace_root.strip():
+        return default_workspace_root().resolve()
+    return Path(workspace_root).expanduser().resolve()
+
+
+def _setup_worker_profiles(
+    resolved_env: Mapping[str, str],
+    gemini_worker: GeminiCliWorker | None,
+    openrouter_worker: OpenRouterCliWorker | None,
+) -> dict[str, WorkerProfile] | None:
+    if not _is_enabled(resolved_env.get(WORKER_PROFILES_ENABLED_ENV_VAR)):
+        return None
+
+    codex_legacy_tool_loop_requested = _is_enabled(
+        resolved_env.get(CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR)
+    )
+    gemini_legacy_tool_loop_requested = gemini_worker is not None and _is_enabled(
+        resolved_env.get(GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR)
+    )
+    if codex_legacy_tool_loop_requested:
+        logger.warning(
+            "Ignoring CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED for execution workers; "
+            "Codex worker is native-only."
+        )
+    if gemini_legacy_tool_loop_requested:
+        logger.warning(
+            "Ignoring CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED for execution workers; "
+            "Gemini worker is native-only."
+        )
+    return _build_default_worker_profiles(
+        include_gemini=gemini_worker is not None,
+        include_openrouter=(
+            openrouter_worker is not None
+            and _is_enabled(resolved_env.get(OPENROUTER_ENABLED_ENV_VAR))
+        ),
+        include_codex_legacy_tool_loop=False,
+        include_gemini_legacy_tool_loop=False,
+    )
+
+
+def build_task_service_from_env(
+    environ: Mapping[str, str] | None = None,
+    *,
+    outbound_http_clients: OutboundHttpClients | None = None,
+) -> TaskExecutionService | None:
+    """Build the real task service when the app is explicitly configured for it."""
+    resolved_env = os.environ if environ is None else environ
+    if not _is_enabled(resolved_env.get(ENABLE_TASK_SERVICE_ENV_VAR)):
+        return None
+
+    session_factory = _build_session_factory(resolved_env)
+    container_manager = _build_container_manager(resolved_env)
+    resolved_workspace_root = _resolve_workspace_root(resolved_env)
+
+    codex_worker = _build_codex_worker(resolved_env, container_manager)
+    gemini_worker = _build_gemini_worker(resolved_env, container_manager)
+    openrouter_worker = _build_openrouter_worker(resolved_env, container_manager)
+    shell_worker = ShellWorker(
+        workspace_root=resolved_workspace_root,
+        container_manager=container_manager,
+    )
+
+    enable_worker_profiles = _is_enabled(resolved_env.get(WORKER_PROFILES_ENABLED_ENV_VAR))
+    worker_profiles = _setup_worker_profiles(resolved_env, gemini_worker, openrouter_worker)
+
+    if outbound_http_clients is None:
+        raise RuntimeError(
+            "Task service bootstrap requires shared outbound HTTP clients for notifier delivery."
+        )
+    progress_notifiers = _build_progress_notifiers(resolved_env, outbound_http_clients)
+
     return TaskExecutionService(
         session_factory=session_factory,
         worker=codex_worker,

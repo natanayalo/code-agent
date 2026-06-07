@@ -35,7 +35,7 @@ from workers.llm_tracing import (
     set_llm_span_output,
     with_llm_span,
 )
-from workers.prompt import build_runtime_adapter_tool_guidance_lines
+from workers.prompt_tools import build_runtime_adapter_tool_guidance_lines
 from workers.subprocess_env import build_gemini_subprocess_env
 
 DEFAULT_GEMINI_EXECUTABLE: Final[str] = "gemini"

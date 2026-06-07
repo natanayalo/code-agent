@@ -1,0 +1,195 @@
+"""Execution outcome persistence helpers for task execution."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping
+from datetime import datetime, timedelta
+from typing import Any, cast
+
+from db.enums import ArtifactType, TaskStatus, WorkerType
+from orchestrator.execution_policy import (
+    _task_status_from_result,
+    _worker_run_status_from_result,
+    _worker_type_for_persistence,
+)
+from orchestrator.execution_serialization import (
+    _approval_constraints_payload,
+    _artifact_type_for_persistence,
+    _review_result_artifact_entry,
+    _serialize_verification_report,
+    _workspace_id_from_artifacts,
+)
+from orchestrator.state import OrchestratorState
+from repositories import (
+    ArtifactRepository,
+    HumanInteractionRepository,
+    SessionStateRepository,
+    TaskRepository,
+    TaskTimelineRepository,
+    WorkerRunRepository,
+    session_scope,
+)
+
+logger = logging.getLogger("orchestrator.execution")
+
+
+def _persist_execution_outcome(
+    self: Any,
+    *,
+    task_id: str,
+    state: OrchestratorState,
+    started_at: datetime,
+    finished_at: datetime,
+    force_task_status: TaskStatus | None = None,
+) -> None:
+    """Persist route, task status, worker-run metadata, and artifacts."""
+    logger.info(
+        "Persisting execution outcome",
+        extra={
+            "task_id": task_id,
+            "approval_required": state.approval.required,
+            "approval_status": state.approval.status,
+            "timeline_count": len(state.timeline_events),
+        },
+    )
+    retention_expires_at = (
+        finished_at + timedelta(seconds=self.retention_seconds)
+        if self.retention_seconds is not None
+        else None
+    )
+    with session_scope(self.session_factory) as session:
+        task_repo = TaskRepository(session)
+        interaction_repo = HumanInteractionRepository(session)
+        worker_run_repo = WorkerRunRepository(session)
+        artifact_repo = ArtifactRepository(session)
+
+        task = task_repo.get(task_id)
+        if task is None:
+            raise RuntimeError(f"Task '{task_id}' disappeared while persisting execution.")
+
+        if state.route.chosen_worker is not None and state.route.route_reason is not None:
+            task.chosen_worker = cast(WorkerType, state.route.chosen_worker)
+            task.chosen_profile = state.route.chosen_profile
+            task.runtime_mode = state.route.runtime_mode
+            task.route_reason = state.route.route_reason
+
+        if state.task_spec is not None:
+            task.task_spec = state.task_spec.model_dump(mode="json")
+        if isinstance(task.task_spec, Mapping):
+            interaction_repo.sync_task_spec_flags(task_id=task_id, task_spec=task.task_spec)
+
+        task.status = force_task_status or _task_status_from_result(state)
+
+        approval = state.approval
+        if approval.required:
+            approval_status = approval.status
+            if approval_status in {"pending", "approved", "rejected"}:
+                constraints = dict(task.constraints or {})
+                constraints["approval"] = _approval_constraints_payload(
+                    status=approval_status,
+                    approval_type=approval.approval_type,
+                    reason=approval.reason,
+                    resume_token=approval.resume_token,
+                    updated_at=finished_at,
+                    source="orchestrator",
+                    approved=(
+                        True
+                        if approval_status == "approved"
+                        else False
+                        if approval_status == "rejected"
+                        else None
+                    ),
+                )
+                task.constraints = constraints
+
+        result = state.result
+        artifacts = result.artifacts if result is not None else []
+        artifact_index = [artifact.model_dump(mode="json") for artifact in artifacts]
+        review_sources = (
+            (
+                result.review_result if result is not None else None,
+                ArtifactType.REVIEW_RESULT.value,
+            ),
+            (state.review, ArtifactType.INDEPENDENT_REVIEW_RESULT.value),
+        )
+        review_artifact_entries: list[tuple[str, dict[str, Any]]] = []
+        for review_payload, review_artifact_type in review_sources:
+            review_entry = _review_result_artifact_entry(
+                review_payload,
+                artifact_type=review_artifact_type,
+            )
+            if review_entry is None:
+                continue
+            artifact_index.append(review_entry)
+            review_artifact_entries.append((review_artifact_type, review_entry))
+        worker_type = _worker_type_for_persistence(state)
+        worker_run = worker_run_repo.create(
+            task_id=task_id,
+            session_id=state.session.session_id if state.session is not None else None,
+            worker_type=worker_type,
+            workspace_id=_workspace_id_from_artifacts(artifacts),
+            started_at=started_at,
+            finished_at=finished_at,
+            status=_worker_run_status_from_result(state),
+            summary=result.summary if result is not None else "Worker did not return a result.",
+            requested_permission=result.requested_permission if result is not None else None,
+            budget_usage=result.budget_usage if result is not None else None,
+            verifier_outcome=_serialize_verification_report(state.verification)
+            or ({"failure_kind": result.failure_kind} if result and result.failure_kind else None),
+            commands_run=[
+                command.model_dump(mode="json")
+                for command in (result.commands_run if result is not None else [])
+            ],
+            files_changed_count=len(result.files_changed) if result is not None else 0,
+            files_changed=result.files_changed if result is not None else [],
+            artifact_index=artifact_index,
+            retention_expires_at=retention_expires_at,
+            worker_profile=state.route.chosen_profile,
+            runtime_mode=state.route.runtime_mode,
+        )
+
+        persisted_count = state.timeline_persisted_count
+        current_attempt_events = []
+        for event in reversed(state.timeline_events):
+            if event.attempt_number != state.attempt_count:
+                break
+            current_attempt_events.append(event)
+        current_attempt_events.reverse()
+        new_events = [
+            event for event in current_attempt_events if event.sequence_number >= persisted_count
+        ]
+        if new_events:
+            timeline_repo = TaskTimelineRepository(session)
+            timeline_repo.create_batch(
+                task_id=task_id,
+                events=[event.model_dump() for event in new_events],
+            )
+
+        if state.session is not None and state.session_state_update is not None:
+            session_state_repo = SessionStateRepository(session)
+            session_state_repo.upsert(
+                session_id=state.session.session_id,
+                **state.session_state_update.model_dump(exclude_none=True),
+            )
+
+        for artifact in artifacts:
+            artifact_type = _artifact_type_for_persistence(artifact)
+            if artifact_type is None:
+                continue
+            artifact_repo.create(
+                run_id=worker_run.id,
+                artifact_type=artifact_type,
+                name=artifact.name,
+                uri=artifact.uri,
+            )
+        for review_artifact_type, review_entry in review_artifact_entries:
+            artifact_repo.create(
+                run_id=worker_run.id,
+                artifact_type=review_artifact_type,
+                name=review_entry["name"],
+                uri=review_entry["uri"],
+                artifact_metadata=review_entry["artifact_metadata"],
+            )
+
+    self._prune_retained_runs(now=finished_at)

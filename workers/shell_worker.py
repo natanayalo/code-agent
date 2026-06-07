@@ -8,9 +8,11 @@ from pathlib import Path
 
 from apps.observability import SPAN_KIND_TOOL
 from sandbox import (
+    DockerSandboxContainer,
     DockerSandboxContainerManager,
     DockerSandboxContainerRequest,
     WorkspaceCleanupPolicy,
+    WorkspaceHandle,
     WorkspaceManager,
     WorkspaceRequest,
 )
@@ -25,6 +27,133 @@ from workers.native_agent_runner import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_diff_if_provided(
+    request: WorkerRequest, container: DockerSandboxContainer, workspace: WorkspaceHandle
+) -> tuple[WorkerResult | None, list[WorkerCommand]]:
+    diff_text = request.constraints.get("apply_diff_text")
+    if not diff_text:
+        return None, []
+
+    logger.info(
+        "Applying diff to workspace before verification",
+        extra={"session_id": request.session_id},
+    )
+    # We use 'git apply' inside the container via a one-shot native agent run
+    apply_result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[
+                "docker",
+                "exec",
+                "-i",
+                "-w",
+                container.working_dir,
+                container.container_name,
+                "git",
+                "apply",
+                "-",
+            ],
+            prompt=diff_text,
+            repo_path=workspace.repo_path,
+            workspace_path=workspace.workspace_path,
+            timeout_seconds=DEFAULT_GIT_APPLY_TIMEOUT_SECONDS,
+            redactor=SecretRedactor(list((request.secrets or {}).values())),
+            span_kind=SPAN_KIND_TOOL,
+        )
+    )
+    setup_commands = [
+        WorkerCommand(
+            command=apply_result.command,
+            exit_code=apply_result.exit_code,
+            duration_seconds=apply_result.duration_seconds,
+        )
+    ]
+    if apply_result.status != "success":
+        return WorkerResult(
+            status="error",
+            summary=f"Failed to apply changes for verification: {apply_result.summary}",
+            failure_kind="sandbox_infra",
+            commands_run=setup_commands,
+        ), setup_commands
+
+    return None, setup_commands
+
+
+def _run_shell_script(
+    request: WorkerRequest,
+    container: DockerSandboxContainer,
+    workspace: WorkspaceHandle,
+    setup_commands: list[WorkerCommand],
+    cancel_requested: Callable[[], bool],
+) -> WorkerResult:
+    # In SHELL mode, we treat task_text as the script content.
+    native_result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[
+                "docker",
+                "exec",
+                "-i",
+                "-w",
+                container.working_dir,
+                container.container_name,
+                "/bin/sh",
+                "-e",
+            ],
+            prompt=request.task_text,
+            repo_path=workspace.repo_path,
+            workspace_path=workspace.workspace_path,
+            timeout_seconds=request.budget.get("worker_timeout_seconds", 300),
+            env=request.secrets,
+            redactor=SecretRedactor(list((request.secrets or {}).values())),
+            span_kind=SPAN_KIND_TOOL,
+        )
+    )
+
+    if cancel_requested():
+        return WorkerResult(
+            status="error",
+            summary="ShellWorker execution was cancelled by the orchestrator.",
+            failure_kind="timeout",
+            commands_run=[
+                *setup_commands,
+                WorkerCommand(
+                    command=native_result.command,
+                    exit_code=native_result.exit_code,
+                    duration_seconds=native_result.duration_seconds,
+                ),
+            ],
+            files_changed=native_result.files_changed,
+            artifacts=native_result.artifacts,
+            diff_text=native_result.diff_text,
+        )
+
+    status = native_result.status
+    summary = native_result.summary
+    failure_kind: FailureKind | None = None
+    if native_result.timed_out:
+        failure_kind = "timeout"
+    elif status != "success":
+        failure_kind = "unknown"
+
+    return WorkerResult(
+        status=status,
+        summary=summary,
+        failure_kind=failure_kind,
+        commands_run=[
+            *setup_commands,
+            WorkerCommand(
+                command=native_result.command,
+                exit_code=native_result.exit_code,
+                duration_seconds=native_result.duration_seconds,
+            ),
+        ],
+        files_changed=native_result.files_changed,
+        artifacts=native_result.artifacts,
+        diff_text=native_result.diff_text,
+        stdout=native_result.stdout,
+        stderr=native_result.stderr,
+    )
 
 
 class ShellWorker(Worker):
@@ -103,53 +232,11 @@ class ShellWorker(Worker):
                 )
 
                 try:
-                    setup_commands: list[WorkerCommand] = []
-                    # T-174: If a diff is provided (from a previous run), apply it before verifying.
-                    diff_text = request.constraints.get("apply_diff_text")
-                    if diff_text:
-                        logger.info(
-                            "Applying diff to workspace before verification",
-                            extra={"session_id": request.session_id},
-                        )
-                        # We use 'git apply' inside the container via a one-shot native agent run
-                        apply_result = run_native_agent(
-                            NativeAgentRunRequest(
-                                command=[
-                                    "docker",
-                                    "exec",
-                                    "-i",
-                                    "-w",
-                                    container.working_dir,
-                                    container.container_name,
-                                    "git",
-                                    "apply",
-                                    "-",
-                                ],
-                                prompt=diff_text,
-                                repo_path=workspace.repo_path,
-                                workspace_path=workspace.workspace_path,
-                                timeout_seconds=DEFAULT_GIT_APPLY_TIMEOUT_SECONDS,
-                                redactor=SecretRedactor(list((request.secrets or {}).values())),
-                                span_kind=SPAN_KIND_TOOL,
-                            )
-                        )
-                        setup_commands.append(
-                            WorkerCommand(
-                                command=apply_result.command,
-                                exit_code=apply_result.exit_code,
-                                duration_seconds=apply_result.duration_seconds,
-                            )
-                        )
-                        if apply_result.status != "success":
-                            return WorkerResult(
-                                status="error",
-                                summary=(
-                                    f"Failed to apply changes for verification: "
-                                    f"{apply_result.summary}"
-                                ),
-                                failure_kind="sandbox_infra",
-                                commands_run=setup_commands,
-                            )
+                    err_result, setup_commands = _apply_diff_if_provided(
+                        request, container, workspace
+                    )
+                    if err_result:
+                        return err_result
 
                     if cancel_requested():
                         return WorkerResult(
@@ -159,72 +246,8 @@ class ShellWorker(Worker):
                             commands_run=setup_commands,
                         )
 
-                    # In SHELL mode, we treat task_text as the script content.
-                    native_result = run_native_agent(
-                        NativeAgentRunRequest(
-                            command=[
-                                "docker",
-                                "exec",
-                                "-i",
-                                "-w",
-                                container.working_dir,
-                                container.container_name,
-                                "/bin/sh",
-                                "-e",
-                            ],
-                            prompt=request.task_text,
-                            repo_path=workspace.repo_path,
-                            workspace_path=workspace.workspace_path,
-                            timeout_seconds=request.budget.get("worker_timeout_seconds", 300),
-                            env=request.secrets,
-                            redactor=SecretRedactor(list((request.secrets or {}).values())),
-                            span_kind=SPAN_KIND_TOOL,
-                        )
-                    )
-
-                    if cancel_requested():
-                        return WorkerResult(
-                            status="error",
-                            summary="ShellWorker execution was cancelled by the orchestrator.",
-                            failure_kind="timeout",
-                            commands_run=[
-                                *setup_commands,
-                                WorkerCommand(
-                                    command=native_result.command,
-                                    exit_code=native_result.exit_code,
-                                    duration_seconds=native_result.duration_seconds,
-                                ),
-                            ],
-                            files_changed=native_result.files_changed,
-                            artifacts=native_result.artifacts,
-                            diff_text=native_result.diff_text,
-                        )
-
-                    status = native_result.status
-                    summary = native_result.summary
-                    failure_kind: FailureKind | None = None
-                    if native_result.timed_out:
-                        failure_kind = "timeout"
-                    elif status != "success":
-                        failure_kind = "unknown"
-
-                    return WorkerResult(
-                        status=status,
-                        summary=summary,
-                        failure_kind=failure_kind,
-                        commands_run=[
-                            *setup_commands,
-                            WorkerCommand(
-                                command=native_result.command,
-                                exit_code=native_result.exit_code,
-                                duration_seconds=native_result.duration_seconds,
-                            ),
-                        ],
-                        files_changed=native_result.files_changed,
-                        artifacts=native_result.artifacts,
-                        diff_text=native_result.diff_text,
-                        stdout=native_result.stdout,
-                        stderr=native_result.stderr,
+                    return _run_shell_script(
+                        request, container, workspace, setup_commands, cancel_requested
                     )
                 finally:
                     self.container_manager.stop(container)

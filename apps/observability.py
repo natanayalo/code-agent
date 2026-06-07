@@ -162,6 +162,66 @@ def _load_tracing_dependencies() -> _TracingDependencies | None:
     )
 
 
+def _execute_tracing_bootstrap(
+    service_name: str, project_name: str, otlp_endpoint: str
+) -> TracingBootstrapResult:
+    deps = _load_tracing_dependencies()
+    if deps is None:
+        logger.warning(
+            "Tracing was enabled but observability dependencies are missing. "
+            "Install openinference/opentelemetry packages to activate tracing.",
+            extra={"service_name": service_name},
+        )
+        return TracingBootstrapResult(
+            enabled=True,
+            configured=False,
+            reason="missing_dependencies",
+            project_name=project_name,
+            otlp_endpoint=otlp_endpoint,
+        )
+
+    # Create a resource to preserve the logical service name.
+    service_version = _SERVICE_VERSION
+
+    resource = deps.resource_cls.create(
+        {
+            "service.name": service_name,
+            "service.version": service_version,
+            "openinference.project.name": project_name,
+        }
+    )
+
+    # Use phoenix.otel.register() for simplified bootstrap and auto-instrumentation.
+    # batch=False (default) uses SimpleSpanProcessor (ideal for API immediate export).
+    # batch=True uses BatchSpanProcessor (ideal for Worker performance).
+    deps.register_fn(
+        project_name=project_name,
+        endpoint=otlp_endpoint,
+        resource=resource,
+        batch=(service_name not in IMMEDIATE_EXPORT_SERVICES),
+        auto_instrument=True,
+    )
+
+    # Ensure TraceContextTextMapPropagator is the global propagator for cross-service linkage.
+    deps.propagate_api.set_global_textmap(deps.trace_context_propagator_cls())
+
+    logger.info(
+        "Tracing bootstrap completed for service runtime.",
+        extra={
+            "service_name": service_name,
+            "project_name": project_name,
+            "otlp_endpoint": otlp_endpoint,
+        },
+    )
+    return TracingBootstrapResult(
+        enabled=True,
+        configured=True,
+        reason="configured",
+        project_name=project_name,
+        otlp_endpoint=otlp_endpoint,
+    )
+
+
 def configure_tracing_from_env(
     *,
     service_name: str,
@@ -186,63 +246,9 @@ def configure_tracing_from_env(
                 otlp_endpoint=otlp_endpoint,
             )
 
-        deps = _load_tracing_dependencies()
-        if deps is None:
-            logger.warning(
-                "Tracing was enabled but observability dependencies are missing. "
-                "Install openinference/opentelemetry packages to activate tracing.",
-                extra={"service_name": service_name},
-            )
-            return TracingBootstrapResult(
-                enabled=True,
-                configured=False,
-                reason="missing_dependencies",
-                project_name=project_name,
-                otlp_endpoint=otlp_endpoint,
-            )
-
-        # Create a resource to preserve the logical service name.
-        service_version = _SERVICE_VERSION
-
-        resource = deps.resource_cls.create(
-            {
-                "service.name": service_name,
-                "service.version": service_version,
-                "openinference.project.name": project_name,
-            }
-        )
-
-        # Use phoenix.otel.register() for simplified bootstrap and auto-instrumentation.
-        # batch=False (default) uses SimpleSpanProcessor (ideal for API immediate export).
-        # batch=True uses BatchSpanProcessor (ideal for Worker performance).
-        deps.register_fn(
-            project_name=project_name,
-            endpoint=otlp_endpoint,
-            resource=resource,
-            batch=(service_name not in IMMEDIATE_EXPORT_SERVICES),
-            auto_instrument=True,
-        )
-
-        # Ensure TraceContextTextMapPropagator is the global propagator for cross-service linkage.
-        deps.propagate_api.set_global_textmap(deps.trace_context_propagator_cls())
-
-        _bootstrap_complete = True
-
-    logger.info(
-        "Tracing bootstrap completed for service runtime.",
-        extra={
-            "service_name": service_name,
-            "project_name": project_name,
-            "otlp_endpoint": otlp_endpoint,
-        },
-    )
-    return TracingBootstrapResult(
-        enabled=True,
-        configured=True,
-        reason="configured",
-        project_name=project_name,
-        otlp_endpoint=otlp_endpoint,
-    )
+        result = _execute_tracing_bootstrap(service_name, project_name, otlp_endpoint)
+        _bootstrap_complete = result.configured
+        return result
 
 
 def capture_trace_context() -> dict[str, str]:

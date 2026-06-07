@@ -2,11 +2,13 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from workers.native_agent_runner import (
-    NativeAgentRunRequest,
+from workers.native_agent_messages import (
     _extract_final_message,
     _read_final_message,
     _stdout_fallback_final_message,
+)
+from workers.native_agent_runner import (
+    NativeAgentRunRequest,
     run_native_agent,
 )
 

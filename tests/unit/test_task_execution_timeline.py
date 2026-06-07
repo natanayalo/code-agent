@@ -51,75 +51,59 @@ def service(session_factory):
     )
 
 
+def _make_timeline_state(task_id, now, events, attempt=0, text="hello"):
+    return OrchestratorState(
+        current_step="persist_memory",
+        attempt_count=attempt,
+        session=SessionRef(
+            session_id="session-1",
+            user_id="user-1",
+            channel="http",
+            external_thread_id="thread-1",
+            active_task_id=task_id,
+        ),
+        task=TaskRequest(task_id=task_id, task_text=text),
+        timeline_events=events,
+        route=RouteDecision(chosen_worker="codex", route_reason="test"),
+        result=WorkerResult(status="success", summary="ok"),
+    )
+
+
+def _setup_task(session_factory, text="hello", thread_id="thread-1"):
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(external_user_id="user-1")
+        conv = SessionRepository(session).create(
+            user_id=user.id, channel="http", external_thread_id=thread_id
+        )
+        task = TaskRepository(session).create(session_id=conv.id, task_text=text)
+        return task.id
+
+
 def test_persist_execution_outcome_saves_timeline(session_factory, service) -> None:
     """The execution service must persist timeline events from the orchestrator state."""
     task_id = "task-1"
     now = utc_now()
 
-    state = OrchestratorState(
-        current_step="persist_memory",
-        session=SessionRef(
-            session_id="session-1",
-            user_id="user-1",
-            channel="http",
-            external_thread_id="thread-1",
-            active_task_id=task_id,
-        ),
-        task=TaskRequest(task_id=task_id, task_text="hello"),
-        timeline_events=[
-            {
-                "event_type": TimelineEventType.TASK_INGESTED,
-                "message": "Ingested",
-                "created_at": now,
-                "sequence_number": 0,
-            },
-            {
-                "event_type": TimelineEventType.WORKER_SELECTED,
-                "message": "Selected",
-                "payload": {"w": "c"},
-                "sequence_number": 1,
-            },
-        ],
-        route=RouteDecision(chosen_worker="codex", route_reason="test"),
-        result=WorkerResult(status="success", summary="ok"),
-    )
+    events = [
+        {
+            "event_type": TimelineEventType.TASK_INGESTED,
+            "message": "Ingested",
+            "created_at": now,
+            "sequence_number": 0,
+        },
+        {
+            "event_type": TimelineEventType.WORKER_SELECTED,
+            "message": "Selected",
+            "payload": {"w": "c"},
+            "sequence_number": 1,
+        },
+    ]
+
+    state = _make_timeline_state(task_id, now, events)
 
     # We need a real task in the DB for FK constraints
-    with session_scope(session_factory) as session:
-        user = UserRepository(session).create(external_user_id="user-1")
-        conv = SessionRepository(session).create(
-            user_id=user.id, channel="http", external_thread_id="thread-1"
-        )
-        task = TaskRepository(session).create(session_id=conv.id, task_text="hello")
-        task_id = task.id
-
-    state = OrchestratorState(
-        current_step="persist_memory",
-        session=SessionRef(
-            session_id="session-1",
-            user_id="user-1",
-            channel="http",
-            external_thread_id="thread-1",
-            active_task_id=task_id,
-        ),
-        task=TaskRequest(task_id=task_id, task_text="hello"),
-        timeline_events=[
-            {
-                "event_type": TimelineEventType.TASK_INGESTED,
-                "message": "Ingested",
-                "created_at": now,
-                "sequence_number": 0,
-            },
-            {
-                "event_type": TimelineEventType.WORKER_SELECTED,
-                "message": "Selected",
-                "payload": {"w": "c"},
-                "sequence_number": 1,
-            },
-        ],
-        route=RouteDecision(chosen_worker="codex", route_reason="test"),
-        result=WorkerResult(status="success", summary="ok"),
-    )
+    task_id = _setup_task(session_factory, thread_id="thread-1")
+    state = _make_timeline_state(task_id, now, events)
 
     service._persist_execution_outcome(
         task_id=task_id,
@@ -143,14 +127,7 @@ def test_persist_execution_outcome_deduplicates_events(session_factory, service)
     """The execution service must skip events that are already persisted (Resume scenario)."""
     now = utc_now()
 
-    # 1. Setup task and initial state
-    with session_scope(session_factory) as session:
-        user = UserRepository(session).create(external_user_id="user-1")
-        conv = SessionRepository(session).create(
-            user_id=user.id, channel="http", external_thread_id="thread-resume"
-        )
-        task = TaskRepository(session).create(session_id=conv.id, task_text="resume me")
-        task_id = task.id
+    task_id = _setup_task(session_factory, text="resume me", thread_id="thread-resume")
 
     initial_event = {
         "event_type": TimelineEventType.TASK_INGESTED,
@@ -159,20 +136,7 @@ def test_persist_execution_outcome_deduplicates_events(session_factory, service)
         "sequence_number": 0,
     }
 
-    state = OrchestratorState(
-        current_step="persist_memory",
-        session=SessionRef(
-            session_id="session-1",
-            user_id="user-1",
-            channel="http",
-            external_thread_id="thread-resume",
-            active_task_id=task_id,
-        ),
-        task=TaskRequest(task_id=task_id, task_text="resume me"),
-        timeline_events=[initial_event],
-        route=RouteDecision(chosen_worker="codex", route_reason="test"),
-        result=WorkerResult(status="success", summary="ok"),
-    )
+    state = _make_timeline_state(task_id, now, [initial_event], text="resume me")
 
     # 2. First persistence (e.g. at a pause)
     service._persist_execution_outcome(
@@ -211,27 +175,13 @@ def test_persist_execution_outcome_deduplicates_retry_attempts(session_factory, 
     """The execution service must deduplicate correctly across multiple retry attempts."""
     now = utc_now()
 
-    # 1. Setup task
-    with session_scope(session_factory) as session:
-        user = UserRepository(session).create(external_user_id="user-1")
-        conv = SessionRepository(session).create(
-            user_id=user.id, channel="http", external_thread_id="thread-retry"
-        )
-        task = TaskRepository(session).create(session_id=conv.id, task_text="retry me")
-        task_id = task.id
+    task_id = _setup_task(session_factory, text="retry me", thread_id="thread-retry")
 
     # 2. Simulate Attempt 0 (Started and Interrupted)
-    state_0 = OrchestratorState(
-        attempt_count=0,
-        session=SessionRef(
-            session_id="session-1",
-            user_id="user-1",
-            channel="http",
-            external_thread_id="thread-retry",
-            active_task_id=task_id,
-        ),
-        task=TaskRequest(task_id=task_id, task_text="retry me"),
-        timeline_events=[
+    state_0 = _make_timeline_state(
+        task_id,
+        now,
+        [
             TaskTimelineEventState(
                 event_type=TimelineEventType.TASK_INGESTED,
                 message="A0-1",
@@ -239,23 +189,18 @@ def test_persist_execution_outcome_deduplicates_retry_attempts(session_factory, 
                 sequence_number=0,
             )
         ],
+        attempt=0,
+        text="retry me",
     )
     service._persist_execution_outcome(
         task_id=task_id, state=state_0, started_at=now, finished_at=now
     )
 
     # 3. Simulate Attempt 1 (Retry - starts with fresh state.timeline_events)
-    state_1 = OrchestratorState(
-        attempt_count=1,
-        session=SessionRef(
-            session_id="session-1",
-            user_id="user-1",
-            channel="http",
-            external_thread_id="thread-retry",
-            active_task_id=task_id,
-        ),
-        task=TaskRequest(task_id=task_id, task_text="retry me"),
-        timeline_events=[
+    state_1 = _make_timeline_state(
+        task_id,
+        now,
+        [
             TaskTimelineEventState(
                 event_type=TimelineEventType.TASK_INGESTED,
                 message="A1-1",
@@ -263,6 +208,8 @@ def test_persist_execution_outcome_deduplicates_retry_attempts(session_factory, 
                 sequence_number=0,
             )
         ],
+        attempt=1,
+        text="retry me",
     )
     # This should NOT be skipped because although DB count is 1,
     # A1-1 is the first entry for attempt 1

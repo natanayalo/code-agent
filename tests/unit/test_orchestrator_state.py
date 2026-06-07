@@ -40,94 +40,97 @@ def test_orchestrator_state_preserves_secret_whitespace() -> None:
     assert state.task.secrets["MIXED"] == "a b"
 
 
-def test_orchestrator_state_supports_nested_workflow_data() -> None:
-    """Nested workflow fields are validated and preserved in the typed state."""
-    state = OrchestratorState(
-        current_step="await_result",
-        session={
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "channel": "telegram",
-            "external_thread_id": "thread-1",
-        },
-        task={
-            "task_id": "task-1",
-            "task_text": "Route to codex",
-            "repo_url": "https://github.com/natanayalo/code-agent",
-            "branch": "master",
-            "worker_override": "codex",
-            "worker_profile_override": "codex-native-executor",
-        },
-        task_spec={
-            "goal": "Route to codex",
-            "repo_url": "https://github.com/natanayalo/code-agent",
-            "target_branch": "master",
-            "risk_level": "low",
-            "task_type": "feature",
-            "delivery_mode": "workspace",
-        },
-        memory={
-            "personal": [
-                {
-                    "memory_key": "communication_preferences",
-                    "value": {"style": "direct"},
-                }
-            ],
-            "project": [
-                {
-                    "memory_key": "known_pitfalls",
-                    "value": {"docker": "use cert.pem when needed"},
-                }
-            ],
-            "session": {"last_worker": "codex"},
-        },
-        route={
-            "chosen_worker": "codex",
-            "chosen_profile": "codex-native-executor",
-            "runtime_mode": "native_agent",
-            "route_reason": "manual_override",
-            "override_applied": True,
-        },
-        approval={
-            "required": True,
-            "status": "approved",
-            "approval_type": "destructive_action",
-            "reason": "Deletes files from the workspace",
-            "resume_token": "approval-task-1",
-        },
-        dispatch={
-            "run_id": "run-1",
-            "worker_type": "codex",
-            "worker_profile": "codex-native-executor",
-            "runtime_mode": "native_agent",
-            "workspace_id": "workspace-1",
-        },
-        result={
-            "status": "success",
-            "summary": "Repository layer added",
-            "commands_run": [{"command": "pytest", "exit_code": 0, "duration_seconds": 3.2}],
-            "files_changed": ["repositories/sqlalchemy.py"],
-            "test_results": [{"name": "pytest", "status": "passed"}],
-            "artifacts": [
-                {
-                    "name": "stdout.log",
-                    "uri": "artifacts/stdout.log",
-                    "artifact_type": "log",
-                }
-            ],
-            "next_action_hint": "persist_memory",
-        },
-        memory_to_persist=[
+_NESTED_WORKFLOW_PAYLOAD = {
+    "current_step": "await_result",
+    "session": {
+        "session_id": "session-1",
+        "user_id": "user-1",
+        "channel": "telegram",
+        "external_thread_id": "thread-1",
+    },
+    "task": {
+        "task_id": "task-1",
+        "task_text": "Route to codex",
+        "repo_url": "https://github.com/natanayalo/code-agent",
+        "branch": "master",
+        "worker_override": "codex",
+        "worker_profile_override": "codex-native-executor",
+    },
+    "task_spec": {
+        "goal": "Route to codex",
+        "repo_url": "https://github.com/natanayalo/code-agent",
+        "target_branch": "master",
+        "risk_level": "low",
+        "task_type": "feature",
+        "delivery_mode": "workspace",
+    },
+    "memory": {
+        "personal": [
             {
-                "category": "project",
-                "memory_key": "successful_command",
-                "value": {"command": "pytest tests/integration/test_repositories.py"},
-                "repo_url": "https://github.com/natanayalo/code-agent",
+                "memory_key": "communication_preferences",
+                "value": {"style": "direct"},
             }
         ],
-        progress_updates=["task accepted", "worker dispatched"],
-        attempt_count=1,
-    )
+        "project": [
+            {
+                "memory_key": "known_pitfalls",
+                "value": {"docker": "use cert.pem when needed"},
+            }
+        ],
+        "session": {"last_worker": "codex"},
+    },
+    "route": {
+        "chosen_worker": "codex",
+        "chosen_profile": "codex-native-executor",
+        "runtime_mode": "native_agent",
+        "route_reason": "manual_override",
+        "override_applied": True,
+    },
+    "approval": {
+        "required": True,
+        "status": "approved",
+        "approval_type": "destructive_action",
+        "reason": "Deletes files from the workspace",
+        "resume_token": "approval-task-1",
+    },
+    "dispatch": {
+        "run_id": "run-1",
+        "worker_type": "codex",
+        "worker_profile": "codex-native-executor",
+        "runtime_mode": "native_agent",
+        "workspace_id": "workspace-1",
+    },
+    "result": {
+        "status": "success",
+        "summary": "Repository layer added",
+        "commands_run": [{"command": "pytest", "exit_code": 0, "duration_seconds": 3.2}],
+        "files_changed": ["repositories/sqlalchemy.py"],
+        "test_results": [{"name": "pytest", "status": "passed"}],
+        "artifacts": [
+            {
+                "name": "stdout.log",
+                "uri": "artifacts/stdout.log",
+                "artifact_type": "log",
+            }
+        ],
+        "next_action_hint": "persist_memory",
+    },
+    "memory_to_persist": [
+        {
+            "category": "project",
+            "memory_key": "successful_command",
+            "value": {"command": "pytest tests/integration/test_repositories.py"},
+            "repo_url": "https://github.com/natanayalo/code-agent",
+        }
+    ],
+    "progress_updates": ["task accepted", "worker dispatched"],
+    "attempt_count": 1,
+}
+
+
+def test_orchestrator_state_supports_nested_workflow_data() -> None:
+    """Nested workflow fields are validated and preserved in the typed state."""
+    state = OrchestratorState(**_NESTED_WORKFLOW_PAYLOAD)
 
     assert state.session is not None
     assert state.session.channel == "telegram"
