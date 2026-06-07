@@ -33,6 +33,121 @@ from apps.observability import (  # noqa: E402
 logger = logging.getLogger(__name__)
 
 
+def _record_native_agent_telemetry(
+    request: NativeAgentRunRequest,
+    result: NativeAgentRunResult,
+    run_summary: str,
+    reason_code: str,
+    reason_detail: str | None,
+    json_payload_source: str | None,
+    json_payload_rejected_reason: str | None,
+) -> None:
+    _record_span_data(
+        output_data=run_summary,
+        redactor=request.redactor,
+    )
+    # New canonical native telemetry attributes.
+    set_current_span_attribute("code_agent.native_agent.outcome_status", result.status)
+    set_current_span_attribute("code_agent.native_agent.reason_code", reason_code)
+    set_current_span_attribute("code_agent.native_agent.reason_detail", reason_detail)
+    set_current_span_attribute(
+        "code_agent.native_agent.command", sanitize_command(result.command, request.redactor)
+    )
+    set_current_span_attribute("code_agent.native_agent.timed_out", result.timed_out)
+    set_current_span_attribute("code_agent.native_agent.duration_seconds", result.duration_seconds)
+    set_current_span_attribute(
+        "code_agent.native_agent.event_capture_enabled", request.events_path is not None
+    )
+    set_current_span_attribute(
+        "code_agent.native_agent.artifact_root_present", bool(result.artifacts)
+    )
+    if result.exit_code is not None:
+        set_current_span_attribute("code_agent.native_agent.exit_code", result.exit_code)
+        set_current_span_attribute(NATIVE_AGENT_EXIT_CODE_ATTRIBUTE, result.exit_code)
+    set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, result.timed_out)
+    set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, result.duration_seconds)
+    set_current_span_attribute(
+        NATIVE_AGENT_STDOUT_ATTRIBUTE,
+        redact_and_truncate_output(
+            result.stdout or "",
+            redactor=request.redactor,
+            limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH,
+        ),
+    )
+    set_current_span_attribute(
+        NATIVE_AGENT_STDERR_ATTRIBUTE,
+        redact_and_truncate_output(
+            result.stderr or "",
+            redactor=request.redactor,
+            limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH,
+        ),
+    )
+    _record_native_agent_json_payload_telemetry(
+        result=result,
+        json_payload_source=json_payload_source,
+        json_payload_rejected_reason=json_payload_rejected_reason,
+    )
+    _record_native_agent_run_completed_telemetry(
+        result=result,
+        reason_code=reason_code,
+    )
+
+    redacted_status_summary = redact_and_truncate_output(
+        run_summary, redactor=request.redactor, limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
+    )
+    set_span_status_from_outcome(result.status, redacted_status_summary)
+
+
+def _record_native_agent_json_payload_telemetry(
+    result: NativeAgentRunResult,
+    json_payload_source: str | None,
+    json_payload_rejected_reason: str | None,
+) -> None:
+    if result.json_payload:
+        # Record structured output for observability (parity with backup branch)
+        set_current_span_attribute("llm.json_output", json.dumps(result.json_payload))
+        if json_payload_source:
+            set_current_span_attribute(f"{_JSON_PAYLOAD_ATTR_PREFIX}_source", json_payload_source)
+        set_current_span_attribute(
+            f"{_JSON_PAYLOAD_ATTR_PREFIX}_keys",
+            ",".join(sorted(result.json_payload)),
+        )
+        add_current_span_event(
+            "code_agent.native_agent.json_payload_extracted",
+            {
+                "source": json_payload_source or "unknown",
+                "keys_count": len(result.json_payload),
+            },
+        )
+    elif json_payload_rejected_reason:
+        set_current_span_attribute(
+            f"{_JSON_PAYLOAD_ATTR_PREFIX}_rejected_reason",
+            json_payload_rejected_reason,
+        )
+        add_current_span_event(
+            "code_agent.native_agent.json_payload_rejected",
+            {"reason": json_payload_rejected_reason},
+        )
+
+
+def _record_native_agent_run_completed_telemetry(
+    result: NativeAgentRunResult,
+    reason_code: str,
+) -> None:
+    run_completed_payload: dict[str, str | int | float | bool] = {
+        "status": result.status,
+        "reason_code": reason_code,
+        "timed_out": result.timed_out,
+        "duration_seconds": result.duration_seconds,
+        "has_json_payload": bool(result.json_payload),
+        "has_final_message": bool(result.final_message),
+        "files_changed_count": len(result.files_changed),
+    }
+    if result.exit_code is not None:
+        run_completed_payload["exit_code"] = result.exit_code
+    add_current_span_event("code_agent.native_agent.run_completed", run_completed_payload)
+
+
 def _finalize_native_agent_run(
     request: NativeAgentRunRequest,
     *,
@@ -79,82 +194,14 @@ def _finalize_native_agent_run(
         summary=summary,
         stderr=stderr,
     )
-    _record_span_data(
-        output_data=run_summary,
-        redactor=request.redactor,
+    _record_native_agent_telemetry(
+        request=request,
+        result=result,
+        run_summary=run_summary,
+        reason_code=reason_code,
+        reason_detail=reason_detail,
+        json_payload_source=json_payload_source,
+        json_payload_rejected_reason=json_payload_rejected_reason,
     )
-    # New canonical native telemetry attributes.
-    set_current_span_attribute("code_agent.native_agent.outcome_status", result.status)
-    set_current_span_attribute("code_agent.native_agent.reason_code", reason_code)
-    set_current_span_attribute("code_agent.native_agent.reason_detail", reason_detail)
-    set_current_span_attribute(
-        "code_agent.native_agent.command", sanitize_command(command_text, request.redactor)
-    )
-    set_current_span_attribute("code_agent.native_agent.timed_out", timed_out)
-    set_current_span_attribute("code_agent.native_agent.duration_seconds", elapsed)
-    set_current_span_attribute(
-        "code_agent.native_agent.event_capture_enabled", request.events_path is not None
-    )
-    set_current_span_attribute("code_agent.native_agent.artifact_root_present", bool(artifacts))
-    if result.exit_code is not None:
-        set_current_span_attribute("code_agent.native_agent.exit_code", result.exit_code)
-        set_current_span_attribute(NATIVE_AGENT_EXIT_CODE_ATTRIBUTE, result.exit_code)
-    set_current_span_attribute(NATIVE_AGENT_TIMED_OUT_ATTRIBUTE, timed_out)
-    set_current_span_attribute(NATIVE_AGENT_DURATION_ATTRIBUTE, elapsed)
-    set_current_span_attribute(
-        NATIVE_AGENT_STDOUT_ATTRIBUTE,
-        redact_and_truncate_output(
-            stdout, redactor=request.redactor, limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
-        ),
-    )
-    set_current_span_attribute(
-        NATIVE_AGENT_STDERR_ATTRIBUTE,
-        redact_and_truncate_output(
-            stderr, redactor=request.redactor, limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
-        ),
-    )
-    if result.json_payload:
-        # Record structured output for observability (parity with backup branch)
-        set_current_span_attribute("llm.json_output", json.dumps(result.json_payload))
-        if json_payload_source:
-            set_current_span_attribute(f"{_JSON_PAYLOAD_ATTR_PREFIX}_source", json_payload_source)
-        set_current_span_attribute(
-            f"{_JSON_PAYLOAD_ATTR_PREFIX}_keys",
-            ",".join(sorted(result.json_payload)),
-        )
-        add_current_span_event(
-            "code_agent.native_agent.json_payload_extracted",
-            {
-                "source": json_payload_source or "unknown",
-                "keys_count": len(result.json_payload),
-            },
-        )
-    elif json_payload_rejected_reason:
-        set_current_span_attribute(
-            f"{_JSON_PAYLOAD_ATTR_PREFIX}_rejected_reason",
-            json_payload_rejected_reason,
-        )
-        add_current_span_event(
-            "code_agent.native_agent.json_payload_rejected",
-            {"reason": json_payload_rejected_reason},
-        )
-
-    run_completed_payload: dict[str, str | int | float | bool] = {
-        "status": result.status,
-        "reason_code": reason_code,
-        "timed_out": timed_out,
-        "duration_seconds": elapsed,
-        "has_json_payload": bool(result.json_payload),
-        "has_final_message": bool(final_message),
-        "files_changed_count": len(files_changed or []),
-    }
-    if result.exit_code is not None:
-        run_completed_payload["exit_code"] = result.exit_code
-    add_current_span_event("code_agent.native_agent.run_completed", run_completed_payload)
-
-    redacted_status_summary = redact_and_truncate_output(
-        run_summary, redactor=request.redactor, limit_chars=NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH
-    )
-    set_span_status_from_outcome(result.status, redacted_status_summary)
 
     return result

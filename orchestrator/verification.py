@@ -312,6 +312,80 @@ def _build_independent_verifier_request(
     )
 
 
+def _handle_verifier_worker_failure(
+    verifier_result: WorkerResult,
+    worker_type: str,
+    state: OrchestratorState,
+    is_last_worker: bool,
+) -> tuple[Literal["passed", "failed", "warning"] | None, str | None, str | None]:
+    message = verifier_result.summary or "no summary returned"
+    if verifier_result.failure_kind in {
+        "provider_error",
+        "provider_auth",
+        "sandbox_infra",
+        "timeout",
+        "model_error",
+        "unknown",
+    }:
+        logger.warning(
+            f"Independent verifier hit {verifier_result.failure_kind} for {worker_type}: {message}",
+            extra={"task_id": state.task.task_id},
+        )
+        if is_last_worker:
+            return (
+                "warning",
+                "Independent verifier could not complete (all fallbacks exhausted). "
+                f"Last error ({worker_type}): {message}",
+                "infra_verifier_unavailable",
+            )
+        return None, None, None
+    else:
+        return (
+            "warning",
+            f"Independent verifier could not complete ({worker_type}): {message}",
+            "infra_verifier_unavailable",
+        )
+
+
+def _handle_verifier_worker_exception(
+    exc: Exception,
+    worker_type: str,
+    state: OrchestratorState,
+    is_last_worker: bool,
+) -> tuple[Literal["passed", "failed", "warning"] | None, str | None, str | None]:
+    if isinstance(exc, TimeoutError):
+        logger.warning(
+            f"Independent verifier timed out for {worker_type}",
+            extra={"task_id": state.task.task_id},
+        )
+        if is_last_worker:
+            if _internal_tests_passed(state):
+                return (
+                    "warning",
+                    f"Independent verifier timed out ({worker_type}), but internal tests passed.",
+                    "infra_verifier_unavailable",
+                )
+            return (
+                "warning",
+                f"Independent verifier timed out ({worker_type}).",
+                "infra_verifier_unavailable",
+            )
+        return None, None, None
+    else:
+        logger.warning(
+            "Independent verifier execution failed unexpectedly",
+            exc_info=True,
+            extra={"worker_type": worker_type, "task_id": state.task.task_id},
+        )
+        if is_last_worker:
+            return (
+                "warning",
+                f"Independent verifier infrastructure error ({worker_type}): {type(exc).__name__}.",
+                "infra_verifier_unavailable",
+            )
+        return None, None, None
+
+
 async def _execute_verifier_worker(
     worker_type: str,
     worker: Worker,
@@ -342,70 +416,19 @@ async def _execute_verifier_worker(
             set_span_input_output(input_data=None, output_data=verifier_result.summary)
 
         if verifier_result.status != "success":
-            message = verifier_result.summary or "no summary returned"
-            if verifier_result.failure_kind in {
-                "provider_error",
-                "provider_auth",
-                "sandbox_infra",
-                "timeout",
-                "model_error",
-                "unknown",
-            }:
-                logger.warning(
-                    f"Independent verifier hit {verifier_result.failure_kind} for {worker_type}: {message}",  # noqa: E501
-                    extra={"task_id": state.task.task_id},
-                )
-                if is_last_worker:
-                    return (
-                        "warning",
-                        "Independent verifier could not complete (all fallbacks exhausted). "
-                        f"Last error ({worker_type}): {message}",
-                        "infra_verifier_unavailable",
-                    )
-                return None, None, None
-            else:
-                return (
-                    "warning",
-                    f"Independent verifier could not complete ({worker_type}): {message}",
-                    "infra_verifier_unavailable",
-                )
+            return _handle_verifier_worker_failure(
+                verifier_result, worker_type, state, is_last_worker
+            )
 
         parsed_status, parsed_summary = _parse_verifier_result(verifier_result)
         return parsed_status, parsed_summary, None
 
-    except TimeoutError:
-        logger.warning(
-            f"Independent verifier timed out for {worker_type}",
-            extra={"task_id": state.task.task_id},
-        )
-        if is_last_worker:
-            if _internal_tests_passed(state):
-                return (
-                    "warning",
-                    f"Independent verifier timed out ({worker_type}), but internal tests passed.",
-                    "infra_verifier_unavailable",
-                )
-            return (
-                "warning",
-                f"Independent verifier timed out ({worker_type}).",
-                "infra_verifier_unavailable",
-            )
-        return None, None, None
+    except TimeoutError as exc:
+        return _handle_verifier_worker_exception(exc, worker_type, state, is_last_worker)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        logger.warning(
-            "Independent verifier execution failed unexpectedly",
-            exc_info=True,
-            extra={"worker_type": worker_type},
-        )
-        if is_last_worker:
-            return (
-                "warning",
-                f"Independent verifier infrastructure error ({worker_type}): {type(exc).__name__}.",
-                "infra_verifier_unavailable",
-            )
-        return None, None, None
+        return _handle_verifier_worker_exception(exc, worker_type, state, is_last_worker)
 
 
 async def run_independent_verifier(
