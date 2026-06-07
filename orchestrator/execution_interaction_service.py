@@ -190,9 +190,10 @@ def apply_task_approval_decision(
             return validation_error
 
         # We know approval_state is not None after validation
-        approval_type = str(approval_state.get("approval_type") or "").strip() or None  # type: ignore[union-attr]
-        reason = str(approval_state.get("reason") or "").strip() or None  # type: ignore[union-attr]
-        resume_token = str(approval_state.get("resume_token") or "").strip() or None  # type: ignore[union-attr]
+        assert approval_state is not None
+        approval_type = str(approval_state.get("approval_type") or "").strip() or None
+        reason = str(approval_state.get("reason") or "").strip() or None
+        resume_token = str(approval_state.get("resume_token") or "").strip() or None
         requested_status = "approved" if approved else "rejected"
         constraints["approval"] = _approval_constraints_payload(
             status=requested_status,
