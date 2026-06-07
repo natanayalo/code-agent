@@ -288,8 +288,8 @@ def _check_test_results(state: OrchestratorState) -> VerificationReportItem:
     if not result.test_results:
         return VerificationReportItem(
             label="tests",
-            status="passed",
-            message="No tests run.",
+            status="warning",
+            message="No test results reported by worker.",
         )
     failed_tests = [r for r in result.test_results if r.status in ("failed", "error")]
     if failed_tests:
@@ -343,8 +343,6 @@ def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
 
 
 def _check_command_audit(state: OrchestratorState) -> VerificationReportItem:
-    result = state.result
-    assert result is not None
     result = state.result
     assert result is not None
     if not result.commands_run:

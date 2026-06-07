@@ -238,9 +238,9 @@ def _run_docker_command(
         ) from exc
 
     stdout_buf, stderr_buf, limit_exceeded_flag = _capture_output_with_threads(
-        proc,  # type: ignore[arg-type]
+        proc,
         command,
-        timeout,  # type: ignore[arg-type]
+        timeout,
     )
 
     if limit_exceeded_flag:
@@ -271,9 +271,9 @@ def _run_docker_command(
 
 
 def _capture_output_with_threads(
-    proc: subprocess.Popen[str],
+    proc: subprocess.Popen[bytes],
     command: list[str],
-    timeout: int,
+    timeout: float | None,
 ) -> tuple[bytearray, bytearray, bool]:
     stdout_buf: bytearray = bytearray()
     stderr_buf: bytearray = bytearray()
@@ -292,7 +292,7 @@ def _capture_output_with_threads(
     stdout_thread = threading.Thread(
         target=lambda: stdout_buf.extend(
             _read_stream_bounded(
-                stdout_pipe,  # type: ignore[arg-type]
+                stdout_pipe,
                 MAX_OUTPUT_SIZE_BYTES,
                 on_limit=kill_on_limit,
             )
@@ -302,7 +302,7 @@ def _capture_output_with_threads(
     stderr_thread = threading.Thread(
         target=lambda: stderr_buf.extend(
             _read_stream_bounded(
-                stderr_pipe,  # type: ignore[arg-type]
+                stderr_pipe,
                 MAX_OUTPUT_SIZE_BYTES,
                 on_limit=kill_on_limit,
             )
@@ -341,9 +341,9 @@ def _capture_output_with_threads(
 
 def _handle_sandbox_timeout(
     exc: subprocess.TimeoutExpired,
-    proc: subprocess.Popen[str],
+    proc: subprocess.Popen[bytes],
     command: list[str],
-    timeout: int,
+    timeout: float | None,
     stdout_buf: bytearray,
     stderr_buf: bytearray,
 ) -> None:

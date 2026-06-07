@@ -59,7 +59,16 @@ def _iter_function_findings(
     path: Path, *, function_limit: int, repo_root: Path, exceptions: dict
 ) -> list[Finding]:
     source = path.read_text(encoding="utf-8")
-    module = ast.parse(source, filename=str(path))
+    try:
+        module = ast.parse(source, filename=str(path))
+    except SyntaxError as exc:
+        return [
+            Finding(
+                path=path,
+                line=exc.lineno or 1,
+                message=f"SyntaxError: {exc.msg}",
+            )
+        ]
     findings: list[Finding] = []
 
     try:
@@ -143,8 +152,12 @@ def _load_exceptions(repo_root: Path) -> dict:
     if yaml is None:
         print("Warning: PyYAML not found, but .sizecheck-exceptions.yaml exists.", file=sys.stderr)
         return {}
-    with exc_file.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    try:
+        with exc_file.open("r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except yaml.YAMLError as exc:
+        print(f"Warning: Failed to parse {exc_file}: {exc}", file=sys.stderr)
+        return {}
 
 
 def main() -> int:
