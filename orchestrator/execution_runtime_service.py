@@ -32,6 +32,7 @@ from orchestrator.execution_serialization import (
     _summarize_graph_span_output,
     _terminal_follow_up_status,
 )
+from orchestrator.execution_snapshot_service import _task_summary
 from orchestrator.execution_types import (
     ProgressEvent,
     ProgressPhase,
@@ -118,7 +119,7 @@ async def submit_task(
                 submission,
                 persisted,
                 phase="failed",
-                summary=self._task_summary(task_snapshot),
+                summary=_task_summary(task_snapshot),
             )
             return None
 
@@ -130,7 +131,7 @@ async def submit_task(
             submission,
             persisted,
             phase=_completion_progress_phase(task_snapshot),
-            summary=self._task_summary(task_snapshot),
+            summary=_task_summary(task_snapshot),
         )
     return None
 
@@ -302,7 +303,7 @@ async def run_queued_task(
                 submission,
                 persisted,
                 phase=_completion_progress_phase(task_snapshot),
-                summary=self._task_summary(task_snapshot),
+                summary=_task_summary(task_snapshot),
             )
     return None
 

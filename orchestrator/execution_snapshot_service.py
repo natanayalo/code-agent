@@ -383,18 +383,16 @@ def _map_human_interaction_snapshot(interaction: HumanInteraction):  # type: ign
 def _pending_interaction_snapshots(self: Any, task: Task):  # type: ignore[no-untyped-def]
     interactions = task.human_interactions if "human_interactions" in task.__dict__ else []
     pending_interactions = [
-        interaction for interaction in interactions if self._is_pending_interaction(interaction)
+        interaction for interaction in interactions if _is_pending_interaction(interaction)
     ]
     return [
-        self._map_human_interaction_snapshot(interaction)
+        _map_human_interaction_snapshot(interaction)
         for interaction in sorted(pending_interactions, key=lambda row: (row.created_at, row.id))
     ]
 
 
 def _count_pending_interactions(self: Any, task: Task) -> int:
-    return sum(
-        1 for interaction in task.human_interactions if self._is_pending_interaction(interaction)
-    )
+    return sum(1 for interaction in task.human_interactions if _is_pending_interaction(interaction))
 
 
 def _ensure_verifier_outcome_ids(self: Any, outcome: Any) -> Any:
