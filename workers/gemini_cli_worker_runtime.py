@@ -9,7 +9,7 @@ import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from apps.observability import (
     set_span_status_from_outcome,
@@ -379,12 +379,12 @@ class GeminiCliWorkerRuntimeMixin:
         runtime_setup: _RuntimeSetup,
         execution: CliRuntimeExecutionResult,
         files_changed: list[str],
-        lint_format_result: dict[str, object] | None,
+        lint_format_result: dict[str, Any] | None,
         lint_format_artifacts: list[ArtifactReference],
         cancel_token: Callable[[], bool] | None,
-    ) -> tuple[ReviewResult | None, list[str], dict[str, object] | None, list[ArtifactReference]]:
+    ) -> tuple[ReviewResult | None, list[str], dict[str, Any], list[ArtifactReference]]:
         if execution.status != "success":
-            return None, files_changed, lint_format_result, lint_format_artifacts
+            return None, files_changed, lint_format_result or {}, lint_format_artifacts
 
         return run_shared_self_review_fix_loop(
             execution=execution,
@@ -395,7 +395,7 @@ class GeminiCliWorkerRuntimeMixin:
             system_prompt=runtime_setup.system_prompt,
             repo_path=workspace.repo_path,
             files_changed=files_changed,
-            lint_format_result=lint_format_result,  # type: ignore[arg-type]
+            lint_format_result=lint_format_result or {},
             lint_format_artifacts=lint_format_artifacts,
             post_run_lint_collector=(
                 lambda current_execution, existing_files: (
@@ -466,7 +466,7 @@ class GeminiCliWorkerRuntimeMixin:
         )
 
         review_result, files_changed, lint_format_result, lint_format_artifacts = (
-            self._run_self_review_if_successful(  # type: ignore[assignment]
+            self._run_self_review_if_successful(
                 request=request,
                 workspace=workspace,
                 runtime_setup=runtime_setup,
