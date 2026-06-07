@@ -445,19 +445,25 @@ class OpenRouterCliWorker(Worker):
         )
         container = runtime_setup.container
         session = runtime_setup.session
-        runtime_phase = self._execute_runtime_phase(
-            request,
-            workspace=workspace,
-            runtime_setup=runtime_setup,
-            cancel_token=cancel_token,
-        )
-        result = self._finalize_runtime_result(
-            workspace,
-            runtime_phase,
-            runtime_settings=runtime_setup.runtime_settings,
-            cancel_token=cancel_token,
-        )
-        return result, container, session
+        try:
+            runtime_phase = self._execute_runtime_phase(
+                request,
+                workspace=workspace,
+                runtime_setup=runtime_setup,
+                cancel_token=cancel_token,
+            )
+            result = self._finalize_runtime_result(
+                workspace,
+                runtime_phase,
+                runtime_settings=runtime_setup.runtime_settings,
+                cancel_token=cancel_token,
+            )
+            return result, container, session
+        except Exception as e:
+            logger.debug(f"Exception in runtime loop: {e}", exc_info=True)
+            self._close_session(session)
+            self._stop_container(container)
+            raise
 
     def _run_sync(
         self,
