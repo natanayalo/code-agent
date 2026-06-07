@@ -23,13 +23,6 @@ function_exceptions:
     _suggest_task_spec_model: Chains fallback logic for TaskSpec enrichment; requires unified error handling.
     suggest_route: Complex routing heuristics evaluating multiple fallback rules in sequence.
     suggest_task_spec_and_route: Orchestrates concurrent async planner calls for routing and specs.
-  orchestrator/execution_interaction_service.py:
-    apply_task_approval_decision: Idempotent state machine transition for task approval; highly coupled to DB models.
-  orchestrator/execution_outcome_service.py:
-    _persist_execution_outcome: Monolithic persistence block coordinating 4 different DB repositories in one transaction.
-  orchestrator/execution_runtime_service.py:
-    run_queued_task: Manages queue lock acquisition, execution, and release within a strict transactional boundary.
-    submit_task: Legacy task submission endpoint doing input validation, DB insert, and async trigger.
   orchestrator/execution_serialization.py:
     _normalize_orchestrator_graph_output: Recursively scrubs transport-only interrupts from nested graph output; heavily coupled to graph structure.
   orchestrator/execution_submission_service.py:
@@ -55,8 +48,6 @@ function_exceptions:
     _execute_verifier_worker: Orchestrates invoking the verification worker; contains monolithic task setup and result mapping logic.
     run_deterministic_verification: Runs sandbox verification commands; relies on contiguous stdout/stderr parsing.
     run_independent_verifier: Fallback logic for independent verifier; requires tight coupling between execution and parsing.
-  sandbox/audit.py:
-    capture_audit_artifacts: Snapshots workspace changes; contiguous filesystem traversal and archival logic.
   sandbox/session.py:
     execute: Executes shell command with state preservation; tight coupling between PTY spawning and reading.
   tests/integration/test_db_migrations.py:
@@ -80,16 +71,26 @@ function_exceptions:
   tests/unit/test_codex_cli_worker.py:
     test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops: Test verifying codex cli worker accumulates lint artifacts across fix loops requires integrated setup/assertions.
     test_codex_cli_worker_native_overrides_and_failures: Test verifying codex cli worker native overrides and failures requires integrated setup/assertions.
+  tests/unit/test_codex_cli_worker_native.py:
+    test_codex_cli_worker_native_overrides_and_failures: Test verifying codex cli worker native overrides and failures requires integrated setup/assertions.
+  tests/unit/test_codex_cli_worker_self_review.py:
+    test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops: Highly stateful logic for test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops; splitting requires unnatural parameter coupling.
   tests/unit/test_codex_exec_adapter.py:
     test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call: Highly stateful logic for test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call; splitting requires unnatural parameter coupling.
   tests/unit/test_evaluation_harness.py:
     test_orchestrator_runner_review_metrics_precision_reflects_suppressed_findings: Test verifying orchestrator runner review metrics precision reflects suppressed findings requires integrated setup/assertions.
+  tests/unit/test_evaluation_harness_runner.py:
+    test_orchestrator_runner_review_metrics_precision_reflects_suppressed_findings: Test verifying orchestrator runner review metrics precision reflects suppressed findings requires integrated setup/assertions.
   tests/unit/test_gemini_cli_worker.py:
     test_gemini_cli_worker_accumulates_lint_artifacts_across_fix_loops: Test verifying gemini cli worker accumulates lint artifacts across fix loops requires integrated setup/assertions.
+  tests/unit/test_gemini_cli_worker_self_review.py:
+    test_gemini_cli_worker_accumulates_lint_artifacts_across_fix_loops: Highly stateful logic for test_gemini_cli_worker_accumulates_lint_artifacts_across_fix_loops; splitting requires unnatural parameter coupling.
   tests/unit/test_native_agent_runner.py:
     test_native_agent_runner_enforces_strict_isolation: Highly stateful logic for test_native_agent_runner_enforces_strict_isolation; splitting requires unnatural parameter coupling.
   tests/unit/test_observability.py:
     test_configure_tracing_from_env_bootstraps_otel_and_openinference: Test verifying configure tracing from env bootstraps otel and openinference requires integrated setup/assertions.
+  tests/unit/test_observability_env.py:
+    test_configure_tracing_from_env_bootstraps_otel_and_openinference: Highly stateful logic for test_configure_tracing_from_env_bootstraps_otel_and_openinference; splitting requires unnatural parameter coupling.
   tests/unit/test_openrouter_cli_worker.py:
     test_openrouter_cli_worker_accumulates_lint_artifacts_across_fix_loops: Highly stateful logic for test_openrouter_cli_worker_accumulates_lint_artifacts_across_fix_loops; splitting requires unnatural parameter coupling.
   tests/unit/test_orchestrator_state.py:
@@ -120,8 +121,6 @@ function_exceptions:
     _build_condensed_context_summary: Compiles conversation history for context windows; tight coupling to message structure.
   workers/cli_runtime_files.py:
     collect_changed_files: Git workspace traversal and diff parsing; contiguous subprocess logic.
-  workers/cli_runtime_loop.py:
-    run_cli_runtime_loop_impl: Stateful while-loop managing core LLM execution and tool turns; heavy local variable sharing.
   workers/cli_runtime_tool_execution.py:
     _record_tool_result: Formats tool outputs for trace context; monolithic data transformation.
     execute_tool_turn: Parses tool actions, runs commands, and tracks budget; highly stateful across the turn.
@@ -132,7 +131,10 @@ function_exceptions:
   workers/codex_cli_worker.py:
     _execute_native_runtime: Submits raw task to native agent; coordinates subprocess, trace context, and timeouts.
     _execute_runtime_phase: Executes a workflow phase in sandbox; tightly coupled to sandbox session state.
-    _run_sync: Coordinates synchronous sandbox execution; manages complete lifecycle of one session.
+  workers/codex_cli_worker_native.py:
+    _execute_native_runtime: Submits raw task to native agent; coordinates subprocess, trace context, and timeouts.
+  workers/codex_cli_worker_runtime.py:
+    _execute_runtime_phase: Executes a workflow phase in sandbox; tightly coupled to sandbox session state.
   workers/codex_exec_adapter.py:
     next_step: Calls LLM API and parses tool outputs; monolithic due to strict schema handling.
   workers/gemini_cli_adapter.py:
@@ -140,43 +142,22 @@ function_exceptions:
   workers/gemini_cli_worker.py:
     _execute_native_runtime: Submits raw task to native agent; coordinates subprocess, trace context, and timeouts.
     _execute_runtime_phase: Executes a workflow phase in sandbox; tightly coupled to sandbox session state.
-    _run_sync: Coordinates synchronous sandbox execution; manages complete lifecycle of one session.
-  workers/native_agent_runner.py:
-    run_native_agent: Coordinates subprocess execution, trace context injection, and timeout handling; extracting disrupts error scope.
-  workers/openrouter_adapter.py:
-    next_step: Calls LLM API and parses tool outputs; monolithic due to strict schema handling.
-  workers/openrouter_cli_worker.py:
-    _execute_runtime_phase: Executes a workflow phase in sandbox; tightly coupled to sandbox session state.
-    _run_sync: Coordinates synchronous sandbox execution; manages complete lifecycle of one session.
-  workers/review_context.py:
-    pack_inspection_context: Assembles deterministic inspection packet; relies on sequential text truncation.
-  workers/self_review.py:
-    _build_changed_file_windows: Chunks diffs for context limits; complex line-number arithmetic prevents splitting.
-    run_shared_self_review_fix_loop: Bounded retry loop mutating execution in place; heavy local state coupling.
-  workers/shell_worker.py:
-    _run_sync: Coordinates synchronous sandbox execution; manages complete lifecycle of one session.
-    run: Provisions workspace and runs shell script; contiguous setup and teardown logic.
-  tests/unit/test_codex_cli_worker_native.py:
-    test_codex_cli_worker_native_overrides_and_failures: Test verifying codex cli worker native overrides and failures requires integrated setup/assertions.
-  tests/unit/test_codex_cli_worker_self_review.py:
-    test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops: Highly stateful logic for test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops; splitting requires unnatural parameter coupling.
-  tests/unit/test_evaluation_harness_runner.py:
-    test_orchestrator_runner_review_metrics_precision_reflects_suppressed_findings: Test verifying orchestrator runner review metrics precision reflects suppressed findings requires integrated setup/assertions.
-  tests/unit/test_gemini_cli_worker_self_review.py:
-    test_gemini_cli_worker_accumulates_lint_artifacts_across_fix_loops: Highly stateful logic for test_gemini_cli_worker_accumulates_lint_artifacts_across_fix_loops; splitting requires unnatural parameter coupling.
-  tests/unit/test_observability_env.py:
-    test_configure_tracing_from_env_bootstraps_otel_and_openinference: Highly stateful logic for test_configure_tracing_from_env_bootstraps_otel_and_openinference; splitting requires unnatural parameter coupling.
-  workers/prompt_review.py:
-    build_review_prompt: Assembles review prompt; monolithic string formatting block.
-  workers/codex_cli_worker_native.py:
-    _execute_native_runtime: Submits raw task to native agent; coordinates subprocess, trace context, and timeouts.
-  workers/codex_cli_worker_runtime.py:
-    _execute_runtime_phase: Executes a workflow phase in sandbox; tightly coupled to sandbox session state.
   workers/gemini_cli_worker_native.py:
     _execute_native_runtime: Submits raw task to native agent; coordinates subprocess, trace context, and timeouts.
   workers/gemini_cli_worker_runtime.py:
     _execute_runtime_phase: Executes a workflow phase in sandbox; tightly coupled to sandbox session state.
   workers/native_agent_finalize.py:
     _finalize_native_agent_run: Constructs NativeAgentRunResult and records span metadata; highly cohesive data mapping.
+  workers/native_agent_runner.py:
+    run_native_agent: Coordinates subprocess execution, trace context injection, and timeout handling; extracting disrupts error scope.
+  workers/openrouter_adapter.py:
+    next_step: Calls LLM API and parses tool outputs; monolithic due to strict schema handling.
+  workers/openrouter_cli_worker.py:
+    _execute_runtime_phase: Executes a workflow phase in sandbox; tightly coupled to sandbox session state.
+  workers/self_review.py:
+    _build_changed_file_windows: Chunks diffs for context limits; complex line-number arithmetic prevents splitting.
+    run_shared_self_review_fix_loop: Bounded retry loop mutating execution in place; heavy local state coupling.
   workers/self_review_packet.py:
     _build_changed_file_windows: Chunks diffs for context limits; complex line-number arithmetic prevents splitting.
+  workers/shell_worker.py:
+    run: Provisions workspace and runs shell script; contiguous setup and teardown logic.

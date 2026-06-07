@@ -64,21 +64,8 @@ _REVIEW_OUTPUT_CONTRACT_TEMPLATE = "\n".join(
 )
 
 
-def build_review_prompt(
-    *,
-    workspace_path: Path,
-    review_context_packet: str,
-    reviewer_kind: str = "worker_self_review",
-    task_text: str | None = None,
-) -> str:
-    """Assemble a review-only prompt separated from execution/tool-loop prompts."""
-    # Reserve a small budget buffer for \n\n separators between prompt sections
-    # and a buffer for block labels/fences added after reading guidance.
-    total_guidance_budget = (
-        DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS
-        - _SECTION_SEPARATOR_OVERHEAD_BUFFER
-        - _GUIDANCE_OVERHEAD_BUFFER
-    )
+def _build_guidance_section(workspace_path: Path, total_guidance_budget: int) -> str:
+    """Read and assemble workspace guidance within the character budget."""
     agents_guidance, agents_assets_guidance = read_workspace_repo_guidance(
         workspace_path,
         max_characters=total_guidance_budget,
@@ -130,24 +117,34 @@ def build_review_prompt(
         max_characters=max(total_guidance_budget - consumed_guidance_characters, 0),
     )
     if review_guidance is not None:
-        if guidance_block_count == 0:
-            consumed_guidance_characters += len("## Review Guidance") + 1
-        else:
-            consumed_guidance_characters += 1  # separator between blocks
-
         fence = markdown_fence_for_content(review_guidance)
         guidance_lines.extend(
             _fenced_text_block_lines("REVIEW.md guidance:", review_guidance, fence=fence)
         )
-        consumed_guidance_characters += len(review_guidance) + _fenced_text_block_overhead(
-            "REVIEW.md guidance:", review_guidance, fence=fence
-        )
-        guidance_block_count += 1
+
+    if guidance_lines:
+        return "\n".join(["## Review Guidance", *guidance_lines])
+    return ""
+
+
+def build_review_prompt(
+    *,
+    workspace_path: Path,
+    review_context_packet: str,
+    reviewer_kind: str = "worker_self_review",
+    task_text: str | None = None,
+) -> str:
+    """Assemble a review-only prompt separated from execution/tool-loop prompts."""
+    # Reserve a small budget buffer for \n\n separators between prompt sections
+    # and a buffer for block labels/fences added after reading guidance.
+    total_guidance_budget = (
+        DEFAULT_REVIEW_GUIDANCE_MAX_CHARACTERS
+        - _SECTION_SEPARATOR_OVERHEAD_BUFFER
+        - _GUIDANCE_OVERHEAD_BUFFER
+    )
+    guidance_section = _build_guidance_section(workspace_path, total_guidance_budget)
 
     build_test_context = build_build_test_section(workspace_path)
-    guidance_section = ""
-    if guidance_lines:
-        guidance_section = "\n".join(["## Review Guidance", *guidance_lines])
 
     task_lines = [
         "## Review Task",
