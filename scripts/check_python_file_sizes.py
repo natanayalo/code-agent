@@ -120,7 +120,8 @@ def collect_findings(
         except ValueError:
             rel_path = str(path)
 
-        line_count = sum(1 for _ in path.open("r", encoding="utf-8"))
+        with path.open("r", encoding="utf-8") as f:
+            line_count = sum(1 for _ in f)
         limit = _file_limit(path, production_limit, test_limit)
 
         if line_count > limit:

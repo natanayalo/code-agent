@@ -411,7 +411,8 @@ def _handle_repair_handoff(
     updated_result: dict[str, Any] | None = None
     repair_handoff_requested = False
     max_passes, used_passes = _resolve_verifier_repair_handoff_budget(state)
-    verifier_repair_request = state.task.constraints.get(VERIFIER_REPAIR_REQUEST_CONSTRAINT)
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    verifier_repair_request = constraints.get(VERIFIER_REPAIR_REQUEST_CONSTRAINT)
     had_verifier_repair_request = isinstance(verifier_repair_request, str) and bool(
         verifier_repair_request.strip()
     )
@@ -428,7 +429,7 @@ def _handle_repair_handoff(
         and (result.status == "success" or repairable_worker_failure)
     ):
         repair_task_text = _build_verifier_repair_task_text(state, report)
-        updated_constraints = dict(state.task.constraints)
+        updated_constraints = dict(constraints)
         updated_constraints[VERIFIER_REPAIR_REQUEST_CONSTRAINT] = repair_task_text
         updated_constraints[VERIFIER_REPAIR_PASSES_USED_CONSTRAINT] = used_passes + 1
         updated_task = state.task.model_copy(
@@ -439,8 +440,8 @@ def _handle_repair_handoff(
             f"verification failed; queued bounded repair handoff ({used_passes + 1}/{max_passes})"
         )
     elif had_verifier_repair_request:
-        cleaned_constraints = _cleanup_verifier_repair_handoff_constraints(state.task.constraints)
-        if cleaned_constraints != state.task.constraints:
+        cleaned_constraints = _cleanup_verifier_repair_handoff_constraints(constraints)
+        if cleaned_constraints != constraints:
             updated_task = state.task.model_copy(
                 update={"constraints": cleaned_constraints}
             ).model_dump()

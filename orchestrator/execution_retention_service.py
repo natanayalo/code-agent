@@ -40,8 +40,16 @@ def _delete_retained_workspace_path(self: Any, workspace_id: str | None) -> bool
     if workspace_path is None or not workspace_path.exists():
         return False
 
-    shutil.rmtree(workspace_path)
-    return True
+    try:
+        shutil.rmtree(workspace_path)
+        return True
+    except OSError as exc:
+        logger.warning(
+            "Failed to delete retained workspace directory",
+            exc_info=exc,
+            extra={"workspace_path": str(workspace_path)},
+        )
+        return False
 
 
 def _prune_retained_runs(self: Any, *, now: datetime) -> int:

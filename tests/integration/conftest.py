@@ -29,14 +29,15 @@ def session_factory():
 
 
 @pytest.fixture
-def client(session_factory) -> Iterator[TestClient]:
+def client(session_factory, tmp_path) -> Iterator[TestClient]:
     """Provide a test client with the execution-path task service configured."""
     worker = _default_worker()
+    checkpoint_file = tmp_path / "test_checkpoints.sqlite"
     app = create_app(
         task_service=TaskExecutionService(
             session_factory=session_factory,
             worker=worker,
-            checkpoint_path="test_checkpoints.sqlite",
+            checkpoint_path=str(checkpoint_file),
         ),
         auth_config=ApiAuthConfig(shared_secret=DEFAULT_SHARED_SECRET),
     )
