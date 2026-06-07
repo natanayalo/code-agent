@@ -39,19 +39,23 @@ class TaskQueueWorker:
         )
         async with self.service:
             while True:
-                claim = await self.service._run_blocking(
-                    self.service.claim_next_task,
-                    worker_id=self.worker_id,
-                    lease_seconds=self.lease_seconds,
-                )
-                if claim is None:
+                try:
+                    claim = await self.service._run_blocking(
+                        self.service.claim_next_task,
+                        worker_id=self.worker_id,
+                        lease_seconds=self.lease_seconds,
+                    )
+                    if claim is None:
+                        await asyncio.sleep(self.poll_interval_seconds)
+                        continue
+                    await self.service.run_queued_task(
+                        task_id=claim.task_id,
+                        worker_id=self.worker_id,
+                        lease_seconds=self.lease_seconds,
+                    )
+                except Exception as exc:
+                    logger.exception("Transient error in task queue worker loop: %s", exc)
                     await asyncio.sleep(self.poll_interval_seconds)
-                    continue
-                await self.service.run_queued_task(
-                    task_id=claim.task_id,
-                    worker_id=self.worker_id,
-                    lease_seconds=self.lease_seconds,
-                )
 
 
 __all__ = ["TaskQueueWorker", "_heartbeat_interval_seconds"]
