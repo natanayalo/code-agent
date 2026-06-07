@@ -331,7 +331,6 @@ def _capture_output_with_threads(
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        _join_threads()
         _handle_sandbox_timeout(exc, proc, command, timeout, stdout_buf, stderr_buf)
     finally:
         _join_threads()
