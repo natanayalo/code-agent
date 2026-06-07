@@ -372,6 +372,60 @@ class GeminiCliWorkerRuntimeMixin:
             self._stop_container(container)  # type: ignore[attr-defined]
             raise
 
+    def _run_self_review_if_successful(
+        self,
+        request: WorkerRequest,
+        workspace: WorkspaceHandle,
+        runtime_setup: _RuntimeSetup,
+        execution: CliRuntimeExecutionResult,
+        files_changed: list[str],
+        lint_format_result: dict[str, object] | None,
+        lint_format_artifacts: list[ArtifactReference],
+        cancel_token: Callable[[], bool] | None,
+    ) -> tuple[ReviewResult | None, list[str], dict[str, object] | None, list[ArtifactReference]]:
+        if execution.status != "success":
+            return None, files_changed, lint_format_result, lint_format_artifacts
+
+        return run_shared_self_review_fix_loop(
+            execution=execution,
+            task_text=request.task_text,
+            constraints=request.constraints,
+            runtime_adapter=self.runtime_adapter,  # type: ignore[attr-defined]
+            runtime_settings=runtime_setup.runtime_settings,
+            system_prompt=runtime_setup.system_prompt,
+            repo_path=workspace.repo_path,
+            files_changed=files_changed,
+            lint_format_result=lint_format_result,  # type: ignore[arg-type]
+            lint_format_artifacts=lint_format_artifacts,
+            post_run_lint_collector=(
+                lambda current_execution, existing_files: (
+                    collect_changed_files_and_apply_post_run_lint_format(
+                        session=runtime_setup.session,
+                        execution=current_execution,
+                        expect_changed_files_artifact=runtime_setup.expects_changed_files,
+                        repo_path_for_detection=workspace.repo_path,
+                        repo_working_directory=Path(runtime_setup.container.working_dir),
+                        existing_files_changed=existing_files,
+                        timeout_seconds=runtime_setup.runtime_settings.command_timeout_seconds,
+                        fallback_command_template=runtime_setup.fallback_command_template,
+                    )
+                )
+            ),
+            tool_registry=self.tool_registry,  # type: ignore[attr-defined]
+            granted_permission=runtime_setup.granted_permission,
+            session=runtime_setup.session,
+            cancel_token=cancel_token,
+            task_id=request.task_id,
+            session_id=request.session_id,
+            model_name=getattr(self.runtime_adapter, "model", None),  # type: ignore[attr-defined]
+            adapter_failure_log_message=(
+                "Gemini CLI worker self-review adapter failed; recording explicit "
+                "no-findings fallback."
+            ),
+            adapter_failure_logger=logger,
+            check_cancel_before_review=True,
+        )
+
     def _execute_runtime_phase(
         self,
         request: WorkerRequest,
@@ -411,52 +465,18 @@ class GeminiCliWorkerRuntimeMixin:
             )
         )
 
-        review_result: ReviewResult | None = None
-        if execution.status == "success":
-            (
-                review_result,
-                files_changed,
-                lint_format_result,
-                lint_format_artifacts,
-            ) = run_shared_self_review_fix_loop(
+        review_result, files_changed, lint_format_result, lint_format_artifacts = (
+            self._run_self_review_if_successful(  # type: ignore[assignment]
+                request=request,
+                workspace=workspace,
+                runtime_setup=runtime_setup,
                 execution=execution,
-                task_text=request.task_text,
-                constraints=request.constraints,
-                runtime_adapter=self.runtime_adapter,  # type: ignore[attr-defined]
-                runtime_settings=runtime_setup.runtime_settings,
-                system_prompt=runtime_setup.system_prompt,
-                repo_path=workspace.repo_path,
                 files_changed=files_changed,
                 lint_format_result=lint_format_result,
                 lint_format_artifacts=lint_format_artifacts,
-                post_run_lint_collector=(
-                    lambda current_execution, existing_files: (
-                        collect_changed_files_and_apply_post_run_lint_format(
-                            session=runtime_setup.session,
-                            execution=current_execution,
-                            expect_changed_files_artifact=runtime_setup.expects_changed_files,
-                            repo_path_for_detection=workspace.repo_path,
-                            repo_working_directory=Path(runtime_setup.container.working_dir),
-                            existing_files_changed=existing_files,
-                            timeout_seconds=runtime_setup.runtime_settings.command_timeout_seconds,
-                            fallback_command_template=runtime_setup.fallback_command_template,
-                        )
-                    )
-                ),
-                tool_registry=self.tool_registry,  # type: ignore[attr-defined]
-                granted_permission=runtime_setup.granted_permission,
-                session=runtime_setup.session,
                 cancel_token=cancel_token,
-                task_id=request.task_id,
-                session_id=request.session_id,
-                model_name=getattr(self.runtime_adapter, "model", None),  # type: ignore[attr-defined]
-                adapter_failure_log_message=(
-                    "Gemini CLI worker self-review adapter failed; recording explicit "
-                    "no-findings fallback."
-                ),
-                adapter_failure_logger=logger,
-                check_cancel_before_review=True,
             )
+        )
 
         return _RuntimeExecutionPhase(
             execution=execution,

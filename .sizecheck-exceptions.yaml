@@ -4,14 +4,6 @@ file_exceptions:
   orchestrator/verification.py: Coordinates the entire verification loop including code building, execution, parsing, and state updates. (Tightly coupled logic boundary)
   workers/native_agent_runner.py: Runner handles complex interactions with native agents including network retries, output capture, and workspace integration. (Cannot easily split further without breaking CLI contract)
 function_exceptions:
-  apps/api/main.py:
-    create_app: Wires up FastAPI routes, middleware, and exception handlers in one block; splitting obscures dependency injection.
-    lifespan: Manages async DB engine startup/shutdown; must run as a single async context manager.
-  apps/api/task_service_factory.py:
-    _build_default_worker_profiles: Central registry of worker profiles; splitting fragments the routing configuration.
-    build_task_service_from_env: Builds the unified task service from environment variables; cohesive factory function.
-  apps/observability.py:
-    configure_tracing_from_env: Bootstraps OTEL and LangChain instrumentation; relies on contiguous environment parsing.
   db/migrations/versions/20260329_0001_initial_schema.py:
     upgrade: Alembic migration containing full initial database schema; cannot be split.
   evaluation/harness.py:
@@ -31,133 +23,22 @@ function_exceptions:
     replay_task: Clones task state, flags, and specs for replay; requires dense DB model interactions.
   orchestrator/graph.py:
     _apply_brain_route_suggestion: Applies routing suggestions by merging them securely into state; tightly coupled mapping block.
-    build_orchestrator_graph: Defines the entire LangGraph state machine; splitting obscures state transitions and edges.
-  orchestrator/nodes/provisioning.py:
-    build_init_environment_node: Factory for init environment node; contiguous LangGraph node definition.
-    init_environment: Sandbox initialization and verification; tightly coupled to filesystem layout and container state.
-  orchestrator/nodes/verification.py:
-    build_verify_result_node: Factory for verify result node; contiguous LangGraph node definition.
-    verify_result: Executes tests and parses output in one continuous subprocess workflow.
-    verify_result_node: Executes verification inside the sandbox; relies on monolithic state inspection.
-  orchestrator/review.py:
-    review_result: Advisory review pass that orchestrates multiple models; splitting would cause excessive parameter passing.
   orchestrator/task_spec.py:
     apply_task_spec_brain_suggestion: Merges AI suggestions into TaskSpec; involves deep nested dictionary and model updates.
     build_task_spec: Parses raw request into structured contract; highly coupled to input validation rules.
-  orchestrator/verification.py:
-    _execute_verifier_worker: Orchestrates invoking the verification worker; contains monolithic task setup and result mapping logic.
-    run_deterministic_verification: Runs sandbox verification commands; relies on contiguous stdout/stderr parsing.
-    run_independent_verifier: Fallback logic for independent verifier; requires tight coupling between execution and parsing.
-  sandbox/session.py:
-    execute: Executes shell command with state preservation; tight coupling between PTY spawning and reading.
-  tests/integration/test_db_migrations.py:
-    test_alembic_downgrade_cleans_review_result_artifacts: Highly stateful logic for test_alembic_downgrade_cleans_review_result_artifacts; splitting requires unnatural parameter coupling.
-  tests/integration/test_orchestrator_graph_checkpoints.py:
-    scenario: Test verifying scenario requires integrated setup/assertions.
-    test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly: Highly stateful logic for test_orchestrator_graph_interrupts_for_approval_and_resumes_cleanly; splitting requires unnatural parameter coupling.
-    test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint: Highly stateful logic for test_orchestrator_graph_resumes_from_persisted_sqlite_checkpoint; splitting requires unnatural parameter coupling.
   tests/integration/test_repositories_interactions.py:
     test_human_interaction_repository_syncs_task_spec_flags: Highly stateful logic for test_human_interaction_repository_syncs_task_spec_flags; splitting requires unnatural parameter coupling.
   tests/integration/test_repositories_task_queue.py:
     test_task_repository_supports_task_spec_lease_progress_and_metrics: Highly stateful logic for test_task_repository_supports_task_spec_lease_progress_and_metrics; splitting requires unnatural parameter coupling.
   tests/integration/test_repositories_worker_runs.py:
     test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics: Highly stateful logic for test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics; splitting requires unnatural parameter coupling.
-  tests/integration/test_task_endpoints_submission.py:
-    test_submit_task_persists_execution_path_and_allows_polling: Highly stateful logic for test_submit_task_persists_execution_path_and_allows_polling; splitting requires unnatural parameter coupling.
-    test_task_endpoints_accept_worker_profile_override_for_explicit_legacy_opt_in: Highly stateful logic for test_task_endpoints_accept_worker_profile_override_for_explicit_legacy_opt_in; splitting requires unnatural parameter coupling.
-    test_task_endpoints_expose_profile_and_runtime_metadata_when_profile_routing_is_enabled: Highly stateful logic for test_task_endpoints_expose_profile_and_runtime_metadata_when_profile_routing_is_enabled; splitting requires unnatural parameter coupling.
   tests/integration/test_vertical_slice_e2e.py:
     test_vertical_slice_e2e_happy_path: Highly stateful logic for test_vertical_slice_e2e_happy_path; splitting requires unnatural parameter coupling.
-  tests/unit/test_codex_cli_worker.py:
-    test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops: Test verifying codex cli worker accumulates lint artifacts across fix loops requires integrated setup/assertions.
-    test_codex_cli_worker_native_overrides_and_failures: Test verifying codex cli worker native overrides and failures requires integrated setup/assertions.
-  tests/unit/test_codex_cli_worker_native.py:
-    test_codex_cli_worker_native_overrides_and_failures: Test verifying codex cli worker native overrides and failures requires integrated setup/assertions.
-  tests/unit/test_codex_cli_worker_self_review.py:
-    test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops: Highly stateful logic for test_codex_cli_worker_accumulates_lint_artifacts_across_fix_loops; splitting requires unnatural parameter coupling.
-  tests/unit/test_codex_exec_adapter.py:
-    test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call: Highly stateful logic for test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call; splitting requires unnatural parameter coupling.
-  tests/unit/test_evaluation_harness.py:
-    test_orchestrator_runner_review_metrics_precision_reflects_suppressed_findings: Test verifying orchestrator runner review metrics precision reflects suppressed findings requires integrated setup/assertions.
-  tests/unit/test_evaluation_harness_runner.py:
-    test_orchestrator_runner_review_metrics_precision_reflects_suppressed_findings: Test verifying orchestrator runner review metrics precision reflects suppressed findings requires integrated setup/assertions.
-  tests/unit/test_gemini_cli_worker.py:
-    test_gemini_cli_worker_accumulates_lint_artifacts_across_fix_loops: Test verifying gemini cli worker accumulates lint artifacts across fix loops requires integrated setup/assertions.
-  tests/unit/test_gemini_cli_worker_self_review.py:
-    test_gemini_cli_worker_accumulates_lint_artifacts_across_fix_loops: Highly stateful logic for test_gemini_cli_worker_accumulates_lint_artifacts_across_fix_loops; splitting requires unnatural parameter coupling.
-  tests/unit/test_native_agent_runner.py:
-    test_native_agent_runner_enforces_strict_isolation: Highly stateful logic for test_native_agent_runner_enforces_strict_isolation; splitting requires unnatural parameter coupling.
-  tests/unit/test_observability.py:
-    test_configure_tracing_from_env_bootstraps_otel_and_openinference: Test verifying configure tracing from env bootstraps otel and openinference requires integrated setup/assertions.
-  tests/unit/test_observability_env.py:
-    test_configure_tracing_from_env_bootstraps_otel_and_openinference: Highly stateful logic for test_configure_tracing_from_env_bootstraps_otel_and_openinference; splitting requires unnatural parameter coupling.
-  tests/unit/test_openrouter_cli_worker.py:
-    test_openrouter_cli_worker_accumulates_lint_artifacts_across_fix_loops: Highly stateful logic for test_openrouter_cli_worker_accumulates_lint_artifacts_across_fix_loops; splitting requires unnatural parameter coupling.
-  tests/unit/test_orchestrator_state.py:
-    test_orchestrator_state_supports_nested_workflow_data: Highly stateful logic for test_orchestrator_state_supports_nested_workflow_data; splitting requires unnatural parameter coupling.
-  tests/unit/test_self_review.py:
-    test_run_shared_self_review_fix_loop_runs_fix_pass_and_merges_artifacts: Test verifying run shared self review fix loop runs fix pass and merges artifacts requires integrated setup/assertions.
-  tests/unit/test_task_execution_service_delivery.py:
-    test_create_task_recovers_from_duplicate_user_and_session_race: Highly stateful logic for test_create_task_recovers_from_duplicate_user_and_session_race; splitting requires unnatural parameter coupling.
-  tests/unit/test_task_execution_service_persistence.py:
-    test_persist_execution_outcome_persists_session_state_update: Highly stateful logic for test_persist_execution_outcome_persists_session_state_update; splitting requires unnatural parameter coupling.
-    test_persist_execution_outcome_persists_structured_review_result_artifact: Highly stateful logic for test_persist_execution_outcome_persists_structured_review_result_artifact; splitting requires unnatural parameter coupling.
-    test_persist_execution_outcome_persists_worker_and_independent_review_artifacts: Test verifying persist execution outcome persists worker and independent review artifacts requires integrated setup/assertions.
-    test_retention_cleanup_clears_workspace_files_and_persisted_artifacts: Highly stateful logic for test_retention_cleanup_clears_workspace_files_and_persisted_artifacts; splitting requires unnatural parameter coupling.
-  tests/unit/test_task_execution_service_queue.py:
-    test_apply_task_approval_decision_reject_is_terminal_and_conflict_is_reported: Highly stateful logic for test_apply_task_approval_decision_reject_is_terminal_and_conflict_is_reported; splitting requires unnatural parameter coupling.
-    test_apply_task_approval_decision_requeues_approved_task: Highly stateful logic for test_apply_task_approval_decision_requeues_approved_task; splitting requires unnatural parameter coupling.
-    test_run_queued_task_rejected_approval_stays_failed: Highly stateful logic for test_run_queued_task_rejected_approval_stays_failed; splitting requires unnatural parameter coupling.
-    test_run_queued_task_requeues_failed_result_when_retries_remain: Highly stateful logic for test_run_queued_task_requeues_failed_result_when_retries_remain; splitting requires unnatural parameter coupling.
-    test_run_queued_task_terminal_interrupt_emits_awaiting_approval_without_requeue: Highly stateful logic for test_run_queued_task_terminal_interrupt_emits_awaiting_approval_without_requeue; splitting requires unnatural parameter coupling.
-  tests/unit/test_task_execution_service_submit.py:
-    test_submit_task_emits_progress_notifications_for_success: Highly stateful logic for test_submit_task_emits_progress_notifications_for_success; splitting requires unnatural parameter coupling.
-  tests/unit/test_task_execution_timeline.py:
-    test_persist_execution_outcome_deduplicates_retry_attempts: Highly stateful logic for test_persist_execution_outcome_deduplicates_retry_attempts; splitting requires unnatural parameter coupling.
-    test_persist_execution_outcome_saves_timeline: Highly stateful logic for test_persist_execution_outcome_saves_timeline; splitting requires unnatural parameter coupling.
-  tests/unit/test_task_snapshot_mapping_regressions.py:
-    test_map_task_to_snapshot_backfills_legacy_run_ids_and_handles_legacy_task_spec: Highly stateful logic for test_map_task_to_snapshot_backfills_legacy_run_ids_and_handles_legacy_task_spec; splitting requires unnatural parameter coupling.
-  workers/cli_runtime_context.py:
-    _build_condensed_context_summary: Compiles conversation history for context windows; tight coupling to message structure.
-  workers/cli_runtime_files.py:
-    collect_changed_files: Git workspace traversal and diff parsing; contiguous subprocess logic.
-  workers/cli_runtime_tool_execution.py:
-    _record_tool_result: Formats tool outputs for trace context; monolithic data transformation.
-    execute_tool_turn: Parses tool actions, runs commands, and tracks budget; highly stateful across the turn.
-  workers/cli_runtime_tool_turn.py:
-    maybe_finalize_for_stall: Detects LLM repetition loops; relies on sequential string matching heuristics.
-  workers/cli_runtime_types.py:
-    settings_from_budget: Merges runtime safety overrides from budget; highly cohesive dictionary mapping.
-  workers/codex_cli_worker.py:
-    _execute_native_runtime: Submits raw task to native agent; coordinates subprocess, trace context, and timeouts.
-    _execute_runtime_phase: Executes a workflow phase in sandbox; tightly coupled to sandbox session state.
-  workers/codex_cli_worker_native.py:
-    _execute_native_runtime: Submits raw task to native agent; coordinates subprocess, trace context, and timeouts.
-  workers/codex_cli_worker_runtime.py:
-    _execute_runtime_phase: Executes a workflow phase in sandbox; tightly coupled to sandbox session state.
   workers/codex_exec_adapter.py:
     next_step: Calls LLM API and parses tool outputs; monolithic due to strict schema handling.
   workers/gemini_cli_adapter.py:
     next_step: Calls LLM API and parses tool outputs; monolithic due to strict schema handling.
-  workers/gemini_cli_worker.py:
-    _execute_native_runtime: Submits raw task to native agent; coordinates subprocess, trace context, and timeouts.
-    _execute_runtime_phase: Executes a workflow phase in sandbox; tightly coupled to sandbox session state.
-  workers/gemini_cli_worker_native.py:
-    _execute_native_runtime: Submits raw task to native agent; coordinates subprocess, trace context, and timeouts.
-  workers/gemini_cli_worker_runtime.py:
-    _execute_runtime_phase: Executes a workflow phase in sandbox; tightly coupled to sandbox session state.
-  workers/native_agent_finalize.py:
-    _finalize_native_agent_run: Constructs NativeAgentRunResult and records span metadata; highly cohesive data mapping.
-  workers/native_agent_runner.py:
-    run_native_agent: Coordinates subprocess execution, trace context injection, and timeout handling; extracting disrupts error scope.
   workers/openrouter_adapter.py:
     next_step: Calls LLM API and parses tool outputs; monolithic due to strict schema handling.
-  workers/openrouter_cli_worker.py:
-    _execute_runtime_phase: Executes a workflow phase in sandbox; tightly coupled to sandbox session state.
   workers/self_review.py:
-    _build_changed_file_windows: Chunks diffs for context limits; complex line-number arithmetic prevents splitting.
     run_shared_self_review_fix_loop: Bounded retry loop mutating execution in place; heavy local state coupling.
-  workers/self_review_packet.py:
-    _build_changed_file_windows: Chunks diffs for context limits; complex line-number arithmetic prevents splitting.
-  workers/shell_worker.py:
-    run: Provisions workspace and runs shell script; contiguous setup and teardown logic.

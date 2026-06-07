@@ -471,6 +471,17 @@ class GeminiCliWorkerNativeMixin:
             )
         )
 
+        return self._build_worker_result_from_native_run(
+            workspace, native_result, runtime_mode, cancel_token
+        )
+
+    def _build_worker_result_from_native_run(
+        self,
+        workspace: WorkspaceHandle,
+        native_result: NativeAgentRunResult,
+        runtime_mode: WorkerRuntimeMode,
+        cancel_token: Callable[[], bool] | None,
+    ) -> WorkerResult:
         summary = build_failure_summary(
             summary=format_native_run_summary(native_result),
             final_message=native_result.final_message,

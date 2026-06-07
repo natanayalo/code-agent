@@ -180,6 +180,94 @@ def _extract_diff_line_hints(diff_text: str) -> dict[str, list[tuple[int, int]]]
     return {path: _merge_line_ranges(ranges) for path, ranges in line_hints.items() if ranges}
 
 
+def _get_changed_file_lines(
+    repo_path: Path,
+    file_path: str,
+    windows: list[str],
+) -> list[str] | None:
+    """Read file lines safely, appending skip/error messages to windows if unable."""
+    resolved_path = (repo_path / file_path).resolve()
+    try:
+        resolved_path.relative_to(repo_path.resolve())
+    except ValueError:
+        windows.append(f"- {file_path}: [skipped: outside repo path]")
+        return None
+    if not resolved_path.is_file():
+        windows.append(f"- {file_path}: [missing]")
+        return None
+    try:
+        file_size = resolved_path.stat().st_size
+    except OSError as exc:
+        windows.append(f"- {file_path}: [stat failed: {exc}]")
+        return None
+    if file_size > DEFAULT_REVIEW_PACKET_MAX_FILE_BYTES:
+        windows.append(
+            f"- {file_path}: [skipped: file size {file_size} bytes exceeds "
+            f"{DEFAULT_REVIEW_PACKET_MAX_FILE_BYTES}-byte limit]"
+        )
+        return None
+    try:
+        return resolved_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        windows.append(f"- {file_path}: [read failed: {exc}]")
+        return None
+
+
+def _format_file_window_blocks(
+    file_path: str,
+    file_lines: list[str],
+    window_ranges: list[tuple[int, int]],
+    total_lines: int,
+    windows: list[str],
+) -> int:
+    """Format individual code windows for a file and return the updated total lines."""
+    file_window_count = 0
+    for first_line, last_line in window_ranges:
+        if total_lines >= DEFAULT_REVIEW_PACKET_MAX_CODE_LINES:
+            break
+        if file_window_count >= DEFAULT_REVIEW_PACKET_MAX_WINDOWS_PER_FILE:
+            windows.append(
+                f"- {file_path}: [additional windows omitted after "
+                f"{DEFAULT_REVIEW_PACKET_MAX_WINDOWS_PER_FILE}]"
+            )
+            break
+        if last_line < first_line:
+            continue
+        remaining_lines = DEFAULT_REVIEW_PACKET_MAX_CODE_LINES - total_lines
+        if remaining_lines <= 0:
+            break
+        clipped_last_line = min(last_line, first_line + remaining_lines - 1)
+        if clipped_last_line < first_line:
+            break
+
+        section_lines = file_lines[first_line - 1 : clipped_last_line]
+        numbered_lines = "\n".join(
+            f"{line_number:04d}: {line_text}"
+            for line_number, line_text in enumerate(section_lines, start=first_line)
+        )
+        code_fence = markdown_fence_for_content(numbered_lines)
+        windows.append(
+            "\n".join(
+                [
+                    f"- {file_path} ({first_line}-{clipped_last_line})",
+                    f"{code_fence}text",
+                    numbered_lines or "<empty>",
+                    code_fence,
+                ]
+            )
+        )
+        total_lines += len(section_lines)
+        file_window_count += 1
+        if clipped_last_line < last_line:
+            windows.append(
+                f"- {file_path}: [window truncated to respect "
+                f"{DEFAULT_REVIEW_PACKET_MAX_CODE_LINES}-line packet budget]"
+            )
+            break
+
+    return total_lines
+
+
 def _build_changed_file_windows(
     *,
     repo_path: Path | None,
@@ -199,30 +287,8 @@ def _build_changed_file_windows(
     for file_path in changed_files:
         if total_lines >= DEFAULT_REVIEW_PACKET_MAX_CODE_LINES:
             break
-        resolved_path = (repo_path / file_path).resolve()
-        try:
-            resolved_path.relative_to(repo_path.resolve())
-        except ValueError:
-            windows.append(f"- {file_path}: [skipped: outside repo path]")
-            continue
-        if not resolved_path.is_file():
-            windows.append(f"- {file_path}: [missing]")
-            continue
-        try:
-            file_size = resolved_path.stat().st_size
-        except OSError as exc:
-            windows.append(f"- {file_path}: [stat failed: {exc}]")
-            continue
-        if file_size > DEFAULT_REVIEW_PACKET_MAX_FILE_BYTES:
-            windows.append(
-                f"- {file_path}: [skipped: file size {file_size} bytes exceeds "
-                f"{DEFAULT_REVIEW_PACKET_MAX_FILE_BYTES}-byte limit]"
-            )
-            continue
-        try:
-            file_lines = resolved_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError as exc:
-            windows.append(f"- {file_path}: [read failed: {exc}]")
+        file_lines = _get_changed_file_lines(repo_path, file_path, windows)
+        if file_lines is None:
             continue
 
         hint_ranges = line_hints_by_file.get(file_path, [])
@@ -242,49 +308,13 @@ def _build_changed_file_windows(
             windows.append(f"- {file_path}: [empty]")
             continue
 
-        file_window_count = 0
-        for first_line, last_line in window_ranges:
-            if total_lines >= DEFAULT_REVIEW_PACKET_MAX_CODE_LINES:
-                break
-            if file_window_count >= DEFAULT_REVIEW_PACKET_MAX_WINDOWS_PER_FILE:
-                windows.append(
-                    f"- {file_path}: [additional windows omitted after "
-                    f"{DEFAULT_REVIEW_PACKET_MAX_WINDOWS_PER_FILE}]"
-                )
-                break
-            if last_line < first_line:
-                continue
-            remaining_lines = DEFAULT_REVIEW_PACKET_MAX_CODE_LINES - total_lines
-            if remaining_lines <= 0:
-                break
-            clipped_last_line = min(last_line, first_line + remaining_lines - 1)
-            if clipped_last_line < first_line:
-                break
-
-            section_lines = file_lines[first_line - 1 : clipped_last_line]
-            numbered_lines = "\n".join(
-                f"{line_number:04d}: {line_text}"
-                for line_number, line_text in enumerate(section_lines, start=first_line)
-            )
-            code_fence = markdown_fence_for_content(numbered_lines)
-            windows.append(
-                "\n".join(
-                    [
-                        f"- {file_path} ({first_line}-{clipped_last_line})",
-                        f"{code_fence}text",
-                        numbered_lines or "<empty>",
-                        code_fence,
-                    ]
-                )
-            )
-            total_lines += len(section_lines)
-            file_window_count += 1
-            if clipped_last_line < last_line:
-                windows.append(
-                    f"- {file_path}: [window truncated to respect "
-                    f"{DEFAULT_REVIEW_PACKET_MAX_CODE_LINES}-line packet budget]"
-                )
-                break
+        total_lines = _format_file_window_blocks(
+            file_path=file_path,
+            file_lines=file_lines,
+            window_ranges=window_ranges,
+            total_lines=total_lines,
+            windows=windows,
+        )
 
     return "\n".join(windows) if windows else "<none>"
 

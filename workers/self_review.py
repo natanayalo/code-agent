@@ -245,6 +245,63 @@ def remaining_runtime_settings(
     return base.model_copy(update=update_payload)
 
 
+def _run_single_review_turn(
+    runtime_adapter: CliRuntimeAdapter,
+    review_prompt: str,
+    repo_path: Path,
+    review_attempt: int,
+    task_id: str | None,
+    session_id: str | None,
+    model_name: str | None,
+    adapter_failure_log_message: str | None,
+    adapter_failure_logger: logging.Logger | None,
+) -> ReviewResult:
+    try:
+        turn_name = f"Turn {review_attempt + 1} (Self-Review)"
+        if model_name:
+            turn_name = f"{model_name} Turn {review_attempt + 1} (Self-Review)"
+
+        with start_optional_span(
+            tracer_name=TRACER_NAME,
+            span_name=turn_name,
+            attributes=with_span_kind(SPAN_KIND_AGENT),
+            task_id=task_id,
+            session_id=session_id,
+        ):
+            set_span_input_output(input_data=review_prompt)
+            review_step = runtime_adapter.next_step(
+                (),
+                prompt_override=review_prompt,
+                working_directory=repo_path,
+                task_id=task_id,
+                session_id=session_id,
+            )
+            if review_step.kind == "final" and review_step.final_output:
+                set_span_input_output(input_data=None, output_data=review_step.final_output)
+            elif review_step.kind == "tool_call":
+                set_span_input_output(
+                    input_data=None,
+                    output_data=f"Executing {review_step.tool_name}",
+                )
+    except Exception as exc:
+        if adapter_failure_log_message and adapter_failure_logger is not None:
+            adapter_failure_logger.warning(adapter_failure_log_message, exc_info=exc)
+        return fallback_no_findings_review(
+            "Worker self-review failed to return a structured payload."
+        )
+
+    if review_step.kind != "final" or review_step.final_output is None:
+        return fallback_no_findings_review("Worker self-review returned a non-final response.")
+
+    parsed_review_result = parse_review_result(review_step.final_output)
+    if parsed_review_result is None:
+        return fallback_no_findings_review(
+            "Worker self-review returned an invalid structured payload."
+        )
+
+    return parsed_review_result
+
+
 def run_shared_self_review_fix_loop(
     *,
     execution: CliRuntimeExecutionResult,
@@ -295,55 +352,18 @@ def run_shared_self_review_fix_loop(
             commands_run=execution.commands_run,
         )
 
-        try:
-            turn_name = f"Turn {review_attempt + 1} (Self-Review)"
-            if model_name:
-                turn_name = f"{model_name} Turn {review_attempt + 1} (Self-Review)"
+        review_result = _run_single_review_turn(
+            runtime_adapter=runtime_adapter,
+            review_prompt=review_prompt,
+            repo_path=repo_path,
+            review_attempt=review_attempt,
+            task_id=task_id,
+            session_id=session_id,
+            model_name=model_name,
+            adapter_failure_log_message=adapter_failure_log_message,
+            adapter_failure_logger=adapter_failure_logger,
+        )
 
-            with start_optional_span(
-                tracer_name=TRACER_NAME,
-                span_name=turn_name,
-                attributes=with_span_kind(SPAN_KIND_AGENT),
-                task_id=task_id,
-                session_id=session_id,
-            ):
-                set_span_input_output(input_data=review_prompt)
-                review_step = runtime_adapter.next_step(
-                    (),
-                    prompt_override=review_prompt,
-                    working_directory=repo_path,
-                    task_id=task_id,
-                    session_id=session_id,
-                )
-                if review_step.kind == "final" and review_step.final_output:
-                    set_span_input_output(input_data=None, output_data=review_step.final_output)
-                elif review_step.kind == "tool_call":
-                    set_span_input_output(
-                        input_data=None,
-                        output_data=f"Executing {review_step.tool_name}",
-                    )
-        except Exception as exc:
-            if adapter_failure_log_message and adapter_failure_logger is not None:
-                adapter_failure_logger.warning(adapter_failure_log_message, exc_info=exc)
-            review_result = fallback_no_findings_review(
-                "Worker self-review failed to return a structured payload."
-            )
-            break
-
-        if review_step.kind != "final" or review_step.final_output is None:
-            review_result = fallback_no_findings_review(
-                "Worker self-review returned a non-final response."
-            )
-            break
-
-        parsed_review_result = parse_review_result(review_step.final_output)
-        if parsed_review_result is None:
-            review_result = fallback_no_findings_review(
-                "Worker self-review returned an invalid structured payload."
-            )
-            break
-
-        review_result = parsed_review_result
         if review_result.outcome == "no_findings":
             break
         if review_attempt >= max_fix_iterations:
