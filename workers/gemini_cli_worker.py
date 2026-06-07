@@ -316,6 +316,31 @@ class GeminiCliWorker(GeminiCliWorkerRuntimeMixin, GeminiCliWorkerNativeMixin, W
 
         return result, container, session
 
+    def _safe_provision_workspace(
+        self,
+        request: WorkerRequest,
+        repo_url: str,
+        workspace_task_id: str,
+    ) -> WorkspaceHandle | WorkerResult:
+        try:
+            return self._provision_workspace(
+                repo_url,
+                request.branch,
+                workspace_task_id=workspace_task_id,
+                workspace_id=request.workspace_id,
+            )
+        except (WorkspaceManagerError, OSError) as exc:
+            logger.exception(
+                "Gemini CLI worker failed to provision workspace",
+                extra={"session_id": request.session_id, "workspace_task_id": workspace_task_id},
+            )
+            return WorkerResult(
+                status="error",
+                summary=f"GeminiCliWorker failed to provision a workspace: {exc}",
+                failure_kind="sandbox_infra",
+                next_action_hint="inspect_worker_configuration",
+            )
+
     def _run_sync(
         self,
         request: WorkerRequest,
@@ -341,24 +366,10 @@ class GeminiCliWorker(GeminiCliWorkerRuntimeMixin, GeminiCliWorkerNativeMixin, W
             },
         )
 
-        try:
-            workspace = self._provision_workspace(
-                repo_url,
-                request.branch,
-                workspace_task_id=workspace_task_id,
-                workspace_id=request.workspace_id,
-            )
-        except (WorkspaceManagerError, OSError) as exc:
-            logger.exception(
-                "Gemini CLI worker failed to provision workspace",
-                extra={"session_id": request.session_id, "workspace_task_id": workspace_task_id},
-            )
-            return WorkerResult(
-                status="error",
-                summary=f"GeminiCliWorker failed to provision a workspace: {exc}",
-                failure_kind="sandbox_infra",
-                next_action_hint="inspect_worker_configuration",
-            )
+        workspace_or_error = self._safe_provision_workspace(request, repo_url, workspace_task_id)
+        if isinstance(workspace_or_error, WorkerResult):
+            return workspace_or_error
+        workspace = workspace_or_error
 
         result: WorkerResult | None = None
         run_succeeded = False

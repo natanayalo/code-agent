@@ -101,6 +101,66 @@ def record_interaction_response(
         return self.get_task(task_id)
 
 
+def _validate_approval_state(
+    self: Any,
+    task_id: str,
+    approval_state: dict[str, Any] | None,
+    approved: bool,
+) -> ApprovalDecisionResult | None:
+    if approval_state is None:
+        return ApprovalDecisionResult(
+            status="not_waiting",
+            detail="Task is not currently awaiting a manual approval decision.",
+        )
+
+    current_status = str(approval_state.get("status") or "").strip().lower()
+    requested_status = "approved" if approved else "rejected"
+    if current_status in {"approved", "rejected"}:
+        if current_status == requested_status:
+            return ApprovalDecisionResult(
+                status="already_applied",
+                task_snapshot=self.get_task(task_id),
+            )
+        return ApprovalDecisionResult(
+            status="conflict",
+            detail=(
+                "Task approval decision already recorded as "
+                f"'{current_status}' and cannot be changed."
+            ),
+        )
+    if current_status != "pending":
+        return ApprovalDecisionResult(
+            status="not_waiting",
+            detail="Task is not currently awaiting a manual approval decision.",
+        )
+    return None
+
+
+def _handle_approval_rejection(
+    task: Any,
+    worker_run_repo: Any,
+    decided_at: Any,
+) -> None:
+    task.status = TaskStatus.FAILED
+    task.next_attempt_at = None
+    task.last_error = "Manual approval rejected via API decision endpoint."
+    worker_type = task.chosen_worker or task.worker_override or WorkerType.CODEX
+    worker_run_repo.create(
+        task_id=task.id,
+        session_id=task.session_id,
+        worker_type=worker_type,
+        workspace_id=None,
+        started_at=decided_at,
+        finished_at=decided_at,
+        status=WorkerRunStatus.FAILURE,
+        summary="Manual approval rejected via API decision endpoint; task remains failed.",
+        commands_run=[],
+        files_changed_count=0,
+        files_changed=[],
+        artifact_index=[],
+    )
+
+
 def apply_task_approval_decision(
     self: Any,
     *,
@@ -125,36 +185,15 @@ def apply_task_approval_decision(
         approval_state = (
             dict(approval_state_raw) if isinstance(approval_state_raw, Mapping) else None
         )
-        if approval_state is None:
-            return ApprovalDecisionResult(
-                status="not_waiting",
-                detail="Task is not currently awaiting a manual approval decision.",
-            )
+        validation_error = _validate_approval_state(self, task_id, approval_state, approved)
+        if validation_error:
+            return validation_error
 
-        current_status = str(approval_state.get("status") or "").strip().lower()
+        # We know approval_state is not None after validation
+        approval_type = str(approval_state.get("approval_type") or "").strip() or None  # type: ignore[union-attr]
+        reason = str(approval_state.get("reason") or "").strip() or None  # type: ignore[union-attr]
+        resume_token = str(approval_state.get("resume_token") or "").strip() or None  # type: ignore[union-attr]
         requested_status = "approved" if approved else "rejected"
-        if current_status in {"approved", "rejected"}:
-            if current_status == requested_status:
-                return ApprovalDecisionResult(
-                    status="already_applied",
-                    task_snapshot=self.get_task(task_id),
-                )
-            return ApprovalDecisionResult(
-                status="conflict",
-                detail=(
-                    "Task approval decision already recorded as "
-                    f"'{current_status}' and cannot be changed."
-                ),
-            )
-        if current_status != "pending":
-            return ApprovalDecisionResult(
-                status="not_waiting",
-                detail="Task is not currently awaiting a manual approval decision.",
-            )
-
-        approval_type = str(approval_state.get("approval_type") or "").strip() or None
-        reason = str(approval_state.get("reason") or "").strip() or None
-        resume_token = str(approval_state.get("resume_token") or "").strip() or None
         constraints["approval"] = _approval_constraints_payload(
             status=requested_status,
             approval_type=approval_type,
@@ -171,24 +210,7 @@ def apply_task_approval_decision(
             task.next_attempt_at = decided_at
             task.last_error = None
         else:
-            task.status = TaskStatus.FAILED
-            task.next_attempt_at = None
-            task.last_error = "Manual approval rejected via API decision endpoint."
-            worker_type = task.chosen_worker or task.worker_override or WorkerType.CODEX
-            worker_run_repo.create(
-                task_id=task.id,
-                session_id=task.session_id,
-                worker_type=worker_type,
-                workspace_id=None,
-                started_at=decided_at,
-                finished_at=decided_at,
-                status=WorkerRunStatus.FAILURE,
-                summary="Manual approval rejected via API decision endpoint; task remains failed.",
-                commands_run=[],
-                files_changed_count=0,
-                files_changed=[],
-                artifact_index=[],
-            )
+            _handle_approval_rejection(task, worker_run_repo, decided_at)
 
         task.constraints = constraints
         task.lease_owner = None

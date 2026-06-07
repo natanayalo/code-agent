@@ -161,58 +161,42 @@ def build_diff_summary(
     return summary or None
 
 
-def capture_audit_artifacts(
+def _get_git_status_changes(repo_path: Path) -> tuple[list[str], list[str]]:
+    """Return tracked and untracked changes from git status."""
+    status_result = run_git_command(
+        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        cwd=repo_path,
+    )
+    if status_result.returncode != 0:
+        raise RuntimeError(
+            status_result.stderr.decode("utf-8", errors="replace").strip()
+            or "git status failed without output"
+        )
+
+    status_entries = parse_git_status_entries(
+        status_result.stdout.decode("utf-8", errors="replace")
+    )
+    files_changed = list(
+        dict.fromkeys(path for _status, path in status_entries if not _should_ignore_path(path))
+    )
+    untracked_files = [
+        path for status, path in status_entries if status == "??" and not _should_ignore_path(path)
+    ]
+    return files_changed, untracked_files
+
+
+def _snapshot_workspace_changes(
     workspace: WorkspaceHandle,
+    artifact_dir: Path,
     *,
-    stdout: str,
-    stderr: str,
-    exit_code: int,
     redactor: SecretRedactor | None = None,
 ) -> tuple[list[str], list[SandboxArtifact]]:
-    """Persist command artifacts and snapshot workspace changes."""
-    artifact_dir = create_artifact_directory(workspace)
-    artifacts = [
-        write_text_artifact(
-            workspace,
-            artifact_dir,
-            filename="stdout.log",
-            content=redactor.redact(stdout) if redactor else stdout,
-            artifact_type="log",
-            artifact_metadata={"stream": "stdout", "exit_code": exit_code},
-        ),
-        write_text_artifact(
-            workspace,
-            artifact_dir,
-            filename="stderr.log",
-            content=redactor.redact(stderr) if redactor else stderr,
-            artifact_type="log",
-            artifact_metadata={"stream": "stderr", "exit_code": exit_code},
-        ),
-    ]
-
+    """Snapshot workspace changes into sandbox artifacts."""
+    artifacts: list[SandboxArtifact] = []
     files_changed: list[str] = []
     try:
-        status_result = run_git_command(
-            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
-            cwd=workspace.repo_path,
-        )
-        if status_result.returncode != 0:
-            raise RuntimeError(
-                status_result.stderr.decode("utf-8", errors="replace").strip()
-                or "git status failed without output"
-            )
+        files_changed, untracked_files = _get_git_status_changes(workspace.repo_path)
 
-        status_entries = parse_git_status_entries(
-            status_result.stdout.decode("utf-8", errors="replace")
-        )
-        files_changed = list(
-            dict.fromkeys(path for _status, path in status_entries if not _should_ignore_path(path))
-        )
-        untracked_files = [
-            path
-            for status, path in status_entries
-            if status == "??" and not _should_ignore_path(path)
-        ]
         changed_files_content = (
             redactor.redact(format_changed_files(files_changed))
             if redactor
@@ -261,17 +245,52 @@ def capture_audit_artifacts(
             },
         )
         content = f"Failed to inspect workspace changes: {exc}\n"
-        if redactor:
-            content = redactor.redact(content)
         artifacts.append(
             write_text_artifact(
                 workspace,
                 artifact_dir,
                 filename="changed-files.txt",
-                content=content,
+                content=redactor.redact(content) if redactor else content,
                 artifact_type="result_summary",
                 artifact_metadata={"kind": "changed_files", "inspection_error": str(exc)},
             )
         )
+
+    return files_changed, artifacts
+
+
+def capture_audit_artifacts(
+    workspace: WorkspaceHandle,
+    *,
+    stdout: str,
+    stderr: str,
+    exit_code: int,
+    redactor: SecretRedactor | None = None,
+) -> tuple[list[str], list[SandboxArtifact]]:
+    """Persist command artifacts and snapshot workspace changes."""
+    artifact_dir = create_artifact_directory(workspace)
+    artifacts = [
+        write_text_artifact(
+            workspace,
+            artifact_dir,
+            filename="stdout.log",
+            content=redactor.redact(stdout) if redactor else stdout,
+            artifact_type="log",
+            artifact_metadata={"stream": "stdout", "exit_code": exit_code},
+        ),
+        write_text_artifact(
+            workspace,
+            artifact_dir,
+            filename="stderr.log",
+            content=redactor.redact(stderr) if redactor else stderr,
+            artifact_type="log",
+            artifact_metadata={"stream": "stderr", "exit_code": exit_code},
+        ),
+    ]
+
+    files_changed, diff_artifacts = _snapshot_workspace_changes(
+        workspace, artifact_dir, redactor=redactor
+    )
+    artifacts.extend(diff_artifacts)
 
     return files_changed, artifacts

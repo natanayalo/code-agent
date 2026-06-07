@@ -40,6 +40,56 @@ def _truncate_at_line_boundary(
     return f"{prefix}{marker}"
 
 
+def _append_truncated_diff_to_packet(
+    base_packet: str,
+    diff_text: str,
+    max_characters: int,
+) -> str:
+    """Safely append diff text to the base packet within character limits."""
+    diff_fence = markdown_fence_for_content(diff_text)
+    diff_header = "\n\n### Diff Excerpt\n"
+    truncation_marker = "\n... (truncated)"
+    diff_open = f"{diff_fence}diff\n"
+    diff_close = f"\n{diff_fence}"
+    diff_overhead = len(diff_header) + len(diff_open) + len(diff_close)
+    content_budget = max(max_characters - diff_overhead, 0)
+    min_base_budget = min(DEFAULT_REVIEW_PACKET_MIN_BASE_BUDGET, content_budget)
+    max_diff_budget = max(content_budget - min_base_budget, 0)
+    diff_reserved_budget = min(
+        max(DEFAULT_REVIEW_PACKET_MIN_DIFF_BUDGET, max_characters // 3),
+        max_diff_budget,
+    )
+    base_budget = max(content_budget - diff_reserved_budget, 0)
+    base_packet = _truncate_at_line_boundary(
+        base_packet,
+        max_characters=base_budget,
+        marker=truncation_marker,
+    )
+
+    full_diff_block = f"{diff_open}{diff_text}{diff_close}"
+    if len(base_packet) + len(diff_header) + len(full_diff_block) <= max_characters:
+        return base_packet + diff_header + full_diff_block
+
+    remaining_diff_budget = (
+        max_characters
+        - len(base_packet)
+        - len(diff_header)
+        - len(diff_open)
+        - len(diff_close)
+        - len(truncation_marker)
+    )
+    if remaining_diff_budget <= 0:
+        return base_packet + diff_header + diff_open + truncation_marker + diff_close
+
+    truncated_diff = _truncate_at_line_boundary(
+        diff_text,
+        max_characters=remaining_diff_budget,
+        marker=truncation_marker,
+    )
+
+    return base_packet + diff_header + diff_open + truncated_diff + diff_close
+
+
 def pack_inspection_context(
     *,
     task_text: str,
@@ -110,48 +160,7 @@ def pack_inspection_context(
     if diff_text is None:
         return base_packet
 
-    diff_fence = markdown_fence_for_content(diff_text)
-    diff_header = "\n\n### Diff Excerpt\n"
-    truncation_marker = "\n... (truncated)"
-    diff_open = f"{diff_fence}diff\n"
-    diff_close = f"\n{diff_fence}"
-    diff_overhead = len(diff_header) + len(diff_open) + len(diff_close)
-    content_budget = max(max_characters - diff_overhead, 0)
-    min_base_budget = min(DEFAULT_REVIEW_PACKET_MIN_BASE_BUDGET, content_budget)
-    max_diff_budget = max(content_budget - min_base_budget, 0)
-    diff_reserved_budget = min(
-        max(DEFAULT_REVIEW_PACKET_MIN_DIFF_BUDGET, max_characters // 3),
-        max_diff_budget,
-    )
-    base_budget = max(content_budget - diff_reserved_budget, 0)
-    base_packet = _truncate_at_line_boundary(
-        base_packet,
-        max_characters=base_budget,
-        marker=truncation_marker,
-    )
-
-    full_diff_block = f"{diff_open}{diff_text}{diff_close}"
-    if len(base_packet) + len(diff_header) + len(full_diff_block) <= max_characters:
-        return base_packet + diff_header + full_diff_block
-
-    remaining_diff_budget = (
-        max_characters
-        - len(base_packet)
-        - len(diff_header)
-        - len(diff_open)
-        - len(diff_close)
-        - len(truncation_marker)
-    )
-    if remaining_diff_budget <= 0:
-        return base_packet + diff_header + diff_open + truncation_marker + diff_close
-
-    truncated_diff = _truncate_at_line_boundary(
-        diff_text,
-        max_characters=remaining_diff_budget,
-        marker=truncation_marker,
-    )
-
-    return base_packet + diff_header + diff_open + truncated_diff + diff_close
+    return _append_truncated_diff_to_packet(base_packet, diff_text, max_characters)
 
 
 def pack_reviewer_context(*args: Any, **kwargs: Any) -> str:

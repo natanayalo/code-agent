@@ -115,7 +115,20 @@ def run_cli_runtime_loop_impl(
         if result is not None:
             return result
 
-    exhausted_without_progress = commands_run and loop_state.commands_with_writes == 0
+    return _finalize_exhausted_loop(
+        context=context,
+        settings=settings,
+        loop_state=loop_state,
+    )
+
+
+def _finalize_exhausted_loop(
+    *,
+    context: _ResultContext,
+    settings: CliRuntimeSettings,
+    loop_state: Any,
+) -> CliRuntimeExecutionResult:
+    exhausted_without_progress = context.commands_run and loop_state.commands_with_writes == 0
     if exhausted_without_progress:
         summary = "CLI runtime consumed iterations without meaningful task progress before budget exhaustion."  # noqa: E501
         stop_reason = "no_progress_before_budget"
@@ -126,9 +139,9 @@ def run_cli_runtime_loop_impl(
         status="failure",
         summary=summary,
         stop_reason=stop_reason,  # type: ignore[arg-type]
-        commands_run=commands_run,
-        messages=messages,
-        budget_ledger=budget_ledger,
+        commands_run=context.commands_run,
+        messages=context.messages,
+        budget_ledger=context.budget_ledger,
     )
 
 
