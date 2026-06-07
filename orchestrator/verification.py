@@ -282,6 +282,132 @@ def _internal_tests_passed(state: OrchestratorState) -> bool:
     return all(r.status == "passed" for r in state.result.test_results)
 
 
+def _build_independent_verifier_request(
+    state: OrchestratorState,
+    timeout_seconds: int,
+) -> WorkerRequest:
+    constraints = dict(state.task.constraints)
+    constraints["read_only"] = False
+    if constraints.get("granted_permission") != ToolPermissionLevel.WORKSPACE_WRITE:
+        constraints.pop("granted_permission", None)
+
+    budget = dict(state.task.budget)
+    budget["worker_timeout_seconds"] = timeout_seconds
+
+    return WorkerRequest(
+        session_id=state.session.session_id if state.session is not None else None,
+        repo_url=state.task.repo_url,
+        branch=state.task.branch,
+        workspace_id=state.dispatch.workspace_id
+        or (state.result.workspace_id if state.result else None),
+        read_only=False,
+        task_text=_build_verifier_task_text(state),
+        memory_context=state.memory.model_dump(),
+        task_spec=state.task_spec.model_dump(mode="json") if state.task_spec is not None else None,
+        constraints=constraints,
+        budget=budget,
+        secrets=dict((state.task.secrets or {}) | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
+        tools=state.task.tools,
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+    )
+
+
+async def _execute_verifier_worker(
+    worker_type: str,
+    worker: Worker,
+    request: WorkerRequest,
+    state: OrchestratorState,
+    timeout_seconds: int,
+    is_last_worker: bool,
+) -> tuple[Literal["passed", "failed", "warning"] | None, str | None, str | None]:
+    try:
+        with start_optional_span(
+            tracer_name="orchestrator.verification",
+            span_name=f"independent_verifier.{worker_type}",
+            task_id=state.task.task_id,
+            session_id=state.session.session_id if state.session else None,
+            attempt=state.attempt_count,
+            attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
+        ):
+            set_span_input_output(input_data=request.task_text)
+            verifier_result = await asyncio.wait_for(
+                worker.run(request, system_prompt=_INDEPENDENT_VERIFIER_SYSTEM_PROMPT),
+                timeout=timeout_seconds + _INDEPENDENT_VERIFIER_TIMEOUT_GRACE_SECONDS,
+            )
+
+            if verifier_result.stdout:
+                set_current_span_attribute(NATIVE_AGENT_STDOUT_ATTRIBUTE, verifier_result.stdout)
+            if verifier_result.stderr:
+                set_current_span_attribute(NATIVE_AGENT_STDERR_ATTRIBUTE, verifier_result.stderr)
+            set_span_input_output(input_data=None, output_data=verifier_result.summary)
+
+        if verifier_result.status != "success":
+            message = verifier_result.summary or "no summary returned"
+            if verifier_result.failure_kind in {
+                "provider_error",
+                "provider_auth",
+                "sandbox_infra",
+                "timeout",
+                "model_error",
+                "unknown",
+            }:
+                logger.warning(
+                    f"Independent verifier hit {verifier_result.failure_kind} for {worker_type}: {message}",  # noqa: E501
+                    extra={"task_id": state.task.task_id},
+                )
+                if is_last_worker:
+                    return (
+                        "warning",
+                        "Independent verifier could not complete (all fallbacks exhausted). "
+                        f"Last error ({worker_type}): {message}",
+                        "infra_verifier_unavailable",
+                    )
+                return None, None, None
+            else:
+                return (
+                    "warning",
+                    f"Independent verifier could not complete ({worker_type}): {message}",
+                    "infra_verifier_unavailable",
+                )
+
+        parsed_status, parsed_summary = _parse_verifier_result(verifier_result)
+        return parsed_status, parsed_summary, None
+
+    except TimeoutError:
+        logger.warning(
+            f"Independent verifier timed out for {worker_type}",
+            extra={"task_id": state.task.task_id},
+        )
+        if is_last_worker:
+            if _internal_tests_passed(state):
+                return (
+                    "warning",
+                    f"Independent verifier timed out ({worker_type}), but internal tests passed.",
+                    "infra_verifier_unavailable",
+                )
+            return (
+                "warning",
+                f"Independent verifier timed out ({worker_type}).",
+                "infra_verifier_unavailable",
+            )
+        return None, None, None
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Independent verifier execution failed unexpectedly",
+            exc_info=True,
+            extra={"worker_type": worker_type},
+        )
+        if is_last_worker:
+            return (
+                "warning",
+                f"Independent verifier infrastructure error ({worker_type}): {type(exc).__name__}.",
+                "infra_verifier_unavailable",
+            )
+        return None, None, None
+
+
 async def run_independent_verifier(
     state: OrchestratorState,
     *,
@@ -313,200 +439,24 @@ async def run_independent_verifier(
         )
 
     timeout_seconds = _resolve_independent_verifier_timeout_seconds(state)
-
-    constraints = dict(state.task.constraints)
-    constraints["read_only"] = False
-    if constraints.get("granted_permission") != ToolPermissionLevel.WORKSPACE_WRITE:
-        constraints.pop("granted_permission", None)
-
-    budget = dict(state.task.budget)
-    budget["worker_timeout_seconds"] = timeout_seconds
-
-    request = WorkerRequest(
-        session_id=state.session.session_id if state.session is not None else None,
-        repo_url=state.task.repo_url,
-        branch=state.task.branch,
-        workspace_id=state.dispatch.workspace_id
-        or (state.result.workspace_id if state.result else None),
-        read_only=False,
-        task_text=_build_verifier_task_text(state),
-        memory_context=state.memory.model_dump(),
-        task_spec=state.task_spec.model_dump(mode="json") if state.task_spec is not None else None,
-        constraints=constraints,
-        budget=budget,
-        secrets=dict((state.task.secrets or {}) | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
-        tools=state.task.tools,
-        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
-    )
+    request = _build_independent_verifier_request(state, timeout_seconds)
 
     for i, (worker_type, worker) in enumerate(verifier_workers):
-        try:
-            with start_optional_span(
-                tracer_name="orchestrator.verification",
-                span_name=f"independent_verifier.{worker_type}",
-                task_id=state.task.task_id,
-                session_id=state.session.session_id if state.session else None,
-                attempt=state.attempt_count,
-                attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
-            ):
-                set_span_input_output(input_data=request.task_text)
-                verifier_result = await asyncio.wait_for(
-                    worker.run(request, system_prompt=_INDEPENDENT_VERIFIER_SYSTEM_PROMPT),
-                    timeout=timeout_seconds + _INDEPENDENT_VERIFIER_TIMEOUT_GRACE_SECONDS,
-                )
-
-                # Record output for better visibility in Phoenix (T-180)
-                if verifier_result.stdout:
-                    set_current_span_attribute(
-                        NATIVE_AGENT_STDOUT_ATTRIBUTE, verifier_result.stdout
-                    )
-                if verifier_result.stderr:
-                    set_current_span_attribute(
-                        NATIVE_AGENT_STDERR_ATTRIBUTE, verifier_result.stderr
-                    )
-                set_span_input_output(input_data=None, output_data=verifier_result.summary)
-
-            if verifier_result.status != "success":
-                message = verifier_result.summary or "no summary returned"
-                if verifier_result.failure_kind in {
-                    "provider_error",
-                    "provider_auth",
-                    "sandbox_infra",
-                    "timeout",
-                    "model_error",
-                    "unknown",
-                }:
-                    logger.warning(
-                        f"Independent verifier hit {verifier_result.failure_kind} "
-                        f"for {worker_type}: {message}",
-                        extra={"task_id": state.task.task_id},
-                    )
-                    if i == len(verifier_workers) - 1:
-                        return (
-                            "warning",
-                            "Independent verifier could not complete (all fallbacks exhausted). "
-                            f"Last error ({worker_type}): {message}",
-                            "infra_verifier_unavailable",
-                        )
-                    continue
-                else:
-                    return (
-                        "warning",
-                        f"Independent verifier could not complete ({worker_type}): {message}",
-                        "infra_verifier_unavailable",
-                    )
-
-            parsed_status, parsed_summary = _parse_verifier_result(verifier_result)
-            return parsed_status, parsed_summary, None
-
-        except TimeoutError:
-            logger.warning(
-                f"Independent verifier timed out for {worker_type}",
-                extra={"task_id": state.task.task_id},
-            )
-            if i == len(verifier_workers) - 1:
-                if _internal_tests_passed(state):
-                    return (
-                        "warning",
-                        "Independent verifier timed out "
-                        f"({worker_type}), but internal tests passed.",
-                        "infra_verifier_unavailable",
-                    )
-                return (
-                    "warning",
-                    f"Independent verifier timed out ({worker_type}).",
-                    "infra_verifier_unavailable",
-                )
-            continue
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.warning(
-                "Independent verifier execution failed unexpectedly",
-                exc_info=True,
-                extra={"worker_type": worker_type},
-            )
-            if i == len(verifier_workers) - 1:
-                return (
-                    "warning",
-                    "Independent verifier infrastructure error "
-                    f"({worker_type}): {type(exc).__name__}.",
-                    "infra_verifier_unavailable",
-                )
-            continue
+        is_last = i == len(verifier_workers) - 1
+        status, msg, code = await _execute_verifier_worker(
+            worker_type, worker, request, state, timeout_seconds, is_last
+        )
+        if status is not None:
+            assert msg is not None
+            return status, msg, code
 
     return "warning", "Independent verifier failed to execute.", "infra_verifier_unavailable"
 
 
-async def run_deterministic_verification(
-    state: OrchestratorState,
-    *,
-    worker_factory: Mapping[str, Worker] | None,
-) -> tuple[Literal["passed", "failed", "warning"], str, dict[str, Any] | None]:
-    """Run explicit verification commands deterministically in the sandbox."""
-    if state.result is None:
-        return "warning", "Deterministic verification skipped: no worker result available.", None
-
-    commands = resolve_verification_commands(state)
-    if not commands:
-        return "passed", "No explicit verification commands defined.", None
-
-    executable_commands, placeholder_commands = split_verification_commands(commands)
-    metadata: dict[str, Any] | None = None
-    if placeholder_commands:
-        metadata = {
-            "placeholder_commands_filtered": True,
-            "placeholder_count": len(placeholder_commands),
-            "placeholder_preview": placeholder_commands[:_VERIFICATION_PLACEHOLDER_PREVIEW_MAX],
-            "executable_count": len(executable_commands),
-        }
-        set_current_span_attribute("code_agent.verification.placeholder_filtered", True)
-        set_current_span_attribute(
-            "code_agent.verification.placeholder_filtered_count", len(placeholder_commands)
-        )
-        add_current_span_event(
-            "code_agent.verification.commands.filtered",
-            {
-                "filtered_count": len(placeholder_commands),
-                "executable_count": len(executable_commands),
-            },
-        )
-    commands = executable_commands
-    if not commands:
-        combined_metadata = dict(metadata or {})
-        combined_metadata["skip_reason_code"] = "verification_commands_placeholder_only"
-        return (
-            "warning",
-            (
-                "Deterministic verification skipped: all configured verification "
-                "commands were placeholders."
-            ),
-            combined_metadata,
-        )
-
-    workers = worker_factory or {}
-    # We prefer the shell worker if available.
-    if "shell" not in workers:
-        return (
-            "warning",
-            "Deterministic verification skipped: no 'shell' worker available.",
-            metadata,
-        )
-
-    worker = workers["shell"]
-    timeout_seconds = _resolve_independent_verifier_timeout_seconds(state)
-
-    logger.info(
-        "Running deterministic verification commands",
-        extra={
-            "session_id": state.session.session_id if state.session else None,
-            "task_id": state.task.task_id,
-            "command_count": len(commands),
-        },
-    )
-    # Build a script from commands
+def _build_deterministic_verification_request(
+    state: OrchestratorState, commands: list[str], timeout_seconds: int
+) -> WorkerRequest:
     script = "\n".join(commands)
-
     workspace_id = state.dispatch.workspace_id or (
         state.result.workspace_id if state.result else None
     )
@@ -514,7 +464,7 @@ async def run_deterministic_verification(
     if not workspace_id and state.result is not None and state.result.diff_text:
         constraints["apply_diff_text"] = state.result.diff_text
 
-    request = WorkerRequest(
+    return WorkerRequest(
         session_id=state.session.session_id if state.session is not None else None,
         repo_url=state.task.repo_url,
         branch=state.task.branch,
@@ -527,6 +477,39 @@ async def run_deterministic_verification(
         runtime_mode=WorkerRuntimeMode.SHELL,
     )
 
+
+def _extract_verification_placeholder_metadata(
+    placeholder_commands: list[str], executable_commands: list[str]
+) -> dict[str, Any] | None:
+    if not placeholder_commands:
+        return None
+    metadata = {
+        "placeholder_commands_filtered": True,
+        "placeholder_count": len(placeholder_commands),
+        "placeholder_preview": placeholder_commands[:_VERIFICATION_PLACEHOLDER_PREVIEW_MAX],
+        "executable_count": len(executable_commands),
+    }
+    set_current_span_attribute("code_agent.verification.placeholder_filtered", True)
+    set_current_span_attribute(
+        "code_agent.verification.placeholder_filtered_count", len(placeholder_commands)
+    )
+    add_current_span_event(
+        "code_agent.verification.commands.filtered",
+        {
+            "filtered_count": len(placeholder_commands),
+            "executable_count": len(executable_commands),
+        },
+    )
+    return metadata
+
+
+async def _execute_deterministic_verification_worker(
+    worker: Worker,
+    request: WorkerRequest,
+    state: OrchestratorState,
+    timeout_seconds: int,
+    metadata: dict[str, Any] | None,
+) -> tuple[Literal["passed", "failed", "warning"], str, dict[str, Any] | None]:
     try:
         with start_optional_span(
             tracer_name="orchestrator.verification",
@@ -536,13 +519,12 @@ async def run_deterministic_verification(
             attempt=state.attempt_count,
             attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
         ):
-            set_span_input_output(input_data=script)
+            set_span_input_output(input_data=request.task_text)
             verifier_result = await asyncio.wait_for(
                 worker.run(request),
                 timeout=timeout_seconds + _INDEPENDENT_VERIFIER_TIMEOUT_GRACE_SECONDS,
             )
 
-            # Record output for better visibility in Phoenix (T-180)
             if verifier_result.stdout:
                 set_current_span_attribute(NATIVE_AGENT_STDOUT_ATTRIBUTE, verifier_result.stdout)
             if verifier_result.stderr:
@@ -552,15 +534,10 @@ async def run_deterministic_verification(
         if _internal_tests_passed(state):
             return (
                 "warning",
-                f"Deterministic verification timed out after {timeout_seconds}s, "
-                "but internal tests passed.",
+                f"Deterministic verification timed out after {timeout_seconds}s, but internal tests passed.",  # noqa: E501
                 metadata,
             )
-        return (
-            "failed",
-            f"Deterministic verification timed out after {timeout_seconds}s.",
-            metadata,
-        )
+        return "failed", f"Deterministic verification timed out after {timeout_seconds}s.", metadata
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -590,3 +567,58 @@ async def run_deterministic_verification(
         },
     )
     return "passed", "Explicit verification commands passed.", metadata
+
+
+async def run_deterministic_verification(
+    state: OrchestratorState,
+    *,
+    worker_factory: Mapping[str, Worker] | None,
+) -> tuple[Literal["passed", "failed", "warning"], str, dict[str, Any] | None]:
+    """Run explicit verification commands deterministically in the sandbox."""
+    if state.result is None:
+        return "warning", "Deterministic verification skipped: no worker result available.", None
+
+    commands = resolve_verification_commands(state)
+    if not commands:
+        return "passed", "No explicit verification commands defined.", None
+
+    executable_commands, placeholder_commands = split_verification_commands(commands)
+    metadata = _extract_verification_placeholder_metadata(placeholder_commands, executable_commands)
+
+    commands = executable_commands
+    if not commands:
+        combined_metadata = dict(metadata or {})
+        combined_metadata["skip_reason_code"] = "verification_commands_placeholder_only"
+        return (
+            "warning",
+            (
+                "Deterministic verification skipped: all configured verification "
+                "commands were placeholders."
+            ),
+            combined_metadata,
+        )
+
+    workers = worker_factory or {}
+    if "shell" not in workers:
+        return (
+            "warning",
+            "Deterministic verification skipped: no 'shell' worker available.",
+            metadata,
+        )
+
+    worker = workers["shell"]
+    timeout_seconds = _resolve_independent_verifier_timeout_seconds(state)
+
+    logger.info(
+        "Running deterministic verification commands",
+        extra={
+            "session_id": state.session.session_id if state.session else None,
+            "task_id": state.task.task_id,
+            "command_count": len(commands),
+        },
+    )
+
+    request = _build_deterministic_verification_request(state, commands, timeout_seconds)
+    return await _execute_deterministic_verification_worker(
+        worker, request, state, timeout_seconds, metadata
+    )

@@ -237,6 +237,44 @@ def _run_docker_command(
             f"Failed to start Docker sandbox command ({cmd_str}): {exc}"
         ) from exc
 
+    stdout_buf, stderr_buf, limit_exceeded_flag = _capture_output_with_threads(
+        proc,
+        command,
+        timeout,
+    )
+
+    if limit_exceeded_flag:
+        _kill_docker_container(command)
+        cmd_str = _mask_url_credentials(shlex.join(command))
+        stdout_str = _decode_bounded(stdout_buf, MAX_OUTPUT_SIZE_BYTES)
+        stderr_str = _decode_bounded(stderr_buf, MAX_OUTPUT_SIZE_BYTES)
+        msg = (
+            f"Docker sandbox output limit exceeded ({MAX_OUTPUT_SIZE_BYTES} bytes) "
+            f"for command ({cmd_str}). Partial output:\n"
+            f"stderr: {stderr_str}\nstdout: {stdout_str}"
+        )
+        raise DockerSandboxOutputLimitError(msg)
+
+    stdout_str = _decode_bounded(stdout_buf, MAX_OUTPUT_SIZE_BYTES)
+    stderr_str = _decode_bounded(stderr_buf, MAX_OUTPUT_SIZE_BYTES)
+
+    if redactor:
+        stdout_str = redactor.redact(stdout_str)
+        stderr_str = redactor.redact(stderr_str)
+
+    return subprocess.CompletedProcess(
+        args=command,
+        returncode=proc.returncode,
+        stdout=stdout_str,
+        stderr=stderr_str,
+    )
+
+
+def _capture_output_with_threads(
+    proc: subprocess.Popen[bytes],
+    command: list[str],
+    timeout: float | None,
+) -> tuple[bytearray, bytearray, bool]:
     stdout_buf: bytearray = bytearray()
     stderr_buf: bytearray = bytearray()
 
@@ -293,62 +331,43 @@ def _run_docker_command(
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        proc.kill()
-        proc.wait()
-        _join_threads()
-        _kill_docker_container(command)
-
-        cmd_str = _mask_url_credentials(shlex.join(command))
-
-        def _tail(buf: bytearray) -> str:
-            # Note: because _read_stream_bounded caps capture at MAX_OUTPUT_SIZE_BYTES+1,
-            # this tail reflects the end of the *captured prefix*, not necessarily the
-            # true end of the process output if it produced more than the limit.
-            tail_bytes = buf[-1024:] if len(buf) > 1024 else buf
-            tail = tail_bytes.decode("utf-8", errors="replace").strip()
-            return f"... (tail of captured prefix)\n{tail}" if len(buf) > 1024 else tail
-
-        stdout_tail = _tail(stdout_buf)
-        stderr_tail = _tail(stderr_buf)
-        output = (
-            f"stderr: {stderr_tail}\nstdout: {stdout_tail}".strip()
-            if stderr_tail or stdout_tail
-            else "command timed out without output"
-        )
-
-        raise DockerSandboxRunnerError(
-            f"Docker sandbox command timed out after {timeout}s ({cmd_str}): {output}"
-        ) from exc
+        _handle_sandbox_timeout(exc, proc, command, timeout, stdout_buf, stderr_buf)
     finally:
-        # Always join threads and clean up pipes, even on unexpected exceptions
-        # such as KeyboardInterrupt or SystemExit.
         _join_threads()
 
-    if limit_exceeded.is_set():
-        _kill_docker_container(command)
-        cmd_str = _mask_url_credentials(shlex.join(command))
-        stdout_str = _decode_bounded(stdout_buf, MAX_OUTPUT_SIZE_BYTES)
-        stderr_str = _decode_bounded(stderr_buf, MAX_OUTPUT_SIZE_BYTES)
-        msg = (
-            f"Docker sandbox output limit exceeded ({MAX_OUTPUT_SIZE_BYTES} bytes) "
-            f"for command ({cmd_str}). Partial output:\n"
-            f"stderr: {stderr_str}\nstdout: {stdout_str}"
-        )
-        raise DockerSandboxOutputLimitError(msg)
+    return stdout_buf, stderr_buf, limit_exceeded.is_set()
 
-    stdout_str = _decode_bounded(stdout_buf, MAX_OUTPUT_SIZE_BYTES)
-    stderr_str = _decode_bounded(stderr_buf, MAX_OUTPUT_SIZE_BYTES)
 
-    if redactor:
-        stdout_str = redactor.redact(stdout_str)
-        stderr_str = redactor.redact(stderr_str)
+def _handle_sandbox_timeout(
+    exc: subprocess.TimeoutExpired,
+    proc: subprocess.Popen[bytes],
+    command: list[str],
+    timeout: float | None,
+    stdout_buf: bytearray,
+    stderr_buf: bytearray,
+) -> None:
+    proc.kill()
+    proc.wait()
+    _kill_docker_container(command)
 
-    return subprocess.CompletedProcess(
-        args=command,
-        returncode=proc.returncode,
-        stdout=stdout_str,
-        stderr=stderr_str,
+    cmd_str = _mask_url_credentials(shlex.join(command))
+
+    def _tail(buf: bytearray) -> str:
+        tail_bytes = buf[-1024:] if len(buf) > 1024 else buf
+        tail = tail_bytes.decode("utf-8", errors="replace").strip()
+        return f"... (tail of captured prefix)\n{tail}" if len(buf) > 1024 else tail
+
+    stdout_tail = _tail(stdout_buf)
+    stderr_tail = _tail(stderr_buf)
+    output = (
+        f"stderr: {stderr_tail}\nstdout: {stdout_tail}".strip()
+        if stderr_tail or stdout_tail
+        else "command timed out without output"
     )
+
+    raise DockerSandboxRunnerError(
+        f"Docker sandbox command timed out after {timeout}s ({cmd_str}): {output}"
+    ) from exc
 
 
 class DockerSandboxRunner:
@@ -392,39 +411,7 @@ class DockerSandboxRunner:
         )
 
         started_at = perf_counter()
-        cmd_name = sanitize_command(request.command[0], redactor)
-        span_name = f"{SANDBOX_RUN_SPAN_PREFIX}: {cmd_name}"
-        with start_optional_span(
-            tracer_name="sandbox.runner",
-            span_name=span_name,
-            attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
-        ):
-            try:
-                set_span_input_output(
-                    input_data=redact_and_truncate_output(shlex.join(request.command), redactor)
-                )
-                completed = self._command_runner(
-                    docker_command,
-                    timeout=request.timeout_seconds,
-                    redactor=redactor,
-                )
-                if completed.returncode != 0:
-                    set_span_status_from_outcome(
-                        "failure", f"Command failed with exit code {completed.returncode}"
-                    )
-                else:
-                    set_span_status_from_outcome("success")
-                set_span_input_output(
-                    input_data=None,
-                    output_data=construct_sandbox_output(
-                        completed.stdout, completed.stderr, redactor
-                    ),
-                )
-            except (RuntimeError, OSError) as exc:
-                logger.debug(f"Command execution failed: {exc}", exc_info=True)
-                record_span_exception(exc)
-                set_span_status_from_outcome("error", str(exc))
-                raise
+        completed = self._execute_with_tracing(request, docker_command, redactor)
         duration_seconds = perf_counter() - started_at
 
         redacted_stdout = redactor.redact(completed.stdout) if redactor else completed.stdout
@@ -463,3 +450,44 @@ class DockerSandboxRunner:
             },
         )
         return result
+
+    def _execute_with_tracing(
+        self,
+        request: DockerSandboxCommand,
+        docker_command: list[str],
+        redactor: SecretRedactor | None,
+    ) -> subprocess.CompletedProcess[str]:
+        cmd_name = sanitize_command(request.command[0], redactor)
+        span_name = f"{SANDBOX_RUN_SPAN_PREFIX}: {cmd_name}"
+        with start_optional_span(
+            tracer_name="sandbox.runner",
+            span_name=span_name,
+            attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
+        ):
+            try:
+                set_span_input_output(
+                    input_data=redact_and_truncate_output(shlex.join(request.command), redactor)
+                )
+                completed = self._command_runner(
+                    docker_command,
+                    timeout=request.timeout_seconds,
+                    redactor=redactor,
+                )
+                if completed.returncode != 0:
+                    set_span_status_from_outcome(
+                        "failure", f"Command failed with exit code {completed.returncode}"
+                    )
+                else:
+                    set_span_status_from_outcome("success")
+                set_span_input_output(
+                    input_data=None,
+                    output_data=construct_sandbox_output(
+                        completed.stdout, completed.stderr, redactor
+                    ),
+                )
+                return completed
+            except (RuntimeError, OSError) as exc:
+                logger.debug(f"Command execution failed: {exc}", exc_info=True)
+                record_span_exception(exc)
+                set_span_status_from_outcome("error", str(exc))
+                raise

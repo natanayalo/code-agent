@@ -14,7 +14,7 @@ DEFAULT_CANCELLATION_TIMEOUT_MESSAGE = "Graceful shutdown of sync worker timed o
 T = TypeVar("T")
 
 
-async def run_sync_with_cancellable_executor(
+async def run_sync_with_cancellable_executor(  # noqa: UP047
     run_sync: Callable[[Callable[[], bool]], T],
     *,
     cancellation_timeout_seconds: float = DEFAULT_CANCELLATION_TIMEOUT_SECONDS,

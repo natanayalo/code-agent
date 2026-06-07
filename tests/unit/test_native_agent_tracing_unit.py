@@ -14,11 +14,17 @@ from workers.native_agent_runner import NativeAgentRunRequest, run_native_agent
 
 @pytest.fixture
 def mock_tracing():
+    mock_set_attr = MagicMock()
+    mock_set_io = MagicMock()
+    mock_add_event = MagicMock()
+
     with (
         patch("workers.native_agent_runner.start_optional_span") as mock_start,
-        patch("workers.native_agent_runner.set_current_span_attribute") as mock_set_attr,
-        patch("workers.native_agent_runner.set_span_input_output") as mock_set_io,
-        patch("workers.native_agent_runner.add_current_span_event") as mock_add_event,
+        patch("workers.native_agent_runner.set_current_span_attribute", mock_set_attr),
+        patch("workers.native_agent_finalize.set_current_span_attribute", mock_set_attr),
+        patch("workers.native_agent_tracing.set_span_input_output", mock_set_io),
+        patch("workers.native_agent_runner.add_current_span_event", mock_add_event),
+        patch("workers.native_agent_finalize.add_current_span_event", mock_add_event),
     ):
         span = MagicMock()
         mock_start.return_value.__enter__.return_value = span
@@ -82,6 +88,7 @@ def test_run_native_agent_emits_redacted_span(tmp_path: Path, mock_tracing) -> N
 
     # Check set_attr calls
     attr_calls = {call.args[0]: call.args[1] for call in mock_tracing["set_attr"].call_args_list}
+    print(attr_calls)
     assert attr_calls["code_agent.native_agent.command"] == "echo [REDACTED]"
 
 
@@ -129,7 +136,7 @@ def test_run_native_agent_sets_error_status_on_timeout(tmp_path: Path, mock_trac
     repo_path.mkdir()
 
     with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd=["sleep"], timeout=1)):
-        with patch("workers.native_agent_runner.set_span_status_from_outcome") as mock_set_status:
+        with patch("workers.native_agent_finalize.set_span_status_from_outcome") as mock_set_status:
             run_native_agent(
                 NativeAgentRunRequest(
                     command=["sleep", "10"],
@@ -141,6 +148,7 @@ def test_run_native_agent_sets_error_status_on_timeout(tmp_path: Path, mock_trac
             )
 
     attr_calls = {call.args[0]: call.args[1] for call in mock_tracing["set_attr"].call_args_list}
+    print(attr_calls)
     assert attr_calls["code_agent.native_agent.timed_out"] is True
     assert "code_agent.native_agent.stdout" in attr_calls
     assert "code_agent.native_agent.stderr" in attr_calls

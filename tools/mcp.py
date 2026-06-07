@@ -41,7 +41,7 @@ def _normalize_lookup_name(name: str) -> str | None:
     return normalized_name
 
 
-def _build_normalized_tool_map(
+def _build_normalized_tool_map(  # noqa: UP047
     entries: Iterable[_ToolEntryT],
     *,
     get_name: Callable[[_ToolEntryT], str],

@@ -26,7 +26,7 @@ from workers.adapter_utils import (
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
 from workers.constants import DEFAULT_CODEX_REQUEST_TIMEOUT_SECONDS
 from workers.llm_tracing import set_llm_span_output, with_llm_span
-from workers.prompt import build_runtime_adapter_tool_guidance_lines
+from workers.prompt_tools import build_runtime_adapter_tool_guidance_lines
 from workers.subprocess_env import build_codex_subprocess_env
 
 DEFAULT_CODEX_EXECUTABLE: Final[str] = "codex"

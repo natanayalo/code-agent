@@ -8,10 +8,10 @@ import workers.prompt as prompt
 from workers.base import WorkerRequest
 from workers.prompt import (
     build_build_test_section,
-    build_review_prompt,
     build_system_prompt,
     build_task_context_section,
 )
+from workers.prompt_review import build_review_prompt
 
 
 def test_build_system_prompt_includes_all_expected_sections(tmp_path: Path) -> None:

@@ -17,14 +17,12 @@ from workers.codex_exec_adapter import (
 )
 
 
-def test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    """The adapter should shell out once and parse the schema-constrained last message."""
-    recorded: dict[str, object] = {}
+class _FakeSubprocessForToolCall:
+    def __init__(self) -> None:
+        self.recorded: dict[str, object] = {}
 
-    def fake_run(
+    def __call__(
+        self,
         command: Sequence[str],
         *,
         input: str,
@@ -34,10 +32,10 @@ def test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call(
         timeout: int,
         env: dict[str, str] | None,
     ) -> subprocess.CompletedProcess[str]:
-        recorded["command"] = list(command)
-        recorded["input"] = input
-        recorded["timeout"] = timeout
-        recorded["env"] = env
+        self.recorded["command"] = list(command)
+        self.recorded["input"] = input
+        self.recorded["timeout"] = timeout
+        self.recorded["env"] = env
         output_path = Path(command[command.index("--output-last-message") + 1])
         schema_path = Path(command[command.index("--output-schema") + 1])
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
@@ -56,6 +54,14 @@ def test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call(
             command, 0, stdout='{"type":"turn.started"}\n', stderr=""
         )
 
+
+def test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """The adapter should shell out once and parse the schema-constrained last message."""
+    fake_run = _FakeSubprocessForToolCall()
+    recorded = fake_run.recorded
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     adapter = CodexExecCliRuntimeAdapter(

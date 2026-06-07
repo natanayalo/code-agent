@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 from apps.observability import (
     SPAN_KIND_AGENT,
-    set_span_status_from_outcome,
     start_optional_span,
     with_span_kind,
 )
@@ -21,7 +19,6 @@ from sandbox import (
     DockerSandboxContainer,
     DockerSandboxContainerError,
     DockerSandboxContainerManager,
-    DockerSandboxContainerRequest,
     DockerShellSession,
     DockerShellSessionError,
     WorkspaceCleanupPolicy,
@@ -30,25 +27,17 @@ from sandbox import (
     WorkspaceManagerError,
     WorkspaceRequest,
 )
-from sandbox.policy import is_in_container
-from sandbox.redact import SecretRedactor
 from sandbox.workspace import _mask_url_credentials, default_workspace_root
 from tools import (
     DEFAULT_TOOL_REGISTRY,
-    EXECUTE_BASH_TOOL_NAME,
-    ToolExpectedArtifact,
     ToolPermissionLevel,
     ToolRegistry,
     UnknownToolError,
-    granted_permission_from_constraints,
 )
-from workers.adapter_utils import build_failure_summary, format_native_run_summary
 from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import (
     ArtifactReference,
-    FailureKind,
     Worker,
-    WorkerCommand,
     WorkerRequest,
     WorkerResult,
 )
@@ -58,24 +47,9 @@ from workers.cli_runtime import (
     CliRuntimeExecutionResult,
     CliRuntimeSettings,
     ShellSessionProtocol,
-    run_cli_runtime_loop,
     settings_from_budget,
 )
-from workers.failure_taxonomy import classify_failure_kind
-from workers.native_agent_models import NativeAgentRunResult
-from workers.native_agent_runner import (
-    NativeAgentRunRequest,
-    run_native_agent,
-)
-from workers.post_run_lint import (
-    collect_changed_files_and_apply_post_run_lint_format,
-)
-from workers.prompt import build_system_prompt
 from workers.review import ReviewResult
-from workers.self_review import (
-    collect_diff_for_review,
-    run_shared_self_review_fix_loop,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +215,11 @@ def _workspace_error_result(
     )
 
 
-class CodexCliWorker(Worker):
+from workers.codex_cli_worker_native import CodexCliWorkerNativeMixin  # noqa: E402
+from workers.codex_cli_worker_runtime import CodexCliWorkerRuntimeMixin  # noqa: E402
+
+
+class CodexCliWorker(CodexCliWorkerRuntimeMixin, CodexCliWorkerNativeMixin, Worker):
     """Execute a bounded multi-turn CLI runtime inside a persistent sandbox."""
 
     def __init__(
@@ -389,481 +367,84 @@ class CodexCliWorker(Worker):
             )
         )
 
-    def _setup_runtime_phase(
+    def _execute_runtime_mode(
         self,
         request: WorkerRequest,
-        *,
         workspace: WorkspaceHandle,
         system_prompt_override: str | None,
-    ) -> _RuntimeSetup:
-        """Prepare runtime dependencies before entering the main CLI loop."""
-        tool_names = request.tools
-        if tool_names is None:
-            tool_names = [tool.name for tool in self.tool_registry.list_tools()]
-
-        scoped_secrets = self.tool_registry.get_scoped_secrets(
-            tool_names=tool_names,
-            available_secrets=request.secrets,
-        )
-
-        # Determine if network should be enabled (T-143 escalation policy)
-        network_enabled = request.network_enabled
-        if not network_enabled:
-            granted_permission = granted_permission_from_constraints(request.constraints)
-            if granted_permission == ToolPermissionLevel.NETWORKED_WRITE:
-                for name in tool_names:
-                    if (tool := self.tool_registry.get_tool(name)) and tool.network_required:
-                        network_enabled = True
-                        break
-
-        container = self.container_manager.start(
-            DockerSandboxContainerRequest(
-                workspace=workspace,
-                environment=scoped_secrets,
-                network_enabled=network_enabled,
+        cancel_token: Callable[[], bool] | None,
+    ) -> tuple[WorkerResult, DockerSandboxContainer | None, ShellSessionProtocol | None]:
+        runtime_mode = self._resolve_runtime_mode(request)
+        if runtime_mode == WorkerRuntimeMode.TOOL_LOOP:
+            logger.warning(
+                "Codex tool_loop runtime mode is deprecated. "
+                "Prefer native_agent defaults; keep tool_loop only for explicit legacy opt-in.",
+                extra={
+                    "session_id": request.session_id,
+                    "worker_profile": request.worker_profile,
+                    "runtime_mode": runtime_mode.value,
+                },
             )
-        )
-        session: ShellSessionProtocol | None = None
-        try:
-            session = self._session_factory(container, secrets=request.secrets)
+            runtime_setup = self._setup_runtime_phase(
+                request,
+                workspace=workspace,
+                system_prompt_override=system_prompt_override,
+            )
+            runtime_phase = self._execute_runtime_phase(
+                request,
+                workspace=workspace,
+                runtime_setup=runtime_setup,
+                cancel_token=cancel_token,
+            )
+            result = self._finalize_runtime_result(
+                workspace,
+                runtime_phase,
+                runtime_settings=runtime_setup.runtime_settings,
+                cancel_token=cancel_token,
+            )
+            return result, runtime_setup.container, runtime_setup.session
+        elif runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
             runtime_settings = settings_from_budget(
                 request.budget,
                 defaults=self.runtime_settings,
                 task_id=request.task_id,
                 session_id=request.session_id,
             )
-            granted_permission = granted_permission_from_constraints(request.constraints)
-            bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
-            fallback_command_template = (
-                request.constraints.get("post_run_lint_format_command")
-                if isinstance(request.constraints.get("post_run_lint_format_command"), str)
-                else None
-            )
-            system_prompt = (
-                system_prompt_override
-                if system_prompt_override is not None
-                else build_system_prompt(
-                    request,
-                    workspace.repo_path,
-                    tool_registry=self.tool_registry,
-                )
-            )
-
-            return _RuntimeSetup(
-                container=container,
-                session=session,
+            result = self._execute_native_runtime(
+                request,
+                workspace=workspace,
                 runtime_settings=runtime_settings,
-                granted_permission=granted_permission,
-                expects_changed_files=(
-                    ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts
-                ),
-                fallback_command_template=fallback_command_template,
-                system_prompt=system_prompt,
-            )
-        except Exception:
-            if session is not None:
-                self._close_session(session)
-            self._stop_container(container)
-            raise
-
-    def _execute_runtime_phase(
-        self,
-        request: WorkerRequest,
-        *,
-        workspace: WorkspaceHandle,
-        runtime_setup: _RuntimeSetup,
-        cancel_token: Callable[[], bool] | None,
-    ) -> _RuntimeExecutionPhase:
-        """Execute the main CLI loop and post-run review/lint phases."""
-        redactor = SecretRedactor(list((request.secrets or {}).values()))
-        execution = run_cli_runtime_loop(
-            self.runtime_adapter,
-            runtime_setup.session,
-            system_prompt=runtime_setup.system_prompt,
-            settings=runtime_setup.runtime_settings,
-            tool_registry=self.tool_registry,
-            granted_permission=runtime_setup.granted_permission,
-            working_directory=workspace.repo_path,
-            cancel_token=cancel_token,
-            task_id=request.task_id,
-            session_id=request.session_id,
-            model_name=getattr(self.runtime_adapter, "model", None),
-            redactor=redactor,
-            response_format=request.response_format,
-            response_schema=request.response_schema,
-        )
-
-        files_changed, lint_format_result, lint_format_artifacts = (
-            collect_changed_files_and_apply_post_run_lint_format(
-                session=runtime_setup.session,
-                execution=execution,
-                expect_changed_files_artifact=runtime_setup.expects_changed_files,
-                repo_path_for_detection=workspace.repo_path,
-                repo_working_directory=Path(runtime_setup.container.working_dir),
-                timeout_seconds=runtime_setup.runtime_settings.command_timeout_seconds,
-                fallback_command_template=runtime_setup.fallback_command_template,
-            )
-        )
-
-        review_result: ReviewResult | None = None
-        if execution.status == "success":
-            (
-                review_result,
-                files_changed,
-                lint_format_result,
-                lint_format_artifacts,
-            ) = run_shared_self_review_fix_loop(
-                execution=execution,
-                task_text=request.task_text,
-                constraints=request.constraints,
-                runtime_adapter=self.runtime_adapter,
-                runtime_settings=runtime_setup.runtime_settings,
-                system_prompt=runtime_setup.system_prompt,
-                repo_path=workspace.repo_path,
-                files_changed=files_changed,
-                lint_format_result=lint_format_result,
-                lint_format_artifacts=lint_format_artifacts,
-                post_run_lint_collector=(
-                    lambda current_execution, existing_files: (
-                        collect_changed_files_and_apply_post_run_lint_format(
-                            session=runtime_setup.session,
-                            execution=current_execution,
-                            expect_changed_files_artifact=runtime_setup.expects_changed_files,
-                            repo_path_for_detection=workspace.repo_path,
-                            repo_working_directory=Path(runtime_setup.container.working_dir),
-                            existing_files_changed=existing_files,
-                            timeout_seconds=runtime_setup.runtime_settings.command_timeout_seconds,
-                            fallback_command_template=runtime_setup.fallback_command_template,
-                        )
-                    )
-                ),
-                tool_registry=self.tool_registry,
-                granted_permission=runtime_setup.granted_permission,
-                session=runtime_setup.session,
+                runtime_mode=runtime_mode,
+                system_prompt_override=system_prompt_override,
                 cancel_token=cancel_token,
-                task_id=request.task_id,
-                session_id=request.session_id,
-                model_name=getattr(self.runtime_adapter, "model", None),
-                adapter_failure_log_message=(
-                    "Codex CLI worker self-review adapter failed; recording explicit "
-                    "no-findings fallback."
-                ),
-                adapter_failure_logger=logger,
-                check_cancel_before_review=True,
             )
-
-        return _RuntimeExecutionPhase(
-            execution=execution,
-            files_changed=files_changed,
-            lint_format_result=lint_format_result,
-            lint_format_artifacts=lint_format_artifacts,
-            review_result=review_result,
-        )
-
-    def _finalize_runtime_result(
-        self,
-        workspace: WorkspaceHandle,
-        runtime_phase: _RuntimeExecutionPhase,
-        *,
-        runtime_settings: CliRuntimeSettings,
-        cancel_token: Callable[[], bool] | None,
-    ) -> WorkerResult:
-        """Map runtime phase outputs to the worker result contract."""
-        result = _worker_result_from_execution(
-            workspace,
-            runtime_phase.execution,
-            files_changed=runtime_phase.files_changed,
-            post_run_lint_format=runtime_phase.lint_format_result,
-            review_result=runtime_phase.review_result,
-            diff_text=collect_diff_for_review(
-                workspace.repo_path,
-                timeout_seconds=runtime_settings.command_timeout_seconds,
-            )
-            if runtime_phase.execution.status == "success"
-            else None,
-            artifacts=runtime_phase.lint_format_artifacts,
-        )
-        if cancel_token and cancel_token():
-            result.status = "error"
-            result.summary = "CLI runtime loop was cancelled by the orchestrator timeout."
-            result.failure_kind = "timeout"
-            result.next_action_hint = "inspect_workspace_artifacts"
-
-        set_span_status_from_outcome(result.status, result.summary)
-        return result
-
-    def _resolve_runtime_mode(self, request: WorkerRequest) -> WorkerRuntimeMode:
-        """Resolve effective runtime mode from request override or worker defaults."""
-        if request.runtime_mode is not None:
-            return request.runtime_mode
-        return self.default_runtime_mode
-
-    def _runtime_mode_not_supported_result(self, runtime_mode: WorkerRuntimeMode) -> WorkerResult:
-        """Return a structured failure for unsupported execution runtime modes."""
-        return WorkerResult(
-            status="failure",
-            summary=(
-                "CodexCliWorker does not support runtime mode "
-                f"`{runtime_mode.value}`. Supported modes: native_agent, tool_loop."
-            ),
-            failure_kind="provider_error",
-            next_action_hint="inspect_worker_configuration",
-        )
-
-    def _build_native_command(
-        self,
-        *,
-        workspace: WorkspaceHandle,
-        request: WorkerRequest,
-        final_message_path: Path,
-        runtime_mode: WorkerRuntimeMode,
-        output_schema_path: Path | None = None,
-    ) -> tuple[list[str], dict[str, Any]]:
-        """Build a one-shot `codex exec` command for native-agent mode."""
-        executable = getattr(self.runtime_adapter, "executable", "codex")
-        model = getattr(self.runtime_adapter, "model", None)
-        profile = getattr(self.runtime_adapter, "profile", None)
-        read_only_requested = bool(request.constraints.get("read_only"))
-
-        # Sandbox selection policy (T-172)
-        in_container = is_in_container()
-        repo_approved = False
-        repo_url = request.repo_url or ""
-        for pattern in self.trusted_repo_patterns:
-            if pattern.search(repo_url):
-                repo_approved = True
-                break
-
-        if read_only_requested:
-            sandbox_mode = "read-only"
-        elif in_container and repo_approved:
-            sandbox_mode = "danger-full-access"
+            return result, None, None
         else:
-            sandbox_mode = self.native_sandbox_mode or DEFAULT_CODEX_NATIVE_SANDBOX_MODE
+            return self._runtime_mode_not_supported_result(runtime_mode), None, None
 
-        logger.info(
-            "Selected Codex native sandbox mode: %s",
-            sandbox_mode,
-            extra={
-                "session_id": request.session_id,
-                "in_container": in_container,
-                "repo_approved": repo_approved,
-                "read_only_requested": read_only_requested,
-            },
-        )
-
-        sandbox_metadata = {
-            "sandbox_mode": sandbox_mode,
-            "in_container": in_container,
-            "repo_approved": repo_approved,
-            "read_only_requested": read_only_requested,
-        }
-
-        command = [
-            executable,
-            "exec",
-            "--skip-git-repo-check",
-            "--sandbox",
-            sandbox_mode,
-            "--color",
-            "never",
-            "--output-last-message",
-            str(final_message_path),
-            "--ephemeral",
-            "-C",
-            str(workspace.repo_path),
-        ]
-        if model:
-            command.extend(["--model", str(model)])
-        if profile:
-            command.extend(["--profile", str(profile)])
-        if output_schema_path:
-            command.extend(["--output-schema", str(output_schema_path)])
-        if self.native_event_capture_enabled and runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
-            command.append("--json")
-        command.append("-")
-        return command, sandbox_metadata
-
-    def _build_native_prompt(self, *, system_prompt: str, request: WorkerRequest) -> str:
-        """Build the native-agent prompt packet for one-shot Codex execution."""
-        task_text = request.task_text.strip()
-        delivery_mode = (request.task_spec or {}).get("delivery_mode", "workspace")
-        is_read_only = delivery_mode == "summary"
-        output_instructions = (
-            "Return a comprehensive summary of your findings and any recommendations."
-            if is_read_only
-            else (
-                "Return a concise final summary of what changed, verification performed, "
-                "and any remaining blocker."
-            )
-        )
-        if request.response_schema:
-            import json as json_lib
-
-            schema_json = json_lib.dumps(request.response_schema, indent=2)
-            output_instructions = (
-                "Return exactly one JSON object that strictly matches this JSON schema:\n"
-                f"{schema_json}\n"
-                "Do not include markdown fences, explanatory prose, or extra keys."
-            )
-
-        sections = [
-            system_prompt.strip(),
-            "## Native Execution Task",
-            task_text,
-            "## Output",
-            output_instructions,
-        ]
-        return "\n\n".join(section for section in sections if section.strip())
-
-    def _native_next_action_hint(self, native_result: NativeAgentRunResult) -> str:
-        """Map native run outcomes to follow-up hints."""
-        if native_result.timed_out:
-            return "increase_budget_or_reduce_scope"
-        if native_result.status == "error":
-            return "inspect_worker_configuration"
-        return "inspect_workspace_artifacts"
-
-    def _native_failure_kind(self, native_result: NativeAgentRunResult) -> FailureKind | None:
-        """Classify failure kind for native-agent outcomes."""
-        if native_result.status == "success":
-            return None
-        if native_result.timed_out:
-            return "timeout"
-        summary = build_failure_summary(
-            summary=format_native_run_summary(native_result),
-            final_message=native_result.final_message,
-        )
-        return classify_failure_kind(
-            status=native_result.status,
-            summary=summary,
-            final_message=native_result.final_message,
-            commands_run=[
-                WorkerCommand(
-                    command=native_result.command,
-                    exit_code=native_result.exit_code,
-                    duration_seconds=native_result.duration_seconds,
-                )
-            ],
-        )
-
-    def _execute_native_runtime(
+    def _provision_workspace_safe(
         self,
         request: WorkerRequest,
-        *,
-        workspace: WorkspaceHandle,
-        runtime_settings: CliRuntimeSettings,
-        runtime_mode: WorkerRuntimeMode,
-        system_prompt_override: str | None,
-        cancel_token: Callable[[], bool] | None,
-    ) -> WorkerResult:
-        """Execute one native-agent `codex exec` run and map it into WorkerResult."""
-        if cancel_token and cancel_token():
+        repo_url: str,
+        workspace_task_id: str,
+    ) -> WorkspaceHandle | WorkerResult:
+        try:
+            return self._provision_workspace(
+                repo_url,
+                request.branch,
+                workspace_task_id=workspace_task_id,
+            )
+        except (WorkspaceManagerError, OSError) as exc:
+            logger.exception(
+                "Codex CLI worker failed to provision workspace",
+                extra={"session_id": request.session_id, "workspace_task_id": workspace_task_id},
+            )
             return WorkerResult(
                 status="error",
-                summary="Codex native-agent run was cancelled before execution.",
-                failure_kind="timeout",
-                artifacts=_workspace_artifacts(workspace),
-                next_action_hint="inspect_workspace_artifacts",
+                summary=f"CodexCliWorker failed to provision a workspace: {exc}",
+                failure_kind="sandbox_infra",
+                next_action_hint="inspect_worker_configuration",
             )
-
-        system_prompt = (
-            system_prompt_override
-            if system_prompt_override is not None
-            else build_system_prompt(
-                request,
-                workspace.repo_path,
-                tool_registry=self.tool_registry,
-            )
-        )
-        final_message_path = workspace.workspace_path / ".code-agent" / "native-final-message.json"
-        final_message_path.parent.mkdir(parents=True, exist_ok=True)
-        events_path = (
-            workspace.workspace_path / ".code-agent" / "native-events.jsonl"
-            if self.native_event_capture_enabled
-            else None
-        )
-        output_schema_path = (
-            workspace.workspace_path / ".code-agent" / "native-response.schema.json"
-            if request.response_schema
-            else None
-        )
-        if output_schema_path:
-            output_schema_path.write_text(
-                json.dumps(request.response_schema, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-
-        command, sandbox_metadata = self._build_native_command(
-            workspace=workspace,
-            request=request,
-            final_message_path=final_message_path,
-            runtime_mode=runtime_mode,
-            output_schema_path=output_schema_path,
-        )
-        native_result = run_native_agent(
-            NativeAgentRunRequest(
-                command=command,
-                prompt=self._build_native_prompt(system_prompt=system_prompt, request=request),
-                repo_path=workspace.repo_path,
-                workspace_path=workspace.workspace_path,
-                timeout_seconds=runtime_settings.worker_timeout_seconds,
-                diff_timeout_seconds=runtime_settings.command_timeout_seconds,
-                changed_files_timeout_seconds=runtime_settings.command_timeout_seconds,
-                env=getattr(self.runtime_adapter, "env", None),
-                final_message_path=final_message_path,
-                events_path=events_path,
-                collect_diff=True,
-                collect_changed_files=True,
-                task_id=request.task_id,
-                session_id=request.session_id,
-                redactor=SecretRedactor(list((request.secrets or {}).values())),
-                response_format=request.response_format,
-                response_schema=request.response_schema,
-            )
-        )
-
-        summary = build_failure_summary(
-            summary=format_native_run_summary(native_result),
-            final_message=native_result.final_message,
-        )
-        result = WorkerResult(
-            status=native_result.status,
-            summary=summary,
-            failure_kind=self._native_failure_kind(native_result),
-            budget_usage={
-                "runtime_mode": runtime_mode.value,
-                "native_agent": {
-                    "duration_seconds": native_result.duration_seconds,
-                    "exit_code": native_result.exit_code,
-                    "timed_out": native_result.timed_out,
-                    "event_capture_enabled": self.native_event_capture_enabled,
-                    **sandbox_metadata,
-                },
-            },
-            commands_run=[
-                WorkerCommand(
-                    command=native_result.command,
-                    exit_code=native_result.exit_code,
-                    duration_seconds=native_result.duration_seconds,
-                )
-            ],
-            files_changed=native_result.files_changed,
-            artifacts=[*_workspace_artifacts(workspace), *native_result.artifacts],
-            diff_text=native_result.diff_text,
-            json_payload=native_result.json_payload,
-            next_action_hint=self._native_next_action_hint(native_result),
-            stdout=native_result.stdout,
-            stderr=native_result.stderr,
-        )
-        if cancel_token and cancel_token():
-            result.status = "error"
-            result.summary = "Codex native-agent run was cancelled by the orchestrator timeout."
-            result.failure_kind = "timeout"
-            result.next_action_hint = "inspect_workspace_artifacts"
-
-        set_span_status_from_outcome(result.status, result.summary)
-        return result
 
     def _run_sync(
         self,
@@ -890,23 +471,9 @@ class CodexCliWorker(Worker):
             },
         )
 
-        try:
-            workspace = self._provision_workspace(
-                repo_url,
-                request.branch,
-                workspace_task_id=workspace_task_id,
-            )
-        except (WorkspaceManagerError, OSError) as exc:
-            logger.exception(
-                "Codex CLI worker failed to provision workspace",
-                extra={"session_id": request.session_id, "workspace_task_id": workspace_task_id},
-            )
-            return WorkerResult(
-                status="error",
-                summary=f"CodexCliWorker failed to provision a workspace: {exc}",
-                failure_kind="sandbox_infra",
-                next_action_hint="inspect_worker_configuration",
-            )
+        workspace = self._provision_workspace_safe(request, repo_url, workspace_task_id)
+        if isinstance(workspace, WorkerResult):
+            return workspace
 
         result: WorkerResult | None = None
         run_succeeded = False
@@ -914,56 +481,13 @@ class CodexCliWorker(Worker):
         session: ShellSessionProtocol | None = None
 
         try:
-            runtime_mode = self._resolve_runtime_mode(request)
-            if runtime_mode == WorkerRuntimeMode.TOOL_LOOP:
-                logger.warning(
-                    "Codex tool_loop runtime mode is deprecated. "
-                    "Prefer native_agent defaults; keep tool_loop only for explicit legacy opt-in.",
-                    extra={
-                        "session_id": request.session_id,
-                        "worker_profile": request.worker_profile,
-                        "runtime_mode": runtime_mode.value,
-                    },
-                )
-            if runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
-                runtime_settings = settings_from_budget(
-                    request.budget,
-                    defaults=self.runtime_settings,
-                    task_id=request.task_id,
-                    session_id=request.session_id,
-                )
-                result = self._execute_native_runtime(
-                    request,
-                    workspace=workspace,
-                    runtime_settings=runtime_settings,
-                    runtime_mode=runtime_mode,
-                    system_prompt_override=system_prompt_override,
-                    cancel_token=cancel_token,
-                )
-                run_succeeded = result.status == "success"
-            elif runtime_mode == WorkerRuntimeMode.TOOL_LOOP:
-                runtime_setup = self._setup_runtime_phase(
-                    request,
-                    workspace=workspace,
-                    system_prompt_override=system_prompt_override,
-                )
-                container = runtime_setup.container
-                session = runtime_setup.session
-                runtime_phase = self._execute_runtime_phase(
-                    request,
-                    workspace=workspace,
-                    runtime_setup=runtime_setup,
-                    cancel_token=cancel_token,
-                )
-                result = self._finalize_runtime_result(
-                    workspace,
-                    runtime_phase,
-                    runtime_settings=runtime_setup.runtime_settings,
-                    cancel_token=cancel_token,
-                )
-                run_succeeded = result.status == "success"
-            else:
-                result = self._runtime_mode_not_supported_result(runtime_mode)
+            result, container, session = self._execute_runtime_mode(
+                request=request,
+                workspace=workspace,
+                system_prompt_override=system_prompt_override,
+                cancel_token=cancel_token,
+            )
+            run_succeeded = result.status == "success"
         except (
             DockerSandboxContainerError,
             DockerShellSessionError,

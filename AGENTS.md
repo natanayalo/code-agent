@@ -97,6 +97,8 @@ For each task:
 - Use the repository virtualenv explicitly for Python tooling and checks.
 - Prefer `.venv/bin/...` invocations (for example: `.venv/bin/poetry`, `.venv/bin/pytest`, `.venv/bin/pre-commit`, `.venv/bin/ruff`, `.venv/bin/mypy`).
 - Do not rely on globally installed `python`, `pytest`, or `pre-commit` binaries.
+- The repository enforces strict size checks for Python files and functions via `scripts/check_python_file_sizes.py` (wired into pre-commit and CI).
+- If a file or function exceeds the size threshold but is fundamentally cohesive, you must add an explicit waiver with a justification in `.sizecheck-exceptions.yaml`. Do not ignore the check or remove the hook.
 
 ## Dashboard tooling environment
 

@@ -175,6 +175,141 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     ] == ["task_id", "attempt_number", "sequence_number"]
 
 
+def _seed_downgrade_users_and_sessions(connection, now: str) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO users (id, external_user_id, display_name, created_at, updated_at) "
+            "VALUES (:id, :external_user_id, :display_name, :created_at, :updated_at)"
+        ),
+        {
+            "id": "u1",
+            "external_user_id": "http:test-user",
+            "display_name": "Test User",
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO sessions "
+            "(id, user_id, channel, external_thread_id, active_task_id, status, "
+            "last_seen_at, created_at, updated_at) "
+            "VALUES (:id, :user_id, :channel, :external_thread_id, :active_task_id, "
+            ":status, :last_seen_at, :created_at, :updated_at)"
+        ),
+        {
+            "id": "s1",
+            "user_id": "u1",
+            "channel": "http",
+            "external_thread_id": "thread-1",
+            "active_task_id": None,
+            "status": "active",
+            "last_seen_at": None,
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
+
+
+def _seed_downgrade_tasks(connection, now: str) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO tasks "
+            "(id, session_id, repo_url, branch, callback_url, task_text, worker_override, "
+            "constraints, task_spec, budget, secrets, secrets_encrypted, status, "
+            "attempt_count, max_attempts, next_attempt_at, lease_owner, lease_expires_at, "
+            "last_error, "
+            "priority, chosen_worker, route_reason, created_at, updated_at) "
+            "VALUES (:id, :session_id, :repo_url, :branch, :callback_url, :task_text, "
+            ":worker_override, :constraints, :task_spec, :budget, :secrets, "
+            ":secrets_encrypted, :status, :attempt_count, :max_attempts, "
+            ":next_attempt_at, :lease_owner, :lease_expires_at, :last_error, "
+            ":priority, :chosen_worker, :route_reason, "
+            ":created_at, :updated_at)"
+        ),
+        {
+            "id": "t1",
+            "session_id": "s1",
+            "repo_url": "https://example.com/repo.git",
+            "branch": "master",
+            "callback_url": None,
+            "task_text": "test",
+            "worker_override": None,
+            "constraints": "{}",
+            "task_spec": None,
+            "budget": "{}",
+            "secrets": "{}",
+            "secrets_encrypted": 0,
+            "status": "completed",
+            "attempt_count": 0,
+            "max_attempts": 3,
+            "next_attempt_at": None,
+            "lease_owner": None,
+            "lease_expires_at": None,
+            "last_error": None,
+            "priority": 0,
+            "chosen_worker": "codex",
+            "route_reason": "test",
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
+
+
+def _seed_downgrade_runs_and_artifacts(connection, now: str) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO worker_runs "
+            "(id, task_id, session_id, worker_type, workspace_id, started_at, finished_at, "
+            "retention_expires_at, status, summary, requested_permission, budget_usage, "
+            "verifier_outcome, commands_run, files_changed_count, files_changed, "
+            "artifact_index) "
+            "VALUES (:id, :task_id, :session_id, :worker_type, :workspace_id, :started_at, "
+            ":finished_at, :retention_expires_at, :status, :summary, "
+            ":requested_permission, :budget_usage, :verifier_outcome, :commands_run, "
+            ":files_changed_count, :files_changed, :artifact_index)"
+        ),
+        {
+            "id": "r1",
+            "task_id": "t1",
+            "session_id": "s1",
+            "worker_type": "codex",
+            "workspace_id": None,
+            "started_at": now,
+            "finished_at": now,
+            "retention_expires_at": None,
+            "status": "success",
+            "summary": "ok",
+            "requested_permission": None,
+            "budget_usage": "{}",
+            "verifier_outcome": None,
+            "commands_run": "[]",
+            "files_changed_count": 0,
+            "files_changed": "[]",
+            "artifact_index": "[]",
+        },
+    )
+    connection.execute(
+        text(
+            "INSERT INTO artifacts "
+            "(id, run_id, artifact_type, name, uri, artifact_metadata, created_at, "
+            "updated_at) "
+            "VALUES (:id, :run_id, :artifact_type, :name, :uri, :artifact_metadata, "
+            ":created_at, :updated_at)"
+        ),
+        {
+            "id": "a1",
+            "run_id": "r1",
+            "artifact_type": "review_result",
+            "name": "review_result",
+            "uri": "inline://review_result",
+            "artifact_metadata": "{}",
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
+
+
 def test_alembic_downgrade_cleans_review_result_artifacts(tmp_path: Path) -> None:
     """Downgrading should remove review_result rows before restoring old constraints."""
     database_path = tmp_path / "downgrade_schema.db"
@@ -187,132 +322,9 @@ def test_alembic_downgrade_cleans_review_result_artifacts(tmp_path: Path) -> Non
     engine = create_engine(f"sqlite:///{database_path}")
     with engine.begin() as connection:
         now = "2026-04-22T00:00:00+00:00"
-        connection.execute(
-            text(
-                "INSERT INTO users (id, external_user_id, display_name, created_at, updated_at) "
-                "VALUES (:id, :external_user_id, :display_name, :created_at, :updated_at)"
-            ),
-            {
-                "id": "u1",
-                "external_user_id": "http:test-user",
-                "display_name": "Test User",
-                "created_at": now,
-                "updated_at": now,
-            },
-        )
-        connection.execute(
-            text(
-                "INSERT INTO sessions "
-                "(id, user_id, channel, external_thread_id, active_task_id, status, "
-                "last_seen_at, created_at, updated_at) "
-                "VALUES (:id, :user_id, :channel, :external_thread_id, :active_task_id, "
-                ":status, :last_seen_at, :created_at, :updated_at)"
-            ),
-            {
-                "id": "s1",
-                "user_id": "u1",
-                "channel": "http",
-                "external_thread_id": "thread-1",
-                "active_task_id": None,
-                "status": "active",
-                "last_seen_at": None,
-                "created_at": now,
-                "updated_at": now,
-            },
-        )
-        connection.execute(
-            text(
-                "INSERT INTO tasks "
-                "(id, session_id, repo_url, branch, callback_url, task_text, worker_override, "
-                "constraints, task_spec, budget, secrets, secrets_encrypted, status, "
-                "attempt_count, max_attempts, next_attempt_at, lease_owner, lease_expires_at, "
-                "last_error, "
-                "priority, chosen_worker, route_reason, created_at, updated_at) "
-                "VALUES (:id, :session_id, :repo_url, :branch, :callback_url, :task_text, "
-                ":worker_override, :constraints, :task_spec, :budget, :secrets, "
-                ":secrets_encrypted, :status, :attempt_count, :max_attempts, "
-                ":next_attempt_at, :lease_owner, :lease_expires_at, :last_error, "
-                ":priority, :chosen_worker, :route_reason, "
-                ":created_at, :updated_at)"
-            ),
-            {
-                "id": "t1",
-                "session_id": "s1",
-                "repo_url": "https://example.com/repo.git",
-                "branch": "master",
-                "callback_url": None,
-                "task_text": "test",
-                "worker_override": None,
-                "constraints": "{}",
-                "task_spec": None,
-                "budget": "{}",
-                "secrets": "{}",
-                "secrets_encrypted": 0,
-                "status": "completed",
-                "attempt_count": 0,
-                "max_attempts": 3,
-                "next_attempt_at": None,
-                "lease_owner": None,
-                "lease_expires_at": None,
-                "last_error": None,
-                "priority": 0,
-                "chosen_worker": "codex",
-                "route_reason": "test",
-                "created_at": now,
-                "updated_at": now,
-            },
-        )
-        connection.execute(
-            text(
-                "INSERT INTO worker_runs "
-                "(id, task_id, session_id, worker_type, workspace_id, started_at, finished_at, "
-                "retention_expires_at, status, summary, requested_permission, budget_usage, "
-                "verifier_outcome, commands_run, files_changed_count, files_changed, "
-                "artifact_index) "
-                "VALUES (:id, :task_id, :session_id, :worker_type, :workspace_id, :started_at, "
-                ":finished_at, :retention_expires_at, :status, :summary, "
-                ":requested_permission, :budget_usage, :verifier_outcome, :commands_run, "
-                ":files_changed_count, :files_changed, :artifact_index)"
-            ),
-            {
-                "id": "r1",
-                "task_id": "t1",
-                "session_id": "s1",
-                "worker_type": "codex",
-                "workspace_id": None,
-                "started_at": now,
-                "finished_at": now,
-                "retention_expires_at": None,
-                "status": "success",
-                "summary": "ok",
-                "requested_permission": None,
-                "budget_usage": "{}",
-                "verifier_outcome": None,
-                "commands_run": "[]",
-                "files_changed_count": 0,
-                "files_changed": "[]",
-                "artifact_index": "[]",
-            },
-        )
-        connection.execute(
-            text(
-                "INSERT INTO artifacts "
-                "(id, run_id, artifact_type, name, uri, artifact_metadata, created_at, "
-                "updated_at) "
-                "VALUES (:id, :run_id, :artifact_type, :name, :uri, :artifact_metadata, "
-                ":created_at, :updated_at)"
-            ),
-            {
-                "id": "a1",
-                "run_id": "r1",
-                "artifact_type": "review_result",
-                "name": "review_result",
-                "uri": "inline://review_result",
-                "artifact_metadata": "{}",
-                "created_at": now,
-                "updated_at": now,
-            },
-        )
+        _seed_downgrade_users_and_sessions(connection, now)
+        _seed_downgrade_tasks(connection, now)
+        _seed_downgrade_runs_and_artifacts(connection, now)
 
     command.downgrade(config, "20260422_0016")
 

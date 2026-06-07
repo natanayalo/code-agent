@@ -3,7 +3,6 @@ import re
 import subprocess
 from unittest.mock import MagicMock, patch
 
-import workers.self_review as self_review
 from tools import DEFAULT_TOOL_REGISTRY, ToolPermissionLevel
 from workers.base import WorkerCommand
 from workers.cli_runtime import (
@@ -14,16 +13,19 @@ from workers.cli_runtime import (
     CliRuntimeStep,
 )
 from workers.self_review import (
-    _extract_diff_line_hints,
     _extract_json_object,
     build_self_review_prompt,
-    build_targeted_review_context_packet,
     collect_diff_for_review,
     merge_budget_ledgers,
     parse_review_result,
     remaining_runtime_settings,
     run_shared_self_review_fix_loop,
     should_skip_self_review,
+)
+from workers.self_review_packet import (
+    _extract_diff_line_hints,
+    _truncate_review_packet,
+    build_targeted_review_context_packet,
 )
 
 
@@ -468,12 +470,12 @@ def test_truncate_review_packet_ignores_non_diff_fences_for_balance():
     )
 
     cutoff = packet.index("### Changed-File Code Windows") + 5
-    truncated = self_review._truncate_review_packet(packet, cutoff, diff_fence="```")
+    truncated = _truncate_review_packet(packet, cutoff, diff_fence="```")
     assert truncated.count("```") == 3
 
 
 def test_build_targeted_review_context_packet_skips_oversized_files(tmp_path, monkeypatch):
-    monkeypatch.setattr(self_review, "DEFAULT_REVIEW_PACKET_MAX_FILE_BYTES", 10)
+    monkeypatch.setattr("workers.self_review_packet.DEFAULT_REVIEW_PACKET_MAX_FILE_BYTES", 10)
     source = tmp_path / "big_payload.txt"
     source.write_text("x" * 128)
     diff_text = "\n".join(
@@ -552,12 +554,16 @@ def test_run_shared_self_review_fix_loop_skips_when_disabled(tmp_path):
     adapter.next_step.assert_not_called()
 
 
-@patch("workers.self_review.collect_diff_for_review", return_value="diff payload")
-@patch("workers.self_review.run_cli_runtime_loop")
-def test_run_shared_self_review_fix_loop_runs_fix_pass_and_merges_artifacts(
-    mock_run_loop, _mock_collect_diff, tmp_path
-):
-    review_steps = [
+class _FakeAdapter:
+    def __init__(self, steps: list[CliRuntimeStep]) -> None:
+        self._steps = list(steps)
+
+    def next_step(self, *_args, **_kwargs):
+        return self._steps.pop(0)
+
+
+def _make_review_steps() -> list[CliRuntimeStep]:
+    return [
         CliRuntimeStep(
             kind="final",
             final_output=json.dumps(
@@ -593,30 +599,30 @@ def test_run_shared_self_review_fix_loop_runs_fix_pass_and_merges_artifacts(
         ),
     ]
 
-    class _Adapter:
-        def __init__(self) -> None:
-            self._steps = list(review_steps)
 
-        def next_step(self, *_args, **_kwargs):
-            return self._steps.pop(0)
+def _post_run_lint_collector(_execution, existing_files):
+    return (
+        [*existing_files, "tests/test_app.py"],
+        {"ran": True, "status": "warning", "errors": ["second pass warning"]},
+        [],
+    )
 
+
+@patch("workers.self_review.collect_diff_for_review", return_value="diff payload")
+@patch("workers.self_review.run_cli_runtime_loop")
+def test_run_shared_self_review_fix_loop_runs_fix_pass_and_merges_artifacts(
+    mock_run_loop, _mock_collect_diff, tmp_path
+):
     follow_up = _runtime_result(summary="Applied fix pass.")
     follow_up.commands_run = [WorkerCommand(id="test-cmd-id", command="pytest -q", exit_code=0)]
     mock_run_loop.return_value = follow_up
-
-    def _post_run_lint_collector(_execution, existing_files):
-        return (
-            [*existing_files, "tests/test_app.py"],
-            {"ran": True, "status": "warning", "errors": ["second pass warning"]},
-            [],
-        )
 
     execution = _runtime_result(summary="Initial success.")
     review_result, files_changed, lint_result, lint_artifacts = run_shared_self_review_fix_loop(
         execution=execution,
         task_text="Ship tiny change",
         constraints={},
-        runtime_adapter=_Adapter(),
+        runtime_adapter=_FakeAdapter(_make_review_steps()),
         runtime_settings=CliRuntimeSettings(max_iterations=6, worker_timeout_seconds=60),
         system_prompt="base prompt",
         repo_path=tmp_path,

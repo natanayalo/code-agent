@@ -35,6 +35,12 @@ repos:
         additional_dependencies: [pre-commit]
         files: ^\.pre-commit-config\.yaml$
         pass_filenames: false
+      - id: check-python-file-sizes
+        name: Check Python File Sizes
+        entry: scripts/check_python_file_sizes.py
+        language: python
+        additional_dependencies: [pyyaml]
+        files: \.py$|^\.sizecheck-exceptions\.yaml$
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.18.2
     hooks:

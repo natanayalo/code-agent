@@ -16,8 +16,8 @@ from workers.codex_cli_worker import CodexCliWorker
 @pytest.fixture
 def mock_runner():
     with (
-        patch("workers.codex_cli_worker.run_native_agent") as mock_run,
-        patch("workers.codex_cli_worker.format_native_run_summary", return_value="done"),
+        patch("workers.codex_cli_worker_native.run_native_agent") as mock_run,
+        patch("workers.codex_cli_worker_native.format_native_run_summary", return_value="done"),
     ):
         result = MagicMock()
         result.status = "success"

@@ -8,6 +8,9 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+import workers.native_agent_artifacts as native_agent_artifacts
+import workers.native_agent_finalize as native_finalize
+import workers.native_agent_messages as native_agent_messages
 import workers.native_agent_runner as native_runner
 from workers.native_agent_runner import NativeAgentRunRequest, run_native_agent
 
@@ -71,6 +74,30 @@ def _init_git_repo(repo_path: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
+    )
+
+
+def _make_env_checker_binary(tmp_path: Path) -> Path:
+    return _write_fake_binary(
+        tmp_path / "fake-env-checker.py",
+        """#!/usr/bin/env python3
+import os
+import json
+# Output critical env vars as JSON
+print(json.dumps({
+    "HOST_VAR": os.environ.get("HOST_VAR"),
+    "DATABASE_URL": os.environ.get("DATABASE_URL"),
+    "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY"),
+    "LANG": os.environ.get("LANG"),
+    "PATH": os.environ.get("PATH"),
+    "HOME": os.environ.get("HOME"),
+    "CODE_AGENT_ENABLE_TRACING": os.environ.get("CODE_AGENT_ENABLE_TRACING"),
+    "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN"),
+    "CODEX_HOME": os.environ.get("CODEX_HOME"),
+    "GEMINI_HOME": os.environ.get("GEMINI_HOME"),
+    "GEMINI_API_KEY": os.environ.get("GEMINI_API_KEY"),
+}))
+""",
     )
 
 
@@ -373,7 +400,9 @@ def test_native_agent_runner_truncates_stdout_fallback_summary(tmp_path: Path) -
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
     _init_git_repo(repo_path)
-    long_stdout = "x" * (native_runner.DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS + 250)
+    long_stdout = "x" * (
+        native_agent_messages.DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS + 250
+    )
     fake_binary = _write_fake_binary(
         tmp_path / "fake-long-stdout.py",
         f"""#!/usr/bin/env python3
@@ -396,20 +425,19 @@ print("{long_stdout}")
     assert result.final_message.startswith("[stdout truncated for summary]")
     assert len(result.final_message) <= (
         len("[stdout truncated for summary]\n")
-        + native_runner.DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS
+        + native_agent_messages.DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS
     )
     assert result.final_message.endswith(
-        "x" * native_runner.DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS
+        "x" * native_agent_messages.DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS
     )
 
 
 def test_read_final_message_is_bounded(tmp_path: Path) -> None:
     """Final message parsing should cap file reads to a fixed safety budget."""
     final_message_path = tmp_path / "final-message.txt"
-    oversized = "a" * (native_runner.DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS + 120)
+    oversized = "a" * (native_agent_messages.DEFAULT_FINAL_MESSAGE_FILE_READ_MAX_CHARACTERS + 120)
     final_message_path.write_text(oversized, encoding="utf-8")
-
-    parsed = native_runner._read_final_message(final_message_path)
+    parsed = native_agent_messages._read_final_message(final_message_path)
 
     assert parsed is not None
     assert parsed.endswith("[final message truncated for safety]")
@@ -418,13 +446,16 @@ def test_read_final_message_is_bounded(tmp_path: Path) -> None:
 
 def test_extract_final_message_handles_dict_payload_values() -> None:
     payload = '{"final_output":{"status":"passed","summary":"ok"}}'
-    assert native_runner._extract_final_message(payload) == '{"status": "passed", "summary": "ok"}'  # noqa: SLF001
+    assert (
+        native_agent_messages._extract_final_message(payload)
+        == '{"status": "passed", "summary": "ok"}'
+    )  # noqa: SLF001
 
 
 def test_finalize_native_agent_run_emits_llm_json_output_attribute(monkeypatch) -> None:
     captured: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        native_runner,
+        native_finalize,
         "set_current_span_attribute",
         lambda key, value: captured.append((key, str(value))),
     )
@@ -453,11 +484,11 @@ def test_finalize_native_agent_run_emits_llm_json_output_attribute(monkeypatch) 
 def test_finalize_native_agent_run_sets_native_reason_codes(monkeypatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        native_runner,
+        native_finalize,
         "set_current_span_attribute",
         lambda key, value: captured.__setitem__(key, value),
     )
-    monkeypatch.setattr(native_runner, "add_current_span_event", lambda name, attributes: None)
+    monkeypatch.setattr(native_finalize, "add_current_span_event", lambda name, attributes: None)
     req = NativeAgentRunRequest(
         command=["echo", "ok"],
         prompt="task",
@@ -476,17 +507,17 @@ def test_finalize_native_agent_run_sets_native_reason_codes(monkeypatch) -> None
         stdout="",
         stderr="",
     )
-    assert captured["code_agent.native.outcome_status"] == "failure"
-    assert captured["code_agent.native.reason_code"] == "nonzero_exit"
-    assert captured["code_agent.native.reason_detail"] == "exit_code_41"
-    assert captured["code_agent.native.exit_code"] == 41
+    assert captured["code_agent.native_agent.outcome_status"] == "failure"
+    assert captured["code_agent.native_agent.reason_code"] == "nonzero_exit"
+    assert captured["code_agent.native_agent.reason_detail"] == "exit_code_41"
+    assert captured["code_agent.native_agent.exit_code"] == 41
 
 
 def test_finalize_native_agent_run_emits_completed_event(monkeypatch) -> None:
     captured_events: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(native_runner, "set_current_span_attribute", lambda key, value: None)
+    monkeypatch.setattr(native_finalize, "set_current_span_attribute", lambda key, value: None)
     monkeypatch.setattr(
-        native_runner,
+        native_finalize,
         "add_current_span_event",
         lambda name, attributes: captured_events.append((name, dict(attributes or {}))),
     )
@@ -510,7 +541,7 @@ def test_finalize_native_agent_run_emits_completed_event(monkeypatch) -> None:
         files_changed=["a.py"],
     )
     completed = [
-        event for event in captured_events if event[0] == "code_agent.native.run_completed"
+        event for event in captured_events if event[0] == "code_agent.native_agent.run_completed"
     ]
     assert completed
     payload = completed[0][1]
@@ -538,7 +569,7 @@ print("ok")
     def _raise_artifact_error(*args, **kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(native_runner, "_write_artifact", _raise_artifact_error)
+    monkeypatch.setattr(native_agent_artifacts, "_write_artifact", _raise_artifact_error)
 
     result = run_native_agent(
         NativeAgentRunRequest(
@@ -603,28 +634,7 @@ def test_native_agent_runner_enforces_strict_isolation(tmp_path: Path, monkeypat
     monkeypatch.setenv("LANG", "en_US.UTF-8")
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
-    fake_binary = _write_fake_binary(
-        tmp_path / "fake-env-checker.py",
-        """#!/usr/bin/env python3
-import os
-import json
-# Output critical env vars as JSON
-print(json.dumps({
-    "HOST_VAR": os.environ.get("HOST_VAR"),
-    "DATABASE_URL": os.environ.get("DATABASE_URL"),
-    "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY"),
-    "LANG": os.environ.get("LANG"),
-    "PATH": os.environ.get("PATH"),
-    "HOME": os.environ.get("HOME"),
-    "CODE_AGENT_ENABLE_TRACING": os.environ.get("CODE_AGENT_ENABLE_TRACING"),
-    "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN"),
-    "CODEX_HOME": os.environ.get("CODEX_HOME"),
-    "GEMINI_HOME": os.environ.get("GEMINI_HOME"),
-    "GEMINI_API_KEY": os.environ.get("GEMINI_API_KEY"),
-}))
-""",
-    )
-
+    fake_binary = _make_env_checker_binary(tmp_path)
     request = NativeAgentRunRequest(
         command=[str(fake_binary)],
         prompt="task",

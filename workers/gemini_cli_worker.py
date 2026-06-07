@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-import re
-import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +10,6 @@ from typing import Protocol
 
 from apps.observability import (
     SPAN_KIND_AGENT,
-    set_span_status_from_outcome,
     start_optional_span,
     with_span_kind,
 )
@@ -23,7 +18,6 @@ from sandbox import (
     DockerSandboxContainer,
     DockerSandboxContainerError,
     DockerSandboxContainerManager,
-    DockerSandboxContainerRequest,
     DockerShellSession,
     DockerShellSessionError,
     WorkspaceCleanupPolicy,
@@ -32,51 +26,36 @@ from sandbox import (
     WorkspaceManagerError,
     WorkspaceRequest,
 )
-from sandbox.redact import SecretRedactor
 from sandbox.workspace import _mask_url_credentials, default_workspace_root
 from tools import (
     DEFAULT_TOOL_REGISTRY,
-    EXECUTE_BASH_TOOL_NAME,
-    ToolExpectedArtifact,
     ToolPermissionLevel,
     ToolRegistry,
     UnknownToolError,
-    granted_permission_from_constraints,
 )
-from workers.adapter_utils import build_failure_summary, format_native_run_summary
 from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import (
     ArtifactReference,
-    FailureKind,
     Worker,
-    WorkerCommand,
     WorkerRequest,
     WorkerResult,
 )
-from workers.cli_adapter_utils import build_worker_result
 from workers.cli_runtime import (
     CliRuntimeAdapter,
     CliRuntimeExecutionResult,
     CliRuntimeSettings,
     ShellSessionProtocol,
-    run_cli_runtime_loop,
     settings_from_budget,
 )
-from workers.failure_taxonomy import classify_failure_kind
-from workers.native_agent_models import NativeAgentRunResult
-from workers.native_agent_runner import (
-    NativeAgentRunRequest,
-    run_native_agent,
+from workers.gemini_cli_worker_native import (
+    GeminiCliWorkerNativeMixin,
+    _apply_cleanup_outcome,
+    _prepare_workspace_gemini_home,
+    _workspace_error_result,
+    _workspace_task_id,
 )
-from workers.post_run_lint import (
-    collect_changed_files_and_apply_post_run_lint_format,
-)
-from workers.prompt import build_system_prompt
+from workers.gemini_cli_worker_runtime import GeminiCliWorkerRuntimeMixin
 from workers.review import ReviewResult
-from workers.self_review import (
-    collect_diff_for_review,
-    run_shared_self_review_fix_loop,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -120,206 +99,7 @@ class ShellSessionFactory(Protocol):
         """Return a ready-to-use shell session."""
 
 
-def _slugify(value: str) -> str:
-    """Create a filesystem-safe slug for sandbox bookkeeping."""
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return slug[:48] or "task"
-
-
-def _workspace_task_id(request: WorkerRequest) -> str:
-    """Build a readable workspace task identifier from the worker request."""
-    if request.task_id:
-        return request.task_id
-    source = request.session_id or request.task_text
-    return f"gemini-cli-{_slugify(source)}"
-
-
-def _workspace_artifacts(workspace: WorkspaceHandle) -> list[ArtifactReference]:
-    """Build the default artifact references for a retained workspace."""
-    return [
-        ArtifactReference(
-            name="workspace",
-            uri=workspace.workspace_path.as_uri(),
-            artifact_type="workspace",
-        )
-    ]
-
-
-def _prepare_workspace_gemini_home(
-    *,
-    workspace_path: Path,
-    source_gemini_home: Path | None = None,
-) -> None:
-    """Best-effort sync of Gemini auth/config into isolated workspace HOME."""
-    candidates: list[Path] = []
-    if source_gemini_home is not None:
-        candidates.append(source_gemini_home)
-    env_gemini_home = os.environ.get("GEMINI_HOME")
-    if env_gemini_home:
-        candidates.append(Path(env_gemini_home))
-    try:
-        candidates.append(Path.home() / ".gemini")
-    except Exception:
-        pass
-    candidates.append(Path("/root/.gemini"))
-
-    resolved_source: Path | None = None
-    for candidate in candidates:
-        expanded = candidate.expanduser()
-        try:
-            if expanded.exists() and expanded.is_dir():
-                resolved_source = expanded
-                break
-        except OSError:
-            continue
-
-    if resolved_source is None:
-        return
-
-    agent_home = workspace_path / ".agent_home"
-    agent_home.mkdir(parents=True, exist_ok=True)
-    target = agent_home / ".gemini"
-    target_settings = target / "settings.json"
-    if target.exists() or target.is_symlink():
-        # Repair stale or partial workspace state: if the auth settings file is
-        # missing, refresh the target from the resolved source.
-        if target_settings.exists():
-            try:
-                if not target.is_symlink() or os.readlink(target) == str(resolved_source):
-                    return
-            except OSError:
-                pass
-        try:
-            if target.is_symlink() or target.is_file():
-                target.unlink()
-            else:
-                shutil.rmtree(target)
-        except OSError:
-            logger.warning(
-                "Failed to reset stale workspace Gemini home before sync",
-                extra={"target": str(target)},
-                exc_info=True,
-            )
-            return
-
-    try:
-        target.symlink_to(resolved_source, target_is_directory=True)
-        return
-    except OSError:
-        logger.info(
-            "Falling back to copy for workspace Gemini home sync",
-            extra={"source": str(resolved_source), "target": str(target)},
-        )
-
-    try:
-        shutil.copytree(resolved_source, target)
-    except OSError:
-        logger.warning(
-            "Failed to sync Gemini home into workspace agent home",
-            extra={"source": str(resolved_source), "target": str(target)},
-            exc_info=True,
-        )
-
-
-def _apply_cleanup_outcome(result: WorkerResult, *, workspace_deleted: bool) -> WorkerResult:
-    """Keep the reported result aligned with the final workspace state."""
-    if not workspace_deleted:
-        return result
-
-    summary = (
-        f"{result.summary.rstrip('.')} Workspace cleaned up per policy."
-        if result.summary
-        else "GeminiCliWorker cleaned up the workspace per policy."
-    )
-    return result.model_copy(
-        update={
-            "summary": summary,
-            "artifacts": [],
-            "next_action_hint": None,
-        }
-    )
-
-
-def _next_action_hint(execution: CliRuntimeExecutionResult) -> str:
-    """Return the best follow-up hint for a retained workspace."""
-    if execution.stop_reason == "permission_required":
-        return "request_higher_permission"
-    if execution.stop_reason in {
-        "max_iterations",
-        "worker_timeout",
-        "budget_exceeded",
-        "stalled_in_inspection",
-        "exploration_exhausted",
-        "no_progress_before_budget",
-    }:
-        return "increase_budget_or_reduce_scope"
-    if execution.stop_reason == "context_window":
-        return "reduce_context_or_scope"
-    if execution.stop_reason == "adapter_error":
-        return "inspect_worker_configuration"
-    return "inspect_workspace_artifacts"
-
-
-def _worker_result_from_execution(
-    workspace: WorkspaceHandle,
-    execution: CliRuntimeExecutionResult,
-    *,
-    files_changed: list[str],
-    post_run_lint_format: dict[str, object] | None = None,
-    review_result: ReviewResult | None = None,
-    diff_text: str | None = None,
-    artifacts: list[ArtifactReference] | None = None,
-) -> WorkerResult:
-    """Map the shared CLI runtime output into the worker contract."""
-    requested_permission = (
-        execution.permission_decision.required_permission.value
-        if execution.permission_decision is not None
-        else None
-    )
-    budget_usage = execution.budget_ledger.model_dump(mode="json")
-    if post_run_lint_format is not None:
-        budget_usage["post_run_lint_format"] = post_run_lint_format
-    return build_worker_result(
-        execution=execution,
-        files_changed=files_changed,
-        requested_permission=requested_permission,
-        post_run_lint_format=post_run_lint_format,
-        review_result=review_result,
-        diff_text=diff_text,
-        artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
-        next_action_hint=_next_action_hint(execution),
-        workspace_id=workspace.workspace_id,
-    )
-
-
-def _workspace_error_result(
-    *,
-    request: WorkerRequest,
-    workspace: WorkspaceHandle,
-    workspace_task_id: str,
-    exc: Exception,
-    summary_prefix: str,
-    next_action_hint: str,
-) -> WorkerResult:
-    """Log a workspace-scoped failure and map it into the worker contract."""
-    logger.exception(
-        "Gemini CLI worker failed inside a provisioned workspace",
-        extra={
-            "session_id": request.session_id,
-            "workspace_id": workspace.workspace_id,
-            "workspace_task_id": workspace_task_id,
-        },
-    )
-    return WorkerResult(
-        status="error",
-        summary=f"{summary_prefix}: {exc}",
-        failure_kind="sandbox_infra",
-        artifacts=_workspace_artifacts(workspace),
-        next_action_hint=next_action_hint,
-    )
-
-
-class GeminiCliWorker(Worker):
+class GeminiCliWorker(GeminiCliWorkerRuntimeMixin, GeminiCliWorkerNativeMixin, Worker):
     """Execute a bounded multi-turn CLI runtime inside a persistent sandbox."""
 
     def __init__(
@@ -464,448 +244,77 @@ class GeminiCliWorker(Worker):
             )
         )
 
-    def _setup_runtime_phase(
+    def _execute_runtime_mode_switch(
         self,
         request: WorkerRequest,
-        *,
         workspace: WorkspaceHandle,
         system_prompt_override: str | None,
-    ) -> _RuntimeSetup:
-        """Prepare runtime dependencies before entering the main CLI loop."""
-        tool_names = request.tools
-        if tool_names is None:
-            tool_names = [tool.name for tool in self.tool_registry.list_tools()]
-
-        scoped_secrets = self.tool_registry.get_scoped_secrets(
-            tool_names=tool_names,
-            available_secrets=request.secrets,
-        )
-
-        # Determine if network should be enabled (T-143 escalation policy)
-        network_enabled = request.network_enabled
-        if not network_enabled:
-            granted_permission = granted_permission_from_constraints(request.constraints)
-            if granted_permission == ToolPermissionLevel.NETWORKED_WRITE:
-                for name in tool_names:
-                    if (tool := self.tool_registry.get_tool(name)) and tool.network_required:
-                        network_enabled = True
-                        break
-
-        container = self.container_manager.start(
-            DockerSandboxContainerRequest(
-                workspace=workspace,
-                environment=scoped_secrets,
-                network_enabled=network_enabled,
-            )
-        )
+        cancel_token: Callable[[], bool] | None,
+    ) -> tuple[WorkerResult, DockerSandboxContainer | None, ShellSessionProtocol | None]:
+        _prepare_workspace_gemini_home(workspace_path=workspace.workspace_path)
+        runtime_mode = self._resolve_runtime_mode(request)
+        container: DockerSandboxContainer | None = None
         session: ShellSessionProtocol | None = None
-        try:
-            session = self._session_factory(container, secrets=request.secrets)
+        result: WorkerResult | None = None
+
+        if runtime_mode == WorkerRuntimeMode.TOOL_LOOP:
+            logger.warning(
+                "Gemini tool_loop runtime mode is deprecated. "
+                "Prefer native_agent defaults; keep tool_loop only for explicit legacy opt-in.",
+                extra={
+                    "session_id": request.session_id,
+                    "worker_profile": request.worker_profile,
+                    "runtime_mode": runtime_mode.value,
+                },
+            )
+        if runtime_mode in {
+            WorkerRuntimeMode.NATIVE_AGENT,
+            WorkerRuntimeMode.REVIEWER_ONLY,
+            WorkerRuntimeMode.PLANNER_ONLY,
+        }:
             runtime_settings = settings_from_budget(
                 request.budget,
                 defaults=self.runtime_settings,
                 task_id=request.task_id,
                 session_id=request.session_id,
-                read_only=request.read_only,
             )
-            granted_permission = granted_permission_from_constraints(request.constraints)
-            bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
-            fallback_command_template = (
-                request.constraints.get("post_run_lint_format_command")
-                if isinstance(request.constraints.get("post_run_lint_format_command"), str)
-                else None
-            )
-            system_prompt = (
-                system_prompt_override
-                if system_prompt_override is not None
-                else build_system_prompt(
-                    request,
-                    workspace.repo_path,
-                    tool_registry=self.tool_registry,
-                )
-            )
-
-            return _RuntimeSetup(
-                container=container,
-                session=session,
-                runtime_settings=runtime_settings,
-                granted_permission=granted_permission,
-                expects_changed_files=(
-                    ToolExpectedArtifact.CHANGED_FILES in bash_tool.expected_artifacts
-                ),
-                fallback_command_template=fallback_command_template,
-                system_prompt=system_prompt,
-            )
-        except Exception:
-            if session is not None:
-                self._close_session(session)
-            self._stop_container(container)
-            raise
-
-    def _execute_runtime_phase(
-        self,
-        request: WorkerRequest,
-        *,
-        workspace: WorkspaceHandle,
-        runtime_setup: _RuntimeSetup,
-        cancel_token: Callable[[], bool] | None,
-    ) -> _RuntimeExecutionPhase:
-        """Execute the main CLI loop and post-run review/lint phases."""
-        redactor = SecretRedactor(list((request.secrets or {}).values()))
-        execution = run_cli_runtime_loop(
-            self.runtime_adapter,
-            runtime_setup.session,
-            system_prompt=runtime_setup.system_prompt,
-            settings=runtime_setup.runtime_settings,
-            tool_registry=self.tool_registry,
-            granted_permission=runtime_setup.granted_permission,
-            working_directory=workspace.repo_path,
-            cancel_token=cancel_token,
-            task_id=request.task_id,
-            session_id=request.session_id,
-            model_name=getattr(self.runtime_adapter, "model", None),
-            redactor=redactor,
-            response_format=request.response_format,
-            response_schema=request.response_schema,
-        )
-
-        files_changed, lint_format_result, lint_format_artifacts = (
-            collect_changed_files_and_apply_post_run_lint_format(
-                session=runtime_setup.session,
-                execution=execution,
-                expect_changed_files_artifact=runtime_setup.expects_changed_files,
-                repo_path_for_detection=workspace.repo_path,
-                repo_working_directory=Path(runtime_setup.container.working_dir),
-                timeout_seconds=runtime_setup.runtime_settings.command_timeout_seconds,
-                fallback_command_template=runtime_setup.fallback_command_template,
-            )
-        )
-
-        review_result: ReviewResult | None = None
-        if execution.status == "success":
-            (
-                review_result,
-                files_changed,
-                lint_format_result,
-                lint_format_artifacts,
-            ) = run_shared_self_review_fix_loop(
-                execution=execution,
-                task_text=request.task_text,
-                constraints=request.constraints,
-                runtime_adapter=self.runtime_adapter,
-                runtime_settings=runtime_setup.runtime_settings,
-                system_prompt=runtime_setup.system_prompt,
-                repo_path=workspace.repo_path,
-                files_changed=files_changed,
-                lint_format_result=lint_format_result,
-                lint_format_artifacts=lint_format_artifacts,
-                post_run_lint_collector=(
-                    lambda current_execution, existing_files: (
-                        collect_changed_files_and_apply_post_run_lint_format(
-                            session=runtime_setup.session,
-                            execution=current_execution,
-                            expect_changed_files_artifact=runtime_setup.expects_changed_files,
-                            repo_path_for_detection=workspace.repo_path,
-                            repo_working_directory=Path(runtime_setup.container.working_dir),
-                            existing_files_changed=existing_files,
-                            timeout_seconds=runtime_setup.runtime_settings.command_timeout_seconds,
-                            fallback_command_template=runtime_setup.fallback_command_template,
-                        )
-                    )
-                ),
-                tool_registry=self.tool_registry,
-                granted_permission=runtime_setup.granted_permission,
-                session=runtime_setup.session,
-                cancel_token=cancel_token,
-                task_id=request.task_id,
-                session_id=request.session_id,
-                model_name=getattr(self.runtime_adapter, "model", None),
-                adapter_failure_log_message=(
-                    "Gemini CLI worker self-review adapter failed; recording explicit "
-                    "no-findings fallback."
-                ),
-                adapter_failure_logger=logger,
-                check_cancel_before_review=True,
-            )
-
-        return _RuntimeExecutionPhase(
-            execution=execution,
-            files_changed=files_changed,
-            lint_format_result=lint_format_result,
-            lint_format_artifacts=lint_format_artifacts,
-            review_result=review_result,
-        )
-
-    def _finalize_runtime_result(
-        self,
-        workspace: WorkspaceHandle,
-        runtime_phase: _RuntimeExecutionPhase,
-        *,
-        runtime_settings: CliRuntimeSettings,
-        cancel_token: Callable[[], bool] | None,
-    ) -> WorkerResult:
-        """Map runtime phase outputs to the worker result contract."""
-        result = _worker_result_from_execution(
-            workspace,
-            runtime_phase.execution,
-            files_changed=runtime_phase.files_changed,
-            post_run_lint_format=runtime_phase.lint_format_result,
-            review_result=runtime_phase.review_result,
-            diff_text=collect_diff_for_review(
-                workspace.repo_path,
-                timeout_seconds=runtime_settings.command_timeout_seconds,
-            )
-            if runtime_phase.execution.status == "success"
-            else None,
-            artifacts=runtime_phase.lint_format_artifacts,
-        )
-        if cancel_token and cancel_token():
-            result.status = "error"
-            result.summary = "CLI runtime loop was cancelled by the orchestrator timeout."
-            result.failure_kind = "timeout"
-            result.next_action_hint = "inspect_workspace_artifacts"
-
-        set_span_status_from_outcome(result.status, result.summary)
-        return result
-
-    def _resolve_runtime_mode(self, request: WorkerRequest) -> WorkerRuntimeMode:
-        """Resolve effective runtime mode from request override or worker defaults."""
-        if request.runtime_mode is not None:
-            return request.runtime_mode
-        return self.default_runtime_mode
-
-    def _runtime_mode_not_supported_result(self, runtime_mode: WorkerRuntimeMode) -> WorkerResult:
-        """Return a structured failure for unsupported execution runtime modes."""
-        return WorkerResult(
-            status="failure",
-            summary=(
-                "GeminiCliWorker does not support runtime mode "
-                f"`{runtime_mode.value}`. Supported modes: native_agent, tool_loop."
-            ),
-            failure_kind="provider_error",
-            next_action_hint="inspect_worker_configuration",
-        )
-
-    def _build_native_command(
-        self,
-        *,
-        request: WorkerRequest,
-        runtime_mode: WorkerRuntimeMode,
-    ) -> list[str]:
-        """Build a one-shot Gemini headless command for native-agent mode."""
-        executable = getattr(self.runtime_adapter, "executable", "gemini")
-        model = getattr(self.runtime_adapter, "model", None)
-        read_only_requested = bool(request.constraints.get("read_only"))
-        is_native = runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
-        approval_mode = (
-            "plan"
-            if read_only_requested
-            else ("yolo" if is_native else DEFAULT_GEMINI_NATIVE_APPROVAL_MODE)
-        )
-        command = [
-            executable,
-            "--output-format",
-            request.response_format if request.response_format == "json" else "text",
-            "--approval-mode",
-            approval_mode,
-        ]
-        if model:
-            command.extend(["--model", str(model)])
-        if self.native_sandbox_enabled and runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
-            command.append("--sandbox")
-        return command
-
-    def _build_native_prompt(
-        self, *, system_prompt: str, request: WorkerRequest, runtime_mode: WorkerRuntimeMode
-    ) -> str:
-        """Build the native-agent prompt packet for one-shot Gemini execution."""
-        task_text = request.task_text.strip()
-        delivery_mode = (request.task_spec or {}).get("delivery_mode", "workspace")
-        is_read_only = delivery_mode == "summary"
-        output_instructions = (
-            "Return a comprehensive summary of your findings and any recommendations."
-            if is_read_only
-            else (
-                "Return a concise final summary of what changed, verification performed, "
-                "and any remaining blocker."
-            )
-        )
-        if request.response_schema:
-            schema_json = json.dumps(request.response_schema, indent=2)
-            output_instructions = (
-                "Return exactly one JSON object that strictly matches this JSON schema:\n"
-                f"{schema_json}\n"
-                "Do not include markdown fences, explanatory prose, or extra keys."
-            )
-
-        role_instructions = ""
-        if runtime_mode == WorkerRuntimeMode.REVIEWER_ONLY:
-            role_instructions = (
-                "## Specialist Role: Reviewer\n"
-                "You are operating as a dedicated code reviewer. Focus on qualitative "
-                "assessment, correctness, and architectural alignment. Do not perform "
-                "implementation unless strictly required to verify a finding."
-            )
-        elif runtime_mode == WorkerRuntimeMode.PLANNER_ONLY:
-            role_instructions = (
-                "## Specialist Role: Planner\n"
-                "You are operating as a dedicated task planner. Your goal is to break "
-                "down the request into actionable steps. Do not execute the changes; "
-                "provide the blueprint."
-            )
-
-        sections = [
-            system_prompt.strip(),
-            role_instructions,
-            "## Native Execution Task",
-            task_text,
-            "## Output",
-            output_instructions,
-        ]
-        return "\n\n".join(section for section in sections if section.strip())
-
-    def _native_next_action_hint(self, native_result: NativeAgentRunResult) -> str:
-        """Map native run outcomes to follow-up hints."""
-        if native_result.timed_out:
-            return "increase_budget_or_reduce_scope"
-        if native_result.status == "error":
-            return "inspect_worker_configuration"
-        return "inspect_workspace_artifacts"
-
-    def _native_failure_kind(self, native_result: NativeAgentRunResult) -> FailureKind | None:
-        """Classify failure kind for native-agent outcomes."""
-        if native_result.status == "success":
-            return None
-        if native_result.timed_out:
-            return "timeout"
-
-        summary = build_failure_summary(
-            summary=format_native_run_summary(native_result),
-            final_message=native_result.final_message,
-        )
-
-        classified = classify_failure_kind(
-            status=native_result.status,
-            summary=summary,
-            final_message=native_result.final_message,
-            commands_run=[
-                WorkerCommand(
-                    command=native_result.command,
-                    exit_code=native_result.exit_code,
-                    duration_seconds=native_result.duration_seconds,
-                )
-            ],
-        )
-        if classified == "unknown" and native_result.status == "error":
-            return "provider_error"
-        return classified
-
-    def _native_run_env(self) -> dict[str, str] | None:
-        """Build native run env with explicit sandbox/no-network defaults when possible."""
-        base_env = dict(getattr(self.runtime_adapter, "env", {}) or {})
-        if self.native_sandbox_enabled:
-            base_env.setdefault("GEMINI_SANDBOX", "true")
-            # On macOS seatbelt, prefer the no-network profile unless explicitly overridden.
-            base_env.setdefault("SEATBELT_PROFILE", "permissive-closed")
-        return base_env or None
-
-    def _execute_native_runtime(
-        self,
-        request: WorkerRequest,
-        *,
-        workspace: WorkspaceHandle,
-        runtime_settings: CliRuntimeSettings,
-        runtime_mode: WorkerRuntimeMode,
-        system_prompt_override: str | None,
-        cancel_token: Callable[[], bool] | None,
-    ) -> WorkerResult:
-        """Execute one native-agent Gemini run and map it into WorkerResult."""
-        if cancel_token and cancel_token():
-            return WorkerResult(
-                status="error",
-                summary="Gemini native-agent run was cancelled before execution.",
-                failure_kind="timeout",
-                artifacts=_workspace_artifacts(workspace),
-                next_action_hint="inspect_workspace_artifacts",
-            )
-
-        system_prompt = (
-            system_prompt_override
-            if system_prompt_override is not None
-            else build_system_prompt(
+            result = self._execute_native_runtime(
                 request,
-                workspace.repo_path,
-                tool_registry=self.tool_registry,
+                workspace=workspace,
+                runtime_settings=runtime_settings,
+                runtime_mode=runtime_mode,
+                system_prompt_override=system_prompt_override,
+                cancel_token=cancel_token,
             )
-        )
-        prompt = self._build_native_prompt(
-            system_prompt=system_prompt, request=request, runtime_mode=runtime_mode
-        )
-        command = self._build_native_command(
-            request=request,
-            runtime_mode=runtime_mode,
-        )
-        native_result = run_native_agent(
-            NativeAgentRunRequest(
-                command=command,
-                # Prompt is sent via stdin to avoid command-line length limits.
-                prompt=prompt,
-                repo_path=workspace.repo_path,
-                workspace_path=workspace.workspace_path,
-                timeout_seconds=runtime_settings.worker_timeout_seconds,
-                diff_timeout_seconds=runtime_settings.command_timeout_seconds,
-                changed_files_timeout_seconds=runtime_settings.command_timeout_seconds,
-                env=self._native_run_env(),
-                collect_diff=True,
-                collect_changed_files=True,
-                task_id=request.task_id,
-                session_id=request.session_id,
-                redactor=SecretRedactor(list((request.secrets or {}).values())),
-                response_format=request.response_format,
-                response_schema=request.response_schema,
+        elif runtime_mode == WorkerRuntimeMode.TOOL_LOOP:
+            runtime_setup = self._setup_runtime_phase(
+                request,
+                workspace=workspace,
+                system_prompt_override=system_prompt_override,
             )
-        )
+            container = runtime_setup.container
+            session = runtime_setup.session
+            runtime_phase = self._execute_runtime_phase(
+                request,
+                workspace=workspace,
+                runtime_setup=runtime_setup,
+                cancel_token=cancel_token,
+            )
+            result = self._finalize_runtime_result(
+                workspace,
+                runtime_phase,
+                runtime_settings=runtime_setup.runtime_settings,
+                cancel_token=cancel_token,
+            )
+        else:
+            result = self._runtime_mode_not_supported_result(runtime_mode)
 
-        summary = build_failure_summary(
-            summary=format_native_run_summary(native_result),
-            final_message=native_result.final_message,
-        )
-        result = WorkerResult(
-            status=native_result.status,
-            summary=summary,
-            failure_kind=self._native_failure_kind(native_result),
-            budget_usage={
-                "runtime_mode": runtime_mode.value,
-                "native_agent": {
-                    "duration_seconds": native_result.duration_seconds,
-                    "exit_code": native_result.exit_code,
-                    "timed_out": native_result.timed_out,
-                    "sandbox_enabled": self.native_sandbox_enabled,
-                },
-            },
-            commands_run=[
-                WorkerCommand(
-                    command=native_result.command,
-                    exit_code=native_result.exit_code,
-                    duration_seconds=native_result.duration_seconds,
-                )
-            ],
-            files_changed=native_result.files_changed,
-            artifacts=[*_workspace_artifacts(workspace), *native_result.artifacts],
-            diff_text=native_result.diff_text,
-            json_payload=native_result.json_payload,
-            next_action_hint=self._native_next_action_hint(native_result),
-            stdout=native_result.stdout,
-            stderr=native_result.stderr,
-        )
-        if cancel_token and cancel_token():
-            result.status = "error"
-            result.summary = "Gemini native-agent run was cancelled by the orchestrator timeout."
-            result.failure_kind = "timeout"
-            result.next_action_hint = "inspect_workspace_artifacts"
+        if result is None:
+            raise RuntimeError(
+                "Gemini CLI worker runtime mode execution completed without a result."
+            )
 
-        set_span_status_from_outcome(result.status, result.summary)
-        return result
+        return result, container, session
 
     def _run_sync(
         self,
@@ -957,61 +366,13 @@ class GeminiCliWorker(Worker):
         session: ShellSessionProtocol | None = None
 
         try:
-            _prepare_workspace_gemini_home(workspace_path=workspace.workspace_path)
-            runtime_mode = self._resolve_runtime_mode(request)
-            if runtime_mode == WorkerRuntimeMode.TOOL_LOOP:
-                logger.warning(
-                    "Gemini tool_loop runtime mode is deprecated. "
-                    "Prefer native_agent defaults; keep tool_loop only for explicit legacy opt-in.",
-                    extra={
-                        "session_id": request.session_id,
-                        "worker_profile": request.worker_profile,
-                        "runtime_mode": runtime_mode.value,
-                    },
-                )
-            if runtime_mode in {
-                WorkerRuntimeMode.NATIVE_AGENT,
-                WorkerRuntimeMode.REVIEWER_ONLY,
-                WorkerRuntimeMode.PLANNER_ONLY,
-            }:
-                runtime_settings = settings_from_budget(
-                    request.budget,
-                    defaults=self.runtime_settings,
-                    task_id=request.task_id,
-                    session_id=request.session_id,
-                )
-                result = self._execute_native_runtime(
-                    request,
-                    workspace=workspace,
-                    runtime_settings=runtime_settings,
-                    runtime_mode=runtime_mode,
-                    system_prompt_override=system_prompt_override,
-                    cancel_token=cancel_token,
-                )
-                run_succeeded = result.status == "success"
-            elif runtime_mode == WorkerRuntimeMode.TOOL_LOOP:
-                runtime_setup = self._setup_runtime_phase(
-                    request,
-                    workspace=workspace,
-                    system_prompt_override=system_prompt_override,
-                )
-                container = runtime_setup.container
-                session = runtime_setup.session
-                runtime_phase = self._execute_runtime_phase(
-                    request,
-                    workspace=workspace,
-                    runtime_setup=runtime_setup,
-                    cancel_token=cancel_token,
-                )
-                result = self._finalize_runtime_result(
-                    workspace,
-                    runtime_phase,
-                    runtime_settings=runtime_setup.runtime_settings,
-                    cancel_token=cancel_token,
-                )
-                run_succeeded = result.status == "success"
-            else:
-                result = self._runtime_mode_not_supported_result(runtime_mode)
+            result, container, session = self._execute_runtime_mode_switch(
+                request,
+                workspace=workspace,
+                system_prompt_override=system_prompt_override,
+                cancel_token=cancel_token,
+            )
+            run_succeeded = result.status == "success"
         except (
             DockerSandboxContainerError,
             DockerShellSessionError,

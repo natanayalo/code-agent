@@ -21,7 +21,7 @@ from tools import ToolPermissionLevel
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
 from workers import Worker, WorkerRequest, WorkerRuntimeMode
 from workers.constants import DEFAULT_REVIEW_TIMEOUT_SECONDS
-from workers.prompt import build_review_prompt
+from workers.prompt_review import build_review_prompt
 from workers.review import ReviewFinding, ReviewResult, SuppressedReviewFinding
 from workers.review_context import pack_reviewer_context
 from workers.self_review import parse_review_result
@@ -282,6 +282,88 @@ def _cleanup_repair_handoff_constraints(constraints: Mapping[str, Any]) -> dict[
     return cleaned
 
 
+def _build_review_request(state: OrchestratorState) -> WorkerRequest:
+    constraints = dict(state.task.constraints)
+    constraints["read_only"] = False
+    if constraints.get("granted_permission") != ToolPermissionLevel.WORKSPACE_WRITE:
+        constraints.pop("granted_permission", None)
+
+    return WorkerRequest(
+        session_id=state.session.session_id if state.session else None,
+        repo_url=state.task.repo_url,
+        branch=state.task.branch,
+        task_text=(
+            "Perform an independent review of the changes in the workspace. "
+            "Use your tools (git diff, read_file) to inspect the modified files "
+            "and their impact before providing your final review findings."
+        ),
+        memory_context=state.memory.model_dump(),
+        constraints=constraints,
+        budget=dict(state.task.budget),
+        secrets=dict((state.task.secrets or {}) | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
+        tools=state.task.tools,
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+    )
+
+
+async def _execute_independent_reviewer(
+    worker_type: str,
+    worker: Worker,
+    review_request: WorkerRequest,
+    review_prompt: str,
+    state: OrchestratorState,
+    timeout_seconds: int,
+) -> ReviewResult | None:
+    try:
+        with start_optional_span(
+            tracer_name="orchestrator.review",
+            span_name=f"independent_reviewer.{worker_type}",
+            task_id=state.task.task_id,
+            session_id=state.session.session_id if state.session else None,
+            attempt=state.attempt_count,
+            attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
+        ):
+            review_run_result = await asyncio.wait_for(
+                worker.run(review_request, system_prompt=review_prompt),
+                timeout=timeout_seconds,
+            )
+            set_span_input_output(input_data=None, output_data=review_run_result.summary)
+
+        if review_run_result.status != "success":
+            logger.warning(
+                "Independent review worker returned non-success status: %s",
+                review_run_result.status,
+                extra={"task_id": state.task.task_id, "worker_type": worker_type},
+            )
+
+        parsed_review = parse_review_result(review_run_result.summary or "")
+        if parsed_review is None:
+            logger.warning("Independent review output could not be parsed into ReviewResult.")
+            if review_run_result.status != "success" or review_run_result.failure_kind in {
+                "provider_error",
+                "provider_auth",
+                "sandbox_infra",
+                "timeout",
+                "model_error",
+                "unknown",
+            }:
+                logger.info(
+                    f"Retrying independent review with next worker after {worker_type} failure",
+                    extra={"task_id": state.task.task_id},
+                )
+            return None
+        return parsed_review
+
+    except TimeoutError:
+        logger.warning("Independent review pass timed out and was skipped.")
+        return None
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception(f"Independent review pass failed unexpectedly for {worker_type}.")
+        return None
+
+
 def _repair_handoff_update(
     state: OrchestratorState,
     parsed_review: ReviewResult,
@@ -329,12 +411,7 @@ def _repair_handoff_update(
     }
 
 
-async def review_result(
-    state: OrchestratorState,
-    *,
-    worker_factory: Mapping[str, Worker] | None = None,
-) -> dict[str, Any]:
-    """Perform an independent advisory review pass after successful verification."""
+def _check_skip_review(state: OrchestratorState) -> dict[str, Any] | None:
     if (
         state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT) is not None
         and state.task.constraints.get(SKIP_INDEPENDENT_REVIEW_CONSTRAINT) is True
@@ -365,32 +442,12 @@ async def review_result(
     if state.result is None:
         return {"current_step": "review_result"}
 
-    # 2. Build the review prompt
-    repo_path = _workspace_path_from_result_artifacts(state)
-    if repo_path is None:
-        logger.warning(
-            "Independent review workspace path unavailable; falling back to current directory."
-        )
+    return None
 
-    review_context = pack_reviewer_context(
-        task_text=state.normalized_task_text or state.task.task_text,
-        worker_summary=state.result.summary or "",
-        files_changed=state.result.files_changed,
-        # T-065: Omit diff_text to encourage tool-based exploration as per user feedback.
-        diff_text=None,
-        commands_run=state.result.commands_run,
-        verifier_report=state.verification.model_dump() if state.verification else None,
-        session_state=_session_state_for_review_context(state),
-    )
 
-    review_prompt = build_review_prompt(
-        workspace_path=repo_path or Path("."),
-        review_context_packet=review_context,
-        reviewer_kind="independent_reviewer",
-        task_text=state.normalized_task_text or state.task.task_text,
-    )
-
-    # 3. Choose reviewer worker candidates
+def _get_reviewer_workers(
+    state: OrchestratorState, worker_factory: Mapping[str, Worker] | None
+) -> list[tuple[str, Worker]]:
     reviewer_workers: list[tuple[str, Worker]] = []
     available_workers = worker_factory or {}
     if "gemini" in available_workers:
@@ -401,34 +458,55 @@ async def review_result(
         dw_type = state.dispatch.worker_type
         if dw_type in available_workers:
             reviewer_workers.append((dw_type, available_workers[dw_type]))
+    return reviewer_workers
+
+
+def _build_review_prompt_for_state(state: OrchestratorState) -> str:
+    repo_path = _workspace_path_from_result_artifacts(state)
+    if repo_path is None:
+        logger.warning(
+            "Independent review workspace path unavailable; falling back to current directory."
+        )
+
+    review_context = pack_reviewer_context(
+        task_text=state.normalized_task_text or state.task.task_text,
+        worker_summary=state.result.summary or "",  # type: ignore[union-attr]
+        files_changed=state.result.files_changed,  # type: ignore[union-attr]
+        # T-065: Omit diff_text to encourage tool-based exploration as per user feedback.
+        diff_text=None,
+        commands_run=state.result.commands_run,  # type: ignore[union-attr]
+        verifier_report=state.verification.model_dump() if state.verification else None,
+        session_state=_session_state_for_review_context(state),
+    )
+
+    return build_review_prompt(
+        workspace_path=repo_path or Path("."),
+        review_context_packet=review_context,
+        reviewer_kind="independent_reviewer",
+        task_text=state.normalized_task_text or state.task.task_text,
+    )
+
+
+async def review_result(
+    state: OrchestratorState,
+    *,
+    worker_factory: Mapping[str, Worker] | None = None,
+) -> dict[str, Any]:
+    """Perform an independent advisory review pass after successful verification."""
+    skip_decision = _check_skip_review(state)
+    if skip_decision is not None:
+        return skip_decision
+
+    review_prompt = _build_review_prompt_for_state(state)
+    reviewer_workers = _get_reviewer_workers(state, worker_factory)
 
     if not reviewer_workers:
         logger.warning("No suitable reviewer worker found, skipping independent review.")
         return {"current_step": "review_result"}
 
     # 4. Run the review pass with fallback
-    constraints = dict(state.task.constraints)
-    constraints["read_only"] = False
-    # T-181: Allow reviewer to keep workspace_write permission if granted.
-    if constraints.get("granted_permission") != ToolPermissionLevel.WORKSPACE_WRITE:
-        constraints.pop("granted_permission", None)
-
-    review_request = WorkerRequest(
-        session_id=state.session.session_id if state.session else None,
-        repo_url=state.task.repo_url,
-        branch=state.task.branch,
-        task_text=(
-            "Perform an independent review of the changes in the workspace. "
-            "Use your tools (git diff, read_file) to inspect the modified files "
-            "and their impact before providing your final review findings."
-        ),
-        memory_context=state.memory.model_dump(),
-        constraints=constraints,
-        budget=dict(state.task.budget),
-        secrets=dict((state.task.secrets or {}) | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
-        tools=state.task.tools,
-        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
-    )
+    review_request = _build_review_request(state)
+    timeout_seconds = _resolve_review_timeout_seconds(state)
 
     for i, (worker_type, worker) in enumerate(reviewer_workers):
         if worker_type == state.dispatch.worker_type:
@@ -436,79 +514,31 @@ async def review_result(
                 f"Independent review is using the same worker type as execution ({worker_type})."
             )
 
-        try:
-            with start_optional_span(
-                tracer_name="orchestrator.review",
-                span_name=f"independent_reviewer.{worker_type}",
-                task_id=state.task.task_id,
-                session_id=state.session.session_id if state.session else None,
-                attempt=state.attempt_count,
-                attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
-            ):
-                # We use the system_prompt override to perform a single-shot review
-                review_run_result = await asyncio.wait_for(
-                    worker.run(review_request, system_prompt=review_prompt),
-                    timeout=_resolve_review_timeout_seconds(state),
-                )
-                set_span_input_output(input_data=None, output_data=review_run_result.summary)
+        parsed_review = await _execute_independent_reviewer(
+            worker_type, worker, review_request, review_prompt, state, timeout_seconds
+        )
+        if parsed_review is None:
+            if i < len(reviewer_workers) - 1:
+                continue
+            return {"current_step": "review_result"}
 
-            if review_run_result.status != "success":
-                logger.warning(
-                    "Independent review worker returned non-success status: %s",
-                    review_run_result.status,
-                    extra={"task_id": state.task.task_id, "worker_type": worker_type},
-                )
-
-            # 5. Parse findings
-            parsed_review = parse_review_result(review_run_result.summary or "")
-            if parsed_review is None:
-                logger.warning("Independent review output could not be parsed into ReviewResult.")
-                if i < len(reviewer_workers) - 1 and (
-                    review_run_result.status != "success"
-                    or review_run_result.failure_kind
-                    in {
-                        "provider_error",
-                        "provider_auth",
-                        "sandbox_infra",
-                        "timeout",
-                        "model_error",
-                        "unknown",
-                    }
-                ):
-                    logger.info(
-                        f"Retrying independent review with next worker after {worker_type} failure",
-                        extra={"task_id": state.task.task_id},
-                    )
-                    continue
-                return {"current_step": "review_result"}
-
-            # Inject the correct reviewer kind if parser missed it
-            if parsed_review.reviewer_kind != "independent_reviewer":
-                parsed_review = parsed_review.model_copy(
-                    update={"reviewer_kind": "independent_reviewer"}
-                )
-            parsed_review = _apply_independent_review_suppression(
-                parsed_review,
-                constraints=state.task.constraints,
+        # 5. Process findings
+        if parsed_review.reviewer_kind != "independent_reviewer":
+            parsed_review = parsed_review.model_copy(
+                update={"reviewer_kind": "independent_reviewer"}
             )
-            repair_update = _repair_handoff_update(state, parsed_review)
-            if repair_update is not None:
-                return repair_update
+        parsed_review = _apply_independent_review_suppression(
+            parsed_review,
+            constraints=state.task.constraints,
+        )
+        repair_update = _repair_handoff_update(state, parsed_review)
+        if repair_update is not None:
+            return repair_update
 
-            return {
-                "current_step": "review_result",
-                "review": parsed_review.model_dump(),
-                "progress_updates": [*state.progress_updates, "independent review completed"],
-            }
-        except TimeoutError:
-            logger.warning("Independent review pass timed out and was skipped.")
-            if i < len(reviewer_workers) - 1:
-                continue
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception(f"Independent review pass failed unexpectedly for {worker_type}.")
-            if i < len(reviewer_workers) - 1:
-                continue
+        return {
+            "current_step": "review_result",
+            "review": parsed_review.model_dump(),
+            "progress_updates": [*state.progress_updates, "independent review completed"],
+        }
 
     return {"current_step": "review_result"}

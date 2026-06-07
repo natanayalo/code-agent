@@ -28,7 +28,7 @@ from workers.cli_runtime import (
     CliRuntimeSettings,
     CliRuntimeStep,
 )
-from workers.openrouter_cli_worker import _next_action_hint, _workspace_task_id
+from workers.openrouter_cli_worker_utils import _next_action_hint, _workspace_task_id
 
 
 class _FakeWorkspaceManager:
@@ -125,6 +125,43 @@ def _make_container(workspace: WorkspaceHandle) -> DockerSandboxContainer:
 
 def _git_status_command(container_workdir: str = "/workspace/repo") -> str:
     return f"git -C {container_workdir} status --porcelain=v1 -z --untracked-files=all"
+
+
+def _make_default_session(container: DockerSandboxContainer) -> _FakeSession:
+    return _FakeSession(
+        {
+            _git_status_command(container.working_dir): DockerShellCommandResult(
+                command=_git_status_command(container.working_dir),
+                exit_code=0,
+                output="",
+                duration_seconds=0.0,
+            )
+        }
+    )
+
+
+def _make_findings_json() -> str:
+    return json.dumps(
+        {
+            "summary": "found issues",
+            "confidence": 1.0,
+            "outcome": "findings",
+            "findings": [
+                {
+                    "severity": "low",
+                    "category": "style",
+                    "confidence": 1.0,
+                    "file_path": "a.py",
+                    "line_start": 1,
+                    "line_end": 1,
+                    "title": "t",
+                    "why_it_matters": "w",
+                    "evidence": "e",
+                    "suggested_fix": "f",
+                }
+            ],
+        }
+    )
 
 
 def test_openrouter_cli_worker_runs_successfully(tmp_path: Path) -> None:
@@ -303,37 +340,8 @@ def test_openrouter_cli_worker_self_review_with_findings(tmp_path: Path) -> None
     """Worker should do a fix pass when self-review has findings."""
     workspace = _make_workspace(tmp_path)
     container = _make_container(workspace)
-    session = _FakeSession(
-        {
-            _git_status_command(container.working_dir): DockerShellCommandResult(
-                command=_git_status_command(container.working_dir),
-                exit_code=0,
-                output="",
-                duration_seconds=0.0,
-            )
-        }
-    )
-    findings_json = json.dumps(
-        {
-            "summary": "found issues",
-            "confidence": 1.0,
-            "outcome": "findings",
-            "findings": [
-                {
-                    "severity": "low",
-                    "category": "style",
-                    "confidence": 1.0,
-                    "file_path": "a.py",
-                    "line_start": 1,
-                    "line_end": 1,
-                    "title": "t",
-                    "why_it_matters": "w",
-                    "evidence": "e",
-                    "suggested_fix": "f",
-                }
-            ],
-        }
-    )
+    session = _make_default_session(container)
+    findings_json = _make_findings_json()
 
     adapter = _ScriptedAdapter(
         [
@@ -379,37 +387,8 @@ def test_openrouter_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_p
     """Lint artifacts from each lint pass should be preserved on the final worker result."""
     workspace = _make_workspace(tmp_path)
     container = _make_container(workspace)
-    session = _FakeSession(
-        {
-            _git_status_command(container.working_dir): DockerShellCommandResult(
-                command=_git_status_command(container.working_dir),
-                exit_code=0,
-                output="",
-                duration_seconds=0.0,
-            )
-        }
-    )
-    findings_json = json.dumps(
-        {
-            "summary": "found issues",
-            "confidence": 1.0,
-            "outcome": "findings",
-            "findings": [
-                {
-                    "severity": "low",
-                    "category": "style",
-                    "confidence": 1.0,
-                    "file_path": "a.py",
-                    "line_start": 1,
-                    "line_end": 1,
-                    "title": "t",
-                    "why_it_matters": "w",
-                    "evidence": "e",
-                    "suggested_fix": "f",
-                }
-            ],
-        }
-    )
+    session = _make_default_session(container)
+    findings_json = _make_findings_json()
     adapter = _ScriptedAdapter(
         [
             CliRuntimeStep(kind="final", final_output="Done initial."),
@@ -450,9 +429,7 @@ def test_openrouter_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_p
                 },
                 [
                     ArtifactReference(
-                        name="lint-first",
-                        uri="artifacts/lint-first.log",
-                        artifact_type="log",
+                        name="lint-first", uri="artifacts/lint-first.log", artifact_type="log"
                     )
                 ],
             ),
@@ -467,9 +444,7 @@ def test_openrouter_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_p
                 },
                 [
                     ArtifactReference(
-                        name="lint-second",
-                        uri="artifacts/lint-second.log",
-                        artifact_type="log",
+                        name="lint-second", uri="artifacts/lint-second.log", artifact_type="log"
                     )
                 ],
             ),
@@ -491,37 +466,8 @@ def test_openrouter_cli_worker_self_review_exhausts_budget(tmp_path: Path) -> No
     """Worker should mark as failure if budget is exceeded during fix loop."""
     workspace = _make_workspace(tmp_path)
     container = _make_container(workspace)
-    session = _FakeSession(
-        {
-            _git_status_command(container.working_dir): DockerShellCommandResult(
-                command=_git_status_command(container.working_dir),
-                exit_code=0,
-                output="",
-                duration_seconds=0.0,
-            )
-        }
-    )
-    findings_json = json.dumps(
-        {
-            "summary": "found issues",
-            "confidence": 1.0,
-            "outcome": "findings",
-            "findings": [
-                {
-                    "severity": "low",
-                    "category": "style",
-                    "confidence": 1.0,
-                    "file_path": "a.py",
-                    "line_start": 1,
-                    "line_end": 1,
-                    "title": "t",
-                    "why_it_matters": "w",
-                    "evidence": "e",
-                    "suggested_fix": "f",
-                }
-            ],
-        }
-    )
+    session = _make_default_session(container)
+    findings_json = _make_findings_json()
 
     adapter = _ScriptedAdapter(
         [
