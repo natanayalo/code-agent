@@ -441,6 +441,8 @@ class DockerShellSession:
 
         if error_holder:
             first_error = error_holder[0]
+            if not isinstance(first_error, Exception):
+                raise first_error
             if isinstance(first_error, DockerShellSessionError):
                 raise first_error
             raise DockerShellSessionError(

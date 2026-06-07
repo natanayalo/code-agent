@@ -192,6 +192,10 @@ async def run_queued_task(
                     [orchestrator_task, heartbeat_task],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                if heartbeat_task.done():
+                    heartbeat_exc = heartbeat_task.exception()
+                    if heartbeat_exc is not None:
+                        raise heartbeat_exc
                 if orchestrator_task in done:
                     state = orchestrator_task.result()
                 else:
