@@ -375,7 +375,7 @@ def _handle_verifier_worker_exception(
         logger.warning(
             "Independent verifier execution failed unexpectedly",
             exc_info=True,
-            extra={"worker_type": worker_type},
+            extra={"worker_type": worker_type, "task_id": state.task.task_id},
         )
         if is_last_worker:
             return (
