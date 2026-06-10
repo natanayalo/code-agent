@@ -270,7 +270,8 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         if getattr(first_choice, "finish_reason", None) == "length":
             raise RuntimeError("OpenRouter response truncated due to token limit.")
 
-        raw_json = _message_content_to_text(getattr(first_choice.message, "content", "")).strip()
+        message = getattr(first_choice, "message", None)
+        raw_json = _message_content_to_text(getattr(message, "content", "")).strip()
         raw_json = _unwrap_markdown_json_fence(raw_json)
         if not raw_json:
             raise RuntimeError("OpenRouter adapter returned an empty response body.")

@@ -168,6 +168,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
                 suppressed.finding.line_end,
             )
             for suppressed in state.review.suppressed_findings
+            if suppressed.finding is not None
         }
         overlapping_fingerprints = actionable_fingerprint_set & suppressed_fingerprint_set
         if overlapping_fingerprints:
