@@ -187,9 +187,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
             false_positive_findings_count=false_positive_findings_count,
             fix_after_review_attempted=bool(repair_attempted),
             fix_after_review_succeeded=(
-                repair_attempted
-                and state.verification is not None
-                and state.verification.status == "passed"
+                state.verification is not None and state.verification.status == "passed"
             )
             if repair_attempted
             else None,
