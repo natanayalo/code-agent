@@ -210,24 +210,16 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
             ),
         )
 
-    def next_step(
+    def _build_request_messages(
         self,
         messages: Sequence[CliRuntimeMessage],
-        *,
-        system_prompt: str | None = None,
-        prompt_override: str | None = None,
-        working_directory: Path | None = None,  # noqa: ARG002 - kept for interface symmetry
-        task_id: str | None = None,
-        session_id: str | None = None,
-        response_format: Literal["text", "json"] = "text",
-        response_schema: dict[str, Any] | None = None,
-    ) -> CliRuntimeStep:
-        """Ask OpenRouter for the next runtime step."""
-        override_prompt = normalize_prompt_override(prompt_override)
-        request_messages: list[ChatCompletionMessageParam]
+        system_prompt: str | None,
+        override_prompt: str | None,
+    ) -> list[ChatCompletionMessageParam]:
+        """Build request messages for the API call."""
         if override_prompt is not None:
             if self.use_role_native_messages:
-                request_messages = cast(
+                return cast(
                     list[ChatCompletionMessageParam],
                     [
                         {
@@ -248,17 +240,17 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
                     ],
                 )
             else:
-                request_messages = cast(
+                return cast(
                     list[ChatCompletionMessageParam],
                     [{"role": "user", "content": override_prompt}],
                 )
         elif self.use_role_native_messages:
-            request_messages = _build_role_native_request_messages(
+            return _build_role_native_request_messages(
                 messages,
                 system_prompt=system_prompt,
             )
         else:
-            request_messages = cast(
+            return cast(
                 list[ChatCompletionMessageParam],
                 [
                     {
@@ -267,6 +259,55 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
                     }
                 ],
             )
+
+    def _parse_response(self, response: Any, is_override: bool) -> CliRuntimeStep:
+        """Parse the API response into a CliRuntimeStep."""
+        choices = getattr(response, "choices", None)
+        if not choices:
+            raise RuntimeError("OpenRouter adapter returned no choices.")
+
+        first_choice = choices[0]
+        if getattr(first_choice, "finish_reason", None) == "length":
+            raise RuntimeError("OpenRouter response truncated due to token limit.")
+
+        raw_json = _message_content_to_text(getattr(first_choice.message, "content", "")).strip()
+        raw_json = _unwrap_markdown_json_fence(raw_json)
+        if not raw_json:
+            raise RuntimeError("OpenRouter adapter returned an empty response body.")
+        if is_override:
+            return parse_cli_runtime_step_or_final(raw_json)
+        try:
+            return CliRuntimeStep.model_validate_json(raw_json)
+        except Exception as exc:
+            # Self-review prompts may return a different JSON schema (ReviewResult).
+            # When that happens, preserve the payload by wrapping it as a final step.
+            try:
+                parsed_payload = json.loads(raw_json)
+            except Exception:
+                parsed_payload = None
+            if isinstance(parsed_payload, dict):
+                return final_cli_runtime_step(raw_json)
+            raise RuntimeError(
+                "OpenRouter adapter returned a response that did not match "
+                "CliRuntimeStep: "
+                f"{truncate_detail_keep_head(raw_json, max_characters=_DETAIL_PREVIEW_CHARACTERS)}"
+            ) from exc
+
+    def next_step(
+        self,
+        messages: Sequence[CliRuntimeMessage],
+        *,
+        system_prompt: str | None = None,
+        prompt_override: str | None = None,
+        working_directory: Path | None = None,  # noqa: ARG002 - kept for interface symmetry
+        task_id: str | None = None,
+        session_id: str | None = None,
+        response_format: Literal["text", "json"] = "text",
+        response_schema: dict[str, Any] | None = None,
+    ) -> CliRuntimeStep:
+        """Ask OpenRouter for the next runtime step."""
+        override_prompt = normalize_prompt_override(prompt_override)
+        request_messages = self._build_request_messages(messages, system_prompt, override_prompt)
 
         try:
             with with_llm_span(
@@ -313,33 +354,4 @@ class OpenRouterCliRuntimeAdapter(CliRuntimeAdapter):
         except Exception as exc:  # pragma: no cover - exercised via unit tests with stubs
             raise RuntimeError(f"OpenRouter adapter request failed: {exc}") from exc
 
-        choices = getattr(response, "choices", None)
-        if not choices:
-            raise RuntimeError("OpenRouter adapter returned no choices.")
-
-        first_choice = choices[0]
-        if getattr(first_choice, "finish_reason", None) == "length":
-            raise RuntimeError("OpenRouter response truncated due to token limit.")
-
-        raw_json = _message_content_to_text(getattr(first_choice.message, "content", "")).strip()
-        raw_json = _unwrap_markdown_json_fence(raw_json)
-        if not raw_json:
-            raise RuntimeError("OpenRouter adapter returned an empty response body.")
-        if override_prompt is not None:
-            return parse_cli_runtime_step_or_final(raw_json)
-        try:
-            return CliRuntimeStep.model_validate_json(raw_json)
-        except Exception as exc:
-            # Self-review prompts may return a different JSON schema (ReviewResult).
-            # When that happens, preserve the payload by wrapping it as a final step.
-            try:
-                parsed_payload = json.loads(raw_json)
-            except Exception:
-                parsed_payload = None
-            if isinstance(parsed_payload, dict):
-                return final_cli_runtime_step(raw_json)
-            raise RuntimeError(
-                "OpenRouter adapter returned a response that did not match "
-                "CliRuntimeStep: "
-                f"{truncate_detail_keep_head(raw_json, max_characters=_DETAIL_PREVIEW_CHARACTERS)}"
-            ) from exc
+        return self._parse_response(response, is_override=override_prompt is not None)

@@ -194,6 +194,35 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         command.extend(["-o", "json", "--accept-raw-output-risk", "--raw-output"])
         return command
 
+    def _parse_output(self, stdout: str, is_override: bool) -> CliRuntimeStep:
+        """Parse the CLI output into a CliRuntimeStep."""
+        raw_output = stdout
+        try:
+            structured = json.loads(raw_output)
+            if isinstance(structured, dict) and "response" in structured:
+                val = structured["response"]
+                raw_output = val if isinstance(val, str) else json.dumps(val)
+        except json.JSONDecodeError:
+            pass
+
+        raw_output = raw_output.strip()
+        if not raw_output:
+            raise RuntimeError("Gemini CLI adapter returned an empty response body.")
+
+        try:
+            raw_json = _extract_json(raw_output)
+            parsed = json.loads(raw_json)
+            normalized = _coerce_step_payload(parsed)
+            if normalized is not None:
+                raw_json = json.dumps(normalized)
+        except (RuntimeError, json.JSONDecodeError):
+            return final_cli_runtime_step(raw_output)
+
+        if is_override:
+            return parse_cli_runtime_step_or_final(raw_json)
+
+        return parse_cli_runtime_step_or_final(raw_json)
+
     def next_step(
         self,
         messages: Sequence[CliRuntimeMessage],
@@ -257,57 +286,17 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 f"Gemini CLI adapter could not start `{self.executable}`: {exc}"
             ) from exc
 
-        stderr_preview = truncate_detail_keep_tail(
-            completed.stderr,
-            max_characters=_DETAIL_PREVIEW_CHARACTERS,
-        )
-        stdout_preview = truncate_detail_keep_tail(
-            completed.stdout,
-            max_characters=_DETAIL_PREVIEW_CHARACTERS,
-        )
-
         if completed.returncode != 0:
+            stderr_preview = truncate_detail_keep_tail(
+                completed.stderr, max_characters=_DETAIL_PREVIEW_CHARACTERS
+            )
+            stdout_preview = truncate_detail_keep_tail(
+                completed.stdout, max_characters=_DETAIL_PREVIEW_CHARACTERS
+            )
             raise RuntimeError(
                 "Gemini CLI adapter failed with exit code "
                 f"{completed.returncode}. stderr: {stderr_preview} "
                 f"stdout: {stdout_preview}"
             )
 
-        raw_output = completed.stdout
-        # If we asked for JSON output, try to parse the structured response first.
-        try:
-            structured = json.loads(raw_output)
-            if isinstance(structured, dict) and "response" in structured:
-                val = structured["response"]
-                raw_output = val if isinstance(val, str) else json.dumps(val)
-        except json.JSONDecodeError:
-            # Fall back to raw output if it wasn't valid JSON (e.g. CLI warnings)
-            pass
-        raw_output = raw_output.strip()
-        if not raw_output:
-            raise RuntimeError("Gemini CLI adapter returned an empty response body.")
-
-        if override_prompt is not None:
-            try:
-                raw_json = _extract_json(raw_output)
-                parsed = json.loads(raw_json)
-                normalized = _coerce_step_payload(parsed)
-                if normalized is not None:
-                    raw_json = json.dumps(normalized)
-            except (RuntimeError, json.JSONDecodeError):
-                return final_cli_runtime_step(raw_output)
-            return parse_cli_runtime_step_or_final(raw_json)
-
-        try:
-            raw_json = _extract_json(raw_output)
-            parsed = json.loads(raw_json)
-            normalized = _coerce_step_payload(parsed)
-            if normalized is not None:
-                raw_json = json.dumps(normalized)
-        except (RuntimeError, json.JSONDecodeError):
-            # If we can't extract or parse JSON, treat the entire output as final_output.
-            return final_cli_runtime_step(raw_output)
-
-        # Fall back to a 'final' step if the JSON is valid but not a CliRuntimeStep.
-        # This allows parsing one-shot review results or mis-shaped outputs gracefully.
-        return parse_cli_runtime_step_or_final(raw_json)
+        return self._parse_output(completed.stdout, is_override=override_prompt is not None)

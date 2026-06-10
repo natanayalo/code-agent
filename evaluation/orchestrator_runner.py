@@ -26,6 +26,62 @@ class _FrozenOutcomeWorker(Worker):
     def __init__(self, outcomes_by_case_id: dict[str, WorkerOutcome]) -> None:
         self._outcomes_by_case_id = dict(outcomes_by_case_id)
 
+    def _generate_mock_review_result(self, outcome: WorkerOutcome) -> WorkerResult:
+        """Generate a mock review WorkerResult based on deterministic outcomes."""
+        review = outcome.review
+        if review is None:
+            review_payload = {
+                "reviewer_kind": "independent_reviewer",
+                "summary": "Mock review: no findings.",
+                "confidence": 1.0,
+                "outcome": "no_findings",
+                "findings": [],
+            }
+        else:
+            findings = []
+            # Generate mock actionable findings (high confidence)
+            for i in range(review.actionable_findings_count):
+                findings.append(
+                    {
+                        "severity": "high",
+                        "category": "logic",
+                        "confidence": 0.9,
+                        "file_path": f"file_{i}.py",
+                        "line_start": 10 + i,
+                        "title": f"Mock Actionable Finding {i}",
+                        "why_it_matters": "critical logic issue",
+                    }
+                )
+            # Generate mock false positive findings (low confidence to trigger suppression)
+            for i in range(review.false_positive_findings_count):
+                findings.append(
+                    {
+                        "severity": "low",
+                        "category": "style",
+                        "confidence": 0.1,
+                        "file_path": f"style_{i}.py",
+                        "line_start": 100 + i,
+                        "title": f"Mock False Positive {i}",
+                        "why_it_matters": "style issue",
+                    }
+                )
+            review_payload = {
+                "reviewer_kind": "independent_reviewer",
+                "summary": f"Mock review with {len(findings)} findings.",
+                "confidence": 1.0,
+                "outcome": "findings" if findings else "no_findings",
+                "findings": findings,
+            }
+        return WorkerResult(
+            status="success",
+            summary=json.dumps(review_payload),
+            commands_run=[],
+            files_changed=[],
+            test_results=[],
+            artifacts=[ArtifactReference(name="workspace", uri="file:///tmp/mock-eval-workspace")],
+            next_action_hint="summarize_result",
+        )
+
     async def run(
         self,
         request: WorkerRequest,
@@ -57,62 +113,7 @@ class _FrozenOutcomeWorker(Worker):
             ]
 
         if request.task_text == "Perform an independent review of the changes.":
-            # Mock review generation based on the deterministic ReviewOutcome if available.
-            review = outcome.review
-            if review is None:
-                review_payload = {
-                    "reviewer_kind": "independent_reviewer",
-                    "summary": "Mock review: no findings.",
-                    "confidence": 1.0,
-                    "outcome": "no_findings",
-                    "findings": [],
-                }
-            else:
-                findings = []
-                # Generate mock actionable findings (high confidence)
-                for i in range(review.actionable_findings_count):
-                    findings.append(
-                        {
-                            "severity": "high",
-                            "category": "logic",
-                            "confidence": 0.9,
-                            "file_path": f"file_{i}.py",
-                            "line_start": 10 + i,
-                            "title": f"Mock Actionable Finding {i}",
-                            "why_it_matters": "critical logic issue",
-                        }
-                    )
-                # Generate mock false positive findings (low confidence to trigger suppression)
-                for i in range(review.false_positive_findings_count):
-                    findings.append(
-                        {
-                            "severity": "low",
-                            "category": "style",
-                            "confidence": 0.1,
-                            "file_path": f"style_{i}.py",
-                            "line_start": 100 + i,
-                            "title": f"Mock False Positive {i}",
-                            "why_it_matters": "style issue",
-                        }
-                    )
-                review_payload = {
-                    "reviewer_kind": "independent_reviewer",
-                    "summary": f"Mock review with {len(findings)} findings.",
-                    "confidence": 1.0,
-                    "outcome": "findings" if findings else "no_findings",
-                    "findings": findings,
-                }
-            return WorkerResult(
-                status="success",
-                summary=json.dumps(review_payload),
-                commands_run=[],
-                files_changed=[],
-                test_results=[],
-                artifacts=[
-                    ArtifactReference(name="workspace", uri="file:///tmp/mock-eval-workspace")
-                ],
-                next_action_hint="summarize_result",
-            )
+            return self._generate_mock_review_result(outcome)
 
         return WorkerResult(
             status=outcome.status,
@@ -140,6 +141,56 @@ class OrchestratorReplayRunner(EvaluationRunner):
             worker=self._worker,
             gemini_worker=self._worker,
             checkpointer=create_in_memory_checkpointer(),
+        )
+
+    def _extract_review_outcome(self, state: OrchestratorState) -> ReviewOutcome | None:
+        """Extract a structured review outcome from the orchestrator state."""
+        if state.review is None:
+            return None
+        # Suppressed findings are a pragmatic proxy for filtered/rejected findings in this path;
+        # this is not a strict semantic "incorrect finding" measurement.
+        actionable_fingerprint_set = {
+            (
+                normalize_path_for_scoring(finding.file_path),
+                finding.title,
+                finding.line_start,
+                finding.line_end,
+            )
+            for finding in state.review.findings
+        }
+        suppressed_fingerprint_set = {
+            (
+                normalize_path_for_scoring(suppressed.finding.file_path),
+                suppressed.finding.title,
+                suppressed.finding.line_start,
+                suppressed.finding.line_end,
+            )
+            for suppressed in state.review.suppressed_findings
+        }
+        overlapping_fingerprints = actionable_fingerprint_set & suppressed_fingerprint_set
+        if overlapping_fingerprints:
+            logger.warning(
+                "Independent review output contained overlapping actionable and suppressed "
+                "findings; deduplicating by fingerprint with suppression precedence."
+            )
+        # "Actionable" in this runner currently means "not suppressed by policy filtering".
+        actionable_findings_count = len(actionable_fingerprint_set - suppressed_fingerprint_set)
+        false_positive_findings_count = len(suppressed_fingerprint_set)
+        # Total findings are deduplicated across actionable/suppressed sets.
+        total_findings_count = actionable_findings_count + false_positive_findings_count
+        repair_attempted = state.repair_handoff_requested
+        return ReviewOutcome(
+            findings_count=total_findings_count,
+            actionable_findings_count=actionable_findings_count,
+            false_positive_findings_count=false_positive_findings_count,
+            fix_after_review_attempted=bool(repair_attempted),
+            fix_after_review_succeeded=(
+                repair_attempted
+                and state.verification is not None
+                and state.verification.status == "passed"
+            )
+            if repair_attempted
+            else None,
         )
 
     async def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
@@ -201,53 +252,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
             tests_passed = all(
                 test_result.status == "passed" for test_result in result.test_results
             )
-        review_outcome: ReviewOutcome | None = None
-        if state.review is not None:
-            # Suppressed findings are a pragmatic proxy for filtered/rejected findings in this path;
-            # this is not a strict semantic "incorrect finding" measurement.
-            actionable_fingerprint_set = {
-                (
-                    normalize_path_for_scoring(finding.file_path),
-                    finding.title,
-                    finding.line_start,
-                    finding.line_end,
-                )
-                for finding in state.review.findings
-            }
-            suppressed_fingerprint_set = {
-                (
-                    normalize_path_for_scoring(suppressed.finding.file_path),
-                    suppressed.finding.title,
-                    suppressed.finding.line_start,
-                    suppressed.finding.line_end,
-                )
-                for suppressed in state.review.suppressed_findings
-            }
-            overlapping_fingerprints = actionable_fingerprint_set & suppressed_fingerprint_set
-            if overlapping_fingerprints:
-                logger.warning(
-                    "Independent review output contained overlapping actionable and suppressed "
-                    "findings; deduplicating by fingerprint with suppression precedence."
-                )
-            # "Actionable" in this runner currently means "not suppressed by policy filtering".
-            actionable_findings_count = len(actionable_fingerprint_set - suppressed_fingerprint_set)
-            false_positive_findings_count = len(suppressed_fingerprint_set)
-            # Total findings are deduplicated across actionable/suppressed sets.
-            total_findings_count = actionable_findings_count + false_positive_findings_count
-            repair_attempted = state.repair_handoff_requested
-            review_outcome = ReviewOutcome(
-                findings_count=total_findings_count,
-                actionable_findings_count=actionable_findings_count,
-                false_positive_findings_count=false_positive_findings_count,
-                fix_after_review_attempted=bool(repair_attempted),
-                fix_after_review_succeeded=(
-                    repair_attempted
-                    and state.verification is not None
-                    and state.verification.status == "passed"
-                )
-                if repair_attempted
-                else None,
-            )
+        review_outcome = self._extract_review_outcome(state)
 
         return WorkerOutcome(
             status=result.status,
