@@ -48,6 +48,7 @@ class _FrozenOutcomeWorker(Worker):
                         "confidence": 0.9,
                         "file_path": f"file_{i}.py",
                         "line_start": 10 + i,
+                        "line_end": 10 + i,
                         "title": f"Mock Actionable Finding {i}",
                         "why_it_matters": "critical logic issue",
                     }
@@ -61,6 +62,7 @@ class _FrozenOutcomeWorker(Worker):
                         "confidence": 0.1,
                         "file_path": f"style_{i}.py",
                         "line_start": 100 + i,
+                        "line_end": 100 + i,
                         "title": f"Mock False Positive {i}",
                         "why_it_matters": "style issue",
                     }
