@@ -108,9 +108,15 @@ async def main():
                 task_data = resp.json()
                 status = task_data.get("status")
             except httpx.RequestError as exc:
-                print(f"    - Attempt {attempt + 1}/{max_attempts}: Transient request error: {exc}")
+                print(f"    - Attempt {attempt + 1}/{max_attempts}: Request error: {exc}")
                 await asyncio.sleep(2)
                 continue
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in {502, 503, 504}:
+                    print(f"    - Attempt {attempt + 1}/{max_attempts}: Transient status error {exc.response.status_code}: {exc}")
+                    await asyncio.sleep(2)
+                    continue
+                raise
 
             print(f"    - Attempt {attempt + 1}/{max_attempts}: Status = {status}")
 
