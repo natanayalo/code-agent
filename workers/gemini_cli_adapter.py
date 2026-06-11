@@ -78,48 +78,31 @@ def _build_adapter_prompt(
 def _extract_json(text: str) -> str:
     """Extract the first valid JSON object from a Gemini CLI response.
 
-    Uses brace-counting with string awareness to find balanced ``{...}``
-    candidates, then validates each with ``json.loads`` before returning it.
-    This handles nested objects, prose with embedded non-JSON braces (e.g.
-    ``{a, b}``), trailing prose, and markdown-fenced responses correctly.
+    Uses json.JSONDecoder().raw_decode to extract JSON robustly from noisy
+    stdout streams, ignoring any trailing characters.
     """
     stripped = text.strip()
     search_from = 0
+    decoder = json.JSONDecoder()
     while True:
         start = stripped.find("{", search_from)
         if start == -1:
             break
-        depth = 0
-        in_string = False
-        escape_next = False
-        end = -1
-        for i, ch in enumerate(stripped[start:], start=start):
-            if escape_next:
-                escape_next = False
-                continue
-            if in_string:
-                if ch == "\\":
-                    escape_next = True
-                elif ch == '"':
-                    in_string = False
-                continue
-            if ch == '"':
-                in_string = True
-            elif ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    end = i
-                    break
-        if end == -1:
-            break
-        candidate = stripped[start : end + 1]
         try:
-            json.loads(candidate)
+            _, end_idx = decoder.raw_decode(stripped[start:])
+            candidate = stripped[start : start + end_idx]
+            logger.debug(
+                "Extracted JSON from noisy output",
+                extra={
+                    "start_idx": start,
+                    "end_idx": start + end_idx,
+                    "total_length": len(stripped),
+                },
+            )
             return candidate
-        except ValueError:
-            search_from = end + 1
+        except json.JSONDecodeError:
+            search_from = start + 1
+
     raise RuntimeError(
         "No JSON object found in Gemini CLI response: "
         f"{truncate_detail_keep_tail(stripped, max_characters=_DETAIL_PREVIEW_CHARACTERS)}"
@@ -194,6 +177,32 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         command.extend(["-o", "json", "--accept-raw-output-risk", "--raw-output"])
         return command
 
+    def _parse_output(self, stdout: str) -> CliRuntimeStep:
+        """Parse the CLI output into a CliRuntimeStep."""
+        raw_output = stdout
+        try:
+            structured = json.loads(raw_output)
+            if isinstance(structured, dict) and "response" in structured:
+                val = structured["response"]
+                raw_output = val if isinstance(val, str) else json.dumps(val)
+        except json.JSONDecodeError:
+            pass
+
+        raw_output = raw_output.strip()
+        if not raw_output:
+            raise RuntimeError("Gemini CLI adapter returned an empty response body.")
+
+        try:
+            raw_json = _extract_json(raw_output)
+            parsed = json.loads(raw_json)
+            normalized = _coerce_step_payload(parsed)
+            if normalized is not None:
+                raw_json = json.dumps(normalized)
+        except (RuntimeError, json.JSONDecodeError):
+            return final_cli_runtime_step(raw_output)
+
+        return parse_cli_runtime_step_or_final(raw_json)
+
     def next_step(
         self,
         messages: Sequence[CliRuntimeMessage],
@@ -257,57 +266,17 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 f"Gemini CLI adapter could not start `{self.executable}`: {exc}"
             ) from exc
 
-        stderr_preview = truncate_detail_keep_tail(
-            completed.stderr,
-            max_characters=_DETAIL_PREVIEW_CHARACTERS,
-        )
-        stdout_preview = truncate_detail_keep_tail(
-            completed.stdout,
-            max_characters=_DETAIL_PREVIEW_CHARACTERS,
-        )
-
         if completed.returncode != 0:
+            stderr_preview = truncate_detail_keep_tail(
+                completed.stderr, max_characters=_DETAIL_PREVIEW_CHARACTERS
+            )
+            stdout_preview = truncate_detail_keep_tail(
+                completed.stdout, max_characters=_DETAIL_PREVIEW_CHARACTERS
+            )
             raise RuntimeError(
                 "Gemini CLI adapter failed with exit code "
                 f"{completed.returncode}. stderr: {stderr_preview} "
                 f"stdout: {stdout_preview}"
             )
 
-        raw_output = completed.stdout
-        # If we asked for JSON output, try to parse the structured response first.
-        try:
-            structured = json.loads(raw_output)
-            if isinstance(structured, dict) and "response" in structured:
-                val = structured["response"]
-                raw_output = val if isinstance(val, str) else json.dumps(val)
-        except json.JSONDecodeError:
-            # Fall back to raw output if it wasn't valid JSON (e.g. CLI warnings)
-            pass
-        raw_output = raw_output.strip()
-        if not raw_output:
-            raise RuntimeError("Gemini CLI adapter returned an empty response body.")
-
-        if override_prompt is not None:
-            try:
-                raw_json = _extract_json(raw_output)
-                parsed = json.loads(raw_json)
-                normalized = _coerce_step_payload(parsed)
-                if normalized is not None:
-                    raw_json = json.dumps(normalized)
-            except (RuntimeError, json.JSONDecodeError):
-                return final_cli_runtime_step(raw_output)
-            return parse_cli_runtime_step_or_final(raw_json)
-
-        try:
-            raw_json = _extract_json(raw_output)
-            parsed = json.loads(raw_json)
-            normalized = _coerce_step_payload(parsed)
-            if normalized is not None:
-                raw_json = json.dumps(normalized)
-        except (RuntimeError, json.JSONDecodeError):
-            # If we can't extract or parse JSON, treat the entire output as final_output.
-            return final_cli_runtime_step(raw_output)
-
-        # Fall back to a 'final' step if the JSON is valid but not a CliRuntimeStep.
-        # This allows parsing one-shot review results or mis-shaped outputs gracefully.
-        return parse_cli_runtime_step_or_final(raw_json)
+        return self._parse_output(completed.stdout)

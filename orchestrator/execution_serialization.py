@@ -161,19 +161,19 @@ def _summarize_graph_span_output(raw_output: object) -> dict[str, Any]:
     return {key: value for key, value in summary.items() if value is not None}
 
 
+def _normalize_requested_permission(raw_permission: object, *, warning_context: str) -> str | None:
+    """Normalize a permission value while logging unknown levels."""
+    requested_permission_level = coerce_permission_level(raw_permission)
+    if raw_permission is not None and requested_permission_level is None:
+        logger.warning(
+            f"Ignoring unknown permission level from {warning_context}.",
+            extra={"requested_permission": raw_permission},
+        )
+    return requested_permission_level.value if requested_permission_level is not None else None
+
+
 def _normalize_orchestrator_graph_output(raw_output: object) -> object:
     """Strip transport-only interrupt keys and map unresolved interrupts to failure output."""
-
-    def _normalize_requested_permission(
-        raw_permission: object, *, warning_context: str
-    ) -> str | None:
-        requested_permission_level = coerce_permission_level(raw_permission)
-        if raw_permission is not None and requested_permission_level is None:
-            logger.warning(
-                f"Ignoring unknown permission level from {warning_context}.",
-                extra={"requested_permission": raw_permission},
-            )
-        return requested_permission_level.value if requested_permission_level is not None else None
 
     if isinstance(raw_output, Mapping):
         normalized = dict(raw_output)

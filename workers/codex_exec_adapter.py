@@ -168,6 +168,46 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         command.append("-")
         return command
 
+    def _parse_output_message_file(
+        self,
+        output_message_path: Path,
+        stdout: str,
+        stderr: str,
+    ) -> CliRuntimeStep:
+        """Parse the output message file written by the CLI adapter."""
+        stdout_preview = truncate_detail_keep_tail(
+            stdout, max_characters=_DETAIL_PREVIEW_CHARACTERS
+        )
+        stderr_preview = truncate_detail_keep_tail(
+            stderr, max_characters=_DETAIL_PREVIEW_CHARACTERS
+        )
+
+        if not output_message_path.exists():
+            raise RuntimeError(
+                "Codex CLI adapter completed without writing the final message file. "
+                f"stdout: {stdout_preview} "
+                f"stderr: {stderr_preview}"
+            )
+
+        raw_output = output_message_path.read_text(encoding="utf-8").strip()
+        if not raw_output:
+            raise RuntimeError(
+                "Codex CLI adapter wrote an empty final message file. "
+                f"stdout: {stdout_preview} "
+                f"stderr: {stderr_preview}"
+            )
+
+        try:
+            parsed = json.loads(raw_output)
+            if isinstance(parsed, dict) and isinstance(parsed.get("tool_input"), dict):
+                parsed["tool_input"] = json.dumps(parsed["tool_input"])
+                raw_output = json.dumps(parsed)
+        except json.JSONDecodeError:
+            pass
+
+        # Fall back to a 'final' step if the payload does not validate as CliRuntimeStep.
+        return parse_cli_runtime_step_or_final(raw_output)
+
     def next_step(
         self,
         messages: Sequence[CliRuntimeMessage],
@@ -231,44 +271,19 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
                     f"Codex CLI adapter could not start `{self.executable}`: {exc}"
                 ) from exc
 
-            stderr_preview = truncate_detail_keep_tail(
-                completed.stderr,
-                max_characters=_DETAIL_PREVIEW_CHARACTERS,
-            )
-            stdout_preview = truncate_detail_keep_tail(
-                completed.stdout,
-                max_characters=_DETAIL_PREVIEW_CHARACTERS,
-            )
-
             if completed.returncode != 0:
+                stderr_preview = truncate_detail_keep_tail(
+                    completed.stderr, max_characters=_DETAIL_PREVIEW_CHARACTERS
+                )
+                stdout_preview = truncate_detail_keep_tail(
+                    completed.stdout, max_characters=_DETAIL_PREVIEW_CHARACTERS
+                )
                 raise RuntimeError(
                     "Codex CLI adapter failed with exit code "
                     f"{completed.returncode}. stderr: {stderr_preview} "
                     f"stdout: {stdout_preview}"
                 )
 
-            if not output_message_path.exists():
-                raise RuntimeError(
-                    "Codex CLI adapter completed without writing the final message file. "
-                    f"stdout: {stdout_preview} "
-                    f"stderr: {stderr_preview}"
-                )
-
-            raw_output = output_message_path.read_text(encoding="utf-8").strip()
-            if not raw_output:
-                raise RuntimeError(
-                    "Codex CLI adapter wrote an empty final message file. "
-                    f"stdout: {stdout_preview} "
-                    f"stderr: {stderr_preview}"
-                )
-
-            try:
-                parsed = json.loads(raw_output)
-                if isinstance(parsed, dict) and isinstance(parsed.get("tool_input"), dict):
-                    parsed["tool_input"] = json.dumps(parsed["tool_input"])
-                    raw_output = json.dumps(parsed)
-            except json.JSONDecodeError:
-                pass
-
-            # Fall back to a 'final' step if the payload does not validate as CliRuntimeStep.
-            return parse_cli_runtime_step_or_final(raw_output)
+            return self._parse_output_message_file(
+                output_message_path, completed.stdout, completed.stderr
+            )
