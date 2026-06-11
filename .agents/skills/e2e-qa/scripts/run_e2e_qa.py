@@ -113,7 +113,8 @@ async def main():
     workspace_dir = None
 
     # We use the exact workspace ID returned by the API
-    expected_workspace_id = task_data.get("latest_run", {}).get("workspace_id")
+    latest_run = task_data.get("latest_run")
+    expected_workspace_id = latest_run.get("workspace_id") if latest_run else None
     if not expected_workspace_id:
         print("  [-] Could not determine workspace_id from task_data")
         return

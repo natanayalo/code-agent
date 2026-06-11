@@ -760,7 +760,7 @@ async def generate_task_spec(
         session_id=state.session.session_id if state.session else None,
         attempt=state.attempt_count,
         task_kind=state.task_kind,
-        route_reason=state.route.route_reason,
+        route_reason=state.route.route_reason if state.route else None,
         verification_summary=state.verification.summary if state.verification else None,
     ):
         task_spec = build_task_spec_for_request(
@@ -801,7 +801,7 @@ def build_generate_task_spec_and_route_node(
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
             task_kind=state.task_kind,
-            route_reason=state.route.route_reason,
+            route_reason=state.route.route_reason if state.route else None,
             verification_summary=state.verification.summary if state.verification else None,
         ):
             task_spec = build_task_spec_for_request(
@@ -906,7 +906,7 @@ async def _execute_task_spec_brain_method(
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
             task_kind=state.task_kind,
-            route_reason=state.route.route_reason,
+            route_reason=state.route.route_reason if state.route else None,
             verification_summary=state.verification.summary if state.verification else None,
         ):
             suggestion = await orchestrator_brain.suggest_task_spec(
@@ -1209,7 +1209,7 @@ async def _execute_unified_brain_method(
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
             task_kind=state.task_kind,
-            route_reason=state.route.route_reason,
+            route_reason=state.route.route_reason if state.route else None,
             verification_summary=state.verification.summary if state.verification else None,
         ):
             suggestion = await unified_method(
@@ -2104,7 +2104,7 @@ async def _execute_route_brain_suggestion(
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
             task_kind=state.task_kind,
-            route_reason=state.route.route_reason,
+            route_reason=state.route.route_reason if state.route else None,
             verification_summary=state.verification.summary if state.verification else None,
         ):
             suggestion = await orchestrator_brain.suggest_route(
@@ -2192,7 +2192,7 @@ def build_choose_worker_node(
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
             task_kind=state.task_kind,
-            route_reason=state.route.route_reason,
+            route_reason=state.route.route_reason if state.route else None,
             verification_summary=state.verification.summary if state.verification else None,
         ):
             route: RouteDecision | None = None
@@ -2281,7 +2281,7 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
         session_id=state.session.session_id if state.session else None,
         attempt=state.attempt_count,
         task_kind=state.task_kind,
-        route_reason=state.route.route_reason,
+        route_reason=state.route.route_reason if state.route else None,
         verification_summary=state.verification.summary if state.verification else None,
     ):
         worker_type = state.route.chosen_worker
@@ -2454,7 +2454,7 @@ def build_await_result_node(
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
             task_kind=state.task_kind,
-            route_reason=state.route.route_reason,
+            route_reason=state.route.route_reason if state.route else None,
             verification_summary=state.verification.summary if state.verification else None,
         ):
             worker_type = state.dispatch.worker_type or state.route.chosen_worker

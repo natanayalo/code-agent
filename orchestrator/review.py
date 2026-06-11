@@ -325,7 +325,7 @@ async def _execute_independent_reviewer(
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
             task_kind=state.task_kind,
-            route_reason=state.route.route_reason,
+            route_reason=state.route.route_reason if state.route else None,
             verification_summary=state.verification.summary if state.verification else None,
             attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
         ):
@@ -524,7 +524,7 @@ async def review_result(
         session_id=state.session.session_id if state.session else None,
         attempt=state.attempt_count,
         task_kind=state.task_kind,
-        route_reason=state.route.route_reason,
+        route_reason=state.route.route_reason if state.route else None,
         verification_summary=state.verification.summary if state.verification else None,
     ):
         for i, (worker_type, worker) in enumerate(reviewer_workers):

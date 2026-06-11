@@ -54,7 +54,7 @@ def classify_task(state_input: OrchestratorState) -> dict[str, Any]:
         session_id=state.session.session_id if state.session else None,
         attempt=state.attempt_count,
         task_kind=state.task_kind,
-        route_reason=state.route.route_reason,
+        route_reason=state.route.route_reason if state.route else None,
         verification_summary=state.verification.summary if state.verification else None,
     ):
         task_text = state.normalized_task_text or state.task.task_text
@@ -142,7 +142,7 @@ def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
         session_id=state.session.session_id if state.session else None,
         attempt=state.attempt_count,
         task_kind=state.task_kind,
-        route_reason=state.route.route_reason,
+        route_reason=state.route.route_reason if state.route else None,
         verification_summary=state.verification.summary if state.verification else None,
     ):
         complexity_reason = _task_complexity_reason(state)
