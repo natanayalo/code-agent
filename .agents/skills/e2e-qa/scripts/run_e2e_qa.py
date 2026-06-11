@@ -2,6 +2,7 @@ import asyncio
 import os
 import shutil
 import subprocess
+from typing import Final
 
 import httpx
 
@@ -9,13 +10,17 @@ import httpx
 API_URL = "http://127.0.0.1:8000"
 SHARED_SECRET = "ayalo123"
 
+
 # Read workspace root from .env to match the docker compose volume mapping
-with open(".env") as f:
-    env_lines = f.readlines()
-workspace_root = "/Users/natanayalo/.code-agent/workspaces"
-for line in env_lines:
-    if line.startswith("CODE_AGENT_WORKSPACE_ROOT="):
-        workspace_root = line.split("=")[1].strip()
+DEFAULT_WORKSPACE_ROOT: Final[str] = os.path.expanduser("~/.code-agent/workspaces")
+
+workspace_root = DEFAULT_WORKSPACE_ROOT
+if os.path.exists(".env"):
+    with open(".env") as f:
+        for line in f:
+            if line.startswith("CODE_AGENT_WORKSPACE_ROOT="):
+                workspace_root = line.split("=")[1].strip()
+                break
 
 DUMMY_REPO_DIR = os.path.join(workspace_root, "dummy_repo")
 
@@ -101,7 +106,7 @@ async def main():
 
             await asyncio.sleep(2)
         else:
-            print("[-] Task timed out.")
+            raise RuntimeError("Task timed out.")
 
     print("\n[*] Verifying dummy repository artifacts")
 
