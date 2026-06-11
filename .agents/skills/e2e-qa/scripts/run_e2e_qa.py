@@ -20,7 +20,7 @@ if os.path.exists(".env"):
         for line in f:
             parts = line.split("=", 1)
             if len(parts) == 2 and parts[0].strip() == "CODE_AGENT_WORKSPACE_ROOT":
-                raw_val = parts[1].strip()
+                raw_val = parts[1].split('#', 1)[0].strip()
                 workspace_root = os.path.expanduser(raw_val.strip("'").strip('"'))
                 break
 
@@ -104,6 +104,8 @@ async def main():
             if status in ["completed", "success", "failed", "cancelled", "error"]:
                 print(f"\n[+] Task finished with status: {status}")
                 print(f"    - Details: {task_data}")
+                if status not in ['completed', 'success']:
+                    raise RuntimeError(f'Task failed with status: {status}')
                 break
 
             await asyncio.sleep(2)
@@ -118,8 +120,7 @@ async def main():
     latest_run = task_data.get("latest_run")
     expected_workspace_id = latest_run.get("workspace_id") if latest_run else None
     if not expected_workspace_id:
-        print("  [-] Could not determine workspace_id from task_data")
-        return
+        raise RuntimeError('Could not determine workspace_id from task_data')
 
     full_path = os.path.join(workspace_root, expected_workspace_id)
     if os.path.isdir(full_path):
@@ -132,9 +133,9 @@ async def main():
             with open(check_file) as f:
                 print(f"  [+] Content: {f.read().strip()}")
         else:
-            print("  [-] qa-hello.txt NOT FOUND in workspace.")
+            raise RuntimeError('qa-hello.txt NOT FOUND in workspace.')
     else:
-        print("  [-] No workspace directory found.")
+        raise RuntimeError(f'No workspace directory found at {full_path}')
 
     print("[+] Done.")
 
