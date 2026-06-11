@@ -25,7 +25,7 @@ if not workspace_root:
                     raw_val = parts[1].split('#', 1)[0].strip()
                     workspace_root = raw_val.strip("'").strip('"')
                     break
-workspace_root = os.path.expanduser(workspace_root)
+workspace_root = os.path.expandvars(os.path.expanduser(workspace_root))
 
 DUMMY_REPO_DIR = os.path.join(workspace_root, "dummy_repo")
 
@@ -95,12 +95,17 @@ async def main():
         print("[*] Polling for task completion...")
         max_attempts = 150  # Gemini is an LLM so it might take ~1-2 min
         for attempt in range(max_attempts):
-            resp = await client.get(
-                f"{API_URL}/tasks/{task_id}", headers={"X-Webhook-Token": SHARED_SECRET}
-            )
-            resp.raise_for_status()
-            task_data = resp.json()
-            status = task_data.get("status")
+            try:
+                resp = await client.get(
+                    f"{API_URL}/tasks/{task_id}", headers={"X-Webhook-Token": SHARED_SECRET}
+                )
+                resp.raise_for_status()
+                task_data = resp.json()
+                status = task_data.get("status")
+            except httpx.HTTPError as exc:
+                print(f"    - Attempt {attempt + 1}/{max_attempts}: Transient request error: {exc}")
+                await asyncio.sleep(2)
+                continue
 
             print(f"    - Attempt {attempt + 1}/{max_attempts}: Status = {status}")
 
