@@ -14,15 +14,18 @@ SHARED_SECRET = "ayalo123"
 # Read workspace root from .env to match the docker compose volume mapping
 DEFAULT_WORKSPACE_ROOT: Final[str] = os.path.expanduser("~/.code-agent/workspaces")
 
-workspace_root = DEFAULT_WORKSPACE_ROOT
-if os.path.exists(".env"):
-    with open(".env") as f:
-        for line in f:
-            parts = line.split("=", 1)
-            if len(parts) == 2 and parts[0].strip() == "CODE_AGENT_WORKSPACE_ROOT":
-                raw_val = parts[1].split('#', 1)[0].strip()
-                workspace_root = os.path.expanduser(raw_val.strip("'").strip('"'))
-                break
+workspace_root = os.environ.get("CODE_AGENT_WORKSPACE_ROOT")
+if not workspace_root:
+    workspace_root = DEFAULT_WORKSPACE_ROOT
+    if os.path.exists(".env"):
+        with open(".env") as f:
+            for line in f:
+                parts = line.split("=", 1)
+                if len(parts) == 2 and parts[0].strip() == "CODE_AGENT_WORKSPACE_ROOT":
+                    raw_val = parts[1].split('#', 1)[0].strip()
+                    workspace_root = raw_val.strip("'").strip('"')
+                    break
+workspace_root = os.path.expanduser(workspace_root)
 
 DUMMY_REPO_DIR = os.path.join(workspace_root, "dummy_repo")
 
