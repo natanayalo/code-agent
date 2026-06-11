@@ -279,15 +279,15 @@ def test_set_span_input_output_truncates_long_payloads() -> None:
             self.attributes[key] = value
 
     span = _FakeSpan()
-    long_payload = "a" * (observability_module.MAX_SPAN_ATTRIBUTE_LENGTH + 100)
+    long_payload = "a" * (observability_utils.MAX_SPAN_ATTRIBUTE_LENGTH + 100)
 
     with patch("opentelemetry.trace.get_current_span", return_value=span):
         observability_module.set_span_input_output(input_data=long_payload)
 
     val = span.attributes["input.value"]
-    assert len(val) > observability_module.MAX_SPAN_ATTRIBUTE_LENGTH
+    assert len(val) > observability_utils.MAX_SPAN_ATTRIBUTE_LENGTH
     assert "... (truncated to 12000 chars)" in val
-    assert val.startswith("a" * observability_module.MAX_SPAN_ATTRIBUTE_LENGTH)
+    assert val.startswith("a" * observability_utils.MAX_SPAN_ATTRIBUTE_LENGTH)
 
 
 def test_set_span_input_output_changes_mime_type_on_truncation() -> None:
@@ -305,7 +305,7 @@ def test_set_span_input_output_changes_mime_type_on_truncation() -> None:
 
     span = _FakeSpan()
     # Create a long dict that will exceed the limit when serialized
-    long_dict = {"key": "a" * observability_module.MAX_SPAN_ATTRIBUTE_LENGTH}
+    long_dict = {"key": "a" * observability_utils.MAX_SPAN_ATTRIBUTE_LENGTH}
 
     with patch("opentelemetry.trace.get_current_span", return_value=span):
         observability_module.set_span_input_output(input_data=long_dict)
@@ -442,7 +442,7 @@ def test_set_span_status_from_outcome_failure() -> None:
 
 def test_truncate_span_payload() -> None:
     """Test standardized truncation logic."""
-    limit = observability_module.MAX_SPAN_ATTRIBUTE_LENGTH
+    limit = observability_utils.MAX_SPAN_ATTRIBUTE_LENGTH
     short_text = "abc"
     assert observability_utils.truncate_span_payload(short_text) == short_text
 
