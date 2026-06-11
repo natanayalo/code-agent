@@ -220,6 +220,7 @@ def _run_provision_workspace(
             task_id=workspace_task_id,
             repo_url=state.task.repo_url or "",
             branch=state.task.branch,
+            attempt=state.attempt_count + 1,
         )
     )
 
@@ -432,7 +433,7 @@ def _init_fail(state: OrchestratorState, message: str) -> dict[str, Any]:
     """Return a hard-failure result for environment initialization."""
     from workers.base import WorkerResult
 
-    return {
+    response: dict[str, Any] = {
         "current_step": "init_environment",
         "result": WorkerResult(
             status="error",
@@ -446,3 +447,6 @@ def _init_fail(state: OrchestratorState, message: str) -> dict[str, Any]:
             message=message,
         ),
     }
+    if state.dispatch.workspace_id:
+        response["dispatch"] = {**state.dispatch.model_dump(), "workspace_id": None}
+    return response

@@ -88,6 +88,54 @@ async def test_review_result_runs_and_parses_findings():
 
 
 @pytest.mark.anyio
+async def test_review_result_uses_json_payload_when_summary_is_stripped():
+    """Verify that if the LLM output was stripped to just a summary string by native runtime,
+    the structured payload is still used."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "add a feature"},
+            "verification": {"status": "passed", "items": []},
+            "result": {
+                "status": "success",
+                "summary": "added feature",
+            },
+            "dispatch": {"worker_type": "gemini"},
+        }
+    )
+
+    mock_reviewer = AsyncMock()
+    review_payload = {
+        "summary": "I am just a string summary without any json formatting",
+        "confidence": 0.9,
+        "outcome": "findings",
+        "findings": [
+            {
+                "title": "Bug in the code",
+                "category": "logic",
+                "confidence": 0.8,
+                "file_path": "feature.py",
+                "severity": "high",
+                "why_it_matters": "It breaks things",
+            }
+        ],
+    }
+
+    # Simulate native agent extracting the summary string but preserving the full JSON
+    mock_reviewer.run.return_value = WorkerResult(
+        status="success",
+        summary=review_payload["summary"],
+        json_payload=review_payload,
+    )
+
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert "review" in res
+    assert res["review"]["outcome"] == "findings"
+    assert res["review"]["findings"][0]["title"] == "Bug in the code"
+
+
+@pytest.mark.anyio
 async def test_review_result_handles_worker_failure_gracefully():
     state = OrchestratorState.model_validate(
         {
@@ -351,3 +399,35 @@ async def test_review_result_propagates_cancellation():
 
     with pytest.raises(asyncio.CancelledError):
         await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+
+@pytest.mark.anyio
+async def test_review_result_preserves_workspace_id():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo task"},
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "done", "workspace_id": "ws-123"},
+            "dispatch": {"worker_type": "gemini", "workspace_id": "ws-dispatch-123"},
+        }
+    )
+
+    mock_reviewer = AsyncMock()
+    review_payload = {
+        "summary": "ok",
+        "confidence": 1.0,
+        "outcome": "no_findings",
+        "findings": [],
+    }
+    mock_reviewer.run.return_value = WorkerResult(
+        status="success",
+        summary=f"```json\\n{json.dumps(review_payload)}\\n```",
+    )
+
+    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+
+    args, _ = mock_reviewer.run.call_args
+    worker_request = args[0]
+    assert worker_request.workspace_id == "ws-dispatch-123"

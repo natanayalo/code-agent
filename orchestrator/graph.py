@@ -1102,8 +1102,7 @@ def _apply_response_policy_and_clarification(
         clarification_summary = "Task paused pending clarification before worker dispatch."
         if clarification_questions:
             clarification_summary = (
-                f"{clarification_summary} Clarification needed: "
-                f"{' '.join(clarification_questions)}"
+                f"{clarification_summary} Clarification needed: {' '.join(clarification_questions)}"
             )
         response["errors"] = [*state.errors, "blocked_on_clarification"]
         response["result"] = WorkerResult(
@@ -1125,16 +1124,14 @@ def _handle_missing_unified_method(
         enabled=True,
         provider=provider_name,
         error=(
-            "RuntimeError: orchestrator_brain_missing_unified_method: "
-            "suggest_task_spec_and_route"
+            "RuntimeError: orchestrator_brain_missing_unified_method: suggest_task_spec_and_route"
         ),
     )
     route_brain_report = RouteBrainMergeReport(
         enabled=True,
         provider=provider_name,
         error=(
-            "RuntimeError: orchestrator_brain_missing_unified_method: "
-            "suggest_task_spec_and_route"
+            "RuntimeError: orchestrator_brain_missing_unified_method: suggest_task_spec_and_route"
         ),
     )
     failure_event_payload = {
@@ -1162,8 +1159,7 @@ def _handle_missing_unified_method(
         "result": WorkerResult(
             status="error",
             summary=(
-                "Orchestrator brain is enabled but does not implement "
-                "suggest_task_spec_and_route."
+                "Orchestrator brain is enabled but does not implement suggest_task_spec_and_route."
             ),
             failure_kind="unknown",
             commands_run=[],
@@ -1178,7 +1174,7 @@ def _handle_missing_unified_method(
         **_timeline_event(
             state,
             TimelineEventType.TASK_SPEC_AND_ROUTE_GENERATED,
-            message=("TaskSpec and route generation failed: unified brain method " "missing."),
+            message=("TaskSpec and route generation failed: unified brain method missing."),
             payload=failure_event_payload,
         ),
     }
@@ -2428,54 +2424,71 @@ def build_await_result_node(
 
     async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
-        worker_type = state.dispatch.worker_type or state.route.chosen_worker
-        requested_profile = state.dispatch.worker_profile or state.route.chosen_profile
-        if state.route.route_reason in ("runtime_unavailable", "incompatible_profile"):
-            result, progress_updates = _build_unavailable_route_result(
-                state,
-                worker_type,
-                requested_profile,
-                available_profile_names,
-                frozenset(available_workers.keys()),
-            )
-        else:
-            bound_worker = available_workers.get(worker_type or "")
-            if bound_worker is None:
-                result = _worker_unavailable_result(
+
+        with start_optional_span(
+            tracer_name="orchestrator.graph",
+            span_name="orchestrator.node.await_result",
+            attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+            task_id=state.task.task_id,
+            session_id=state.session.session_id if state.session else None,
+            attempt=state.attempt_count,
+        ):
+            worker_type = state.dispatch.worker_type or state.route.chosen_worker
+            requested_profile = state.dispatch.worker_profile or state.route.chosen_profile
+            if state.route.route_reason in ("runtime_unavailable", "incompatible_profile"):
+                result, progress_updates = _build_unavailable_route_result(
+                    state,
                     worker_type,
-                    available_workers=frozenset(available_workers.keys()),
+                    requested_profile,
+                    available_profile_names,
+                    frozenset(available_workers.keys()),
                 )
-                progress_message = f"worker unavailable: {worker_type or 'unknown'}"
-                progress_updates = _progress_update(state, progress_message)
             else:
-                request = _build_worker_request(state)
-                result, progress_message = await _await_worker_with_timeout(
-                    bound_worker,
-                    request,
-                    worker_type=worker_type or "unknown",
-                    session_id=request.session_id,
-                    timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
-                )
-                if result.workspace_id is None and state.dispatch.workspace_id:
-                    result = result.model_copy(update={"workspace_id": state.dispatch.workspace_id})
-                progress_updates = _progress_update(state, progress_message)
-        return {
-            "current_step": "await_result",
-            "result": result.model_dump(),
-            "progress_updates": progress_updates,
-            **_timeline_event(
-                state,
-                (
-                    TimelineEventType.WORKER_COMPLETED
-                    if result.status == "success"
-                    else TimelineEventType.WORKER_FAILED
-                    if result.status == "failure"
-                    else TimelineEventType.WORKER_ERROR
+                bound_worker = available_workers.get(worker_type or "")
+                if bound_worker is None:
+                    result = _worker_unavailable_result(
+                        worker_type,
+                        available_workers=frozenset(available_workers.keys()),
+                    )
+                    progress_message = f"worker unavailable: {worker_type or 'unknown'}"
+                    progress_updates = _progress_update(state, progress_message)
+                else:
+                    request = _build_worker_request(state)
+                    result, progress_message = await _await_worker_with_timeout(
+                        bound_worker,
+                        request,
+                        worker_type=worker_type or "unknown",
+                        session_id=request.session_id,
+                        timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                    )
+                    if result.workspace_id is None and state.dispatch.workspace_id:
+                        result = result.model_copy(
+                            update={"workspace_id": state.dispatch.workspace_id}
+                        )
+                    progress_updates = _progress_update(state, progress_message)
+            response: dict[str, Any] = {
+                "current_step": "await_result",
+                "result": result.model_dump(),
+                "progress_updates": progress_updates,
+                **_timeline_event(
+                    state,
+                    (
+                        TimelineEventType.WORKER_COMPLETED
+                        if result.status == "success"
+                        else TimelineEventType.WORKER_FAILED
+                        if result.status == "failure"
+                        else TimelineEventType.WORKER_ERROR
+                    ),
+                    message=result.summary or progress_message,
+                    payload={"status": result.status},
                 ),
-                message=result.summary or progress_message,
-                payload={"status": result.status},
-            ),
-        }
+            }
+            clear_ws = result.status == "error" or (
+                result.status == "failure" and result.failure_kind in ("timeout", "sandbox_infra")
+            )
+            if clear_ws and state.dispatch.workspace_id:
+                response["dispatch"] = {**state.dispatch.model_dump(), "workspace_id": None}
+            return response
 
     return await_result
 

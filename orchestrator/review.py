@@ -12,6 +12,7 @@ from urllib.request import url2pathname
 
 from apps.observability import (
     OPENINFERENCE_SPAN_KIND_ATTRIBUTE,
+    SPAN_KIND_CHAIN,
     SPAN_KIND_TOOL,
     set_span_input_output,
     start_optional_span,
@@ -292,6 +293,8 @@ def _build_review_request(state: OrchestratorState) -> WorkerRequest:
         session_id=state.session.session_id if state.session else None,
         repo_url=state.task.repo_url,
         branch=state.task.branch,
+        workspace_id=state.dispatch.workspace_id
+        or (state.result.workspace_id if state.result else None),
         task_text=(
             "Perform an independent review of the changes in the workspace. "
             "Use your tools (git diff, read_file) to inspect the modified files "
@@ -336,7 +339,9 @@ async def _execute_independent_reviewer(
                 extra={"task_id": state.task.task_id, "worker_type": worker_type},
             )
 
-        parsed_review = parse_review_result(review_run_result.summary or "")
+        parsed_review = parse_review_result(
+            review_run_result.json_payload or review_run_result.summary or ""
+        )
         if parsed_review is None:
             logger.warning("Independent review output could not be parsed into ReviewResult.")
             if review_run_result.status != "success" or review_run_result.failure_kind in {
@@ -508,37 +513,46 @@ async def review_result(
     review_request = _build_review_request(state)
     timeout_seconds = _resolve_review_timeout_seconds(state)
 
-    for i, (worker_type, worker) in enumerate(reviewer_workers):
-        if worker_type == state.dispatch.worker_type:
-            logger.warning(
-                f"Independent review is using the same worker type as execution ({worker_type})."
+    with start_optional_span(
+        tracer_name="orchestrator.graph",
+        span_name="orchestrator.node.review_result",
+        attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_CHAIN},
+        task_id=state.task.task_id,
+        session_id=state.session.session_id if state.session else None,
+        attempt=state.attempt_count,
+    ):
+        for i, (worker_type, worker) in enumerate(reviewer_workers):
+            if worker_type == state.dispatch.worker_type:
+                logger.warning(
+                    f"Independent review is using the same worker type "
+                    f"as execution ({worker_type})."
+                )
+
+            parsed_review = await _execute_independent_reviewer(
+                worker_type, worker, review_request, review_prompt, state, timeout_seconds
             )
+            if parsed_review is None:
+                if i < len(reviewer_workers) - 1:
+                    continue
+                return {"current_step": "review_result"}
 
-        parsed_review = await _execute_independent_reviewer(
-            worker_type, worker, review_request, review_prompt, state, timeout_seconds
-        )
-        if parsed_review is None:
-            if i < len(reviewer_workers) - 1:
-                continue
-            return {"current_step": "review_result"}
-
-        # 5. Process findings
-        if parsed_review.reviewer_kind != "independent_reviewer":
-            parsed_review = parsed_review.model_copy(
-                update={"reviewer_kind": "independent_reviewer"}
+            # 5. Process findings
+            if parsed_review.reviewer_kind != "independent_reviewer":
+                parsed_review = parsed_review.model_copy(
+                    update={"reviewer_kind": "independent_reviewer"}
+                )
+            parsed_review = _apply_independent_review_suppression(
+                parsed_review,
+                constraints=state.task.constraints,
             )
-        parsed_review = _apply_independent_review_suppression(
-            parsed_review,
-            constraints=state.task.constraints,
-        )
-        repair_update = _repair_handoff_update(state, parsed_review)
-        if repair_update is not None:
-            return repair_update
+            repair_update = _repair_handoff_update(state, parsed_review)
+            if repair_update is not None:
+                return repair_update
 
-        return {
-            "current_step": "review_result",
-            "review": parsed_review.model_dump(),
-            "progress_updates": [*state.progress_updates, "independent review completed"],
-        }
+            return {
+                "current_step": "review_result",
+                "review": parsed_review.model_dump(),
+                "progress_updates": [*state.progress_updates, "independent review completed"],
+            }
 
-    return {"current_step": "review_result"}
+        return {"current_step": "review_result"}

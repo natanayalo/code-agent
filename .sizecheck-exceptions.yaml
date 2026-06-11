@@ -8,21 +8,17 @@ function_exceptions:
     upgrade: Alembic migration containing full initial database schema; cannot be split.
   evaluation/harness.py:
     _compute_review_metrics: Iterates through nested review model outputs to compile precision/recall; heavy local state coupling.
-  evaluation/orchestrator_runner.py:
-    run: Provisions workspace and runs shell script; contiguous setup and teardown logic.
-    run_case: Executes a full orchestrator flow for an eval case; stateful transitions make extraction unnatural.
   orchestrator/brain.py:
     _suggest_task_spec_model: Chains fallback logic for TaskSpec enrichment; requires unified error handling.
     suggest_route: Complex routing heuristics evaluating multiple fallback rules in sequence.
     suggest_task_spec_and_route: Orchestrates concurrent async planner calls for routing and specs.
-  orchestrator/execution_serialization.py:
-    _normalize_orchestrator_graph_output: Recursively scrubs transport-only interrupts from nested graph output; heavily coupled to graph structure.
   orchestrator/execution_submission_service.py:
     _load_submission_for_task: Reconstructs submission payload from DB state; multiple dependent DB queries.
     _persist_submission: Creates initial DB scaffolding for a task; must run in a single cohesive transaction.
     replay_task: Clones task state, flags, and specs for replay; requires dense DB model interactions.
   orchestrator/graph.py:
     _apply_brain_route_suggestion: Applies routing suggestions by merging them securely into state; tightly coupled mapping block.
+    build_await_result_node: Graph node builder for awaiting worker results, handling parsing, progress, and fallback logic cleanly without artificial splitting.
   orchestrator/task_spec.py:
     apply_task_spec_brain_suggestion: Merges AI suggestions into TaskSpec; involves deep nested dictionary and model updates.
     build_task_spec: Parses raw request into structured contract; highly coupled to input validation rules.
@@ -34,11 +30,5 @@ function_exceptions:
     test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics: Highly stateful logic for test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics; splitting requires unnatural parameter coupling.
   tests/integration/test_vertical_slice_e2e.py:
     test_vertical_slice_e2e_happy_path: Highly stateful logic for test_vertical_slice_e2e_happy_path; splitting requires unnatural parameter coupling.
-  workers/codex_exec_adapter.py:
-    next_step: Calls LLM API and parses tool outputs; monolithic due to strict schema handling.
-  workers/gemini_cli_adapter.py:
-    next_step: Calls LLM API and parses tool outputs; monolithic due to strict schema handling.
-  workers/openrouter_adapter.py:
-    next_step: Calls LLM API and parses tool outputs; monolithic due to strict schema handling.
   workers/self_review.py:
     run_shared_self_review_fix_loop: Bounded retry loop mutating execution in place; heavy local state coupling.

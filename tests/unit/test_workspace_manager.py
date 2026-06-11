@@ -171,7 +171,7 @@ def test_create_workspace_raises_on_existing_non_empty_directory_without_git(
 ) -> None:
     manager = WorkspaceManager(tmp_path)
 
-    def mock_build_workspace_id(task_id: str) -> str:
+    def mock_build_workspace_id(task_id: str, attempt: int) -> str:
         return "workspace-existing"
 
     manager._command_runner = lambda cmd, **kwargs: None

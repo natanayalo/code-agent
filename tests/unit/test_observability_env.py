@@ -202,7 +202,7 @@ def test_configure_tracing_from_env_bootstraps_otel_and_openinference(
     assert len(register_calls) == 1
     assert register_calls[0]["project_name"] == "agent-dev"
     assert register_calls[0]["endpoint"] == "http://phoenix:6006/v1/traces"
-    assert register_calls[0]["auto_instrument"] is True
+    assert register_calls[0]["auto_instrument"] is False
 
 
 def test_configure_tracing_from_env_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
