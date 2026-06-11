@@ -3,18 +3,23 @@
 import json
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Final
 
-from apps.observability import (
-    ATTEMPT_COUNT_ATTRIBUTE,
-    ATTR_ROUTE_REASON,
-    ATTR_TASK_KIND,
-    ATTR_VERIFICATION_SUMMARY,
-    CHANNEL_ATTRIBUTE,
-    MAX_SPAN_ATTRIBUTE_LENGTH,
-    SESSION_ID_ATTRIBUTE,
-    TASK_ID_ATTRIBUTE,
-)
+OPENINFERENCE_SPAN_KIND_ATTRIBUTE: Final[str] = "openinference.span.kind"
+SESSION_ID_ATTRIBUTE: Final[str] = "session.id"
+INPUT_VALUE_ATTRIBUTE: Final[str] = "input.value"
+INPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "input.mime_type"
+OUTPUT_VALUE_ATTRIBUTE: Final[str] = "output.value"
+OUTPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "output.mime_type"
+TASK_ID_ATTRIBUTE: Final[str] = "code_agent.task_id"
+ATTEMPT_COUNT_ATTRIBUTE: Final[str] = "code_agent.attempt_count"
+CHANNEL_ATTRIBUTE: Final[str] = "code_agent.channel"
+OUTCOME_STATUS_ATTRIBUTE: Final[str] = "code_agent.outcome_status"
+ATTR_TASK_KIND: Final[str] = "code_agent.task_kind"
+ATTR_WORKER_ID: Final[str] = "code_agent.worker_id"
+ATTR_ROUTE_REASON: Final[str] = "code_agent.route_reason"
+ATTR_VERIFICATION_SUMMARY: Final[str] = "code_agent.verification_summary"
+MAX_SPAN_ATTRIBUTE_LENGTH: Final[int] = 12000
 
 logger = logging.getLogger(__name__)
 

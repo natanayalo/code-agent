@@ -19,7 +19,8 @@ if os.path.exists(".env"):
     with open(".env") as f:
         for line in f:
             if line.startswith("CODE_AGENT_WORKSPACE_ROOT="):
-                workspace_root = line.split("=")[1].strip()
+                raw_val = line.split("=")[1].strip()
+                workspace_root = os.path.expanduser(raw_val.strip("'").strip('"'))
                 break
 
 DUMMY_REPO_DIR = os.path.join(workspace_root, "dummy_repo")

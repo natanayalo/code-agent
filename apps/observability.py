@@ -13,6 +13,22 @@ from importlib import import_module
 from threading import Lock
 from typing import Any, Final, TypeVar
 
+from apps.observability_utils import (
+    ATTEMPT_COUNT_ATTRIBUTE,
+    ATTR_ROUTE_REASON,
+    ATTR_TASK_KIND,
+    ATTR_VERIFICATION_SUMMARY,
+    CHANNEL_ATTRIBUTE,
+    INPUT_MIME_TYPE_ATTRIBUTE,
+    INPUT_VALUE_ATTRIBUTE,
+    OPENINFERENCE_SPAN_KIND_ATTRIBUTE,
+    OUTCOME_STATUS_ATTRIBUTE,
+    OUTPUT_MIME_TYPE_ATTRIBUTE,
+    OUTPUT_VALUE_ATTRIBUTE,
+    SESSION_ID_ATTRIBUTE,
+    TASK_ID_ATTRIBUTE,
+)
+
 logger = logging.getLogger(__name__)
 
 ENABLE_TRACING_ENV_VAR: Final[str] = "CODE_AGENT_ENABLE_TRACING"
@@ -22,21 +38,7 @@ OTEL_OTLP_TRACES_ENDPOINT_ENV_VAR: Final[str] = "OTEL_EXPORTER_OTLP_TRACES_ENDPO
 PHOENIX_COLLECTOR_ENDPOINT_ENV_VAR: Final[str] = "PHOENIX_COLLECTOR_ENDPOINT"
 DEFAULT_TRACING_PROJECT: Final[str] = "code-agent"
 DEFAULT_PHOENIX_OTLP_HTTP_ENDPOINT: Final[str] = "http://127.0.0.1:6006/v1/traces"
-OPENINFERENCE_SPAN_KIND_ATTRIBUTE: Final[str] = "openinference.span.kind"
-SESSION_ID_ATTRIBUTE: Final[str] = "session.id"
-INPUT_VALUE_ATTRIBUTE: Final[str] = "input.value"
-INPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "input.mime_type"
-OUTPUT_VALUE_ATTRIBUTE: Final[str] = "output.value"
-OUTPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "output.mime_type"
-TASK_ID_ATTRIBUTE: Final[str] = "code_agent.task_id"
-ATTEMPT_COUNT_ATTRIBUTE: Final[str] = "code_agent.attempt_count"
-CHANNEL_ATTRIBUTE: Final[str] = "code_agent.channel"
-OUTCOME_STATUS_ATTRIBUTE: Final[str] = "code_agent.outcome_status"
-ATTR_TASK_KIND: Final[str] = "code_agent.task_kind"
-ATTR_WORKER_ID: Final[str] = "code_agent.worker_id"
-ATTR_ROUTE_REASON: Final[str] = "code_agent.route_reason"
-ATTR_VERIFICATION_SUMMARY: Final[str] = "code_agent.verification_summary"
-MAX_SPAN_ATTRIBUTE_LENGTH: Final[int] = 12000
+
 
 # Native Agent Span Attributes
 NATIVE_AGENT_COMMAND_ATTRIBUTE: Final[str] = "code_agent.native_agent.command"
