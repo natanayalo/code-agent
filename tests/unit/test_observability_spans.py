@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from apps import observability as observability_module
+from apps import observability_utils
 
 
 @pytest.fixture(autouse=True)
@@ -443,10 +444,10 @@ def test_truncate_span_payload() -> None:
     """Test standardized truncation logic."""
     limit = observability_module.MAX_SPAN_ATTRIBUTE_LENGTH
     short_text = "abc"
-    assert observability_module._truncate_span_payload(short_text) == short_text
+    assert observability_utils.truncate_span_payload(short_text) == short_text
 
     long_text = "x" * (limit + 10)
-    truncated = observability_module._truncate_span_payload(long_text)
+    truncated = observability_utils.truncate_span_payload(long_text)
     assert len(truncated) > limit
     assert "... (truncated to 12000 chars)" in truncated
     assert truncated.startswith("x" * limit)
@@ -455,7 +456,7 @@ def test_truncate_span_payload() -> None:
 def test_serialize_span_payload_json() -> None:
     """Test JSON serialization and MIME type."""
     payload = {"a": 1}
-    truncated, mime = observability_module._serialize_span_payload(payload)
+    truncated, mime = observability_utils.serialize_span_payload(payload)
     assert truncated == '{"a": 1}'
     assert mime == "application/json"
 
@@ -463,7 +464,7 @@ def test_serialize_span_payload_json() -> None:
 def test_serialize_span_payload_text() -> None:
     """Test plain text serialization."""
     payload = 123
-    truncated, mime = observability_module._serialize_span_payload(payload)
+    truncated, mime = observability_utils.serialize_span_payload(payload)
     assert truncated == "123"
     assert mime == "text/plain"
 
@@ -587,27 +588,27 @@ def test_get_centralized_span_status() -> None:
     from opentelemetry import trace as otel_trace
 
     # Success cases
-    s1 = observability_module.get_centralized_span_status("success")
+    s1 = observability_utils.get_centralized_span_status("success")
     assert s1.status_code == otel_trace.StatusCode.OK
 
-    s2 = observability_module.get_centralized_span_status("completed")
+    s2 = observability_utils.get_centralized_span_status("completed")
     assert s2.status_code == otel_trace.StatusCode.OK
 
     # Error cases
-    e1 = observability_module.get_centralized_span_status("error")
+    e1 = observability_utils.get_centralized_span_status("error")
     assert e1.status_code == otel_trace.StatusCode.ERROR
 
-    e2 = observability_module.get_centralized_span_status("failure")
+    e2 = observability_utils.get_centralized_span_status("failure")
     assert e2.status_code == otel_trace.StatusCode.ERROR
 
-    e3 = observability_module.get_centralized_span_status("failed")
+    e3 = observability_utils.get_centralized_span_status("failed")
     assert e3.status_code == otel_trace.StatusCode.ERROR
 
-    e4 = observability_module.get_centralized_span_status("cancelled")
+    e4 = observability_utils.get_centralized_span_status("cancelled")
     assert e4.status_code == otel_trace.StatusCode.ERROR
 
     # Unknown case
-    u1 = observability_module.get_centralized_span_status("unknown_status")
+    u1 = observability_utils.get_centralized_span_status("unknown_status")
     assert u1.status_code == otel_trace.StatusCode.UNSET
 
 
