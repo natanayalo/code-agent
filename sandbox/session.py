@@ -396,8 +396,7 @@ class DockerShellSession:
         for denied in self.path_policy.denied_prefixes:
             if denied in command:
                 raise DockerShellSessionError(
-                    f"Command may touch a denied path ({denied}): "
-                    f"{self.redactor.redact(command)}"
+                    f"Command may touch a denied path ({denied}): {self.redactor.redact(command)}"
                 )
 
     def _run_and_capture_output(

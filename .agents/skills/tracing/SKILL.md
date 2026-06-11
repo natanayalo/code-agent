@@ -64,12 +64,43 @@ Extract trace IDs from the span list:
 python -c 'import json,sys; d=json.load(sys.stdin).get("data") or []; print("\n".join(sorted({(s.get("context") or {}).get("trace_id","") for s in d if (s.get("context") or {}).get("trace_id")})))'
 ```
 
-## 4. Troubleshooting
+## 4. Query Sub-Spans Within a Trace
+
+Use the Python client to fetch and explore the span hierarchy:
+
+```python
+from phoenix.client import Client
+from collections import defaultdict
+
+client = Client(base_url="http://localhost:6006")
+
+# Get spans for a project
+df = client.spans.get_spans_dataframe(project_identifier="PROJECT_ID", limit=10000)
+
+# Filter by trace_id
+trace_df = df[df["context.trace_id"] == "TRACE_ID"]
+
+# Build parent-child hierarchy
+children = defaultdict(list)
+for _, row in trace_df.iterrows():
+    children[row.get("parent_id")].append(row)
+
+# Access spans by parent: children["parent_span_id"]
+```
+
+Key columns:
+- `context.trace_id`: Trace identifier
+- `context.span_id`: Span identifier
+- `parent_id`: Reference to parent span
+- `name`: Span name
+- `start_time`: Span start timestamp
+
+## 5. Troubleshooting
 
 - **No Spans**: Verify `CODE_AGENT_TRACING_PROJECT` matches exactly and Phoenix is reachable from the worker container.
 - **Multiple Traces**: Check `code_agent.attempt_count` attributes; retries will generate separate traces for the same task.
 - **UI Empty**: Ensure OTLP endpoint is correct and spans are being exported (batch vs. immediate mode).
 
-## 5. API Reference
+## 6. API Reference
 
 For full Phoenix REST API documentation, see [phoenix_api.md](./resources/phoenix_api.md).

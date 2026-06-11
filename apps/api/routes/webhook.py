@@ -13,6 +13,7 @@ from apps.api.dependencies import get_task_service, require_api_auth
 from apps.observability import (
     SESSION_ID_ATTRIBUTE,
     SPAN_KIND_AGENT,
+    TASK_ID_ATTRIBUTE,
     set_current_span_attribute,
     set_span_input_output,
     start_optional_span,
@@ -157,6 +158,7 @@ def receive_webhook(
                 detail=str(exc),
             ) from exc
 
+        set_current_span_attribute(TASK_ID_ATTRIBUTE, outcome.task_snapshot.task_id)
         set_current_span_attribute(SESSION_ID_ATTRIBUTE, outcome.task_snapshot.session_id)
 
         set_span_input_output(input_data=None, output_data=outcome.task_snapshot.model_dump())

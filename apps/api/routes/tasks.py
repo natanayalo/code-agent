@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from apps.api.dependencies import get_task_service, require_any_valid_auth
 from apps.observability import (
+    SESSION_ID_ATTRIBUTE,
     SPAN_KIND_AGENT,
+    TASK_ID_ATTRIBUTE,
+    set_current_span_attribute,
     set_span_input_output,
     start_optional_span,
     with_span_kind,
@@ -40,6 +43,8 @@ def submit_task(
         set_span_input_output(input_data=payload.model_dump(exclude={"secrets"}))
         try:
             task_snapshot, _ = task_service.create_task(payload)
+            set_current_span_attribute(TASK_ID_ATTRIBUTE, task_snapshot.task_id)
+            set_current_span_attribute(SESSION_ID_ATTRIBUTE, task_snapshot.session_id)
             return task_snapshot
         except TaskSubmissionValidationError as exc:
             raise HTTPException(

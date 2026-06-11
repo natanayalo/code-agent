@@ -35,6 +35,8 @@ CHANNEL_ATTRIBUTE: Final[str] = "code_agent.channel"
 OUTCOME_STATUS_ATTRIBUTE: Final[str] = "code_agent.outcome_status"
 ATTR_TASK_KIND: Final[str] = "code_agent.task_kind"
 ATTR_WORKER_ID: Final[str] = "code_agent.worker_id"
+ATTR_ROUTE_REASON: Final[str] = "code_agent.route_reason"
+ATTR_VERIFICATION_SUMMARY: Final[str] = "code_agent.verification_summary"
 MAX_SPAN_ATTRIBUTE_LENGTH: Final[int] = 12000
 
 # Native Agent Span Attributes
@@ -345,6 +347,9 @@ def get_centralized_span_input_data(
     session_id: str | None = None,
     attempt: int | None = None,
     channel: str | None = None,
+    task_kind: str | None = None,
+    route_reason: str | None = None,
+    verification_summary: str | None = None,
     extra_attributes: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Consolidate standard task correlation attributes into a span attribute dictionary."""
@@ -357,6 +362,12 @@ def get_centralized_span_input_data(
         attributes[ATTEMPT_COUNT_ATTRIBUTE] = attempt
     if channel:
         attributes[CHANNEL_ATTRIBUTE] = channel
+    if task_kind:
+        attributes[ATTR_TASK_KIND] = task_kind
+    if route_reason:
+        attributes[ATTR_ROUTE_REASON] = route_reason
+    if verification_summary:
+        attributes[ATTR_VERIFICATION_SUMMARY] = verification_summary
     return attributes
 
 
@@ -419,6 +430,9 @@ def start_optional_span(
     session_id: str | None = None,
     attempt: int | None = None,
     channel: str | None = None,
+    task_kind: str | None = None,
+    route_reason: str | None = None,
+    verification_summary: str | None = None,
 ) -> Any:
     """Start a span when OTEL is available, otherwise return a no-op context manager."""
     try:
@@ -430,6 +444,9 @@ def start_optional_span(
             session_id=session_id,
             attempt=attempt,
             channel=channel,
+            task_kind=task_kind,
+            route_reason=route_reason,
+            verification_summary=verification_summary,
             extra_attributes=attributes,
         )
 
@@ -585,6 +602,9 @@ def set_span_task_metadata(
     session_id: str | None = None,
     attempt: int | None = None,
     channel: str | None = None,
+    task_kind: str | None = None,
+    route_reason: str | None = None,
+    verification_summary: str | None = None,
 ) -> None:
     """Set standardized task correlation attributes on the current span."""
     if task_id:
@@ -595,3 +615,9 @@ def set_span_task_metadata(
         set_current_span_attribute(ATTEMPT_COUNT_ATTRIBUTE, attempt)
     if channel:
         set_current_span_attribute(CHANNEL_ATTRIBUTE, channel)
+    if task_kind:
+        set_current_span_attribute(ATTR_TASK_KIND, task_kind)
+    if route_reason:
+        set_current_span_attribute(ATTR_ROUTE_REASON, route_reason)
+    if verification_summary:
+        set_current_span_attribute(ATTR_VERIFICATION_SUMMARY, verification_summary)
