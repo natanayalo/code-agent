@@ -356,8 +356,22 @@ class CodexCliWorker(CodexCliWorkerRuntimeMixin, CodexCliWorkerNativeMixin, Work
         branch: str | None,
         *,
         workspace_task_id: str,
+        workspace_id: str | None = None,
     ) -> WorkspaceHandle:
         """Create the sandbox workspace for this run."""
+        if workspace_id:
+            try:
+                return self.workspace_manager.get_workspace(
+                    workspace_id,
+                    repo_url=repo_url,
+                    branch=branch,
+                    task_id=workspace_task_id,
+                )
+            except WorkspaceManagerError as exc:
+                logger.warning(
+                    f"CodexCliWorker failed to retrieve workspace {workspace_id}: {exc}. "
+                    "Falling back to provisioning a new workspace."
+                )
         return self.workspace_manager.create_workspace(
             WorkspaceRequest(
                 task_id=workspace_task_id,
@@ -433,6 +447,7 @@ class CodexCliWorker(CodexCliWorkerRuntimeMixin, CodexCliWorkerNativeMixin, Work
                 repo_url,
                 request.branch,
                 workspace_task_id=workspace_task_id,
+                workspace_id=request.workspace_id,
             )
         except (WorkspaceManagerError, OSError) as exc:
             logger.exception(

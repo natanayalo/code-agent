@@ -199,7 +199,7 @@ def _execute_tracing_bootstrap(
         endpoint=otlp_endpoint,
         resource=resource,
         batch=(service_name not in IMMEDIATE_EXPORT_SERVICES),
-        auto_instrument=True,
+        auto_instrument=False,
     )
 
     # Ensure TraceContextTextMapPropagator is the global propagator for cross-service linkage.

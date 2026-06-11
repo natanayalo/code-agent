@@ -18,6 +18,7 @@ function_exceptions:
     replay_task: Clones task state, flags, and specs for replay; requires dense DB model interactions.
   orchestrator/graph.py:
     _apply_brain_route_suggestion: Applies routing suggestions by merging them securely into state; tightly coupled mapping block.
+    build_await_result_node: Graph node builder for awaiting worker results, handling parsing, progress, and fallback logic cleanly without artificial splitting.
   orchestrator/task_spec.py:
     apply_task_spec_brain_suggestion: Merges AI suggestions into TaskSpec; involves deep nested dictionary and model updates.
     build_task_spec: Parses raw request into structured contract; highly coupled to input validation rules.

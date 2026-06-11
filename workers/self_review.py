@@ -165,17 +165,26 @@ def build_fix_loop_prompt(
     )
 
 
-def parse_review_result(raw_output: str) -> ReviewResult | None:
-    """Parse a structured `ReviewResult` payload from model text output."""
-    candidate = _extract_json_object(raw_output)
-    if candidate is None:
+def parse_review_result(raw_output: str | dict[str, Any]) -> ReviewResult | None:
+    """Parse a structured `ReviewResult` payload from model text output or dict."""
+    logger = logging.getLogger(__name__)
+    if isinstance(raw_output, dict):
+        payload = dict(raw_output)
+    elif isinstance(raw_output, str):
+        candidate = _extract_json_object(raw_output)
+        if candidate is None:
+            logger.debug("No JSON candidate found in raw_output")
+            return None
+        try:
+            payload, _ = json.JSONDecoder().raw_decode(candidate)
+        except json.JSONDecodeError as e:
+            logger.debug(f"Failed to decode JSON: {e}")
+            return None
+        if not isinstance(payload, dict):
+            return None
+    else:
         return None
-    try:
-        payload = json.loads(candidate)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(payload, dict):
-        return None
+
     payload["reviewer_kind"] = "worker_self_review"
     try:
         return ReviewResult.model_validate(payload)

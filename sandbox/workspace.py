@@ -64,6 +64,7 @@ class WorkspaceRequest(SandboxModel):
     task_id: str = Field(min_length=1)
     repo_url: str = Field(min_length=1)
     branch: str | None = None
+    attempt: int = 1
     cleanup_policy: WorkspaceCleanupPolicy | None = None
 
 
@@ -95,11 +96,13 @@ def _slugify_workspace_owner(value: str) -> str:
     return slug[:48] or "task"
 
 
-def _build_workspace_id(task_id: str) -> str:
-    """Generate a readable deterministic workspace identifier for a task."""
+def _build_workspace_id(task_id: str, attempt: int = 1) -> str:
+    """Generate a readable deterministic workspace identifier for a task and attempt."""
     import hashlib
 
     task_hash = hashlib.sha256(task_id.encode()).hexdigest()[:8]
+    if attempt > 1:
+        return f"workspace-{_slugify_task_id(task_id)}-{task_hash}-v{attempt}"
     return f"workspace-{_slugify_task_id(task_id)}-{task_hash}"
 
 
@@ -191,7 +194,7 @@ class WorkspaceManager:
         """Create a unique task workspace and clone the repo into it."""
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
-        workspace_id = _build_workspace_id(request.task_id)
+        workspace_id = _build_workspace_id(request.task_id, request.attempt)
         workspace_path = self.root_dir / workspace_id
         # T-180: Merge workspace root and repository root for path consistency
         repo_path = workspace_path
