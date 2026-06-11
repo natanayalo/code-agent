@@ -35,7 +35,10 @@ def setup_dummy_repo():
     shutil.rmtree(DUMMY_REPO_DIR, ignore_errors=True)
     os.makedirs(DUMMY_REPO_DIR, exist_ok=True)
     subprocess.run(
-        ["git", "init", "-b", "master"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
+        ["git", "init"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "checkout", "-b", "master"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
     )
     readme_path = os.path.join(DUMMY_REPO_DIR, "README.md")
     with open(readme_path, "w") as f:
@@ -90,6 +93,8 @@ async def main():
         resp.raise_for_status()
         data = resp.json()
         task_id = data.get("task_id")
+        if not task_id:
+            raise RuntimeError(f"Webhook response did not contain task_id: {data}")
         print(f"[+] Task ingested successfully. Task ID: {task_id}")
 
         print("[*] Polling for task completion...")
@@ -102,7 +107,7 @@ async def main():
                 resp.raise_for_status()
                 task_data = resp.json()
                 status = task_data.get("status")
-            except httpx.HTTPError as exc:
+            except httpx.RequestError as exc:
                 print(f"    - Attempt {attempt + 1}/{max_attempts}: Transient request error: {exc}")
                 await asyncio.sleep(2)
                 continue
