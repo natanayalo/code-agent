@@ -78,48 +78,31 @@ def _build_adapter_prompt(
 def _extract_json(text: str) -> str:
     """Extract the first valid JSON object from a Gemini CLI response.
 
-    Uses brace-counting with string awareness to find balanced ``{...}``
-    candidates, then validates each with ``json.loads`` before returning it.
-    This handles nested objects, prose with embedded non-JSON braces (e.g.
-    ``{a, b}``), trailing prose, and markdown-fenced responses correctly.
+    Uses json.JSONDecoder().raw_decode to extract JSON robustly from noisy
+    stdout streams, ignoring any trailing characters.
     """
     stripped = text.strip()
     search_from = 0
+    decoder = json.JSONDecoder()
     while True:
         start = stripped.find("{", search_from)
         if start == -1:
             break
-        depth = 0
-        in_string = False
-        escape_next = False
-        end = -1
-        for i, ch in enumerate(stripped[start:], start=start):
-            if escape_next:
-                escape_next = False
-                continue
-            if in_string:
-                if ch == "\\":
-                    escape_next = True
-                elif ch == '"':
-                    in_string = False
-                continue
-            if ch == '"':
-                in_string = True
-            elif ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    end = i
-                    break
-        if end == -1:
-            break
-        candidate = stripped[start : end + 1]
         try:
-            json.loads(candidate)
+            _, end_idx = decoder.raw_decode(stripped[start:])
+            candidate = stripped[start : start + end_idx]
+            logger.debug(
+                "Extracted JSON from noisy output",
+                extra={
+                    "start_idx": start,
+                    "end_idx": start + end_idx,
+                    "total_length": len(stripped),
+                },
+            )
             return candidate
-        except ValueError:
-            search_from = end + 1
+        except json.JSONDecodeError:
+            search_from = start + 1
+
     raise RuntimeError(
         "No JSON object found in Gemini CLI response: "
         f"{truncate_detail_keep_tail(stripped, max_characters=_DETAIL_PREVIEW_CHARACTERS)}"
@@ -194,7 +177,7 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
         command.extend(["-o", "json", "--accept-raw-output-risk", "--raw-output"])
         return command
 
-    def _parse_output(self, stdout: str, is_override: bool) -> CliRuntimeStep:
+    def _parse_output(self, stdout: str) -> CliRuntimeStep:
         """Parse the CLI output into a CliRuntimeStep."""
         raw_output = stdout
         try:
@@ -217,9 +200,6 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 raw_json = json.dumps(normalized)
         except (RuntimeError, json.JSONDecodeError):
             return final_cli_runtime_step(raw_output)
-
-        if is_override:
-            return parse_cli_runtime_step_or_final(raw_json)
 
         return parse_cli_runtime_step_or_final(raw_json)
 
@@ -299,4 +279,4 @@ class GeminiCliRuntimeAdapter(CliRuntimeAdapter):
                 f"stdout: {stdout_preview}"
             )
 
-        return self._parse_output(completed.stdout, is_override=override_prompt is not None)
+        return self._parse_output(completed.stdout)
