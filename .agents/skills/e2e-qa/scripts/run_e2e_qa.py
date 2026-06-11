@@ -18,8 +18,9 @@ workspace_root = DEFAULT_WORKSPACE_ROOT
 if os.path.exists(".env"):
     with open(".env") as f:
         for line in f:
-            if line.startswith("CODE_AGENT_WORKSPACE_ROOT="):
-                raw_val = line.split("=")[1].strip()
+            parts = line.split("=", 1)
+            if len(parts) == 2 and parts[0].strip() == "CODE_AGENT_WORKSPACE_ROOT":
+                raw_val = parts[1].strip()
                 workspace_root = os.path.expanduser(raw_val.strip("'").strip('"'))
                 break
 
@@ -100,7 +101,7 @@ async def main():
 
             print(f"    - Attempt {attempt + 1}/{max_attempts}: Status = {status}")
 
-            if status in ["completed", "success", "failed"]:
+            if status in ["completed", "success", "failed", "cancelled", "error"]:
                 print(f"\n[+] Task finished with status: {status}")
                 print(f"    - Details: {task_data}")
                 break
