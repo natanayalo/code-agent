@@ -37,9 +37,6 @@ def setup_dummy_repo():
     subprocess.run(
         ["git", "init"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
     )
-    subprocess.run(
-        ["git", "checkout", "-B", "master"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
-    )
     readme_path = os.path.join(DUMMY_REPO_DIR, "README.md")
     with open(readme_path, "w") as f:
         f.write("# Dummy QA Repo\n")
@@ -53,6 +50,9 @@ def setup_dummy_repo():
         cwd=DUMMY_REPO_DIR,
         check=True,
         capture_output=True,
+    )
+    subprocess.run(
+        ["git", "branch", "-M", "master"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
     )
 
 
