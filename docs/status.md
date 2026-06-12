@@ -2,12 +2,13 @@
 
 ## Current Phase
 
-Phase 1: clarity and control.
+Phase 2: bounded autonomy.
 
 Active focus:
 
-- migration planning for Codex/Gemini native-agent execution
-- preserving TaskSpec, HumanInteraction, dashboard, and verification governance around worker autonomy
+- Milestone 18 (Controlled Autonomy / Scout Mode) planning
+- add PR-native delivery fields and GitHub branch/draft-PR integration
+- continue tightening native-agent observability and verifier acceptance policy
 
 ## Current Capabilities
 
