@@ -174,11 +174,13 @@ def parse_review_result(raw_output: str | dict[str, Any]) -> ReviewResult | None
         candidate = _extract_json_object(raw_output)
         if candidate is None:
             logger.debug("No JSON candidate found in raw_output")
+            logger.debug(f"Raw output was: {raw_output}")
             return None
         try:
             payload, _ = json.JSONDecoder().raw_decode(candidate)
         except json.JSONDecodeError as e:
             logger.debug(f"Failed to decode JSON: {e}")
+            logger.debug(f"Candidate JSON was: {candidate}")
             return None
         if not isinstance(payload, dict):
             return None
@@ -188,7 +190,9 @@ def parse_review_result(raw_output: str | dict[str, Any]) -> ReviewResult | None
     payload["reviewer_kind"] = "worker_self_review"
     try:
         return ReviewResult.model_validate(payload)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to validate ReviewResult payload: {e}")
+        logger.debug(f"Payload was: {payload}")
         return None
 
 

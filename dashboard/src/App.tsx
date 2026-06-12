@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { TaskBoard } from './components/TaskBoard';
 import { StatsPanel } from './components/StatsPanel';
-import { api } from './services/api';
+import { api, ApiError } from './services/api';
 import { TaskStatus } from './types/task';
 import { AuthProvider, useAuth } from './components/auth/AuthContext';
 import { AuthGuard } from './components/auth/AuthGuard';
@@ -41,7 +41,14 @@ function DashboardContent() {
     queryKey: ['task-detail', selectedTaskId],
     queryFn: () => api.getTask(selectedTaskId as string),
     enabled: selectedTaskId !== null,
-    refetchInterval: selectedTaskId ? REFRESH_INTERVAL_MS : false,
+    retry: (failureCount, error) => {
+      if (error instanceof ApiError && error.status === 404) return false;
+      return failureCount < 3;
+    },
+    refetchInterval: (query) => {
+      if (query.state.error instanceof ApiError && query.state.error.status === 404) return false;
+      return selectedTaskId ? REFRESH_INTERVAL_MS : false;
+    },
   });
 
   const stats = useMemo(() => {

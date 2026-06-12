@@ -4,10 +4,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import App from './App';
 import { TaskStatus } from './types/task';
-import { api } from './services/api';
+import { api, ApiError } from './services/api';
 
 // Mock the API service
 vi.mock('./services/api', () => ({
+  ApiError: class ApiError extends Error {
+    constructor(public status: number, message: string) {
+      super(message);
+      this.name = 'ApiError';
+    }
+  },
   api: {
     listTasks: vi.fn(),
     getTask: vi.fn(),
@@ -173,5 +179,27 @@ describe('App', () => {
     expect(
       screen.getByText(/Manage skeptical memory entries with confidence and verification metadata/i)
     ).toBeInTheDocument();
+  });
+
+  it('stops polling and does not retry when API returns 404 for task detail', async () => {
+    vi.mocked(api.listTasks).mockResolvedValue([
+      { task_id: 'missing-task', task_text: 'Task 1', status: TaskStatus.PENDING, created_at: new Date().toISOString(), session_id: 's1', priority: 1, updated_at: new Date().toISOString() },
+    ]);
+    vi.mocked(api.getTask).mockRejectedValue(new ApiError(404, 'Task not found'));
+    vi.mocked(api.auth.status).mockResolvedValue({ authenticated: true });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    );
+
+    // Open the missing task
+    expect(await screen.findByText('Task Status Board')).toBeInTheDocument();
+    fireEvent.click(await screen.findByText('Task 1'));
+
+    // Verify it handles error gracefully
+    expect(await screen.findByText(/Task not found/i)).toBeInTheDocument();
+    expect(api.getTask).toHaveBeenCalledTimes(1);
   });
 });

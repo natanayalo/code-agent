@@ -130,12 +130,17 @@ Current routing hints:
 - use the `start-task` skill when the user asks to start a new task, pick the next backlog item, or begin the next implementation slice
 - use the `address-review` skill, together with the GitHub review-comment skill when needed, when the user asks to inspect or address PR review feedback
 - use the `db-schema` skill for model or migration changes under `db/`
+- use the `e2e-qa` skill to run full-pipeline verification using `run_e2e_qa.py` when validating infrastructure or orchestration changes
 
 ## Folder ownership
 
 ### apps/
 Entry points and application-layer logic (auth, progress, protocol mapping).
 No core business domain logic here.
+
+### dashboard/
+Owns the local React/Vite operator UX, task list, timeline, and interaction components.
+No backend persistence logic here.
 
 ### orchestrator/
 Owns workflow graph, state transitions, routing, retry policy, approval checkpoints.
