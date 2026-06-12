@@ -17,6 +17,13 @@ interface TaskInteractionResponsePayload {
   status?: InteractionResponseStatus;
 }
 
+export class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const headers = {
     'Content-Type': 'application/json',
@@ -47,7 +54,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
     } catch {
       // Fallback to default message
     }
-    throw new Error(errorMessage);
+    throw new ApiError(response.status, errorMessage);
   }
 
   if (response.status === 204) {
