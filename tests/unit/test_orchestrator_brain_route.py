@@ -20,7 +20,7 @@ from workers import WorkerResult
 from workers.constants import DEFAULT_DISCOVERY_TIMEOUT_SECONDS
 
 
-def test_default_brain_timeout_is_five_minutes() -> None:
+def test_default_brain_timeout_is_forty_five_seconds() -> None:
     brain = RuleBasedOrchestratorBrain()
 
     assert DEFAULT_DISCOVERY_TIMEOUT_SECONDS == 45
