@@ -8,20 +8,20 @@
 
 ## Current Phase
 
-Phase 1: clarity and control.
+Phase 2: bounded autonomy.
 
 Priority sequence:
 
-1. Milestone 15: Product identity and documentation refresh
-2. Milestone A: TaskSpec and human workflow foundation
-3. Milestone 16: Operator UX and transparency
-4. Milestone 17: Worker profile and runtime leverage
-5. Milestone 17.5: Full E2E stabilization
+1. Milestone 18: Controlled Autonomy / Scout Mode
+2. Milestone 19: Reflection and Improvement Pipeline
 
 Planned next phases:
 
-1. Phase 2: bounded autonomy
-2. Phase 3: deeper platform maturity
+1. Phase 3: deeper platform maturity
+
+Past phases:
+
+1. Phase 1: clarity and control (Milestones 15 through 17.5)
 
 ## Milestone 15: Product Identity and Documentation Refresh
 
