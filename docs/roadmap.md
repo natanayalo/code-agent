@@ -65,8 +65,11 @@ Non-goals:
 Success criteria:
 
 - every worker run starts from an inspectable task contract
-- ambiguous and high-risk tasks expose the precise human checkpoint needed
 - dashboard/operator views can prioritize tasks needing input
+
+Status:
+
+- completed
 
 ## Milestone 16: Operator UX and Transparency
 
@@ -95,6 +98,10 @@ Success criteria:
 - active task inspection without direct log reading
 - faster/clearer approval flow than Telegram-only
 - replay/retry invokable from dashboard
+
+Status:
+
+- completed
 
 ## Milestone 17: Native Agent Worker Runtime Profiles
 
@@ -185,6 +192,10 @@ Migration/deprecation plan:
 - phase 6: isolate OpenRouter as legacy tool-loop mode and keep disabled by default unless explicitly configured
 - phase 7: remove Codex/Gemini operation-selector defaults only after a documented rollback path and retained compatibility tests exist
 
+Status:
+
+- completed (native agent defaults shipped and stabilized in Milestone 17.5)
+
 ## Milestone 17.5: Full E2E Stabilization
 
 Goal:
@@ -231,6 +242,10 @@ Task list:
 | T-177 | P1 | Optimize discovery latency and router fallback. | Introduce "Discovery" profile and harden brain-router fallback. | Enrichment latency drops; router is resilient to brain timeouts. | `orchestrator/brain.py`, `orchestrator/graph.py` | Fallback heuristics may be less "smart" than the brain. |
 | T-178 | P1 | E2E Forensic Investigation & Runtime Hardening. | Fix 404 polling loops and harden JSON/ReviewResult parsing. | API is clean of polling spam; JSON failures are log-inspectable. | `dashboard/src/hooks/*`, `workers/self_review.py`, `orchestrator/brain.py` | Complex parsing logic can still fail; needs targeted unit tests. |
 | None | P0 | Python File Decomposition & Size Check Enforcement. | Add `scripts/check_python_file_sizes.py` and waiver tracking to enforce strict file/function sizes. | Pre-commit size checks pass; hotspots decomposed. | `scripts/check_python_file_sizes.py`, `.sizecheck-exceptions.yaml`, multiple refactors | Decomposition without regression requires careful handling. |
+
+Status:
+
+- completed
 
 ## Milestone 18: Controlled Autonomy / Scout Mode
 
