@@ -20,7 +20,8 @@ Responsibilities:
 
 - ingress and auth for API/webhook/Telegram
 - session + task creation and persistence
-- TaskSpec generation for goal, risk, task type, policy, verification, and delivery metadata
+- generated TaskSpec contract for task goal/risk/type/delivery policy
+- optional LLM orchestrator brain for TaskSpec enrichment and route recommendation
 - queueing and lease-based claiming
 - orchestration graph execution
 - worker routing policy and manual override handling
@@ -78,7 +79,7 @@ Current default profile matrix:
 
 - **Codex execution**: `codex-native-executor` with explicit read-only variant `codex-native-executor-read-only`
 - **Gemini execution**: `gemini-native-executor` with explicit read-only variant `gemini-native-executor-read-only`
-- **Gemini specialist profiles** (native mode): `gemini-native-planner` and `gemini-native-reviewer`
+- **Gemini specialist profiles** (native mode): `gemini-native-planner`, `gemini-native-reviewer`, and `gemini-native-discovery`
 - **OpenRouter legacy execution**: `openrouter-tool-loop-legacy` (explicit opt-in only)
 - **Optional Codex/Gemini legacy execution**: `*-tool-loop-executor` profiles are available only
   when the corresponding `*_TOOL_LOOP_LEGACY_ENABLED` env toggle is set.
@@ -131,12 +132,11 @@ Owns human-facing control and visibility interfaces.
 
 Current operator surfaces:
 
+- local dashboard/PWA for task inspection, timeline visibility, and interaction controls
 - task submission/status/replay/approval endpoints (`/tasks`)
 - webhook + Telegram ingress routes
 - progress notifications (`started`, `running`, terminal)
 - health/readiness + operational metrics endpoints
-
-Future operator surface direction is a local dashboard/PWA for richer inspection and controls.
 
 ## 6) Future Reflection / Autonomy Layer
 
