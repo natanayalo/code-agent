@@ -7,7 +7,7 @@ from typing import Final
 import httpx
 
 # Configuration
-API_URL = "http://127.0.0.1:8000"
+API_URL: Final[str] = os.environ.get("CODE_AGENT_API_URL", "http://127.0.0.1:8000")
 SHARED_SECRET = os.environ.get("CODE_AGENT_API_SHARED_SECRET", "ayalo123")
 
 
@@ -41,9 +41,9 @@ def setup_dummy_repo():
     with open(readme_path, "w", encoding="utf-8") as f:
         f.write("# Dummy QA Repo\n")
     subprocess.run(["git", "add", "README.md"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "QA User"], cwd=DUMMY_REPO_DIR, check=True)
+    subprocess.run(["git", "config", "user.name", "QA User"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True)
     subprocess.run(
-        ["git", "config", "user.email", "qa@example.com"], cwd=DUMMY_REPO_DIR, check=True
+        ["git", "config", "user.email", "qa@example.com"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
     )
     subprocess.run(
         ["git", "commit", "-m", "Initial commit"],
