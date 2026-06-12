@@ -8,7 +8,7 @@ import httpx
 
 # Configuration
 API_URL = "http://127.0.0.1:8000"
-SHARED_SECRET = "ayalo123"
+SHARED_SECRET = os.environ.get("CODE_AGENT_API_SHARED_SECRET", "ayalo123")
 
 
 # Read workspace root from .env to match the docker compose volume mapping

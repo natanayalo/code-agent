@@ -27,6 +27,14 @@ from apps.observability_utils import (
     OUTPUT_VALUE_ATTRIBUTE,
     SESSION_ID_ATTRIBUTE,
     TASK_ID_ATTRIBUTE,
+    get_centralized_span_input_data,
+    get_centralized_span_status,
+)
+from apps.observability_utils import (
+    resolve_span_status_code as _resolve_span_status_code,
+)
+from apps.observability_utils import (
+    serialize_span_payload as _serialize_span_payload,
 )
 
 logger = logging.getLogger(__name__)
@@ -359,8 +367,6 @@ def start_optional_span(
     try:
         from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
 
-        from apps.observability_utils import get_centralized_span_input_data
-
         tracer = otel_trace.get_tracer(tracer_name)
         span_attributes = get_centralized_span_input_data(
             task_id=task_id,
@@ -392,8 +398,6 @@ def set_span_input_output(
     """Set OpenInference input/output attributes on the current span."""
     try:
         from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
-
-        from apps.observability_utils import serialize_span_payload as _serialize_span_payload
 
         span = otel_trace.get_current_span()
         if not span.is_recording():
@@ -469,8 +473,6 @@ def set_span_status(status_code: Any, description: str | None = None) -> None:
     try:
         from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
 
-        from apps.observability_utils import resolve_span_status_code as _resolve_span_status_code
-
         span = otel_trace.get_current_span()
         if span.is_recording():
             if isinstance(status_code, str):
@@ -493,8 +495,6 @@ def set_span_status(status_code: Any, description: str | None = None) -> None:
 
 def set_span_status_from_outcome(status: str, summary: str | None = None) -> None:
     """Set span status based on a standard outcome status (success/error/failure)."""
-    from apps.observability_utils import get_centralized_span_status
-
     set_current_span_attribute(OUTCOME_STATUS_ATTRIBUTE, status)
     status_obj = get_centralized_span_status(status, summary)
     if status_obj:
