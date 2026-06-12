@@ -18,7 +18,7 @@ workspace_root = os.environ.get("CODE_AGENT_WORKSPACE_ROOT")
 if not workspace_root:
     workspace_root = DEFAULT_WORKSPACE_ROOT
     if os.path.exists(".env"):
-        with open(".env") as f:
+        with open(".env", encoding="utf-8") as f:
             for line in f:
                 parts = line.split("=", 1)
                 if len(parts) == 2 and parts[0].strip() == "CODE_AGENT_WORKSPACE_ROOT":
@@ -38,7 +38,7 @@ def setup_dummy_repo():
         ["git", "init"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
     )
     readme_path = os.path.join(DUMMY_REPO_DIR, "README.md")
-    with open(readme_path, "w") as f:
+    with open(readme_path, "w", encoding="utf-8") as f:
         f.write("# Dummy QA Repo\n")
     subprocess.run(["git", "add", "README.md"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.name", "QA User"], cwd=DUMMY_REPO_DIR, check=True)
@@ -149,7 +149,7 @@ async def main():
         check_file = os.path.join(workspace_dir, "qa-hello.txt")
         if os.path.exists(check_file):
             print("  [+] qa-hello.txt exists in workspace!")
-            with open(check_file) as f:
+            with open(check_file, encoding="utf-8") as f:
                 print(f"  [+] Content: {f.read().strip()}")
         else:
             raise RuntimeError('qa-hello.txt NOT FOUND in workspace.')
