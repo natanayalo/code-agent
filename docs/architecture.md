@@ -103,6 +103,24 @@ Primary modules:
 - `sandbox/`
 - `tools/`
 
+### Native Agent Sandbox Policy
+
+For native agent execution, the sandbox boundary depends on the worker profile and environment:
+
+**1. Codex Native Sandbox**
+
+Codex `exec` supports several sandbox modes mapped by repository trust:
+
+1.  **`read-only`**: Used when constraints specify `read_only: true`. No modifications allowed.
+2.  **`workspace-write`**: Default for untrusted repos or outside Docker. Uses Codex's internal Linux namespace sandbox.
+3.  **`danger-full-access`**: Disables Codex's internal sandbox. Used **ONLY** when running inside a Docker container (`is_in_container()`) **AND** the repository is explicitly trusted via operator-controlled regex patterns (`CODE_AGENT_CODEX_TRUSTED_REPO_PATTERNS`).
+
+*Security Guardrails:* Docker is the primary boundary. `danger-full-access` is only allowed inside a container to prevent nested Linux namespace collisions while keeping the process isolated by Docker.
+
+**2. Gemini Native Sandbox**
+
+The Gemini CLI uses a simpler boolean sandbox mechanism controlled via `CODE_AGENT_GEMINI_NATIVE_SANDBOX_ENABLED`. It defaults to `0` since the primary isolation boundary is the `docker-compose` worker container itself.
+
 ## 4) Memory Layer
 
 Owns durable context that survives individual runs.
