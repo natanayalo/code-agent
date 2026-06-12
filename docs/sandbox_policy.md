@@ -1,8 +1,8 @@
-# Codex Native Sandbox Policy
+# Native Agent Sandbox Policy
 
-This document describes the runtime policy for Codex native agent execution, specifically regarding sandbox boundaries and Docker container alignment.
+This document describes the runtime policy for native agent execution, specifically regarding sandbox boundaries and Docker container alignment.
 
-## Sandbox Modes
+## 1. Codex Native Sandbox
 
 Codex `exec` supports several sandbox modes. Our system maps these modes based on the environment and repository trust:
 
@@ -43,3 +43,9 @@ elif in_container and repo_approved:
 else:
     sandbox_mode = "workspace-write"
 ```
+
+## 2. Gemini Native Sandbox
+
+The Gemini CLI uses a simpler boolean sandbox mechanism. This is controlled via the environment:
+
+*   **`CODE_AGENT_GEMINI_NATIVE_SANDBOX_ENABLED`**: Set to `1` to explicitly enable Gemini's internal sandbox. Defaults to `0` since the primary isolation boundary is the `docker-compose` worker container itself.
