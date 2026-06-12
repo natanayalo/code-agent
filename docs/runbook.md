@@ -119,11 +119,17 @@ Behavior:
 
 ## 5) Operator Endpoints
 
-Core endpoints:
+Current Operator UI:
+
+- **Dashboard**: `http://localhost:3000` (started automatically with `scripts/up.sh`)
+
+Core API endpoints:
 
 - `POST /tasks` submit work
 - `GET /tasks/{task_id}` inspect status and latest run
 - `POST /tasks/{task_id}/approval` apply manual approval decision
+- `POST /tasks/{task_id}/cancel` cancel a running or pending task
+- `POST /tasks/{task_id}/interactions/{interaction_id}/response` resume after clarifying/fixing interaction
 - `POST /tasks/{task_id}/replay` replay terminal task with optional overrides
 - `GET /health`, `GET /ready`, `GET /metrics`
 
@@ -227,7 +233,15 @@ Use replay endpoint instead of manually cloning task rows:
 - do not relax callback SSRF guardrails for convenience
 - do not alter secrets/auth/billing/sandbox policy without explicit approval
 
-## 9) Minimal Operational Checklist
+## 9) Local E2E Verification
+
+For full pipeline testing (API -> Orchestrator -> Sandbox Worker -> DB), use the automated QA runbook. Ensure your `.env` has test credentials and the stack is running.
+
+```bash
+python scripts/run_e2e_qa.py
+```
+
+## 10) Minimal Operational Checklist
 
 Before running tasks:
 
