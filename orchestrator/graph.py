@@ -759,6 +759,9 @@ async def generate_task_spec(
         task_id=state.task.task_id,
         session_id=state.session.session_id if state.session else None,
         attempt=state.attempt_count,
+        task_kind=state.task_kind,
+        route_reason=state.route.route_reason if state.route else None,
+        verification_summary=state.verification.summary if state.verification else None,
     ):
         task_spec = build_task_spec_for_request(
             state.task,
@@ -797,6 +800,9 @@ def build_generate_task_spec_and_route_node(
             task_id=state.task.task_id,
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
+            task_kind=state.task_kind,
+            route_reason=state.route.route_reason if state.route else None,
+            verification_summary=state.verification.summary if state.verification else None,
         ):
             task_spec = build_task_spec_for_request(
                 state.task,
@@ -899,6 +905,9 @@ async def _execute_task_spec_brain_method(
             task_id=state.task.task_id,
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
+            task_kind=state.task_kind,
+            route_reason=state.route.route_reason if state.route else None,
+            verification_summary=state.verification.summary if state.verification else None,
         ):
             suggestion = await orchestrator_brain.suggest_task_spec(
                 task=state.task,
@@ -1199,6 +1208,9 @@ async def _execute_unified_brain_method(
             task_id=state.task.task_id,
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
+            task_kind=state.task_kind,
+            route_reason=state.route.route_reason if state.route else None,
+            verification_summary=state.verification.summary if state.verification else None,
         ):
             suggestion = await unified_method(
                 state=state,
@@ -2091,6 +2103,9 @@ async def _execute_route_brain_suggestion(
             task_id=state.task.task_id,
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
+            task_kind=state.task_kind,
+            route_reason=state.route.route_reason if state.route else None,
+            verification_summary=state.verification.summary if state.verification else None,
         ):
             suggestion = await orchestrator_brain.suggest_route(
                 state=state,
@@ -2176,6 +2191,9 @@ def build_choose_worker_node(
             task_id=state.task.task_id,
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
+            task_kind=state.task_kind,
+            route_reason=state.route.route_reason if state.route else None,
+            verification_summary=state.verification.summary if state.verification else None,
         ):
             route: RouteDecision | None = None
             brain_report: RouteBrainMergeReport | None = None
@@ -2262,6 +2280,9 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
         task_id=state.task.task_id,
         session_id=state.session.session_id if state.session else None,
         attempt=state.attempt_count,
+        task_kind=state.task_kind,
+        route_reason=state.route.route_reason if state.route else None,
+        verification_summary=state.verification.summary if state.verification else None,
     ):
         worker_type = state.route.chosen_worker
         if state.route.route_reason != "runtime_unavailable" and worker_type is None:
@@ -2432,6 +2453,9 @@ def build_await_result_node(
             task_id=state.task.task_id,
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
+            task_kind=state.task_kind,
+            route_reason=state.route.route_reason if state.route else None,
+            verification_summary=state.verification.summary if state.verification else None,
         ):
             worker_type = state.dispatch.worker_type or state.route.chosen_worker
             requested_profile = state.dispatch.worker_profile or state.route.chosen_profile

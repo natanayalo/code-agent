@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.metadata
-import json
 import logging
 import os
 from collections.abc import Callable, Generator, Mapping
@@ -14,6 +13,30 @@ from importlib import import_module
 from threading import Lock
 from typing import Any, Final, TypeVar
 
+from apps.observability_utils import (
+    ATTEMPT_COUNT_ATTRIBUTE,
+    ATTR_ROUTE_REASON,
+    ATTR_TASK_KIND,
+    ATTR_VERIFICATION_SUMMARY,
+    CHANNEL_ATTRIBUTE,
+    INPUT_MIME_TYPE_ATTRIBUTE,
+    INPUT_VALUE_ATTRIBUTE,
+    OPENINFERENCE_SPAN_KIND_ATTRIBUTE,
+    OUTCOME_STATUS_ATTRIBUTE,
+    OUTPUT_MIME_TYPE_ATTRIBUTE,
+    OUTPUT_VALUE_ATTRIBUTE,
+    SESSION_ID_ATTRIBUTE,
+    TASK_ID_ATTRIBUTE,
+    get_centralized_span_input_data,
+    get_centralized_span_status,
+)
+from apps.observability_utils import (
+    resolve_span_status_code as _resolve_span_status_code,
+)
+from apps.observability_utils import (
+    serialize_span_payload as _serialize_span_payload,
+)
+
 logger = logging.getLogger(__name__)
 
 ENABLE_TRACING_ENV_VAR: Final[str] = "CODE_AGENT_ENABLE_TRACING"
@@ -23,19 +46,7 @@ OTEL_OTLP_TRACES_ENDPOINT_ENV_VAR: Final[str] = "OTEL_EXPORTER_OTLP_TRACES_ENDPO
 PHOENIX_COLLECTOR_ENDPOINT_ENV_VAR: Final[str] = "PHOENIX_COLLECTOR_ENDPOINT"
 DEFAULT_TRACING_PROJECT: Final[str] = "code-agent"
 DEFAULT_PHOENIX_OTLP_HTTP_ENDPOINT: Final[str] = "http://127.0.0.1:6006/v1/traces"
-OPENINFERENCE_SPAN_KIND_ATTRIBUTE: Final[str] = "openinference.span.kind"
-SESSION_ID_ATTRIBUTE: Final[str] = "session.id"
-INPUT_VALUE_ATTRIBUTE: Final[str] = "input.value"
-INPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "input.mime_type"
-OUTPUT_VALUE_ATTRIBUTE: Final[str] = "output.value"
-OUTPUT_MIME_TYPE_ATTRIBUTE: Final[str] = "output.mime_type"
-TASK_ID_ATTRIBUTE: Final[str] = "code_agent.task_id"
-ATTEMPT_COUNT_ATTRIBUTE: Final[str] = "code_agent.attempt_count"
-CHANNEL_ATTRIBUTE: Final[str] = "code_agent.channel"
-OUTCOME_STATUS_ATTRIBUTE: Final[str] = "code_agent.outcome_status"
-ATTR_TASK_KIND: Final[str] = "code_agent.task_kind"
-ATTR_WORKER_ID: Final[str] = "code_agent.worker_id"
-MAX_SPAN_ATTRIBUTE_LENGTH: Final[int] = 12000
+
 
 # Native Agent Span Attributes
 NATIVE_AGENT_COMMAND_ATTRIBUTE: Final[str] = "code_agent.native_agent.command"
@@ -339,77 +350,6 @@ def bind_current_trace_context(  # noqa: UP047
     return _wrapped
 
 
-def get_centralized_span_input_data(
-    *,
-    task_id: str | None = None,
-    session_id: str | None = None,
-    attempt: int | None = None,
-    channel: str | None = None,
-    extra_attributes: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Consolidate standard task correlation attributes into a span attribute dictionary."""
-    attributes: dict[str, Any] = dict(extra_attributes) if extra_attributes is not None else {}
-    if task_id:
-        attributes[TASK_ID_ATTRIBUTE] = task_id
-    if session_id:
-        attributes[SESSION_ID_ATTRIBUTE] = session_id
-    if attempt is not None:
-        attributes[ATTEMPT_COUNT_ATTRIBUTE] = attempt
-    if channel:
-        attributes[CHANNEL_ATTRIBUTE] = channel
-    return attributes
-
-
-def get_centralized_result_mapping() -> dict[str, Any] | None:
-    """Return the centralized mapping of string statuses to OpenTelemetry StatusCode enum values."""
-    try:
-        from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
-
-        return {
-            "success": otel_trace.StatusCode.OK,
-            "completed": otel_trace.StatusCode.OK,
-            "ok": otel_trace.StatusCode.OK,
-            "blocked_on_clarification": otel_trace.StatusCode.UNSET,
-            "error": otel_trace.StatusCode.ERROR,
-            "failure": otel_trace.StatusCode.ERROR,
-            "failed": otel_trace.StatusCode.ERROR,
-            "cancelled": otel_trace.StatusCode.ERROR,
-            "unset": otel_trace.StatusCode.UNSET,
-        }
-    except ImportError:
-        return None
-
-
-def _resolve_span_status_code(status: str) -> Any:
-    """Map a string status to an OpenTelemetry StatusCode enum value."""
-    try:
-        mapping = get_centralized_result_mapping()
-        if mapping is None:
-            return None
-        return mapping.get(status.lower(), mapping["unset"])
-    except Exception as exc:
-        logger.debug("Failed to resolve span status code: %s", exc)
-        return None
-
-
-def get_centralized_span_status(
-    status: str,
-    description: str | None = None,
-) -> Any:
-    """Map a standard outcome status (success/error/failure) to an OpenTelemetry Status object."""
-    try:
-        from opentelemetry import trace as otel_trace  # type: ignore  # noqa: PLC0415
-
-        status_code = _resolve_span_status_code(status)
-        if status_code is not None:
-            return otel_trace.Status(status_code, description)
-
-        return None
-    except Exception as exc:
-        logger.debug("Failed to map span status: %s", exc)
-        return None
-
-
 def start_optional_span(
     *,
     tracer_name: str,
@@ -419,6 +359,9 @@ def start_optional_span(
     session_id: str | None = None,
     attempt: int | None = None,
     channel: str | None = None,
+    task_kind: str | None = None,
+    route_reason: str | None = None,
+    verification_summary: str | None = None,
 ) -> Any:
     """Start a span when OTEL is available, otherwise return a no-op context manager."""
     try:
@@ -430,6 +373,9 @@ def start_optional_span(
             session_id=session_id,
             attempt=attempt,
             channel=channel,
+            task_kind=task_kind,
+            route_reason=route_reason,
+            verification_summary=verification_summary,
             extra_attributes=attributes,
         )
 
@@ -443,31 +389,6 @@ def with_span_kind(kind: str, attributes: Mapping[str, Any] | None = None) -> di
     merged = dict(attributes) if attributes is not None else {}
     merged[OPENINFERENCE_SPAN_KIND_ATTRIBUTE] = kind
     return merged
-
-
-def _truncate_span_payload(value: str) -> str:
-    """Standardized truncation for span attributes to prevent oversized payloads."""
-    if len(value) <= MAX_SPAN_ATTRIBUTE_LENGTH:
-        return value
-    truncated = value[:MAX_SPAN_ATTRIBUTE_LENGTH]
-    return f"{truncated}\n... (truncated to {MAX_SPAN_ATTRIBUTE_LENGTH} chars)"
-
-
-def _serialize_span_payload(payload: Any) -> tuple[str, str]:
-    """Serialize payloads for OpenInference input/output span attributes."""
-    if isinstance(payload, Mapping | list | tuple):
-        actual_payload = dict(payload) if isinstance(payload, Mapping) else payload
-        serialized = json.dumps(actual_payload, default=str)
-        mime_type = "application/json"
-    else:
-        serialized = str(payload)
-        mime_type = "text/plain"
-
-    truncated = _truncate_span_payload(serialized)
-    if len(serialized) > MAX_SPAN_ATTRIBUTE_LENGTH:
-        mime_type = "text/plain"
-
-    return truncated, mime_type
 
 
 def set_span_input_output(
@@ -585,6 +506,9 @@ def set_span_task_metadata(
     session_id: str | None = None,
     attempt: int | None = None,
     channel: str | None = None,
+    task_kind: str | None = None,
+    route_reason: str | None = None,
+    verification_summary: str | None = None,
 ) -> None:
     """Set standardized task correlation attributes on the current span."""
     if task_id:
@@ -595,3 +519,9 @@ def set_span_task_metadata(
         set_current_span_attribute(ATTEMPT_COUNT_ATTRIBUTE, attempt)
     if channel:
         set_current_span_attribute(CHANNEL_ATTRIBUTE, channel)
+    if task_kind:
+        set_current_span_attribute(ATTR_TASK_KIND, task_kind)
+    if route_reason:
+        set_current_span_attribute(ATTR_ROUTE_REASON, route_reason)
+    if verification_summary:
+        set_current_span_attribute(ATTR_VERIFICATION_SUMMARY, verification_summary)

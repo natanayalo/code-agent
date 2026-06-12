@@ -88,6 +88,9 @@ async def _run_deterministic_step(
         task_id=state.task.task_id,
         session_id=state.session.session_id if state.session else None,
         attempt=state.attempt_count,
+        task_kind=state.task_kind,
+        route_reason=state.route.route_reason if state.route else None,
+        verification_summary=state.verification.summary if state.verification else None,
     ):
         (
             deterministic_verifier_status,
@@ -131,6 +134,9 @@ async def _run_independent_step(
         task_id=state.task.task_id,
         session_id=state.session.session_id if state.session else None,
         attempt=state.attempt_count,
+        task_kind=state.task_kind,
+        route_reason=state.route.route_reason if state.route else None,
+        verification_summary=state.verification.summary if state.verification else None,
     ):
         status, summary, reason_code = await run_independent_verifier(
             state,
@@ -200,6 +206,9 @@ def build_verify_result_node(
             task_id=state.task.task_id,
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
+            task_kind=state.task_kind,
+            route_reason=state.route.route_reason if state.route else None,
+            verification_summary=state.verification.summary if state.verification else None,
         ):
             logger.info(
                 "Entering verify_result_node",

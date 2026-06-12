@@ -8,7 +8,6 @@ import sys
 from typing import Any
 
 from apps.observability import (
-    ATTR_WORKER_ID,
     SPAN_KIND_AGENT,
     record_span_exception,
     set_current_span_attribute,
@@ -18,6 +17,7 @@ from apps.observability import (
     with_restored_trace_context,
     with_span_kind,
 )
+from apps.observability_utils import ATTR_WORKER_ID
 from db.base import utc_now
 from db.enums import TaskStatus
 from orchestrator.execution_policy import (

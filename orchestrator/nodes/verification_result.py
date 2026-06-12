@@ -330,8 +330,7 @@ def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
             label="file_changes",
             status="warning",
             message=(
-                f"Worker reported {result.status} "
-                f"but changed {len(result.files_changed)} files."
+                f"Worker reported {result.status} but changed {len(result.files_changed)} files."
             ),
         )
     else:

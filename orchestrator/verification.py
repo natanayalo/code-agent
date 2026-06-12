@@ -401,6 +401,9 @@ async def _execute_verifier_worker(
             task_id=state.task.task_id,
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
+            task_kind=state.task_kind,
+            route_reason=state.route.route_reason if state.route else None,
+            verification_summary=state.verification.summary if state.verification else None,
             attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
         ):
             set_span_input_output(input_data=request.task_text)
@@ -540,6 +543,9 @@ async def _execute_deterministic_verification_worker(
             task_id=state.task.task_id,
             session_id=state.session.session_id if state.session else None,
             attempt=state.attempt_count,
+            task_kind=state.task_kind,
+            route_reason=state.route.route_reason if state.route else None,
+            verification_summary=state.verification.summary if state.verification else None,
             attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
         ):
             set_span_input_output(input_data=request.task_text)
