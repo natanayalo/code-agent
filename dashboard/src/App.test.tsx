@@ -200,5 +200,6 @@ describe('App', () => {
 
     // Verify it handles error gracefully
     expect(await screen.findByText(/Task not found/i)).toBeInTheDocument();
+    expect(api.getTask).toHaveBeenCalledTimes(1);
   });
 });
