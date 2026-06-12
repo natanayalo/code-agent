@@ -1222,7 +1222,9 @@ async def _execute_unified_brain_method(
                 input_data=task_spec.model_dump(),
                 output_data=suggestion.model_dump() if suggestion else None,
             )
-    except (RuntimeError, AttributeError, TypeError) as exc:
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
         logger.debug("Failed to execute unified brain method: %s", exc, exc_info=True)
         detail = str(exc).strip()
         task_spec_brain_report = TaskSpecBrainMergeReport(

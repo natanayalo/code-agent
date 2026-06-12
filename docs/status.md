@@ -54,10 +54,10 @@ Granular tasks for the active and upcoming milestones:
 - Milestone target: increase test coverage across all e2e-critical slices (T-164 to T-171) with explicit unit/integration/dashboard tests for each changed behavior, while meeting existing CI coverage gates.
 See [Stabilization Tasks](stabilization_tasks.md) for the full list of tasks.
 
-- [ ] T-177: Optimize discovery latency and brain-router fallback resilience
 - [ ] T-178: E2E Forensic Investigation & Runtime Hardening (404 polling, JSON parsing resilience)
 
 ### Milestone 17.5 Done (Published)
+- [x] T-177: Optimize discovery latency and brain-router fallback resilience — Introduced 'Discovery' profile, shortened brain enrichment timeout to 45s, and hardened orchestrator to gracefully fallback from brain `TimeoutError`s and other unhandled exceptions.
 - [x] T-176: Standardize Phoenix/OpenInference span attributes and JSON payloads ([#214](https://github.com/natanayalo/code-agent/pull/214)) — extracted stateless utility functions into `apps/observability_utils.py`, implemented standardized span attributes, and ensured robust handling of trace metadata.
 - [x] T-171: local e2e runbook + compose/env verification ([#214](https://github.com/natanayalo/code-agent/pull/214)) — introduced the `@agents/skills/e2e-qa` skill with an automated Python verification script that acts as an E2E runbook.
 - [x] T-175: Add infra-failure (shell crash) detection to NativeAgentRunner ([#182](https://github.com/natanayalo/code-agent/pull/182)) — added stderr scanning for common crash markers (segfault, OOM, etc.) and integrated with failure taxonomy for systemic `sandbox_infra` classification.

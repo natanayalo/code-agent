@@ -31,7 +31,7 @@ from orchestrator.state import (
     WorkerType,
 )
 from workers.base import Worker, WorkerProfile, WorkerRequest, WorkerResult
-from workers.constants import DEFAULT_BRAIN_TIMEOUT_SECONDS
+from workers.constants import DEFAULT_DISCOVERY_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +51,9 @@ def _planner_failure_reason_code(result: WorkerResult | None, exc: Exception | N
     return result.status
 
 
-DEFAULT_ROUTE_BRAIN_TIMEOUT_SECONDS = DEFAULT_BRAIN_TIMEOUT_SECONDS
-DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS = DEFAULT_BRAIN_TIMEOUT_SECONDS
-DEFAULT_ROUTE_PLANNER_PROFILE = "gemini-native-planner"
+DEFAULT_ROUTE_BRAIN_TIMEOUT_SECONDS = DEFAULT_DISCOVERY_TIMEOUT_SECONDS
+DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS = DEFAULT_DISCOVERY_TIMEOUT_SECONDS
+DEFAULT_ROUTE_PLANNER_PROFILE = "gemini-native-discovery"
 DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS: Final = 5
 
 _ROUTE_SYSTEM_PROMPT = """

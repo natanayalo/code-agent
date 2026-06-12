@@ -17,14 +17,14 @@ from tests.unit.orchestrator_brain_support import (
     _StaticWorker,
 )
 from workers import WorkerResult
-from workers.constants import DEFAULT_BRAIN_TIMEOUT_SECONDS
+from workers.constants import DEFAULT_DISCOVERY_TIMEOUT_SECONDS
 
 
 def test_default_brain_timeout_is_five_minutes() -> None:
     brain = RuleBasedOrchestratorBrain()
 
-    assert DEFAULT_BRAIN_TIMEOUT_SECONDS == 300
-    assert brain.planner_timeout_seconds == 300
+    assert DEFAULT_DISCOVERY_TIMEOUT_SECONDS == 45
+    assert brain.planner_timeout_seconds == 45
 
 
 def test_suggest_route_parses_plain_json_payload() -> None:

@@ -279,7 +279,7 @@ async def test_suggest_task_spec_and_route_uses_default_brain_timeout_budget() -
         available_profiles=None,
     )
 
-    assert worker.requests[-1].budget["worker_timeout_seconds"] == 300
+    assert worker.requests[-1].budget["worker_timeout_seconds"] == 45
 
 
 @pytest.mark.asyncio

@@ -73,6 +73,7 @@ GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_NATIVE_SA
 # Default profile names
 GEMINI_NATIVE_PLANNER_PROFILE: Final[str] = "gemini-native-planner"
 GEMINI_NATIVE_REVIEWER_PROFILE: Final[str] = "gemini-native-reviewer"
+GEMINI_NATIVE_DISCOVERY_PROFILE: Final[str] = "gemini-native-discovery"
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +209,16 @@ def _build_default_worker_profiles(
         # Add specialized profiles for Gemini (T-142)
         profiles[GEMINI_NATIVE_PLANNER_PROFILE] = WorkerProfile(
             name=GEMINI_NATIVE_PLANNER_PROFILE,
+            worker_type="gemini",
+            runtime_mode=WorkerRuntimeMode.PLANNER_ONLY,
+            capability_tags=["planning"],
+            supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            permission_profile="workspace_write",
+            mutation_policy="patch_allowed",
+            self_review_policy="on_failure",
+        )
+        profiles[GEMINI_NATIVE_DISCOVERY_PROFILE] = WorkerProfile(
+            name=GEMINI_NATIVE_DISCOVERY_PROFILE,
             worker_type="gemini",
             runtime_mode=WorkerRuntimeMode.PLANNER_ONLY,
             capability_tags=["planning"],
