@@ -80,7 +80,7 @@ def resolve_span_status_code(status: str) -> Any:
         mapping = get_centralized_result_mapping()
         if mapping is None:
             return None
-        return mapping.get(status.lower(), mapping["unset"])
+        return mapping.get(status.strip().lower(), mapping["unset"])
     except Exception as exc:
         logger.debug("Failed to resolve span status code: %s", exc)
         return None
