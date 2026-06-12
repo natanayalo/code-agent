@@ -52,7 +52,6 @@ Granular tasks for the active and upcoming milestones:
 
 ### Milestone 17.5: Full E2E Stabilization
 - Milestone target: increase test coverage across all e2e-critical slices (T-164 to T-171) with explicit unit/integration/dashboard tests for each changed behavior, while meeting existing CI coverage gates.
-See [Stabilization Tasks](stabilization_tasks.md) for the full list of tasks.
 
 ### Milestone 17.5 Done (Published)
 - [x] T-178: E2E Forensic Investigation & Runtime Hardening (404 polling, JSON parsing resilience)
