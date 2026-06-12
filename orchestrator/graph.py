@@ -1225,7 +1225,7 @@ async def _execute_unified_brain_method(
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        logger.debug("Failed to execute unified brain method: %s", exc, exc_info=True)
+        logger.warning("Failed to execute unified brain method: %s", exc, exc_info=True)
         detail = str(exc).strip()
         task_spec_brain_report = TaskSpecBrainMergeReport(
             enabled=True,
