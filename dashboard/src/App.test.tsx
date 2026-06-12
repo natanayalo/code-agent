@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import App from './App';
 import { TaskStatus } from './types/task';
-import { api } from './services/api';
+import { api, ApiError } from './services/api';
 
 // Mock the API service
 vi.mock('./services/api', () => ({
@@ -185,8 +185,7 @@ describe('App', () => {
     vi.mocked(api.listTasks).mockResolvedValue([
       { task_id: 'missing-task', task_text: 'Task 1', status: TaskStatus.PENDING, created_at: new Date().toISOString(), session_id: 's1', priority: 1, updated_at: new Date().toISOString() },
     ]);
-    const ApiErrorMock = (await import('./services/api')).ApiError;
-    vi.mocked(api.getTask).mockRejectedValue(new ApiErrorMock(404, 'Task not found'));
+    vi.mocked(api.getTask).mockRejectedValue(new ApiError(404, 'Task not found'));
     vi.mocked(api.auth.status).mockResolvedValue({ authenticated: true });
 
     render(
