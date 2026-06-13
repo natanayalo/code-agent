@@ -370,7 +370,8 @@ def apply_task_spec_brain_suggestion(
 
     delivery_branch = task_spec.delivery_branch
     suggested_delivery_branch = suggestion.suggested_delivery_branch
-    if suggested_delivery_branch is not None:
+    if suggested_delivery_branch is not None and suggested_delivery_branch.strip():
+        suggested_delivery_branch = suggested_delivery_branch.strip()
         if not delivery_branch:
             delivery_branch = suggested_delivery_branch
         elif suggested_delivery_branch != delivery_branch:
@@ -378,7 +379,8 @@ def apply_task_spec_brain_suggestion(
 
     pr_title = task_spec.pr_title
     suggested_pr_title = suggestion.suggested_pr_title
-    if suggested_pr_title is not None:
+    if suggested_pr_title is not None and suggested_pr_title.strip():
+        suggested_pr_title = suggested_pr_title.strip()
         if not pr_title:
             pr_title = suggested_pr_title
         elif suggested_pr_title != pr_title:
@@ -386,7 +388,8 @@ def apply_task_spec_brain_suggestion(
 
     pr_body = task_spec.pr_body
     suggested_pr_body = suggestion.suggested_pr_body
-    if suggested_pr_body is not None:
+    if suggested_pr_body is not None and suggested_pr_body.strip():
+        suggested_pr_body = suggested_pr_body.strip()
         if not pr_body:
             pr_body = suggested_pr_body
         elif suggested_pr_body != pr_body:

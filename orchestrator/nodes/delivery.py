@@ -17,7 +17,7 @@ from apps.observability import (
     set_span_input_output,
     start_optional_span,
 )
-from db.enums import TimelineEventType
+from db.enums import TimelineEventType, WorkerRunStatus
 from orchestrator.nodes.utils import (
     _available_workers,
     _ensure_state,
@@ -82,7 +82,7 @@ async def _run_deliver_result(
     state = _ensure_state(state_input)
 
     # Check preconditions
-    if not state.result or state.result.status != "success":
+    if not state.result or state.result.status != WorkerRunStatus.SUCCESS:
         return {"current_step": "deliver_result"}
 
     if not state.task_spec or state.task_spec.delivery_mode not in {"branch", "draft_pr"}:
@@ -131,9 +131,10 @@ async def _run_deliver_result(
             },
         )
 
+        task_secrets = state.task.secrets or {}
         gh_token = (
-            state.task.secrets.get("GH_TOKEN")
-            or state.task.secrets.get("GITHUB_TOKEN")
+            task_secrets.get("GH_TOKEN")
+            or task_secrets.get("GITHUB_TOKEN")
             or os.environ.get("GH_TOKEN")
             or os.environ.get("GITHUB_TOKEN")
         )
@@ -172,14 +173,14 @@ async def _run_deliver_result(
             branch=state.task.branch,
             workspace_id=state.dispatch.workspace_id,
             task_text=prompt,
-            constraints=dict(state.task.constraints),
+            constraints=dict(state.task.constraints or {}),
             budget={
                 "worker_timeout_seconds": 300,
                 **state.task.budget,
             },
             network_enabled=True,
             secrets={
-                **state.task.secrets,
+                **task_secrets,
                 "GH_TOKEN": gh_token or "",
             },
             tools=["execute_bash", "execute_git", "execute_github"],
@@ -213,7 +214,7 @@ async def _run_deliver_result(
         if hasattr(result, "stderr") and result.stderr:
             set_current_span_attribute(NATIVE_AGENT_STDERR_ATTRIBUTE, result.stderr)
 
-        if getattr(result, "status", None) != "success":
+        if getattr(result, "status", None) != WorkerRunStatus.SUCCESS:
             msg = f"Delivery script failed: {getattr(result, 'summary', '')}"
             return {
                 "current_step": "deliver_result",
