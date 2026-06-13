@@ -40,7 +40,10 @@ def _build_delivery_prompt(
     # Return a natural language prompt for the agent instead of a bash script.
     mode_instructions = ""
     if delivery_mode == "draft_pr":
-        mode_instructions = f"After pushing, use the github tool or gh cli to create a draft PR titled '{pr_title}' with body '{pr_body}'. If it already exists, do not error."
+        mode_instructions = (
+            f"After pushing, use the github tool or gh cli to create a draft PR titled "
+            f"'{pr_title}' with body '{pr_body}'. If it already exists, do not error."
+        )
 
     prompt = f"""
 Please deliver the current workspace changes to the remote repository.
@@ -50,10 +53,12 @@ Configuration:
 - Delivery mode: {delivery_mode}
 
 Instructions:
-1. Check if there are any uncommitted changes. If there are, commit them locally with a descriptive message (e.g. "Automated implementation for task").
+1. Check if there are any uncommitted changes. If there are, commit them locally
+   with a descriptive message (e.g. "Automated implementation for task").
 2. Fetch the latest from origin.
 3. Checkout or create the branch `{branch_name}`.
-4. If the remote branch exists, gracefully rebase your changes onto it. Resolve any conflicts professionally.
+4. If the remote branch exists, gracefully rebase your changes onto it.
+   Resolve any conflicts professionally.
 5. Push the changes to origin (`git push -u origin {branch_name}`).
 {mode_instructions}
 
@@ -84,7 +89,8 @@ async def _run_deliver_result(
 
     available = _available_workers(worker, gemini_worker, openrouter_worker, shell_worker)
 
-    # Try to use the worker that was dispatched for the task, but fallback to gemini if it's shell or not found
+    # Try to use the worker that was dispatched for the task.
+    # Fallback to gemini if it's shell or not found.
     worker_id = state.dispatch.worker_type if state.dispatch else "gemini"
     if worker_id == "shell" or worker_id not in available:
         worker_id = "gemini"
@@ -114,7 +120,10 @@ async def _run_deliver_result(
 
         gh_token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
         if not gh_token and state.task_spec.delivery_mode == "draft_pr":
-            msg = "Delivery failed: GH_TOKEN or GITHUB_TOKEN not found in environment (required for PR creation)."
+            msg = (
+                "Delivery failed: GH_TOKEN or GITHUB_TOKEN not found in environment "
+                "(required for PR creation)."
+            )
             logger.warning(msg)
             return {
                 "current_step": "deliver_result",

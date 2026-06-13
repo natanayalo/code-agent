@@ -6,9 +6,9 @@ branch_labels = None
 depends_on = None
 
 
-from collections.abc import Iterable
+from collections.abc import Iterable  # noqa: E402
 
-from alembic import op
+from alembic import op  # noqa: E402
 
 TIMELINE_EVENT_TYPE_VALUES = (
     "task_ingested",
@@ -62,7 +62,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(
-        "DELETE FROM task_timeline_events WHERE event_type IN ('delivery_started', 'delivery_completed', 'delivery_failed')"
+        "DELETE FROM task_timeline_events WHERE event_type IN "
+        "('delivery_started', 'delivery_completed', 'delivery_failed')"
     )
     with op.batch_alter_table("task_timeline_events") as batch_op:
         batch_op.drop_constraint(op.f("ck_task_timeline_events_event_type"), type_="check")
