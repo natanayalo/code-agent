@@ -36,3 +36,5 @@ function_exceptions:
     create_workspace: Complex workspace provisioning logic with retries and rollback that is hard to safely extract
   orchestrator/nodes/delivery.py:
     _run_deliver_result: Delivery logic integrates tracing, progress reporting, and fallback error handling
+  sandbox/container.py:
+    _build_docker_container_run_command: Complex docker CLI argument compilation with security boundaries.

@@ -109,7 +109,24 @@ def _build_docker_container_run_command(
 
         parsed_url = urlparse(request.workspace.repo_url)
         if parsed_url.scheme == "file":
+            if not parsed_url.path:
+                raise DockerSandboxContainerError(
+                    "Local repo path cannot be empty for " "file:// scheme"
+                )
             local_repo_path = os.path.abspath(parsed_url.path)
+
+            from pathlib import Path
+
+            from sandbox.workspace import default_workspace_root
+
+            resolved_path = Path(local_repo_path).resolve()
+            allowed_root = default_workspace_root().resolve()
+            if not resolved_path.is_relative_to(allowed_root):
+                raise DockerSandboxContainerError(
+                    f"Local repo path {resolved_path} is outside the "
+                    f"allowed workspace root {allowed_root}"
+                )
+
             if "," in local_repo_path:
                 raise DockerSandboxContainerError(
                     "Local repo path contains a comma which is incompatible with "
