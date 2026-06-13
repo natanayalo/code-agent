@@ -57,8 +57,12 @@ Configuration:
 Instructions:
 1. Fetch the latest from origin.
 2. Checkout or create the branch `{branch_name}`.
-3. Check if there are any uncommitted changes. If there are, commit them locally
-   on `{branch_name}` with a descriptive message (e.g. "Automated implementation for task").
+3. Check for any uncommitted changes using `git status`.
+   - Before committing, review the changes to ensure no unintended files
+     (like debug logs, temporary artifacts, or secrets) are included.
+   - Stage ONLY the files relevant to this task (avoid blindly using `git add .`).
+   - Commit them locally on `{branch_name}` with a clear, specific message
+     describing the work done.
 4. If the remote branch exists, gracefully rebase your changes onto it.
    Resolve any conflicts professionally.
 5. Push the changes to origin (`git push -u origin {branch_name}`).
