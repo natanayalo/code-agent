@@ -120,11 +120,12 @@ def test_workspace_manager_uses_init_mode(tmp_path: Path) -> None:
         captured_commands.append(command)
 
     manager = WorkspaceManager(tmp_path, command_runner=fake_runner)
-    manager.create_workspace(
+    workspace = manager.create_workspace(
         WorkspaceRequest(task_id="task-init", workspace_mode=workspace_module.WorkspaceMode.INIT)
     )
 
     assert captured_commands == [["git", "init"]]
+    assert workspace.workspace_mode == workspace_module.WorkspaceMode.INIT
 
 
 def test_workspace_manager_uses_none_mode(tmp_path: Path) -> None:
@@ -134,11 +135,12 @@ def test_workspace_manager_uses_none_mode(tmp_path: Path) -> None:
         captured_commands.append(command)
 
     manager = WorkspaceManager(tmp_path, command_runner=fake_runner)
-    manager.create_workspace(
+    workspace = manager.create_workspace(
         WorkspaceRequest(task_id="task-none", workspace_mode=workspace_module.WorkspaceMode.NONE)
     )
 
     assert captured_commands == []
+    assert workspace.workspace_mode == workspace_module.WorkspaceMode.NONE
 
 
 def test_run_command_raises_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:

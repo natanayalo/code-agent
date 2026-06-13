@@ -6,12 +6,15 @@ import logging
 import os
 import shlex
 import subprocess
+from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from pydantic import Field
 
 from sandbox.redact import mask_url_credentials as _mask_url_credentials
-from sandbox.workspace import SandboxModel, WorkspaceHandle
+from sandbox.workspace import SandboxModel, WorkspaceHandle, default_workspace_root
 
 logger = logging.getLogger(__name__)
 
@@ -63,27 +66,16 @@ def build_container_name(workspace: WorkspaceHandle) -> str:
     return f"sandbox-{workspace.workspace_id}"
 
 
-def _build_docker_container_run_command(
-    request: DockerSandboxContainerRequest,
-    *,
-    image: str,
-    docker_binary: str = "docker",
-) -> list[str]:
-    """Build the `docker run -d` command for a persistent sandbox container."""
-    container_name = build_container_name(request.workspace)
-    command = [
-        docker_binary,
-        "run",
-        "-d",
-        "--rm",
-        "--name",
-        container_name,
-    ]
+def _append_resource_limits(command: list[str], request: DockerSandboxContainerRequest) -> None:
     if request.memory_limit:
         command.extend(["--memory", request.memory_limit])
     if request.cpu_limit:
         command.extend(["--cpus", str(request.cpu_limit)])
 
+
+def _append_workspace_mount(
+    command: list[str], request: DockerSandboxContainerRequest
+) -> tuple[Path, str]:
     workspace_path = request.workspace.workspace_path.resolve()
     if "," in str(workspace_path):
         raise DockerSandboxContainerError(
@@ -103,65 +95,88 @@ def _build_docker_container_run_command(
             f"type=bind,source={workspace_path},target={target_path}",
         ]
     )
+    return workspace_path, working_dir
 
-    if request.workspace.repo_url:
-        from urllib.parse import urlparse
 
-        parsed_url = urlparse(request.workspace.repo_url)
-        if parsed_url.scheme == "file":
-            if not parsed_url.path:
-                raise DockerSandboxContainerError(
-                    "Local repo path cannot be empty for " "file:// scheme"
-                )
-            from urllib.request import url2pathname
+def _local_repo_path_from_file_url(repo_url: str) -> str | None:
+    parsed_url = urlparse(repo_url)
+    if parsed_url.scheme != "file":
+        return None
+    if not parsed_url.path:
+        raise DockerSandboxContainerError("Local repo path cannot be empty for file:// scheme")
+    return os.path.abspath(url2pathname(parsed_url.path))
 
-            local_repo_path = os.path.abspath(url2pathname(parsed_url.path))
 
-            from pathlib import Path
+def _is_allowed_local_remote(resolved_path: Path) -> bool:
+    allowed_remotes_env = os.environ.get("CODE_AGENT_ALLOWED_LOCAL_REMOTES", "")
+    for path_text in allowed_remotes_env.split(","):
+        path_text = path_text.strip()
+        if path_text and resolved_path.is_relative_to(Path(path_text).resolve()):
+            return True
+    return False
 
-            from sandbox.workspace import default_workspace_root
 
-            resolved_path = Path(local_repo_path).resolve()
-            allowed_root = default_workspace_root().resolve()
+def _raise_if_sibling_workspace(
+    *,
+    resolved_path: Path,
+    workspace_path: Path,
+    allowed_root: Path,
+) -> None:
+    is_sibling = not resolved_path.is_relative_to(workspace_path)
+    if resolved_path == workspace_path or not is_sibling:
+        return
 
-            if resolved_path == allowed_root:
-                raise DockerSandboxContainerError(
-                    f"Mounting the workspace root {allowed_root} is forbidden"
-                )
+    rel_parts = resolved_path.relative_to(allowed_root).parts
+    if rel_parts and rel_parts[0].startswith("workspace-"):
+        raise DockerSandboxContainerError(
+            f"Mounting sibling workspaces is forbidden: {resolved_path}"
+        )
 
-            if resolved_path.is_relative_to(allowed_root):
-                workspace_path = Path(request.workspace.workspace_path).resolve()
-                is_sibling = not resolved_path.is_relative_to(workspace_path)
-                if resolved_path != workspace_path and is_sibling:
-                    rel_parts = resolved_path.relative_to(allowed_root).parts
-                    if rel_parts and rel_parts[0].startswith("workspace-"):
-                        raise DockerSandboxContainerError(
-                            f"Mounting sibling workspaces is forbidden: {resolved_path}"
-                        )
-            else:
-                allowed_remotes_env = os.environ.get("CODE_AGENT_ALLOWED_LOCAL_REMOTES", "")
-                is_allowed_remote = False
-                for p in allowed_remotes_env.split(","):
-                    p = p.strip()
-                    if p and resolved_path.is_relative_to(Path(p).resolve()):
-                        is_allowed_remote = True
-                        break
 
-                if not is_allowed_remote:
-                    raise DockerSandboxContainerError(
-                        f"Local repo path {resolved_path} is outside the "
-                        f"allowed workspace root {allowed_root}"
-                    )
+def _validate_local_repo_mount_path(local_repo_path: str, workspace_path: Path) -> None:
+    resolved_path = Path(local_repo_path).resolve()
+    allowed_root = default_workspace_root().resolve()
 
-            if "," in local_repo_path:
-                raise DockerSandboxContainerError(
-                    "Local repo path contains a comma which is incompatible with "
-                    f"the --mount syntax: {local_repo_path}"
-                )
-            command.extend(
-                ["--mount", f"type=bind,source={local_repo_path},target={local_repo_path}"]
-            )
+    if resolved_path == allowed_root:
+        raise DockerSandboxContainerError(
+            f"Mounting the workspace root {allowed_root} is forbidden"
+        )
 
+    if resolved_path.is_relative_to(allowed_root):
+        _raise_if_sibling_workspace(
+            resolved_path=resolved_path,
+            workspace_path=workspace_path,
+            allowed_root=allowed_root,
+        )
+        return
+
+    if not _is_allowed_local_remote(resolved_path):
+        raise DockerSandboxContainerError(
+            f"Local repo path {resolved_path} is outside the "
+            f"allowed workspace root {allowed_root}"
+        )
+
+
+def _append_local_repo_mount(
+    command: list[str], request: DockerSandboxContainerRequest, workspace_path: Path
+) -> None:
+    if not request.workspace.repo_url:
+        return
+
+    local_repo_path = _local_repo_path_from_file_url(request.workspace.repo_url)
+    if local_repo_path is None:
+        return
+
+    _validate_local_repo_mount_path(local_repo_path, workspace_path)
+    if "," in local_repo_path:
+        raise DockerSandboxContainerError(
+            "Local repo path contains a comma which is incompatible with "
+            f"the --mount syntax: {local_repo_path}"
+        )
+    command.extend(["--mount", f"type=bind,source={local_repo_path},target={local_repo_path}"])
+
+
+def _append_user_options(command: list[str]) -> None:
     try:
         uid = os.getuid()
         gid = os.getgid()
@@ -169,9 +184,10 @@ def _build_docker_container_run_command(
     except AttributeError:
         pass
 
-    if not request.network_enabled:
-        command.extend(["--network", "none"])
 
+def _append_environment_options(
+    command: list[str], request: DockerSandboxContainerRequest, working_dir: str
+) -> None:
     # T-182: Ensure a writable HOME for tools like poetry/npm
     effective_env = dict(request.environment)
     if "HOME" not in effective_env:
@@ -179,6 +195,33 @@ def _build_docker_container_run_command(
 
     for key, value in sorted(effective_env.items()):
         command.extend(["--env", f"{key}={value}"])
+
+
+def _build_docker_container_run_command(
+    request: DockerSandboxContainerRequest,
+    *,
+    image: str,
+    docker_binary: str = "docker",
+) -> list[str]:
+    """Build the `docker run -d` command for a persistent sandbox container."""
+    container_name = build_container_name(request.workspace)
+    command = [
+        docker_binary,
+        "run",
+        "-d",
+        "--rm",
+        "--name",
+        container_name,
+    ]
+    _append_resource_limits(command, request)
+
+    workspace_path, working_dir = _append_workspace_mount(command, request)
+    _append_local_repo_mount(command, request, workspace_path)
+    _append_user_options(command)
+    if not request.network_enabled:
+        command.extend(["--network", "none"])
+
+    _append_environment_options(command, request, working_dir)
     command.append(image)
     command.extend(request.keepalive_command)
     return command

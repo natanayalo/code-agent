@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Mapping
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -59,7 +59,7 @@ class WorkspaceCleanupPolicy(SandboxModel):
 DEFAULT_WORKSPACE_ROOT_ENV_VAR = "CODE_AGENT_WORKSPACE_ROOT"
 
 
-class WorkspaceMode(str, Enum):
+class WorkspaceMode(StrEnum):
     """How the workspace should be initialized."""
 
     CLONE = "clone"
@@ -201,6 +201,79 @@ class WorkspaceManager:
         self.command_timeout = command_timeout
         self._command_runner = command_runner or _run_command
 
+    def _workspace_handle(
+        self,
+        request: WorkspaceRequest,
+        *,
+        workspace_id: str,
+        workspace_path: Path,
+        repo_path: Path,
+    ) -> WorkspaceHandle:
+        return WorkspaceHandle(
+            workspace_id=workspace_id,
+            task_id=request.task_id,
+            workspace_path=workspace_path,
+            repo_path=repo_path,
+            repo_url=request.repo_url,
+            branch=request.branch,
+            workspace_mode=request.workspace_mode,
+            cleanup_policy=request.cleanup_policy or self.cleanup_policy,
+        )
+
+    def _prepare_workspace_directory(
+        self,
+        *,
+        request: WorkspaceRequest,
+        workspace_id: str,
+        workspace_path: Path,
+        repo_path: Path,
+    ) -> WorkspaceHandle | None:
+        try:
+            if workspace_path.exists():
+                if (workspace_path / ".git").is_dir():
+                    logger.info(
+                        "Reusing existing workspace directory",
+                        extra={"workspace_id": workspace_id, "task_id": request.task_id},
+                    )
+                    return self._workspace_handle(
+                        request,
+                        workspace_id=workspace_id,
+                        workspace_path=workspace_path,
+                        repo_path=repo_path,
+                    )
+                if any(workspace_path.iterdir()):
+                    raise WorkspaceManagerError(
+                        f"Workspace directory exists and is not empty: {workspace_id}"
+                    )
+                logger.info(
+                    "Workspace directory %s exists and is empty. Proceeding with clone.",
+                    workspace_id,
+                )
+            else:
+                workspace_path.mkdir(parents=False)
+        except FileExistsError:
+            # Race condition check
+            if any(workspace_path.iterdir()):
+                raise WorkspaceManagerError(f"Failed to create workspace directory: {workspace_id}")
+        except Exception as exc:
+            raise WorkspaceManagerError(f"Failed to prepare workspace directory: {exc}") from exc
+        return None
+
+    def _initialize_workspace(self, request: WorkspaceRequest, repo_path: Path) -> None:
+        if request.workspace_mode == WorkspaceMode.CLONE:
+            if not request.repo_url:
+                raise WorkspaceManagerError("repo_url is required for CLONE mode")
+            self._command_runner(
+                _build_clone_command(request.repo_url, repo_path, request.branch),
+                timeout=self.command_timeout,
+            )
+        elif request.workspace_mode == WorkspaceMode.INIT:
+            self._command_runner(["git", "init"], cwd=repo_path, timeout=self.command_timeout)
+        elif request.workspace_mode == WorkspaceMode.NONE:
+            pass  # directory already created
+        else:
+            raise WorkspaceManagerError(f"Unknown workspace mode: {request.workspace_mode}")
+
     def create_workspace(self, request: WorkspaceRequest) -> WorkspaceHandle:
         """Create a unique task workspace and clone the repo into it."""
         self.root_dir.mkdir(parents=True, exist_ok=True)
@@ -220,54 +293,17 @@ class WorkspaceManager:
             },
         )
 
-        try:
-            if workspace_path.exists():
-                if (workspace_path / ".git").is_dir():
-                    logger.info(
-                        "Reusing existing workspace directory",
-                        extra={"workspace_id": workspace_id, "task_id": request.task_id},
-                    )
-                    return WorkspaceHandle(
-                        workspace_id=workspace_id,
-                        task_id=request.task_id,
-                        workspace_path=workspace_path,
-                        repo_path=repo_path,
-                        repo_url=request.repo_url,
-                        branch=request.branch,
-                        cleanup_policy=request.cleanup_policy or self.cleanup_policy,
-                    )
-                elif any(workspace_path.iterdir()):
-                    raise WorkspaceManagerError(
-                        f"Workspace directory exists and is not empty: {workspace_id}"
-                    )
-                else:
-                    logger.info(
-                        "Workspace directory %s exists and is empty. Proceeding with clone.",
-                        workspace_id,
-                    )
-            else:
-                workspace_path.mkdir(parents=False)
-        except FileExistsError:
-            # Race condition check
-            if any(workspace_path.iterdir()):
-                raise WorkspaceManagerError(f"Failed to create workspace directory: {workspace_id}")
-        except Exception as exc:
-            raise WorkspaceManagerError(f"Failed to prepare workspace directory: {exc}")
+        existing_handle = self._prepare_workspace_directory(
+            request=request,
+            workspace_id=workspace_id,
+            workspace_path=workspace_path,
+            repo_path=repo_path,
+        )
+        if existing_handle is not None:
+            return existing_handle
 
         try:
-            if request.workspace_mode == WorkspaceMode.CLONE:
-                if not request.repo_url:
-                    raise WorkspaceManagerError("repo_url is required for CLONE mode")
-                self._command_runner(
-                    _build_clone_command(request.repo_url, repo_path, request.branch),
-                    timeout=self.command_timeout,
-                )
-            elif request.workspace_mode == WorkspaceMode.INIT:
-                self._command_runner(["git", "init"], cwd=repo_path, timeout=self.command_timeout)
-            elif request.workspace_mode == WorkspaceMode.NONE:
-                pass  # directory already created
-            else:
-                raise WorkspaceManagerError(f"Unknown workspace mode: {request.workspace_mode}")
+            self._initialize_workspace(request, repo_path)
         except Exception:
             shutil.rmtree(workspace_path, ignore_errors=True)
             logger.exception(
@@ -276,14 +312,11 @@ class WorkspaceManager:
             )
             raise
 
-        return WorkspaceHandle(
+        return self._workspace_handle(
+            request,
             workspace_id=workspace_id,
-            task_id=request.task_id,
             workspace_path=workspace_path,
             repo_path=repo_path,
-            repo_url=request.repo_url,
-            branch=request.branch,
-            cleanup_policy=request.cleanup_policy or self.cleanup_policy,
         )
 
     def get_workspace(
