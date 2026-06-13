@@ -70,10 +70,10 @@ def test_route_after_review_result_dispatches_on_repair_handoff():
     assert _route_after_review_result(state) == "provision_workspace"
 
 
-def test_route_after_review_result_summarizes_without_repair_handoff():
+def test_route_after_review_result_delivers_without_repair_handoff():
     state = OrchestratorState.model_validate({"task": {"task_text": "demo"}})
 
-    assert _route_after_review_result(state) == "summarize_result"
+    assert _route_after_review_result(state) == "deliver_result"
 
 
 def test_await_permission_escalation_approved():

@@ -381,3 +381,45 @@ async def test_rule_based_orchestrator_brain_escalates_urgent_low_risk_task() ->
 
     assert suggestion is not None
     assert suggestion.suggested_risk_level == "medium"
+
+
+def test_build_task_spec_with_delivery_fields() -> None:
+    spec = build_task_spec(
+        task_text="Fix issue and open a draft pr",
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="master",
+        constraints={
+            "delivery_branch": "fix/issue",
+            "pr_title": "Fix issue",
+            "pr_body": "This fixes the issue.",
+        },
+    )
+
+    assert spec.delivery_mode == "draft_pr"
+    assert spec.delivery_branch == "fix/issue"
+    assert spec.pr_title == "Fix issue"
+    assert spec.pr_body == "This fixes the issue."
+
+
+def test_brain_suggestion_adds_pr_fields() -> None:
+    spec = build_task_spec(
+        task_text="Add feature and open pr",
+        repo_url="repo",
+        target_branch="main",
+    )
+    suggestion = TaskSpecBrainSuggestion(
+        suggested_delivery_branch="feat/new",
+        suggested_pr_title="New Feature",
+    )
+    merged, report = apply_task_spec_brain_suggestion(task_spec=spec, suggestion=suggestion)
+
+    assert merged.delivery_branch == "feat/new"
+    assert merged.pr_title == "New Feature"
+    assert "suggested_delivery_branch" not in report.ignored_fields
+
+
+def test_task_spec_strips_delivery_branch_whitespace() -> None:
+    from orchestrator.state import TaskSpec
+
+    spec = TaskSpec(goal="Test goal", delivery_branch="  main  ")
+    assert spec.delivery_branch == "main"

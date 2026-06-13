@@ -36,6 +36,7 @@ from orchestrator.constants import (
     HIGH_QUALITY_REQUEST_MARKERS,
     LOW_COST_REQUEST_MARKERS,
 )
+from orchestrator.nodes.delivery import build_deliver_result_node
 from orchestrator.nodes.ingestion import classify_task, ingest_task, plan_task
 from orchestrator.nodes.provisioning import (
     build_init_environment_node,
@@ -108,6 +109,7 @@ ORCHESTRATOR_NODE_SEQUENCE = (
     "await_result",
     "verify_result",
     "review_result",
+    "deliver_result",
     "summarize_result",
     "persist_memory",
 )
@@ -1282,6 +1284,9 @@ def _apply_unified_brain_suggestion(
         suggested_risk_level=suggestion.suggested_risk_level,
         suggested_task_type=suggestion.suggested_task_type,
         suggested_delivery_mode=suggestion.suggested_delivery_mode,
+        suggested_delivery_branch=getattr(suggestion, "suggested_delivery_branch", None),
+        suggested_pr_title=getattr(suggestion, "suggested_pr_title", None),
+        suggested_pr_body=getattr(suggestion, "suggested_pr_body", None),
         rationale=suggestion.rationale,
     )
     task_spec, task_spec_brain_report = apply_task_spec_brain_suggestion(
@@ -2742,7 +2747,7 @@ def _route_after_review_result(state_input: OrchestratorState) -> str:
     state = _ensure_state(state_input)
     if state.repair_handoff_requested:
         return "provision_workspace"
-    return "summarize_result"
+    return "deliver_result"
 
 
 # Moved to orchestrator/nodes/verification.py and utils.py
@@ -2982,6 +2987,12 @@ def _add_orchestrator_complex_nodes(
             build_review_result_node(worker, gemini_worker, openrouter_worker, shell_worker)
         ),
     )
+    builder.add_node(
+        "deliver_result",
+        RunnableLambda(
+            build_deliver_result_node(worker, gemini_worker, openrouter_worker, shell_worker)
+        ),
+    )
 
 
 def _add_orchestrator_edges(builder: Any) -> None:
@@ -3049,9 +3060,10 @@ def _add_orchestrator_edges(builder: Any) -> None:
         _route_after_review_result,
         {
             "provision_workspace": "provision_workspace",
-            "summarize_result": "summarize_result",
+            "deliver_result": "deliver_result",
         },
     )
+    builder.add_edge("deliver_result", "summarize_result")
     builder.add_edge("summarize_result", "persist_memory")
     builder.add_edge("persist_memory", END)
 

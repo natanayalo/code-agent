@@ -8,7 +8,7 @@ from datetime import datetime
 from operator import add
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from workers import (
     SUPPORTED_WORKER_TYPES as WORKER_SUPPORTED_TYPES,
@@ -52,6 +52,7 @@ WorkflowStep = Literal[
     "await_permission_escalation",
     "verify_result",
     "review_result",
+    "deliver_result",
     "summarize_result",
     "persist_memory",
 ]
@@ -142,6 +143,7 @@ TaskSpecType = Literal[
     "maintenance",
 ]
 TaskDeliveryMode = WorkerDeliveryMode
+TaskWorkspaceMode = Literal["clone", "init", "none"]
 
 
 class TaskSpec(OrchestratorModel):
@@ -150,6 +152,7 @@ class TaskSpec(OrchestratorModel):
     goal: str = Field(min_length=1)
     repo_url: str | None = None
     target_branch: str | None = None
+    workspace_mode: TaskWorkspaceMode = "clone"
     assumptions: list[str] = Field(default_factory=list)
     acceptance_criteria: list[str] = Field(default_factory=list)
     non_goals: list[str] = Field(default_factory=list)
@@ -164,6 +167,16 @@ class TaskSpec(OrchestratorModel):
     requires_permission: bool = False
     permission_reason: str | None = None
     delivery_mode: TaskDeliveryMode = "workspace"
+    delivery_branch: str | None = None
+    pr_title: str | None = None
+    pr_body: str | None = None
+
+    @field_validator("delivery_branch", mode="before")
+    @classmethod
+    def strip_delivery_branch(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 class ApprovalCheckpoint(OrchestratorModel):

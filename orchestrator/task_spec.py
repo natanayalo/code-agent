@@ -265,10 +265,26 @@ def build_task_spec(
         if delivery_mode == "draft_pr":
             expected_artifacts.append("draft_pr_link")
 
+    delivery_branch = task_constraints.get("delivery_branch")
+    if not isinstance(delivery_branch, str) or not delivery_branch.strip():
+        delivery_branch = None
+    pr_title = task_constraints.get("pr_title")
+    if not isinstance(pr_title, str) or not pr_title.strip():
+        pr_title = None
+    pr_body = task_constraints.get("pr_body")
+    if not isinstance(pr_body, str) or not pr_body.strip():
+        pr_body = None
+
+    workspace_mode_raw = task_constraints.get("workspace_mode")
+    workspace_mode = "clone"
+    if workspace_mode_raw in ("clone", "init", "none"):
+        workspace_mode = workspace_mode_raw
+
     return TaskSpec(
         goal=normalized_task_text,
         repo_url=repo_url,
         target_branch=target_branch,
+        workspace_mode=workspace_mode,  # type: ignore
         assumptions=list(dict.fromkeys(assumptions)),
         acceptance_criteria=list(dict.fromkeys(acceptance_criteria)),
         non_goals=list(dict.fromkeys(non_goals)),
@@ -286,6 +302,9 @@ def build_task_spec(
         requires_permission=requires_permission,
         permission_reason=permission_reason,
         delivery_mode=delivery_mode,
+        delivery_branch=delivery_branch,
+        pr_title=pr_title,
+        pr_body=pr_body,
     )
 
 
@@ -349,6 +368,33 @@ def apply_task_spec_brain_suggestion(
     if suggested_delivery_mode is not None and suggested_delivery_mode != task_spec.delivery_mode:
         ignored_fields.append("suggested_delivery_mode")
 
+    delivery_branch = task_spec.delivery_branch
+    suggested_delivery_branch = suggestion.suggested_delivery_branch
+    if suggested_delivery_branch is not None and suggested_delivery_branch.strip():
+        suggested_delivery_branch = suggested_delivery_branch.strip()
+        if not delivery_branch:
+            delivery_branch = suggested_delivery_branch
+        elif suggested_delivery_branch != delivery_branch:
+            ignored_fields.append("suggested_delivery_branch")
+
+    pr_title = task_spec.pr_title
+    suggested_pr_title = suggestion.suggested_pr_title
+    if suggested_pr_title is not None and suggested_pr_title.strip():
+        suggested_pr_title = suggested_pr_title.strip()
+        if not pr_title:
+            pr_title = suggested_pr_title
+        elif suggested_pr_title != pr_title:
+            ignored_fields.append("suggested_pr_title")
+
+    pr_body = task_spec.pr_body
+    suggested_pr_body = suggestion.suggested_pr_body
+    if suggested_pr_body is not None and suggested_pr_body.strip():
+        suggested_pr_body = suggested_pr_body.strip()
+        if not pr_body:
+            pr_body = suggested_pr_body
+        elif suggested_pr_body != pr_body:
+            ignored_fields.append("suggested_pr_body")
+
     risk_level = task_spec.risk_level
     suggested_risk_level = suggestion.suggested_risk_level
     if suggested_risk_level is not None:
@@ -380,6 +426,9 @@ def apply_task_spec_brain_suggestion(
             "requires_permission": requires_permission,
             "permission_reason": permission_reason,
             "forbidden_actions": forbidden_actions,
+            "delivery_branch": delivery_branch,
+            "pr_title": pr_title,
+            "pr_body": pr_body,
         }
     )
 
@@ -396,6 +445,9 @@ def apply_task_spec_brain_suggestion(
             or requires_permission != task_spec.requires_permission
             or permission_reason != task_spec.permission_reason
             or forbidden_actions != task_spec.forbidden_actions
+            or delivery_branch != task_spec.delivery_branch
+            or pr_title != task_spec.pr_title
+            or pr_body != task_spec.pr_body
         ),
         added_assumptions=added_assumptions,
         added_acceptance_criteria=added_acceptance,

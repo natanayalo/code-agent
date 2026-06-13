@@ -68,8 +68,9 @@ def session_factory(tmp_path: Path):
 
 
 @pytest.mark.anyio
-async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path):
+async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, monkeypatch):
     """The full stack should ingest a task, run it in a sandbox, and persist the result."""
+    monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path)
     if not _docker_available():
         pytest.skip("Docker daemon is unavailable")
 
