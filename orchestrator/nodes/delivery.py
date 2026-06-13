@@ -12,7 +12,7 @@ import httpx
 from apps.observability import (
     NATIVE_AGENT_STDERR_ATTRIBUTE,
     NATIVE_AGENT_STDOUT_ATTRIBUTE,
-    SPAN_KIND_TOOL,
+    SPAN_KIND_CHAIN,
     set_current_span_attribute,
     set_span_input_output,
     start_optional_span,
@@ -55,10 +55,10 @@ Configuration:
 - Delivery mode: {delivery_mode}
 
 Instructions:
-1. Check if there are any uncommitted changes. If there are, commit them locally
-   with a descriptive message (e.g. "Automated implementation for task").
-2. Fetch the latest from origin.
-3. Checkout or create the branch `{branch_name}`.
+1. Fetch the latest from origin.
+2. Checkout or create the branch `{branch_name}`.
+3. Check if there are any uncommitted changes. If there are, commit them locally
+   on `{branch_name}` with a descriptive message (e.g. "Automated implementation for task").
 4. If the remote branch exists, gracefully rebase your changes onto it.
    Resolve any conflicts professionally.
 5. Push the changes to origin (`git push -u origin {branch_name}`).
@@ -107,7 +107,7 @@ async def _run_deliver_result(
     with start_optional_span(
         tracer_name="orchestrator.graph",
         span_name="orchestrator.node.deliver_result",
-        attributes={"openinference.span.kind": SPAN_KIND_TOOL},
+        attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
         task_id=state.task.task_id,
         session_id=state.session.session_id if state.session else None,
         attempt=state.attempt_count,
