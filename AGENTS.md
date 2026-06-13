@@ -63,6 +63,8 @@ Do not build these yet:
 - Never add destructive automation by default.
 - Never hardcode secrets or tokens.
 - Never mix orchestration logic with provider-specific worker code.
+- Never use `--no-verify` to bypass git hooks or pre-commit checks. If a hook fails, you must fix the underlying issue.
+- Never commit directly to `master` or `main`. Always create a new branch and use a Pull Request.
 - Every behavior change must have tests.
 - Every new component must have logs that help debug failures.
 - Prefer small commits and small PRs.
