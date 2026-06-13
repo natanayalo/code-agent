@@ -123,11 +123,35 @@ def _build_docker_container_run_command(
 
             resolved_path = Path(local_repo_path).resolve()
             allowed_root = default_workspace_root().resolve()
-            if not resolved_path.is_relative_to(allowed_root):
+
+            if resolved_path == allowed_root:
                 raise DockerSandboxContainerError(
-                    f"Local repo path {resolved_path} is outside the "
-                    f"allowed workspace root {allowed_root}"
+                    f"Mounting the workspace root {allowed_root} is forbidden"
                 )
+
+            if resolved_path.is_relative_to(allowed_root):
+                workspace_path = Path(request.workspace.workspace_path).resolve()
+                is_sibling = not resolved_path.is_relative_to(workspace_path)
+                if resolved_path != workspace_path and is_sibling:
+                    rel_parts = resolved_path.relative_to(allowed_root).parts
+                    if rel_parts and rel_parts[0].startswith("workspace-"):
+                        raise DockerSandboxContainerError(
+                            f"Mounting sibling workspaces is forbidden: {resolved_path}"
+                        )
+            else:
+                allowed_remotes_env = os.environ.get("CODE_AGENT_ALLOWED_LOCAL_REMOTES", "")
+                is_allowed_remote = False
+                for p in allowed_remotes_env.split(","):
+                    p = p.strip()
+                    if p and resolved_path.is_relative_to(Path(p).resolve()):
+                        is_allowed_remote = True
+                        break
+
+                if not is_allowed_remote:
+                    raise DockerSandboxContainerError(
+                        f"Local repo path {resolved_path} is outside the "
+                        f"allowed workspace root {allowed_root}"
+                    )
 
             if "," in local_repo_path:
                 raise DockerSandboxContainerError(

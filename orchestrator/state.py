@@ -8,7 +8,7 @@ from datetime import datetime
 from operator import add
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from workers import (
     SUPPORTED_WORKER_TYPES as WORKER_SUPPORTED_TYPES,
@@ -170,6 +170,13 @@ class TaskSpec(OrchestratorModel):
     delivery_branch: str | None = None
     pr_title: str | None = None
     pr_body: str | None = None
+
+    @field_validator("delivery_branch", mode="before")
+    @classmethod
+    def strip_delivery_branch(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 class ApprovalCheckpoint(OrchestratorModel):

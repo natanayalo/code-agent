@@ -243,3 +243,50 @@ def test_container_manager_stop_raises_for_other_remove_errors(tmp_path: Path) -
 
     with pytest.raises(DockerSandboxContainerError, match="Failed to stop sandbox container"):
         manager.stop(container)
+
+
+def test_build_docker_container_run_command_blocks_workspace_root(tmp_path: Path) -> None:
+    from sandbox.workspace import default_workspace_root
+
+    workspace = _workspace_handle(tmp_path)
+    workspace.repo_url = f"file://{default_workspace_root().resolve()}"
+    request = DockerSandboxContainerRequest(workspace=workspace)
+    with pytest.raises(DockerSandboxContainerError, match="Mounting the workspace root"):
+        _build_docker_container_run_command(request, image="python:3.12-slim")
+
+
+def test_build_docker_container_run_command_blocks_sibling_workspace(tmp_path: Path) -> None:
+    from sandbox.workspace import default_workspace_root
+
+    workspace = _workspace_handle(tmp_path)
+    sibling_path = default_workspace_root().resolve() / "workspace-other"
+    workspace.repo_url = f"file://{sibling_path}"
+    request = DockerSandboxContainerRequest(workspace=workspace)
+    with pytest.raises(
+        DockerSandboxContainerError,
+        match="Mounting sibling workspaces is forbidden",
+    ):
+        _build_docker_container_run_command(request, image="python:3.12-slim")
+
+
+def test_build_docker_container_run_command_blocks_outside_root(tmp_path: Path) -> None:
+    workspace = _workspace_handle(tmp_path)
+    outside_path = tmp_path / "outside-dir"
+    workspace.repo_url = f"file://{outside_path.resolve()}"
+    request = DockerSandboxContainerRequest(workspace=workspace)
+    with pytest.raises(DockerSandboxContainerError, match="outside the allowed workspace root"):
+        _build_docker_container_run_command(request, image="python:3.12-slim")
+
+
+def test_build_docker_container_run_command_allows_outside_root_with_allowlist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = _workspace_handle(tmp_path)
+    outside_path = tmp_path / "allowed-remote-dir"
+    outside_path.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CODE_AGENT_ALLOWED_LOCAL_REMOTES", str(tmp_path.resolve()))
+    workspace.repo_url = f"file://{outside_path.resolve()}"
+    request = DockerSandboxContainerRequest(workspace=workspace)
+    # Should not raise
+    command = _build_docker_container_run_command(request, image="python:3.12-slim")
+    assert "--mount" in command

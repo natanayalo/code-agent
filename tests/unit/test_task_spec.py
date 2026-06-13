@@ -416,3 +416,10 @@ def test_brain_suggestion_adds_pr_fields() -> None:
     assert merged.delivery_branch == "feat/new"
     assert merged.pr_title == "New Feature"
     assert "suggested_delivery_branch" not in report.ignored_fields
+
+
+def test_task_spec_strips_delivery_branch_whitespace() -> None:
+    from orchestrator.state import TaskSpec
+
+    spec = TaskSpec(goal="Test goal", delivery_branch="  main  ")
+    assert spec.delivery_branch == "main"

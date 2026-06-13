@@ -28,6 +28,33 @@ from workers.base import Worker, WorkerRequest, WorkerResult
 logger = logging.getLogger(__name__)
 
 
+def _is_valid_git_branch_name(name: str) -> bool:
+    """Validate a branch name according to git check-ref-format --branch semantics."""
+    if not name or name.startswith("-"):
+        return False
+    if name == "@":
+        return False
+    if name.startswith("/") or name.endswith("/") or "//" in name:
+        return False
+    if name.endswith("."):
+        return False
+
+    invalid_chars = [" ", "\t", "\n", "~", "^", ":", "?", "*", "[", "\\"]
+    if any(c in name for c in invalid_chars):
+        return False
+    if any(ord(c) < 32 or ord(c) == 127 for c in name):
+        return False
+
+    if ".." in name or "@{" in name:
+        return False
+
+    for component in name.split("/"):
+        if component.startswith(".") or component.endswith(".lock"):
+            return False
+
+    return True
+
+
 def _build_delivery_prompt(
     state: OrchestratorState,
     branch_name: str,
@@ -160,7 +187,24 @@ async def _run_deliver_result(
                 ),
             }
 
-        branch_name = state.task_spec.delivery_branch or f"task/{state.task.task_id}"
+        branch_name = (state.task_spec.delivery_branch or f"task/{state.task.task_id}").strip()
+
+        if not _is_valid_git_branch_name(branch_name):
+            msg = f"Delivery failed: branch name '{branch_name}' is invalid or unsafe."
+            logger.warning(msg)
+            return {
+                "current_step": "deliver_result",
+                "progress_updates": _progress_update(
+                    state, "delivery failed (invalid branch name)"
+                ),
+                "result": WorkerResult(status=WorkerRunStatus.FAILURE, summary=msg),
+                **_timeline_event(
+                    state,
+                    TimelineEventType.DELIVERY_FAILED,
+                    message=msg,
+                ),
+            }
+
         if branch_name in {"master", "main"}:
             msg = (
                 f"Delivery failed: committing or pushing directly to protected "
@@ -262,10 +306,31 @@ async def _run_deliver_result(
                 ),
             }
 
+        merged_result = state.result
+        if result and result.status == WorkerRunStatus.SUCCESS:
+            if state.result:
+                new_json = {**(state.result.json_payload or {}), **(result.json_payload or {})}
+                summary_parts = []
+                if state.result.summary:
+                    summary_parts.append(state.result.summary)
+                if result.summary:
+                    summary_parts.append(f"Delivery Output:\n{result.summary}")
+                merged_summary = "\n\n".join(summary_parts) or "Delivery completed."
+                merged_result = state.result.model_copy(
+                    update={
+                        "artifacts": state.result.artifacts + (result.artifacts or []),
+                        "summary": merged_summary,
+                        "json_payload": new_json,
+                    }
+                )
+            else:
+                merged_result = result
+
         set_span_input_output(output_data="success")
         return {
             "current_step": "deliver_result",
             "progress_updates": _progress_update(state, "delivery completed"),
+            "result": merged_result,
             **_timeline_event(
                 state,
                 TimelineEventType.DELIVERY_COMPLETED,

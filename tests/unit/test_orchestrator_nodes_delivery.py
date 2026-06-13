@@ -178,3 +178,120 @@ async def test_run_deliver_result_worker_status_failure(monkeypatch):
         assert res["timeline_events"][0].event_type == TimelineEventType.DELIVERY_FAILED
         assert "Delivery script failed" in res["timeline_events"][0].message
         assert res["timeline_events"][0].payload["stdout"] == "out"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "branch_name",
+    [
+        "-unsafe",
+        "@",
+        "/foo",
+        "foo/",
+        "foo//bar",
+        "foo.",
+        "foo..bar",
+        "foo/bar.lock",
+        "foo/.bar",
+        "foo~bar",
+        "foo^bar",
+        "foo:bar",
+        "foo?bar",
+        "foo*bar",
+        "foo[bar",
+        "foo\\bar",
+        "foo bar",
+        "foo@{bar",
+        "foo\rbar",
+        "foo\x01bar",
+        "foo\x7fbar",
+    ],
+)
+async def test_run_deliver_result_rejects_invalid_branch_names(branch_name: str) -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {"status": "success", "summary": "ok"},
+            "task_spec": {
+                "delivery_mode": "branch",
+                "goal": "demo",
+                "delivery_branch": branch_name,
+            },
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "gemini"},
+        }
+    )
+    res = await _run_deliver_result(state, gemini_worker=AsyncMock())
+    assert res["timeline_events"][0].event_type == TimelineEventType.DELIVERY_FAILED
+    assert "invalid or unsafe" in res["timeline_events"][0].message
+    assert res["result"].status == "failure"
+
+
+@pytest.mark.asyncio
+async def test_run_deliver_result_merges_worker_result_on_success() -> None:
+    from workers.base import ArtifactReference
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {
+                "status": "success",
+                "summary": "impl summary",
+                "artifacts": [{"name": "file.py", "uri": "file:///file.py"}],
+            },
+            "task_spec": {
+                "delivery_mode": "branch",
+                "goal": "demo",
+                "delivery_branch": "valid-branch",
+            },
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "gemini"},
+        }
+    )
+    worker_mock = AsyncMock()
+    worker_mock.run.return_value = WorkerResult(
+        status="success",
+        summary="delivery summary",
+        artifacts=[ArtifactReference(name="delivery.log", uri="file:///delivery.log")],
+        json_payload={"pr_link": "http"},
+    )
+
+    with (
+        patch("orchestrator.nodes.delivery.start_optional_span"),
+        patch("orchestrator.nodes.delivery.set_span_input_output"),
+    ):
+        res = await _run_deliver_result(state, gemini_worker=worker_mock)
+
+        merged_result = res["result"]
+        assert merged_result.status == "success"
+        assert "impl summary" in merged_result.summary
+        assert "Delivery Output:" in merged_result.summary
+        assert "delivery summary" in merged_result.summary
+        assert len(merged_result.artifacts) == 2
+        assert merged_result.artifacts[0].name == "file.py"
+        assert merged_result.artifacts[1].name == "delivery.log"
+        assert merged_result.json_payload == {"pr_link": "http"}
+
+
+@pytest.mark.asyncio
+async def test_run_deliver_result_merge_omits_missing_summary_text() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "result": {"status": "success"},
+            "task_spec": {
+                "delivery_mode": "branch",
+                "goal": "demo",
+                "delivery_branch": "valid-branch",
+            },
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "gemini"},
+        }
+    )
+    worker_mock = AsyncMock()
+    worker_mock.run.return_value = WorkerResult(status="success")
+
+    with (
+        patch("orchestrator.nodes.delivery.start_optional_span"),
+        patch("orchestrator.nodes.delivery.set_span_input_output"),
+    ):
+        res = await _run_deliver_result(state, gemini_worker=worker_mock)
+
+    assert res["result"].summary == "Delivery completed."

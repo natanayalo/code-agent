@@ -220,6 +220,10 @@ Workers must not:
 - destructive git operations
 - network actions beyond allowlisted tools
 
+### Sandbox restrictions
+- The sandbox strictly prohibits mounting sibling workspaces or the top-level workspace root.
+- To mount directories outside the workspace root, they must be explicitly allowlisted using a comma-separated list of absolute paths in the `CODE_AGENT_ALLOWED_LOCAL_REMOTES` environment variable.
+
 ## Memory policy
 
 Use 3 categories only in v1:
