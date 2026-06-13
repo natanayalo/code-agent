@@ -104,6 +104,10 @@ def _build_docker_container_run_command(
         ]
     )
 
+    if request.workspace.repo_url and request.workspace.repo_url.startswith("file://"):
+        local_repo_path = request.workspace.repo_url[7:]
+        command.extend(["--mount", f"type=bind,source={local_repo_path},target={local_repo_path}"])
+
     try:
         uid = os.getuid()
         gid = os.getgid()

@@ -110,6 +110,9 @@ class TimelineEventType(StrEnum):
     WORKSPACE_PROVISIONED = "workspace_provisioned"
     ENVIRONMENT_INITIALIZED = "environment_initialized"
     INFRA_FAILURE = "infra_failure"
+    DELIVERY_STARTED = "delivery_started"
+    DELIVERY_COMPLETED = "delivery_completed"
+    DELIVERY_FAILED = "delivery_failed"
 
 
 def build_sql_enum(enum_class: type[StrEnum], *, name: str) -> SQLAlchemyEnum:

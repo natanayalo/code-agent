@@ -215,12 +215,17 @@ def _run_provision_workspace(
         },
     )
 
+    workspace_mode = "clone"
+    if state.task_spec and hasattr(state.task_spec, "workspace_mode"):
+        workspace_mode = state.task_spec.workspace_mode  # type: ignore
+
     handle = workspace_manager.create_workspace(
         WorkspaceRequest(
             task_id=workspace_task_id,
             repo_url=state.task.repo_url or "",
             branch=state.task.branch,
             attempt=state.attempt_count + 1,
+            workspace_mode=workspace_mode,  # type: ignore
         )
     )
 

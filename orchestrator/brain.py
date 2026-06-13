@@ -386,6 +386,9 @@ class TaskSpecBrainSuggestion(OrchestratorModel):
     suggested_risk_level: TaskRiskLevel | None = None
     suggested_task_type: TaskSpecType | None = None
     suggested_delivery_mode: TaskDeliveryMode | None = None
+    suggested_delivery_branch: str | None = None
+    suggested_pr_title: str | None = None
+    suggested_pr_body: str | None = None
     rationale: str | None = None
 
 
@@ -425,6 +428,9 @@ class UnifiedOrchestratorSuggestion(OrchestratorModel):
     suggested_risk_level: TaskRiskLevel | None = None
     suggested_task_type: TaskSpecType | None = None
     suggested_delivery_mode: TaskDeliveryMode | None = None
+    suggested_delivery_branch: str | None = None
+    suggested_pr_title: str | None = None
+    suggested_pr_body: str | None = None
     suggested_worker: WorkerType | None = None
     suggested_profile: str | None = None
     suggested_retry_strategy: str | None = None
@@ -706,6 +712,10 @@ class RuleBasedOrchestratorBrain:
             ),
             suggested_task_type=model.suggested_task_type or base.suggested_task_type,
             suggested_delivery_mode=model.suggested_delivery_mode or base.suggested_delivery_mode,
+            suggested_delivery_branch=model.suggested_delivery_branch
+            or base.suggested_delivery_branch,
+            suggested_pr_title=model.suggested_pr_title or base.suggested_pr_title,
+            suggested_pr_body=model.suggested_pr_body or base.suggested_pr_body,
             rationale=" | ".join(
                 [
                     f"[{k}] {v}"
@@ -1077,6 +1087,9 @@ class RuleBasedOrchestratorBrain:
                             suggested_risk_level=unified.suggested_risk_level,
                             suggested_task_type=unified.suggested_task_type,
                             suggested_delivery_mode=unified.suggested_delivery_mode,
+                            suggested_delivery_branch=unified.suggested_delivery_branch,
+                            suggested_pr_title=unified.suggested_pr_title,
+                            suggested_pr_body=unified.suggested_pr_body,
                             rationale=unified.rationale,
                         ),
                     )
@@ -1089,6 +1102,9 @@ class RuleBasedOrchestratorBrain:
                         suggested_risk_level=task_suggestion.suggested_risk_level,
                         suggested_task_type=task_suggestion.suggested_task_type,
                         suggested_delivery_mode=task_suggestion.suggested_delivery_mode,
+                        suggested_delivery_branch=task_suggestion.suggested_delivery_branch,
+                        suggested_pr_title=task_suggestion.suggested_pr_title,
+                        suggested_pr_body=task_suggestion.suggested_pr_body,
                         suggested_worker=unified.suggested_worker,
                         suggested_profile=unified.suggested_profile,
                         suggested_retry_strategy=unified.suggested_retry_strategy,
@@ -1110,6 +1126,9 @@ class RuleBasedOrchestratorBrain:
                 suggested_risk_level=task_suggestion.suggested_risk_level,
                 suggested_task_type=task_suggestion.suggested_task_type,
                 suggested_delivery_mode=task_suggestion.suggested_delivery_mode,
+                suggested_delivery_branch=task_suggestion.suggested_delivery_branch,
+                suggested_pr_title=task_suggestion.suggested_pr_title,
+                suggested_pr_body=task_suggestion.suggested_pr_body,
                 rationale=task_suggestion.rationale,
             )
         return None

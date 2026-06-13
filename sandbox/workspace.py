@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Mapping
+from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -58,12 +59,21 @@ class WorkspaceCleanupPolicy(SandboxModel):
 DEFAULT_WORKSPACE_ROOT_ENV_VAR = "CODE_AGENT_WORKSPACE_ROOT"
 
 
+class WorkspaceMode(str, Enum):
+    """How the workspace should be initialized."""
+
+    CLONE = "clone"
+    INIT = "init"
+    NONE = "none"
+
+
 class WorkspaceRequest(SandboxModel):
     """Input required to provision a task workspace."""
 
     task_id: str = Field(min_length=1)
-    repo_url: str = Field(min_length=1)
+    repo_url: str = Field(default="")
     branch: str | None = None
+    workspace_mode: WorkspaceMode = WorkspaceMode.CLONE
     attempt: int = 1
     cleanup_policy: WorkspaceCleanupPolicy | None = None
 
@@ -77,6 +87,7 @@ class WorkspaceHandle(SandboxModel):
     repo_path: Path
     repo_url: str
     branch: str | None = None
+    workspace_mode: WorkspaceMode = WorkspaceMode.CLONE
     cleanup_policy: WorkspaceCleanupPolicy
 
 
@@ -244,10 +255,19 @@ class WorkspaceManager:
             raise WorkspaceManagerError(f"Failed to prepare workspace directory: {exc}")
 
         try:
-            self._command_runner(
-                _build_clone_command(request.repo_url, repo_path, request.branch),
-                timeout=self.command_timeout,
-            )
+            if request.workspace_mode == WorkspaceMode.CLONE:
+                if not request.repo_url:
+                    raise WorkspaceManagerError("repo_url is required for CLONE mode")
+                self._command_runner(
+                    _build_clone_command(request.repo_url, repo_path, request.branch),
+                    timeout=self.command_timeout,
+                )
+            elif request.workspace_mode == WorkspaceMode.INIT:
+                self._command_runner(["git", "init"], cwd=repo_path, timeout=self.command_timeout)
+            elif request.workspace_mode == WorkspaceMode.NONE:
+                pass  # directory already created
+            else:
+                raise WorkspaceManagerError(f"Unknown workspace mode: {request.workspace_mode}")
         except Exception:
             shutil.rmtree(workspace_path, ignore_errors=True)
             logger.exception(
