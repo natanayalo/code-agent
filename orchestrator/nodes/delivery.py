@@ -7,8 +7,6 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import httpx
-
 from apps.observability import (
     NATIVE_AGENT_STDERR_ATTRIBUTE,
     NATIVE_AGENT_STDOUT_ATTRIBUTE,
@@ -163,6 +161,24 @@ async def _run_deliver_result(
             }
 
         branch_name = state.task_spec.delivery_branch or f"task/{state.task.task_id}"
+        if branch_name in {"master", "main"}:
+            msg = (
+                f"Delivery failed: committing or pushing directly to protected "
+                f"branch '{branch_name}' is forbidden."
+            )
+            logger.warning(msg)
+            return {
+                "current_step": "deliver_result",
+                "progress_updates": _progress_update(
+                    state, f"delivery failed (forbidden branch {branch_name})"
+                ),
+                "result": WorkerResult(status=WorkerRunStatus.FAILURE, summary=msg),
+                **_timeline_event(
+                    state,
+                    TimelineEventType.DELIVERY_FAILED,
+                    message=msg,
+                ),
+            }
         pr_title = (
             state.task_spec.pr_title or f"Automated implementation for task {state.task.task_id}"
         )
@@ -182,7 +198,7 @@ async def _run_deliver_result(
             constraints=dict(state.task.constraints or {}),
             budget={
                 "worker_timeout_seconds": 300,
-                **state.task.budget,
+                **(state.task.budget or {}),
             },
             network_enabled=True,
             secrets={
@@ -210,7 +226,7 @@ async def _run_deliver_result(
 
         try:
             result = await delivery_worker.run(request)
-        except (TimeoutError, RuntimeError, ValueError, TypeError, httpx.HTTPError) as exc:
+        except Exception as exc:
             msg = f"Delivery execution failed: {type(exc).__name__}: {exc}"
             logger.debug(msg)
             return {
@@ -246,7 +262,7 @@ async def _run_deliver_result(
                 ),
             }
 
-        set_span_input_output(None, output_data="success")
+        set_span_input_output(output_data="success")
         return {
             "current_step": "deliver_result",
             "progress_updates": _progress_update(state, "delivery completed"),
