@@ -25,7 +25,7 @@ from orchestrator.nodes.utils import (
     _timeline_event,
 )
 from orchestrator.state import OrchestratorState
-from workers.base import Worker, WorkerRequest
+from workers.base import Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,7 @@ async def _run_deliver_result(
             "progress_updates": _progress_update(
                 state, f"delivery failed (missing worker {worker_id})"
             ),
+            "result": WorkerResult(status=WorkerRunStatus.FAILURE, summary=msg),
             **_timeline_event(
                 state,
                 TimelineEventType.DELIVERY_FAILED,
@@ -149,6 +150,7 @@ async def _run_deliver_result(
                 "progress_updates": _progress_update(
                     state, "delivery failed (missing github token)"
                 ),
+                "result": WorkerResult(status=WorkerRunStatus.FAILURE, summary=msg),
                 **_timeline_event(
                     state,
                     TimelineEventType.DELIVERY_FAILED,
@@ -182,8 +184,16 @@ async def _run_deliver_result(
             secrets={
                 **task_secrets,
                 "GH_TOKEN": gh_token or "",
+                "GITHUB_TOKEN": gh_token or "",
             },
             tools=["execute_bash", "execute_git", "execute_github"],
+            worker_profile=(
+                state.dispatch.worker_profile
+                or (state.route.chosen_profile if state.route else None)
+            ),
+            runtime_mode=(
+                state.dispatch.runtime_mode or (state.route.runtime_mode if state.route else None)
+            ),
         )
 
         set_span_input_output(
@@ -202,6 +212,7 @@ async def _run_deliver_result(
             return {
                 "current_step": "deliver_result",
                 "progress_updates": _progress_update(state, "delivery execution failed"),
+                "result": WorkerResult(status=WorkerRunStatus.FAILURE, summary=msg),
                 **_timeline_event(
                     state,
                     TimelineEventType.DELIVERY_FAILED,
@@ -219,6 +230,7 @@ async def _run_deliver_result(
             return {
                 "current_step": "deliver_result",
                 "progress_updates": _progress_update(state, "delivery script failed"),
+                "result": WorkerResult(status=WorkerRunStatus.FAILURE, summary=msg),
                 **_timeline_event(
                     state,
                     TimelineEventType.DELIVERY_FAILED,

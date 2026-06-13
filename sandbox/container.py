@@ -113,7 +113,9 @@ def _build_docker_container_run_command(
                 raise DockerSandboxContainerError(
                     "Local repo path cannot be empty for " "file:// scheme"
                 )
-            local_repo_path = os.path.abspath(parsed_url.path)
+            from urllib.request import url2pathname
+
+            local_repo_path = os.path.abspath(url2pathname(parsed_url.path))
 
             from pathlib import Path
 
