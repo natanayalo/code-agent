@@ -7,7 +7,6 @@ Phase 2: bounded autonomy.
 Active focus:
 
 - Milestone 18 (Controlled Autonomy / Scout Mode) planning
-- add PR-native delivery fields and GitHub branch/draft-PR integration
 - continue tightening native-agent observability and verifier acceptance policy
 
 ## Current Capabilities
@@ -22,6 +21,7 @@ Active focus:
 - skeptical memory + compact session state persistence
 - operational controls: task replay, approval decision endpoint, progress callbacks, and metrics
 - generated TaskSpec contract for task goal/risk/type/delivery policy before worker routing
+- PR-native delivery fields with GitHub branch/draft-PR delivery integration
 - dashboard visibility for TaskSpec, interactions, timeline events, logs, artifacts, replay controls, traces, memory, and tool inventory
 - CI now measures Python coverage from `tests/unit` only and runs `tests/integration` as a separate pass
 - pre-commit Ruff checks repo Python files for non-top-level imports while preserving a few intentional lazy imports in guarded modules
@@ -29,7 +29,6 @@ Active focus:
 ## Open Risks
 
 - operator inspection/control still relies on API + logs more than dedicated UI
-- PR-native delivery is represented as desired delivery metadata only; branch/PR creation is still a future slice
 - Codex/Gemini now support native-agent defaults behind rollback flags, but deeper verifier/repair integration is still in progress
 - native-agent runs may initially have coarser command-level audit unless CLI event streams are captured and normalized
 - OpenRouter remains useful for eval/raw-chat experiments but should be isolated as legacy tool-loop mode during the migration
@@ -38,16 +37,25 @@ Active focus:
 
 ## Next Priorities
 
-1. add PR-native delivery fields and GitHub branch/draft-PR integration
-2. prepare bounded-scout lane planning
-3. continue tightening native-agent observability and verifier acceptance policy
+1. T-180: Define Scout Mode task type and lane parameters (Milestone 18)
+2. continue tightening native-agent observability and verifier acceptance policy
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
+- T-180: Define Scout Mode task type and lane parameters.
+- T-181: Add Read-Mostly sandbox policy.
+- T-182: Implement Idea Inbox / Proposal store.
+- T-183: Route Scout output to Review Inbox.
+- T-184: Dashboard UI for Idea Inbox.
+- T-185: Add Trigger Sources: Schedule and Idle time.
+
 ## Recent Completed Milestones
 
+- prepare bounded-scout lane planning (Milestone 18 tasks scoped)
+
+- PR-native delivery fields and GitHub branch/draft-PR integration
 - Milestone 17.5: Full E2E Stabilization (T-164 to T-178)
 - Milestone 17: Native Agent Worker Runtime Profiles (T-140 to T-163)
 - Milestone 10: Telegram ingress and progress update flow (T-050 to T-053)
