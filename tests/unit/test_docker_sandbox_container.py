@@ -290,3 +290,24 @@ def test_build_docker_container_run_command_allows_outside_root_with_allowlist(
     # Should not raise
     command = _build_docker_container_run_command(request, image="python:3.12-slim")
     assert "--mount" in command
+
+
+def test_build_docker_container_run_command_uses_patched_workspace_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Container validation should honor the runtime workspace root lookup."""
+    import sandbox.workspace as workspace_module
+
+    workspace = _workspace_handle(tmp_path / "actual-workspace")
+    local_remote = tmp_path / "dummy_repo"
+    local_remote.mkdir()
+    monkeypatch.setattr(workspace_module, "default_workspace_root", lambda: tmp_path)
+    workspace.repo_url = f"file://{local_remote.resolve()}"
+    request = DockerSandboxContainerRequest(workspace=workspace)
+
+    command = _build_docker_container_run_command(request, image="python:3.12-slim")
+
+    local_remote_mount = (
+        f"type=bind,source={local_remote.resolve()},target={local_remote.resolve()}"
+    )
+    assert local_remote_mount in command

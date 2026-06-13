@@ -14,7 +14,7 @@ from urllib.request import url2pathname
 from pydantic import Field
 
 from sandbox.redact import mask_url_credentials as _mask_url_credentials
-from sandbox.workspace import SandboxModel, WorkspaceHandle, default_workspace_root
+from sandbox.workspace import SandboxModel, WorkspaceHandle
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +134,8 @@ def _raise_if_sibling_workspace(
 
 
 def _validate_local_repo_mount_path(local_repo_path: str, workspace_path: Path) -> None:
+    from sandbox.workspace import default_workspace_root
+
     resolved_path = Path(local_repo_path).resolve()
     allowed_root = default_workspace_root().resolve()
 
