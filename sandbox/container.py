@@ -104,9 +104,20 @@ def _build_docker_container_run_command(
         ]
     )
 
-    if request.workspace.repo_url and request.workspace.repo_url.startswith("file://"):
-        local_repo_path = request.workspace.repo_url[7:]
-        command.extend(["--mount", f"type=bind,source={local_repo_path},target={local_repo_path}"])
+    if request.workspace.repo_url:
+        from urllib.parse import urlparse
+
+        parsed_url = urlparse(request.workspace.repo_url)
+        if parsed_url.scheme == "file":
+            local_repo_path = os.path.abspath(parsed_url.path)
+            if "," in local_repo_path:
+                raise DockerSandboxContainerError(
+                    "Local repo path contains a comma which is incompatible with "
+                    f"the --mount syntax: {local_repo_path}"
+                )
+            command.extend(
+                ["--mount", f"type=bind,source={local_repo_path},target={local_repo_path}"]
+            )
 
     try:
         uid = os.getuid()

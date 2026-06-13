@@ -7,6 +7,8 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+import httpx
+
 from apps.observability import (
     NATIVE_AGENT_STDERR_ATTRIBUTE,
     NATIVE_AGENT_STDOUT_ATTRIBUTE,
@@ -170,7 +172,7 @@ async def _run_deliver_result(
 
         try:
             result = await delivery_worker.run(request)
-        except RuntimeError as exc:
+        except (TimeoutError, RuntimeError, ValueError, TypeError, httpx.HTTPError) as exc:
             msg = f"Delivery execution failed: {type(exc).__name__}: {exc}"
             logger.debug(msg)
             return {

@@ -17,7 +17,7 @@ from apps.observability import (
 from db.enums import TimelineEventType
 from orchestrator.nodes.utils import _ensure_state, _progress_update, _timeline_event
 from orchestrator.state import OrchestratorState
-from sandbox import WorkspaceManager, WorkspaceRequest
+from sandbox import WorkspaceManager, WorkspaceMode, WorkspaceRequest
 from workers.base import Worker, WorkerRequest
 
 logger = logging.getLogger(__name__)
@@ -215,9 +215,7 @@ def _run_provision_workspace(
         },
     )
 
-    workspace_mode = "clone"
-    if state.task_spec and hasattr(state.task_spec, "workspace_mode"):
-        workspace_mode = state.task_spec.workspace_mode  # type: ignore
+    workspace_mode = state.task_spec.workspace_mode if state.task_spec else "clone"
 
     handle = workspace_manager.create_workspace(
         WorkspaceRequest(
@@ -225,7 +223,7 @@ def _run_provision_workspace(
             repo_url=state.task.repo_url or "",
             branch=state.task.branch,
             attempt=state.attempt_count + 1,
-            workspace_mode=workspace_mode,  # type: ignore
+            workspace_mode=WorkspaceMode(workspace_mode),
         )
     )
 

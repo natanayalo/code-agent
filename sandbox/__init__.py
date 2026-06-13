@@ -22,6 +22,7 @@ from sandbox.workspace import (
     WorkspaceHandle,
     WorkspaceManager,
     WorkspaceManagerError,
+    WorkspaceMode,
     WorkspaceRequest,
 )
 
@@ -45,5 +46,6 @@ __all__ = [
     "WorkspaceHandle",
     "WorkspaceManager",
     "WorkspaceManagerError",
+    "WorkspaceMode",
     "WorkspaceRequest",
 ]
