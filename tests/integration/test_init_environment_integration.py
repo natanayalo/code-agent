@@ -90,8 +90,9 @@ build-backend = "poetry.core.masonry.api"
 
 
 @pytest.mark.asyncio
-async def test_init_environment_integration_poetry(tmp_path: Path):
+async def test_init_environment_integration_poetry(tmp_path: Path, monkeypatch):
     """Verify that init_environment correctly configures poetry and creates a .venv."""
+    monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path)
     image = os.environ.get("CODE_AGENT_SANDBOX_IMAGE", "code-agent-worker:latest")
     if not _docker_and_image_available(image):
         pytest.skip(f"Docker or image {image!r} unavailable")
