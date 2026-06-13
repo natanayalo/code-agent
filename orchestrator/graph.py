@@ -1284,6 +1284,9 @@ def _apply_unified_brain_suggestion(
         suggested_risk_level=suggestion.suggested_risk_level,
         suggested_task_type=suggestion.suggested_task_type,
         suggested_delivery_mode=suggestion.suggested_delivery_mode,
+        suggested_delivery_branch=getattr(suggestion, "suggested_delivery_branch", None),
+        suggested_pr_title=getattr(suggestion, "suggested_pr_title", None),
+        suggested_pr_body=getattr(suggestion, "suggested_pr_body", None),
         rationale=suggestion.rationale,
     )
     task_spec, task_spec_brain_report = apply_task_spec_brain_suggestion(
