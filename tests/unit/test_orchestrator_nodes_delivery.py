@@ -70,7 +70,10 @@ async def test_run_deliver_result_missing_worker():
     )
     # Available workers will fall back to gemini, which is not provided as an argument.
     res = await _run_deliver_result(state)
-    assert res == {"current_step": "deliver_result"}
+    assert res["current_step"] == "deliver_result"
+    assert "timeline_events" in res
+    assert res["timeline_events"][0].event_type == TimelineEventType.DELIVERY_FAILED
+    assert "no suitable delivery worker configured" in res["timeline_events"][0].message
 
 
 @pytest.mark.asyncio

@@ -65,6 +65,8 @@ Instructions:
 {mode_instructions}
 
 Do not use `--force` or `-f` when pushing.
+Never use `--no-verify` to bypass git hooks or pre-commit checks.
+If a hook fails, you must fix the underlying issue.
 If you encounter any unresolvable conflicts, gracefully exit and explain the failure.
 """
     return prompt.strip()
@@ -99,10 +101,19 @@ async def _run_deliver_result(
 
     delivery_worker = available.get(worker_id)
     if not delivery_worker:
-        logger.warning(
-            f"deliver_result skipped: no suitable delivery worker configured (tried {worker_id})."
-        )
-        return {"current_step": "deliver_result"}
+        msg = f"Delivery failed: no suitable delivery worker configured (tried {worker_id})."
+        logger.warning(msg)
+        return {
+            "current_step": "deliver_result",
+            "progress_updates": _progress_update(
+                state, f"delivery failed (missing worker {worker_id})"
+            ),
+            **_timeline_event(
+                state,
+                TimelineEventType.DELIVERY_FAILED,
+                message=msg,
+            ),
+        }
 
     with start_optional_span(
         tracer_name="orchestrator.graph",
@@ -120,7 +131,12 @@ async def _run_deliver_result(
             },
         )
 
-        gh_token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        gh_token = (
+            state.task.secrets.get("GH_TOKEN")
+            or state.task.secrets.get("GITHUB_TOKEN")
+            or os.environ.get("GH_TOKEN")
+            or os.environ.get("GITHUB_TOKEN")
+        )
         if not gh_token and state.task_spec.delivery_mode == "draft_pr":
             msg = (
                 "Delivery failed: GH_TOKEN or GITHUB_TOKEN not found in environment "
@@ -156,9 +172,16 @@ async def _run_deliver_result(
             branch=state.task.branch,
             workspace_id=state.dispatch.workspace_id,
             task_text=prompt,
-            budget={"worker_timeout_seconds": 300},  # increased timeout for agent reasoning
+            constraints=dict(state.task.constraints),
+            budget={
+                "worker_timeout_seconds": 300,
+                **state.task.budget,
+            },
             network_enabled=True,
-            secrets={"GH_TOKEN": gh_token or ""},
+            secrets={
+                **state.task.secrets,
+                "GH_TOKEN": gh_token or "",
+            },
             tools=["execute_bash", "execute_git", "execute_github"],
         )
 
