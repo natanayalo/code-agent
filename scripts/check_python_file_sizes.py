@@ -223,7 +223,7 @@ def main() -> int:
         return 1
 
     print(
-        "\npython-size-check: All findings are covered by waivers."
+        "\npython-size-check: All findings are covered by waivers. "
         "Note: waivers are discouraged — review exceptions and prefer refactoring."
     )
     return 0

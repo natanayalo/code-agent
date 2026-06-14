@@ -107,7 +107,8 @@ def append_workspace_mount_options(
         if symlink_path.exists() or symlink_path.is_symlink():
             try:
                 if symlink_path.is_symlink():
-                    if os.readlink(symlink_path) != ".code-agent/.sandbox.db":
+                    target = os.readlink(symlink_path)
+                    if Path(target).as_posix() != ".code-agent/.sandbox.db":
                         symlink_path.unlink()
                 else:
                     if symlink_path.is_file() and not sandbox_db_path.exists():
