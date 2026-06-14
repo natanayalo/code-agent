@@ -141,6 +141,12 @@ def accept_proposal(
         # Construct task text from proposal
         task_text = _build_task_text_for_proposal(proposal)
 
+        # Extract primitive values before exiting session scope to avoid DetachedInstanceError
+        channel = conversation_session.channel
+        external_thread_id = conversation_session.external_thread_id
+        external_user_id = user.external_user_id or "unknown"
+        display_name = user.display_name
+
     # We must call create_task_outcome outside the session_scope
     # because it creates its own session_scope.
     submission = TaskSubmission(
@@ -149,17 +155,17 @@ def accept_proposal(
         branch=branch,
         priority=0,
         session=SubmissionSession(
-            channel=conversation_session.channel,
-            external_user_id=user.external_user_id or "unknown",
-            external_thread_id=conversation_session.external_thread_id,
-            display_name=user.display_name,
+            channel=channel,
+            external_user_id=external_user_id,
+            external_thread_id=external_thread_id,
+            display_name=display_name,
         ),
         # Strip scout constraints by not copying them from source task
     )
 
     # Use a DeliveryKey based on proposal_id to ensure idempotency at the task creation level too
     delivery_key = DeliveryKey(
-        channel=conversation_session.channel,
+        channel=channel,
         delivery_id=f"proposal_{proposal_id}",
     )
 
