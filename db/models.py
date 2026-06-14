@@ -591,6 +591,7 @@ class Proposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """An idea or code proposal emitted by a task for later review."""
 
     __tablename__ = "proposals"
+    __table_args__ = (Index("ix_proposals_created_at", "created_at"),)
 
     session_id: Mapped[str] = mapped_column(
         ForeignKey("sessions.id", ondelete="CASCADE"),

@@ -82,9 +82,16 @@ def upgrade() -> None:
         ["status"],
         unique=False,
     )
+    op.create_index(
+        "ix_proposals_created_at",
+        "proposals",
+        ["created_at"],
+        unique=False,
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("ix_proposals_created_at", table_name="proposals")
     op.drop_index("ix_proposals_status", table_name="proposals")
     op.drop_index("ix_proposals_task_id", table_name="proposals")
     op.drop_index("ix_proposals_session_id", table_name="proposals")

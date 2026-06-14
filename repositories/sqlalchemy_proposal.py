@@ -28,7 +28,7 @@ class ProposalRepository:
         summary: str,
         task_id: str | None = None,
         content: str | None = None,
-        status: ProposalStatus = ProposalStatus.PENDING_REVIEW,
+        status: ProposalStatus | str = ProposalStatus.PENDING_REVIEW,
         metadata_payload: dict[str, Any] | None = None,
     ) -> Proposal:
         """Create a new proposal tied to a session."""

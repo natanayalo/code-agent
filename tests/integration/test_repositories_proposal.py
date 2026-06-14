@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -91,8 +91,6 @@ def test_list_proposals(session_factory) -> None:
             channel="web",
             external_thread_id="thread-proposal-3",
         )
-
-        from datetime import datetime, timedelta
 
         p1 = proposal_repo.create_proposal(
             session_id=sess.id,
