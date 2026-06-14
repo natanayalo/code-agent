@@ -187,7 +187,10 @@ def accept_proposal(
 
         if getattr(result, "rowcount", 0) == 0:
             session.expire(proposal)
-            if proposal.status == ProposalStatus.ACCEPTED:
+            refetched = session.get(Proposal, proposal_id)
+            if refetched is None:
+                return "not_found", None, f"Proposal '{proposal_id}' was deleted concurrently."
+            if refetched.status == ProposalStatus.ACCEPTED:
                 return "conflict", outcome.task_snapshot, "Proposal was accepted concurrently."
 
             self.cancel_task(task_id=outcome.task_snapshot.task_id)
@@ -230,8 +233,11 @@ def reject_proposal(
         result = session.execute(stmt)
         if getattr(result, "rowcount", 0) == 0:
             session.expire(proposal)
-            if proposal.status == ProposalStatus.REJECTED:
-                return "success", _map_proposal_to_snapshot(proposal), None
+            refetched = session.get(Proposal, proposal_id)
+            if refetched is None:
+                return "not_found", None, f"Proposal '{proposal_id}' was deleted concurrently."
+            if refetched.status == ProposalStatus.REJECTED:
+                return "success", _map_proposal_to_snapshot(refetched), None
             return "conflict", None, "Proposal was modified concurrently."
 
         session.expire(proposal)
