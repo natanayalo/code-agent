@@ -165,8 +165,11 @@ def _append_workspace_mount(
         agent_home_path.mkdir(parents=True, exist_ok=True)
         artifacts_path = workspace_path / "artifacts"
         artifacts_path.mkdir(parents=True, exist_ok=True)
-        sandbox_db_path = workspace_path / ".sandbox.db"
+        sandbox_db_path = code_agent_path / ".sandbox.db"
         sandbox_db_path.touch(exist_ok=True)
+        symlink_path = workspace_path / ".sandbox.db"
+        if not symlink_path.exists() and not symlink_path.is_symlink():
+            symlink_path.symlink_to(".code-agent/.sandbox.db")
 
         command.extend(
             ["--mount", f"type=bind,source={code_agent_path},target={target_path}/.code-agent"]
@@ -176,9 +179,6 @@ def _append_workspace_mount(
         )
         command.extend(
             ["--mount", f"type=bind,source={artifacts_path},target={target_path}/artifacts"]
-        )
-        command.extend(
-            ["--mount", f"type=bind,source={sandbox_db_path},target={target_path}/.sandbox.db"]
         )
 
     return workspace_path, working_dir
