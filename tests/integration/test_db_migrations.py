@@ -15,6 +15,7 @@ EXPECTED_TABLES = {
     "inbound_deliveries",
     "memory_personal",
     "memory_project",
+    "proposals",
     "sessions",
     "session_states",
     "tasks",
@@ -26,6 +27,14 @@ EXPECTED_TABLES = {
 EXPECTED_CHECK_CONSTRAINTS = {
     "sessions": {
         "ck_sessions_session_status": {"active", "closed"},
+    },
+    "proposals": {
+        "ck_proposals_proposal_status": {
+            "pending_review",
+            "accepted",
+            "rejected",
+            "implemented",
+        },
     },
     "tasks": {
         "ck_tasks_task_status": {
