@@ -130,8 +130,8 @@ def test_create_task_clamps_scout_budget_and_forces_read_only() -> None:
             "max_iterations": 10,
             "worker_timeout_seconds": 600,
             "max_tool_calls": 50,
-            "max_shell_commands": 50,
-            "max_retries": 5,
+            "max_shell_commands": -5,
+            "max_retries": -1,
         },
     )
 

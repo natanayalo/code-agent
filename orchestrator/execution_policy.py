@@ -162,6 +162,8 @@ def normalize_scout_submission(
         else:
             try:
                 coerced_val = int(val)
+                if coerced_val < 0:
+                    coerced_val = cap
                 normalized_budget[key] = min(coerced_val, cap)
             except (ValueError, TypeError):
                 normalized_budget[key] = cap
