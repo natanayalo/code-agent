@@ -197,7 +197,9 @@ class Session(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     tasks: Mapped[list[Task]] = relationship(back_populates="session")
     worker_runs: Mapped[list[WorkerRun]] = relationship(back_populates="session")
     session_state: Mapped[SessionState | None] = relationship(back_populates="session")
-    proposals: Mapped[list[Proposal]] = relationship(back_populates="session")
+    proposals: Mapped[list[Proposal]] = relationship(
+        back_populates="session", cascade="all, delete-orphan", passive_deletes=True
+    )
 
     @validates("status")
     def _coerce_status(self, _key: str, value: SessionStatus | str) -> SessionStatus:
@@ -269,7 +271,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="task",
         order_by="TaskTimelineEvent.attempt_number.asc(), TaskTimelineEvent.sequence_number.asc()",
     )
-    proposals: Mapped[list[Proposal]] = relationship(back_populates="task")
+    proposals: Mapped[list[Proposal]] = relationship(back_populates="task", passive_deletes=True)
 
     @validates("status")
     def _coerce_status(self, _key: str, value: TaskStatus | str) -> TaskStatus:

@@ -36,7 +36,7 @@ def upgrade() -> None:
             ),
             nullable=False,
         ),
-        sa.Column("metadata_payload", sa.JSON(), nullable=False),
+        sa.Column("metadata_payload", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
         sa.Column("id", sa.String(length=36), nullable=False),
         sa.Column(
             "created_at",

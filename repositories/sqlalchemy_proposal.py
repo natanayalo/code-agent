@@ -55,7 +55,7 @@ class ProposalRepository:
     def update_proposal_status(self, proposal_id: str, status: ProposalStatus | str) -> Proposal:
         """Update the status of a proposal."""
         proposal = self.get_proposal(proposal_id)
-        proposal.status = ProposalStatus(status)
+        proposal.status = status
         self.session.flush()
         return proposal
 
@@ -75,7 +75,7 @@ class ProposalRepository:
         if session_id is not None:
             stmt = stmt.where(Proposal.session_id == session_id)
 
-        stmt = stmt.order_by(Proposal.created_at.desc())
+        stmt = stmt.order_by(Proposal.created_at.desc(), Proposal.id.desc())
         stmt = stmt.limit(limit).offset(offset)
 
         return list(self.session.scalars(stmt))
