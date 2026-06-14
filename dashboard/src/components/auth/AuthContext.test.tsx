@@ -57,7 +57,7 @@ describe('AuthContext', () => {
     expect(api.auth.login).toHaveBeenCalledWith('test-secret');
     expect(api.auth.status).toHaveBeenCalledTimes(2);
 
-    vi.mocked(api.auth.logout).mockResolvedValue({ status: 'ok' });
+    vi.mocked(api.auth.logout).mockResolvedValue(undefined);
     await act(async () => {
       screen.getByText('Logout').click();
     });
