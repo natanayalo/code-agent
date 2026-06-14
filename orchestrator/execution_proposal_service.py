@@ -189,6 +189,8 @@ def accept_proposal(
                 session.expire(proposal)
                 refetched = session.get(Proposal, proposal_id)
                 if refetched is None:
+                    if not outcome.duplicate:
+                        self.cancel_task(task_id=outcome.task_snapshot.task_id)
                     return "not_found", None, f"Proposal '{proposal_id}' was deleted concurrently."
                 if refetched.status == ProposalStatus.ACCEPTED:
                     accepted_task_id = (refetched.metadata_payload or {}).get("accepted_task_id")

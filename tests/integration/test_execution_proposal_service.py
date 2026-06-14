@@ -123,3 +123,69 @@ def test_accept_proposal_scout_metadata(client, session_factory, test_session_id
     assert "```diff\n-a\n+b\n```" in snapshot.task_text
     assert "Files changed:\na.txt" in snapshot.task_text
     assert '```json\n{\n  "hello": "world"\n}\n```' in snapshot.task_text
+
+
+def test_accept_proposal_concurrent_deletion(client, session_factory, test_session_id):
+    task_service = client.app.state.task_service
+    with session_scope(session_factory) as session:
+        repo = ProposalRepository(session)
+        proposal = repo.create_proposal(
+            session_id=test_session_id,
+            title="To be deleted",
+            summary="Will be deleted during accept",
+            status=ProposalStatus.PENDING_REVIEW,
+        )
+        proposal_id = proposal.id
+
+    # We need to simulate concurrent deletion after task creation and after
+    # the proposal is initially fetched inside the transaction, but before the UPDATE.
+    # We can do this by patching ProposalRepository.get_proposal to delete the proposal
+    # from a separate transaction right before it returns, but ONLY on the second call
+    # (since accept_proposal fetches the proposal once before creating the task, and once after).
+    from repositories.sqlalchemy_proposal import ProposalRepository as RealRepo
+
+    original_get_proposal = RealRepo.get_proposal
+
+    call_count = [0]
+
+    def mock_get_proposal(self, pid):
+        call_count[0] += 1
+        p = original_get_proposal(self, pid)
+        if pid == proposal_id and call_count[0] == 2:
+            with session_scope(session_factory) as del_session:
+                del_session.execute(
+                    __import__("sqlalchemy").text("DELETE FROM proposals WHERE id = :id"),
+                    {"id": pid},
+                )
+        return p
+
+    RealRepo.get_proposal = mock_get_proposal
+
+    original_cancel_task = task_service.cancel_task
+    cancel_called = []
+
+    def mock_cancel_task(*, task_id: str) -> None:
+        cancel_called.append(task_id)
+        original_cancel_task(task_id=task_id)
+
+    task_service.cancel_task = mock_cancel_task
+
+    try:
+        status, snapshot, detail = task_service.accept_proposal(proposal_id)
+        assert status == "not_found"
+        assert "deleted concurrently" in detail
+
+        # Verify the created task was cancelled by checking if cancel_task was called
+        assert len(cancel_called) == 1
+
+        # Find the task created for this test to verify the DB status if possible
+        with session_scope(session_factory) as session:
+            from repositories.sqlalchemy_task import TaskRepository
+
+            tasks = TaskRepository(session).list_by_session(session_id=test_session_id)
+            # It seems cancel_task might set status to FAILED if the task hasn't fully started,
+            # or maybe CANCELLED. Either way, cancel_task was invoked.
+            assert all(t.status in ("cancelled", "failed") for t in tasks)
+    finally:
+        RealRepo.get_proposal = original_get_proposal
+        task_service.cancel_task = original_cancel_task
