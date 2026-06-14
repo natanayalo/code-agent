@@ -28,6 +28,7 @@ from db.enums import (
     ArtifactType,
     HumanInteractionStatus,
     HumanInteractionType,
+    ProposalStatus,
     SessionStatus,
     TaskStatus,
     TimelineEventType,
@@ -50,6 +51,7 @@ HUMAN_INTERACTION_STATUS_ENUM = build_sql_enum(
     HumanInteractionStatus, name="human_interaction_status"
 )
 WORKER_RUNTIME_MODE_ENUM = build_sql_enum(WorkerRuntimeMode, name="worker_runtime_mode")
+PROPOSAL_STATUS_ENUM = build_sql_enum(ProposalStatus, name="proposal_status")
 
 
 class EncryptedJSON(TypeDecorator):
@@ -195,6 +197,9 @@ class Session(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     tasks: Mapped[list[Task]] = relationship(back_populates="session")
     worker_runs: Mapped[list[WorkerRun]] = relationship(back_populates="session")
     session_state: Mapped[SessionState | None] = relationship(back_populates="session")
+    proposals: Mapped[list[Proposal]] = relationship(
+        back_populates="session", cascade="all, delete-orphan", passive_deletes=True
+    )
 
     @validates("status")
     def _coerce_status(self, _key: str, value: SessionStatus | str) -> SessionStatus:
@@ -266,6 +271,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="task",
         order_by="TaskTimelineEvent.attempt_number.asc(), TaskTimelineEvent.sequence_number.asc()",
     )
+    proposals: Mapped[list[Proposal]] = relationship(back_populates="task", passive_deletes=True)
 
     @validates("status")
     def _coerce_status(self, _key: str, value: TaskStatus | str) -> TaskStatus:
@@ -579,3 +585,39 @@ class HumanInteraction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     ) -> HumanInteractionStatus:
         """Normalize assigned status to the canonical enum."""
         return HumanInteractionStatus(value)
+
+
+class Proposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """An idea or code proposal emitted by a task for later review."""
+
+    __tablename__ = "proposals"
+    __table_args__ = (Index("ix_proposals_created_at", "created_at"),)
+
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[ProposalStatus] = mapped_column(
+        PROPOSAL_STATUS_ENUM,
+        nullable=False,
+        default=ProposalStatus.PENDING_REVIEW,
+        index=True,
+    )
+    metadata_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+
+    session: Mapped[Session] = relationship(back_populates="proposals")
+    task: Mapped[Task | None] = relationship(back_populates="proposals")
+
+    @validates("status")
+    def _coerce_status(self, _key: str, value: ProposalStatus | str) -> ProposalStatus:
+        """Normalize assigned status to the canonical enum."""
+        return ProposalStatus(value)

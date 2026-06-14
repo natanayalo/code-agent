@@ -37,14 +37,13 @@ Active focus:
 
 ## Next Priorities
 
-1. T-187: Add Read-Mostly sandbox policy.
+1. T-188: Implement Idea Inbox / Proposal store.
 2. continue tightening native-agent observability and verifier acceptance policy
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
-- T-187: Add Read-Mostly sandbox policy.
 - T-188: Implement Idea Inbox / Proposal store.
 - T-189: Route Scout output to Review Inbox.
 - T-190: Dashboard UI for Idea Inbox.
@@ -52,6 +51,7 @@ Granular tasks for the active and upcoming milestones:
 
 ## Recent Completed Milestones
 
+- T-187: Add Read-Mostly sandbox policy (#223)
 - T-186: Define Scout Mode task type and lane parameters.
 - Prepare bounded-scout lane planning
 - PR-native delivery fields and GitHub branch/draft-PR integration

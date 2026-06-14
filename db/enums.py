@@ -115,6 +115,15 @@ class TimelineEventType(StrEnum):
     DELIVERY_FAILED = "delivery_failed"
 
 
+class ProposalStatus(StrEnum):
+    """Allowed lifecycle states for persisted proposals."""
+
+    PENDING_REVIEW = "pending_review"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    IMPLEMENTED = "implemented"
+
+
 def build_sql_enum(enum_class: type[StrEnum], *, name: str) -> SQLAlchemyEnum:
     """Create a non-native SQLAlchemy enum backed by a check constraint."""
 

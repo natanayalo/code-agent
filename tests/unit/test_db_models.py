@@ -11,6 +11,7 @@ from db.enums import (
     ArtifactType,
     HumanInteractionStatus,
     HumanInteractionType,
+    ProposalStatus,
     SessionStatus,
     TaskStatus,
     TimelineEventType,
@@ -24,6 +25,7 @@ EXPECTED_TABLES = {
     "inbound_deliveries",
     "memory_personal",
     "memory_project",
+    "proposals",
     "sessions",
     "session_states",
     "tasks",
@@ -50,6 +52,7 @@ def test_model_metadata_uses_canonical_enums_for_constrained_columns() -> None:
         ("artifacts", "artifact_type"): ArtifactType,
         ("human_interactions", "interaction_type"): HumanInteractionType,
         ("human_interactions", "status"): HumanInteractionStatus,
+        ("proposals", "status"): ProposalStatus,
         ("task_timeline_events", "event_type"): TimelineEventType,
     }
 

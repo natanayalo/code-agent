@@ -8,6 +8,7 @@ from repositories.sqlalchemy_memory import (
     PersonalMemoryRepository,
     ProjectMemoryRepository,
 )
+from repositories.sqlalchemy_proposal import ProposalRepository
 from repositories.sqlalchemy_run import ArtifactRepository, WorkerRunRepository
 from repositories.sqlalchemy_session import (
     SessionRepository,
@@ -23,6 +24,7 @@ __all__ = [
     "InboundDeliveryRepository",
     "PersonalMemoryRepository",
     "ProjectMemoryRepository",
+    "ProposalRepository",
     "SessionRepository",
     "SessionStateRepository",
     "TaskRepository",
