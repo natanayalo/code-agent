@@ -159,7 +159,7 @@ describe('IdeaInboxPage', () => {
     const rejectBtn = screen.getByText('Reject');
     fireEvent.click(rejectBtn);
 
-    const errorMsg = await screen.findByText('Action failed: Failed to reject proposal');
+    const errorMsg = await screen.findByText('Action failed: Generic reject error');
     expect(errorMsg).toBeInTheDocument();
   });
 
