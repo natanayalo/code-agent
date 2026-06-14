@@ -74,21 +74,17 @@ def _append_resource_limits(command: list[str], request: DockerSandboxContainerR
         command.extend(["--cpus", str(request.cpu_limit)])
 
 
-def _append_workspace_mount(
-    command: list[str], request: DockerSandboxContainerRequest
+def append_workspace_mount_options(
+    command: list[str],
+    workspace_path: Path,
+    working_dir: str | None,
+    read_only_workspace: bool,
 ) -> tuple[Path, str]:
-    workspace_path = request.workspace.workspace_path.resolve()
-    if "," in str(workspace_path):
-        raise DockerSandboxContainerError(
-            f"Workspace path contains a comma which is incompatible with "
-            f"the --mount syntax: {workspace_path}"
-        )
     target_path = str(workspace_path)
-    working_dir = request.working_dir
     if working_dir is None or working_dir == "/workspace":
         working_dir = target_path
 
-    ro_flag = ",readonly" if request.read_only_workspace else ""
+    ro_flag = ",readonly" if read_only_workspace else ""
     command.extend(
         [
             "--workdir",
@@ -98,7 +94,7 @@ def _append_workspace_mount(
         ]
     )
 
-    if request.read_only_workspace:
+    if read_only_workspace:
         code_agent_path = workspace_path / ".code-agent"
         code_agent_path.mkdir(parents=True, exist_ok=True)
         agent_home_path = workspace_path / ".agent_home"
@@ -106,7 +102,7 @@ def _append_workspace_mount(
         artifacts_path = workspace_path / "artifacts"
         artifacts_path.mkdir(parents=True, exist_ok=True)
         sandbox_db_path = code_agent_path / ".sandbox.db"
-        sandbox_db_path.touch(exist_ok=True)
+
         symlink_path = workspace_path / ".sandbox.db"
         if symlink_path.exists() or symlink_path.is_symlink():
             try:
@@ -126,6 +122,8 @@ def _append_workspace_mount(
             except OSError:
                 pass
 
+        sandbox_db_path.touch(exist_ok=True)
+
         command.extend(
             ["--mount", f"type=bind,source={code_agent_path},target={target_path}/.code-agent"]
         )
@@ -137,6 +135,23 @@ def _append_workspace_mount(
         )
 
     return workspace_path, working_dir
+
+
+def _append_workspace_mount(
+    command: list[str], request: DockerSandboxContainerRequest
+) -> tuple[Path, str]:
+    workspace_path = request.workspace.workspace_path.resolve()
+    if "," in str(workspace_path):
+        raise DockerSandboxContainerError(
+            f"Workspace path contains a comma which is incompatible with "
+            f"the --mount syntax: {workspace_path}"
+        )
+    return append_workspace_mount_options(
+        command=command,
+        workspace_path=workspace_path,
+        working_dir=request.working_dir,
+        read_only_workspace=request.read_only_workspace,
+    )
 
 
 def _local_repo_path_from_file_url(repo_url: str) -> str | None:

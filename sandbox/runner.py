@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import shlex
 import subprocess
 import threading
@@ -24,7 +23,11 @@ from apps.observability import (
 )
 from sandbox.audit import capture_audit_artifacts
 from sandbox.constants import DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS
-from sandbox.container import build_container_name
+from sandbox.container import (
+    _append_user_options,
+    append_workspace_mount_options,
+    build_container_name,
+)
 from sandbox.policy import PathPolicy
 from sandbox.redact import (
     SecretRedactor,
@@ -143,69 +146,12 @@ def _append_workspace_mount(
     request: DockerSandboxCommand,
     workspace_path: Path,
 ) -> tuple[Path, str]:
-    target_path = str(workspace_path)
-    working_dir = request.working_dir
-    if working_dir is None or working_dir == "/workspace":
-        working_dir = target_path
-
-    ro_flag = ",readonly" if request.read_only_workspace else ""
-    command.extend(
-        [
-            "--workdir",
-            working_dir,
-            "--mount",
-            f"type=bind,source={workspace_path},target={target_path}{ro_flag}",
-        ]
+    return append_workspace_mount_options(
+        command=command,
+        workspace_path=workspace_path,
+        working_dir=request.working_dir,
+        read_only_workspace=request.read_only_workspace,
     )
-
-    if request.read_only_workspace:
-        code_agent_path = workspace_path / ".code-agent"
-        code_agent_path.mkdir(parents=True, exist_ok=True)
-        agent_home_path = workspace_path / ".agent_home"
-        agent_home_path.mkdir(parents=True, exist_ok=True)
-        artifacts_path = workspace_path / "artifacts"
-        artifacts_path.mkdir(parents=True, exist_ok=True)
-        sandbox_db_path = code_agent_path / ".sandbox.db"
-        sandbox_db_path.touch(exist_ok=True)
-        symlink_path = workspace_path / ".sandbox.db"
-        if symlink_path.exists() or symlink_path.is_symlink():
-            try:
-                if symlink_path.is_symlink():
-                    if os.readlink(symlink_path) != ".code-agent/.sandbox.db":
-                        symlink_path.unlink()
-                else:
-                    if symlink_path.is_file() and not sandbox_db_path.exists():
-                        symlink_path.rename(sandbox_db_path)
-                    else:
-                        symlink_path.unlink()
-            except OSError:
-                pass
-        if not symlink_path.exists() and not symlink_path.is_symlink():
-            try:
-                symlink_path.symlink_to(".code-agent/.sandbox.db")
-            except OSError:
-                pass
-
-        command.extend(
-            ["--mount", f"type=bind,source={code_agent_path},target={target_path}/.code-agent"]
-        )
-        command.extend(
-            ["--mount", f"type=bind,source={agent_home_path},target={target_path}/.agent_home"]
-        )
-        command.extend(
-            ["--mount", f"type=bind,source={artifacts_path},target={target_path}/artifacts"]
-        )
-
-    return workspace_path, working_dir
-
-
-def _append_user_options(command: list[str]) -> None:
-    try:
-        uid = os.getuid()
-        gid = os.getgid()
-        command.extend(["--user", f"{uid}:{gid}"])
-    except AttributeError:
-        pass  # Windows or environment without getuid
 
 
 def _build_docker_run_command(
