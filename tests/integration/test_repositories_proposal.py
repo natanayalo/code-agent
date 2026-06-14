@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+
 import pytest
 
 from db.enums import ProposalStatus
@@ -66,7 +68,7 @@ def test_update_proposal_status(session_factory) -> None:
             summary="Testing status update",
         )
 
-        updated = proposal_repo.update_proposal_status(proposal.id, "accepted")
+        updated = proposal_repo.update_proposal_status(proposal.id, ProposalStatus.ACCEPTED)
         assert updated.status == ProposalStatus.ACCEPTED
 
         retrieved = proposal_repo.get_proposal(proposal.id)
@@ -90,6 +92,8 @@ def test_list_proposals(session_factory) -> None:
             external_thread_id="thread-proposal-3",
         )
 
+        from datetime import datetime, timedelta
+
         p1 = proposal_repo.create_proposal(
             session_id=sess.id,
             title="P1",
@@ -101,7 +105,11 @@ def test_list_proposals(session_factory) -> None:
             summary="P2 summary",
         )
 
-        proposal_repo.update_proposal_status(p1.id, "rejected")
+        p1.created_at = datetime.now(UTC) - timedelta(seconds=5)
+        p2.created_at = datetime.now(UTC)
+        session.flush()
+
+        proposal_repo.update_proposal_status(p1.id, ProposalStatus.REJECTED)
 
         all_props = proposal_repo.list_proposals(session_id=sess.id)
         assert len(all_props) >= 2
@@ -110,7 +118,9 @@ def test_list_proposals(session_factory) -> None:
         assert all_props[0].id == p2.id
         assert all_props[1].id == p1.id
 
-        pending_props = proposal_repo.list_proposals(session_id=sess.id, status="pending_review")
+        pending_props = proposal_repo.list_proposals(
+            session_id=sess.id, status=ProposalStatus.PENDING_REVIEW
+        )
         assert len(pending_props) == 1
         assert pending_props[0].id == p2.id
 
