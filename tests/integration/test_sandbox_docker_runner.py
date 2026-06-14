@@ -224,7 +224,7 @@ def test_docker_sandbox_runner_read_only_workspace(
         with DockerShellSession(container) as session:
             python_cmd = (
                 'python3 -c "from pathlib import Path; '
-                f"Path('{source_repo}/local_repo_write.txt').write_text('fail')\""
+                f"Path('{source_repo.as_posix()}/local_repo_write.txt').write_text('fail')\""
             )
             result_local_repo = session.execute(python_cmd)
         assert result_local_repo.exit_code != 0
