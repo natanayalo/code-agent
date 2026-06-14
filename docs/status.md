@@ -37,7 +37,7 @@ Active focus:
 
 ## Next Priorities
 
-1. T-180: Define Scout Mode task type and lane parameters (Milestone 18)
+1. T-180: Define Scout Mode task type and lane parameters
 2. continue tightening native-agent observability and verifier acceptance policy
 
 ## Current Backlog
@@ -53,7 +53,7 @@ Granular tasks for the active and upcoming milestones:
 
 ## Recent Completed Milestones
 
-- prepare bounded-scout lane planning (Milestone 18 tasks scoped)
+- prepare bounded-scout lane planning
 
 - PR-native delivery fields and GitHub branch/draft-PR integration
 - Milestone 17.5: Full E2E Stabilization (T-164 to T-178)
