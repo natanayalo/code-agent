@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -55,7 +55,7 @@ class ProposalRepository:
     def update_proposal_status(self, proposal_id: str, status: ProposalStatus | str) -> Proposal:
         """Update the status of a proposal."""
         proposal = self.get_proposal(proposal_id)
-        proposal.status = status
+        proposal.status = cast(ProposalStatus, status)
         self.session.flush()
         return proposal
 
