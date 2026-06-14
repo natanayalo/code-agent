@@ -175,4 +175,53 @@ describe('IdeaInboxPage', () => {
     fireEvent.click(retryBtn);
     expect(api.listProposals).toHaveBeenCalledTimes(2);
   });
+
+  it('renders complex metadata payload gracefully', async () => {
+    const pComplex = {
+      proposal_id: 'p-complex',
+      session_id: 's1',
+      task_id: null,
+      title: 'Idea Complex',
+      summary: 'S3',
+      content: null,
+      status: ProposalStatus.PENDING_REVIEW,
+      metadata_payload: {
+        files_changed: ['fileA.ts', 'fileB.ts'],
+        diff_text: '--- a/fileA.ts\n+++ b/fileA.ts',
+      },
+      created_at: new Date().toISOString()
+    };
+    const pUnserializable = {
+      proposal_id: 'p-unserializable',
+      session_id: 's1',
+      task_id: null,
+      title: 'Idea Unserializable',
+      summary: 'S4',
+      content: null,
+      status: ProposalStatus.PENDING_REVIEW,
+      metadata_payload: {
+        files_changed: { some: 'object' },
+        diff_text: { another: 'object' },
+      },
+      created_at: 'invalid-date'
+    };
+
+    vi.mocked(api.listProposals).mockResolvedValue([pComplex, pUnserializable] as ProposalSnapshot[]);
+    renderWithProviders(<IdeaInboxPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Idea Complex')).toBeInTheDocument();
+    });
+
+    // Check complex parsed output
+    expect(screen.getByText((content) => content.includes('fileA.ts') && content.includes('fileB.ts'))).toBeInTheDocument();
+    expect(screen.getByText((content) => content.includes('--- a/fileA.ts'))).toBeInTheDocument();
+
+    // Check unserializable fallback
+    const unserializableEls = screen.getAllByText('Unserializable Object value');
+    expect(unserializableEls).toHaveLength(2); // one for files_changed, one for diff_text
+
+    // Check invalid date fallback
+    expect(screen.getAllByText('N/A').length).toBeGreaterThan(0);
+  });
 });
