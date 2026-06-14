@@ -187,7 +187,7 @@ def build_task_spec(
         or task_constraints.get("read_only") is True
         or task_type == "scout"
     )
-    if is_no_modification_smoke and task_type != "scout":
+    if _is_pwd_home_smoke_task(normalized_task_text) and task_type != "scout":
         task_type = "maintenance"
     risk_level = _resolve_risk_level(
         task_text=normalized_task_text,
