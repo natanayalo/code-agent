@@ -168,12 +168,16 @@ def _append_workspace_mount(
         sandbox_db_path = code_agent_path / ".sandbox.db"
         sandbox_db_path.touch(exist_ok=True)
         symlink_path = workspace_path / ".sandbox.db"
-        if symlink_path.exists() and not symlink_path.is_symlink():
+        if symlink_path.exists() or symlink_path.is_symlink():
             try:
-                if symlink_path.is_file() and not sandbox_db_path.exists():
-                    symlink_path.rename(sandbox_db_path)
+                if symlink_path.is_symlink():
+                    if os.readlink(symlink_path) != ".code-agent/.sandbox.db":
+                        symlink_path.unlink()
                 else:
-                    symlink_path.unlink()
+                    if symlink_path.is_file() and not sandbox_db_path.exists():
+                        symlink_path.rename(sandbox_db_path)
+                    else:
+                        symlink_path.unlink()
             except OSError:
                 pass
         if not symlink_path.exists() and not symlink_path.is_symlink():
