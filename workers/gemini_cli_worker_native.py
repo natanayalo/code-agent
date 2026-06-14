@@ -300,7 +300,7 @@ class GeminiCliWorkerNativeMixin:
         """Build a one-shot Gemini headless command for native-agent mode."""
         executable = getattr(self.runtime_adapter, "executable", "gemini")  # type: ignore[attr-defined]
         model = getattr(self.runtime_adapter, "model", None)  # type: ignore[attr-defined]
-        read_only_requested = bool(request.constraints.get("read_only"))
+        read_only_requested = request.read_only or bool(request.constraints.get("read_only"))
         is_native = runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
         approval_mode = (
             "plan"

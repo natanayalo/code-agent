@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-import os
 import shlex
 import subprocess
 import threading
+from pathlib import Path
 from time import perf_counter
 from typing import Final, Protocol
 
@@ -23,7 +23,11 @@ from apps.observability import (
 )
 from sandbox.audit import capture_audit_artifacts
 from sandbox.constants import DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS
-from sandbox.container import build_container_name
+from sandbox.container import (
+    _append_user_options,
+    append_workspace_mount_options,
+    build_container_name,
+)
 from sandbox.policy import PathPolicy
 from sandbox.redact import (
     SecretRedactor,
@@ -72,6 +76,7 @@ class DockerSandboxCommand(SandboxModel):
     cpu_limit: float | None = 1.0
     secrets: dict[str, str] = Field(default_factory=dict)
     path_policy: PathPolicy | None = None
+    read_only_workspace: bool = False
 
 
 class DockerSandboxResult(SandboxModel):
@@ -136,6 +141,19 @@ _read_stream_bounded = read_stream_bounded
 _decode_bounded = decode_bounded
 
 
+def _append_workspace_mount(
+    command: list[str],
+    request: DockerSandboxCommand,
+    workspace_path: Path,
+) -> tuple[Path, str]:
+    return append_workspace_mount_options(
+        command=command,
+        workspace_path=workspace_path,
+        working_dir=request.working_dir,
+        read_only_workspace=request.read_only_workspace,
+    )
+
+
 def _build_docker_run_command(
     request: DockerSandboxCommand,
     *,
@@ -166,26 +184,9 @@ def _build_docker_run_command(
             f"Workspace path contains a comma which is incompatible with "
             f"the --mount syntax: {workspace_path}"
         )
-    target_path = str(workspace_path)
-    working_dir = request.working_dir
-    if working_dir is None or working_dir == "/workspace":
-        working_dir = target_path
 
-    command.extend(
-        [
-            "--workdir",
-            working_dir,
-            "--mount",
-            f"type=bind,source={workspace_path},target={target_path}",
-        ]
-    )
-
-    try:
-        uid = os.getuid()
-        gid = os.getgid()
-        command.extend(["--user", f"{uid}:{gid}"])
-    except AttributeError:
-        pass  # Windows or environment without getuid
+    workspace_path, working_dir = _append_workspace_mount(command, request, workspace_path)
+    _append_user_options(command)
 
     if not request.network_enabled:
         command.extend(["--network", "none"])

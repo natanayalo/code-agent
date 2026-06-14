@@ -42,6 +42,7 @@ class DockerSandboxContainerRequest(SandboxModel):
         min_length=1,
     )
     start_timeout_seconds: int = Field(default=30, ge=1)
+    read_only_workspace: bool = False
 
 
 class DockerSandboxContainer(SandboxModel):
@@ -73,6 +74,70 @@ def _append_resource_limits(command: list[str], request: DockerSandboxContainerR
         command.extend(["--cpus", str(request.cpu_limit)])
 
 
+def append_workspace_mount_options(
+    command: list[str],
+    workspace_path: Path,
+    working_dir: str | None,
+    read_only_workspace: bool,
+) -> tuple[Path, str]:
+    target_path = str(workspace_path)
+    if working_dir is None or working_dir == "/workspace":
+        working_dir = target_path
+
+    ro_flag = ",readonly" if read_only_workspace else ""
+    command.extend(
+        [
+            "--workdir",
+            working_dir,
+            "--mount",
+            f"type=bind,source={workspace_path},target={target_path}{ro_flag}",
+        ]
+    )
+
+    if read_only_workspace:
+        code_agent_path = workspace_path / ".code-agent"
+        code_agent_path.mkdir(parents=True, exist_ok=True)
+        agent_home_path = workspace_path / ".agent_home"
+        agent_home_path.mkdir(parents=True, exist_ok=True)
+        artifacts_path = workspace_path / "artifacts"
+        artifacts_path.mkdir(parents=True, exist_ok=True)
+        sandbox_db_path = code_agent_path / ".sandbox.db"
+
+        symlink_path = workspace_path / ".sandbox.db"
+        if symlink_path.exists() or symlink_path.is_symlink():
+            try:
+                if symlink_path.is_symlink():
+                    target = os.readlink(symlink_path)
+                    if Path(target).as_posix() != ".code-agent/.sandbox.db":
+                        symlink_path.unlink()
+                else:
+                    if symlink_path.is_file() and not sandbox_db_path.exists():
+                        symlink_path.rename(sandbox_db_path)
+                    else:
+                        symlink_path.unlink()
+            except OSError:
+                pass
+        if not symlink_path.exists() and not symlink_path.is_symlink():
+            try:
+                symlink_path.symlink_to(".code-agent/.sandbox.db")
+            except OSError:
+                pass
+
+        sandbox_db_path.touch(exist_ok=True)
+
+        command.extend(
+            ["--mount", f"type=bind,source={code_agent_path},target={target_path}/.code-agent"]
+        )
+        command.extend(
+            ["--mount", f"type=bind,source={agent_home_path},target={target_path}/.agent_home"]
+        )
+        command.extend(
+            ["--mount", f"type=bind,source={artifacts_path},target={target_path}/artifacts"]
+        )
+
+    return workspace_path, working_dir
+
+
 def _append_workspace_mount(
     command: list[str], request: DockerSandboxContainerRequest
 ) -> tuple[Path, str]:
@@ -82,20 +147,12 @@ def _append_workspace_mount(
             f"Workspace path contains a comma which is incompatible with "
             f"the --mount syntax: {workspace_path}"
         )
-    target_path = str(workspace_path)
-    working_dir = request.working_dir
-    if working_dir is None or working_dir == "/workspace":
-        working_dir = target_path
-
-    command.extend(
-        [
-            "--workdir",
-            working_dir,
-            "--mount",
-            f"type=bind,source={workspace_path},target={target_path}",
-        ]
+    return append_workspace_mount_options(
+        command=command,
+        workspace_path=workspace_path,
+        working_dir=request.working_dir,
+        read_only_workspace=request.read_only_workspace,
     )
-    return workspace_path, working_dir
 
 
 def _local_repo_path_from_file_url(repo_url: str) -> str | None:
@@ -175,7 +232,10 @@ def _append_local_repo_mount(
             "Local repo path contains a comma which is incompatible with "
             f"the --mount syntax: {local_repo_path}"
         )
-    command.extend(["--mount", f"type=bind,source={local_repo_path},target={local_repo_path}"])
+    ro_flag = ",readonly" if request.read_only_workspace else ""
+    command.extend(
+        ["--mount", f"type=bind,source={local_repo_path},target={local_repo_path}{ro_flag}"]
+    )
 
 
 def _append_user_options(command: list[str]) -> None:

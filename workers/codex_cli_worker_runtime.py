@@ -250,6 +250,7 @@ class CodexCliWorkerRuntimeMixin:
                 workspace=workspace,
                 environment=scoped_secrets,
                 network_enabled=network_enabled,
+                read_only_workspace=request.read_only or bool(request.constraints.get("read_only")),
             )
         )
         session: ShellSessionProtocol | None = None
@@ -260,6 +261,7 @@ class CodexCliWorkerRuntimeMixin:
                 defaults=self.runtime_settings,  # type: ignore[attr-defined]
                 task_id=request.task_id,
                 session_id=request.session_id,
+                read_only=request.read_only or bool(request.constraints.get("read_only")),
             )
             granted_permission = granted_permission_from_constraints(request.constraints)
             bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)  # type: ignore[attr-defined]
