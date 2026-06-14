@@ -214,7 +214,7 @@ def main() -> int:
 
     if has_errors:
         print(
-            "\npython-size-check:"
+            "\npython-size-check: "
             "Thresholds are blocking. Splitting the file/function is the preferred fix. "
             "Adding a waiver is strongly discouraged and should be reserved for exceptional cases "
             "(generated code, unavoidable compatibility shims, or large static data). "
