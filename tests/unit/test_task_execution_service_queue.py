@@ -94,6 +94,72 @@ def test_claim_next_task_allows_single_claim_and_lease_reclaim() -> None:
     assert reclaimed.attempt_count == 2
 
 
+def test_claim_next_task_orders_by_queue_lane_then_priority_then_age() -> None:
+    """Queue should yield primary before scout, then by priority, then by age."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+
+    with session_scope(session_factory) as session:
+        repo = TaskRepository(session)
+        now = utc_now()
+        SessionRepository(session).create(
+            user_id="u1", channel="test", external_thread_id="t1", last_seen_at=now
+        )
+        repo.create(
+            session_id="t1",
+            task_text="scout old",
+            queue_lane="scout",
+            priority=1,
+            next_attempt_at=now - timedelta(minutes=5),
+        )
+        repo.create(
+            session_id="t1",
+            task_text="primary low prio",
+            queue_lane="primary",
+            priority=0,
+            next_attempt_at=now - timedelta(minutes=4),
+        )
+        repo.create(
+            session_id="t1",
+            task_text="primary high prio old",
+            queue_lane="primary",
+            priority=1,
+            next_attempt_at=now - timedelta(minutes=3),
+        )
+        repo.create(
+            session_id="t1",
+            task_text="primary high prio new",
+            queue_lane="primary",
+            priority=1,
+            next_attempt_at=now - timedelta(minutes=2),
+        )
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+
+    claims = []
+    for _ in range(4):
+        claim = service.claim_next_task(worker_id="w1", lease_seconds=60)
+        assert claim is not None
+        with session_scope(session_factory) as session:
+            task = TaskRepository(session).get(claim.task_id)
+            claims.append(task)
+
+    assert claims[0].task_text == "primary high prio old"
+    assert claims[1].task_text == "primary high prio new"
+    assert claims[2].task_text == "primary low prio"
+    assert claims[3].task_text == "scout old"
+
+    assert service.claim_next_task(worker_id="w1", lease_seconds=60) is None
+
+
 def test_release_failure_requeues_until_max_attempts_then_fails() -> None:
     """Failed attempts should requeue until max attempts, then become terminally failed."""
     engine = create_engine_from_url(

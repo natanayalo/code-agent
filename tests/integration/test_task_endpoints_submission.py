@@ -434,3 +434,20 @@ def test_submit_task_rejects_hostname_callback_urls_resolving_to_private_address
     )
 
     assert response.status_code == 422
+
+
+def test_submit_task_rejects_invalid_scout_budget(client: TestClient) -> None:
+    """Submissions with invalid budget configurations for scout mode should return 422."""
+    response = client.post(
+        "/tasks",
+        headers={},
+        json={
+            "task_text": "Run a scout task",
+            "repo_url": "https://github.com/natanayalo/code-agent",
+            "constraints": {"task_type": "scout"},
+            "budget": {"max_iterations": "inf"},
+        },
+    )
+
+    assert response.status_code == 422
+    assert "Invalid budget configuration for max_iterations: inf" in response.json()["detail"]

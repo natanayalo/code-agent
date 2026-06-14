@@ -15,7 +15,11 @@ from db.base import utc_now
 from db.enums import TaskStatus, WorkerRunStatus
 from db.models import Session as ConversationSession
 from db.models import User
-from orchestrator.execution_policy import _deep_merge, _sanitize_submission_constraints
+from orchestrator.execution_policy import (
+    _deep_merge,
+    _sanitize_submission_constraints,
+    normalize_scout_submission,
+)
 from orchestrator.execution_types import (
     REPLAYABLE_STATUSES as _REPLAYABLE_STATUSES,
 )
@@ -63,9 +67,19 @@ def _normalize_and_validate_submission(self: Any, submission: TaskSubmission) ->
             "worker_profile_override must reference a configured worker profile "
             f"when profile routing is enabled. Unknown profile: '{normalized_profile_override}'."
         )
-    if normalized_profile_override == submission.worker_profile_override:
-        return submission
-    return submission.model_copy(update={"worker_profile_override": normalized_profile_override})
+    try:
+        normalized_constraints, normalized_budget = normalize_scout_submission(
+            submission.constraints, submission.budget
+        )
+    except ValueError as e:
+        raise TaskSubmissionValidationError(str(e)) from e
+    return submission.model_copy(
+        update={
+            "worker_profile_override": normalized_profile_override,
+            "constraints": normalized_constraints,
+            "budget": normalized_budget,
+        }
+    )
 
 
 def replay_task(
@@ -185,6 +199,8 @@ def _persist_submission(
         session_repo = SessionRepository(session)
         task_repo = TaskRepository(session)
         interaction_repo = HumanInteractionRepository(session)
+        queue_lane = "scout" if submission.constraints.get("task_type") == "scout" else "primary"
+
         sanitized_constraints = _sanitize_submission_constraints(
             submission.constraints,
             reserved_keys=_RESERVED_INTERNAL_CONSTRAINT_KEYS,
@@ -238,7 +254,7 @@ def _persist_submission(
             branch=submission.branch,
             callback_url=submission.callback_url,
             worker_override=submission.worker_override,
-            budget=dict(submission.budget),
+            budget=submission.budget,
             secrets=dict(submission.secrets),
             task_spec=task_spec,
             trace_context=trace_context,
@@ -248,6 +264,7 @@ def _persist_submission(
             max_attempts=max(1, max_attempts),
             next_attempt_at=now,
             priority=submission.priority,
+            queue_lane=queue_lane,
         )
         interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
         session_repo.set_active_task(session_id=conversation_session.id, active_task_id=task.id)

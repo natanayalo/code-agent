@@ -111,11 +111,96 @@ async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -
     await service.submit_task(submission, persisted)
 
     assert recorded_calls == [
+        "_load_submission_for_task",
         "fake_mark_task_in_progress",
         "_get_count",
         "fake_persist_execution_outcome",
         "fake_get_task",
     ]
+
+
+def test_create_task_clamps_scout_budget_and_forces_read_only() -> None:
+    """Scout task constraints should be clamped to bounds and forced read-only."""
+    service, session_factory = _make_task_service()
+
+    submission = execution_module.TaskSubmission(
+        task_text="Run a scout task",
+        repo_url="https://github.com/natanayalo/code-agent",
+        constraints={"task_type": "scout", "read_only": False},
+        budget={
+            "max_iterations": 10,
+            "worker_timeout_seconds": 600,
+            "max_tool_calls": 50,
+            "max_shell_commands": 50,
+            "max_retries": 5,
+        },
+    )
+
+    snapshot, persisted = service.create_task(submission)
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(persisted.task_id)
+        assert task is not None
+        assert task.queue_lane == "scout"
+
+        constraints = dict(task.constraints)
+        budget = dict(task.budget)
+
+        # Constraints are forced to read_only=True
+        assert constraints.get("read_only") is True
+
+        # Budget clamped to scout caps
+        assert budget.get("max_iterations") == 3
+        assert budget.get("worker_timeout_seconds") == 180
+        assert budget.get("max_tool_calls") == 8
+        assert budget.get("max_shell_commands") == 8
+        assert budget.get("max_retries") == 0
+        assert budget.get("execution_mode") == "unattended"
+
+
+def test_create_task_rejects_invalid_scout_budget() -> None:
+    """Scout task submission with invalid budget should raise ValueError."""
+    service, session_factory = _make_task_service()
+
+    submission_negative = execution_module.TaskSubmission(
+        task_text="Run a scout task",
+        repo_url="https://github.com/natanayalo/code-agent",
+        constraints={"task_type": "scout"},
+        budget={"max_iterations": -1},
+    )
+
+    with pytest.raises(ValueError, match="Budget value for max_iterations cannot be negative"):
+        service.create_task(submission_negative)
+
+    submission_invalid_type = execution_module.TaskSubmission(
+        task_text="Run a scout task",
+        repo_url="https://github.com/natanayalo/code-agent",
+        constraints={"task_type": "scout"},
+        budget={"max_iterations": "abc"},
+    )
+
+    with pytest.raises(ValueError, match="Invalid budget configuration for max_iterations: abc"):
+        service.create_task(submission_invalid_type)
+
+    submission_boolean = execution_module.TaskSubmission(
+        task_text="Run a scout task",
+        repo_url="https://github.com/natanayalo/code-agent",
+        constraints={"task_type": "scout"},
+        budget={"max_iterations": True},
+    )
+
+    with pytest.raises(ValueError, match="Invalid budget configuration for max_iterations: True"):
+        service.create_task(submission_boolean)
+
+    submission_inf = execution_module.TaskSubmission(
+        task_text="Run a scout task",
+        repo_url="https://github.com/natanayalo/code-agent",
+        constraints={"task_type": "scout"},
+        budget={"max_iterations": "inf"},
+    )
+
+    with pytest.raises(ValueError, match="Invalid budget configuration for max_iterations: inf"):
+        service.create_task(submission_inf)
 
 
 @pytest.mark.anyio

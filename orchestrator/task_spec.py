@@ -178,9 +178,16 @@ def build_task_spec(
     """Build the persisted structured task contract for a raw task request."""
     normalized_task_text = _normalized_text(task_text)
     task_constraints: Mapping[str, Any] = constraints or {}
-    task_type = _resolve_task_type(normalized_task_text, task_kind)
-    is_no_modification_smoke = _is_pwd_home_smoke_task(normalized_task_text)
-    if is_no_modification_smoke:
+    if task_constraints.get("task_type") == "scout":
+        task_type = cast(TaskSpecType, "scout")
+    else:
+        task_type = _resolve_task_type(normalized_task_text, task_kind)
+    is_no_modification_smoke = (
+        _is_pwd_home_smoke_task(normalized_task_text)
+        or task_constraints.get("read_only") is True
+        or task_type == "scout"
+    )
+    if _is_pwd_home_smoke_task(normalized_task_text) and task_type != "scout":
         task_type = "maintenance"
     risk_level = _resolve_risk_level(
         task_text=normalized_task_text,

@@ -34,6 +34,7 @@ class TaskRepository:
         secrets_encrypted: bool = False,
         status: str = "pending",
         priority: int = 0,
+        queue_lane: str = "primary",
         max_attempts: int = 3,
         next_attempt_at: datetime | None = None,
         chosen_worker: str | None = None,
@@ -56,6 +57,7 @@ class TaskRepository:
             secrets_encrypted=secrets_encrypted,
             status=status,
             priority=priority,
+            queue_lane=queue_lane,
             max_attempts=max_attempts,
             next_attempt_at=next_attempt_at,
             chosen_worker=chosen_worker,
@@ -248,7 +250,11 @@ class TaskRepository:
                         ),
                     )
                 )
-                .order_by(Task.priority.desc(), Task.created_at.asc())
+                .order_by(
+                    case((Task.queue_lane == "primary", 1), else_=2).asc(),
+                    Task.priority.desc(),
+                    Task.created_at.asc(),
+                )
                 .limit(25)
             )
         )

@@ -91,6 +91,9 @@ async def submit_task(
     persisted: _PersistedTaskContext,
 ) -> None:
     """Legacy direct execution entrypoint kept for compatibility/tests."""
+    loaded = await self._run_blocking(self._load_submission_for_task, task_id=persisted.task_id)
+    if loaded is not None:
+        submission = loaded[0]
     span_cm = start_optional_span(
         tracer_name="orchestrator.execution",
         span_name="TaskExecutionService.submit_task",
