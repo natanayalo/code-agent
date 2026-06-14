@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from apps.api.dependencies import get_task_service, require_any_valid_auth
@@ -40,11 +42,11 @@ def list_proposals(
 
 @router.post("/{proposal_id}/accept", response_model=TaskSnapshot)
 def accept_proposal(
-    proposal_id: str,
+    proposal_id: UUID,
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> TaskSnapshot:
     """Accept a proposal and promote it to a queued execution task."""
-    result_status, task_snapshot, detail = task_service.accept_proposal(proposal_id)
+    result_status, task_snapshot, detail = task_service.accept_proposal(str(proposal_id))
     if result_status == "not_found":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -68,11 +70,11 @@ def accept_proposal(
 
 @router.post("/{proposal_id}/reject", response_model=ProposalSnapshot)
 def reject_proposal(
-    proposal_id: str,
+    proposal_id: UUID,
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> ProposalSnapshot:
     """Reject a proposal."""
-    result_status, proposal_snapshot, detail = task_service.reject_proposal(proposal_id)
+    result_status, proposal_snapshot, detail = task_service.reject_proposal(str(proposal_id))
     if result_status == "not_found":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

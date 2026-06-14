@@ -109,11 +109,33 @@ export function IdeaInboxPage() {
                   </div>
                   <div className="memory-content">
                     <p>{proposal.summary}</p>
-                    {proposal.content && (
+                    {(proposal.content || proposal.metadata_payload) && (
                       <div className="proposal-details">
                         <details>
                           <summary>View Details</summary>
-                          <pre className="json-viewer">{proposal.content}</pre>
+                          {proposal.content && <pre className="json-viewer">{proposal.content}</pre>}
+                          {proposal.metadata_payload?.files_changed && (
+                            <div className="metadata-section" style={{ marginTop: '10px' }}>
+                              <strong>Files Changed:</strong>
+                              <pre className="json-viewer">
+                                {Array.isArray(proposal.metadata_payload.files_changed)
+                                  ? proposal.metadata_payload.files_changed.join('\n')
+                                  : typeof proposal.metadata_payload.files_changed === 'object'
+                                    ? 'Unserializable Object value'
+                                    : String(proposal.metadata_payload.files_changed)}
+                              </pre>
+                            </div>
+                          )}
+                          {proposal.metadata_payload?.diff_text && (
+                            <div className="metadata-section" style={{ marginTop: '10px' }}>
+                              <strong>Diff:</strong>
+                              <pre className="json-viewer">
+                                {typeof proposal.metadata_payload.diff_text === 'object'
+                                  ? 'Unserializable Object value'
+                                  : String(proposal.metadata_payload.diff_text)}
+                              </pre>
+                            </div>
+                          )}
                         </details>
                       </div>
                     )}
