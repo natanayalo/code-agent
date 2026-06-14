@@ -37,19 +37,18 @@ Active focus:
 
 ## Next Priorities
 
-1. T-190: Dashboard UI for Idea Inbox.
-2. T-191: Add Trigger Sources: Schedule and Idle time.
-3. continue tightening native-agent observability and verifier acceptance policy
+1. T-191: Add Trigger Sources: Schedule and Idle time.
+2. continue tightening native-agent observability and verifier acceptance policy
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
-- T-190: Dashboard UI for Idea Inbox.
 - T-191: Add Trigger Sources: Schedule and Idle time.
 
 ## Recent Completed Milestones
 
+- T-190: Dashboard UI for Idea Inbox (#227)
 - T-189: Route Scout output to Review Inbox (#226)
 - T-188: Implement Idea Inbox / Proposal store (#224)
 - T-187: Add Read-Mostly sandbox policy (#223)

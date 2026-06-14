@@ -7,6 +7,7 @@ import {
   ProjectMemorySnapshot,
   ProjectMemoryUpsertRequest,
 } from '../types/memory';
+import { ProposalSnapshot, ProposalStatus } from '../types/proposal';
 import { ToolDefinition, SandboxStatusResponse } from '../types/system';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -256,6 +257,43 @@ export const api = {
       });
     } catch (error) {
       console.warn(`Failed to cancel task ${taskId}`, error);
+      throw error;
+    }
+  },
+
+  async listProposals(status?: ProposalStatus | string): Promise<ProposalSnapshot[]> {
+    try {
+      const query = new URLSearchParams();
+      if (status) {
+        query.set('status', status);
+      }
+      const queryString = query.toString();
+      const data = await fetchWithAuth(`/proposals${queryString ? `?${queryString}` : ''}`);
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to fetch proposals from API', error);
+      throw error;
+    }
+  },
+
+  async acceptProposal(proposalId: string): Promise<TaskSnapshot> {
+    try {
+      return await fetchWithAuth(`/proposals/${proposalId}/accept`, {
+        method: 'POST',
+      });
+    } catch (error) {
+      console.warn(`Failed to accept proposal ${proposalId}`, error);
+      throw error;
+    }
+  },
+
+  async rejectProposal(proposalId: string): Promise<ProposalSnapshot> {
+    try {
+      return await fetchWithAuth(`/proposals/${proposalId}/reject`, {
+        method: 'POST',
+      });
+    } catch (error) {
+      console.warn(`Failed to reject proposal ${proposalId}`, error);
       throw error;
     }
   },

@@ -489,11 +489,11 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
 
       {loading && <p className="task-detail-muted">Loading task detail...</p>}
 
-      {error && (
+      {error ? (
         <p className="task-detail-error">
           {error instanceof Error ? error.message : 'Failed to load task detail.'}
         </p>
-      )}
+      ) : null}
 
       {task && (
         <div className="task-detail-content">

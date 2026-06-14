@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -23,6 +24,9 @@ describe('TaskCard', () => {
     task_text: 'Test task description',
     status: TaskStatus.IN_PROGRESS,
     created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    session_id: 'session-123',
+    priority: 0,
     repo_url: 'https://github.com/user/repo',
     branch: 'main',
     chosen_worker: 'gemini',
@@ -91,9 +95,8 @@ describe('TaskCard', () => {
   });
 
   it('handles missing or invalid dates', () => {
-    // @ts-expect-error: testing null date
     const taskMissing = { ...mockTask, created_at: null };
-    const { rerender } = render(<TaskCard task={taskMissing} />);
+    const { rerender } = render(<TaskCard task={taskMissing as unknown as import('../types/task').TaskSummarySnapshot} />);
     expect(screen.getByText('N/A')).toBeInTheDocument();
 
     const taskInvalid = { ...mockTask, created_at: 'invalid-date' };

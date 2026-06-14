@@ -25,6 +25,7 @@ from db.models import Task as _Task
 from orchestrator import (
     execution_interaction_service,
     execution_outcome_service,
+    execution_proposal_service,
     execution_retention_service,
     execution_runtime_service,
     execution_snapshot_service,
@@ -88,6 +89,7 @@ from orchestrator.execution_types import (
     ProgressPhase,
     ProjectMemorySnapshot,
     ProjectMemoryUpsertRequest,
+    ProposalSnapshot,
     SessionSnapshot,
     SessionWorkingContextSnapshot,
     SubmissionSession,
@@ -276,6 +278,9 @@ class TaskExecutionService:
     delete_project_memory = execution_snapshot_service.delete_project_memory
     _map_task_to_snapshot = execution_snapshot_service._map_task_to_snapshot
     _map_task_to_summary = execution_snapshot_service._map_task_to_summary
+    list_proposals = execution_proposal_service.list_proposals
+    accept_proposal = execution_proposal_service.accept_proposal
+    reject_proposal = execution_proposal_service.reject_proposal
     _is_pending_interaction = staticmethod(execution_snapshot_service._is_pending_interaction)
     _map_human_interaction_snapshot = staticmethod(
         execution_snapshot_service._map_human_interaction_snapshot
@@ -347,6 +352,7 @@ __all__ = [
     "ProgressPhase",
     "ProjectMemorySnapshot",
     "ProjectMemoryUpsertRequest",
+    "ProposalSnapshot",
     "SessionSnapshot",
     "SessionWorkingContextSnapshot",
     "SubmissionSession",

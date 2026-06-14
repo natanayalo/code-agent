@@ -248,6 +248,21 @@ class HumanInteractionSnapshot(ExecutionModel):
     updated_at: datetime
 
 
+class ProposalSnapshot(ExecutionModel):
+    """A persisted idea or code proposal for review."""
+
+    proposal_id: str
+    session_id: str
+    task_id: str | None = None
+    title: str
+    summary: str
+    content: str | None = None
+    status: str
+    metadata_payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
 class TaskSnapshot(TaskSummarySnapshot):
     """The full task view with execution history and timeline."""
 

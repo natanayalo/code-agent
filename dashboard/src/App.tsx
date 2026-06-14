@@ -15,6 +15,7 @@ import { KnowledgeBasePage } from './components/KnowledgeBasePage';
 import { SystemPage } from './components/SystemPage';
 import { TaskDetailPanel } from './components/TaskDetailPanel';
 import { OperatorInbox } from './components/OperatorInbox';
+import { IdeaInboxPage } from './components/IdeaInboxPage';
 
 const REFRESH_INTERVAL_MS = 30000;
 
@@ -159,6 +160,14 @@ function AppRoutes() {
         element={
           <AuthGuard>
             <SessionsPage />
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/proposals"
+        element={
+          <AuthGuard>
+            <IdeaInboxPage />
           </AuthGuard>
         }
       />
