@@ -3,7 +3,7 @@ import { api } from './api';
 
 // Mock fetch
 const mockFetch = vi.fn();
-global.fetch = mockFetch;
+vi.stubGlobal('fetch', mockFetch);
 
 describe('api service', () => {
   beforeEach(() => {
@@ -453,9 +453,34 @@ describe('api service', () => {
       await expect(api.listSessions()).rejects.toThrow('Network fail');
     });
 
+    it('listProposals catch block rethrows error', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(api.listProposals()).rejects.toThrow('Network fail');
+    });
+
+    it('listProposals returns empty array when response is not an array', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ not_an_array: true }),
+      });
+      const result = await api.listProposals();
+      expect(result).toEqual([]);
+    });
+
     it('decideTaskApproval catch block rethrows error', async () => {
       mockFetch.mockRejectedValueOnce(new Error('Network fail'));
       await expect(api.decideTaskApproval('1', true)).rejects.toThrow('Network fail');
+    });
+
+    it('acceptProposal catch block rethrows error', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(api.acceptProposal('1')).rejects.toThrow('Network fail');
+    });
+
+    it('rejectProposal catch block rethrows error', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(api.rejectProposal('1')).rejects.toThrow('Network fail');
     });
 
     it('throws on JSON parse failure', async () => {
@@ -687,6 +712,56 @@ describe('api service', () => {
       await expect(api.getSandboxStatus()).rejects.toThrow('Sandbox fail');
       expect(warnSpy).toHaveBeenCalled();
       warnSpy.mockRestore();
+    });
+
+    it('listProposals returns array of proposals', async () => {
+      const mockProposals = [{ proposal_id: 'p1', title: 'Idea 1' }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockProposals,
+      });
+
+      const result = await api.listProposals('pending_review');
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/proposals?status=pending_review');
+      expect(result).toEqual(mockProposals);
+    });
+
+    it('acceptProposal sends correct POST request', async () => {
+      const mockSnapshot = { task_id: 't1', status: 'pending' };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockSnapshot,
+      });
+
+      const result = await api.acceptProposal('p1');
+      const [url, options] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/proposals/p1/accept');
+      expect(options.method).toBe('POST');
+      expect(result).toEqual(mockSnapshot);
+    });
+
+    it('rejectProposal sends correct POST request', async () => {
+      const mockSnapshot = { proposal_id: 'p1', status: 'rejected' };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockSnapshot,
+      });
+
+      const result = await api.rejectProposal('p1');
+      const [url, options] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/proposals/p1/reject');
+      expect(options.method).toBe('POST');
+      expect(result).toEqual(mockSnapshot);
     });
   });
 });

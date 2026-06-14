@@ -13,6 +13,8 @@ function_exceptions:
     _suggest_task_spec_model: Chains fallback logic for TaskSpec enrichment; requires unified error handling.
     suggest_route: Complex routing heuristics evaluating multiple fallback rules in sequence.
     suggest_task_spec_and_route: Orchestrates concurrent async planner calls for routing and specs.
+  orchestrator/execution_proposal_service.py:
+    accept_proposal: Cohesive execution orchestration flow spanning DB retrieval, task building, and conditional SQL atomic updates; splitting degrades readability.
   orchestrator/execution_submission_service.py:
     _load_submission_for_task: Reconstructs submission payload from DB state; multiple dependent DB queries.
     _persist_submission: Creates initial DB scaffolding for a task; must run in a single cohesive transaction.

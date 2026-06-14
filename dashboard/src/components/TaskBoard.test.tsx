@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
@@ -24,7 +25,7 @@ describe('TaskBoard', () => {
       status: TaskStatus.FAILED,
       created_at: '2024-01-01T09:00:00Z',
     },
-  ];
+  ] as unknown as import('../types/task').TaskSummarySnapshot[];
 
   const mockRefetch = vi.fn();
 
@@ -193,14 +194,13 @@ describe('TaskBoard', () => {
     const unknownTask = {
       task_id: 'unknown',
       task_text: 'Unknown Status Task',
-      // @ts-expect-error: testing unknown status
       status: 'invalid_status',
       created_at: new Date().toISOString(),
     };
 
     render(
       <TaskBoard
-        tasks={[unknownTask]}
+        tasks={[unknownTask] as unknown as import('../types/task').TaskSummarySnapshot[]}
         loading={false}
         isFetching={false}
         error={null}
