@@ -37,24 +37,23 @@ Active focus:
 
 ## Next Priorities
 
-1. T-180: Define Scout Mode task type and lane parameters
+1. T-186: Define Scout Mode task type and lane parameters
 2. continue tightening native-agent observability and verifier acceptance policy
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
-- T-180: Define Scout Mode task type and lane parameters.
-- T-181: Add Read-Mostly sandbox policy.
-- T-182: Implement Idea Inbox / Proposal store.
-- T-183: Route Scout output to Review Inbox.
-- T-184: Dashboard UI for Idea Inbox.
-- T-185: Add Trigger Sources: Schedule and Idle time.
+- T-186: Define Scout Mode task type and lane parameters.
+- T-187: Add Read-Mostly sandbox policy.
+- T-188: Implement Idea Inbox / Proposal store.
+- T-189: Route Scout output to Review Inbox.
+- T-190: Dashboard UI for Idea Inbox.
+- T-191: Add Trigger Sources: Schedule and Idle time.
 
 ## Recent Completed Milestones
 
-- prepare bounded-scout lane planning
-
+- Prepare bounded-scout lane planning
 - PR-native delivery fields and GitHub branch/draft-PR integration
 - Milestone 17.5: Full E2E Stabilization (T-164 to T-178)
 - Milestone 17: Native Agent Worker Runtime Profiles (T-140 to T-163)
