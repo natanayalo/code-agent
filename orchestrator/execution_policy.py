@@ -160,6 +160,8 @@ def normalize_scout_submission(
         if val is None:
             normalized_budget[key] = cap
         else:
+            if isinstance(val, bool):
+                raise ValueError(f"Invalid budget configuration for {key}: {val}")
             try:
                 coerced_val = int(float(val))
             except (ValueError, TypeError):

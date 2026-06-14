@@ -181,6 +181,16 @@ def test_create_task_rejects_invalid_scout_budget() -> None:
     with pytest.raises(ValueError, match="Invalid budget configuration for max_iterations: abc"):
         service.create_task(submission_invalid_type)
 
+    submission_boolean = execution_module.TaskSubmission(
+        task_text="Run a scout task",
+        repo_url="https://github.com/natanayalo/code-agent",
+        constraints={"task_type": "scout"},
+        budget={"max_iterations": True},
+    )
+
+    with pytest.raises(ValueError, match="Invalid budget configuration for max_iterations: True"):
+        service.create_task(submission_boolean)
+
 
 @pytest.mark.anyio
 async def test_submit_task_emits_progress_notifications_for_success(monkeypatch) -> None:
