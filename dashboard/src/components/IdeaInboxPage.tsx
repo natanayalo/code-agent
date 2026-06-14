@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, XCircle, Lightbulb } from 'lucide-react';
-import { api, ApiError } from '../services/api';
+import { api } from '../services/api';
 import { ProposalSnapshot, ProposalStatus } from '../types/proposal';
 import { DashboardLayout } from './layout/DashboardLayout';
 
@@ -29,7 +29,7 @@ export function IdeaInboxPage() {
       // For now, we stay on the Idea Inbox and it refreshes.
     },
     onError: (err) => {
-      const msg = err instanceof ApiError ? err.message : 'Failed to accept proposal';
+      const msg = err instanceof Error ? err.message : 'Failed to accept proposal';
       setActionError(msg);
     },
   });
@@ -44,7 +44,7 @@ export function IdeaInboxPage() {
       setActionError(null);
     },
     onError: (err) => {
-      const msg = err instanceof ApiError ? err.message : 'Failed to reject proposal';
+      const msg = err instanceof Error ? err.message : 'Failed to reject proposal';
       setActionError(msg);
     },
   });

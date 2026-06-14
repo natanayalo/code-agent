@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Literal
 
@@ -77,8 +78,6 @@ def _build_task_text_for_proposal(proposal: Proposal) -> str:
         files_joined = "\n".join(str(f) for f in files_changed if f)
         task_text += f"\n\nFiles changed:\n{files_joined}"
     if "json_payload" in metadata:
-        import json
-
         payload_str = json.dumps(metadata["json_payload"], indent=2)
         task_text += f"\n\nJSON Payload:\n```json\n{payload_str}\n```"
 
