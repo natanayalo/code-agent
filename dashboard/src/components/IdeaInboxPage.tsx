@@ -101,7 +101,11 @@ export function IdeaInboxPage() {
                 <div key={proposal.proposal_id} className="memory-card">
                   <div className="memory-header">
                     <h3 className="memory-key">{proposal.title}</h3>
-                    <div className="memory-source">{new Date(proposal.created_at).toLocaleString()}</div>
+                    <div className="memory-source">
+                      {proposal.created_at && !isNaN(new Date(proposal.created_at).getTime())
+                        ? new Date(proposal.created_at).toLocaleString()
+                        : 'N/A'}
+                    </div>
                   </div>
                   <div className="memory-content">
                     <p>{proposal.summary}</p>
