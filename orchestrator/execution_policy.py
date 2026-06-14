@@ -164,7 +164,7 @@ def normalize_scout_submission(
                 raise ValueError(f"Invalid budget configuration for {key}: {val}")
             try:
                 coerced_val = int(float(val))
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):
                 raise ValueError(f"Invalid budget configuration for {key}: {val}")
 
             if coerced_val < 0:
