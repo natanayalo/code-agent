@@ -293,7 +293,7 @@ describe('SessionsPage', () => {
       }
     ];
 
-    vi.mocked(api.listSessions).mockResolvedValue(mockSessions as unknown as import('../types/system').SessionSnapshot[]);
+    vi.mocked(api.listSessions).mockResolvedValue(mockSessions as unknown as import('../types/session').SessionSnapshot[]);
 
     render(
       <QueryClientProvider client={queryClient}>
@@ -324,7 +324,7 @@ describe('SessionsPage', () => {
       },
     ];
 
-    vi.mocked(api.listSessions).mockResolvedValue(mockSessions as unknown as import('../types/system').SessionSnapshot[]);
+    vi.mocked(api.listSessions).mockResolvedValue(mockSessions as unknown as import('../types/session').SessionSnapshot[]);
 
     render(
       <QueryClientProvider client={queryClient}>

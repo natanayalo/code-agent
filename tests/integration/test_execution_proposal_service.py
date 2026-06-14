@@ -25,7 +25,7 @@ def test_session_id(session_factory):
 
 
 @pytest.fixture
-def pending_proposal(session_factory, test_session_id):
+def pending_proposal_id(session_factory, test_session_id):
     with session_scope(session_factory) as session:
         repo = ProposalRepository(session)
         proposal = repo.create_proposal(
@@ -35,19 +35,19 @@ def pending_proposal(session_factory, test_session_id):
             content="Some details here",
             status=ProposalStatus.PENDING_REVIEW,
         )
-        return proposal
+        return proposal.id
 
 
-def test_list_proposals(client, pending_proposal):
+def test_list_proposals(client, pending_proposal_id):
     task_service = client.app.state.task_service
     proposals = task_service.list_proposals(status=ProposalStatus.PENDING_REVIEW)
     assert len(proposals) > 0
-    assert any(p.proposal_id == pending_proposal.id for p in proposals)
+    assert any(p.proposal_id == pending_proposal_id for p in proposals)
 
 
-def test_accept_proposal_success(client, pending_proposal):
+def test_accept_proposal_success(client, pending_proposal_id):
     task_service = client.app.state.task_service
-    status, task_snapshot, detail = task_service.accept_proposal(pending_proposal.id)
+    status, task_snapshot, detail = task_service.accept_proposal(pending_proposal_id)
     assert status == "created"
     assert task_snapshot is not None
     assert detail is None
@@ -57,22 +57,22 @@ def test_accept_proposal_success(client, pending_proposal):
     assert "A test idea summary" in task_snapshot.task_text
 
     # Check idempotency
-    status2, task_snapshot2, detail2 = task_service.accept_proposal(pending_proposal.id)
+    status2, task_snapshot2, detail2 = task_service.accept_proposal(pending_proposal_id)
     assert status2 == "conflict"
     assert task_snapshot2 is not None
     assert task_snapshot2.task_id == task_snapshot.task_id
     assert "already accepted" in detail2
 
 
-def test_reject_proposal_success(client, pending_proposal):
+def test_reject_proposal_success(client, pending_proposal_id):
     task_service = client.app.state.task_service
-    status, proposal_snapshot, detail = task_service.reject_proposal(pending_proposal.id)
+    status, proposal_snapshot, detail = task_service.reject_proposal(pending_proposal_id)
     assert status == "success"
     assert proposal_snapshot is not None
     assert proposal_snapshot.status == "rejected"
 
     # Reject again (idempotent)
-    status2, proposal_snapshot2, detail2 = task_service.reject_proposal(pending_proposal.id)
+    status2, proposal_snapshot2, detail2 = task_service.reject_proposal(pending_proposal_id)
     assert status2 == "success"
     assert proposal_snapshot2.status == "rejected"
 
