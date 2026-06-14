@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Report oversized Python modules and functions as non-blocking review prompts."""
+"""Report oversized Python modules and functions as non-blocking review prompts.
+
+Waivers (in .sizecheck-exceptions.yaml) are strongly discouraged and should only be
+used for exceptional cases such as generated code, unavoidable third-party
+compatibility shims, or large preformatted data/constants that cannot reasonably
+be refactored. Splitting files or functions is the preferred remediation.
+"""
 
 from __future__ import annotations
 
@@ -151,7 +157,11 @@ def _load_exceptions(repo_root: Path) -> dict:
     if not exc_file.exists():
         return {}
     if yaml is None:
-        print("Warning: PyYAML not found, but .sizecheck-exceptions.yaml exists.", file=sys.stderr)
+        print(
+            "Warning: PyYAML not found, but .sizecheck-exceptions.yaml exists. "
+            "Note: adding waivers is discouraged; prefer refactoring over exceptions.",
+            file=sys.stderr,
+        )
         return {}
     try:
         with exc_file.open("r", encoding="utf-8") as f:
@@ -204,11 +214,18 @@ def main() -> int:
 
     if has_errors:
         print(
-            "\npython-size-check: Thresholds are blocking. Split the file/function or add a waiver in .sizecheck-exceptions.yaml."  # noqa: E501
+            "\npython-size-check:"
+            "Thresholds are blocking. Splitting the file/function is the preferred fix. "
+            "Adding a waiver is strongly discouraged and should be reserved for exceptional cases "
+            "(generated code, unavoidable compatibility shims, or large static data). "
+            "If necessary, add a waiver in .sizecheck-exceptions.yaml."
         )
         return 1
 
-    print("\npython-size-check: All findings are covered by waivers.")
+    print(
+        "\npython-size-check: All findings are covered by waivers."
+        "Note: waivers are discouraged — review exceptions and prefer refactoring."
+    )
     return 0
 
 

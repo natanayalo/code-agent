@@ -248,7 +248,7 @@ class CodexCliWorkerNativeMixin:
         executable = getattr(self.runtime_adapter, "executable", "codex")  # type: ignore[attr-defined]
         model = getattr(self.runtime_adapter, "model", None)  # type: ignore[attr-defined]
         profile = getattr(self.runtime_adapter, "profile", None)  # type: ignore[attr-defined]
-        read_only_requested = bool(request.constraints.get("read_only"))
+        read_only_requested = request.read_only or bool(request.constraints.get("read_only"))
 
         # Sandbox selection policy (T-172)
         in_container = is_in_container()

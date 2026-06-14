@@ -42,6 +42,7 @@ class DockerSandboxContainerRequest(SandboxModel):
         min_length=1,
     )
     start_timeout_seconds: int = Field(default=30, ge=1)
+    read_only_workspace: bool = False
 
 
 class DockerSandboxContainer(SandboxModel):
@@ -87,14 +88,39 @@ def _append_workspace_mount(
     if working_dir is None or working_dir == "/workspace":
         working_dir = target_path
 
+    ro_flag = ",readonly" if request.read_only_workspace else ""
     command.extend(
         [
             "--workdir",
             working_dir,
             "--mount",
-            f"type=bind,source={workspace_path},target={target_path}",
+            f"type=bind,source={workspace_path},target={target_path}{ro_flag}",
         ]
     )
+
+    if request.read_only_workspace:
+        code_agent_path = workspace_path / ".code-agent"
+        code_agent_path.mkdir(parents=True, exist_ok=True)
+        agent_home_path = workspace_path / ".agent_home"
+        agent_home_path.mkdir(parents=True, exist_ok=True)
+        artifacts_path = workspace_path / "artifacts"
+        artifacts_path.mkdir(parents=True, exist_ok=True)
+        sandbox_db_path = workspace_path / ".sandbox.db"
+        sandbox_db_path.touch(exist_ok=True)
+
+        command.extend(
+            ["--mount", f"type=bind,source={code_agent_path},target={target_path}/.code-agent"]
+        )
+        command.extend(
+            ["--mount", f"type=bind,source={agent_home_path},target={target_path}/.agent_home"]
+        )
+        command.extend(
+            ["--mount", f"type=bind,source={artifacts_path},target={target_path}/artifacts"]
+        )
+        command.extend(
+            ["--mount", f"type=bind,source={sandbox_db_path},target={target_path}/.sandbox.db"]
+        )
+
     return workspace_path, working_dir
 
 
@@ -175,7 +201,10 @@ def _append_local_repo_mount(
             "Local repo path contains a comma which is incompatible with "
             f"the --mount syntax: {local_repo_path}"
         )
-    command.extend(["--mount", f"type=bind,source={local_repo_path},target={local_repo_path}"])
+    ro_flag = ",readonly" if request.read_only_workspace else ""
+    command.extend(
+        ["--mount", f"type=bind,source={local_repo_path},target={local_repo_path}{ro_flag}"]
+    )
 
 
 def _append_user_options(command: list[str]) -> None:

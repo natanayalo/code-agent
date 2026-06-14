@@ -7,6 +7,7 @@ import os
 import shlex
 import subprocess
 import threading
+from pathlib import Path
 from time import perf_counter
 from typing import Final, Protocol
 
@@ -72,6 +73,7 @@ class DockerSandboxCommand(SandboxModel):
     cpu_limit: float | None = 1.0
     secrets: dict[str, str] = Field(default_factory=dict)
     path_policy: PathPolicy | None = None
+    read_only_workspace: bool = False
 
 
 class DockerSandboxResult(SandboxModel):
@@ -136,6 +138,61 @@ _read_stream_bounded = read_stream_bounded
 _decode_bounded = decode_bounded
 
 
+def _append_workspace_mount(
+    command: list[str],
+    request: DockerSandboxCommand,
+    workspace_path: Path,
+) -> tuple[Path, str]:
+    target_path = str(workspace_path)
+    working_dir = request.working_dir
+    if working_dir is None or working_dir == "/workspace":
+        working_dir = target_path
+
+    ro_flag = ",readonly" if request.read_only_workspace else ""
+    command.extend(
+        [
+            "--workdir",
+            working_dir,
+            "--mount",
+            f"type=bind,source={workspace_path},target={target_path}{ro_flag}",
+        ]
+    )
+
+    if request.read_only_workspace:
+        code_agent_path = workspace_path / ".code-agent"
+        code_agent_path.mkdir(parents=True, exist_ok=True)
+        agent_home_path = workspace_path / ".agent_home"
+        agent_home_path.mkdir(parents=True, exist_ok=True)
+        artifacts_path = workspace_path / "artifacts"
+        artifacts_path.mkdir(parents=True, exist_ok=True)
+        sandbox_db_path = workspace_path / ".sandbox.db"
+        sandbox_db_path.touch(exist_ok=True)
+
+        command.extend(
+            ["--mount", f"type=bind,source={code_agent_path},target={target_path}/.code-agent"]
+        )
+        command.extend(
+            ["--mount", f"type=bind,source={agent_home_path},target={target_path}/.agent_home"]
+        )
+        command.extend(
+            ["--mount", f"type=bind,source={artifacts_path},target={target_path}/artifacts"]
+        )
+        command.extend(
+            ["--mount", f"type=bind,source={sandbox_db_path},target={target_path}/.sandbox.db"]
+        )
+
+    return workspace_path, working_dir
+
+
+def _append_user_options(command: list[str]) -> None:
+    try:
+        uid = os.getuid()
+        gid = os.getgid()
+        command.extend(["--user", f"{uid}:{gid}"])
+    except AttributeError:
+        pass  # Windows or environment without getuid
+
+
 def _build_docker_run_command(
     request: DockerSandboxCommand,
     *,
@@ -166,26 +223,9 @@ def _build_docker_run_command(
             f"Workspace path contains a comma which is incompatible with "
             f"the --mount syntax: {workspace_path}"
         )
-    target_path = str(workspace_path)
-    working_dir = request.working_dir
-    if working_dir is None or working_dir == "/workspace":
-        working_dir = target_path
 
-    command.extend(
-        [
-            "--workdir",
-            working_dir,
-            "--mount",
-            f"type=bind,source={workspace_path},target={target_path}",
-        ]
-    )
-
-    try:
-        uid = os.getuid()
-        gid = os.getgid()
-        command.extend(["--user", f"{uid}:{gid}"])
-    except AttributeError:
-        pass  # Windows or environment without getuid
+    workspace_path, working_dir = _append_workspace_mount(command, request, workspace_path)
+    _append_user_options(command)
 
     if not request.network_enabled:
         command.extend(["--network", "none"])

@@ -158,3 +158,75 @@ def test_persistent_shell_session_preserves_state_across_commands(tmp_path: Path
         )
     finally:
         container_manager.stop(container)
+
+
+def test_docker_sandbox_runner_read_only_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A mounted read-only workspace command should fail to write outside explicit mounts."""
+    image = os.environ.get("CODE_AGENT_TEST_DOCKER_IMAGE", "python:3.12-slim")
+    if not _docker_and_image_available(image):
+        pytest.skip(f"Docker daemon or image {image!r} is unavailable")
+
+    source_repo = _create_local_repo(tmp_path)
+    workspace_manager = WorkspaceManager(tmp_path / "workspaces")
+    workspace = workspace_manager.create_workspace(
+        WorkspaceRequest(task_id="task-ro", repo_url=str(source_repo))
+    )
+
+    runner = DockerSandboxRunner(default_image=image)
+
+    # 1. Attempt to write to the root of the workspace should fail
+    result_fail = runner.run(
+        DockerSandboxCommand(
+            workspace=workspace,
+            read_only_workspace=True,
+            command=[
+                "python3",
+                "-c",
+                "from pathlib import Path; Path('should_fail.txt').write_text('fail')",
+            ],
+        )
+    )
+    assert result_fail.exit_code != 0
+
+    # 2. Attempt to write to .code-agent or artifacts should succeed
+    result_success = runner.run(
+        DockerSandboxCommand(
+            workspace=workspace,
+            read_only_workspace=True,
+            command=[
+                "python3",
+                "-c",
+                (
+                    "from pathlib import Path; "
+                    "Path('artifacts/should_succeed.txt').write_text('success')"
+                ),
+            ],
+        )
+    )
+    assert result_success.exit_code == 0
+    assert (workspace.workspace_path / "artifacts" / "should_succeed.txt").exists()
+
+    # 3. Attempt to write to local repo should fail (using ContainerManager)
+    monkeypatch.setenv("CODE_AGENT_ALLOWED_LOCAL_REMOTES", str(source_repo))
+    workspace_with_local_repo = workspace_manager.create_workspace(
+        WorkspaceRequest(task_id="task-ro-local", repo_url=f"file://{source_repo}")
+    )
+    container_manager = DockerSandboxContainerManager(default_image=image)
+    container = container_manager.start(
+        DockerSandboxContainerRequest(
+            workspace=workspace_with_local_repo,
+            read_only_workspace=True,
+        )
+    )
+    try:
+        with DockerShellSession(container) as session:
+            python_cmd = (
+                'python3 -c "from pathlib import Path; '
+                f"Path('{source_repo}/local_repo_write.txt').write_text('fail')\""
+            )
+            result_local_repo = session.execute(python_cmd)
+        assert result_local_repo.exit_code != 0
+    finally:
+        container_manager.stop(container)

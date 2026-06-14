@@ -423,6 +423,7 @@ class CodexCliWorker(CodexCliWorkerRuntimeMixin, CodexCliWorkerNativeMixin, Work
                 defaults=self.runtime_settings,
                 task_id=request.task_id,
                 session_id=request.session_id,
+                read_only=request.read_only or bool(request.constraints.get("read_only")),
             )
             result = self._execute_native_runtime(
                 request,
