@@ -194,7 +194,8 @@ def accept_proposal(
                     accepted_task_id = (refetched.metadata_payload or {}).get("accepted_task_id")
                     if accepted_task_id and accepted_task_id != outcome.task_snapshot.task_id:
                         # Cancel our orphaned task since another task was accepted for this proposal
-                        self.cancel_task(task_id=outcome.task_snapshot.task_id)
+                        if not outcome.duplicate:
+                            self.cancel_task(task_id=outcome.task_snapshot.task_id)
                         actual_task = self.get_task(accepted_task_id)
                         return (
                             "conflict",
@@ -203,13 +204,15 @@ def accept_proposal(
                         )
                     return "conflict", outcome.task_snapshot, "Proposal was accepted concurrently."
 
-                self.cancel_task(task_id=outcome.task_snapshot.task_id)
+                if not outcome.duplicate:
+                    self.cancel_task(task_id=outcome.task_snapshot.task_id)
                 return "conflict", None, "Proposal was modified concurrently."
 
             session.expire(proposal)
     except Exception:
         try:
-            self.cancel_task(task_id=outcome.task_snapshot.task_id)
+            if not outcome.duplicate:
+                self.cancel_task(task_id=outcome.task_snapshot.task_id)
         except Exception as cancel_err:
             logger.error(
                 "Failed to cancel orphaned task %s after proposal update error: %s",
