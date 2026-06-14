@@ -212,8 +212,8 @@ def _persist_scout_proposal_if_needed(
             "files_changed": state.result.files_changed,
             "artifacts": [artifact.model_dump(mode="json") for artifact in artifacts],
             "budget_usage": state.result.budget_usage,
-            "diff_text": state.result.diff_text,
-            "json_payload": state.result.json_payload,
+            "diff_text": getattr(state.result, "diff_text", None),
+            "json_payload": getattr(state.result, "json_payload", None),
         },
     )
     logger.info(
