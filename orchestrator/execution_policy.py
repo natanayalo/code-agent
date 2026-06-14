@@ -161,12 +161,13 @@ def normalize_scout_submission(
             normalized_budget[key] = cap
         else:
             try:
-                coerced_val = int(val)
-                if coerced_val < 0:
-                    coerced_val = cap
-                normalized_budget[key] = min(coerced_val, cap)
+                coerced_val = int(float(val))
             except (ValueError, TypeError):
-                normalized_budget[key] = cap
+                raise ValueError(f"Invalid budget configuration for {key}: {val}")
+
+            if coerced_val < 0:
+                raise ValueError(f"Budget value for {key} cannot be negative")
+            normalized_budget[key] = min(coerced_val, cap)
 
     return normalized_constraints, normalized_budget
 

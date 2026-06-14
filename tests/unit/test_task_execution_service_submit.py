@@ -130,8 +130,8 @@ def test_create_task_clamps_scout_budget_and_forces_read_only() -> None:
             "max_iterations": 10,
             "worker_timeout_seconds": 600,
             "max_tool_calls": 50,
-            "max_shell_commands": -5,
-            "max_retries": -1,
+            "max_shell_commands": 50,
+            "max_retries": 5,
         },
     )
 
@@ -155,6 +155,31 @@ def test_create_task_clamps_scout_budget_and_forces_read_only() -> None:
         assert budget.get("max_shell_commands") == 8
         assert budget.get("max_retries") == 0
         assert budget.get("execution_mode") == "unattended"
+
+
+def test_create_task_rejects_invalid_scout_budget() -> None:
+    """Scout task submission with invalid budget should raise ValueError."""
+    service, session_factory = _make_task_service()
+
+    submission_negative = execution_module.TaskSubmission(
+        task_text="Run a scout task",
+        repo_url="https://github.com/natanayalo/code-agent",
+        constraints={"task_type": "scout"},
+        budget={"max_iterations": -1},
+    )
+
+    with pytest.raises(ValueError, match="Budget value for max_iterations cannot be negative"):
+        service.create_task(submission_negative)
+
+    submission_invalid_type = execution_module.TaskSubmission(
+        task_text="Run a scout task",
+        repo_url="https://github.com/natanayalo/code-agent",
+        constraints={"task_type": "scout"},
+        budget={"max_iterations": "abc"},
+    )
+
+    with pytest.raises(ValueError, match="Invalid budget configuration for max_iterations: abc"):
+        service.create_task(submission_invalid_type)
 
 
 @pytest.mark.anyio
