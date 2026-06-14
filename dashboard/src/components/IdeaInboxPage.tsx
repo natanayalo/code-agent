@@ -17,6 +17,9 @@ export function IdeaInboxPage() {
 
   const acceptMutation = useMutation({
     mutationFn: (proposalId: string) => api.acceptProposal(proposalId),
+    onMutate: () => {
+      setActionError(null);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['proposals'] });
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
@@ -33,6 +36,9 @@ export function IdeaInboxPage() {
 
   const rejectMutation = useMutation({
     mutationFn: (proposalId: string) => api.rejectProposal(proposalId),
+    onMutate: () => {
+      setActionError(null);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['proposals'] });
       setActionError(null);

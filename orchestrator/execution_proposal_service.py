@@ -72,8 +72,9 @@ def _build_task_text_for_proposal(proposal: Proposal) -> str:
     metadata = proposal.metadata_payload or {}
     if "diff_text" in metadata:
         task_text += f"\n\nDiff:\n```diff\n{metadata['diff_text']}\n```"
-    if "files_changed" in metadata:
-        files_joined = "\n".join(metadata["files_changed"])
+    files_changed = metadata.get("files_changed")
+    if isinstance(files_changed, list):
+        files_joined = "\n".join(str(f) for f in files_changed if f)
         task_text += f"\n\nFiles changed:\n{files_joined}"
     if "json_payload" in metadata:
         import json
@@ -105,7 +106,7 @@ def accept_proposal(
 
         if proposal.status == ProposalStatus.ACCEPTED:
             # Idempotent return
-            accepted_task_id = proposal.metadata_payload.get("accepted_task_id")
+            accepted_task_id = (proposal.metadata_payload or {}).get("accepted_task_id")
             if accepted_task_id:
                 task_snapshot = self.get_task(accepted_task_id)
                 if task_snapshot:
@@ -168,7 +169,7 @@ def accept_proposal(
         repo = ProposalRepository(session)
         proposal = repo.get_proposal(proposal_id)
 
-        metadata = dict(proposal.metadata_payload)
+        metadata = dict(proposal.metadata_payload) if proposal.metadata_payload else {}
         metadata["accepted_task_id"] = outcome.task_snapshot.task_id
 
         stmt = (
