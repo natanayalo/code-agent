@@ -137,17 +137,20 @@ def _apply_execution_budget_policy(
 
 
 def normalize_scout_submission(
-    constraints: dict[str, Any], budget: dict[str, Any]
+    constraints: dict[str, Any] | None, budget: dict[str, Any] | None
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Enforce Scout mode constraints and clamp budget caps."""
-    is_scout = constraints.get("task_type") == "scout"
-    if not is_scout:
-        return constraints, budget
+    safe_constraints = dict(constraints or {})
+    safe_budget = dict(budget or {})
 
-    normalized_constraints = dict(constraints)
+    is_scout = safe_constraints.get("task_type") == "scout"
+    if not is_scout:
+        return safe_constraints, safe_budget
+
+    normalized_constraints = dict(safe_constraints)
     normalized_constraints["read_only"] = True
 
-    normalized_budget = dict(budget)
+    normalized_budget = dict(safe_budget)
     normalized_budget["execution_mode"] = SCOUT_BUDGET_CAPS["execution_mode"]
 
     for key, cap in SCOUT_BUDGET_CAPS.items():
