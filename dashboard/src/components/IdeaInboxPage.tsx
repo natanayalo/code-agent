@@ -109,7 +109,7 @@ export function IdeaInboxPage() {
                   </div>
                   <div className="memory-content">
                     <p>{proposal.summary}</p>
-                    {(proposal.content || proposal.metadata_payload) && (
+                    {(proposal.content || proposal.metadata_payload?.files_changed || proposal.metadata_payload?.diff_text) && (
                       <div className="proposal-details">
                         <details>
                           <summary>View Details</summary>

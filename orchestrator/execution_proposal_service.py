@@ -171,42 +171,53 @@ def accept_proposal(
 
     outcome = self.create_task_outcome(submission, delivery_key=delivery_key)
 
-    with session_scope(self.session_factory) as session:
-        repo = ProposalRepository(session)
-        proposal = repo.get_proposal(proposal_id)
+    try:
+        with session_scope(self.session_factory) as session:
+            repo = ProposalRepository(session)
+            proposal = repo.get_proposal(proposal_id)
 
-        metadata = dict(proposal.metadata_payload) if proposal.metadata_payload else {}
-        metadata["accepted_task_id"] = outcome.task_snapshot.task_id
+            metadata = dict(proposal.metadata_payload) if proposal.metadata_payload else {}
+            metadata["accepted_task_id"] = outcome.task_snapshot.task_id
 
-        stmt = (
-            update(Proposal)
-            .where(Proposal.id == proposal_id, Proposal.status == ProposalStatus.PENDING_REVIEW)
-            .values(status=ProposalStatus.ACCEPTED, metadata_payload=metadata)
-        )
-        result = session.execute(stmt)
+            stmt = (
+                update(Proposal)
+                .where(Proposal.id == proposal_id, Proposal.status == ProposalStatus.PENDING_REVIEW)
+                .values(status=ProposalStatus.ACCEPTED, metadata_payload=metadata)
+            )
+            result = session.execute(stmt)
 
-        if getattr(result, "rowcount", 0) == 0:
+            if getattr(result, "rowcount", 0) == 0:
+                session.expire(proposal)
+                refetched = session.get(Proposal, proposal_id)
+                if refetched is None:
+                    return "not_found", None, f"Proposal '{proposal_id}' was deleted concurrently."
+                if refetched.status == ProposalStatus.ACCEPTED:
+                    accepted_task_id = (refetched.metadata_payload or {}).get("accepted_task_id")
+                    if accepted_task_id and accepted_task_id != outcome.task_snapshot.task_id:
+                        # Cancel our orphaned task since another task was accepted for this proposal
+                        self.cancel_task(task_id=outcome.task_snapshot.task_id)
+                        actual_task = self.get_task(accepted_task_id)
+                        return (
+                            "conflict",
+                            actual_task,
+                            "Proposal was accepted concurrently with a different task.",
+                        )
+                    return "conflict", outcome.task_snapshot, "Proposal was accepted concurrently."
+
+                self.cancel_task(task_id=outcome.task_snapshot.task_id)
+                return "conflict", None, "Proposal was modified concurrently."
+
             session.expire(proposal)
-            refetched = session.get(Proposal, proposal_id)
-            if refetched is None:
-                return "not_found", None, f"Proposal '{proposal_id}' was deleted concurrently."
-            if refetched.status == ProposalStatus.ACCEPTED:
-                accepted_task_id = (refetched.metadata_payload or {}).get("accepted_task_id")
-                if accepted_task_id and accepted_task_id != outcome.task_snapshot.task_id:
-                    # Cancel our orphaned task since another task was accepted for this proposal
-                    self.cancel_task(task_id=outcome.task_snapshot.task_id)
-                    actual_task = self.get_task(accepted_task_id)
-                    return (
-                        "conflict",
-                        actual_task,
-                        "Proposal was accepted concurrently with a different task.",
-                    )
-                return "conflict", outcome.task_snapshot, "Proposal was accepted concurrently."
-
+    except Exception:
+        try:
             self.cancel_task(task_id=outcome.task_snapshot.task_id)
-            return "conflict", None, "Proposal was modified concurrently."
-
-        session.expire(proposal)
+        except Exception as cancel_err:
+            logger.error(
+                "Failed to cancel orphaned task %s after proposal update error: %s",
+                outcome.task_snapshot.task_id,
+                cancel_err,
+            )
+        raise
 
     return "created", outcome.task_snapshot, None
 
