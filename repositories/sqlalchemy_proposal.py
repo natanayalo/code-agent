@@ -68,6 +68,9 @@ class ProposalRepository:
         offset: int = 0,
     ) -> list[Proposal]:
         """List proposals, ordered newest-first, with optional filtering."""
+        limit = max(0, limit)
+        offset = max(0, offset)
+
         stmt = select(Proposal)
 
         if status is not None:
