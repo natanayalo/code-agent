@@ -64,6 +64,7 @@ class ProposalRepository:
         *,
         status: ProposalStatus | str | None = None,
         session_id: str | None = None,
+        task_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Proposal]:
@@ -77,6 +78,8 @@ class ProposalRepository:
             stmt = stmt.where(Proposal.status == ProposalStatus(status))
         if session_id is not None:
             stmt = stmt.where(Proposal.session_id == session_id)
+        if task_id is not None:
+            stmt = stmt.where(Proposal.task_id == task_id)
 
         stmt = stmt.order_by(Proposal.created_at.desc(), Proposal.id.desc())
         stmt = stmt.limit(limit).offset(offset)

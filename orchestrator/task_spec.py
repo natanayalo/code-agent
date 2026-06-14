@@ -198,6 +198,8 @@ def build_task_spec(
     delivery_mode = _resolve_delivery_mode(normalized_task_text, task_constraints)
     if is_no_modification_smoke and delivery_mode == "workspace":
         delivery_mode = "summary"
+    if task_type == "scout":
+        delivery_mode = cast(TaskDeliveryMode, "summary")
 
     assumptions = _coerce_string_list(task_constraints.get("assumptions"))
     if not repo_url:
