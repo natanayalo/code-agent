@@ -67,9 +67,19 @@ def _normalize_and_validate_submission(self: Any, submission: TaskSubmission) ->
             "worker_profile_override must reference a configured worker profile "
             f"when profile routing is enabled. Unknown profile: '{normalized_profile_override}'."
         )
-    if normalized_profile_override == submission.worker_profile_override:
-        return submission
-    return submission.model_copy(update={"worker_profile_override": normalized_profile_override})
+    try:
+        normalized_constraints, normalized_budget = normalize_scout_submission(
+            submission.constraints, submission.budget
+        )
+    except ValueError as e:
+        raise TaskSubmissionValidationError(str(e)) from e
+    return submission.model_copy(
+        update={
+            "worker_profile_override": normalized_profile_override,
+            "constraints": normalized_constraints,
+            "budget": normalized_budget,
+        }
+    )
 
 
 def replay_task(
@@ -189,13 +199,10 @@ def _persist_submission(
         session_repo = SessionRepository(session)
         task_repo = TaskRepository(session)
         interaction_repo = HumanInteractionRepository(session)
-        normalized_constraints, normalized_budget = normalize_scout_submission(
-            submission.constraints, submission.budget
-        )
-        queue_lane = "scout" if normalized_constraints.get("task_type") == "scout" else "primary"
+        queue_lane = "scout" if submission.constraints.get("task_type") == "scout" else "primary"
 
         sanitized_constraints = _sanitize_submission_constraints(
-            normalized_constraints,
+            submission.constraints,
             reserved_keys=_RESERVED_INTERNAL_CONSTRAINT_KEYS,
         )
         persisted_constraints = dict(sanitized_constraints)
@@ -247,7 +254,7 @@ def _persist_submission(
             branch=submission.branch,
             callback_url=submission.callback_url,
             worker_override=submission.worker_override,
-            budget=normalized_budget,
+            budget=submission.budget,
             secrets=dict(submission.secrets),
             task_spec=task_spec,
             trace_context=trace_context,

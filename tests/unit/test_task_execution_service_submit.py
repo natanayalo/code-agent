@@ -111,6 +111,7 @@ async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -
     await service.submit_task(submission, persisted)
 
     assert recorded_calls == [
+        "_load_submission_for_task",
         "fake_mark_task_in_progress",
         "_get_count",
         "fake_persist_execution_outcome",
