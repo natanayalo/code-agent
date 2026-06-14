@@ -118,6 +118,45 @@ async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -
     ]
 
 
+def test_create_task_clamps_scout_budget_and_forces_read_only() -> None:
+    """Scout task constraints should be clamped to bounds and forced read-only."""
+    service, session_factory = _make_task_service()
+
+    submission = execution_module.TaskSubmission(
+        task_text="Run a scout task",
+        repo_url="https://github.com/natanayalo/code-agent",
+        constraints={"task_type": "scout", "read_only": False},
+        budget={
+            "max_iterations": 10,
+            "worker_timeout_seconds": 600,
+            "max_tool_calls": 50,
+            "max_shell_commands": 50,
+            "max_retries": 5,
+        },
+    )
+
+    snapshot, persisted = service.create_task(submission)
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(persisted.task_id)
+        assert task is not None
+        assert task.queue_lane == "scout"
+
+        constraints = dict(task.constraints)
+        budget = dict(task.budget)
+
+        # Constraints are forced to read_only=True
+        assert constraints.get("read_only") is True
+
+        # Budget clamped to scout caps
+        assert budget.get("max_iterations") == 3
+        assert budget.get("worker_timeout_seconds") == 180
+        assert budget.get("max_tool_calls") == 8
+        assert budget.get("max_shell_commands") == 8
+        assert budget.get("max_retries") == 0
+        assert budget.get("execution_mode") == "unattended"
+
+
 @pytest.mark.anyio
 async def test_submit_task_emits_progress_notifications_for_success(monkeypatch) -> None:
     """Successful task execution should emit started, running, and completed updates."""

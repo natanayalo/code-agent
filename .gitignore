@@ -25,3 +25,7 @@ htmlcov/
 # Local editor and OS files
 .vscode/
 .DS_Store
+
+# Local databases
+*.db
+*.sqlite

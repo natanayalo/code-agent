@@ -249,6 +249,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    queue_lane: Mapped[str] = mapped_column(String(50), nullable=False, default="primary")
     chosen_worker: Mapped[WorkerType | None] = mapped_column(WORKER_TYPE_ENUM, nullable=True)
     chosen_profile: Mapped[str | None] = mapped_column(String(255), nullable=True)
     runtime_mode: Mapped[WorkerRuntimeMode | None] = mapped_column(

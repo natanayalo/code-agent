@@ -55,5 +55,11 @@ Start with:
 - `pre-commit run --files <changed schema files>`
 - `pytest tests/unit/test_db_models.py tests/integration/test_db_migrations.py`
 
-If real Postgres compatibility matters, add:
-- `DATABASE_URL=... alembic upgrade head`
+If real Postgres compatibility matters or to apply migrations locally, use the Docker Compose `migrate` service:
+- `docker compose up migrate`
+
+Or manually via the container:
+- `docker compose run --rm api alembic upgrade head`
+
+> [!WARNING]
+> Do not run `alembic` directly on the host without explicitly passing a Postgres `DATABASE_URL`, as it will fall back to creating accidental local SQLite `.db` files that clutter the repository.

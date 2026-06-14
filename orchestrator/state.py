@@ -141,6 +141,7 @@ TaskSpecType = Literal[
     "investigation",
     "review_fix",
     "maintenance",
+    "scout",
 ]
 TaskDeliveryMode = WorkerDeliveryMode
 TaskWorkspaceMode = Literal["clone", "init", "none"]

@@ -56,6 +56,14 @@ GLOBAL_BUDGET_CAPS: dict[str, int] = {
     "max_verifier_passes": 5,
     "max_observation_characters": 12000,
 }
+SCOUT_BUDGET_CAPS: dict[str, Any] = {
+    "execution_mode": UNATTENDED_EXECUTION_MODE,
+    "max_iterations": 3,
+    "worker_timeout_seconds": 180,
+    "max_tool_calls": 8,
+    "max_shell_commands": 8,
+    "max_retries": 0,
+}
 NON_NEGATIVE_BUDGET_KEYS = frozenset(
     {"max_retries", "max_verifier_passes", "max_tool_calls", "max_shell_commands"}
 )
@@ -126,6 +134,36 @@ def _apply_execution_budget_policy(
             effective_budget.pop(key, None)
 
     return effective_budget
+
+
+def normalize_scout_submission(
+    constraints: dict[str, Any], budget: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Enforce Scout mode constraints and clamp budget caps."""
+    is_scout = constraints.get("task_type") == "scout"
+    if not is_scout:
+        return constraints, budget
+
+    normalized_constraints = dict(constraints)
+    normalized_constraints["read_only"] = True
+
+    normalized_budget = dict(budget)
+    normalized_budget["execution_mode"] = SCOUT_BUDGET_CAPS["execution_mode"]
+
+    for key, cap in SCOUT_BUDGET_CAPS.items():
+        if key == "execution_mode":
+            continue
+        val = normalized_budget.get(key)
+        if val is None:
+            normalized_budget[key] = cap
+        else:
+            try:
+                coerced_val = int(val)
+                normalized_budget[key] = min(coerced_val, cap)
+            except (ValueError, TypeError):
+                normalized_budget[key] = cap
+
+    return normalized_constraints, normalized_budget
 
 
 def _is_unsafe_callback_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:

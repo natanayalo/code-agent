@@ -15,7 +15,11 @@ from db.base import utc_now
 from db.enums import TaskStatus, WorkerRunStatus
 from db.models import Session as ConversationSession
 from db.models import User
-from orchestrator.execution_policy import _deep_merge, _sanitize_submission_constraints
+from orchestrator.execution_policy import (
+    _deep_merge,
+    _sanitize_submission_constraints,
+    normalize_scout_submission,
+)
 from orchestrator.execution_types import (
     REPLAYABLE_STATUSES as _REPLAYABLE_STATUSES,
 )
@@ -185,8 +189,13 @@ def _persist_submission(
         session_repo = SessionRepository(session)
         task_repo = TaskRepository(session)
         interaction_repo = HumanInteractionRepository(session)
+        normalized_constraints, normalized_budget = normalize_scout_submission(
+            submission.constraints, submission.budget
+        )
+        queue_lane = "scout" if normalized_constraints.get("task_type") == "scout" else "primary"
+
         sanitized_constraints = _sanitize_submission_constraints(
-            submission.constraints,
+            normalized_constraints,
             reserved_keys=_RESERVED_INTERNAL_CONSTRAINT_KEYS,
         )
         persisted_constraints = dict(sanitized_constraints)
@@ -238,7 +247,7 @@ def _persist_submission(
             branch=submission.branch,
             callback_url=submission.callback_url,
             worker_override=submission.worker_override,
-            budget=dict(submission.budget),
+            budget=normalized_budget,
             secrets=dict(submission.secrets),
             task_spec=task_spec,
             trace_context=trace_context,
@@ -248,6 +257,7 @@ def _persist_submission(
             max_attempts=max(1, max_attempts),
             next_attempt_at=now,
             priority=submission.priority,
+            queue_lane=queue_lane,
         )
         interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
         session_repo.set_active_task(session_id=conversation_session.id, active_task_id=task.id)

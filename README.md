@@ -92,6 +92,23 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/ready
 ```
 
+### Database Migrations
+
+To apply database migrations to your local Postgres container, use the included Docker Compose service:
+
+```bash
+docker compose up migrate
+```
+
+Alternatively, to run manual `alembic` commands, use the `api` container:
+
+```bash
+docker compose run --rm api alembic upgrade head
+```
+
+> [!NOTE]
+> Avoid running `alembic` directly on your host machine without setting `DATABASE_URL`. Doing so will fall back to the default SQLite configuration and create accidental `.db` files in the repository.
+
 ### Trace observability (Phoenix + OpenInference)
 
 If you use `scripts/up.sh` and set `CODE_AGENT_ENABLE_TRACING=1`, Phoenix is started automatically.
