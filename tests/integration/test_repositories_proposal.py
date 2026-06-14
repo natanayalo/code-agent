@@ -110,7 +110,7 @@ def test_list_proposals(session_factory) -> None:
         proposal_repo.update_proposal_status(p1.id, ProposalStatus.REJECTED)
 
         all_props = proposal_repo.list_proposals(session_id=sess.id)
-        assert len(all_props) >= 2
+        assert len(all_props) == 2
 
         # Should be ordered newest first
         assert all_props[0].id == p2.id
