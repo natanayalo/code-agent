@@ -225,3 +225,39 @@ def test_orchestrator_graph_review_task_without_deliverable_fails() -> None:
     assert state.verification.failure_kind == "incomplete_delivery"
     assert state.result is not None
     assert state.result.status == "failure"
+
+
+def test_orchestrator_graph_scout_task_skips_delivery() -> None:
+    """Scout tasks should process normally but skip branch delivery entirely."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=["orchestrator/graph.py"],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary="Scout complete.",
+        )
+    )
+    graph = build_orchestrator_graph(worker=worker)
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": "Scout the orchestrator module",
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                    "constraints": {"task_type": "scout", "delivery_mode": "branch"},
+                }
+            }
+        )
+    )
+    state = OrchestratorState.model_validate(raw_output)
+    assert state.task_spec is not None
+    assert state.task_spec.task_type == "scout"
+    assert state.task_spec.delivery_mode == "summary"
+    assert state.result is not None
+    assert state.result.status == "success"
+    assert len(worker.requests) == 1
+    assert "delivery completed" not in state.progress_updates

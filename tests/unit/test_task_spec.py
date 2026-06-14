@@ -423,3 +423,22 @@ def test_task_spec_strips_delivery_branch_whitespace() -> None:
 
     spec = TaskSpec(goal="Test goal", delivery_branch="  main  ")
     assert spec.delivery_branch == "main"
+
+
+def test_build_task_spec_forces_summary_delivery_for_scout_tasks() -> None:
+    """Scout tasks must use summary delivery even if draft_pr is requested."""
+    spec = build_task_spec(
+        task_text="Scout the codebase",
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="main",
+        constraints={
+            "task_type": "scout",
+            "delivery_mode": "draft_pr",
+        },
+    )
+
+    assert spec.task_type == "scout"
+    assert spec.delivery_mode == "summary"
+    assert "prepare_draft_pr_delivery" not in spec.allowed_actions
+    assert "workspace_diff" not in spec.expected_artifacts
+    assert validate_task_spec_policy(spec) == []

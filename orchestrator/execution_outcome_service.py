@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any, cast
 
-from db.enums import ArtifactType, TaskStatus, WorkerType
+from db.enums import ArtifactType, ProposalStatus, TaskStatus, WorkerType
 from orchestrator.execution_policy import (
     _task_status_from_result,
     _worker_run_status_from_result,
@@ -24,6 +24,7 @@ from orchestrator.state import OrchestratorState
 from repositories import (
     ArtifactRepository,
     HumanInteractionRepository,
+    ProposalRepository,
     SessionStateRepository,
     TaskRepository,
     TaskTimelineRepository,
@@ -172,6 +173,55 @@ def _persist_artifacts_for_run(
         )
 
 
+def _should_create_scout_proposal(state: OrchestratorState) -> bool:
+    result = state.result
+    return (
+        state.task_spec is not None
+        and state.task_spec.task_type == "scout"
+        and result is not None
+        and result.status == "success"
+    )
+
+
+def _persist_scout_proposal_if_needed(
+    proposal_repo: ProposalRepository,
+    *,
+    task: Any,
+    state: OrchestratorState,
+    artifacts: list[Any],
+    worker_run_id: str,
+) -> None:
+    if not _should_create_scout_proposal(state):
+        return
+
+    existing_proposals = proposal_repo.list_proposals(task_id=task.id, limit=1)
+    if existing_proposals:
+        return
+
+    assert state.result is not None
+    proposal = proposal_repo.create_proposal(
+        session_id=task.session_id,
+        task_id=task.id,
+        title=f"Scout Output for Task {task.id}",
+        summary=state.result.summary or "Scout task completed without summary.",
+        status=ProposalStatus.PENDING_REVIEW,
+        metadata_payload={
+            "source": "scout",
+            "task_id": task.id,
+            "worker_run_id": worker_run_id,
+            "files_changed": state.result.files_changed,
+            "artifacts": [artifact.model_dump(mode="json") for artifact in artifacts],
+            "budget_usage": state.result.budget_usage,
+            "diff_text": state.result.diff_text,
+            "json_payload": state.result.json_payload,
+        },
+    )
+    logger.info(
+        "Persisted scout proposal",
+        extra={"task_id": task.id, "proposal_id": proposal.id, "worker_run_id": worker_run_id},
+    )
+
+
 def _update_task_route_and_spec(
     task: Any,
     state: OrchestratorState,
@@ -260,6 +310,14 @@ def _persist_execution_outcome(
             worker_run_id=worker_run.id,
             artifacts=artifacts,
             review_artifact_entries=review_artifact_entries,
+        )
+
+        _persist_scout_proposal_if_needed(
+            ProposalRepository(session),
+            task=task,
+            state=state,
+            artifacts=artifacts,
+            worker_run_id=worker_run.id,
         )
 
     self._prune_retained_runs(now=finished_at)
