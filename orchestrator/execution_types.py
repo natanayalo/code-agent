@@ -8,7 +8,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from db.enums import HumanInteractionStatus, TaskStatus, WorkerType
+from db.enums import HumanInteractionStatus, ProposalType, TaskStatus, WorkerType
 from orchestrator.execution_policy import validate_callback_url
 from orchestrator.state import TaskSpec
 
@@ -258,6 +258,7 @@ class ProposalSnapshot(ExecutionModel):
     summary: str
     content: str | None = None
     status: str
+    proposal_type: ProposalType = ProposalType.SCOUT
     metadata_payload: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime

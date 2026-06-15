@@ -35,6 +35,10 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "rejected",
             "implemented",
         },
+        "ck_proposals_proposal_type": {
+            "scout",
+            "reflection",
+        },
     },
     "tasks": {
         "ck_tasks_task_status": {

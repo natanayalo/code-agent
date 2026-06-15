@@ -12,6 +12,7 @@ from db.enums import (
     HumanInteractionStatus,
     HumanInteractionType,
     ProposalStatus,
+    ProposalType,
     SessionStatus,
     TaskStatus,
     TimelineEventType,
@@ -53,6 +54,7 @@ def test_model_metadata_uses_canonical_enums_for_constrained_columns() -> None:
         ("human_interactions", "interaction_type"): HumanInteractionType,
         ("human_interactions", "status"): HumanInteractionStatus,
         ("proposals", "status"): ProposalStatus,
+        ("proposals", "proposal_type"): ProposalType,
         ("task_timeline_events", "event_type"): TimelineEventType,
     }
 

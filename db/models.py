@@ -29,6 +29,7 @@ from db.enums import (
     HumanInteractionStatus,
     HumanInteractionType,
     ProposalStatus,
+    ProposalType,
     SessionStatus,
     TaskStatus,
     TimelineEventType,
@@ -52,6 +53,7 @@ HUMAN_INTERACTION_STATUS_ENUM = build_sql_enum(
 )
 WORKER_RUNTIME_MODE_ENUM = build_sql_enum(WorkerRuntimeMode, name="worker_runtime_mode")
 PROPOSAL_STATUS_ENUM = build_sql_enum(ProposalStatus, name="proposal_status")
+PROPOSAL_TYPE_ENUM = build_sql_enum(ProposalType, name="proposal_type")
 
 
 class EncryptedJSON(TypeDecorator):
@@ -612,6 +614,12 @@ class Proposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=ProposalStatus.PENDING_REVIEW,
         index=True,
     )
+    proposal_type: Mapped[ProposalType] = mapped_column(
+        PROPOSAL_TYPE_ENUM,
+        nullable=False,
+        default=ProposalType.SCOUT,
+        index=True,
+    )
     metadata_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
     session: Mapped[Session] = relationship(back_populates="proposals")
@@ -621,3 +629,8 @@ class Proposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     def _coerce_status(self, _key: str, value: ProposalStatus | str) -> ProposalStatus:
         """Normalize assigned status to the canonical enum."""
         return ProposalStatus(value)
+
+    @validates("proposal_type")
+    def _coerce_proposal_type(self, _key: str, value: ProposalType | str) -> ProposalType:
+        """Normalize assigned proposal_type to the canonical enum."""
+        return ProposalType(value)

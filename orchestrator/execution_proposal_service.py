@@ -28,7 +28,7 @@ from repositories import (
 logger = logging.getLogger("orchestrator.execution.proposals")
 
 
-def _map_proposal_to_snapshot(proposal: Proposal) -> ProposalSnapshot:
+def _map_to_snapshot(self: Any, proposal: Proposal) -> ProposalSnapshot:
     """Convert a Proposal SQLAlchemy model to a ProposalSnapshot."""
     return ProposalSnapshot(
         proposal_id=proposal.id,
@@ -38,6 +38,7 @@ def _map_proposal_to_snapshot(proposal: Proposal) -> ProposalSnapshot:
         summary=proposal.summary,
         content=proposal.content,
         status=proposal.status.value if hasattr(proposal.status, "value") else str(proposal.status),
+        proposal_type=proposal.proposal_type,
         metadata_payload=dict(proposal.metadata_payload) if proposal.metadata_payload else {},
         created_at=proposal.created_at,
         updated_at=proposal.updated_at,
@@ -48,6 +49,7 @@ def list_proposals(
     self: Any,
     *,
     status: ProposalStatus | str | None = None,
+    proposal_type: str | None = None,
     session_id: str | None = None,
     task_id: str | None = None,
     limit: int = 50,
@@ -57,12 +59,13 @@ def list_proposals(
     with session_scope(self.session_factory) as session:
         proposals = ProposalRepository(session).list_proposals(
             status=status,
+            proposal_type=proposal_type,
             session_id=session_id,
             task_id=task_id,
             limit=limit,
             offset=offset,
         )
-        return [_map_proposal_to_snapshot(p) for p in proposals]
+        return [self._map_to_snapshot(p) for p in proposals]
 
 
 def _build_task_text_for_proposal(proposal: Proposal) -> str:
@@ -245,7 +248,7 @@ def reject_proposal(
             return "not_found", None, f"Proposal '{proposal_id}' was not found."
 
         if proposal.status == ProposalStatus.REJECTED:
-            return "success", _map_proposal_to_snapshot(proposal), None
+            return "success", self._map_to_snapshot(proposal), None
 
         if proposal.status != ProposalStatus.PENDING_REVIEW:
             return "conflict", None, f"Proposal cannot be rejected from status '{proposal.status}'."
@@ -262,8 +265,8 @@ def reject_proposal(
             if refetched is None:
                 return "not_found", None, f"Proposal '{proposal_id}' was deleted concurrently."
             if refetched.status == ProposalStatus.REJECTED:
-                return "success", _map_proposal_to_snapshot(refetched), None
+                return "success", self._map_to_snapshot(refetched), None
             return "conflict", None, "Proposal was modified concurrently."
 
         session.expire(proposal)
-        return "success", _map_proposal_to_snapshot(proposal), None
+        return "success", self._map_to_snapshot(proposal), None

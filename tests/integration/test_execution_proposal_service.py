@@ -2,7 +2,7 @@
 
 import pytest
 
-from db.enums import ProposalStatus
+from db.enums import ProposalStatus, ProposalType
 from db.models import Session as ConversationSession
 from db.models import User
 from repositories import ProposalRepository, session_scope
@@ -43,6 +43,13 @@ def test_list_proposals(client, pending_proposal_id):
     proposals = task_service.list_proposals(status=ProposalStatus.PENDING_REVIEW)
     assert len(proposals) > 0
     assert any(p.proposal_id == pending_proposal_id for p in proposals)
+
+    scout_proposals = task_service.list_proposals(proposal_type=ProposalType.SCOUT)
+    assert len(scout_proposals) > 0
+    assert any(p.proposal_id == pending_proposal_id for p in scout_proposals)
+
+    reflection_proposals = task_service.list_proposals(proposal_type=ProposalType.REFLECTION)
+    assert not any(p.proposal_id == pending_proposal_id for p in reflection_proposals)
 
 
 def test_accept_proposal_success(client, pending_proposal_id):
