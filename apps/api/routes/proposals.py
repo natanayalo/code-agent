@@ -24,7 +24,7 @@ router = APIRouter(
 @router.get("", response_model=list[ProposalSnapshot])
 def list_proposals(
     status_filter: ProposalStatus | None = Query(None, alias="status"),
-    proposal_type: ProposalType | None = Query(None, alias="proposal_type"),
+    proposal_type: ProposalType | None = None,
     session_id: str | None = None,
     task_id: str | None = None,
     limit: int = Query(50, ge=1, le=100),
@@ -34,7 +34,7 @@ def list_proposals(
     """List proposals with optional filtering and pagination."""
     return task_service.list_proposals(
         status=status_filter,
-        proposal_type=proposal_type.value if proposal_type else None,
+        proposal_type=proposal_type,
         session_id=session_id,
         task_id=task_id,
         limit=limit,
