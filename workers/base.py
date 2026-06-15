@@ -157,6 +157,7 @@ class WorkerResult(WorkerModel):
     review_result: ReviewResult | None = None
     diff_text: str | None = None
     json_payload: dict[str, Any] | None = None
+    friction_reports: list[dict[str, Any]] = Field(default_factory=list)
     next_action_hint: str | None = None
     stdout: Any | None = None
     stderr: Any | None = None

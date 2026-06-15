@@ -157,34 +157,91 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
     return effective_env
 
 
+def _build_friction_report_dict(
+    source: str,
+    description: str,
+    impact: str,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "source": source,
+        "description": description,
+        "impact": impact,
+        "context": context or {},
+    }
+
+
 def _determine_exit_status(
     completed_returncode: int, final_message: str | None, stderr_text: str
-) -> tuple[Literal["success", "failure", "error"], str]:
+) -> tuple[Literal["success", "failure", "error"], str, list[dict[str, Any]]]:
+    friction_reports: list[dict[str, Any]] = []
     if completed_returncode == 0:
-        return "success", final_message or "Native agent run completed successfully."
+        return (
+            "success",
+            final_message or "Native agent run completed successfully.",
+            friction_reports,
+        )
 
     summary = f"Native agent command exited with code {completed_returncode}."
     status: Literal["success", "failure", "error"] = "failure"
 
     stderr_tail = truncate_detail_keep_tail(stderr_text, max_characters=8192)
     if marker := find_infra_failure_marker(stderr_tail):
-        return "error", f"SANDBOX_INFRA: detected shell crash ({marker})"
+        friction_reports.append(
+            _build_friction_report_dict(
+                source="sandbox",
+                description=f"Sandbox infra crash detected: {marker}",
+                impact="blocked",
+                context={"marker": marker, "exit_code": completed_returncode},
+            )
+        )
+        return "error", f"SANDBOX_INFRA: detected shell crash ({marker})", friction_reports
     if "requires user confirmation" in stderr_tail.lower():
         return (
             "error",
             "SANDBOX_INFRA: shell command blocked (requires user confirmation in non-interactive mode)",  # noqa: E501
+            friction_reports,
         )
     if "tool" in stderr_tail.lower() and "not found" in stderr_tail.lower():
         truncated_stderr = truncate_detail_keep_tail(stderr_tail, max_characters=1024)
         lines = truncated_stderr.strip().splitlines()
         last_line = lines[-1] if lines else "unknown error"
-        return "error", f"SANDBOX_INFRA: tool registry mismatch detected ({last_line})"
+        friction_reports.append(
+            _build_friction_report_dict(
+                source="sandbox",
+                description=f"Tool registry mismatch: {last_line}",
+                impact="blocked",
+                context={"last_line": last_line, "exit_code": completed_returncode},
+            )
+        )
+        return (
+            "error",
+            f"SANDBOX_INFRA: tool registry mismatch detected ({last_line})",
+            friction_reports,
+        )
     if completed_returncode in _SIGNAL_EXIT_CODES:
         sig_name = _SIGNAL_EXIT_CODES[completed_returncode]
-        return "error", f"SANDBOX_INFRA: detected shell crash ({sig_name})"
+        friction_reports.append(
+            _build_friction_report_dict(
+                source="sandbox",
+                description=f"Sandbox infra crash detected via signal: {sig_name}",
+                impact="blocked",
+                context={"signal": sig_name, "exit_code": completed_returncode},
+            )
+        )
+        return "error", f"SANDBOX_INFRA: detected shell crash ({sig_name})", friction_reports
 
-    return status, summary
-    return status, summary
+    if any(err in stderr_text for err in ["ECONNRESET", "socket hang up", "ETIMEDOUT"]):
+        friction_reports.append(
+            _build_friction_report_dict(
+                source="tooling",
+                description="Native agent command failed with network retry exhaustion.",
+                impact="blocked",
+                context={"exit_code": completed_returncode},
+            )
+        )
+
+    return status, summary, friction_reports
 
 
 def _process_llm_metadata(llm_metadata: dict[str, Any] | None) -> None:  # type: ignore[name-defined]
@@ -264,10 +321,20 @@ def _handle_native_agent_timeout(
     stderr_text = _normalize_stream_payload(exc.stderr)
     output_text = stdout_text + stderr_text
 
+    friction_reports = []
     if _handle_network_error_retry(
         output_text, retry_count, max_retries, command_text, "timed out with network error"
     ):
         return True, None
+    else:
+        friction_reports.append(
+            _build_friction_report_dict(
+                source="tooling",
+                description=f"Native agent command timed out after {request.timeout_seconds}s.",
+                impact="blocked",
+                context={"timeout_seconds": request.timeout_seconds},
+            )
+        )
 
     artifacts: list[ArtifactReference] = []
     try:
@@ -285,6 +352,14 @@ def _handle_native_agent_timeout(
             "Native agent runner failed while collecting timeout artifacts.",
             extra={"command": command_text},
         )
+        friction_reports.append(
+            _build_friction_report_dict(
+                source="orchestrator",
+                description=f"Native agent runner failed to collect artifacts on timeout: {e}",
+                impact="blocked",
+                context={"error_type": type(e).__name__},
+            )
+        )
 
     return False, _finalize_native_agent_run(
         request=request,
@@ -296,6 +371,7 @@ def _handle_native_agent_timeout(
         stdout=stdout_text,
         stderr=stderr_text,
         artifacts=artifacts,
+        friction_reports=friction_reports,
     )
 
 
@@ -469,7 +545,9 @@ def _collect_native_agent_results(
             stderr_text,
         )
 
-        status, summary = _determine_exit_status(completed.returncode, final_message, stderr_text)
+        status, summary, friction_reports = _determine_exit_status(
+            completed.returncode, final_message, stderr_text
+        )
 
         json_payload, json_payload_source, json_payload_rejected_reason = (
             _extract_business_json_payload(
@@ -497,6 +575,7 @@ def _collect_native_agent_results(
             json_payload=json_payload,
             json_payload_source=json_payload_source,
             json_payload_rejected_reason=json_payload_rejected_reason,
+            friction_reports=friction_reports,
         )
     except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as exc:
         logger.debug("Native agent runner artifact collection failed: %s", exc)
@@ -507,6 +586,14 @@ def _collect_native_agent_results(
                 "exit_code": completed.returncode if completed else None,
             },
         )
+        friction_reports = [
+            _build_friction_report_dict(
+                source="orchestrator",
+                description=f"Native agent runner failed while collecting artifacts: {exc}",
+                impact="blocked",
+                context={"error_type": type(exc).__name__, "error": str(exc)},
+            )
+        ]
         return _finalize_native_agent_run(
             request=request,
             status="error",
@@ -518,6 +605,7 @@ def _collect_native_agent_results(
             stdout=stdout_text,
             stderr=stderr_text,
             artifacts=artifacts,
+            friction_reports=friction_reports,
         )
 
 

@@ -126,6 +126,8 @@ def _run_shell_script(
             files_changed=native_result.files_changed,
             artifacts=native_result.artifacts,
             diff_text=native_result.diff_text,
+            json_payload=native_result.json_payload,
+            friction_reports=native_result.friction_reports,
         )
 
     status = native_result.status
@@ -151,6 +153,8 @@ def _run_shell_script(
         files_changed=native_result.files_changed,
         artifacts=native_result.artifacts,
         diff_text=native_result.diff_text,
+        json_payload=native_result.json_payload,
+        friction_reports=native_result.friction_reports,
         stdout=native_result.stdout,
         stderr=native_result.stderr,
     )

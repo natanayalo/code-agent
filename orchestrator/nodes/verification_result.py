@@ -11,6 +11,7 @@ from orchestrator.nodes.utils import (
     _requires_deliverable_evidence,
     _timeline_events,
 )
+from orchestrator.reflection import FrictionReport
 from orchestrator.state import (
     OrchestratorState,
     VerificationFailureKind,
@@ -226,6 +227,22 @@ def _build_verify_response(
         response["result"] = updated_result
     if repair_handoff_requested:
         response["repair_handoff_requested"] = True
+
+    if report.status == "failed":
+        friction_report = FrictionReport(
+            task_id=state.task.task_id,
+            worker_run_id=state.dispatch.run_id,
+            source="tooling",
+            description=f"Verification failed: {report.summary or 'unknown error'}",
+            impact="blocked",
+            context={
+                "failure_kind": report.failure_kind,
+                "items": [item.model_dump() for item in report.items if item.status == "failed"],
+                "repair_handoff_requested": repair_handoff_requested,
+            },
+        )
+        response["friction_reports"] = state.friction_reports + [friction_report]
+
     return response
 
 
