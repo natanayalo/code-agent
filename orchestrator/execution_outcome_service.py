@@ -232,8 +232,11 @@ def _persist_friction_proposals_if_needed(
     worker_run_id: str,
 ) -> None:
     all_reports: list[FrictionReport] = list(state.friction_reports)
-    if state.result is not None and getattr(state.result, "friction_reports", None):
-        for rep_dict in getattr(state.result, "friction_reports"):
+    result_reports = (
+        getattr(state.result, "friction_reports", None) if state.result is not None else None
+    )
+    if result_reports:
+        for rep_dict in result_reports:
             try:
                 all_reports.append(
                     FrictionReport(
@@ -280,14 +283,9 @@ def _persist_friction_proposals_if_needed(
         elif "test" in desc_lower and "fail" in desc_lower:
             title = "Execution friction: repeated test failure"
         else:
-            title = (
-                "Execution friction: "
-                + (
-                    report.description.split(":")[0]
-                    if ":" in report.description
-                    else report.description
-                )[:50]
-            )
+            sliced_desc = report.description[:50]
+            first_part = sliced_desc.split(":")[0] if ":" in sliced_desc else sliced_desc
+            title = f"Execution friction: {first_part.strip().replace('\n', ' ')}"
 
         fingerprint_input = (
             f"{task.id}:{report.source}:{report.impact}:{report.description}".encode()
