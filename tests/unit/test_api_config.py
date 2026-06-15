@@ -38,3 +38,16 @@ def test_load_from_env_falls_back_to_default_image_when_blank() -> None:
     config = SystemConfig.load_from_env({"CODE_AGENT_SANDBOX_IMAGE": "   "})
 
     assert config.default_image == DEFAULT_SANDBOX_IMAGE
+
+
+def test_load_from_env_parses_non_negative_scout_triggers() -> None:
+    """Scout trigger intervals should support zero to disable them."""
+    config = SystemConfig.load_from_env(
+        {
+            "CODE_AGENT_SCOUT_IDLE_MINUTES": "0",
+            "CODE_AGENT_SCOUT_SCHEDULE_INTERVAL_MINUTES": "0",
+        }
+    )
+
+    assert config.scout_idle_trigger_minutes == 0
+    assert config.scout_schedule_interval_minutes == 0

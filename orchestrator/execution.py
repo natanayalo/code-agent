@@ -266,6 +266,7 @@ class TaskExecutionService:
     _record_execution_span_error = execution_runtime_service._record_execution_span_error
     _heartbeat_loop = execution_runtime_service._heartbeat_loop
     claim_next_task = execution_snapshot_service.claim_next_task
+    is_execution_busy = execution_snapshot_service.is_execution_busy
     get_task = execution_snapshot_service.get_task
     list_tasks = execution_snapshot_service.list_tasks
     list_sessions = execution_snapshot_service.list_sessions

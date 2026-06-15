@@ -202,6 +202,16 @@ class TaskRepository:
             tasks.append(task)
         return tasks
 
+    def is_execution_busy(self) -> bool:
+        """Return True if any tasks are currently pending or in progress across any queue lane."""
+        statement = (
+            select(Task.id)
+            .where(Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS]))
+            .limit(1)
+        )
+        result = self.session.execute(statement).scalar_one_or_none()
+        return result is not None
+
     def set_route(
         self,
         *,

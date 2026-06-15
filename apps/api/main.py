@@ -27,6 +27,7 @@ from apps.api.routes.system import router as system_router  # noqa: E402
 from apps.api.routes.tasks import router as tasks_router  # noqa: E402
 from apps.api.routes.telegram import router as telegram_router  # noqa: E402
 from apps.api.routes.webhook import router as webhook_router  # noqa: E402
+from apps.api.scheduler import ScoutScheduler  # noqa: E402
 from apps.api.task_service_factory import build_task_service_from_env  # noqa: E402
 from apps.observability import configure_tracing_from_env  # noqa: E402
 from apps.runtime import RUN_API_ENV_VAR, should_run_api  # noqa: E402
@@ -100,7 +101,14 @@ def _build_lifespan(
 
                 if app.state.task_service is not None:
                     async with app.state.task_service:
-                        yield
+                        scout_scheduler = ScoutScheduler(
+                            task_service=app.state.task_service, config=app.state.system_config
+                        )
+                        scout_scheduler.start()
+                        try:
+                            yield
+                        finally:
+                            await scout_scheduler.stop()
                 else:
                     yield
             finally:

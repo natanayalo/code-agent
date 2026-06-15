@@ -9,6 +9,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from apps.api.auth import ApiAuthConfig
+from apps.api.config import SystemConfig
 from apps.api.main import create_app
 from db.enums import HumanInteractionStatus, TaskStatus
 from orchestrator.execution import (
@@ -453,3 +454,48 @@ def test_record_interaction_response_returns_updated_snapshot_when_found() -> No
     assert response.status_code == 200
     assert response.json()["task_id"] == "task-1"
     assert response.json()["status"] == "pending"
+
+
+def test_trigger_scout_task_returns_created_snapshot() -> None:
+    """POST /tasks/scout/trigger should submit a scout task with configured defaults."""
+    service = _FakeTaskService()
+    service.created_snapshot = _task_snapshot(task_id="task-scout", status="pending")
+
+    with _task_client(service) as client:
+        # override config
+        client.app.state.system_config = SystemConfig(
+            default_image="test",
+            workspace_root="/tmp",
+            scout_repo_url="https://github.com/scout/repo",
+            scout_branch="main",
+            scout_task_text="Scout text",
+        )
+        response = client.post("/tasks/scout/trigger")
+
+    assert response.status_code == 202
+    assert response.json()["task_id"] == "task-scout"
+    assert len(service.create_calls) == 1
+
+    submission = service.create_calls[0]
+    assert submission.task_text == "Scout text"
+    assert submission.repo_url == "https://github.com/scout/repo"
+    assert submission.branch == "main"
+    assert submission.constraints == {"task_type": "scout", "trigger_source": "manual"}
+    assert submission.session.external_user_id == "system:scout-scheduler"
+
+
+def test_trigger_scout_task_returns_400_when_unconfigured() -> None:
+    """POST /tasks/scout/trigger should return 400 if scout repo is missing."""
+    service = _FakeTaskService()
+
+    with _task_client(service) as client:
+        client.app.state.system_config = SystemConfig(
+            default_image="test",
+            workspace_root="/tmp",
+            scout_repo_url="",  # missing
+        )
+        response = client.post("/tasks/scout/trigger")
+
+    assert response.status_code == 400
+    assert "missing CODE_AGENT_SCOUT_REPO_URL" in response.json()["detail"]
+    assert len(service.create_calls) == 0

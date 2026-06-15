@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from apps.api.dependencies import get_task_service, require_any_valid_auth
+from apps.api.config import SystemConfig
+from apps.api.dependencies import get_system_config, get_task_service, require_any_valid_auth
 from apps.observability import (
     SESSION_ID_ATTRIBUTE,
     SPAN_KIND_AGENT,
@@ -17,6 +18,7 @@ from apps.observability import (
 from db.enums import TaskStatus
 from orchestrator.execution import (
     InteractionResponse,
+    SubmissionSession,
     TaskApprovalDecision,
     TaskExecutionService,
     TaskReplayRequest,
@@ -51,6 +53,48 @@ def submit_task(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
             ) from exc
+
+
+@router.post("/scout/trigger", response_model=TaskSnapshot, status_code=status.HTTP_202_ACCEPTED)
+def trigger_scout_task(
+    task_service: TaskExecutionService = Depends(get_task_service),
+    config: SystemConfig = Depends(get_system_config),
+) -> TaskSnapshot:
+    """Manually trigger a scout task using system defaults."""
+    if not config.scout_repo_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Scout functionality is not fully configured "
+                "(missing CODE_AGENT_SCOUT_REPO_URL)."
+            ),
+        )
+
+    submission = TaskSubmission(
+        task_text=config.scout_task_text,
+        repo_url=config.scout_repo_url,
+        branch=config.scout_branch,
+        priority=0,
+        constraints={
+            "task_type": "scout",
+            "trigger_source": "manual",
+        },
+        session=SubmissionSession(
+            channel="scheduler",
+            external_user_id="system:scout-scheduler",
+            external_thread_id="scout-scheduler",
+            display_name="Scout Scheduler",
+        ),
+    )
+
+    try:
+        task_snapshot, _ = task_service.create_task(submission)
+        return task_snapshot
+    except TaskSubmissionValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("", response_model=list[TaskSummarySnapshot])

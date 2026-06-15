@@ -30,6 +30,20 @@ def coerce_positive_int_env(value: str | None, *, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
+def coerce_non_negative_int_env(value: str | None, *, default: int) -> int:
+    """Parse non-negative integer env settings with a safe fallback."""
+    if value is None:
+        return default
+    stripped = value.strip()
+    if not stripped:
+        return default
+    try:
+        parsed = int(stripped)
+    except ValueError:
+        return default
+    return parsed if parsed >= 0 else default
+
+
 def should_run_api(environ: Mapping[str, str] | None = None) -> bool:
     """Return whether API runtime is enabled for this process."""
     resolved_env = os.environ if environ is None else environ
