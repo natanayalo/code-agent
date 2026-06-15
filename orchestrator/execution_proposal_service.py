@@ -38,6 +38,11 @@ def _map_proposal_to_snapshot(proposal: Proposal) -> ProposalSnapshot:
         summary=proposal.summary,
         content=proposal.content,
         status=proposal.status.value if hasattr(proposal.status, "value") else str(proposal.status),
+        proposal_type=(
+            proposal.proposal_type.value
+            if hasattr(proposal.proposal_type, "value")
+            else str(proposal.proposal_type)
+        ),
         metadata_payload=dict(proposal.metadata_payload) if proposal.metadata_payload else {},
         created_at=proposal.created_at,
         updated_at=proposal.updated_at,
@@ -48,6 +53,7 @@ def list_proposals(
     self: Any,
     *,
     status: ProposalStatus | str | None = None,
+    proposal_type: str | None = None,
     session_id: str | None = None,
     task_id: str | None = None,
     limit: int = 50,
@@ -57,6 +63,7 @@ def list_proposals(
     with session_scope(self.session_factory) as session:
         proposals = ProposalRepository(session).list_proposals(
             status=status,
+            proposal_type=proposal_type,
             session_id=session_id,
             task_id=task_id,
             limit=limit,

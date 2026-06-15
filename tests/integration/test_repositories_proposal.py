@@ -105,22 +105,35 @@ def test_list_proposals(session_factory) -> None:
 
         p1.created_at = datetime.now(UTC) - timedelta(seconds=5)
         p2.created_at = datetime.now(UTC)
+        p3 = proposal_repo.create_proposal(
+            session_id=sess.id,
+            title="P3",
+            summary="P3 summary",
+            proposal_type="reflection",
+        )
+        p3.created_at = datetime.now(UTC) + timedelta(seconds=5)
         session.flush()
 
         proposal_repo.update_proposal_status(p1.id, ProposalStatus.REJECTED)
 
         all_props = proposal_repo.list_proposals(session_id=sess.id)
-        assert len(all_props) == 2
+        assert len(all_props) == 3
 
         # Should be ordered newest first
-        assert all_props[0].id == p2.id
-        assert all_props[1].id == p1.id
+        assert all_props[0].id == p3.id
+        assert all_props[1].id == p2.id
+        assert all_props[2].id == p1.id
 
         pending_props = proposal_repo.list_proposals(
             session_id=sess.id, status=ProposalStatus.PENDING_REVIEW
         )
-        assert len(pending_props) == 1
-        assert pending_props[0].id == p2.id
+        assert len(pending_props) == 2
+
+        reflection_props = proposal_repo.list_proposals(
+            session_id=sess.id, proposal_type="reflection"
+        )
+        assert len(reflection_props) == 1
+        assert reflection_props[0].id == p3.id
 
 
 def test_get_proposal_not_found(session_factory) -> None:

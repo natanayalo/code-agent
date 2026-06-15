@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from db.enums import ProposalStatus
+from db.enums import ProposalStatus, ProposalType
 from db.models import Proposal
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,7 @@ class ProposalRepository:
         task_id: str | None = None,
         content: str | None = None,
         status: ProposalStatus | str = ProposalStatus.PENDING_REVIEW,
+        proposal_type: ProposalType | str = ProposalType.SCOUT,
         metadata_payload: dict[str, Any] | None = None,
     ) -> Proposal:
         """Create a new proposal tied to a session."""
@@ -39,6 +40,7 @@ class ProposalRepository:
             summary=summary,
             content=content,
             status=status,
+            proposal_type=proposal_type,
             metadata_payload=metadata_payload or {},
         )
         self.session.add(proposal)
@@ -63,6 +65,7 @@ class ProposalRepository:
         self,
         *,
         status: ProposalStatus | str | None = None,
+        proposal_type: ProposalType | str | None = None,
         session_id: str | None = None,
         task_id: str | None = None,
         limit: int = 50,
@@ -76,6 +79,8 @@ class ProposalRepository:
 
         if status is not None:
             stmt = stmt.where(Proposal.status == ProposalStatus(status))
+        if proposal_type is not None:
+            stmt = stmt.where(Proposal.proposal_type == ProposalType(proposal_type))
         if session_id is not None:
             stmt = stmt.where(Proposal.session_id == session_id)
         if task_id is not None:

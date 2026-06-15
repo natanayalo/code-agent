@@ -124,6 +124,13 @@ class ProposalStatus(StrEnum):
     IMPLEMENTED = "implemented"
 
 
+class ProposalType(StrEnum):
+    """Allowed categories for persisted proposals."""
+
+    SCOUT = "scout"
+    REFLECTION = "reflection"
+
+
 def build_sql_enum(enum_class: type[StrEnum], *, name: str) -> SQLAlchemyEnum:
     """Create a non-native SQLAlchemy enum backed by a check constraint."""
 
