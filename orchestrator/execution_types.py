@@ -258,7 +258,7 @@ class ProposalSnapshot(ExecutionModel):
     summary: str
     content: str | None = None
     status: str
-    proposal_type: str = "scout"
+    proposal_type: Literal["scout", "reflection"] = "scout"
     metadata_payload: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime

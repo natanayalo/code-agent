@@ -38,11 +38,7 @@ def _map_proposal_to_snapshot(proposal: Proposal) -> ProposalSnapshot:
         summary=proposal.summary,
         content=proposal.content,
         status=proposal.status.value if hasattr(proposal.status, "value") else str(proposal.status),
-        proposal_type=(
-            proposal.proposal_type.value
-            if hasattr(proposal.proposal_type, "value")
-            else str(proposal.proposal_type)
-        ),
+        proposal_type=proposal.proposal_type,  # type: ignore[arg-type]
         metadata_payload=dict(proposal.metadata_payload) if proposal.metadata_payload else {},
         created_at=proposal.created_at,
         updated_at=proposal.updated_at,

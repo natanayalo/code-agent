@@ -28,7 +28,7 @@ def upgrade() -> None:
                     native_enum=False,
                     create_constraint=False,
                 ),
-                server_default="scout",
+                server_default="'scout'",
                 nullable=False,
             )
         )
