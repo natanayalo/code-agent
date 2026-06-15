@@ -61,6 +61,13 @@ def claim_next_task(self: Any, *, worker_id: str, lease_seconds: int) -> TaskCla
         )
 
 
+def is_execution_busy(self: Any) -> bool:
+    """Return True if any tasks are currently pending or in progress across any queue lane."""
+    with session_scope(self.session_factory) as session:
+        task_repo = TaskRepository(session)
+        return task_repo.is_execution_busy()
+
+
 def get_task(self: Any, task_id: str) -> TaskSnapshot | None:
     """Load the current persisted task state with full timeline and latest run."""
     with session_scope(self.session_factory) as session:

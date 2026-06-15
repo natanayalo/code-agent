@@ -275,7 +275,7 @@ Task list:
 | T-188 | P0 | Implement Idea Inbox / Proposal store. | Add `Proposal` DB model tied to `Session`. Allow tasks to emit ideas instead of final code. | Ideas are durably stored with origin metadata and status (`PENDING_REVIEW`). | `db/models.py`, `repositories/sqlalchemy.py` | Schema migration needs care. | (Done in #224) |
 | T-189 | P0 | Route Scout output to Review Inbox. | Ensure Scout tasks do not merge or deploy. Their artifacts transition to a `PENDING_REVIEW` proposal state. | Scout outputs only show up in the Idea Inbox and never execute mutations on main codebase. | `orchestrator/execution.py`, `orchestrator/graph.py` | Escape via tool loop if boundaries are weak. | (Done in #226) |
 | T-190 | P1 | Dashboard UI for Idea Inbox. | Surface Scout proposals in the dashboard. Operator can review, reject, or promote them to real tasks. | Operator can click "Accept Idea" to turn it into a queued execution task. | `dashboard/src/components/*`, `dashboard/src/services/api.ts` | State drift between UI and backend. | (Done in #227) |
-| T-191 | P2 | Add Trigger Sources: Schedule and Idle time. | Create a cron-like scheduler or API endpoints that spawn Scout tasks based on configured intervals or system idleness. | Background task generation works without human input. | `apps/api/scheduler.py` | Spawning loops could consume budget quickly. | |
+| T-191 | P2 | Add Trigger Sources: Schedule and Idle time. | Create a cron-like scheduler or API endpoints that spawn Scout tasks based on configured intervals or system idleness. | Background task generation works without human input. | `apps/api/scheduler.py` | Spawning loops could consume budget quickly. | (Done) |
 
 ## Milestone 19: Reflection and Improvement Pipeline
 
