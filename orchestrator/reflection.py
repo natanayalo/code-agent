@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -25,7 +25,7 @@ class FrictionReport(OrchestratorModel):
     source: FrictionSource = "other"
     description: str = Field(min_length=1)
     impact: ImpactLevel = "unknown"
-    context: dict[str, str] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class ImprovementSuggestion(OrchestratorModel):
