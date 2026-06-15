@@ -6,7 +6,7 @@ Phase 2: bounded autonomy.
 
 Active focus:
 
-- Milestone 18 (Controlled Autonomy / Scout Mode) planning
+- Milestone 19 (Reflection and Improvement Pipeline) execution
 - continue tightening native-agent observability and verifier acceptance policy
 
 ## Current Capabilities
@@ -43,8 +43,14 @@ Active focus:
 
 Granular tasks for the active and upcoming milestones:
 
+- T-193: Integrate schemas with DB Proposal model.
+- T-194: Capture execution friction from worker runtime.
+- T-195: Generate Scored Improvement Proposals.
+- T-196: Dashboard UI for Reflection & Improvement Queue.
+
 ## Recent Completed Milestones
 
+- T-192: Define Reflection and Improvement schemas.
 - T-191: Add Trigger Sources: Schedule and Idle time.
 - T-190: Dashboard UI for Idea Inbox (#227)
 - T-189: Route Scout output to Review Inbox (#226)
