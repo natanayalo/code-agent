@@ -20,6 +20,8 @@ class ScoutScheduler:
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._last_busy_time = datetime.now(UTC)
+        self._last_schedule_period: int | None = None
+        self._last_idle_hour: str | None = None
 
     def start(self) -> None:
         """Start the background scheduler loop."""
@@ -77,20 +79,25 @@ class ScoutScheduler:
         interval_seconds = self.config.scout_schedule_interval_minutes * 60
         if interval_seconds > 0:
             schedule_period = int(now.timestamp() // interval_seconds)
-            schedule_delivery_key = DeliveryKey(
-                channel="scheduler",
-                delivery_id=f"scout_schedule_{schedule_period}",
-            )
-            if self._submit_scout(schedule_delivery_key, trigger_source="schedule"):
-                return
+            if self._last_schedule_period != schedule_period:
+                schedule_delivery_key = DeliveryKey(
+                    channel="scheduler",
+                    delivery_id=f"scout_schedule_{schedule_period}",
+                )
+                if self._submit_scout(schedule_delivery_key, trigger_source="schedule"):
+                    self._last_schedule_period = schedule_period
+                    return
 
         idle_trigger_seconds = self.config.scout_idle_trigger_minutes * 60
         if idle_trigger_seconds > 0 and idle_duration >= idle_trigger_seconds:
-            idle_delivery_key = DeliveryKey(
-                channel="scheduler",
-                delivery_id=f"scout_idle_{now.strftime('%Y%m%d%H')}",
-            )
-            self._submit_scout(idle_delivery_key, trigger_source="idle")
+            current_hour = now.strftime("%Y%m%d%H")
+            if self._last_idle_hour != current_hour:
+                idle_delivery_key = DeliveryKey(
+                    channel="scheduler",
+                    delivery_id=f"scout_idle_{current_hour}",
+                )
+                if self._submit_scout(idle_delivery_key, trigger_source="idle"):
+                    self._last_idle_hour = current_hour
 
     def _submit_scout(self, delivery_key: DeliveryKey, trigger_source: str) -> bool:
         """Submit a scout task with the given delivery key to prevent duplicates.

@@ -100,15 +100,15 @@ def _build_lifespan(
                 _validate_security_config(app)
 
                 if app.state.task_service is not None:
-                    scout_scheduler = ScoutScheduler(
-                        task_service=app.state.task_service, config=app.state.system_config
-                    )
-                    scout_scheduler.start()
-                    try:
-                        async with app.state.task_service:
+                    async with app.state.task_service:
+                        scout_scheduler = ScoutScheduler(
+                            task_service=app.state.task_service, config=app.state.system_config
+                        )
+                        scout_scheduler.start()
+                        try:
                             yield
-                    finally:
-                        await scout_scheduler.stop()
+                        finally:
+                            await scout_scheduler.stop()
                 else:
                     yield
             finally:
