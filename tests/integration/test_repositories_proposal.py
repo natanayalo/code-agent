@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from db.enums import ProposalStatus
+from db.enums import ProposalStatus, ProposalType
 from repositories.session import session_scope
 from repositories.sqlalchemy import ProposalRepository, SessionRepository, UserRepository
 
@@ -109,7 +109,7 @@ def test_list_proposals(session_factory) -> None:
             session_id=sess.id,
             title="P3",
             summary="P3 summary",
-            proposal_type="reflection",
+            proposal_type=ProposalType.REFLECTION,
         )
         p3.created_at = datetime.now(UTC) + timedelta(seconds=5)
         session.flush()
@@ -130,7 +130,7 @@ def test_list_proposals(session_factory) -> None:
         assert len(pending_props) == 2
 
         reflection_props = proposal_repo.list_proposals(
-            session_id=sess.id, proposal_type="reflection"
+            session_id=sess.id, proposal_type=ProposalType.REFLECTION
         )
         assert len(reflection_props) == 1
         assert reflection_props[0].id == p3.id

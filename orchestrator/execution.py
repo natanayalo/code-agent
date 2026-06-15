@@ -279,6 +279,7 @@ class TaskExecutionService:
     delete_project_memory = execution_snapshot_service.delete_project_memory
     _map_task_to_snapshot = execution_snapshot_service._map_task_to_snapshot
     _map_task_to_summary = execution_snapshot_service._map_task_to_summary
+    _map_to_snapshot = execution_proposal_service._map_to_snapshot
     list_proposals = execution_proposal_service.list_proposals
     accept_proposal = execution_proposal_service.accept_proposal
     reject_proposal = execution_proposal_service.reject_proposal
