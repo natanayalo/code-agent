@@ -172,7 +172,7 @@ def _build_friction_report_dict(
 
 
 def _determine_exit_status(
-    completed_returncode: int, final_message: str | None, stderr_text: str
+    completed_returncode: int, final_message: str | None, stderr_text: str, stdout_text: str = ""
 ) -> tuple[Literal["success", "failure", "error"], str, list[dict[str, Any]]]:
     friction_reports: list[dict[str, Any]] = []
     if completed_returncode == 0:
@@ -201,7 +201,7 @@ def _determine_exit_status(
             _build_friction_report_dict(
                 source="sandbox",
                 description=(
-                    "Shell command blocked (requires user confirmation in " "non-interactive mode)"
+                    "Shell command blocked (requires user confirmation in non-interactive mode)"
                 ),
                 impact="blocked",
                 context={"exit_code": completed_returncode},
@@ -241,7 +241,9 @@ def _determine_exit_status(
         )
         return "error", f"SANDBOX_INFRA: detected shell crash ({sig_name})", friction_reports
 
-    if any(err in stderr_text for err in ["ECONNRESET", "socket hang up", "ETIMEDOUT"]):
+    stdout_tail = stdout_text[-10000:] if stdout_text else ""
+    combined_text = stdout_tail + stderr_text
+    if any(err in combined_text for err in ["ECONNRESET", "socket hang up", "ETIMEDOUT"]):
         friction_reports.append(
             _build_friction_report_dict(
                 source="tooling",
@@ -556,7 +558,7 @@ def _collect_native_agent_results(
         )
 
         status, summary, friction_reports = _determine_exit_status(
-            completed.returncode, final_message, stderr_text
+            completed.returncode, final_message, stderr_text, stdout_text
         )
 
         json_payload, json_payload_source, json_payload_rejected_reason = (
