@@ -197,6 +197,16 @@ def _determine_exit_status(
         )
         return "error", f"SANDBOX_INFRA: detected shell crash ({marker})", friction_reports
     if "requires user confirmation" in stderr_tail.lower():
+        friction_reports.append(
+            _build_friction_report_dict(
+                source="sandbox",
+                description=(
+                    "Shell command blocked (requires user confirmation in " "non-interactive mode)"
+                ),
+                impact="blocked",
+                context={"exit_code": completed_returncode},
+            )
+        )
         return (
             "error",
             "SANDBOX_INFRA: shell command blocked (requires user confirmation in non-interactive mode)",  # noqa: E501
@@ -577,8 +587,8 @@ def _collect_native_agent_results(
             json_payload_rejected_reason=json_payload_rejected_reason,
             friction_reports=friction_reports,
         )
-    except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as exc:
-        logger.debug("Native agent runner artifact collection failed: %s", exc)
+    except (OSError, subprocess.SubprocessError, ValueError, RuntimeError, AttributeError) as exc:
+        logger.debug("Failed while collecting artifacts: %s", exc)
         logger.exception(
             "Native agent runner failed while collecting artifacts or metadata.",
             extra={
@@ -586,14 +596,18 @@ def _collect_native_agent_results(
                 "exit_code": completed.returncode if completed else None,
             },
         )
-        friction_reports = [
+        current_friction = locals().get("friction_reports")
+        if not isinstance(current_friction, list):
+            current_friction = []
+        current_friction.append(
             _build_friction_report_dict(
                 source="orchestrator",
                 description=f"Native agent runner failed while collecting artifacts: {exc}",
                 impact="blocked",
                 context={"error_type": type(exc).__name__, "error": str(exc)},
             )
-        ]
+        )
+        friction_reports = current_friction
         return _finalize_native_agent_run(
             request=request,
             status="error",

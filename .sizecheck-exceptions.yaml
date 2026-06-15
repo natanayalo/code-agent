@@ -38,5 +38,6 @@ function_exceptions:
     test_vertical_slice_e2e_happy_path: Highly stateful logic for test_vertical_slice_e2e_happy_path; splitting requires unnatural parameter coupling.
   workers/native_agent_runner.py:
     _collect_native_agent_results: Coordinates async result collection from the agent and tool runner; tightly coupled logic.
+    _determine_exit_status: Parses and classifies error markers from native execution logs; cohesive matching block.
   workers/self_review.py:
     run_shared_self_review_fix_loop: Bounded retry loop mutating execution in place; heavy local state coupling.

@@ -236,7 +236,14 @@ def _persist_friction_proposals_if_needed(
         for rep_dict in getattr(state.result, "friction_reports"):
             try:
                 all_reports.append(
-                    FrictionReport(task_id=task.id, worker_run_id=worker_run_id, **rep_dict)
+                    FrictionReport(
+                        task_id=task.id,
+                        worker_run_id=worker_run_id,
+                        source=rep_dict.get("source"),
+                        description=rep_dict.get("description"),
+                        impact=rep_dict.get("impact"),
+                        context=rep_dict.get("context"),
+                    )
                 )
             except Exception as exc:
                 logger.warning("Failed to parse friction report dict from worker: %s", exc)
