@@ -246,13 +246,22 @@ def _persist_friction_proposals_if_needed(
             if not isinstance(rep_dict, dict):
                 rep_dict = dict(rep_dict)
             try:
+                source = rep_dict.get("source")
+                if source not in {"tooling", "orchestrator", "sandbox", "instructions", "other"}:
+                    source = "other"
+                impact = rep_dict.get("impact")
+                if impact not in {"slowed_down", "blocked", "required_workaround", "unknown"}:
+                    impact = "unknown"
+                desc = rep_dict.get("description")
+                if isinstance(desc, str):
+                    desc = desc.strip() or None
                 all_reports.append(
                     FrictionReport(
                         task_id=task.id,
                         worker_run_id=worker_run_id,
-                        source=rep_dict.get("source"),
-                        description=rep_dict.get("description"),
-                        impact=rep_dict.get("impact"),
+                        source=source,  # type: ignore[arg-type]
+                        description=desc,
+                        impact=impact,  # type: ignore[arg-type]
                         context=rep_dict.get("context"),
                     )
                 )
