@@ -441,17 +441,21 @@ def _persist_execution_outcome(
             worker_run_id=worker_run.id,
         )
 
-        try:
-            with session_scope(self.session_factory) as prop_session:
-                _persist_friction_proposals_if_needed(
-                    ProposalRepository(prop_session),
-                    task_id=task.id,
-                    session_id=task.session_id,
-                    task_constraints=task.constraints,
-                    state=state,
-                    worker_run_id=worker_run.id,
-                )
-        except Exception as exc:
-            logger.warning("Failed to persist friction proposals: %s", exc, exc_info=True)
+        task_id_val = task.id
+        session_id_val = task.session_id
+        task_constraints_val = task.constraints
+        worker_run_id_val = worker_run.id
 
+    try:
+        with session_scope(self.session_factory) as prop_session:
+            _persist_friction_proposals_if_needed(
+                ProposalRepository(prop_session),
+                task_id=task_id_val,
+                session_id=session_id_val,
+                task_constraints=task_constraints_val,
+                state=state,
+                worker_run_id=worker_run_id_val,
+            )
+    except Exception as exc:
+        logger.warning("Failed to persist friction proposals: %s", exc, exc_info=True)
     self._prune_retained_runs(now=finished_at)
