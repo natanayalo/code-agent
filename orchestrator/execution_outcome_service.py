@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 from typing import Any, cast
 
 from pydantic import ValidationError
-from sqlalchemy.exc import SQLAlchemyError
 
 from db.enums import ArtifactType, ProposalStatus, ProposalType, TaskStatus, WorkerType
 from orchestrator.execution_policy import (
@@ -230,7 +229,9 @@ def _persist_scout_proposal_if_needed(
 def _persist_friction_proposals_if_needed(
     proposal_repo: ProposalRepository,
     *,
-    task: Any,
+    task_id: str,
+    session_id: str,
+    task_constraints: dict[str, Any] | None,
     state: OrchestratorState,
     worker_run_id: str,
 ) -> None:
@@ -255,9 +256,11 @@ def _persist_friction_proposals_if_needed(
                 desc = rep_dict.get("description")
                 if isinstance(desc, str):
                     desc = desc.strip() or None
+                elif desc is not None:
+                    desc = str(desc).strip() or None
                 all_reports.append(
                     FrictionReport(
-                        task_id=task.id,
+                        task_id=task_id,
                         worker_run_id=worker_run_id,
                         source=source,  # type: ignore[arg-type]
                         description=desc,
@@ -280,8 +283,8 @@ def _persist_friction_proposals_if_needed(
     elif state.route and state.route.route_reason and "retry" in state.route.route_reason.lower():
         has_retry_context = True
     elif (
-        isinstance(task.constraints, dict)
-        and VERIFIER_REPAIR_PASSES_USED_CONSTRAINT in task.constraints
+        isinstance(task_constraints, dict)
+        and VERIFIER_REPAIR_PASSES_USED_CONSTRAINT in task_constraints
     ):
         has_retry_context = True
 
@@ -308,12 +311,12 @@ def _persist_friction_proposals_if_needed(
             first_part = sliced_desc.split(":")[0] if ":" in sliced_desc else sliced_desc
             title = f"Execution friction: {first_part.strip().replace('\n', ' ')}"
 
-        fingerprint_input = f"{task.id}:{report.source}:{report.impact}:{safe_desc}".encode()
+        fingerprint_input = f"{task_id}:{report.source}:{report.impact}:{safe_desc}".encode()
         fingerprint = hashlib.sha256(fingerprint_input).hexdigest()
 
         proposal = proposal_repo.create_proposal(
-            session_id=task.session_id,
-            task_id=task.id,
+            session_id=session_id,
+            task_id=task_id,
             title=title,
             summary=safe_desc,
             status=ProposalStatus.PENDING_REVIEW,
@@ -332,7 +335,7 @@ def _persist_friction_proposals_if_needed(
         logger.info(
             "Persisted friction report proposal",
             extra={
-                "task_id": task.id,
+                "task_id": task_id,
                 "proposal_id": proposal.id,
                 "worker_run_id": worker_run_id,
                 "title": title,
@@ -439,13 +442,16 @@ def _persist_execution_outcome(
         )
 
         try:
-            _persist_friction_proposals_if_needed(
-                ProposalRepository(session),
-                task=task,
-                state=state,
-                worker_run_id=worker_run.id,
-            )
-        except (RuntimeError, SQLAlchemyError) as exc:
-            logger.debug("Failed to persist friction proposals: %s", exc)
+            with session_scope(self.session_factory) as prop_session:
+                _persist_friction_proposals_if_needed(
+                    ProposalRepository(prop_session),
+                    task_id=task.id,
+                    session_id=task.session_id,
+                    task_constraints=task.constraints,
+                    state=state,
+                    worker_run_id=worker_run.id,
+                )
+        except Exception as exc:
+            logger.warning("Failed to persist friction proposals: %s", exc, exc_info=True)
 
     self._prune_retained_runs(now=finished_at)
