@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any, cast
 
 from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from db.enums import ArtifactType, ProposalStatus, ProposalType, TaskStatus, WorkerType
 from orchestrator.execution_policy import (
@@ -283,7 +284,9 @@ def _persist_friction_proposals_if_needed(
     for report in all_reports:
         safe_desc = report.description or ""
         desc_lower = safe_desc.lower()
-        if "timeout" in desc_lower:
+        if not safe_desc:
+            title = f"Execution friction: {report.source or 'unknown source'}"
+        elif "timeout" in desc_lower:
             title = "Execution friction: native timeout"
         elif "infra crash" in desc_lower:
             title = "Execution friction: sandbox infra crash"
@@ -426,11 +429,14 @@ def _persist_execution_outcome(
             worker_run_id=worker_run.id,
         )
 
-        _persist_friction_proposals_if_needed(
-            ProposalRepository(session),
-            task=task,
-            state=state,
-            worker_run_id=worker_run.id,
-        )
+        try:
+            _persist_friction_proposals_if_needed(
+                ProposalRepository(session),
+                task=task,
+                state=state,
+                worker_run_id=worker_run.id,
+            )
+        except (RuntimeError, SQLAlchemyError) as exc:
+            logger.debug("Failed to persist friction proposals: %s", exc)
 
     self._prune_retained_runs(now=finished_at)

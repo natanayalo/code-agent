@@ -252,6 +252,7 @@ def _determine_exit_status(
                 context={"exit_code": completed_returncode},
             )
         )
+        return "error", "SANDBOX_INFRA: network retry exhaustion detected.", friction_reports
 
     return status, summary, friction_reports
 
