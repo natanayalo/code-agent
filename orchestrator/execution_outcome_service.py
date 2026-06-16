@@ -239,6 +239,11 @@ def _persist_friction_proposals_if_needed(
     )
     if result_reports:
         for rep_dict in result_reports:
+            if not isinstance(rep_dict, Mapping):
+                logger.warning("Friction report from worker is not a mapping: %r", rep_dict)
+                continue
+            if not isinstance(rep_dict, dict):
+                rep_dict = dict(rep_dict)
             try:
                 all_reports.append(
                     FrictionReport(
@@ -250,7 +255,7 @@ def _persist_friction_proposals_if_needed(
                         context=rep_dict.get("context"),
                     )
                 )
-            except ValidationError as exc:
+            except (ValidationError, AttributeError) as exc:
                 logger.warning("Failed to parse friction report dict from worker: %s", exc)
                 logger.debug("Validation details: %s", exc, exc_info=True)
 
@@ -276,7 +281,8 @@ def _persist_friction_proposals_if_needed(
     import hashlib
 
     for report in all_reports:
-        desc_lower = report.description.lower()
+        safe_desc = report.description or ""
+        desc_lower = safe_desc.lower()
         if "timeout" in desc_lower:
             title = "Execution friction: native timeout"
         elif "infra crash" in desc_lower:
@@ -286,20 +292,18 @@ def _persist_friction_proposals_if_needed(
         elif "test" in desc_lower and "fail" in desc_lower:
             title = "Execution friction: repeated test failure"
         else:
-            sliced_desc = report.description[:50]
+            sliced_desc = safe_desc[:50]
             first_part = sliced_desc.split(":")[0] if ":" in sliced_desc else sliced_desc
             title = f"Execution friction: {first_part.strip().replace('\n', ' ')}"
 
-        fingerprint_input = (
-            f"{task.id}:{report.source}:{report.impact}:{report.description}".encode()
-        )
+        fingerprint_input = f"{task.id}:{report.source}:{report.impact}:{safe_desc}".encode()
         fingerprint = hashlib.sha256(fingerprint_input).hexdigest()
 
         proposal = proposal_repo.create_proposal(
             session_id=task.session_id,
             task_id=task.id,
             title=title,
-            summary=report.description,
+            summary=safe_desc,
             status=ProposalStatus.PENDING_REVIEW,
             proposal_type=ProposalType.REFLECTION,
             metadata_payload={

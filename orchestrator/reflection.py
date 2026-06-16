@@ -22,10 +22,10 @@ class FrictionReport(BaseModel):
 
     task_id: str | None = None
     worker_run_id: str | None = None
-    source: FrictionSource = "other"
-    description: str = Field(min_length=1)
-    impact: ImpactLevel = "unknown"
-    context: dict[str, Any] = Field(default_factory=dict)
+    source: FrictionSource | None = "other"
+    description: str | None = Field(default=None, min_length=1)
+    impact: ImpactLevel | None = "unknown"
+    context: dict[str, Any] | None = Field(default=None)
 
 
 class ImprovementSuggestion(BaseModel):
