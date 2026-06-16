@@ -293,6 +293,13 @@ def _persist_friction_proposals_if_needed(
 
     import hashlib
 
+    existing_proposals = proposal_repo.list_proposals(task_id=task_id)
+    existing_fingerprints = {
+        p.metadata_payload.get("fingerprint")
+        for p in existing_proposals
+        if p.metadata_payload and isinstance(p.metadata_payload, dict)
+    }
+
     for report in all_reports:
         safe_desc = report.description or ""
         desc_lower = safe_desc.lower()
@@ -313,6 +320,9 @@ def _persist_friction_proposals_if_needed(
 
         fingerprint_input = f"{task_id}:{report.source}:{report.impact}:{safe_desc}".encode()
         fingerprint = hashlib.sha256(fingerprint_input).hexdigest()
+
+        if fingerprint in existing_fingerprints:
+            continue
 
         proposal = proposal_repo.create_proposal(
             session_id=session_id,
