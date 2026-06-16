@@ -545,6 +545,7 @@ def _collect_native_agent_results(
     stdout_text = completed.stdout or ""
     stderr_text = completed.stderr or ""
     artifacts: list[ArtifactReference] = []
+    friction_reports: list[dict[str, Any]] = []
 
     try:
         artifacts, final_message, files_changed, diff_text = _build_native_agent_artifacts(
@@ -598,10 +599,7 @@ def _collect_native_agent_results(
                 "exit_code": completed.returncode if completed else None,
             },
         )
-        current_friction = locals().get("friction_reports")
-        if not isinstance(current_friction, list):
-            current_friction = []
-        current_friction.append(
+        friction_reports.append(
             _build_friction_report_dict(
                 source="orchestrator",
                 description=f"Native agent runner failed while collecting artifacts: {exc}",
@@ -609,7 +607,6 @@ def _collect_native_agent_results(
                 context={"error_type": type(exc).__name__, "error": str(exc)},
             )
         )
-        friction_reports = current_friction
         return _finalize_native_agent_run(
             request=request,
             status="error",

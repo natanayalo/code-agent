@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any, cast
 
+from pydantic import ValidationError
+
 from db.enums import ArtifactType, ProposalStatus, ProposalType, TaskStatus, WorkerType
 from orchestrator.execution_policy import (
     _task_status_from_result,
@@ -248,8 +250,9 @@ def _persist_friction_proposals_if_needed(
                         context=rep_dict.get("context"),
                     )
                 )
-            except Exception as exc:
+            except ValidationError as exc:
                 logger.warning("Failed to parse friction report dict from worker: %s", exc)
+                logger.debug("Validation details: %s", exc, exc_info=True)
 
     if not all_reports:
         return
