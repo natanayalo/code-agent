@@ -427,6 +427,7 @@ def _persist_friction_proposals_if_needed(
                 attempt_count=state.attempt_count,
                 failure_kind=failure_kind,
                 retry_context=has_retry_context,
+                session_id=session_id,
                 task_constraints=task_constraints or state.task.constraints,
                 task_budget=state.task.budget,
             ),

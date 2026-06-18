@@ -364,6 +364,7 @@ def test_persist_execution_outcome_applies_llm_improvement_scoring(session_facto
         assert len(proposals) == 1
         metadata = proposals[0].metadata_payload
         suggestion = metadata["improvement_suggestion"]
+        assert scorer.calls[0].session_id == proposals[0].session_id
 
     assert scorer.calls[0].task_id == task_id
     assert scorer.calls[0].task_constraints == {"operator": "local"}

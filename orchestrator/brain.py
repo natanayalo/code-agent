@@ -122,6 +122,9 @@ Output contract:
 
 _RULES_RATIONALE = "rules_v1"
 _NATIVE_WRAPPER_METADATA_KEYS = frozenset({"session_id", "stats", "models", "tools", "files"})
+_IMPROVEMENT_SCORING_LITERAL_FIELDS = frozenset(
+    {"value", "effort", "risk", "layer_impact", "hitl_need"}
+)
 
 
 def _native_wrapper_payload_key(payload: Mapping[str, Any]) -> str | None:
@@ -591,7 +594,9 @@ class RuleBasedOrchestratorBrain:
             return None
 
         try:
-            scoring = ImprovementScoringBrainSuggestion.model_validate(payload)
+            scoring = ImprovementScoringBrainSuggestion.model_validate(
+                self._normalize_improvement_scoring_payload(payload)
+            )
         except Exception as exc:
             logger.warning("Failed to validate brain improvement scoring suggestion: %s", exc)
             return None
@@ -631,7 +636,7 @@ class RuleBasedOrchestratorBrain:
         budget = dict(context.task_budget or {})
         budget["worker_timeout_seconds"] = self.planner_timeout_seconds
         return WorkerRequest(
-            session_id=None,
+            session_id=context.session_id,
             task_id=context.task_id,
             repo_url=context.repo_url,
             branch=context.branch,
@@ -684,8 +689,6 @@ class RuleBasedOrchestratorBrain:
                     str(exc),
                 )
 
-            if i == len(planners) - 1 and result is not None:
-                set_span_status_from_outcome(result.status, result.summary)
         return None, None
 
     @staticmethod
@@ -705,6 +708,16 @@ class RuleBasedOrchestratorBrain:
         if not isinstance(decoded, Mapping):
             return None
         return _unwrap_payload_wrapper(decoded)
+
+    @staticmethod
+    def _normalize_improvement_scoring_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        for key, value in payload.items():
+            if key in _IMPROVEMENT_SCORING_LITERAL_FIELDS and isinstance(value, str):
+                normalized[key] = value.strip().lower()
+            else:
+                normalized[key] = value
+        return normalized
 
     @staticmethod
     def _merge_improvement_scoring(

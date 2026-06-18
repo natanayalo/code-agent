@@ -45,6 +45,7 @@ def _context() -> ImprovementSuggestionScoringContext:
         attempt_count=2,
         failure_kind="sandbox_infra",
         retry_context=True,
+        session_id="session-1",
         task_constraints={"budget": "bounded"},
         task_budget={"worker_timeout_seconds": 30},
     )
@@ -81,11 +82,40 @@ async def test_score_improvement_suggestion_model_success() -> None:
     assert result.metadata.fallback is False
 
     request = worker.requests[0]
+    assert request.session_id == "session-1"
     assert request.response_format == "json"
     assert request.response_schema is not None
     assert "value" in request.response_schema["properties"]
     assert request.constraints["read_only"] is True
     assert request.constraints["budget"] == "bounded"
+
+
+@pytest.mark.asyncio
+async def test_score_improvement_suggestion_normalizes_literal_case() -> None:
+    payload = {
+        "value": "High",
+        "effort": "Medium",
+        "risk": "Low",
+        "layer_impact": "Orchestrator",
+        "validation_path": "Run orchestrator persistence tests.",
+        "hitl_need": "Optional",
+        "rationale": "Capitalized model output should still validate.",
+    }
+    worker = _StaticWorker(WorkerResult(status="success", summary=json.dumps(payload)))
+    brain = RuleBasedOrchestratorBrain(planner_worker=worker)
+
+    result = await brain.score_improvement_suggestion(
+        report=_report(),
+        deterministic_suggestion=_suggestion(),
+        context=_context(),
+    )
+
+    assert result is not None
+    assert result.suggestion.value == "high"
+    assert result.suggestion.effort == "medium"
+    assert result.suggestion.risk == "low"
+    assert result.suggestion.layer_impact == "orchestrator"
+    assert result.suggestion.hitl_need == "optional"
 
 
 @pytest.mark.asyncio

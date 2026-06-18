@@ -89,6 +89,7 @@ class ImprovementSuggestionScoringContext:
     attempt_count: int
     failure_kind: str | None
     retry_context: bool
+    session_id: str | None = None
     task_constraints: Mapping[str, Any] | None = None
     task_budget: Mapping[str, Any] | None = None
 
