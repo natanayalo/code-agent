@@ -330,13 +330,13 @@ def _persist_scored_friction_proposals(
             task_fingerprints = fingerprints_by_task[task_id]
             if draft.fingerprint in task_fingerprints:
                 continue
-            task_fingerprints.add(draft.fingerprint)
             if context.session_id is None:
                 logger.warning(
                     "Skipping improvement suggestion without a session id",
                     extra={"task_id": task_id, "worker_run_id": draft.report.worker_run_id},
                 )
                 continue
+            task_fingerprints.add(draft.fingerprint)
 
             scoring_result = scored_proposal.scoring_result
             proposal = proposal_repo.create_proposal(

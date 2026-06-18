@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -663,6 +664,63 @@ async def test_persist_scored_improvement_proposal_ignores_scout_fingerprints(
     assert len(scout_proposals) == 1
     assert len(reflection_proposals) == 1
     assert reflection_proposals[0].metadata_payload["fingerprint"] == drafts[0].fingerprint
+
+
+@pytest.mark.anyio
+async def test_persist_scored_improvement_proposal_skips_missing_session_without_dedupe(
+    session_factory,
+) -> None:
+    """A skipped missing-session draft should not suppress a later valid match."""
+    service = MockExecutionService(session_factory)
+
+    with session_scope(session_factory) as session:
+        task_id = _setup_task(session)
+
+    state = _make_sandbox_friction_state(task_id)
+    now = datetime.now(UTC)
+    persisted_outcome = _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+        persist_friction_proposals=False,
+    )
+    drafts = service._build_friction_proposal_drafts(
+        task_id=persisted_outcome.task_id,
+        session_id=persisted_outcome.session_id,
+        task_constraints=persisted_outcome.task_constraints,
+        state=state,
+        worker_run_id=persisted_outcome.worker_run_id,
+    )
+    scored_proposals = await service._score_friction_proposal_drafts(drafts=drafts)
+    valid_scored_proposal = scored_proposals[0]
+    missing_session_scored_proposal = replace(
+        valid_scored_proposal,
+        draft=replace(
+            valid_scored_proposal.draft,
+            scoring_context=replace(
+                valid_scored_proposal.draft.scoring_context,
+                session_id=None,
+            ),
+        ),
+    )
+
+    service._persist_scored_friction_proposals(
+        scored_proposals=[
+            missing_session_scored_proposal,
+            valid_scored_proposal,
+        ]
+    )
+
+    with session_scope(session_factory) as session:
+        proposals = ProposalRepository(session).list_proposals(
+            task_id=task_id,
+            proposal_type=ProposalType.REFLECTION,
+        )
+
+    assert len(proposals) == 1
+    assert proposals[0].metadata_payload["fingerprint"] == valid_scored_proposal.draft.fingerprint
 
 
 def test_persist_execution_outcome_scores_worker_friction_report_dict(session_factory) -> None:
