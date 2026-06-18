@@ -730,6 +730,22 @@ describe('api service', () => {
       expect(result).toEqual(mockProposals);
     });
 
+    it('listProposals includes proposal_type when provided', async () => {
+      const mockProposals = [{ proposal_id: 'p1', title: 'Improvement 1' }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockProposals,
+      });
+
+      const result = await api.listProposals('pending_review', 'reflection');
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/proposals?status=pending_review&proposal_type=reflection');
+      expect(result).toEqual(mockProposals);
+    });
+
     it('acceptProposal sends correct POST request', async () => {
       const mockSnapshot = { task_id: 't1', status: 'pending' };
       mockFetch.mockResolvedValueOnce({
