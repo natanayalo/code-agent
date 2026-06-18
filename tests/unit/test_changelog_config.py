@@ -3,7 +3,8 @@ from pathlib import Path
 
 
 def test_changelog_config_tracks_merged_pull_requests() -> None:
-    config = tomllib.loads(Path("cliff.toml").read_text())
+    cliff_toml_path = Path(__file__).resolve().parents[2] / "cliff.toml"
+    config = tomllib.loads(cliff_toml_path.read_text())
 
     assert config["changelog"]["output"] == "CHANGELOG.md"
     assert config["remote"]["github"] == {
