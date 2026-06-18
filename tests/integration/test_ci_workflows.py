@@ -134,7 +134,9 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
     assert triggers["push"]["branches"] == ["master"]
     assert "workflow_dispatch" in triggers
     assert workflow["permissions"] == {"contents": "write"}
-    assert "peter-evans/create-pull-request@v8" not in used_actions
+    assert not any(
+        action and action.startswith("peter-evans/create-pull-request") for action in used_actions
+    )
     assert checkout_step["with"]["ref"] == "master"
     assert checkout_step["with"]["persist-credentials"] is True
     assert "git diff --name-only" in verify_step["run"]
