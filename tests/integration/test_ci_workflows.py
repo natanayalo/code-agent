@@ -140,7 +140,7 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
         action and action.startswith("peter-evans/create-pull-request") for action in used_actions
     )
     assert steps.index(validate_step) < steps.index(checkout_step)
-    assert "CHANGELOG_DEPLOY_KEY" in validate_step.get("run", "")
+    assert "CHANGELOG_DEPLOY_KEY" in (validate_step.get("run") or "")
 
     checkout_with = checkout_step.get("with", {})
     assert checkout_with.get("ref") == "master"
