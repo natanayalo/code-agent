@@ -214,10 +214,20 @@ git cliff --output CHANGELOG.md
 
 The `changelog` GitHub Actions workflow also runs after merges to `master`. If
 the generated changelog changed, it commits only `CHANGELOG.md` back to
-`master` as `github-actions[bot]`. This is the repository's narrow exception to
-the normal "no direct commits to `master`" rule, and the GitHub branch
-protection/ruleset must allow the GitHub Actions bot to bypass protections for
-this generated changelog update.
+`master` using the `CHANGELOG_DEPLOY_KEY` write deploy key. This is the
+repository's narrow exception to the normal "no direct commits to `master`"
+rule.
+
+Required GitHub setup:
+
+1. Create a dedicated SSH deploy key for changelog automation.
+2. Add the public key under repository deploy keys with write access.
+3. Store the private key as the `CHANGELOG_DEPLOY_KEY` Actions secret.
+4. Add deploy keys to the `master` ruleset bypass list with "Always allow".
+
+The workflow validates that only `CHANGELOG.md` changed before pushing. Pure
+`CHANGELOG.md` pushes are ignored by the workflow trigger to avoid a follow-up
+no-op run after the generated commit lands.
 
 ## Current Focus
 

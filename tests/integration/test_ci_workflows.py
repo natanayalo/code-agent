@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -126,19 +127,31 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
     workflow = _load_yaml(".github/workflows/changelog.yml")
     triggers = _workflow_triggers(workflow)
     steps = _job_steps(workflow, "update-changelog")
+    validate_step = _step_by_name(steps, "Validate changelog deploy key")
     checkout_step = _step_by_name(steps, "Check out repository")
     verify_step = _step_by_name(steps, "Verify only changelog changed")
     commit_step = _step_by_name(steps, "Commit generated changelog")
     used_actions = [step.get("uses") for step in steps]
 
     assert triggers["push"]["branches"] == ["master"]
+    assert triggers["push"].get("paths-ignore") == ["CHANGELOG.md"]
     assert "workflow_dispatch" in triggers
-    assert workflow["permissions"] == {"contents": "write"}
+    assert workflow["permissions"] == {"contents": "read"}
     assert not any(
         action and action.startswith("peter-evans/create-pull-request") for action in used_actions
     )
+    assert steps.index(validate_step) < steps.index(checkout_step)
+    validate_run = validate_step.get("run") or ""
+    validate_env = validate_step.get("env") or {}
+    deploy_key_pattern = re.compile(r"\bCHANGELOG_DEPLOY_KEY\b")
+    assert deploy_key_pattern.search(validate_run) or any(
+        deploy_key_pattern.search(str(value)) for value in validate_env.values()
+    )
+
     checkout_with = checkout_step.get("with", {})
     assert checkout_with.get("ref") == "master"
+    ssh_key = checkout_with.get("ssh-key") or ""
+    assert "".join(ssh_key.split()) == "${{secrets.CHANGELOG_DEPLOY_KEY}}"
     assert checkout_with.get("persist-credentials") is True
 
     verify_run = verify_step.get("run", "")
