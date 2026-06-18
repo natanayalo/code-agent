@@ -78,8 +78,10 @@ def build_improvement_suggestion_draft(
 
 def compute_friction_fingerprint(report: FrictionReport, *, task_id: str) -> str:
     """Return the stable fingerprint used to dedupe reflection proposals."""
+    source = report.source or "other"
+    impact = report.impact or "unknown"
     safe_desc = report.description or ""
-    fingerprint_input = f"{task_id}:{report.source}:{report.impact}:{safe_desc}".encode()
+    fingerprint_input = f"{task_id}:{source}:{impact}:{safe_desc}".encode()
     return hashlib.sha256(fingerprint_input).hexdigest()
 
 
@@ -211,13 +213,15 @@ def _title_for_report(
         return "Improve verifier failure recovery"
     if failure_kind == "test_regression" or ("test" in desc_lower and "fail" in desc_lower):
         return "Reduce repeated test failure friction"
-    if not report.description:
+    if not (report.description or "").strip():
         return f"Improve {_source_label(report)} friction handling"
 
     first_part = description[:80]
     if ":" in first_part:
         first_part = first_part.split(":", maxsplit=1)[0]
     first_part = " ".join(first_part.split())
+    if len(first_part) < 3:
+        return f"Improve {_source_label(report)} friction handling"
     return f"Improve {first_part} handling"
 
 

@@ -69,6 +69,31 @@ def test_missing_description_still_produces_valid_suggestion_text() -> None:
     assert draft.suggestion.validation_path
 
 
+def test_whitespace_description_uses_source_title_fallback() -> None:
+    report = FrictionReport(source="other", description="   ", impact="unknown")
+
+    draft = build_improvement_suggestion_draft(
+        report,
+        task_id="task-whitespace",
+        attempt_count=0,
+    )
+
+    assert draft.suggestion.title == "Improve other friction handling"
+    assert "reported without a detailed description" in draft.suggestion.description
+
+
+def test_short_split_title_uses_source_title_fallback() -> None:
+    report = FrictionReport(source="tooling", description="A: B", impact="slowed_down")
+
+    draft = build_improvement_suggestion_draft(
+        report,
+        task_id="task-short-title",
+        attempt_count=0,
+    )
+
+    assert draft.suggestion.title == "Improve tooling friction handling"
+
+
 def test_fingerprint_is_stable_and_changes_with_identity_fields() -> None:
     report = FrictionReport(
         source="tooling",
@@ -91,3 +116,20 @@ def test_fingerprint_is_stable_and_changes_with_identity_fields() -> None:
     assert len(fingerprint) == 64
     assert fingerprint == compute_friction_fingerprint(same_report, task_id="task-4")
     assert fingerprint != compute_friction_fingerprint(changed_report, task_id="task-4")
+
+
+def test_fingerprint_normalizes_nullable_source_and_impact_defaults() -> None:
+    defaulted_report = FrictionReport(
+        source="other",
+        description="Same friction.",
+        impact="unknown",
+    )
+    nullable_report = FrictionReport(
+        source=None,
+        description="Same friction.",
+        impact=None,
+    )
+
+    assert compute_friction_fingerprint(defaulted_report, task_id="task-5") == (
+        compute_friction_fingerprint(nullable_report, task_id="task-5")
+    )
