@@ -286,6 +286,33 @@ describe('IdeaInboxPage', () => {
     expect(screen.getByText('Sandbox command timed out twice.')).toBeInTheDocument();
   });
 
+  it('does not render empty friction context evidence', async () => {
+    vi.mocked(api.listProposals).mockResolvedValue([
+      createProposal({
+        proposal_id: 'p-empty-context',
+        proposal_type: ProposalType.REFLECTION,
+        title: 'Reflection with empty context',
+        metadata_payload: {
+          friction_report: {
+            source: 'tooling',
+            impact: 'slowed_down',
+            context: {},
+          },
+        },
+      }),
+    ]);
+
+    renderWithProviders(<IdeaInboxPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Reflection with empty context')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Tooling')).toBeInTheDocument();
+    expect(screen.queryByText('Context')).not.toBeInTheDocument();
+    expect(screen.queryByText('{}')).not.toBeInTheDocument();
+  });
+
   it('renders sparse reflection metadata with safe fallback values', async () => {
     vi.mocked(api.listProposals).mockResolvedValue([
       createProposal({
@@ -344,6 +371,27 @@ describe('IdeaInboxPage', () => {
     expect(screen.queryByText('Reflection improvement')).not.toBeInTheDocument();
     expect(api.listProposals).toHaveBeenCalledWith(ProposalStatus.PENDING_REVIEW);
     expect(api.listProposals).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses filter-specific empty state labels', async () => {
+    vi.mocked(api.listProposals).mockResolvedValue([
+      createProposal({
+        proposal_id: 'p-reflection-only',
+        proposal_type: ProposalType.REFLECTION,
+        title: 'Reflection only',
+      }),
+    ]);
+
+    renderWithProviders(<IdeaInboxPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Reflection only')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show ideas proposals' }));
+
+    expect(screen.getByText('No pending ideas')).toBeInTheDocument();
+    expect(screen.queryByText('No pending proposals')).not.toBeInTheDocument();
   });
 
   it('uses reflection-specific rejection confirmation copy', async () => {
