@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
-  pull-requests: write
 concurrency:
   group: changelog-update
   cancel-in-progress: true
@@ -20,7 +19,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          persist-credentials: false
+          ref: master
+          persist-credentials: true
       - name: Generate changelog
         uses: orhun/git-cliff-action@v4
         with:
@@ -30,13 +30,25 @@ jobs:
         env:
           OUTPUT: CHANGELOG.md
           GITHUB_REPO: ${{ github.repository }}
-      - name: Open changelog pull request
-        uses: peter-evans/create-pull-request@v8
+      - name: Verify only changelog changed
+        run: |
+          changed_files="$(git diff --name-only)"
+          if [ -z "$changed_files" ]; then
+            echo "CHANGELOG.md is already current."
+            exit 0
+          fi
+
+          if [ -n "$changed_files" ] && [ "$changed_files" != "CHANGELOG.md" ]; then
+            echo "Unexpected generated files:"
+            git diff --name-only
+            exit 1
+          fi
+      - name: Commit generated changelog
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          add-paths: CHANGELOG.md
-          branch: automation/update-changelog
-          base: master
-          commit-message: "docs: update changelog"
-          title: "docs: update changelog"
-          body: Generated from merged PR history with git-cliff.
+          commit_message: "docs: update changelog"
+          branch: master
+          file_pattern: CHANGELOG.md
+          commit_user_name: github-actions[bot]
+          commit_user_email: 41898282+github-actions[bot]@users.noreply.github.com
+          commit_author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"

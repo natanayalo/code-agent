@@ -121,6 +121,41 @@ def test_pre_commit_workflow_runs_on_push_without_ci_branch_guard_failures() -> 
     assert "--hook-stage manual" in run_step["run"]
 
 
+def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None:
+    """Generated changelog updates should be the only direct bot commit to master."""
+    workflow = _load_yaml(".github/workflows/changelog.yml")
+    triggers = _workflow_triggers(workflow)
+    steps = _job_steps(workflow, "update-changelog")
+    checkout_step = _step_by_name(steps, "Check out repository")
+    verify_step = _step_by_name(steps, "Verify only changelog changed")
+    commit_step = _step_by_name(steps, "Commit generated changelog")
+    used_actions = [step.get("uses") for step in steps]
+
+    assert triggers["push"]["branches"] == ["master"]
+    assert "workflow_dispatch" in triggers
+    assert workflow["permissions"] == {"contents": "write"}
+    assert not any(
+        action and action.startswith("peter-evans/create-pull-request") for action in used_actions
+    )
+    checkout_with = checkout_step.get("with", {})
+    assert checkout_with.get("ref") == "master"
+    assert checkout_with.get("persist-credentials") is True
+
+    verify_run = verify_step.get("run", "")
+    assert "git diff --name-only" in verify_run
+    assert 'if [ -z "$changed_files" ]; then' in verify_run
+    assert (
+        'if [ -n "$changed_files" ] && [ "$changed_files" != "CHANGELOG.md" ]; then' in verify_run
+    )
+    assert steps.index(verify_step) < steps.index(commit_step)
+    assert commit_step.get("uses", "").startswith("stefanzweifel/git-auto-commit-action")
+
+    commit_with = commit_step.get("with", {})
+    assert commit_with.get("branch") == "master"
+    assert commit_with.get("file_pattern") == "CHANGELOG.md"
+    assert commit_with.get("commit_message") == "docs: update changelog"
+
+
 def test_frozen_eval_workflow_runs_harness_and_uploads_report() -> None:
     """Frozen evaluation should run on push and upload a deterministic JSON report."""
     workflow = _load_yaml(".github/workflows/frozen-eval.yml")
