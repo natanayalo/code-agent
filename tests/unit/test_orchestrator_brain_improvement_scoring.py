@@ -64,7 +64,7 @@ def _context() -> ImprovementSuggestionScoringContext:
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_score_improvement_suggestion_model_success() -> None:
     payload = {
         "value": "high",
@@ -103,7 +103,7 @@ async def test_score_improvement_suggestion_model_success() -> None:
     assert request.constraints["budget"] == "bounded"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_score_improvement_suggestion_normalizes_literal_case() -> None:
     payload = {
         "value": "High",
@@ -131,7 +131,7 @@ async def test_score_improvement_suggestion_normalizes_literal_case() -> None:
     assert result.suggestion.hitl_need == "optional"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_score_improvement_suggestion_normalizes_blank_rationale() -> None:
     payload = {
         "effort": "medium",
@@ -151,7 +151,7 @@ async def test_score_improvement_suggestion_normalizes_blank_rationale() -> None
     assert result.metadata.rationale is None
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_score_improvement_suggestion_returns_none_for_invalid_payload() -> None:
     brain = RuleBasedOrchestratorBrain(
         planner_worker=_StaticWorker(WorkerResult(status="success", summary="not json"))
@@ -166,7 +166,7 @@ async def test_score_improvement_suggestion_returns_none_for_invalid_payload() -
     assert result is None
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_score_improvement_suggestion_returns_none_on_planner_failure() -> None:
     brain = RuleBasedOrchestratorBrain(planner_worker=_ExplodingWorker())
 
@@ -179,7 +179,7 @@ async def test_score_improvement_suggestion_returns_none_on_planner_failure() ->
     assert result is None
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_score_improvement_suggestion_returns_none_on_missing_planner_result() -> None:
     brain = RuleBasedOrchestratorBrain(planner_worker=_NoneWorker())
 
