@@ -126,19 +126,25 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
     workflow = _load_yaml(".github/workflows/changelog.yml")
     triggers = _workflow_triggers(workflow)
     steps = _job_steps(workflow, "update-changelog")
+    validate_step = _step_by_name(steps, "Validate changelog deploy key")
     checkout_step = _step_by_name(steps, "Check out repository")
     verify_step = _step_by_name(steps, "Verify only changelog changed")
     commit_step = _step_by_name(steps, "Commit generated changelog")
     used_actions = [step.get("uses") for step in steps]
 
     assert triggers["push"]["branches"] == ["master"]
+    assert triggers["push"]["paths-ignore"] == ["CHANGELOG.md"]
     assert "workflow_dispatch" in triggers
-    assert workflow["permissions"] == {"contents": "write"}
+    assert workflow["permissions"] == {"contents": "read"}
     assert not any(
         action and action.startswith("peter-evans/create-pull-request") for action in used_actions
     )
+    assert steps.index(validate_step) < steps.index(checkout_step)
+    assert "CHANGELOG_DEPLOY_KEY" in validate_step.get("run", "")
+
     checkout_with = checkout_step.get("with", {})
     assert checkout_with.get("ref") == "master"
+    assert checkout_with.get("ssh-key") == "${{ secrets.CHANGELOG_DEPLOY_KEY }}"
     assert checkout_with.get("persist-credentials") is True
 
     verify_run = verify_step.get("run", "")

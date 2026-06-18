@@ -66,8 +66,9 @@ Do not build these yet:
 - Never use `--no-verify` to bypass git hooks or pre-commit checks. If a hook fails, you must fix the underlying issue.
 - Never commit directly to `master` or `main`. Always create a new branch and use a Pull Request.
   The only exception is the `changelog` GitHub Actions workflow, which may
-  commit generated `CHANGELOG.md` updates to `master` as `github-actions[bot]`
-  after verifying no other files changed.
+  commit generated `CHANGELOG.md` updates to `master` using the
+  `CHANGELOG_DEPLOY_KEY` write deploy key after verifying no other files
+  changed.
 - Every behavior change must have tests.
 - Every new component must have logs that help debug failures.
 - Prefer small commits and small PRs.
