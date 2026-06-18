@@ -16,7 +16,11 @@ def test_changelog_config_tracks_merged_pull_requests() -> None:
         {
             "pattern": "Merge pull request #([0-9]+) from [^\\n]+\\n\\n(.+)",
             "replace": "${2} ([#${1}](https://github.com/natanayalo/code-agent/pull/${1}))",
-        }
+        },
+        {
+            "pattern": "(.*) \\(#([0-9]+)\\)",
+            "replace": "${1} ([#${2}](https://github.com/natanayalo/code-agent/pull/${2}))",
+        },
     ]
 
     parser_messages = [parser.get("message") for parser in config["git"]["commit_parsers"]]
