@@ -222,9 +222,9 @@ describe('IdeaInboxPage', () => {
         summary: 'Retries should stop when sandbox startup fails repeatedly.',
         metadata_payload: {
           improvement_suggestion: {
-            value: 'high',
-            effort: 'medium',
-            risk: 'low',
+            value: 'High',
+            effort: 'Medium',
+            risk: 'Low',
             layer_impact: 'sandbox',
             validation_path: 'Run sandbox integration smoke.',
             hitl_need: 'optional',
@@ -252,9 +252,9 @@ describe('IdeaInboxPage', () => {
 
     expect(screen.getByText('Improvement')).toBeInTheDocument();
     expect(screen.getByText('Approve Improvement')).toBeInTheDocument();
-    expect(screen.getByText('High')).toBeInTheDocument();
-    expect(screen.getByText('Medium')).toBeInTheDocument();
-    expect(screen.getByText('Low')).toBeInTheDocument();
+    expect(screen.getByText('High')).toHaveClass('score-high');
+    expect(screen.getByText('Medium')).toHaveClass('score-medium');
+    expect(screen.getByText('Low')).toHaveClass('score-low');
     expect(screen.getAllByText('Sandbox')).toHaveLength(2);
     expect(screen.getByText('Optional')).toBeInTheDocument();
     expect(screen.getByText(/Run sandbox integration smoke\./)).toBeInTheDocument();

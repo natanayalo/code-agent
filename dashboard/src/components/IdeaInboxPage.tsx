@@ -85,10 +85,11 @@ function scoreTone(value: unknown): string {
   if (typeof value !== 'string') {
     return 'neutral';
   }
-  if (['high', 'large', 'required'].includes(value)) {
+  const normalized = value.trim().toLowerCase();
+  if (['high', 'large', 'required'].includes(normalized)) {
     return 'high';
   }
-  if (['low', 'small', 'none'].includes(value)) {
+  if (['low', 'small', 'none'].includes(normalized)) {
     return 'low';
   }
   return 'medium';
