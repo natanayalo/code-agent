@@ -41,6 +41,15 @@ jobs:
         env:
           OUTPUT: CHANGELOG.md
           GITHUB_REPO: ${{ github.repository }}
+      - name: Normalize changelog EOF
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("CHANGELOG.md")
+          text = path.read_text(encoding="utf-8").rstrip("\n") + "\n"
+          path.write_text(text, encoding="utf-8")
+          PY
       - name: Verify only changelog changed
         run: |
           changed_files="$(git diff --name-only)"
