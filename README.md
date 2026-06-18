@@ -44,6 +44,7 @@ Detailed architecture: [`docs/architecture.md`](docs/architecture.md)
 - runbook and troubleshooting: [`docs/runbook.md`](docs/runbook.md)
 - forward plan: [`docs/roadmap.md`](docs/roadmap.md)
 - current snapshot/status: [`docs/status.md`](docs/status.md)
+- shipped changes: [`CHANGELOG.md`](CHANGELOG.md)
 
 ## Repository Layout
 
@@ -199,6 +200,21 @@ poetry run pre-commit run --all-files
 # Dashboard checks
 cd dashboard && npm run test:run
 ```
+
+## Changelog
+
+`CHANGELOG.md` is generated from merged pull requests using
+[`git-cliff`](https://git-cliff.org/). To update it locally, install the CLI
+with Homebrew and run:
+
+```bash
+brew install git-cliff
+git cliff --output CHANGELOG.md
+```
+
+The `changelog` GitHub Actions workflow also runs after merges to `master`. If
+the generated changelog changed, it opens or updates a dedicated changelog pull
+request instead of committing directly to `master`.
 
 ## Current Focus
 
