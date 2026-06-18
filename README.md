@@ -228,7 +228,9 @@ Required GitHub setup:
 The workflow validates that only `CHANGELOG.md` changed before pushing and
 normalizes the generated file before committing it. Pure `CHANGELOG.md` pushes
 are ignored by the changelog and general CI push workflows to avoid follow-up
-no-op or formatting-only runs after the generated commit lands.
+no-op or formatting-only runs after the generated commit lands. The generated
+commit message also includes `[skip ci]` so GitHub can skip push-triggered CI
+when it honors standard skip markers.
 
 ## Current Focus
 

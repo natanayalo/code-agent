@@ -66,7 +66,7 @@ jobs:
       - name: Commit generated changelog
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
-          commit_message: "docs: update changelog"
+          commit_message: "docs: update changelog [skip ci]"
           branch: master
           file_pattern: CHANGELOG.md
           commit_user_name: github-actions[bot]

@@ -175,7 +175,7 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
     commit_with = commit_step.get("with", {})
     assert commit_with.get("branch") == "master"
     assert commit_with.get("file_pattern") == "CHANGELOG.md"
-    assert commit_with.get("commit_message") == "docs: update changelog"
+    assert commit_with.get("commit_message") == "docs: update changelog [skip ci]"
 
 
 def test_frozen_eval_workflow_runs_harness_and_uploads_report() -> None:
