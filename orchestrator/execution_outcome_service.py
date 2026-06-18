@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, cast
 
-from pydantic import ValidationError
-
-from db.enums import ArtifactType, ProposalStatus, ProposalType, TaskStatus, WorkerType
+from db.enums import ArtifactType, ProposalStatus, TaskStatus, WorkerType
+from orchestrator.execution_improvement_proposal_service import (
+    _persist_friction_proposals_if_needed,
+)
 from orchestrator.execution_policy import (
     _task_status_from_result,
     _worker_run_status_from_result,
@@ -23,15 +24,6 @@ from orchestrator.execution_serialization import (
     _serialize_verification_report,
     _workspace_id_from_artifacts,
 )
-from orchestrator.improvement_suggestions import (
-    ImprovementSuggestionScorer,
-    ImprovementSuggestionScoringContext,
-    ImprovementSuggestionScoringMetadata,
-    ImprovementSuggestionScoringResult,
-    build_improvement_suggestion_draft,
-)
-from orchestrator.nodes.verification_result import VERIFIER_REPAIR_PASSES_USED_CONSTRAINT
-from orchestrator.reflection import FrictionReport, ImprovementSuggestion
 from orchestrator.state import OrchestratorState
 from repositories import (
     ArtifactRepository,
@@ -45,6 +37,16 @@ from repositories import (
 )
 
 logger = logging.getLogger("orchestrator.execution")
+
+
+@dataclass(frozen=True)
+class _PersistedExecutionOutcome:
+    """Identifiers needed for post-transaction proposal persistence."""
+
+    task_id: str
+    session_id: str
+    task_constraints: dict[str, Any] | None
+    worker_run_id: str
 
 
 def _apply_approval_constraints(task: Any, state: OrchestratorState, finished_at: datetime) -> None:
@@ -234,234 +236,6 @@ def _persist_scout_proposal_if_needed(
     )
 
 
-def _deterministic_scoring_result(
-    suggestion: ImprovementSuggestion,
-    *,
-    enabled: bool,
-    fallback: bool,
-    fallback_reason: str | None,
-    provider: str | None = None,
-) -> ImprovementSuggestionScoringResult:
-    return ImprovementSuggestionScoringResult(
-        suggestion=suggestion,
-        metadata=ImprovementSuggestionScoringMetadata(
-            enabled=enabled,
-            mode="deterministic",
-            provider=provider,
-            fallback=fallback,
-            fallback_reason=fallback_reason,
-        ),
-    )
-
-
-def _run_improvement_scorer(
-    scorer: ImprovementSuggestionScorer | None,
-    *,
-    enabled: bool,
-    report: FrictionReport,
-    deterministic_suggestion: ImprovementSuggestion,
-    context: ImprovementSuggestionScoringContext,
-) -> ImprovementSuggestionScoringResult:
-    if not enabled:
-        return _deterministic_scoring_result(
-            deterministic_suggestion,
-            enabled=False,
-            fallback=False,
-            fallback_reason="disabled",
-        )
-    provider = type(scorer).__name__ if scorer is not None else None
-    if scorer is None:
-        return _deterministic_scoring_result(
-            deterministic_suggestion,
-            enabled=True,
-            fallback=True,
-            fallback_reason="scorer_unavailable",
-        )
-    try:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            result = asyncio.run(
-                scorer.score_improvement_suggestion(
-                    report=report,
-                    deterministic_suggestion=deterministic_suggestion,
-                    context=context,
-                )
-            )
-        else:
-            raise RuntimeError("cannot_run_async_scorer_from_running_event_loop")
-    except Exception as exc:
-        logger.warning(
-            "Model-backed improvement scoring failed; using deterministic scoring",
-            extra={
-                "task_id": context.task_id,
-                "provider": provider,
-                "error_type": type(exc).__name__,
-            },
-        )
-        return _deterministic_scoring_result(
-            deterministic_suggestion,
-            enabled=True,
-            fallback=True,
-            fallback_reason=f"{type(exc).__name__}: {exc}",
-            provider=provider,
-        )
-    if result is None:
-        return _deterministic_scoring_result(
-            deterministic_suggestion,
-            enabled=True,
-            fallback=True,
-            fallback_reason="no_model_suggestion",
-            provider=provider,
-        )
-    return result
-
-
-def _persist_friction_proposals_if_needed(
-    proposal_repo: ProposalRepository,
-    *,
-    task_id: str,
-    session_id: str,
-    task_constraints: dict[str, Any] | None,
-    state: OrchestratorState,
-    worker_run_id: str,
-    improvement_scorer: ImprovementSuggestionScorer | None = None,
-    enable_improvement_llm_scoring: bool = False,
-) -> None:
-    all_reports: list[FrictionReport] = list(state.friction_reports)
-    result_reports = (
-        getattr(state.result, "friction_reports", None) if state.result is not None else None
-    )
-    if result_reports:
-        for rep_dict in result_reports:
-            if not isinstance(rep_dict, Mapping):
-                logger.warning("Friction report from worker is not a mapping: %r", rep_dict)
-                continue
-            if not isinstance(rep_dict, dict):
-                rep_dict = dict(rep_dict)
-            try:
-                source = rep_dict.get("source")
-                if source not in {"tooling", "orchestrator", "sandbox", "instructions", "other"}:
-                    source = "other"
-                impact = rep_dict.get("impact")
-                if impact not in {"slowed_down", "blocked", "required_workaround", "unknown"}:
-                    impact = "unknown"
-                desc = rep_dict.get("description")
-                if isinstance(desc, str):
-                    desc = desc.strip() or None
-                elif desc is not None:
-                    desc = str(desc).strip() or None
-                all_reports.append(
-                    FrictionReport(
-                        task_id=task_id,
-                        worker_run_id=worker_run_id,
-                        source=source,  # type: ignore[arg-type]
-                        description=desc,
-                        impact=impact,  # type: ignore[arg-type]
-                        context=rep_dict.get("context"),
-                    )
-                )
-            except (ValidationError, AttributeError) as exc:
-                logger.warning("Failed to parse friction report dict from worker: %s", exc)
-                logger.debug("Validation details: %s", exc, exc_info=True)
-
-    if not all_reports:
-        return
-
-    # User constraint: persist queue only when signal is repeated or repair has been exhausted
-    # First attempt is 1, so > 1 implies repeated
-    has_retry_context = False
-    if state.attempt_count > 1:
-        has_retry_context = True
-    elif state.route and state.route.route_reason and "retry" in state.route.route_reason.lower():
-        has_retry_context = True
-    elif (
-        isinstance(task_constraints, dict)
-        and VERIFIER_REPAIR_PASSES_USED_CONSTRAINT in task_constraints
-    ):
-        has_retry_context = True
-
-    if not has_retry_context:
-        return
-
-    existing_proposals = proposal_repo.list_proposals(task_id=task_id)
-    existing_fingerprints: set[str] = set()
-    for existing_proposal in existing_proposals:
-        metadata = existing_proposal.metadata_payload
-        if not isinstance(metadata, dict):
-            continue
-        fingerprint = metadata.get("fingerprint")
-        if isinstance(fingerprint, str):
-            existing_fingerprints.add(fingerprint)
-    failure_kind = getattr(state.result, "failure_kind", None) if state.result else None
-
-    for report in all_reports:
-        report = report.model_copy(
-            update={
-                "task_id": report.task_id or task_id,
-                "worker_run_id": report.worker_run_id or worker_run_id,
-            }
-        )
-        draft = build_improvement_suggestion_draft(
-            report,
-            task_id=task_id,
-            attempt_count=state.attempt_count,
-            failure_kind=failure_kind,
-            retry_context=has_retry_context,
-        )
-
-        if draft.fingerprint in existing_fingerprints:
-            continue
-        existing_fingerprints.add(draft.fingerprint)
-
-        scoring_result = _run_improvement_scorer(
-            improvement_scorer,
-            enabled=enable_improvement_llm_scoring,
-            report=report,
-            deterministic_suggestion=draft.suggestion,
-            context=ImprovementSuggestionScoringContext(
-                task_id=task_id,
-                task_text=state.task.task_text,
-                repo_url=state.task.repo_url,
-                branch=state.task.branch,
-                attempt_count=state.attempt_count,
-                failure_kind=failure_kind,
-                retry_context=has_retry_context,
-                session_id=session_id,
-                task_constraints=task_constraints or state.task.constraints,
-                task_budget=state.task.budget,
-            ),
-        )
-
-        proposal = proposal_repo.create_proposal(
-            session_id=session_id,
-            task_id=task_id,
-            title=scoring_result.suggestion.title,
-            summary=scoring_result.suggestion.description,
-            status=ProposalStatus.PENDING_REVIEW,
-            proposal_type=ProposalType.REFLECTION,
-            metadata_payload={
-                "reflection_kind": "improvement_suggestion",
-                "improvement_suggestion": scoring_result.suggestion.model_dump(mode="json"),
-                "friction_report": report.model_dump(mode="json"),
-                "scoring": scoring_result.metadata.to_payload(),
-                "attempt_count": state.attempt_count,
-                "failure_kind": failure_kind,
-                "worker_type": state.route.chosen_worker if state.route else None,
-                "fingerprint": draft.fingerprint,
-            },
-        )
-        logger.info(
-            "Persisted improvement suggestion proposal",
-            extra={
-                "task_id": task_id,
-                "proposal_id": proposal.id,
-                "worker_run_id": worker_run_id,
-                "title": scoring_result.suggestion.title,
-            },
-        )
-
-
 def _update_task_route_and_spec(
     task: Any,
     state: OrchestratorState,
@@ -489,7 +263,8 @@ def _persist_execution_outcome(
     started_at: datetime,
     finished_at: datetime,
     force_task_status: TaskStatus | None = None,
-) -> None:
+    persist_friction_proposals: bool = True,
+) -> _PersistedExecutionOutcome:
     """Persist route, task status, worker-run metadata, and artifacts."""
     logger.info(
         "Persisting execution outcome",
@@ -562,23 +337,29 @@ def _persist_execution_outcome(
 
         task_id_val = task.id
         session_id_val = task.session_id
-        task_constraints_val = task.constraints
+        task_constraints_val = (
+            dict(task.constraints) if isinstance(task.constraints, dict) else None
+        )
         worker_run_id_val = worker_run.id
 
-    try:
-        with session_scope(self.session_factory) as prop_session:
+    persisted_outcome = _PersistedExecutionOutcome(
+        task_id=task_id_val,
+        session_id=session_id_val,
+        task_constraints=task_constraints_val,
+        worker_run_id=worker_run_id_val,
+    )
+
+    if persist_friction_proposals:
+        try:
             _persist_friction_proposals_if_needed(
-                ProposalRepository(prop_session),
+                self,
                 task_id=task_id_val,
                 session_id=session_id_val,
                 task_constraints=task_constraints_val,
                 state=state,
                 worker_run_id=worker_run_id_val,
-                improvement_scorer=getattr(self, "improvement_scorer", None),
-                enable_improvement_llm_scoring=bool(
-                    getattr(self, "enable_improvement_llm_scoring", False)
-                ),
             )
-    except Exception as exc:
-        logger.warning("Failed to persist friction proposals: %s", exc, exc_info=True)
+        except Exception as exc:
+            logger.warning("Failed to persist friction proposals: %s", exc, exc_info=True)
     self._prune_retained_runs(now=finished_at)
+    return persisted_outcome

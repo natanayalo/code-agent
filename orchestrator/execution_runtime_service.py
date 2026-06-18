@@ -123,8 +123,8 @@ async def submit_task(
         try:
             state = await self._run_orchestrator(submission, persisted)
             finished_at = utc_now()
-            await self._run_blocking(
-                self._persist_execution_outcome,
+            await _persist_execution_outcome_with_reflections(
+                self,
                 task_id=persisted.task_id,
                 state=state,
                 started_at=started_at,
@@ -214,8 +214,8 @@ async def _persist_run_queued_task_outcome(
     finished_at: Any,
 ) -> None:
     if state.result is not None and state.result.status == "success":
-        await self._run_blocking(
-            self._persist_execution_outcome,
+        await _persist_execution_outcome_with_reflections(
+            self,
             task_id=persisted.task_id,
             state=state,
             started_at=started_at,
@@ -229,8 +229,8 @@ async def _persist_run_queued_task_outcome(
             state=state,
             terminal_failure=terminal_failure,
         )
-        await self._run_blocking(
-            self._persist_execution_outcome,
+        await _persist_execution_outcome_with_reflections(
+            self,
             task_id=persisted.task_id,
             state=state,
             started_at=started_at,
@@ -250,6 +250,56 @@ async def _persist_run_queued_task_outcome(
                 task_id=persisted.task_id,
                 worker_id=worker_id,
             )
+
+
+async def _persist_execution_outcome_with_reflections(
+    self: Any,
+    *,
+    task_id: str,
+    state: OrchestratorState,
+    started_at: Any,
+    finished_at: Any,
+    force_task_status: TaskStatus | None = None,
+) -> None:
+    persisted_outcome = await self._run_blocking(
+        self._persist_execution_outcome,
+        task_id=task_id,
+        state=state,
+        started_at=started_at,
+        finished_at=finished_at,
+        force_task_status=force_task_status,
+        persist_friction_proposals=False,
+    )
+    await _persist_improvement_proposals_for_outcome(
+        self,
+        state=state,
+        persisted_outcome=persisted_outcome,
+    )
+
+
+async def _persist_improvement_proposals_for_outcome(
+    self: Any,
+    *,
+    state: OrchestratorState,
+    persisted_outcome: Any,
+) -> None:
+    try:
+        drafts = self._build_friction_proposal_drafts(
+            task_id=persisted_outcome.task_id,
+            session_id=persisted_outcome.session_id,
+            task_constraints=persisted_outcome.task_constraints,
+            state=state,
+            worker_run_id=persisted_outcome.worker_run_id,
+        )
+        scored_proposals = await self._score_friction_proposal_drafts(drafts=drafts)
+        if not scored_proposals:
+            return
+        await self._run_blocking(
+            self._persist_scored_friction_proposals,
+            scored_proposals=scored_proposals,
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist friction proposals: %s", exc, exc_info=True)
 
 
 async def _handle_run_queued_task_error(

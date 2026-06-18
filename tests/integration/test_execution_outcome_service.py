@@ -10,6 +10,11 @@ from sqlalchemy.pool import StaticPool
 
 from db.base import Base
 from db.enums import ProposalStatus, ProposalType
+from orchestrator.execution_improvement_proposal_service import (
+    _build_friction_proposal_drafts,
+    _persist_scored_friction_proposals,
+    _score_friction_proposal_drafts,
+)
 from orchestrator.execution_outcome_service import _persist_execution_outcome
 from orchestrator.improvement_suggestions import (
     ImprovementSuggestionScoringContext,
@@ -52,6 +57,10 @@ class MockExecutionService:
 
     def _prune_retained_runs(self, now: datetime) -> None:
         pass
+
+    _build_friction_proposal_drafts = _build_friction_proposal_drafts
+    _score_friction_proposal_drafts = _score_friction_proposal_drafts
+    _persist_scored_friction_proposals = _persist_scored_friction_proposals
 
 
 class RecordingScorer:
@@ -129,6 +138,77 @@ def _setup_task(session) -> str:
         task_text="Do scout stuff",
     )
     return task.id
+
+
+async def _persist_outcome_and_score_improvements(
+    service: MockExecutionService,
+    *,
+    task_id: str,
+    state: OrchestratorState,
+    now: datetime,
+) -> None:
+    persisted_outcome = _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+        persist_friction_proposals=False,
+    )
+    drafts = service._build_friction_proposal_drafts(
+        task_id=persisted_outcome.task_id,
+        session_id=persisted_outcome.session_id,
+        task_constraints=persisted_outcome.task_constraints,
+        state=state,
+        worker_run_id=persisted_outcome.worker_run_id,
+    )
+    scored_proposals = await service._score_friction_proposal_drafts(drafts=drafts)
+    service._persist_scored_friction_proposals(scored_proposals=scored_proposals)
+
+
+def _make_sandbox_friction_state(
+    task_id: str,
+    *,
+    task_text: str = "fix sandbox",
+    constraints: dict[str, Any] | None = None,
+    duplicate_reports: bool = False,
+) -> OrchestratorState:
+    task_kwargs: dict[str, Any] = {"task_text": task_text, "task_id": task_id}
+    if constraints is not None:
+        task_kwargs["constraints"] = constraints
+    reports = [
+        FrictionReport(
+            task_id=task_id,
+            source="sandbox",
+            description="Infra crash prevented checkout.",
+            impact="blocked",
+            context={"failure_kind": "sandbox_infra"},
+        )
+    ]
+    if duplicate_reports:
+        reports.append(reports[0].model_copy())
+    return OrchestratorState(
+        task=TaskRequest(**task_kwargs),
+        session=None,
+        route=RouteDecision(chosen_worker="codex", route_reason="retry after infra failure"),
+        dispatch=WorkerDispatch(),
+        approval=ApprovalCheckpoint(required=False, status="not_required"),
+        task_spec=TaskSpec(
+            goal=task_text,
+            task_type="maintenance",
+            delivery_mode="workspace",
+        ),
+        result=WorkerResult(
+            status="failure",
+            summary="Sandbox infra crash blocked execution.",
+            failure_kind="sandbox_infra",
+            commands_run=[],
+            test_results=[],
+            artifacts=[],
+        ),
+        friction_reports=reports,
+        attempt_count=2,
+    )
 
 
 def _assert_sandbox_improvement_proposal(proposal: Any, *, task_id: str) -> None:
@@ -300,7 +380,8 @@ def test_persist_execution_outcome_creates_scored_improvement_proposal(session_f
         assert len(proposals) == 1
 
 
-def test_persist_execution_outcome_applies_llm_improvement_scoring(session_factory) -> None:
+@pytest.mark.anyio
+async def test_persist_execution_outcome_applies_llm_improvement_scoring(session_factory) -> None:
     """Enabled model scoring should revise scores and persist scorer rationale."""
     scorer = RecordingScorer()
     service = MockExecutionService(
@@ -312,49 +393,38 @@ def test_persist_execution_outcome_applies_llm_improvement_scoring(session_facto
     with session_scope(session_factory) as session:
         task_id = _setup_task(session)
 
-    state = OrchestratorState(
-        task=TaskRequest(
-            task_text="fix sandbox",
-            task_id=task_id,
-            constraints={"operator": "local"},
-        ),
-        session=None,
-        route=RouteDecision(chosen_worker="codex", route_reason="retry after infra failure"),
-        dispatch=WorkerDispatch(),
-        approval=ApprovalCheckpoint(required=False, status="not_required"),
-        task_spec=TaskSpec(
-            goal="fix sandbox",
-            task_type="maintenance",
-            delivery_mode="workspace",
-        ),
-        result=WorkerResult(
-            status="failure",
-            summary="Sandbox infra crash blocked execution.",
-            failure_kind="sandbox_infra",
-            commands_run=[],
-            test_results=[],
-            artifacts=[],
-        ),
-        friction_reports=[
-            FrictionReport(
-                task_id=task_id,
-                source="sandbox",
-                description="Infra crash prevented checkout.",
-                impact="blocked",
-                context={"failure_kind": "sandbox_infra"},
-            )
-        ],
-        attempt_count=2,
+    state = _make_sandbox_friction_state(
+        task_id,
+        constraints={"operator": "local"},
     )
     now = datetime.now(UTC)
 
-    _persist_execution_outcome(
+    persisted_outcome = _persist_execution_outcome(
         service,
         task_id=task_id,
         state=state,
         started_at=now,
         finished_at=now,
+        persist_friction_proposals=False,
     )
+
+    with session_scope(session_factory) as session:
+        proposals = ProposalRepository(session).list_proposals(
+            task_id=task_id,
+            proposal_type=ProposalType.REFLECTION,
+        )
+        assert proposals == []
+    assert scorer.calls == []
+
+    drafts = service._build_friction_proposal_drafts(
+        task_id=persisted_outcome.task_id,
+        session_id=persisted_outcome.session_id,
+        task_constraints=persisted_outcome.task_constraints,
+        state=state,
+        worker_run_id=persisted_outcome.worker_run_id,
+    )
+    scored_proposals = await service._score_friction_proposal_drafts(drafts=drafts)
+    service._persist_scored_friction_proposals(scored_proposals=scored_proposals)
 
     with session_scope(session_factory) as session:
         proposals = ProposalRepository(session).list_proposals(
@@ -382,7 +452,8 @@ def test_persist_execution_outcome_applies_llm_improvement_scoring(session_facto
     assert suggestion["hitl_need"] == "optional"
 
 
-def test_persist_execution_outcome_falls_back_when_llm_scoring_fails(session_factory) -> None:
+@pytest.mark.anyio
+async def test_persist_execution_outcome_falls_back_when_llm_scoring_fails(session_factory) -> None:
     """Scorer failures should keep deterministic suggestions and record fallback metadata."""
     service = MockExecutionService(
         session_factory,
@@ -393,44 +464,14 @@ def test_persist_execution_outcome_falls_back_when_llm_scoring_fails(session_fac
     with session_scope(session_factory) as session:
         task_id = _setup_task(session)
 
-    state = OrchestratorState(
-        task=TaskRequest(task_text="fix sandbox", task_id=task_id),
-        session=None,
-        route=RouteDecision(chosen_worker="codex", route_reason="retry after infra failure"),
-        dispatch=WorkerDispatch(),
-        approval=ApprovalCheckpoint(required=False, status="not_required"),
-        task_spec=TaskSpec(
-            goal="fix sandbox",
-            task_type="maintenance",
-            delivery_mode="workspace",
-        ),
-        result=WorkerResult(
-            status="failure",
-            summary="Sandbox infra crash blocked execution.",
-            failure_kind="sandbox_infra",
-            commands_run=[],
-            test_results=[],
-            artifacts=[],
-        ),
-        friction_reports=[
-            FrictionReport(
-                task_id=task_id,
-                source="sandbox",
-                description="Infra crash prevented checkout.",
-                impact="blocked",
-                context={"failure_kind": "sandbox_infra"},
-            )
-        ],
-        attempt_count=2,
-    )
+    state = _make_sandbox_friction_state(task_id)
     now = datetime.now(UTC)
 
-    _persist_execution_outcome(
+    await _persist_outcome_and_score_improvements(
         service,
         task_id=task_id,
         state=state,
-        started_at=now,
-        finished_at=now,
+        now=now,
     )
 
     with session_scope(session_factory) as session:
@@ -519,7 +560,8 @@ def test_persist_execution_outcome_skips_scorer_when_llm_scoring_disabled(
     assert metadata["scoring"]["fallback_reason"] == "disabled"
 
 
-def test_persist_execution_outcome_dedupes_same_pass_friction_reports(
+@pytest.mark.anyio
+async def test_persist_execution_outcome_dedupes_same_pass_friction_reports(
     session_factory,
 ) -> None:
     """Duplicate friction reports in one outcome should create one proposal."""
@@ -533,49 +575,18 @@ def test_persist_execution_outcome_dedupes_same_pass_friction_reports(
     with session_scope(session_factory) as session:
         task_id = _setup_task(session)
 
-    state = OrchestratorState(
-        task=TaskRequest(task_text="fix duplicate friction", task_id=task_id),
-        session=None,
-        route=RouteDecision(chosen_worker="codex", route_reason="retry after infra failure"),
-        dispatch=WorkerDispatch(),
-        approval=ApprovalCheckpoint(required=False, status="not_required"),
-        task_spec=TaskSpec(
-            goal="fix duplicate friction",
-            task_type="maintenance",
-            delivery_mode="workspace",
-        ),
-        result=WorkerResult(
-            status="failure",
-            summary="Sandbox infra crash blocked execution.",
-            failure_kind="sandbox_infra",
-            commands_run=[],
-            test_results=[],
-            artifacts=[],
-        ),
-        friction_reports=[
-            FrictionReport(
-                source="sandbox",
-                description="Infra crash prevented checkout.",
-                impact="blocked",
-                context={"failure_kind": "sandbox_infra"},
-            ),
-            FrictionReport(
-                source="sandbox",
-                description="Infra crash prevented checkout.",
-                impact="blocked",
-                context={"failure_kind": "sandbox_infra"},
-            ),
-        ],
-        attempt_count=2,
+    state = _make_sandbox_friction_state(
+        task_id,
+        task_text="fix duplicate friction",
+        duplicate_reports=True,
     )
     now = datetime.now(UTC)
 
-    _persist_execution_outcome(
+    await _persist_outcome_and_score_improvements(
         service,
         task_id=task_id,
         state=state,
-        started_at=now,
-        finished_at=now,
+        now=now,
     )
 
     with session_scope(session_factory) as session:

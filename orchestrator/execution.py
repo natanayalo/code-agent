@@ -23,6 +23,7 @@ from db.enums import (
 )
 from db.models import Task as _Task
 from orchestrator import (
+    execution_improvement_proposal_service,
     execution_interaction_service,
     execution_outcome_service,
     execution_proposal_service,
@@ -340,6 +341,15 @@ class TaskExecutionService:
     _create_or_get_user = execution_submission_service._create_or_get_user
     _create_or_get_session = execution_submission_service._create_or_get_session
     _persist_execution_outcome = execution_outcome_service._persist_execution_outcome
+    _build_friction_proposal_drafts = (
+        execution_improvement_proposal_service._build_friction_proposal_drafts
+    )
+    _score_friction_proposal_drafts = (
+        execution_improvement_proposal_service._score_friction_proposal_drafts
+    )
+    _persist_scored_friction_proposals = (
+        execution_improvement_proposal_service._persist_scored_friction_proposals
+    )
     _log_task_outcome = execution_snapshot_service._log_task_outcome
 
 
