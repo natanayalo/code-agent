@@ -502,4 +502,3 @@ completed-task ledger; keep completed work here instead.
 - Chore: harden ci validation gates ([#19](https://github.com/natanayalo/code-agent/pull/19))
 
 - Chore: add repo quality hooks and CI ([#4](https://github.com/natanayalo/code-agent/pull/4))
-

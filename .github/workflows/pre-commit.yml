@@ -1,6 +1,8 @@
 name: pre-commit
 on:
   push:
+    paths-ignore:
+      - CHANGELOG.md
 permissions:
   contents: read
 concurrency:

@@ -80,6 +80,7 @@ def test_pytest_workflow_runs_unit_coverage_and_integration_suite_on_push() -> N
     upload_step = _step_by_name(steps, "Upload coverage artifact")
 
     assert "push" in triggers
+    assert triggers["push"].get("paths-ignore") == ["CHANGELOG.md"]
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] is True
     assert workflow["jobs"]["pytest"]["timeout-minutes"] == 15
@@ -114,6 +115,7 @@ def test_pre_commit_workflow_runs_on_push_without_ci_branch_guard_failures() -> 
     run_step = _step_by_name(steps, "Run pre-commit")
 
     assert "push" in triggers
+    assert triggers["push"].get("paths-ignore") == ["CHANGELOG.md"]
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] is True
     assert workflow["jobs"]["pre-commit"]["timeout-minutes"] == 10
@@ -129,6 +131,8 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
     steps = _job_steps(workflow, "update-changelog")
     validate_step = _step_by_name(steps, "Validate changelog deploy key")
     checkout_step = _step_by_name(steps, "Check out repository")
+    generate_step = _step_by_name(steps, "Generate changelog")
+    normalize_step = _step_by_name(steps, "Normalize changelog EOF")
     verify_step = _step_by_name(steps, "Verify only changelog changed")
     commit_step = _step_by_name(steps, "Commit generated changelog")
     used_actions = [step.get("uses") for step in steps]
@@ -154,6 +158,11 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
     assert "".join(ssh_key.split()) == "${{secrets.CHANGELOG_DEPLOY_KEY}}"
     assert checkout_with.get("persist-credentials") is True
 
+    normalize_run = normalize_step.get("run", "")
+    assert 'rstrip("\\n") + "\\n"' in normalize_run
+    assert "write_text" in normalize_run
+    assert steps.index(generate_step) < steps.index(normalize_step) < steps.index(verify_step)
+
     verify_run = verify_step.get("run", "")
     assert "git diff --name-only" in verify_run
     assert 'if [ -z "$changed_files" ]; then' in verify_run
@@ -178,6 +187,7 @@ def test_frozen_eval_workflow_runs_harness_and_uploads_report() -> None:
     upload_step = _step_by_name(steps, "Upload frozen evaluation report")
 
     assert "push" in triggers
+    assert triggers["push"].get("paths-ignore") == ["CHANGELOG.md"]
     assert workflow["permissions"] == {"contents": "read"}
     assert workflow["concurrency"]["cancel-in-progress"] is True
     assert workflow["jobs"]["frozen-eval"]["timeout-minutes"] == 10

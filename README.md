@@ -225,9 +225,10 @@ Required GitHub setup:
 3. Store the private key as the `CHANGELOG_DEPLOY_KEY` Actions secret.
 4. Add deploy keys to the `master` ruleset bypass list with "Always allow".
 
-The workflow validates that only `CHANGELOG.md` changed before pushing. Pure
-`CHANGELOG.md` pushes are ignored by the workflow trigger to avoid a follow-up
-no-op run after the generated commit lands.
+The workflow validates that only `CHANGELOG.md` changed before pushing and
+normalizes the generated file before committing it. Pure `CHANGELOG.md` pushes
+are ignored by the changelog and general CI push workflows to avoid follow-up
+no-op or formatting-only runs after the generated commit lands.
 
 ## Current Focus
 

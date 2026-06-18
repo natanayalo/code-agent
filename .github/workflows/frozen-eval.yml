@@ -1,6 +1,8 @@
 name: frozen-eval
 on:
   push:
+    paths-ignore:
+      - CHANGELOG.md
 permissions:
   contents: read
 concurrency:
