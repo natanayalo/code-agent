@@ -64,8 +64,9 @@ def test_missing_description_still_produces_valid_suggestion_text() -> None:
     )
 
     assert draft.suggestion.title == "Improve other friction handling"
-    assert draft.suggestion.description
-    assert "other friction was reported" in draft.suggestion.description
+    assert draft.suggestion.description == (
+        "Reduce recurring other friction observed during task execution."
+    )
     assert draft.suggestion.validation_path
 
 
@@ -79,7 +80,9 @@ def test_whitespace_description_uses_source_title_fallback() -> None:
     )
 
     assert draft.suggestion.title == "Improve other friction handling"
-    assert "reported without a detailed description" in draft.suggestion.description
+    assert draft.suggestion.description == (
+        "Reduce recurring other friction observed during task execution."
+    )
 
 
 def test_short_split_title_uses_source_title_fallback() -> None:
@@ -146,6 +149,22 @@ def test_title_generation_strips_trailing_punctuation() -> None:
 
     assert period_draft.suggestion.title == "Improve Dependency install failed handling"
     assert colon_draft.suggestion.title == "Improve Failed to execute handling"
+
+
+def test_title_generation_uses_specific_suffix_after_generic_prefix() -> None:
+    report = FrictionReport(
+        source="tooling",
+        description="Error: pip install failed",
+        impact="slowed_down",
+    )
+
+    draft = build_improvement_suggestion_draft(
+        report,
+        task_id="task-generic-prefix-title",
+        attempt_count=0,
+    )
+
+    assert draft.suggestion.title == "Improve pip install failed handling"
 
 
 def test_fingerprint_is_stable_and_changes_with_identity_fields() -> None:

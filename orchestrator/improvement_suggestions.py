@@ -31,6 +31,16 @@ _HIGH_RISK_FAILURE_KINDS = frozenset(
         "risky_command",
     }
 )
+_GENERIC_TITLE_PREFIXES = frozenset(
+    {
+        "error",
+        "exception",
+        "failure",
+        "failed",
+        "failed to execute command",
+        "warning",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -218,7 +228,12 @@ def _title_for_report(
 
     first_part = description[:80]
     if ": " in first_part:
-        first_part = first_part.split(": ", maxsplit=1)[0]
+        prefix, suffix = first_part.split(": ", maxsplit=1)
+        prefix = prefix.strip()
+        if prefix.lower() in _GENERIC_TITLE_PREFIXES:
+            first_part = suffix.strip()
+        else:
+            first_part = prefix
     first_part = " ".join(first_part.split()).rstrip(".:,;")
     if len(first_part) < 3:
         return f"Improve {_source_label(report)} friction handling"
@@ -227,6 +242,8 @@ def _title_for_report(
 
 def _suggestion_description(report: FrictionReport, description: str) -> str:
     source = _source_label(report)
+    if not (report.description or "").strip():
+        return f"Reduce recurring {source} friction observed during task execution."
     return f"Reduce recurring {source} friction observed during task execution: {description}"
 
 
