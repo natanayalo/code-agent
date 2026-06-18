@@ -230,6 +230,69 @@ def test_persist_execution_outcome_creates_scored_improvement_proposal(session_f
         assert len(proposals) == 1
 
 
+def test_persist_execution_outcome_dedupes_same_pass_friction_reports(
+    session_factory,
+) -> None:
+    """Duplicate friction reports in one outcome should create one proposal."""
+    service = MockExecutionService(session_factory)
+
+    with session_scope(session_factory) as session:
+        task_id = _setup_task(session)
+
+    state = OrchestratorState(
+        task=TaskRequest(task_text="fix duplicate friction", task_id=task_id),
+        session=None,
+        route=RouteDecision(chosen_worker="codex", route_reason="retry after infra failure"),
+        dispatch=WorkerDispatch(),
+        approval=ApprovalCheckpoint(required=False, status="not_required"),
+        task_spec=TaskSpec(
+            goal="fix duplicate friction",
+            task_type="maintenance",
+            delivery_mode="workspace",
+        ),
+        result=WorkerResult(
+            status="failure",
+            summary="Sandbox infra crash blocked execution.",
+            failure_kind="sandbox_infra",
+            commands_run=[],
+            test_results=[],
+            artifacts=[],
+        ),
+        friction_reports=[
+            FrictionReport(
+                source="sandbox",
+                description="Infra crash prevented checkout.",
+                impact="blocked",
+                context={"failure_kind": "sandbox_infra"},
+            ),
+            FrictionReport(
+                source="sandbox",
+                description="Infra crash prevented checkout.",
+                impact="blocked",
+                context={"failure_kind": "sandbox_infra"},
+            ),
+        ],
+        attempt_count=2,
+    )
+    now = datetime.now(UTC)
+
+    _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+    )
+
+    with session_scope(session_factory) as session:
+        proposals = ProposalRepository(session).list_proposals(
+            task_id=task_id,
+            proposal_type=ProposalType.REFLECTION,
+        )
+        assert len(proposals) == 1
+        _assert_sandbox_improvement_proposal(proposals[0], task_id=task_id)
+
+
 def test_persist_execution_outcome_scores_worker_friction_report_dict(session_factory) -> None:
     """Worker-emitted friction dicts should be parsed and persisted as suggestions."""
     service = MockExecutionService(session_factory)

@@ -317,6 +317,7 @@ def _persist_friction_proposals_if_needed(
 
         if draft.fingerprint in existing_fingerprints:
             continue
+        existing_fingerprints.add(draft.fingerprint)
 
         proposal = proposal_repo.create_proposal(
             session_id=session_id,
