@@ -134,7 +134,7 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
     used_actions = [step.get("uses") for step in steps]
 
     assert triggers["push"]["branches"] == ["master"]
-    assert triggers["push"]["paths-ignore"] == ["CHANGELOG.md"]
+    assert triggers["push"].get("paths-ignore") == ["CHANGELOG.md"]
     assert "workflow_dispatch" in triggers
     assert workflow["permissions"] == {"contents": "read"}
     assert not any(
@@ -150,7 +150,8 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
 
     checkout_with = checkout_step.get("with", {})
     assert checkout_with.get("ref") == "master"
-    assert checkout_with.get("ssh-key") == "${{ secrets.CHANGELOG_DEPLOY_KEY }}"
+    ssh_key = checkout_with.get("ssh-key") or ""
+    assert "".join(ssh_key.split()) == "${{secrets.CHANGELOG_DEPLOY_KEY}}"
     assert checkout_with.get("persist-credentials") is True
 
     verify_run = verify_step.get("run", "")
