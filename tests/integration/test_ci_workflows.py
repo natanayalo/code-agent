@@ -137,19 +137,23 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
     assert not any(
         action and action.startswith("peter-evans/create-pull-request") for action in used_actions
     )
-    assert checkout_step["with"]["ref"] == "master"
-    assert checkout_step["with"]["persist-credentials"] is True
-    assert "git diff --name-only" in verify_step["run"]
-    assert 'if [ -z "$changed_files" ]; then' in verify_step["run"]
+    checkout_with = checkout_step.get("with", {})
+    assert checkout_with.get("ref") == "master"
+    assert checkout_with.get("persist-credentials") is True
+
+    verify_run = verify_step.get("run", "")
+    assert "git diff --name-only" in verify_run
+    assert 'if [ -z "$changed_files" ]; then' in verify_run
     assert (
-        'if [ -n "$changed_files" ] && [ "$changed_files" != "CHANGELOG.md" ]; then'
-        in verify_step["run"]
+        'if [ -n "$changed_files" ] && [ "$changed_files" != "CHANGELOG.md" ]; then' in verify_run
     )
     assert steps.index(verify_step) < steps.index(commit_step)
-    assert commit_step["uses"].startswith("stefanzweifel/git-auto-commit-action")
-    assert commit_step["with"]["branch"] == "master"
-    assert commit_step["with"]["file_pattern"] == "CHANGELOG.md"
-    assert commit_step["with"]["commit_message"] == "docs: update changelog"
+    assert commit_step.get("uses", "").startswith("stefanzweifel/git-auto-commit-action")
+
+    commit_with = commit_step.get("with", {})
+    assert commit_with.get("branch") == "master"
+    assert commit_with.get("file_pattern") == "CHANGELOG.md"
+    assert commit_with.get("commit_message") == "docs: update changelog"
 
 
 def test_frozen_eval_workflow_runs_harness_and_uploads_report() -> None:
