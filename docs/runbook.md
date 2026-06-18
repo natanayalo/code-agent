@@ -58,6 +58,13 @@ Codex and Gemini defaults are pinned to native-agent execution.
 - `/metrics` exposes `runtime_mode_usage` and `legacy_tool_loop_usage` so operators can track
   migration progress away from legacy tool-loop execution.
 
+## 2.2) Reflection Proposal Scoring Controls
+
+- `CODE_AGENT_IMPROVEMENT_LLM_SCORING_ENABLED=1` allows configured planner workers to revise
+  reflection improvement proposal scoring fields and attach model rationale.
+- Deterministic scoring remains the fallback when model scoring is disabled, unavailable, invalid,
+  or timed out. Proposal metadata records the scoring mode, provider, rationale, and fallback reason.
+
 ## 3) Queue + Lease Behavior
 
 Queue lifecycle:

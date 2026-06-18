@@ -23,6 +23,7 @@ from db.enums import (
 )
 from db.models import Task as _Task
 from orchestrator import (
+    execution_improvement_proposal_service,
     execution_interaction_service,
     execution_outcome_service,
     execution_proposal_service,
@@ -106,6 +107,7 @@ from orchestrator.execution_types import (
     _PersistedTaskContext,
 )
 from orchestrator.graph import build_orchestrator_graph
+from orchestrator.improvement_suggestions import ImprovementSuggestionScorer
 from sandbox import WorkspaceManager
 from workers import Worker, WorkerProfile
 
@@ -135,6 +137,8 @@ class TaskExecutionService:
         enable_worker_profiles: bool = False,
         enable_independent_verifier: bool = False,
         orchestrator_brain: OrchestratorBrain | None = None,
+        improvement_scorer: ImprovementSuggestionScorer | None = None,
+        enable_improvement_llm_scoring: bool = False,
         progress_notifier: ProgressNotifier | None = None,
         default_task_max_attempts: int = 3,
         workspace_root: str | Path | None = None,
@@ -150,6 +154,8 @@ class TaskExecutionService:
         self.enable_worker_profiles = enable_worker_profiles
         self.enable_independent_verifier = enable_independent_verifier
         self.orchestrator_brain = orchestrator_brain
+        self.improvement_scorer = improvement_scorer
+        self.enable_improvement_llm_scoring = enable_improvement_llm_scoring
         self.progress_notifier = progress_notifier
         self.default_task_max_attempts = max(1, default_task_max_attempts)
         self.workspace_root = None
@@ -335,6 +341,15 @@ class TaskExecutionService:
     _create_or_get_user = execution_submission_service._create_or_get_user
     _create_or_get_session = execution_submission_service._create_or_get_session
     _persist_execution_outcome = execution_outcome_service._persist_execution_outcome
+    _build_friction_proposal_drafts = (
+        execution_improvement_proposal_service._build_friction_proposal_drafts
+    )
+    _score_friction_proposal_drafts = (
+        execution_improvement_proposal_service._score_friction_proposal_drafts
+    )
+    _persist_scored_friction_proposals = (
+        execution_improvement_proposal_service._persist_scored_friction_proposals
+    )
     _log_task_outcome = execution_snapshot_service._log_task_outcome
 
 

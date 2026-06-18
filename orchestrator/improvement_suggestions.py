@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 
 from orchestrator.reflection import (
     EffortScore,
@@ -14,6 +16,8 @@ from orchestrator.reflection import (
     RiskScore,
     ValueScore,
 )
+
+ImprovementSuggestionScoringMode = Literal["deterministic", "llm"]
 
 _CRITICAL_VALUE_FAILURE_KINDS = frozenset(
     {
@@ -49,6 +53,66 @@ class ImprovementSuggestionDraft:
 
     suggestion: ImprovementSuggestion
     fingerprint: str
+
+
+@dataclass(frozen=True)
+class ImprovementSuggestionScoringMetadata:
+    """Audit metadata for deterministic or model-backed proposal scoring."""
+
+    enabled: bool
+    mode: ImprovementSuggestionScoringMode
+    provider: str | None = None
+    rationale: str | None = None
+    fallback: bool = False
+    fallback_reason: str | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        """Return the JSON-safe metadata payload stored with reflection proposals."""
+        return {
+            "enabled": self.enabled,
+            "mode": self.mode,
+            "provider": self.provider,
+            "rationale": self.rationale,
+            "fallback": self.fallback,
+            "fallback_reason": self.fallback_reason,
+        }
+
+
+@dataclass(frozen=True)
+class ImprovementSuggestionScoringContext:
+    """Context available to optional model-backed scoring providers."""
+
+    task_id: str
+    task_text: str | None
+    repo_url: str | None
+    branch: str | None
+    attempt_count: int
+    failure_kind: str | None
+    retry_context: bool
+    session_id: str | None = None
+    task_constraints: Mapping[str, Any] | None = None
+    task_budget: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class ImprovementSuggestionScoringResult:
+    """A model-scored improvement suggestion and its audit metadata."""
+
+    suggestion: ImprovementSuggestion
+    metadata: ImprovementSuggestionScoringMetadata
+
+
+class ImprovementSuggestionScorer(Protocol):
+    """Async boundary for optional model-backed improvement suggestion scoring."""
+
+    async def score_improvement_suggestion(
+        self,
+        *,
+        report: FrictionReport,
+        deterministic_suggestion: ImprovementSuggestion,
+        context: ImprovementSuggestionScoringContext,
+    ) -> ImprovementSuggestionScoringResult | None:
+        """Return model-scored suggestion fields, or None to use deterministic scoring."""
 
 
 def build_improvement_suggestion_draft(
@@ -247,6 +311,10 @@ def _suggestion_description(report: FrictionReport, description: str) -> str:
 
 __all__ = [
     "ImprovementSuggestionDraft",
+    "ImprovementSuggestionScorer",
+    "ImprovementSuggestionScoringContext",
+    "ImprovementSuggestionScoringMetadata",
+    "ImprovementSuggestionScoringResult",
     "build_improvement_suggestion_draft",
     "compute_friction_fingerprint",
 ]

@@ -5,6 +5,10 @@ file_exceptions:
   orchestrator/verification.py: Coordinates the entire verification loop including code building, execution, parsing, and state updates. (Tightly coupled logic boundary)
   workers/native_agent_runner.py: Runner handles complex interactions with native agents including network retries, output capture, and workspace integration. (Cannot easily split further without breaking CLI contract)
 function_exceptions:
+  .agents/skills/e2e-qa/scripts/run_e2e_qa.py:
+    main: E2E QA CLI script coordinates setup, submission, polling, and artifact validation as one operator workflow.
+  .agents/skills/e2e-qa/scripts/run_e2e_qa_delivery.py:
+    main: E2E delivery QA CLI script coordinates remote setup, submission, polling, and branch validation as one operator workflow.
   db/migrations/versions/20260329_0001_initial_schema.py:
     upgrade: Alembic migration containing full initial database schema; cannot be split.
   evaluation/harness.py:

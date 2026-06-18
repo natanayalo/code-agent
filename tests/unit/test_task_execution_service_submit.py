@@ -93,8 +93,13 @@ async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -
     def fake_mark_task_in_progress(*, task_id: str) -> None:
         return None
 
-    def fake_persist_execution_outcome(**kwargs) -> None:
-        return None
+    def fake_persist_execution_outcome(**kwargs):
+        return SimpleNamespace(
+            task_id="task-1",
+            session_id="session-1",
+            task_constraints=None,
+            worker_run_id="run-1",
+        )
 
     def fake_get_task(task_id: str) -> execution_module.TaskSnapshot:
         return snapshot
@@ -259,7 +264,16 @@ async def test_submit_task_emits_progress_notifications_for_success(monkeypatch)
     monkeypatch.setattr(service, "_run_blocking", run_blocking)
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
     monkeypatch.setattr(service, "_mark_task_in_progress", lambda *, task_id: None)
-    monkeypatch.setattr(service, "_persist_execution_outcome", lambda **kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "_persist_execution_outcome",
+        lambda **kwargs: SimpleNamespace(
+            task_id=persisted.task_id,
+            session_id=persisted.session_id,
+            task_constraints=None,
+            worker_run_id="run-1",
+        ),
+    )
     monkeypatch.setattr(service, "get_task", lambda task_id: completed_snapshot)
     monkeypatch.setattr(service, "_log_task_outcome", lambda task_snapshot: None)
 
