@@ -14,7 +14,7 @@ def test_friction_report_defaults():
     assert report.source == "other"
     assert report.description == "Command failed"
     assert report.impact == "unknown"
-    assert report.context == {}
+    assert report.context is None
 
 
 def test_friction_report_validation():

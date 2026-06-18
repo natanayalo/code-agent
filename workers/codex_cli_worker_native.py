@@ -490,6 +490,7 @@ class CodexCliWorkerNativeMixin:
             artifacts=[*_workspace_artifacts(workspace), *native_result.artifacts],
             diff_text=native_result.diff_text,
             json_payload=native_result.json_payload,
+            friction_reports=native_result.friction_reports,
             next_action_hint=self._native_next_action_hint(native_result),
             stdout=native_result.stdout,
             stderr=native_result.stderr,

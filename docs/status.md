@@ -43,12 +43,12 @@ Active focus:
 
 Granular tasks for the active and upcoming milestones:
 
-- T-194: Capture execution friction from worker runtime.
 - T-195: Generate Scored Improvement Proposals.
 - T-196: Dashboard UI for Reflection & Improvement Queue.
 
 ## Recent Completed Milestones
 
+- T-194: Capture execution friction from worker runtime (#237)
 - T-193: Integrate schemas with DB Proposal model (#236)
 - T-192: Define Reflection and Improvement schemas.
 - T-191: Add Trigger Sources: Schedule and Idle time.

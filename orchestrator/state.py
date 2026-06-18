@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from orchestrator.reflection import FrictionReport
 from workers import (
     SUPPORTED_WORKER_TYPES as WORKER_SUPPORTED_TYPES,
 )
@@ -269,6 +270,7 @@ class OrchestratorState(OrchestratorModel):
     result: WorkerResult | None = None
     verification: VerificationReport | None = None
     review: ReviewResult | None = None
+    friction_reports: list[FrictionReport] = Field(default_factory=list)
     memory_to_persist: list[PersistMemoryEntry] = Field(default_factory=list)
     progress_updates: list[str] = Field(default_factory=list)
     timeline_events: Annotated[list[TaskTimelineEventState], add] = Field(default_factory=list)

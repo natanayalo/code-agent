@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field
-
-from orchestrator.state import OrchestratorModel
+from pydantic import BaseModel, ConfigDict, Field
 
 FrictionSource = Literal["tooling", "orchestrator", "sandbox", "instructions", "other"]
 ImpactLevel = Literal["slowed_down", "blocked", "required_workaround", "unknown"]
@@ -17,19 +15,23 @@ LayerImpact = Literal["orchestrator", "worker", "sandbox", "api", "dashboard", "
 HitlNeed = Literal["required", "optional", "none"]
 
 
-class FrictionReport(OrchestratorModel):
+class FrictionReport(BaseModel):
     """A structured report capturing friction encountered during a task execution."""
+
+    model_config = ConfigDict(extra="forbid")
 
     task_id: str | None = None
     worker_run_id: str | None = None
-    source: FrictionSource = "other"
-    description: str = Field(min_length=1)
-    impact: ImpactLevel = "unknown"
-    context: dict[str, Any] = Field(default_factory=dict)
+    source: FrictionSource | None = "other"
+    description: str | None = Field(default=None, min_length=1)
+    impact: ImpactLevel | None = "unknown"
+    context: dict[str, Any] | None = Field(default=None)
 
 
-class ImprovementSuggestion(OrchestratorModel):
+class ImprovementSuggestion(BaseModel):
     """A structured proposal for an improvement generated from friction or exploration."""
+
+    model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1)
     description: str = Field(min_length=1)

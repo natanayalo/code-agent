@@ -7,7 +7,9 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any, cast
 
-from db.enums import ArtifactType, ProposalStatus, TaskStatus, WorkerType
+from pydantic import ValidationError
+
+from db.enums import ArtifactType, ProposalStatus, ProposalType, TaskStatus, WorkerType
 from orchestrator.execution_policy import (
     _task_status_from_result,
     _worker_run_status_from_result,
@@ -20,6 +22,8 @@ from orchestrator.execution_serialization import (
     _serialize_verification_report,
     _workspace_id_from_artifacts,
 )
+from orchestrator.nodes.verification_result import VERIFIER_REPAIR_PASSES_USED_CONSTRAINT
+from orchestrator.reflection import FrictionReport
 from orchestrator.state import OrchestratorState
 from repositories import (
     ArtifactRepository,
@@ -222,6 +226,133 @@ def _persist_scout_proposal_if_needed(
     )
 
 
+def _persist_friction_proposals_if_needed(
+    proposal_repo: ProposalRepository,
+    *,
+    task_id: str,
+    session_id: str,
+    task_constraints: dict[str, Any] | None,
+    state: OrchestratorState,
+    worker_run_id: str,
+) -> None:
+    all_reports: list[FrictionReport] = list(state.friction_reports)
+    result_reports = (
+        getattr(state.result, "friction_reports", None) if state.result is not None else None
+    )
+    if result_reports:
+        for rep_dict in result_reports:
+            if not isinstance(rep_dict, Mapping):
+                logger.warning("Friction report from worker is not a mapping: %r", rep_dict)
+                continue
+            if not isinstance(rep_dict, dict):
+                rep_dict = dict(rep_dict)
+            try:
+                source = rep_dict.get("source")
+                if source not in {"tooling", "orchestrator", "sandbox", "instructions", "other"}:
+                    source = "other"
+                impact = rep_dict.get("impact")
+                if impact not in {"slowed_down", "blocked", "required_workaround", "unknown"}:
+                    impact = "unknown"
+                desc = rep_dict.get("description")
+                if isinstance(desc, str):
+                    desc = desc.strip() or None
+                elif desc is not None:
+                    desc = str(desc).strip() or None
+                all_reports.append(
+                    FrictionReport(
+                        task_id=task_id,
+                        worker_run_id=worker_run_id,
+                        source=source,  # type: ignore[arg-type]
+                        description=desc,
+                        impact=impact,  # type: ignore[arg-type]
+                        context=rep_dict.get("context"),
+                    )
+                )
+            except (ValidationError, AttributeError) as exc:
+                logger.warning("Failed to parse friction report dict from worker: %s", exc)
+                logger.debug("Validation details: %s", exc, exc_info=True)
+
+    if not all_reports:
+        return
+
+    # User constraint: persist queue only when signal is repeated or repair has been exhausted
+    # First attempt is 1, so > 1 implies repeated
+    has_retry_context = False
+    if state.attempt_count > 1:
+        has_retry_context = True
+    elif state.route and state.route.route_reason and "retry" in state.route.route_reason.lower():
+        has_retry_context = True
+    elif (
+        isinstance(task_constraints, dict)
+        and VERIFIER_REPAIR_PASSES_USED_CONSTRAINT in task_constraints
+    ):
+        has_retry_context = True
+
+    if not has_retry_context:
+        return
+
+    import hashlib
+
+    existing_proposals = proposal_repo.list_proposals(task_id=task_id)
+    existing_fingerprints = {
+        p.metadata_payload.get("fingerprint")
+        for p in existing_proposals
+        if p.metadata_payload and isinstance(p.metadata_payload, dict)
+    }
+
+    for report in all_reports:
+        safe_desc = report.description or ""
+        desc_lower = safe_desc.lower()
+        if not safe_desc:
+            title = f"Execution friction: {report.source or 'unknown source'}"
+        elif "timeout" in desc_lower:
+            title = "Execution friction: native timeout"
+        elif "infra crash" in desc_lower:
+            title = "Execution friction: sandbox infra crash"
+        elif "verification failed" in desc_lower:
+            title = "Verification friction: bounded repair exhausted"
+        elif "test" in desc_lower and "fail" in desc_lower:
+            title = "Execution friction: repeated test failure"
+        else:
+            sliced_desc = safe_desc[:50]
+            first_part = sliced_desc.split(":")[0] if ":" in sliced_desc else sliced_desc
+            title = f"Execution friction: {first_part.strip().replace('\n', ' ')}"
+
+        fingerprint_input = f"{task_id}:{report.source}:{report.impact}:{safe_desc}".encode()
+        fingerprint = hashlib.sha256(fingerprint_input).hexdigest()
+
+        if fingerprint in existing_fingerprints:
+            continue
+
+        proposal = proposal_repo.create_proposal(
+            session_id=session_id,
+            task_id=task_id,
+            title=title,
+            summary=safe_desc,
+            status=ProposalStatus.PENDING_REVIEW,
+            proposal_type=ProposalType.REFLECTION,
+            metadata_payload={
+                "reflection_kind": "friction_report",
+                "friction_report": report.model_dump(mode="json"),
+                "attempt_count": state.attempt_count,
+                "failure_kind": getattr(state.result, "failure_kind", None)
+                if state.result
+                else None,
+                "worker_type": state.route.chosen_worker if state.route else None,
+                "fingerprint": fingerprint,
+            },
+        )
+        logger.info(
+            "Persisted friction report proposal",
+            extra={
+                "task_id": task_id,
+                "proposal_id": proposal.id,
+                "worker_run_id": worker_run_id,
+                "title": title,
+            },
+        )
+
+
 def _update_task_route_and_spec(
     task: Any,
     state: OrchestratorState,
@@ -320,4 +451,21 @@ def _persist_execution_outcome(
             worker_run_id=worker_run.id,
         )
 
+        task_id_val = task.id
+        session_id_val = task.session_id
+        task_constraints_val = task.constraints
+        worker_run_id_val = worker_run.id
+
+    try:
+        with session_scope(self.session_factory) as prop_session:
+            _persist_friction_proposals_if_needed(
+                ProposalRepository(prop_session),
+                task_id=task_id_val,
+                session_id=session_id_val,
+                task_constraints=task_constraints_val,
+                state=state,
+                worker_run_id=worker_run_id_val,
+            )
+    except Exception as exc:
+        logger.warning("Failed to persist friction proposals: %s", exc, exc_info=True)
     self._prune_retained_runs(now=finished_at)

@@ -37,6 +37,7 @@ class NativeAgentRunResult:
     stdout: str = ""
     stderr: str = ""
     json_payload: dict[str, Any] | None = None
+    friction_reports: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
