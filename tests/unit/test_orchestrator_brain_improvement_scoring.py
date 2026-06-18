@@ -132,6 +132,26 @@ async def test_score_improvement_suggestion_normalizes_literal_case() -> None:
 
 
 @pytest.mark.asyncio
+async def test_score_improvement_suggestion_normalizes_blank_rationale() -> None:
+    payload = {
+        "effort": "medium",
+        "rationale": "   ",
+    }
+    worker = _StaticWorker(WorkerResult(status="success", summary=json.dumps(payload)))
+    brain = RuleBasedOrchestratorBrain(planner_worker=worker)
+
+    result = await brain.score_improvement_suggestion(
+        report=_report(),
+        deterministic_suggestion=_suggestion(),
+        context=_context(),
+    )
+
+    assert result is not None
+    assert result.suggestion.effort == "medium"
+    assert result.metadata.rationale is None
+
+
+@pytest.mark.asyncio
 async def test_score_improvement_suggestion_returns_none_for_invalid_payload() -> None:
     brain = RuleBasedOrchestratorBrain(
         planner_worker=_StaticWorker(WorkerResult(status="success", summary="not json"))
