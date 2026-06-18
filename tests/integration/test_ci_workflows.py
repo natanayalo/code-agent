@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -140,7 +141,12 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
         action and action.startswith("peter-evans/create-pull-request") for action in used_actions
     )
     assert steps.index(validate_step) < steps.index(checkout_step)
-    assert "CHANGELOG_DEPLOY_KEY" in (validate_step.get("run") or "")
+    validate_run = validate_step.get("run") or ""
+    validate_env = validate_step.get("env") or {}
+    deploy_key_pattern = re.compile(r"\bCHANGELOG_DEPLOY_KEY\b")
+    assert deploy_key_pattern.search(validate_run) or any(
+        deploy_key_pattern.search(str(value)) for value in validate_env.values()
+    )
 
     checkout_with = checkout_step.get("with", {})
     assert checkout_with.get("ref") == "master"
