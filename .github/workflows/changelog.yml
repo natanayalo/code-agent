@@ -38,7 +38,7 @@ jobs:
             exit 0
           fi
 
-          if [ "$changed_files" != "CHANGELOG.md" ]; then
+          if [ -n "$changed_files" ] && [ "$changed_files" != "CHANGELOG.md" ]; then
             echo "Unexpected generated files:"
             git diff --name-only
             exit 1

@@ -140,7 +140,11 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
     assert checkout_step["with"]["ref"] == "master"
     assert checkout_step["with"]["persist-credentials"] is True
     assert "git diff --name-only" in verify_step["run"]
-    assert 'if [ "$changed_files" != "CHANGELOG.md" ]; then' in verify_step["run"]
+    assert 'if [ -z "$changed_files" ]; then' in verify_step["run"]
+    assert (
+        'if [ -n "$changed_files" ] && [ "$changed_files" != "CHANGELOG.md" ]; then'
+        in verify_step["run"]
+    )
     assert steps.index(verify_step) < steps.index(commit_step)
     assert commit_step["uses"].startswith("stefanzweifel/git-auto-commit-action")
     assert commit_step["with"]["branch"] == "master"
