@@ -670,8 +670,14 @@ class RuleBasedOrchestratorBrain:
                         request,
                         system_prompt=_IMPROVEMENT_SCORING_SYSTEM_PROMPT,
                     )
-                if result.status == "success":
+                if result is not None and result.status == "success":
                     return result, worker_name
+                if result is None:
+                    logger.warning(
+                        "planner improvement scoring returned no result (%s)",
+                        worker_name,
+                    )
+                    continue
                 logger.warning(
                     "planner improvement scoring returned non-success status '%s' (%s)",
                     result.status,

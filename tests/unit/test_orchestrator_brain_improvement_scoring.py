@@ -10,7 +10,20 @@ from orchestrator.brain import RuleBasedOrchestratorBrain
 from orchestrator.improvement_suggestions import ImprovementSuggestionScoringContext
 from orchestrator.reflection import FrictionReport, ImprovementSuggestion
 from tests.unit.orchestrator_brain_support import _ExplodingWorker, _StaticWorker
-from workers import WorkerResult
+from workers import Worker, WorkerRequest, WorkerResult
+
+
+class _NoneWorker(Worker):
+    """Worker double that simulates a buggy planner returning None."""
+
+    async def run(
+        self,
+        request: WorkerRequest,
+        *,
+        system_prompt: str | None = None,
+    ) -> WorkerResult:
+        del request, system_prompt
+        return None  # type: ignore[return-value]
 
 
 def _report() -> FrictionReport:
@@ -136,6 +149,19 @@ async def test_score_improvement_suggestion_returns_none_for_invalid_payload() -
 @pytest.mark.asyncio
 async def test_score_improvement_suggestion_returns_none_on_planner_failure() -> None:
     brain = RuleBasedOrchestratorBrain(planner_worker=_ExplodingWorker())
+
+    result = await brain.score_improvement_suggestion(
+        report=_report(),
+        deterministic_suggestion=_suggestion(),
+        context=_context(),
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_score_improvement_suggestion_returns_none_on_missing_planner_result() -> None:
+    brain = RuleBasedOrchestratorBrain(planner_worker=_NoneWorker())
 
     result = await brain.score_improvement_suggestion(
         report=_report(),
