@@ -213,8 +213,11 @@ git cliff --output CHANGELOG.md
 ```
 
 The `changelog` GitHub Actions workflow also runs after merges to `master`. If
-the generated changelog changed, it opens or updates a dedicated changelog pull
-request instead of committing directly to `master`.
+the generated changelog changed, it commits only `CHANGELOG.md` back to
+`master` as `github-actions[bot]`. This is the repository's narrow exception to
+the normal "no direct commits to `master`" rule, and the GitHub branch
+protection/ruleset must allow the GitHub Actions bot to bypass protections for
+this generated changelog update.
 
 ## Current Focus
 
