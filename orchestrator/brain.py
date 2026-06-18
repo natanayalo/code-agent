@@ -744,7 +744,7 @@ class RuleBasedOrchestratorBrain:
             value = getattr(scoring, field_name)
             if value is not None:
                 updates[field_name] = value
-        rationale = scoring.rationale.strip() or None if scoring.rationale else None
+        rationale = (scoring.rationale or "").strip() or None
         if not updates and not rationale:
             return None
 

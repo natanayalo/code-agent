@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final, cast, get_args
 
 from pydantic import ValidationError
 
@@ -18,11 +18,19 @@ from orchestrator.improvement_suggestions import (
     build_improvement_suggestion_draft,
 )
 from orchestrator.nodes.verification_result import VERIFIER_REPAIR_PASSES_USED_CONSTRAINT
-from orchestrator.reflection import FrictionReport, ImprovementSuggestion
+from orchestrator.reflection import (
+    FrictionReport,
+    FrictionSource,
+    ImpactLevel,
+    ImprovementSuggestion,
+)
 from orchestrator.state import OrchestratorState
 from repositories import ProposalRepository, session_scope
 
 logger = logging.getLogger("orchestrator.execution")
+
+_ALLOWED_FRICTION_SOURCES: Final[set[str]] = set(get_args(FrictionSource))
+_ALLOWED_FRICTION_IMPACTS: Final[set[str]] = set(get_args(ImpactLevel))
 
 
 @dataclass(frozen=True)
@@ -142,12 +150,14 @@ def _collect_friction_reports(
         if not isinstance(rep_dict, dict):
             rep_dict = dict(rep_dict)
         try:
-            source = rep_dict.get("source")
-            if source not in {"tooling", "orchestrator", "sandbox", "instructions", "other"}:
-                source = "other"
-            impact = rep_dict.get("impact")
-            if impact not in {"slowed_down", "blocked", "required_workaround", "unknown"}:
-                impact = "unknown"
+            source_value = rep_dict.get("source")
+            if not isinstance(source_value, str) or source_value not in _ALLOWED_FRICTION_SOURCES:
+                source_value = "other"
+            source = cast(FrictionSource, source_value)
+            impact_value = rep_dict.get("impact")
+            if not isinstance(impact_value, str) or impact_value not in _ALLOWED_FRICTION_IMPACTS:
+                impact_value = "unknown"
+            impact = cast(ImpactLevel, impact_value)
             desc = rep_dict.get("description")
             if isinstance(desc, str):
                 desc = desc.strip() or None
@@ -157,9 +167,9 @@ def _collect_friction_reports(
                 FrictionReport(
                     task_id=task_id,
                     worker_run_id=worker_run_id,
-                    source=source,  # type: ignore[arg-type]
+                    source=source,
                     description=desc,
-                    impact=impact,  # type: ignore[arg-type]
+                    impact=impact,
                     context=rep_dict.get("context"),
                 )
             )
