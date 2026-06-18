@@ -1,0 +1,61 @@
+# git-cliff configuration for generating CHANGELOG.md from merged PR history.
+# See https://git-cliff.org/docs/configuration/ for supported fields.
+
+[changelog]
+header = """
+# Changelog
+
+This file is generated from merged pull requests with
+[git-cliff](https://git-cliff.org/). Do not use `docs/status.md` as a
+completed-task ledger; keep completed work here instead.
+"""
+body = """
+{% if version -%}
+## {{ version | trim_start_matches(pat="v") }} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+## Merged PR History
+{% endif -%}
+
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | trim }}
+{% for commit in commits %}
+- {{ commit.message | upper_first }}
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+render_always = true
+output = "CHANGELOG.md"
+
+[git]
+conventional_commits = false
+filter_unconventional = false
+split_commits = false
+protect_breaking_commits = false
+filter_commits = false
+fail_on_unmatched_commit = false
+topo_order = false
+topo_order_commits = true
+sort_commits = "newest"
+
+commit_preprocessors = [
+  { pattern = "Merge pull request #([0-9]+) from [^\\n]+\\n\\n(.+)", replace = "${2} ([#${1}](https://github.com/natanayalo/code-agent/pull/${1}))" },
+]
+
+commit_parsers = [
+  { message = "^feat(\\(.+\\))?: .*\\(\\[#\\d+\\]", group = "Added" },
+  { message = "^fix(\\(.+\\))?: .*\\(\\[#\\d+\\]", group = "Fixed" },
+  { message = "^docs(\\(.+\\))?: .*\\(\\[#\\d+\\]", group = "Documentation" },
+  { message = "^refactor(\\(.+\\))?: .*\\(\\[#\\d+\\]", group = "Changed" },
+  { message = "^perf(\\(.+\\))?: .*\\(\\[#\\d+\\]", group = "Performance" },
+  { message = "^test(\\(.+\\))?: .*\\(\\[#\\d+\\]", group = "Testing" },
+  { message = "^ci(\\(.+\\))?: .*\\(\\[#\\d+\\]", group = "CI" },
+  { message = "^chore\\(deps.*\\): .*\\(\\[#\\d+\\]", group = "Dependencies" },
+  { message = "^chore(\\(.+\\))?: .*\\(\\[#\\d+\\]", group = "Maintenance" },
+  { message = ".*\\(\\[#\\d+\\]", group = "Changed" },
+  { message = ".*", skip = true },
+]
+
+[remote.github]
+owner = "natanayalo"
+repo = "code-agent"

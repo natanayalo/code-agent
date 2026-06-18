@@ -13,6 +13,7 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 - `README.md`
 - `docs/roadmap.md`
 - `docs/status.md`
+- `CHANGELOG.md`
 - nearby code, tests, and config for the task area
 
 ## Trigger rules
@@ -30,10 +31,9 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 5. Add or update tests in the same slice.
 6. Run layered verification for the changed behavior: changed-file lint/type checks, targeted unit tests, required integration tests, and required e2e smoke checks for touched critical paths. After targeted checks pass, run the broader suite (`pytest` or `npm run test:run`) before publishing. Use repo-standard entrypoints (for Python prefer `.venv/bin/...`). If a command needs approval or is blocked, request approval or report the blocker clearly.
 7. Create or switch to a focused task branch before publishing work. Prefer `task/<task-id>-<short-slug>` when a task ID exists; otherwise use `task/<short-slug>`.
-8. Update `docs/status.md` before wrapping up:
-   - move a finished task slice out of `Next` or `In Progress`
-   - add it to `Done` with the PR number once the work is published
-   - leave the task in `In Progress` only when the slice is still actively unfinished or unpublished
+8. Update `docs/status.md` before wrapping up when active priorities or backlog
+   order changed. Do not add completed-task history there; completed merged PRs
+   are captured in `CHANGELOG.md` by the changelog workflow.
 9. Stage only the task files, create a specific commit, push the branch, and create a Pull Request (PR) by default once checks pass; skip publish steps only if the user explicitly asks not to publish. Use `gh pr create` with a descriptive title and body.
 10. Update `README.md` or other nearby instructions when local workflow, verification, or CI/CD behavior changes.
 11. Call out any manual external follow-up that cannot be enforced from repo code, then summarize what changed, what was verified, what was deferred, and provide the PR link.
@@ -76,7 +76,8 @@ Use this skill to turn a fresh task request into the smallest safe implementatio
 - Prefer small, reviewable diffs.
 - Do not absorb adjacent cleanup unless it is required for correctness.
 - If review or design feedback expands scope, track a follow-up instead of silently widening the task.
-- Update `docs/status.md` when task progress materially changes, and explicitly move finished published tasks into `Done`.
+- Update `docs/status.md` when task progress materially changes, but keep
+  completed-task history in `CHANGELOG.md`.
 - Do not describe branch protection or similar external controls as enforced unless the required
   GitHub or platform settings are also called out.
 - Keep commits focused and do not stage unrelated changes.
