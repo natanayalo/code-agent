@@ -219,7 +219,7 @@ def _title_for_report(
     first_part = description[:80]
     if ": " in first_part:
         first_part = first_part.split(": ", maxsplit=1)[0]
-    first_part = " ".join(first_part.split())
+    first_part = " ".join(first_part.split()).rstrip(".:,;")
     if len(first_part) < 3:
         return f"Improve {_source_label(report)} friction handling"
     return f"Improve {first_part} handling"

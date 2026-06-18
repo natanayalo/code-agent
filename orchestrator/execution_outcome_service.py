@@ -293,11 +293,14 @@ def _persist_friction_proposals_if_needed(
         return
 
     existing_proposals = proposal_repo.list_proposals(task_id=task_id)
-    existing_fingerprints = {
-        p.metadata_payload.get("fingerprint")
-        for p in existing_proposals
-        if p.metadata_payload and isinstance(p.metadata_payload, dict)
-    }
+    existing_fingerprints: set[str] = set()
+    for existing_proposal in existing_proposals:
+        metadata = existing_proposal.metadata_payload
+        if not isinstance(metadata, dict):
+            continue
+        fingerprint = metadata.get("fingerprint")
+        if isinstance(fingerprint, str):
+            existing_fingerprints.add(fingerprint)
     failure_kind = getattr(state.result, "failure_kind", None) if state.result else None
 
     for report in all_reports:

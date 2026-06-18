@@ -121,6 +121,33 @@ def test_title_generation_preserves_urls_and_file_line_references() -> None:
     assert file_draft.suggestion.title == "Improve main.py:42 raised ValueError handling"
 
 
+def test_title_generation_strips_trailing_punctuation() -> None:
+    period_report = FrictionReport(
+        source="tooling",
+        description="Dependency install failed.",
+        impact="slowed_down",
+    )
+    colon_report = FrictionReport(
+        source="tooling",
+        description="Failed to execute:",
+        impact="slowed_down",
+    )
+
+    period_draft = build_improvement_suggestion_draft(
+        period_report,
+        task_id="task-period-title",
+        attempt_count=0,
+    )
+    colon_draft = build_improvement_suggestion_draft(
+        colon_report,
+        task_id="task-colon-title",
+        attempt_count=0,
+    )
+
+    assert period_draft.suggestion.title == "Improve Dependency install failed handling"
+    assert colon_draft.suggestion.title == "Improve Failed to execute handling"
+
+
 def test_fingerprint_is_stable_and_changes_with_identity_fields() -> None:
     report = FrictionReport(
         source="tooling",
