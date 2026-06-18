@@ -229,11 +229,8 @@ def _title_for_report(
     first_part = description[:80]
     if ": " in first_part:
         prefix, suffix = first_part.split(": ", maxsplit=1)
-        prefix = prefix.strip()
-        if prefix.lower() in _GENERIC_TITLE_PREFIXES:
+        if prefix.strip().lower() in _GENERIC_TITLE_PREFIXES:
             first_part = suffix.strip()
-        else:
-            first_part = prefix
     first_part = " ".join(first_part.split()).rstrip(".:,;")
     if len(first_part) < 3:
         return f"Improve {_source_label(report)} friction handling"

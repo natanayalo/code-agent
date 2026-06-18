@@ -85,7 +85,7 @@ def test_whitespace_description_uses_source_title_fallback() -> None:
     )
 
 
-def test_short_split_title_uses_source_title_fallback() -> None:
+def test_short_split_title_preserves_context_without_fallback() -> None:
     report = FrictionReport(source="tooling", description="A: B", impact="slowed_down")
 
     draft = build_improvement_suggestion_draft(
@@ -94,7 +94,7 @@ def test_short_split_title_uses_source_title_fallback() -> None:
         attempt_count=0,
     )
 
-    assert draft.suggestion.title == "Improve tooling friction handling"
+    assert draft.suggestion.title == "Improve A: B handling"
 
 
 def test_title_generation_preserves_urls_and_file_line_references() -> None:
