@@ -295,7 +295,10 @@ def _existing_improvement_fingerprints(
     task_id: str,
 ) -> set[str]:
     existing_fingerprints: set[str] = set()
-    for existing_proposal in proposal_repo.list_proposals(task_id=task_id):
+    for existing_proposal in proposal_repo.list_proposals(
+        task_id=task_id,
+        proposal_type=ProposalType.REFLECTION,
+    ):
         metadata = existing_proposal.metadata_payload
         if not isinstance(metadata, dict):
             continue

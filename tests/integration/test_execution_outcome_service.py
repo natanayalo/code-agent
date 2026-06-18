@@ -605,6 +605,66 @@ async def test_persist_execution_outcome_dedupes_same_pass_friction_reports(
     assert suggestion["risk"] == "medium"
 
 
+@pytest.mark.anyio
+async def test_persist_scored_improvement_proposal_ignores_scout_fingerprints(
+    session_factory,
+) -> None:
+    """Scout proposal fingerprints should not suppress reflection suggestions."""
+    service = MockExecutionService(session_factory)
+
+    with session_scope(session_factory) as session:
+        task_id = _setup_task(session)
+        task = TaskRepository(session).get(task_id)
+        assert task is not None
+        task_session_id = task.session_id
+
+    state = _make_sandbox_friction_state(task_id)
+    now = datetime.now(UTC)
+    persisted_outcome = _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+        persist_friction_proposals=False,
+    )
+    drafts = service._build_friction_proposal_drafts(
+        task_id=persisted_outcome.task_id,
+        session_id=persisted_outcome.session_id,
+        task_constraints=persisted_outcome.task_constraints,
+        state=state,
+        worker_run_id=persisted_outcome.worker_run_id,
+    )
+    assert len(drafts) == 1
+
+    with session_scope(session_factory) as session:
+        ProposalRepository(session).create_proposal(
+            session_id=task_session_id,
+            task_id=task_id,
+            title="Scout finding",
+            summary="Scout proposal with a colliding fingerprint.",
+            proposal_type=ProposalType.SCOUT,
+            metadata_payload={"fingerprint": drafts[0].fingerprint},
+        )
+
+    scored_proposals = await service._score_friction_proposal_drafts(drafts=drafts)
+    service._persist_scored_friction_proposals(scored_proposals=scored_proposals)
+
+    with session_scope(session_factory) as session:
+        scout_proposals = ProposalRepository(session).list_proposals(
+            task_id=task_id,
+            proposal_type=ProposalType.SCOUT,
+        )
+        reflection_proposals = ProposalRepository(session).list_proposals(
+            task_id=task_id,
+            proposal_type=ProposalType.REFLECTION,
+        )
+
+    assert len(scout_proposals) == 1
+    assert len(reflection_proposals) == 1
+    assert reflection_proposals[0].metadata_payload["fingerprint"] == drafts[0].fingerprint
+
+
 def test_persist_execution_outcome_scores_worker_friction_report_dict(session_factory) -> None:
     """Worker-emitted friction dicts should be parsed and persisted as suggestions."""
     service = MockExecutionService(session_factory)
