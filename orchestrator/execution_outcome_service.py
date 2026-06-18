@@ -301,6 +301,12 @@ def _persist_friction_proposals_if_needed(
     failure_kind = getattr(state.result, "failure_kind", None) if state.result else None
 
     for report in all_reports:
+        report = report.model_copy(
+            update={
+                "task_id": report.task_id or task_id,
+                "worker_run_id": report.worker_run_id or worker_run_id,
+            }
+        )
         draft = build_improvement_suggestion_draft(
             report,
             task_id=task_id,

@@ -69,15 +69,18 @@ def _setup_task(session) -> str:
     return task.id
 
 
-def _assert_sandbox_improvement_proposal(proposal: Any) -> None:
+def _assert_sandbox_improvement_proposal(proposal: Any, *, task_id: str) -> None:
     metadata = proposal.metadata_payload
     suggestion = metadata["improvement_suggestion"]
+    friction_report = metadata["friction_report"]
 
     assert proposal.status == ProposalStatus.PENDING_REVIEW
     assert proposal.title == "Harden sandbox infrastructure recovery"
     assert proposal.summary == suggestion["description"]
     assert metadata["reflection_kind"] == "improvement_suggestion"
-    assert metadata["friction_report"]["description"] == "Infra crash prevented checkout."
+    assert friction_report["description"] == "Infra crash prevented checkout."
+    assert friction_report["task_id"] == task_id
+    assert friction_report["worker_run_id"]
     assert metadata["failure_kind"] == "sandbox_infra"
     assert metadata["fingerprint"]
     assert suggestion["value"] == "high"
@@ -209,7 +212,7 @@ def test_persist_execution_outcome_creates_scored_improvement_proposal(session_f
             proposal_type=ProposalType.REFLECTION,
         )
         assert len(proposals) == 1
-        _assert_sandbox_improvement_proposal(proposals[0])
+        _assert_sandbox_improvement_proposal(proposals[0], task_id=task_id)
 
     _persist_execution_outcome(
         service,

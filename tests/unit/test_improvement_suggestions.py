@@ -94,6 +94,33 @@ def test_short_split_title_uses_source_title_fallback() -> None:
     assert draft.suggestion.title == "Improve tooling friction handling"
 
 
+def test_title_generation_preserves_urls_and_file_line_references() -> None:
+    url_report = FrictionReport(
+        source="tooling",
+        description="http://localhost:8000 returned 500",
+        impact="slowed_down",
+    )
+    file_report = FrictionReport(
+        source="tooling",
+        description="main.py:42 raised ValueError",
+        impact="slowed_down",
+    )
+
+    url_draft = build_improvement_suggestion_draft(
+        url_report,
+        task_id="task-url-title",
+        attempt_count=0,
+    )
+    file_draft = build_improvement_suggestion_draft(
+        file_report,
+        task_id="task-file-title",
+        attempt_count=0,
+    )
+
+    assert url_draft.suggestion.title == "Improve http://localhost:8000 returned 500 handling"
+    assert file_draft.suggestion.title == "Improve main.py:42 raised ValueError handling"
+
+
 def test_fingerprint_is_stable_and_changes_with_identity_fields() -> None:
     report = FrictionReport(
         source="tooling",
@@ -132,4 +159,26 @@ def test_fingerprint_normalizes_nullable_source_and_impact_defaults() -> None:
 
     assert compute_friction_fingerprint(defaulted_report, task_id="task-5") == (
         compute_friction_fingerprint(nullable_report, task_id="task-5")
+    )
+
+
+def test_fingerprint_strips_description_whitespace() -> None:
+    stripped_report = FrictionReport(
+        source="tooling",
+        description="Same friction.",
+        impact="unknown",
+    )
+    padded_report = FrictionReport(
+        source="tooling",
+        description="  Same friction.  ",
+        impact="unknown",
+    )
+    empty_report = FrictionReport(source="tooling", description=None, impact="unknown")
+    whitespace_report = FrictionReport(source="tooling", description="   ", impact="unknown")
+
+    assert compute_friction_fingerprint(stripped_report, task_id="task-6") == (
+        compute_friction_fingerprint(padded_report, task_id="task-6")
+    )
+    assert compute_friction_fingerprint(empty_report, task_id="task-6") == (
+        compute_friction_fingerprint(whitespace_report, task_id="task-6")
     )
