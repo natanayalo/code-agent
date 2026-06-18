@@ -22,6 +22,7 @@ from orchestrator.execution_serialization import (
     _serialize_verification_report,
     _workspace_id_from_artifacts,
 )
+from orchestrator.improvement_suggestions import build_improvement_suggestion_draft
 from orchestrator.nodes.verification_result import VERIFIER_REPAIR_PASSES_USED_CONSTRAINT
 from orchestrator.reflection import FrictionReport
 from orchestrator.state import OrchestratorState
@@ -291,64 +292,60 @@ def _persist_friction_proposals_if_needed(
     if not has_retry_context:
         return
 
-    import hashlib
-
     existing_proposals = proposal_repo.list_proposals(task_id=task_id)
-    existing_fingerprints = {
-        p.metadata_payload.get("fingerprint")
-        for p in existing_proposals
-        if p.metadata_payload and isinstance(p.metadata_payload, dict)
-    }
+    existing_fingerprints: set[str] = set()
+    for existing_proposal in existing_proposals:
+        metadata = existing_proposal.metadata_payload
+        if not isinstance(metadata, dict):
+            continue
+        fingerprint = metadata.get("fingerprint")
+        if isinstance(fingerprint, str):
+            existing_fingerprints.add(fingerprint)
+    failure_kind = getattr(state.result, "failure_kind", None) if state.result else None
 
     for report in all_reports:
-        safe_desc = report.description or ""
-        desc_lower = safe_desc.lower()
-        if not safe_desc:
-            title = f"Execution friction: {report.source or 'unknown source'}"
-        elif "timeout" in desc_lower:
-            title = "Execution friction: native timeout"
-        elif "infra crash" in desc_lower:
-            title = "Execution friction: sandbox infra crash"
-        elif "verification failed" in desc_lower:
-            title = "Verification friction: bounded repair exhausted"
-        elif "test" in desc_lower and "fail" in desc_lower:
-            title = "Execution friction: repeated test failure"
-        else:
-            sliced_desc = safe_desc[:50]
-            first_part = sliced_desc.split(":")[0] if ":" in sliced_desc else sliced_desc
-            title = f"Execution friction: {first_part.strip().replace('\n', ' ')}"
+        report = report.model_copy(
+            update={
+                "task_id": report.task_id or task_id,
+                "worker_run_id": report.worker_run_id or worker_run_id,
+            }
+        )
+        draft = build_improvement_suggestion_draft(
+            report,
+            task_id=task_id,
+            attempt_count=state.attempt_count,
+            failure_kind=failure_kind,
+            retry_context=has_retry_context,
+        )
 
-        fingerprint_input = f"{task_id}:{report.source}:{report.impact}:{safe_desc}".encode()
-        fingerprint = hashlib.sha256(fingerprint_input).hexdigest()
-
-        if fingerprint in existing_fingerprints:
+        if draft.fingerprint in existing_fingerprints:
             continue
+        existing_fingerprints.add(draft.fingerprint)
 
         proposal = proposal_repo.create_proposal(
             session_id=session_id,
             task_id=task_id,
-            title=title,
-            summary=safe_desc,
+            title=draft.suggestion.title,
+            summary=draft.suggestion.description,
             status=ProposalStatus.PENDING_REVIEW,
             proposal_type=ProposalType.REFLECTION,
             metadata_payload={
-                "reflection_kind": "friction_report",
+                "reflection_kind": "improvement_suggestion",
+                "improvement_suggestion": draft.suggestion.model_dump(mode="json"),
                 "friction_report": report.model_dump(mode="json"),
                 "attempt_count": state.attempt_count,
-                "failure_kind": getattr(state.result, "failure_kind", None)
-                if state.result
-                else None,
+                "failure_kind": failure_kind,
                 "worker_type": state.route.chosen_worker if state.route else None,
-                "fingerprint": fingerprint,
+                "fingerprint": draft.fingerprint,
             },
         )
         logger.info(
-            "Persisted friction report proposal",
+            "Persisted improvement suggestion proposal",
             extra={
                 "task_id": task_id,
                 "proposal_id": proposal.id,
                 "worker_run_id": worker_run_id,
-                "title": title,
+                "title": draft.suggestion.title,
             },
         )
 

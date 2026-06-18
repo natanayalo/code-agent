@@ -44,7 +44,6 @@ Active focus:
 
 Granular tasks for the active and upcoming milestones:
 
-- T-195: Generate Scored Improvement Proposals.
 - T-196: Dashboard UI for Reflection & Improvement Queue.
 
 ## Completed Work
