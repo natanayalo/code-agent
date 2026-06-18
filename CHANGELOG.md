@@ -268,6 +268,8 @@ completed-task ledger; keep completed work here instead.
 
 ### CI
 
+- Ci: skip changelog-only validation runs ([#245](https://github.com/natanayalo/code-agent/pull/245))
+
 - Ci: use deploy key for changelog push ([#244](https://github.com/natanayalo/code-agent/pull/244))
 
 - Ci: commit generated changelog updates ([#243](https://github.com/natanayalo/code-agent/pull/243))
