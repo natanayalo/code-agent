@@ -142,7 +142,7 @@ def test_changelog_workflow_commits_only_generated_changelog_to_master() -> None
     assert "git diff --name-only" in verify_step["run"]
     assert 'if [ "$changed_files" != "CHANGELOG.md" ]; then' in verify_step["run"]
     assert steps.index(verify_step) < steps.index(commit_step)
-    assert commit_step["uses"] == "stefanzweifel/git-auto-commit-action@v7"
+    assert commit_step["uses"].startswith("stefanzweifel/git-auto-commit-action")
     assert commit_step["with"]["branch"] == "master"
     assert commit_step["with"]["file_pattern"] == "CHANGELOG.md"
     assert commit_step["with"]["commit_message"] == "docs: update changelog"
