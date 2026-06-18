@@ -11,7 +11,12 @@ from sqlalchemy.pool import StaticPool
 from db.base import Base
 from db.enums import ProposalStatus, ProposalType
 from orchestrator.execution_outcome_service import _persist_execution_outcome
-from orchestrator.reflection import FrictionReport
+from orchestrator.improvement_suggestions import (
+    ImprovementSuggestionScoringContext,
+    ImprovementSuggestionScoringMetadata,
+    ImprovementSuggestionScoringResult,
+)
+from orchestrator.reflection import FrictionReport, ImprovementSuggestion
 from orchestrator.state import (
     ApprovalCheckpoint,
     OrchestratorState,
@@ -33,12 +38,69 @@ from repositories import (
 
 
 class MockExecutionService:
-    def __init__(self, session_factory):
+    def __init__(
+        self,
+        session_factory,
+        *,
+        improvement_scorer: Any | None = None,
+        enable_improvement_llm_scoring: bool = False,
+    ):
         self.session_factory = session_factory
         self.retention_seconds = None
+        self.improvement_scorer = improvement_scorer
+        self.enable_improvement_llm_scoring = enable_improvement_llm_scoring
 
     def _prune_retained_runs(self, now: datetime) -> None:
         pass
+
+
+class RecordingScorer:
+    """Test scorer returning a model-backed score override."""
+
+    def __init__(self) -> None:
+        self.calls: list[ImprovementSuggestionScoringContext] = []
+
+    async def score_improvement_suggestion(
+        self,
+        *,
+        report: FrictionReport,
+        deterministic_suggestion: ImprovementSuggestion,
+        context: ImprovementSuggestionScoringContext,
+    ) -> ImprovementSuggestionScoringResult | None:
+        del report
+        self.calls.append(context)
+        suggestion = deterministic_suggestion.model_copy(
+            update={
+                "effort": "medium",
+                "risk": "medium",
+                "layer_impact": "orchestrator",
+                "hitl_need": "optional",
+                "validation_path": "Run orchestrator persistence tests.",
+            }
+        )
+        return ImprovementSuggestionScoringResult(
+            suggestion=suggestion,
+            metadata=ImprovementSuggestionScoringMetadata(
+                enabled=True,
+                mode="llm",
+                provider="RecordingScorer",
+                rationale="Repeated sandbox friction points at recovery policy.",
+            ),
+        )
+
+
+class ExplodingScorer:
+    """Test scorer that simulates a model timeout/failure."""
+
+    async def score_improvement_suggestion(
+        self,
+        *,
+        report: FrictionReport,
+        deterministic_suggestion: ImprovementSuggestion,
+        context: ImprovementSuggestionScoringContext,
+    ) -> ImprovementSuggestionScoringResult | None:
+        del report, deterministic_suggestion, context
+        raise TimeoutError("scoring timed out")
 
 
 @pytest.fixture
@@ -83,6 +145,14 @@ def _assert_sandbox_improvement_proposal(proposal: Any, *, task_id: str) -> None
     assert friction_report["worker_run_id"]
     assert metadata["failure_kind"] == "sandbox_infra"
     assert metadata["fingerprint"]
+    assert metadata["scoring"] == {
+        "enabled": False,
+        "mode": "deterministic",
+        "provider": None,
+        "rationale": None,
+        "fallback": False,
+        "fallback_reason": "disabled",
+    }
     assert suggestion["value"] == "high"
     assert suggestion["effort"] == "large"
     assert suggestion["risk"] == "high"
@@ -230,11 +300,234 @@ def test_persist_execution_outcome_creates_scored_improvement_proposal(session_f
         assert len(proposals) == 1
 
 
+def test_persist_execution_outcome_applies_llm_improvement_scoring(session_factory) -> None:
+    """Enabled model scoring should revise scores and persist scorer rationale."""
+    scorer = RecordingScorer()
+    service = MockExecutionService(
+        session_factory,
+        improvement_scorer=scorer,
+        enable_improvement_llm_scoring=True,
+    )
+
+    with session_scope(session_factory) as session:
+        task_id = _setup_task(session)
+
+    state = OrchestratorState(
+        task=TaskRequest(
+            task_text="fix sandbox",
+            task_id=task_id,
+            constraints={"operator": "local"},
+        ),
+        session=None,
+        route=RouteDecision(chosen_worker="codex", route_reason="retry after infra failure"),
+        dispatch=WorkerDispatch(),
+        approval=ApprovalCheckpoint(required=False, status="not_required"),
+        task_spec=TaskSpec(
+            goal="fix sandbox",
+            task_type="maintenance",
+            delivery_mode="workspace",
+        ),
+        result=WorkerResult(
+            status="failure",
+            summary="Sandbox infra crash blocked execution.",
+            failure_kind="sandbox_infra",
+            commands_run=[],
+            test_results=[],
+            artifacts=[],
+        ),
+        friction_reports=[
+            FrictionReport(
+                task_id=task_id,
+                source="sandbox",
+                description="Infra crash prevented checkout.",
+                impact="blocked",
+                context={"failure_kind": "sandbox_infra"},
+            )
+        ],
+        attempt_count=2,
+    )
+    now = datetime.now(UTC)
+
+    _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+    )
+
+    with session_scope(session_factory) as session:
+        proposals = ProposalRepository(session).list_proposals(
+            task_id=task_id,
+            proposal_type=ProposalType.REFLECTION,
+        )
+        assert len(proposals) == 1
+        metadata = proposals[0].metadata_payload
+        suggestion = metadata["improvement_suggestion"]
+
+    assert scorer.calls[0].task_id == task_id
+    assert scorer.calls[0].task_constraints == {"operator": "local"}
+    assert metadata["scoring"] == {
+        "enabled": True,
+        "mode": "llm",
+        "provider": "RecordingScorer",
+        "rationale": "Repeated sandbox friction points at recovery policy.",
+        "fallback": False,
+        "fallback_reason": None,
+    }
+    assert suggestion["effort"] == "medium"
+    assert suggestion["risk"] == "medium"
+    assert suggestion["layer_impact"] == "orchestrator"
+    assert suggestion["hitl_need"] == "optional"
+
+
+def test_persist_execution_outcome_falls_back_when_llm_scoring_fails(session_factory) -> None:
+    """Scorer failures should keep deterministic suggestions and record fallback metadata."""
+    service = MockExecutionService(
+        session_factory,
+        improvement_scorer=ExplodingScorer(),
+        enable_improvement_llm_scoring=True,
+    )
+
+    with session_scope(session_factory) as session:
+        task_id = _setup_task(session)
+
+    state = OrchestratorState(
+        task=TaskRequest(task_text="fix sandbox", task_id=task_id),
+        session=None,
+        route=RouteDecision(chosen_worker="codex", route_reason="retry after infra failure"),
+        dispatch=WorkerDispatch(),
+        approval=ApprovalCheckpoint(required=False, status="not_required"),
+        task_spec=TaskSpec(
+            goal="fix sandbox",
+            task_type="maintenance",
+            delivery_mode="workspace",
+        ),
+        result=WorkerResult(
+            status="failure",
+            summary="Sandbox infra crash blocked execution.",
+            failure_kind="sandbox_infra",
+            commands_run=[],
+            test_results=[],
+            artifacts=[],
+        ),
+        friction_reports=[
+            FrictionReport(
+                task_id=task_id,
+                source="sandbox",
+                description="Infra crash prevented checkout.",
+                impact="blocked",
+                context={"failure_kind": "sandbox_infra"},
+            )
+        ],
+        attempt_count=2,
+    )
+    now = datetime.now(UTC)
+
+    _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+    )
+
+    with session_scope(session_factory) as session:
+        proposals = ProposalRepository(session).list_proposals(
+            task_id=task_id,
+            proposal_type=ProposalType.REFLECTION,
+        )
+        metadata = proposals[0].metadata_payload
+        suggestion = metadata["improvement_suggestion"]
+
+    assert metadata["scoring"]["enabled"] is True
+    assert metadata["scoring"]["mode"] == "deterministic"
+    assert metadata["scoring"]["provider"] == "ExplodingScorer"
+    assert metadata["scoring"]["fallback"] is True
+    assert "TimeoutError: scoring timed out" in metadata["scoring"]["fallback_reason"]
+    assert suggestion["effort"] == "large"
+    assert suggestion["risk"] == "high"
+    assert suggestion["hitl_need"] == "required"
+
+
+def test_persist_execution_outcome_skips_scorer_when_llm_scoring_disabled(
+    session_factory,
+) -> None:
+    """Disabled scoring flag should not call the scorer even if one is configured."""
+    scorer = RecordingScorer()
+    service = MockExecutionService(
+        session_factory,
+        improvement_scorer=scorer,
+        enable_improvement_llm_scoring=False,
+    )
+
+    with session_scope(session_factory) as session:
+        task_id = _setup_task(session)
+
+    state = OrchestratorState(
+        task=TaskRequest(task_text="fix sandbox", task_id=task_id),
+        session=None,
+        route=RouteDecision(chosen_worker="codex", route_reason="retry after infra failure"),
+        dispatch=WorkerDispatch(),
+        approval=ApprovalCheckpoint(required=False, status="not_required"),
+        task_spec=TaskSpec(
+            goal="fix sandbox",
+            task_type="maintenance",
+            delivery_mode="workspace",
+        ),
+        result=WorkerResult(
+            status="failure",
+            summary="Sandbox infra crash blocked execution.",
+            failure_kind="sandbox_infra",
+            commands_run=[],
+            test_results=[],
+            artifacts=[],
+        ),
+        friction_reports=[
+            FrictionReport(
+                task_id=task_id,
+                source="sandbox",
+                description="Infra crash prevented checkout.",
+                impact="blocked",
+                context={"failure_kind": "sandbox_infra"},
+            )
+        ],
+        attempt_count=2,
+    )
+    now = datetime.now(UTC)
+
+    _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+    )
+
+    with session_scope(session_factory) as session:
+        proposals = ProposalRepository(session).list_proposals(
+            task_id=task_id,
+            proposal_type=ProposalType.REFLECTION,
+        )
+        metadata = proposals[0].metadata_payload
+
+    assert scorer.calls == []
+    assert metadata["scoring"]["enabled"] is False
+    assert metadata["scoring"]["mode"] == "deterministic"
+    assert metadata["scoring"]["fallback"] is False
+    assert metadata["scoring"]["fallback_reason"] == "disabled"
+
+
 def test_persist_execution_outcome_dedupes_same_pass_friction_reports(
     session_factory,
 ) -> None:
     """Duplicate friction reports in one outcome should create one proposal."""
-    service = MockExecutionService(session_factory)
+    scorer = RecordingScorer()
+    service = MockExecutionService(
+        session_factory,
+        improvement_scorer=scorer,
+        enable_improvement_llm_scoring=True,
+    )
 
     with session_scope(session_factory) as session:
         task_id = _setup_task(session)
@@ -290,7 +583,14 @@ def test_persist_execution_outcome_dedupes_same_pass_friction_reports(
             proposal_type=ProposalType.REFLECTION,
         )
         assert len(proposals) == 1
-        _assert_sandbox_improvement_proposal(proposals[0], task_id=task_id)
+        metadata = proposals[0].metadata_payload
+        suggestion = metadata["improvement_suggestion"]
+
+    assert len(scorer.calls) == 1
+    assert metadata["fingerprint"]
+    assert metadata["scoring"]["mode"] == "llm"
+    assert metadata["scoring"]["fallback"] is False
+    assert suggestion["risk"] == "medium"
 
 
 def test_persist_execution_outcome_scores_worker_friction_report_dict(session_factory) -> None:

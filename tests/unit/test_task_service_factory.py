@@ -194,6 +194,30 @@ def test_build_task_service_from_env_wires_planner_worker_into_orchestrator_brai
         _close_outbound_http_clients(outbound_http_clients)
 
 
+def test_build_task_service_from_env_wires_improvement_scorer_without_brain(
+    tmp_path: Path,
+) -> None:
+    """Improvement scoring flag should not implicitly enable brain routing."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "CODE_AGENT_IMPROVEMENT_LLM_SCORING_ENABLED": "1",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert service.enable_improvement_llm_scoring is True
+        assert isinstance(service.improvement_scorer, RuleBasedOrchestratorBrain)
+        assert service.orchestrator_brain is None
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
 def test_build_task_service_from_env_propagates_gemini_native_sandbox_toggle(
     tmp_path: Path,
 ) -> None:

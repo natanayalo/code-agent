@@ -30,6 +30,7 @@ from workers import (
     OpenRouterCliRuntimeAdapter,
     OpenRouterCliWorker,
     ShellWorker,
+    Worker,
     WorkerProfile,
     WorkerType,
 )
@@ -65,6 +66,7 @@ NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: Final[str] = (
 )
 INDEPENDENT_VERIFIER_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED"
 ORCHESTRATOR_BRAIN_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED"
+IMPROVEMENT_LLM_SCORING_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_IMPROVEMENT_LLM_SCORING_ENABLED"
 CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED"
 GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED"
 CODEX_TRUSTED_REPO_PATTERNS_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TRUSTED_REPO_PATTERNS"
@@ -432,6 +434,25 @@ def _setup_worker_profiles(
     )
 
 
+def _build_brain_provider(
+    *,
+    enable_orchestrator_brain: bool,
+    enable_improvement_llm_scoring: bool,
+    codex_worker: CodexCliWorker,
+    gemini_worker: GeminiCliWorker | None,
+    openrouter_worker: OpenRouterCliWorker | None,
+) -> RuleBasedOrchestratorBrain | None:
+    if not (enable_orchestrator_brain or enable_improvement_llm_scoring):
+        return None
+    fallback_planners: list[Worker] = [codex_worker]
+    if openrouter_worker is not None:
+        fallback_planners.append(openrouter_worker)
+    return RuleBasedOrchestratorBrain(
+        planner_worker=gemini_worker,
+        fallback_planners=fallback_planners,
+    )
+
+
 def build_task_service_from_env(
     environ: Mapping[str, str] | None = None,
     *,
@@ -456,6 +477,17 @@ def build_task_service_from_env(
 
     enable_worker_profiles = _is_enabled(resolved_env.get(WORKER_PROFILES_ENABLED_ENV_VAR))
     worker_profiles = _setup_worker_profiles(resolved_env, gemini_worker, openrouter_worker)
+    enable_orchestrator_brain = _is_enabled(resolved_env.get(ORCHESTRATOR_BRAIN_ENABLED_ENV_VAR))
+    enable_improvement_llm_scoring = _is_enabled(
+        resolved_env.get(IMPROVEMENT_LLM_SCORING_ENABLED_ENV_VAR)
+    )
+    brain_provider = _build_brain_provider(
+        enable_orchestrator_brain=enable_orchestrator_brain,
+        enable_improvement_llm_scoring=enable_improvement_llm_scoring,
+        codex_worker=codex_worker,
+        gemini_worker=gemini_worker,
+        openrouter_worker=openrouter_worker,
+    )
 
     if outbound_http_clients is None:
         raise RuntimeError(
@@ -474,15 +506,9 @@ def build_task_service_from_env(
         enable_independent_verifier=_is_enabled(
             resolved_env.get(INDEPENDENT_VERIFIER_ENABLED_ENV_VAR)
         ),
-        orchestrator_brain=(
-            RuleBasedOrchestratorBrain(
-                planner_worker=gemini_worker,
-                fallback_planners=[w for w in [codex_worker, openrouter_worker] if w is not None],
-            )
-            if _is_enabled(resolved_env.get(ORCHESTRATOR_BRAIN_ENABLED_ENV_VAR))
-            and any(w is not None for w in [gemini_worker, codex_worker, openrouter_worker])
-            else None
-        ),
+        orchestrator_brain=brain_provider if enable_orchestrator_brain else None,
+        improvement_scorer=brain_provider if enable_improvement_llm_scoring else None,
+        enable_improvement_llm_scoring=enable_improvement_llm_scoring,
         progress_notifier=CompositeProgressNotifier(progress_notifiers),
         default_task_max_attempts=_coerce_positive_int(
             resolved_env.get(DEFAULT_TASK_MAX_ATTEMPTS_ENV_VAR),

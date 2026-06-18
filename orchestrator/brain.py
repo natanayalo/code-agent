@@ -19,6 +19,20 @@ from apps.observability import (
 )
 from db.enums import WorkerRuntimeMode
 from orchestrator.constants import RISK_ORDER
+from orchestrator.improvement_suggestions import (
+    ImprovementSuggestionScoringContext,
+    ImprovementSuggestionScoringMetadata,
+    ImprovementSuggestionScoringResult,
+)
+from orchestrator.reflection import (
+    EffortScore,
+    FrictionReport,
+    HitlNeed,
+    ImprovementSuggestion,
+    LayerImpact,
+    RiskScore,
+    ValueScore,
+)
 from orchestrator.state import (
     OrchestratorModel,
     OrchestratorState,
@@ -85,6 +99,20 @@ Task:
   and verification commands.
 - You can also suggest a risk level, task type, and delivery mode, but these are subject
   to strict policy clamps.
+
+Output contract:
+- Return exactly one JSON object, and no extra prose.
+- The authoritative JSON schema will be provided in the Output section.
+- Follow that schema exactly and do not add extra keys.
+""".strip()
+
+_IMPROVEMENT_SCORING_SYSTEM_PROMPT = """
+You are an improvement proposal scoring assistant.
+
+Task:
+- Review one friction report and the deterministic improvement suggestion derived from it.
+- Return revised scoring fields only when the evidence supports a better score.
+- Keep the output conservative, operational, and grounded in the provided evidence.
 
 Output contract:
 - Return exactly one JSON object, and no extra prose.
@@ -437,6 +465,18 @@ class UnifiedOrchestratorSuggestion(OrchestratorModel):
     rationale: str | None = None
 
 
+class ImprovementScoringBrainSuggestion(OrchestratorModel):
+    """Optional model-backed score overrides for an improvement suggestion."""
+
+    value: ValueScore | None = None
+    effort: EffortScore | None = None
+    risk: RiskScore | None = None
+    layer_impact: LayerImpact | None = None
+    validation_path: str | None = Field(default=None, min_length=1)
+    hitl_need: HitlNeed | None = None
+    rationale: str | None = None
+
+
 class RouteBrainMergeReport(OrchestratorModel):
     """Audit details about how brain route suggestions were applied or ignored."""
 
@@ -487,6 +527,15 @@ class OrchestratorBrain(Protocol):
     ) -> UnifiedOrchestratorSuggestion | None:
         """Return unified task-spec enrichment and route suggestion, or None."""
 
+    async def score_improvement_suggestion(
+        self,
+        *,
+        report: FrictionReport,
+        deterministic_suggestion: ImprovementSuggestion,
+        context: ImprovementSuggestionScoringContext,
+    ) -> ImprovementSuggestionScoringResult | None:
+        """Return model-scored improvement fields, or None to keep deterministic scoring."""
+
 
 class RuleBasedOrchestratorBrain:
     """Small deterministic brain used as a safe bootstrap for optional enrichment."""
@@ -515,6 +564,184 @@ class RuleBasedOrchestratorBrain:
             planners.append(self.primary_planner)
         planners.extend(self.fallback_planners)
         return planners
+
+    async def score_improvement_suggestion(
+        self,
+        *,
+        report: FrictionReport,
+        deterministic_suggestion: ImprovementSuggestion,
+        context: ImprovementSuggestionScoringContext,
+    ) -> ImprovementSuggestionScoringResult | None:
+        """Use planner workers to revise improvement proposal scoring fields."""
+        planners = self._get_all_planners()
+        if not planners:
+            return None
+
+        request = self._build_improvement_scoring_request(
+            report=report,
+            deterministic_suggestion=deterministic_suggestion,
+            context=context,
+        )
+        result, provider = await self._run_improvement_scoring_planners(planners, request)
+        if result is None or provider is None:
+            return None
+
+        payload = self._improvement_scoring_payload(result)
+        if payload is None:
+            return None
+
+        try:
+            scoring = ImprovementScoringBrainSuggestion.model_validate(payload)
+        except Exception as exc:
+            logger.warning("Failed to validate brain improvement scoring suggestion: %s", exc)
+            return None
+        return self._merge_improvement_scoring(
+            deterministic_suggestion=deterministic_suggestion,
+            scoring=scoring,
+            provider=provider,
+        )
+
+    def _build_improvement_scoring_request(
+        self,
+        *,
+        report: FrictionReport,
+        deterministic_suggestion: ImprovementSuggestion,
+        context: ImprovementSuggestionScoringContext,
+    ) -> WorkerRequest:
+        prompt_payload = {
+            "friction_report": report.model_dump(mode="json"),
+            "deterministic_suggestion": deterministic_suggestion.model_dump(mode="json"),
+            "task": {
+                "task_id": context.task_id,
+                "task_text": context.task_text,
+                "attempt_count": context.attempt_count,
+                "failure_kind": context.failure_kind,
+                "retry_context": context.retry_context,
+            },
+        }
+        context_json = json.dumps(_to_serializable(prompt_payload), sort_keys=True, default=str)
+        prompt = (
+            "Score this improvement suggestion from the provided friction evidence.\n\n"
+            "Context JSON:\n"
+            f"{context_json}\n"
+        )
+        constraints = dict(context.task_constraints or {})
+        constraints["read_only"] = True
+        constraints.pop("granted_permission", None)
+        budget = dict(context.task_budget or {})
+        budget["worker_timeout_seconds"] = self.planner_timeout_seconds
+        return WorkerRequest(
+            session_id=None,
+            task_id=context.task_id,
+            repo_url=context.repo_url,
+            branch=context.branch,
+            task_text=prompt,
+            memory_context={},
+            task_plan=None,
+            task_spec=None,
+            constraints=constraints,
+            budget=budget,
+            secrets={},
+            tools=[],
+            worker_profile=self.planner_profile,
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            response_format="json",
+            response_schema=_strict_json_schema(ImprovementScoringBrainSuggestion),
+        )
+
+    async def _run_improvement_scoring_planners(
+        self,
+        planners: list[Worker],
+        request: WorkerRequest,
+    ) -> tuple[WorkerResult | None, str | None]:
+        for i, worker in enumerate(planners):
+            result: WorkerResult | None = None
+            worker_name = worker.__class__.__name__
+            try:
+                async with asyncio.timeout(
+                    self.planner_timeout_seconds + DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS
+                ):
+                    result = await worker.run(
+                        request,
+                        system_prompt=_IMPROVEMENT_SCORING_SYSTEM_PROMPT,
+                    )
+                if result.status == "success":
+                    return result, worker_name
+                logger.warning(
+                    "planner improvement scoring returned non-success status '%s' (%s)",
+                    result.status,
+                    worker_name,
+                )
+            except asyncio.CancelledError:
+                raise
+            except TimeoutError:
+                logger.warning("planner improvement scoring timed out for %s", worker_name)
+            except Exception as exc:
+                logger.warning(
+                    "planner improvement scoring failed for %s: %s: %s",
+                    worker_name,
+                    type(exc).__name__,
+                    str(exc),
+                )
+
+            if i == len(planners) - 1 and result is not None:
+                set_span_status_from_outcome(result.status, result.summary)
+        return None, None
+
+    @staticmethod
+    def _improvement_scoring_payload(result: WorkerResult) -> Mapping[str, Any] | None:
+        payload: Mapping[str, Any] | None = result.json_payload
+        if isinstance(payload, Mapping):
+            return _unwrap_payload_wrapper(payload)
+
+        raw_summary = (result.summary or "").strip()
+        if not raw_summary:
+            return None
+        normalized_json = extract_json_block(raw_summary)
+        try:
+            decoded = json.loads(normalized_json)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(decoded, Mapping):
+            return None
+        return _unwrap_payload_wrapper(decoded)
+
+    @staticmethod
+    def _merge_improvement_scoring(
+        *,
+        deterministic_suggestion: ImprovementSuggestion,
+        scoring: ImprovementScoringBrainSuggestion,
+        provider: str,
+    ) -> ImprovementSuggestionScoringResult | None:
+        updates: dict[str, Any] = {}
+        for field_name in (
+            "value",
+            "effort",
+            "risk",
+            "layer_impact",
+            "validation_path",
+            "hitl_need",
+        ):
+            value = getattr(scoring, field_name)
+            if value is not None:
+                updates[field_name] = value
+        rationale = scoring.rationale.strip() if scoring.rationale else None
+        if not updates and not rationale:
+            return None
+
+        payload = deterministic_suggestion.model_dump(mode="json")
+        payload.update(updates)
+        suggestion = ImprovementSuggestion.model_validate(payload)
+        return ImprovementSuggestionScoringResult(
+            suggestion=suggestion,
+            metadata=ImprovementSuggestionScoringMetadata(
+                enabled=True,
+                mode="llm",
+                provider=provider,
+                rationale=rationale,
+                fallback=False,
+            ),
+        )
 
     async def suggest_task_spec(
         self,

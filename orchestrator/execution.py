@@ -106,6 +106,7 @@ from orchestrator.execution_types import (
     _PersistedTaskContext,
 )
 from orchestrator.graph import build_orchestrator_graph
+from orchestrator.improvement_suggestions import ImprovementSuggestionScorer
 from sandbox import WorkspaceManager
 from workers import Worker, WorkerProfile
 
@@ -135,6 +136,8 @@ class TaskExecutionService:
         enable_worker_profiles: bool = False,
         enable_independent_verifier: bool = False,
         orchestrator_brain: OrchestratorBrain | None = None,
+        improvement_scorer: ImprovementSuggestionScorer | None = None,
+        enable_improvement_llm_scoring: bool = False,
         progress_notifier: ProgressNotifier | None = None,
         default_task_max_attempts: int = 3,
         workspace_root: str | Path | None = None,
@@ -150,6 +153,8 @@ class TaskExecutionService:
         self.enable_worker_profiles = enable_worker_profiles
         self.enable_independent_verifier = enable_independent_verifier
         self.orchestrator_brain = orchestrator_brain
+        self.improvement_scorer = improvement_scorer
+        self.enable_improvement_llm_scoring = enable_improvement_llm_scoring
         self.progress_notifier = progress_notifier
         self.default_task_max_attempts = max(1, default_task_max_attempts)
         self.workspace_root = None

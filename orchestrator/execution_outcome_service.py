@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from datetime import datetime, timedelta
@@ -22,9 +23,15 @@ from orchestrator.execution_serialization import (
     _serialize_verification_report,
     _workspace_id_from_artifacts,
 )
-from orchestrator.improvement_suggestions import build_improvement_suggestion_draft
+from orchestrator.improvement_suggestions import (
+    ImprovementSuggestionScorer,
+    ImprovementSuggestionScoringContext,
+    ImprovementSuggestionScoringMetadata,
+    ImprovementSuggestionScoringResult,
+    build_improvement_suggestion_draft,
+)
 from orchestrator.nodes.verification_result import VERIFIER_REPAIR_PASSES_USED_CONSTRAINT
-from orchestrator.reflection import FrictionReport
+from orchestrator.reflection import FrictionReport, ImprovementSuggestion
 from orchestrator.state import OrchestratorState
 from repositories import (
     ArtifactRepository,
@@ -227,6 +234,89 @@ def _persist_scout_proposal_if_needed(
     )
 
 
+def _deterministic_scoring_result(
+    suggestion: ImprovementSuggestion,
+    *,
+    enabled: bool,
+    fallback: bool,
+    fallback_reason: str | None,
+    provider: str | None = None,
+) -> ImprovementSuggestionScoringResult:
+    return ImprovementSuggestionScoringResult(
+        suggestion=suggestion,
+        metadata=ImprovementSuggestionScoringMetadata(
+            enabled=enabled,
+            mode="deterministic",
+            provider=provider,
+            fallback=fallback,
+            fallback_reason=fallback_reason,
+        ),
+    )
+
+
+def _run_improvement_scorer(
+    scorer: ImprovementSuggestionScorer | None,
+    *,
+    enabled: bool,
+    report: FrictionReport,
+    deterministic_suggestion: ImprovementSuggestion,
+    context: ImprovementSuggestionScoringContext,
+) -> ImprovementSuggestionScoringResult:
+    if not enabled:
+        return _deterministic_scoring_result(
+            deterministic_suggestion,
+            enabled=False,
+            fallback=False,
+            fallback_reason="disabled",
+        )
+    provider = type(scorer).__name__ if scorer is not None else None
+    if scorer is None:
+        return _deterministic_scoring_result(
+            deterministic_suggestion,
+            enabled=True,
+            fallback=True,
+            fallback_reason="scorer_unavailable",
+        )
+    try:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            result = asyncio.run(
+                scorer.score_improvement_suggestion(
+                    report=report,
+                    deterministic_suggestion=deterministic_suggestion,
+                    context=context,
+                )
+            )
+        else:
+            raise RuntimeError("cannot_run_async_scorer_from_running_event_loop")
+    except Exception as exc:
+        logger.warning(
+            "Model-backed improvement scoring failed; using deterministic scoring",
+            extra={
+                "task_id": context.task_id,
+                "provider": provider,
+                "error_type": type(exc).__name__,
+            },
+        )
+        return _deterministic_scoring_result(
+            deterministic_suggestion,
+            enabled=True,
+            fallback=True,
+            fallback_reason=f"{type(exc).__name__}: {exc}",
+            provider=provider,
+        )
+    if result is None:
+        return _deterministic_scoring_result(
+            deterministic_suggestion,
+            enabled=True,
+            fallback=True,
+            fallback_reason="no_model_suggestion",
+            provider=provider,
+        )
+    return result
+
+
 def _persist_friction_proposals_if_needed(
     proposal_repo: ProposalRepository,
     *,
@@ -235,6 +325,8 @@ def _persist_friction_proposals_if_needed(
     task_constraints: dict[str, Any] | None,
     state: OrchestratorState,
     worker_run_id: str,
+    improvement_scorer: ImprovementSuggestionScorer | None = None,
+    enable_improvement_llm_scoring: bool = False,
 ) -> None:
     all_reports: list[FrictionReport] = list(state.friction_reports)
     result_reports = (
@@ -322,17 +414,36 @@ def _persist_friction_proposals_if_needed(
             continue
         existing_fingerprints.add(draft.fingerprint)
 
+        scoring_result = _run_improvement_scorer(
+            improvement_scorer,
+            enabled=enable_improvement_llm_scoring,
+            report=report,
+            deterministic_suggestion=draft.suggestion,
+            context=ImprovementSuggestionScoringContext(
+                task_id=task_id,
+                task_text=state.task.task_text,
+                repo_url=state.task.repo_url,
+                branch=state.task.branch,
+                attempt_count=state.attempt_count,
+                failure_kind=failure_kind,
+                retry_context=has_retry_context,
+                task_constraints=task_constraints or state.task.constraints,
+                task_budget=state.task.budget,
+            ),
+        )
+
         proposal = proposal_repo.create_proposal(
             session_id=session_id,
             task_id=task_id,
-            title=draft.suggestion.title,
-            summary=draft.suggestion.description,
+            title=scoring_result.suggestion.title,
+            summary=scoring_result.suggestion.description,
             status=ProposalStatus.PENDING_REVIEW,
             proposal_type=ProposalType.REFLECTION,
             metadata_payload={
                 "reflection_kind": "improvement_suggestion",
-                "improvement_suggestion": draft.suggestion.model_dump(mode="json"),
+                "improvement_suggestion": scoring_result.suggestion.model_dump(mode="json"),
                 "friction_report": report.model_dump(mode="json"),
+                "scoring": scoring_result.metadata.to_payload(),
                 "attempt_count": state.attempt_count,
                 "failure_kind": failure_kind,
                 "worker_type": state.route.chosen_worker if state.route else None,
@@ -345,7 +456,7 @@ def _persist_friction_proposals_if_needed(
                 "task_id": task_id,
                 "proposal_id": proposal.id,
                 "worker_run_id": worker_run_id,
-                "title": draft.suggestion.title,
+                "title": scoring_result.suggestion.title,
             },
         )
 
@@ -462,6 +573,10 @@ def _persist_execution_outcome(
                 task_constraints=task_constraints_val,
                 state=state,
                 worker_run_id=worker_run_id_val,
+                improvement_scorer=getattr(self, "improvement_scorer", None),
+                enable_improvement_llm_scoring=bool(
+                    getattr(self, "enable_improvement_llm_scoring", False)
+                ),
             )
     except Exception as exc:
         logger.warning("Failed to persist friction proposals: %s", exc, exc_info=True)
