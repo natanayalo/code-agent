@@ -167,6 +167,26 @@ def test_title_generation_uses_specific_suffix_after_generic_prefix() -> None:
     assert draft.suggestion.title == "Improve pip install failed handling"
 
 
+def test_title_generation_truncates_after_generic_prefix() -> None:
+    suffix = (
+        "dependency resolver kept backtracking on pinned versions after cache refresh "
+        "while installing constraints"
+    )
+    report = FrictionReport(
+        source="tooling",
+        description=f"Failed to execute command: {suffix}",
+        impact="slowed_down",
+    )
+
+    draft = build_improvement_suggestion_draft(
+        report,
+        task_id="task-long-generic-prefix-title",
+        attempt_count=0,
+    )
+
+    assert draft.suggestion.title == f"Improve {suffix[:80]} handling"
+
+
 def test_fingerprint_is_stable_and_changes_with_identity_fields() -> None:
     report = FrictionReport(
         source="tooling",

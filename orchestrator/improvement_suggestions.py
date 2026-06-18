@@ -226,11 +226,12 @@ def _title_for_report(
     if not (report.description or "").strip():
         return f"Improve {_source_label(report)} friction handling"
 
-    first_part = description[:80]
-    if ": " in first_part:
-        prefix, suffix = first_part.split(": ", maxsplit=1)
+    cleaned_desc = description
+    if ": " in cleaned_desc:
+        prefix, suffix = cleaned_desc.split(": ", maxsplit=1)
         if prefix.strip().lower() in _GENERIC_TITLE_PREFIXES:
-            first_part = suffix.strip()
+            cleaned_desc = suffix.strip()
+    first_part = cleaned_desc[:80]
     first_part = " ".join(first_part.split()).rstrip(".:,;")
     if len(first_part) < 3:
         return f"Improve {_source_label(report)} friction handling"
