@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add llm improvement proposal scoring ([#248](https://github.com/natanayalo/code-agent/pull/248))
+
 - Feat: generate scored improvement proposals ([#247](https://github.com/natanayalo/code-agent/pull/247))
 
 - Feat: capture execution friction from worker runtime (T-194) ([#237](https://github.com/natanayalo/code-agent/pull/237))
