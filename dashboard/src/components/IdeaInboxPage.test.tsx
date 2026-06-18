@@ -213,6 +213,28 @@ describe('IdeaInboxPage', () => {
     expect(screen.getAllByText('N/A').length).toBeGreaterThan(0);
   });
 
+  it('does not render scout metadata details for explicit null fields', async () => {
+    vi.mocked(api.listProposals).mockResolvedValue([
+      createProposal({
+        proposal_id: 'p-null-metadata',
+        title: 'Idea with null metadata',
+        metadata_payload: {
+          files_changed: null,
+          diff_text: null,
+        },
+      }),
+    ]);
+
+    renderWithProviders(<IdeaInboxPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Idea with null metadata')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('View Details')).not.toBeInTheDocument();
+    expect(screen.queryByText('null')).not.toBeInTheDocument();
+  });
+
   it('renders reflection improvements with scoring fields and friction evidence', async () => {
     vi.mocked(api.listProposals).mockResolvedValue([
       createProposal({

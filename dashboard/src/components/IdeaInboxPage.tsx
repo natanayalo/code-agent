@@ -204,7 +204,7 @@ function ReflectionProposalDetails({ proposal }: { proposal: ProposalSnapshot })
 function ScoutProposalDetails({ proposal }: { proposal: ProposalSnapshot }) {
   const filesChanged = proposal.metadata_payload?.files_changed;
   const diffText = proposal.metadata_payload?.diff_text;
-  if (!proposal.content && filesChanged === undefined && diffText === undefined) {
+  if (!proposal.content && filesChanged == null && diffText == null) {
     return null;
   }
 
@@ -212,13 +212,13 @@ function ScoutProposalDetails({ proposal }: { proposal: ProposalSnapshot }) {
     <details className="proposal-details-panel">
       <summary>View Details</summary>
       {proposal.content ? <pre className="json-viewer">{proposal.content}</pre> : null}
-      {filesChanged !== undefined ? (
+      {filesChanged != null ? (
         <div className="metadata-section">
           <strong>Files Changed:</strong>
           <pre className="json-viewer">{renderMetadataValue(filesChanged)}</pre>
         </div>
       ) : null}
-      {diffText !== undefined ? (
+      {diffText != null ? (
         <div className="metadata-section">
           <strong>Diff:</strong>
           <pre className="json-viewer">{renderMetadataValue(diffText)}</pre>
