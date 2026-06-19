@@ -79,7 +79,7 @@ def test_build_choose_worker_node_applies_brain_profile_suggestion_with_worker_c
             return RouteBrainSuggestion(
                 suggested_worker="codex",
                 suggested_profile="antigravity-native-executor",
-                rationale="Use the gemini native profile despite worker hint mismatch.",
+                rationale="Use the antigravity native profile despite worker hint mismatch.",
             )
 
     state = OrchestratorState.model_validate(

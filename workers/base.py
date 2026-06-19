@@ -73,7 +73,7 @@ def normalize_worker_type(value: Any) -> Any:
 
 
 def normalize_worker_profile_name(value: str | None) -> str | None:
-    """Normalize legacy Gemini profile names to canonical Antigravity profile names."""
+    """Normalize optional worker profile names and reject retired public names."""
 
     if value is None:
         return None
@@ -81,7 +81,7 @@ def normalize_worker_profile_name(value: str | None) -> str | None:
     if not stripped:
         return None
     if stripped.startswith("gemini-"):
-        return f"antigravity-{stripped.removeprefix('gemini-')}"
+        raise ValueError("Gemini profile names are no longer supported; use antigravity profiles.")
     return stripped
 
 

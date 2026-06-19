@@ -107,7 +107,7 @@ async def test_brain_skips_all_if_all_planners_fail():
 
 def test_legacy_rotation_avoids_previously_failed_workers():
     """Verify that deterministic rotation skips workers that have already failed."""
-    # Attempt 0: Gemini failed
+    # Attempt 0: Antigravity failed
     events = [
         TaskTimelineEventState(
             event_type=TimelineEventType.WORKER_DISPATCHED,
@@ -122,12 +122,12 @@ def test_legacy_rotation_avoids_previously_failed_workers():
     ]
 
     state = _state(attempt_count=1, timeline_events=events)
-    # Available workers: gemini, codex, openrouter
+    # Available workers: antigravity, codex, openrouter
     available = frozenset({"antigravity", "codex", "openrouter"})
 
     decision = _compute_legacy_route_decision(state, available)
 
-    # Should NOT pick gemini
+    # Should NOT pick antigravity
     assert decision.chosen_worker != "antigravity"
     # Should pick codex or openrouter (depending on SUPPORTED_WORKER_TYPES order)
     assert decision.chosen_worker in {"codex", "openrouter"}
@@ -135,7 +135,7 @@ def test_legacy_rotation_avoids_previously_failed_workers():
 
 def test_legacy_rotation_falls_back_to_failed_if_all_exhausted():
     """Verify that rotation repeats a failed worker if NO untried workers are available."""
-    # Attempt 0: Gemini failed
+    # Attempt 0: Antigravity failed
     # Attempt 1: Codex failed
     # Attempt 2: OpenRouter failed
     events = [
@@ -164,7 +164,7 @@ def test_legacy_rotation_falls_back_to_failed_if_all_exhausted():
     state = _state(attempt_count=2, timeline_events=events)
     state.dispatch.worker_type = "codex"  # Last one tried
 
-    # Available: only gemini and codex
+    # Available: only antigravity and codex
     available = frozenset({"antigravity", "codex"})
 
     decision = _compute_legacy_route_decision(state, available)

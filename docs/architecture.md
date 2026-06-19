@@ -183,7 +183,7 @@ flowchart TD
     ORCH --> ROUTE[Worker Routing]
 
     ROUTE --> CW[Codex Worker]
-    ROUTE --> GW[Gemini Worker]
+    ROUTE --> GW[Antigravity Worker]
     ROUTE --> OW[OpenRouter Worker]
 
     CW --> SB[Sandbox Workspace / Container]

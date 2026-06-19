@@ -67,7 +67,7 @@ class TaskSubmission(ExecutionModel):
     @field_validator("worker_override", mode="before")
     @classmethod
     def normalize_worker_override(cls, value: object) -> object:
-        """Accept temporary legacy worker aliases at the API boundary."""
+        """Normalize canonical worker names at the API boundary."""
         if value is None:
             return None
         return coerce_worker_type(value)
@@ -75,7 +75,7 @@ class TaskSubmission(ExecutionModel):
     @field_validator("worker_profile_override", mode="before")
     @classmethod
     def normalize_profile_override(cls, value: object) -> object:
-        """Normalize legacy Gemini profile names to canonical Antigravity profile names."""
+        """Trim optional worker profile override names."""
         if value is None or isinstance(value, str):
             return normalize_worker_profile_name(value)
         return value
@@ -99,7 +99,7 @@ class TaskReplayRequest(ExecutionModel):
     @field_validator("worker_override", mode="before")
     @classmethod
     def normalize_worker_override(cls, value: object) -> object:
-        """Accept temporary legacy worker aliases at the replay boundary."""
+        """Normalize canonical worker names at the replay boundary."""
         if value is None:
             return None
         return coerce_worker_type(value)
@@ -107,7 +107,7 @@ class TaskReplayRequest(ExecutionModel):
     @field_validator("worker_profile_override", mode="before")
     @classmethod
     def normalize_profile_override(cls, value: object) -> object:
-        """Normalize legacy Gemini profile names to canonical Antigravity profile names."""
+        """Trim optional worker profile override names."""
         if value is None or isinstance(value, str):
             return normalize_worker_profile_name(value)
         return value

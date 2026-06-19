@@ -23,7 +23,7 @@ async def test_suggest_task_spec_and_route_parses_unified_payload() -> None:
                 '"suggested_risk_level":null,"suggested_task_type":null,'
                 '"suggested_delivery_mode":null,"suggested_worker":"antigravity",'
                 '"suggested_profile":"antigravity-native-executor-read-only",'
-                '"suggested_retry_strategy":null,"rationale":"use gemini read-only"}'
+                '"suggested_retry_strategy":null,"rationale":"use antigravity read-only"}'
             ),
         )
     )
@@ -44,7 +44,7 @@ async def test_suggest_task_spec_and_route_parses_unified_payload() -> None:
 
 
 @pytest.mark.asyncio
-async def test_suggest_task_spec_and_route_parses_wrapped_unified_payload() -> None:
+async def test_suggest_task_spec_and_route_ignores_retired_worker_names() -> None:
     worker = _StaticWorker(
         WorkerResult(
             status="success",
@@ -55,7 +55,7 @@ async def test_suggest_task_spec_and_route_parses_wrapped_unified_payload() -> N
                 '\\"suggested_risk_level\\":null,\\"suggested_task_type\\":null,'
                 '\\"suggested_delivery_mode\\":null,\\"suggested_worker\\":\\"gemini\\",'
                 '\\"suggested_profile\\":\\"antigravity-native-executor-read-only\\",'
-                '\\"suggested_retry_strategy\\":null,\\"rationale\\":\\"use gemini\\"}'
+                '\\"suggested_retry_strategy\\":null,\\"rationale\\":\\"retired worker name\\"}'
                 '\\n```","stats":{"models":{}}}'
             ),
         )
@@ -72,7 +72,7 @@ async def test_suggest_task_spec_and_route_parses_wrapped_unified_payload() -> N
     )
 
     assert suggestion is not None
-    assert suggestion.suggested_worker == "antigravity"
+    assert suggestion.suggested_worker is None
     assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
 
 
@@ -87,7 +87,7 @@ async def test_suggest_task_spec_and_route_salvages_route_when_task_type_invalid
                 '"suggested_risk_level":"low","suggested_task_type":"not_a_real_type",'
                 '"suggested_delivery_mode":"summary","suggested_worker":"antigravity",'
                 '"suggested_profile":"antigravity-native-executor-read-only",'
-                '"suggested_retry_strategy":null,"rationale":"use gemini"}'
+                '"suggested_retry_strategy":null,"rationale":"use antigravity"}'
             ),
         )
     )
@@ -122,7 +122,7 @@ async def test_suggest_task_spec_and_route_unwraps_json_payload_wrapper() -> Non
                     '"suggested_risk_level":"low","suggested_task_type":"maintenance",'
                     '"suggested_delivery_mode":"summary","suggested_worker":"antigravity",'
                     '"suggested_profile":"antigravity-native-executor-read-only",'
-                    '"suggested_retry_strategy":null,"rationale":"use gemini"}\n'
+                    '"suggested_retry_strategy":null,"rationale":"use antigravity"}\n'
                     "```"
                 ),
                 "stats": {"models": {}},
@@ -166,7 +166,7 @@ async def test_suggest_task_spec_and_route_falls_back_from_stats_json_payload_to
                 '"suggested_risk_level":"low","suggested_task_type":"maintenance",'
                 '"suggested_delivery_mode":"summary","suggested_worker":"antigravity",'
                 '"suggested_profile":"antigravity-native-executor-read-only",'
-                '"suggested_retry_strategy":null,"rationale":"use gemini"}\n'
+                '"suggested_retry_strategy":null,"rationale":"use antigravity"}\n'
                 "```"
             ),
         )
@@ -200,7 +200,7 @@ async def test_suggest_task_spec_and_route_prefers_fenced_unified_json_over_stat
                 '"suggested_risk_level":"low","suggested_task_type":"maintenance",'
                 '"suggested_delivery_mode":"summary","suggested_worker":"antigravity",'
                 '"suggested_profile":"antigravity-native-executor-read-only",'
-                '"suggested_retry_strategy":null,"rationale":"use gemini"}\n'
+                '"suggested_retry_strategy":null,"rationale":"use antigravity"}\n'
                 "```\n"
                 '{"input":10922,"prompt":10922,"candidates":349,'
                 '"total":13016,"cached":0,"thoughts":1745,"tool":0}\n'

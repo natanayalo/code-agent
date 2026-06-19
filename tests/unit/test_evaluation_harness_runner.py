@@ -277,16 +277,16 @@ def test_orchestrator_runner_reports_failure_for_missing_case_outcome() -> None:
     assert "missing replay outcome" in outcome.summary.lower()
 
 
-def test_orchestrator_runner_supports_gemini_override() -> None:
+def test_orchestrator_runner_supports_antigravity_override() -> None:
     case = FrozenTaskCase(
-        case_id="gemini-case",
+        case_id="antigravity-case",
         repo_fixture="fixtures/empty",
         task_text="Do a thing",
         expectation=TaskExpectation(require_success=True),
     )
     runner = OrchestratorReplayRunner(
         outcomes_by_case_id={
-            "gemini-case": WorkerOutcome(status="success", summary="gemini path ok")
+            "antigravity-case": WorkerOutcome(status="success", summary="antigravity path ok")
         },
         worker_override="antigravity",
     )
@@ -294,7 +294,7 @@ def test_orchestrator_runner_supports_gemini_override() -> None:
     outcome = asyncio.run(runner.run_case(case))
 
     assert outcome.status == "success"
-    assert "gemini path ok" in outcome.summary
+    assert "antigravity path ok" in outcome.summary
 
 
 def test_orchestrator_runner_preserves_error_status() -> None:

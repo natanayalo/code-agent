@@ -57,7 +57,6 @@ class WorkerType(StrEnum):
     """Supported worker identifiers stored in persistence."""
 
     ANTIGRAVITY = "antigravity"
-    GEMINI = "antigravity"
     CODEX = "codex"
     OPENROUTER = "openrouter"
 
@@ -132,21 +131,13 @@ class ProposalType(StrEnum):
     REFLECTION = "reflection"
 
 
-LEGACY_WORKER_TYPE_ALIASES = {
-    "gemini": WorkerType.ANTIGRAVITY,
-}
-
-
 def coerce_worker_type(value: object) -> WorkerType:
-    """Normalize worker identifiers, including temporary migration aliases."""
+    """Normalize worker identifiers to the canonical worker enum."""
 
     if isinstance(value, WorkerType):
         return value
     if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in LEGACY_WORKER_TYPE_ALIASES:
-            return LEGACY_WORKER_TYPE_ALIASES[normalized]
-        return WorkerType(normalized)
+        return WorkerType(value.strip().lower())
     raise ValueError(f"Invalid worker type: {value!r}")
 
 

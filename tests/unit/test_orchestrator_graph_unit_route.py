@@ -298,7 +298,7 @@ def test_compute_route_profile_aware_openrouter_requires_legacy_opt_in() -> None
 
 
 def test_compute_route_budget_prefer_high_quality():
-    """T-071: prefer_high_quality budget hint routes to gemini."""
+    """T-071: prefer_high_quality budget hint routes to antigravity."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "demo", "budget": {"prefer_high_quality": True}}}
     )
@@ -317,8 +317,8 @@ def test_compute_route_budget_prefer_low_cost():
     assert route.route_reason == "budget_preference"
 
 
-def test_compute_route_budget_prefer_high_quality_fallback_when_gemini_unavailable():
-    """T-071: falls back to openrouter with preferred_unavailable when gemini isn't configured."""
+def test_compute_route_budget_prefer_high_quality_fallback_when_antigravity_unavailable():
+    """T-071: falls back to openrouter when antigravity isn't configured."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "demo", "budget": {"prefer_high_quality": True}}}
     )
@@ -328,7 +328,7 @@ def test_compute_route_budget_prefer_high_quality_fallback_when_gemini_unavailab
 
 
 def test_compute_route_task_kind_architecture():
-    """T-071: architecture task shape routes to gemini with high_stakes_refactor."""
+    """T-071: architecture task shape routes to antigravity with high_stakes_refactor."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "refactor the module"}, "task_kind": "architecture"}
     )
@@ -338,7 +338,7 @@ def test_compute_route_task_kind_architecture():
 
 
 def test_compute_route_task_kind_ambiguous():
-    """T-071: ambiguous task shape routes to gemini with ambiguous_task."""
+    """T-071: ambiguous task shape routes to antigravity with ambiguous_task."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "investigate logs"}, "task_kind": "ambiguous"}
     )
@@ -518,7 +518,7 @@ def test_compute_route_retries_same_worker_for_environment_failure_kind():
 
 
 def test_compute_route_environment_failure_does_not_downgrade_prior_high_quality_worker():
-    """An environment failure on gemini should not silently downgrade to codex on retry."""
+    """An environment failure on antigravity should not silently downgrade to codex on retry."""
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "fix the code"},

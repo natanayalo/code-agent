@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from pydantic import ValidationError
+
 from tests.unit.task_execution_service_support import *  # noqa: F403
 
 
@@ -303,8 +305,8 @@ def test_load_submission_for_task_restores_execution_overrides_and_budget() -> N
         execution_module.TaskSubmission(
             task_text="Needs approval",
             repo_url="https://github.com/natanayalo/code-agent",
-            worker_override="gemini",
-            worker_profile_override="gemini-native-executor",
+            worker_override="antigravity",
+            worker_profile_override="antigravity-native-executor",
             constraints={"requires_approval": True, "approval_reason": "manual gate"},
             budget={"max_iterations": 5},
         )
@@ -319,19 +321,35 @@ def test_load_submission_for_task_restores_execution_overrides_and_budget() -> N
     assert submission.budget == {"max_iterations": 5}
 
 
-def test_execution_boundary_models_normalize_legacy_profile_overrides() -> None:
-    """Task execution boundary models should canonicalize legacy Gemini profile names."""
+def test_execution_boundary_models_trim_profile_overrides() -> None:
+    """Task execution boundary models should trim canonical profile names."""
 
     submission = execution_module.TaskSubmission(
         task_text="Run task",
-        worker_profile_override=" gemini-native-executor ",
+        worker_profile_override=" antigravity-native-executor ",
     )
     replay_request = execution_module.TaskReplayRequest(
-        worker_profile_override="gemini-native-reviewer",
+        worker_profile_override=" antigravity-native-reviewer ",
     )
 
     assert submission.worker_profile_override == "antigravity-native-executor"
     assert replay_request.worker_profile_override == "antigravity-native-reviewer"
+
+
+def test_execution_boundary_models_reject_retired_gemini_inputs() -> None:
+    """Task execution boundaries should accept only canonical Antigravity names."""
+
+    with pytest.raises(ValidationError, match="not a valid WorkerType"):
+        execution_module.TaskSubmission(
+            task_text="Run task",
+            worker_override="gemini",
+        )
+
+    with pytest.raises(ValidationError, match="Gemini profile names are no longer supported"):
+        execution_module.TaskSubmission(
+            task_text="Run task",
+            worker_profile_override="gemini-native-executor",
+        )
 
 
 def test_load_submission_for_task_returns_none_when_persisted_scaffolding_is_missing() -> None:
