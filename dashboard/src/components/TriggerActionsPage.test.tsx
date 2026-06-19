@@ -54,6 +54,9 @@ describe('TriggerActionsPage', () => {
     vi.mocked(api.submitTask).mockResolvedValue(createTaskSnapshot({ task_id: 'task-123' }));
     renderPage();
 
+    const liveRegion = screen.getByRole('status');
+    expect(liveRegion).toBeEmptyDOMElement();
+
     fireEvent.change(screen.getByLabelText('Task text'), {
       target: { value: '  Add a dashboard trigger tab  ' },
     });
@@ -88,6 +91,41 @@ describe('TriggerActionsPage', () => {
     });
     expect(await screen.findByText('Task queued')).toBeInTheDocument();
     expect(screen.getByText('task-123')).toBeInTheDocument();
+    expect(liveRegion).toHaveTextContent('Task queued');
+    expect(liveRegion).toHaveTextContent('task-123');
+  });
+
+  it('omits task priority when the priority field is empty', async () => {
+    vi.mocked(api.submitTask).mockResolvedValue(createTaskSnapshot({ task_id: 'task-no-priority' }));
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText('Task text'), {
+      target: { value: 'Queue task without priority' },
+    });
+    fireEvent.change(screen.getByLabelText('Priority'), { target: { value: '' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Queue dashboard task' }));
+
+    await waitFor(() => expect(api.submitTask).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.submitTask).mock.calls[0][0]).not.toHaveProperty('priority');
+  });
+
+  it('rejects invalid task priority values before submitting', () => {
+    const { container } = renderPage();
+
+    fireEvent.change(screen.getByLabelText('Task text'), {
+      target: { value: 'Queue task with invalid priority' },
+    });
+    fireEvent.change(screen.getByLabelText('Priority'), { target: { value: '-1' } });
+
+    const form = container.querySelector('form');
+    expect(form).not.toBeNull();
+    fireEvent.submit(form as HTMLFormElement);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Priority must be a whole number greater than or equal to 0.',
+    );
+    expect(api.submitTask).not.toHaveBeenCalled();
   });
 
   it('validates task text before submitting', () => {
@@ -97,7 +135,9 @@ describe('TriggerActionsPage', () => {
     expect(form).not.toBeNull();
     fireEvent.submit(form as HTMLFormElement);
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Task text is required.');
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('Task text is required.');
+    expect(alert.querySelector('svg')).not.toBeNull();
     expect(api.submitTask).not.toHaveBeenCalled();
   });
 

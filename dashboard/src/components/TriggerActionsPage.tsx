@@ -49,15 +49,15 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 function TriggerResult({ task, label }: { task: TaskSnapshot | null; label: string }) {
-  if (!task) {
-    return null;
-  }
-
   return (
-    <div className="trigger-result" role="status">
-      <CheckCircle2 size={18} />
-      <span>{label}</span>
-      <code>{task.task_id}</code>
+    <div className={task ? 'trigger-result' : undefined} role="status">
+      {task ? (
+        <>
+          <CheckCircle2 size={18} />
+          <span>{label}</span>
+          <code>{task.task_id}</code>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -115,21 +115,23 @@ export function TriggerActionsPage() {
       return;
     }
 
-    const parsedPriority = Number(priority);
-    if (!Number.isInteger(parsedPriority) || parsedPriority < 0) {
-      setTaskError('Priority must be a whole number greater than or equal to 0.');
-      return;
-    }
-
     const payload: TaskSubmissionRequest = {
       task_text: normalizedTaskText,
-      priority: parsedPriority,
       constraints: {
         task_type: taskType,
         trigger_source: 'dashboard',
       },
       session: DASHBOARD_SESSION,
     };
+    const normalizedPriority = priority.trim();
+    if (normalizedPriority) {
+      const parsedPriority = Number(normalizedPriority);
+      if (!Number.isInteger(parsedPriority) || parsedPriority < 0) {
+        setTaskError('Priority must be a whole number greater than or equal to 0.');
+        return;
+      }
+      payload.priority = parsedPriority;
+    }
     const normalizedRepoUrl = normalizeOptional(repoUrl);
     const normalizedBranch = normalizeOptional(branch);
     if (normalizedRepoUrl) {
@@ -272,6 +274,7 @@ export function TriggerActionsPage() {
 
               {taskError ? (
                 <div className="error-banner" role="alert">
+                  <AlertTriangle size={16} />
                   <span>{taskError}</span>
                 </div>
               ) : null}
