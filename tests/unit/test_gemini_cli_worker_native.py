@@ -20,6 +20,7 @@ from workers import GeminiCliWorker, WorkerRequest, WorkerResult
 from workers.base import ArtifactReference
 from workers.cli_runtime import CliRuntimeMessage, CliRuntimeStep
 from workers.gemini_cli_worker import _prepare_workspace_gemini_home
+from workers.gemini_cli_worker_native import GeminiCliWorkerNativeMixin
 from workers.native_agent_runner import NativeAgentRunResult
 
 
@@ -75,6 +76,11 @@ class _ScriptedAdapter:
         if not self._steps:
             raise AssertionError("Adapter received more turns than expected.")
         return self._steps.pop(0)
+
+
+class _BareNativeMixin(GeminiCliWorkerNativeMixin):
+    def __init__(self) -> None:
+        self.runtime_adapter = _ScriptedAdapter([])
 
 
 class _FakeSession:
@@ -269,6 +275,35 @@ def test_gemini_native_prompt_includes_schema_and_planner_role(tmp_path: Path) -
     )
     assert "Specialist Role: Planner" in prompt
     assert "Return exactly one JSON object that strictly matches this JSON schema" in prompt
+
+
+def test_gemini_native_mixin_defaults_missing_native_sandbox_flag(tmp_path: Path) -> None:
+    worker = _BareNativeMixin()
+    command = worker._build_native_command(
+        request=WorkerRequest(repo_url="https://example.com/repo.git", task_text="run"),
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+    )
+    native_env = worker._native_run_env()
+    result = worker._build_worker_result_from_native_run(
+        _make_workspace(tmp_path),
+        NativeAgentRunResult(
+            status="success",
+            summary="done",
+            command="gemini --output-format text",
+            exit_code=0,
+            duration_seconds=0.1,
+            timed_out=False,
+            final_message="done",
+        ),
+        WorkerRuntimeMode.NATIVE_AGENT,
+        None,
+    )
+
+    assert "--sandbox" in command
+    assert native_env is not None
+    assert native_env["GEMINI_SANDBOX"] == "true"
+    assert result.budget_usage is not None
+    assert result.budget_usage["native_agent"]["sandbox_enabled"] is True
 
 
 def test_prepare_workspace_gemini_home_creates_workspace_mapping(tmp_path: Path) -> None:

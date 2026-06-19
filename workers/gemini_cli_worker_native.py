@@ -326,7 +326,10 @@ class GeminiCliWorkerNativeMixin:
         ]
         if model:
             command.extend(["--model", str(model)])
-        if self.native_sandbox_enabled and runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:  # type: ignore[attr-defined]
+        if (
+            getattr(self, "native_sandbox_enabled", True)
+            and runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
+        ):
             command.append("--sandbox")
         return command
 
@@ -426,7 +429,7 @@ class GeminiCliWorkerNativeMixin:
     def _native_run_env(self) -> dict[str, str] | None:
         """Build native run env with explicit sandbox/no-network defaults when possible."""
         base_env = dict(getattr(self.runtime_adapter, "env", {}) or {})  # type: ignore[attr-defined]
-        if self.native_sandbox_enabled:  # type: ignore[attr-defined]
+        if getattr(self, "native_sandbox_enabled", True):
             base_env.setdefault("GEMINI_SANDBOX", "true")
             # On macOS seatbelt, prefer the no-network profile unless explicitly overridden.
             base_env.setdefault("SEATBELT_PROFILE", "permissive-closed")
@@ -469,7 +472,7 @@ class GeminiCliWorkerNativeMixin:
                 request=request,
                 prompt=prompt,
                 runtime_settings=runtime_settings,
-                native_sandbox_enabled=self.native_sandbox_enabled,  # type: ignore[attr-defined]
+                native_sandbox_enabled=getattr(self, "native_sandbox_enabled", True),
             )
             command_redactions.append(prompt)
             stdin_prompt = False
@@ -559,7 +562,7 @@ class GeminiCliWorkerNativeMixin:
                     "duration_seconds": native_result.duration_seconds,
                     "exit_code": native_result.exit_code,
                     "timed_out": native_result.timed_out,
-                    "sandbox_enabled": self.native_sandbox_enabled,  # type: ignore[attr-defined]
+                    "sandbox_enabled": getattr(self, "native_sandbox_enabled", True),
                     **(provider_metadata or {}),
                 },
             },

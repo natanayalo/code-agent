@@ -6,16 +6,12 @@ import json
 import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, cast, get_args
 
 from workers.adapter_utils import coerce_positive_int
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
 from workers.constants import DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS
 from workers.subprocess_env import build_antigravity_subprocess_env
-
-DEFAULT_ANTIGRAVITY_EXECUTABLE: Final[str] = "agy"
-DEFAULT_ANTIGRAVITY_TOOL_PERMISSION: Final[str] = "proceed-in-sandbox"
-DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY: Final[str] = "agent-decides"
 
 ANTIGRAVITY_EXECUTABLE_ENV_VAR: Final[str] = "CODE_AGENT_ANTIGRAVITY_CLI_BIN"
 ANTIGRAVITY_MODEL_ENV_VAR: Final[str] = "CODE_AGENT_ANTIGRAVITY_MODEL"
@@ -29,26 +25,6 @@ ANTIGRAVITY_ARTIFACT_REVIEW_POLICY_ENV_VAR: Final[str] = (
     "CODE_AGENT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY"
 )
 
-VALID_ANTIGRAVITY_TOOL_PERMISSIONS: Final[frozenset[str]] = frozenset(
-    {
-        "request-review",
-        "proceed-in-sandbox",
-        "always-proceed",
-        "strict",
-    }
-)
-VALID_ANTIGRAVITY_ARTIFACT_REVIEW_POLICIES: Final[frozenset[str]] = frozenset(
-    {
-        "asks-for-review",
-        "agent-decides",
-        "always-proceed",
-    }
-)
-LEGACY_ARTIFACT_REVIEW_POLICY_ALIASES: Final[dict[str, str]] = {
-    "auto": "agent-decides",
-    "manual": "asks-for-review",
-}
-
 AntigravityToolPermission = Literal[
     "request-review",
     "proceed-in-sandbox",
@@ -61,6 +37,21 @@ AntigravityArtifactReviewPolicy = Literal[
     "always-proceed",
 ]
 
+DEFAULT_ANTIGRAVITY_EXECUTABLE: Final[str] = "agy"
+DEFAULT_ANTIGRAVITY_TOOL_PERMISSION: Final[AntigravityToolPermission] = "proceed-in-sandbox"
+DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY: Final[AntigravityArtifactReviewPolicy] = "agent-decides"
+
+VALID_ANTIGRAVITY_TOOL_PERMISSIONS: Final[frozenset[str]] = frozenset(
+    str(value) for value in get_args(AntigravityToolPermission)
+)
+VALID_ANTIGRAVITY_ARTIFACT_REVIEW_POLICIES: Final[frozenset[str]] = frozenset(
+    str(value) for value in get_args(AntigravityArtifactReviewPolicy)
+)
+LEGACY_ARTIFACT_REVIEW_POLICY_ALIASES: Final[dict[str, AntigravityArtifactReviewPolicy]] = {
+    "auto": "agent-decides",
+    "manual": "asks-for-review",
+}
+
 
 def _normalize_tool_permission(value: str | None) -> AntigravityToolPermission:
     normalized = (value or DEFAULT_ANTIGRAVITY_TOOL_PERMISSION).strip().lower()
@@ -69,7 +60,7 @@ def _normalize_tool_permission(value: str | None) -> AntigravityToolPermission:
         raise ValueError(
             f"Invalid Antigravity tool permission: '{value}'. Expected one of: {supported}."
         )
-    return normalized  # type: ignore[return-value]
+    return cast(AntigravityToolPermission, normalized)
 
 
 def _normalize_artifact_review_policy(value: str | None) -> AntigravityArtifactReviewPolicy:
@@ -80,7 +71,7 @@ def _normalize_artifact_review_policy(value: str | None) -> AntigravityArtifactR
         raise ValueError(
             f"Invalid Antigravity artifact review policy: '{value}'. Expected one of: {supported}."
         )
-    return normalized  # type: ignore[return-value]
+    return cast(AntigravityArtifactReviewPolicy, normalized)
 
 
 def _normalize_optional_text(value: str | None) -> str | None:
