@@ -48,7 +48,7 @@ Active focus:
 
 Reference baseline:
 
-- official Antigravity CLI manuals are linked from [Milestone 19.5](roadmap.md#milestone-195-gemini-to-antigravity-migration) and should be rechecked before implementing T-198 through T-204
+- official Antigravity CLI manuals are linked from [Milestone 19.5](roadmap.md#milestone-195-gemini-to-antigravity-migration) and should be rechecked before implementing T-205 through T-211
 
 ## Current Backlog
 

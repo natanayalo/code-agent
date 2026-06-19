@@ -41,5 +41,5 @@ npm run build
 Validate this skill after edits with:
 
 ```bash
-.venv/bin/python /Users/natanayalo/.codex/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/dashboard-qa
+.venv/bin/python ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/dashboard-qa
 ```

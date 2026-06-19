@@ -62,4 +62,33 @@ describe('Header', () => {
       expect(screen.getByRole('button', { name: /Log out/i })).not.toBeDisabled();
     });
   });
+
+  it('recovers when the logout request rejects', async () => {
+    const logoutError = new Error('logout failed');
+    const logout = vi.fn().mockRejectedValue(logoutError);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      render(
+        <MemoryRouter>
+          <Header auth={{ authenticated: true, logout }} />
+        </MemoryRouter>
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /Log out/i }));
+
+      await waitFor(() => {
+        expect(logout).toHaveBeenCalledTimes(1);
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Log out/i })).not.toBeDisabled();
+      });
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Failed to log out from dashboard header',
+        logoutError
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });

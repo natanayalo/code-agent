@@ -35,6 +35,8 @@ export function Header({ auth: authOverride }: HeaderProps = {}) {
     setIsLoggingOut(true);
     try {
       await auth.logout();
+    } catch (error) {
+      console.warn('Failed to log out from dashboard header', error);
     } finally {
       setIsLoggingOut(false);
     }
