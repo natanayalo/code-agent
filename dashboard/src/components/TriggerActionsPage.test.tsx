@@ -68,7 +68,7 @@ describe('TriggerActionsPage', () => {
     fireEvent.change(screen.getByLabelText('Worker'), { target: { value: 'codex' } });
     fireEvent.change(screen.getByLabelText('Priority'), { target: { value: '2' } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Queue dashboard task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Queue Task' }));
 
     await waitFor(() => {
       expect(api.submitTask).toHaveBeenCalledWith({
@@ -99,12 +99,12 @@ describe('TriggerActionsPage', () => {
     vi.mocked(api.submitTask).mockResolvedValue(createTaskSnapshot({ task_id: 'task-no-priority' }));
     renderPage();
 
+    expect(screen.getByLabelText('Priority')).toHaveValue(null);
     fireEvent.change(screen.getByLabelText('Task text'), {
       target: { value: 'Queue task without priority' },
     });
-    fireEvent.change(screen.getByLabelText('Priority'), { target: { value: '' } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Queue dashboard task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Queue Task' }));
 
     await waitFor(() => expect(api.submitTask).toHaveBeenCalledTimes(1));
     expect(vi.mocked(api.submitTask).mock.calls[0][0]).not.toHaveProperty('priority');
@@ -168,10 +168,10 @@ describe('TriggerActionsPage', () => {
     fireEvent.change(screen.getByLabelText('Task text'), {
       target: { value: 'Investigate queue behavior' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Queue dashboard task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Queue Task' }));
 
     expect(await screen.findByText('Queueing...')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Queue dashboard task' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Queueing...' })).toBeDisabled();
   });
 
   it('ignores duplicate task submissions while the mutation is pending', async () => {
@@ -197,7 +197,7 @@ describe('TriggerActionsPage', () => {
     renderPage();
 
     fireEvent.click(screen.getByRole('tab', { name: /Scout/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Trigger configured scout run' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Trigger Scout' }));
 
     await waitFor(() => expect(api.triggerScoutTask).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('Scout queued')).toBeInTheDocument();
@@ -209,7 +209,7 @@ describe('TriggerActionsPage', () => {
     renderPage();
 
     fireEvent.click(screen.getByRole('tab', { name: /Scout/i }));
-    const scoutButton = screen.getByRole('button', { name: 'Trigger configured scout run' });
+    const scoutButton = screen.getByRole('button', { name: 'Trigger Scout' });
 
     fireEvent.click(scoutButton);
     await screen.findByText('Triggering...');
@@ -223,7 +223,7 @@ describe('TriggerActionsPage', () => {
     renderPage();
 
     fireEvent.click(screen.getByRole('tab', { name: /Scout/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Trigger configured scout run' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Trigger Scout' }));
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Scout repo is not configured');

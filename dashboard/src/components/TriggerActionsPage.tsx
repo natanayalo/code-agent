@@ -70,7 +70,7 @@ export function TriggerActionsPage() {
   const [taskText, setTaskText] = React.useState('');
   const [repoUrl, setRepoUrl] = React.useState('');
   const [branch, setBranch] = React.useState('');
-  const [priority, setPriority] = React.useState('0');
+  const [priority, setPriority] = React.useState('');
   const [taskType, setTaskType] = React.useState<DashboardTaskType>('feature');
   const [workerOverride, setWorkerOverride] = React.useState<WorkerSelection>('');
   const [taskError, setTaskError] = React.useState<string | null>(null);
@@ -291,7 +291,6 @@ export function TriggerActionsPage() {
                   type="submit"
                   className="button button-success trigger-primary-button"
                   disabled={submitTaskMutation.isPending}
-                  aria-label="Queue dashboard task"
                 >
                   {submitTaskMutation.isPending ? (
                     <Loader2 className="spin" size={16} />
@@ -340,7 +339,6 @@ export function TriggerActionsPage() {
                   className="button button-success trigger-primary-button"
                   disabled={triggerScoutMutation.isPending}
                   onClick={handleScoutTrigger}
-                  aria-label="Trigger configured scout run"
                 >
                   {triggerScoutMutation.isPending ? (
                     <Loader2 className="spin" size={16} />
