@@ -458,8 +458,8 @@ def _get_reviewer_workers(
 ) -> list[tuple[str, Worker]]:
     reviewer_workers: list[tuple[str, Worker]] = []
     available_workers = worker_factory or {}
-    if "gemini" in available_workers:
-        reviewer_workers.append(("gemini", available_workers["gemini"]))
+    if "antigravity" in available_workers:
+        reviewer_workers.append(("antigravity", available_workers["antigravity"]))
     if "codex" in available_workers:
         reviewer_workers.append(("codex", available_workers["codex"]))
     if not reviewer_workers and state.dispatch.worker_type is not None:

@@ -151,8 +151,8 @@ def test_gemini_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path)
         stdout='{"response":"Native run complete.","stats":{}}',
         stderr="",
         json_payload={
-            "suggested_worker": "gemini",
-            "suggested_profile": "gemini-native-executor-read-only",
+            "suggested_worker": "antigravity",
+            "suggested_profile": "antigravity-native-executor-read-only",
         },
     )
 
@@ -176,8 +176,8 @@ def test_gemini_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path)
     assert result.status == "success"
     assert result.summary == "Native run complete."
     assert result.json_payload == {
-        "suggested_worker": "gemini",
-        "suggested_profile": "gemini-native-executor-read-only",
+        "suggested_worker": "antigravity",
+        "suggested_profile": "antigravity-native-executor-read-only",
     }
     assert result.files_changed == ["note.txt"]
     assert result.diff_text == "diff --git a/note.txt b/note.txt"

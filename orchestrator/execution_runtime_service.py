@@ -7,6 +7,8 @@ import logging
 import sys
 from typing import Any
 
+from pydantic import ValidationError
+
 from apps.observability import (
     SPAN_KIND_AGENT,
     record_span_exception,
@@ -329,6 +331,33 @@ async def _handle_run_queued_task_error(
     )
 
 
+async def _handle_invalid_queued_submission(
+    self: Any,
+    exc: ValidationError,
+    worker_id: str,
+    task_id: str,
+) -> None:
+    """Fail queued tasks whose persisted submission cannot be validated."""
+    self._record_execution_span_error(exc)
+    logger.exception(
+        "Queued task submission failed validation before execution",
+        extra={
+            "task_id": task_id,
+            "worker_id": worker_id,
+        },
+    )
+    await self._run_blocking(
+        self._record_task_attempt_error,
+        task_id=task_id,
+        error=f"{type(exc).__name__}: {exc}",
+    )
+    await self._run_blocking(
+        self._release_task_terminal_failure,
+        task_id=task_id,
+        worker_id=worker_id,
+    )
+
+
 async def run_queued_task(
     self: Any,
     *,
@@ -337,7 +366,11 @@ async def run_queued_task(
     lease_seconds: int = 60,
 ) -> None:
     """Execute one claimed queued task id and persist/release queue state."""
-    loaded = await self._run_blocking(self._load_submission_for_task, task_id=task_id)
+    try:
+        loaded = await self._run_blocking(self._load_submission_for_task, task_id=task_id)
+    except ValidationError as exc:
+        await _handle_invalid_queued_submission(self, exc, worker_id, task_id)
+        return None
     if loaded is None:
         logger.warning(
             "Skipping queued task run: task no longer exists",

@@ -73,9 +73,12 @@ CODEX_TRUSTED_REPO_PATTERNS_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TRUSTED_REPO
 GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_NATIVE_SANDBOX_ENABLED"
 
 # Default profile names
-GEMINI_NATIVE_PLANNER_PROFILE: Final[str] = "gemini-native-planner"
-GEMINI_NATIVE_REVIEWER_PROFILE: Final[str] = "gemini-native-reviewer"
-GEMINI_NATIVE_DISCOVERY_PROFILE: Final[str] = "gemini-native-discovery"
+ANTIGRAVITY_NATIVE_PLANNER_PROFILE: Final[str] = "antigravity-native-planner"
+ANTIGRAVITY_NATIVE_REVIEWER_PROFILE: Final[str] = "antigravity-native-reviewer"
+ANTIGRAVITY_NATIVE_DISCOVERY_PROFILE: Final[str] = "antigravity-native-discovery"
+GEMINI_NATIVE_PLANNER_PROFILE: Final[str] = ANTIGRAVITY_NATIVE_PLANNER_PROFILE
+GEMINI_NATIVE_REVIEWER_PROFILE: Final[str] = ANTIGRAVITY_NATIVE_REVIEWER_PROFILE
+GEMINI_NATIVE_DISCOVERY_PROFILE: Final[str] = ANTIGRAVITY_NATIVE_DISCOVERY_PROFILE
 
 logger = logging.getLogger(__name__)
 
@@ -205,13 +208,17 @@ def _build_default_worker_profiles(
         _add_worker_profiles(profiles, "codex", WorkerRuntimeMode.TOOL_LOOP, legacy_mode=True)
 
     if include_gemini:
-        _add_worker_profiles(profiles, "gemini", WorkerRuntimeMode.NATIVE_AGENT)
+        _add_worker_profiles(profiles, "antigravity", WorkerRuntimeMode.NATIVE_AGENT)
         if include_gemini_legacy_tool_loop:
-            _add_worker_profiles(profiles, "gemini", WorkerRuntimeMode.TOOL_LOOP, legacy_mode=True)
-        # Add specialized profiles for Gemini (T-142)
-        profiles[GEMINI_NATIVE_PLANNER_PROFILE] = WorkerProfile(
-            name=GEMINI_NATIVE_PLANNER_PROFILE,
-            worker_type="gemini",
+            _add_worker_profiles(
+                profiles,
+                "antigravity",
+                WorkerRuntimeMode.TOOL_LOOP,
+                legacy_mode=True,
+            )
+        profiles[ANTIGRAVITY_NATIVE_PLANNER_PROFILE] = WorkerProfile(
+            name=ANTIGRAVITY_NATIVE_PLANNER_PROFILE,
+            worker_type="antigravity",
             runtime_mode=WorkerRuntimeMode.PLANNER_ONLY,
             capability_tags=["planning"],
             supported_delivery_modes=["workspace", "branch", "draft_pr"],
@@ -219,9 +226,9 @@ def _build_default_worker_profiles(
             mutation_policy="patch_allowed",
             self_review_policy="on_failure",
         )
-        profiles[GEMINI_NATIVE_DISCOVERY_PROFILE] = WorkerProfile(
-            name=GEMINI_NATIVE_DISCOVERY_PROFILE,
-            worker_type="gemini",
+        profiles[ANTIGRAVITY_NATIVE_DISCOVERY_PROFILE] = WorkerProfile(
+            name=ANTIGRAVITY_NATIVE_DISCOVERY_PROFILE,
+            worker_type="antigravity",
             runtime_mode=WorkerRuntimeMode.PLANNER_ONLY,
             capability_tags=["planning"],
             supported_delivery_modes=["workspace", "branch", "draft_pr"],
@@ -229,9 +236,9 @@ def _build_default_worker_profiles(
             mutation_policy="patch_allowed",
             self_review_policy="on_failure",
         )
-        profiles[GEMINI_NATIVE_REVIEWER_PROFILE] = WorkerProfile(
-            name=GEMINI_NATIVE_REVIEWER_PROFILE,
-            worker_type="gemini",
+        profiles[ANTIGRAVITY_NATIVE_REVIEWER_PROFILE] = WorkerProfile(
+            name=ANTIGRAVITY_NATIVE_REVIEWER_PROFILE,
+            worker_type="antigravity",
             runtime_mode=WorkerRuntimeMode.REVIEWER_ONLY,
             capability_tags=["review"],
             supported_delivery_modes=["workspace", "branch", "draft_pr"],

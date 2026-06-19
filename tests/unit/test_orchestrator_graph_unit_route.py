@@ -125,10 +125,10 @@ def test_await_clarification_returns_resolved_without_interrupt() -> None:
 def test_compute_route_override_available():
     """T-072: manual override is honoured when the worker is available."""
     state = OrchestratorState.model_validate(
-        {"task": {"task_text": "demo", "worker_override": "gemini"}}
+        {"task": {"task_text": "demo", "worker_override": "antigravity"}}
     )
     route = _compute_route_decision(state, _ALL_WORKERS)
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "manual_override"
     assert route.override_applied is True
 
@@ -136,10 +136,10 @@ def test_compute_route_override_available():
 def test_compute_route_override_unavailable_fails_explicitly():
     """T-072: manual override for an unavailable worker returns runtime_unavailable."""
     state = OrchestratorState.model_validate(
-        {"task": {"task_text": "demo", "worker_override": "gemini"}}
+        {"task": {"task_text": "demo", "worker_override": "antigravity"}}
     )
     route = _compute_route_decision(state, _CODEX_ONLY)
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "runtime_unavailable"
     assert route.override_applied is True
 
@@ -162,7 +162,7 @@ def test_compute_route_profile_aware_selects_native_default_for_codex() -> None:
     route = _compute_route_decision(
         state,
         _ALL_WORKERS,
-        available_profiles=_PROFILED_CODEX_GEMINI,
+        available_profiles=_PROFILED_CODEX_ANTIGRAVITY,
     )
 
     assert route.chosen_worker == "codex"
@@ -257,8 +257,8 @@ def test_compute_route_profile_override_unavailable_fails_explicitly() -> None:
     )
     route = _compute_route_decision(
         state,
-        frozenset({"codex", "gemini"}),
-        available_profiles=_PROFILED_CODEX_GEMINI,
+        frozenset({"codex", "antigravity"}),
+        available_profiles=_PROFILED_CODEX_ANTIGRAVITY,
     )
 
     assert route.chosen_worker is None
@@ -298,12 +298,12 @@ def test_compute_route_profile_aware_openrouter_requires_legacy_opt_in() -> None
 
 
 def test_compute_route_budget_prefer_high_quality():
-    """T-071: prefer_high_quality budget hint routes to gemini."""
+    """T-071: prefer_high_quality budget hint routes to antigravity."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "demo", "budget": {"prefer_high_quality": True}}}
     )
     route = _compute_route_decision(state, _ALL_WORKERS)
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "budget_preference"
 
 
@@ -317,8 +317,8 @@ def test_compute_route_budget_prefer_low_cost():
     assert route.route_reason == "budget_preference"
 
 
-def test_compute_route_budget_prefer_high_quality_fallback_when_gemini_unavailable():
-    """T-071: falls back to openrouter with preferred_unavailable when gemini isn't configured."""
+def test_compute_route_budget_prefer_high_quality_fallback_when_antigravity_unavailable():
+    """T-071: falls back to openrouter when antigravity isn't configured."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "demo", "budget": {"prefer_high_quality": True}}}
     )
@@ -328,22 +328,22 @@ def test_compute_route_budget_prefer_high_quality_fallback_when_gemini_unavailab
 
 
 def test_compute_route_task_kind_architecture():
-    """T-071: architecture task shape routes to gemini with high_stakes_refactor."""
+    """T-071: architecture task shape routes to antigravity with high_stakes_refactor."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "refactor the module"}, "task_kind": "architecture"}
     )
     route = _compute_route_decision(state, _ALL_WORKERS)
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "high_stakes_refactor"
 
 
 def test_compute_route_task_kind_ambiguous():
-    """T-071: ambiguous task shape routes to gemini with ambiguous_task."""
+    """T-071: ambiguous task shape routes to antigravity with ambiguous_task."""
     state = OrchestratorState.model_validate(
         {"task": {"task_text": "investigate logs"}, "task_kind": "ambiguous"}
     )
     route = _compute_route_decision(state, _ALL_WORKERS)
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "ambiguous_task"
 
 
@@ -373,7 +373,7 @@ def test_compute_route_task_text_explicit_highest_quality_preference():
         {"task": {"task_text": "Use the highest quality worker for this change"}}
     )
     route = _compute_route_decision(state, _ALL_WORKERS)
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "budget_preference"
 
 
@@ -416,7 +416,7 @@ def test_compute_route_multi_file_task_prefers_high_quality_worker():
         }
     )
     route = _compute_route_decision(state, _ALL_WORKERS)
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "high_stakes_refactor"
 
 
@@ -442,7 +442,7 @@ def test_compute_route_verifier_failure_escalation():
         }
     )
     route = _compute_route_decision(state, _ALL_WORKERS)
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "verifier_failed_previous_run"
 
 
@@ -463,7 +463,7 @@ def test_compute_route_previous_worker_failed_escalation():
         }
     )
     route = _compute_route_decision(state, _ALL_WORKERS)
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "previous_worker_failed"
 
 
@@ -491,7 +491,7 @@ def test_compute_route_uses_worker_failure_kind_when_verifier_failure_kind_does_
         }
     )
     route = _compute_route_decision(state, _ALL_WORKERS)
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "verifier_failed_previous_run"
 
 
@@ -518,13 +518,13 @@ def test_compute_route_retries_same_worker_for_environment_failure_kind():
 
 
 def test_compute_route_environment_failure_does_not_downgrade_prior_high_quality_worker():
-    """An environment failure on gemini should not silently downgrade to codex on retry."""
+    """An environment failure on antigravity should not silently downgrade to codex on retry."""
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "fix the code"},
             "task_kind": "implementation",
             "attempt_count": 1,
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
             "result": {
                 "status": "error",
                 "failure_kind": "provider_auth",
@@ -536,7 +536,7 @@ def test_compute_route_environment_failure_does_not_downgrade_prior_high_quality
         }
     )
     route = _compute_route_decision(state, _ALL_WORKERS)
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "environment_retry_same_worker"
 
 
@@ -563,7 +563,7 @@ def test_compute_route_escalation_fails_explicitly_when_alternate_unavailable():
         }
     )
     route = _compute_route_decision(state, _CODEX_ONLY)
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "runtime_unavailable"
 
 
@@ -584,7 +584,7 @@ def test_compute_route_neither_worker_available():
         {"task": {"task_text": "demo"}, "task_kind": "architecture"}
     )
     route = _compute_route_decision(state, frozenset())
-    assert route.chosen_worker == "gemini"
+    assert route.chosen_worker == "antigravity"
     assert route.route_reason == "runtime_unavailable"
 
 

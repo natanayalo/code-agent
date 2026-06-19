@@ -733,7 +733,7 @@ def test_persist_execution_outcome_scores_worker_friction_report_dict(session_fa
     state = OrchestratorState(
         task=TaskRequest(task_text="complete after workaround", task_id=task_id),
         session=None,
-        route=RouteDecision(chosen_worker="gemini", route_reason="retry same worker"),
+        route=RouteDecision(chosen_worker="antigravity", route_reason="retry same worker"),
         dispatch=WorkerDispatch(),
         approval=ApprovalCheckpoint(required=False, status="not_required"),
         task_spec=TaskSpec(

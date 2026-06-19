@@ -19,6 +19,7 @@ from workers import (
     WorkerResult,
     WorkerRuntimeMode,
     WorkerType,
+    normalize_worker_type,
 )
 from workers.review import ReviewResult
 
@@ -91,6 +92,11 @@ class TaskRequest(OrchestratorModel):
     secrets: dict[str, str] = Field(default_factory=dict)
     tools: list[str] | None = None
 
+    @field_validator("worker_override", mode="before")
+    @classmethod
+    def normalize_worker_override(cls, value: Any) -> Any:
+        return normalize_worker_type(value)
+
 
 class MemoryEntry(OrchestratorModel):
     """A structured memory record loaded for a task."""
@@ -115,6 +121,11 @@ class RouteDecision(OrchestratorModel):
     runtime_mode: WorkerRuntimeMode | None = None
     route_reason: str | None = None
     override_applied: bool = False
+
+    @field_validator("chosen_worker", mode="before")
+    @classmethod
+    def normalize_chosen_worker(cls, value: Any) -> Any:
+        return normalize_worker_type(value)
 
 
 class TaskPlanStep(OrchestratorModel):
@@ -199,6 +210,11 @@ class WorkerDispatch(OrchestratorModel):
     worker_profile: str | None = None
     runtime_mode: WorkerRuntimeMode | None = None
     workspace_id: str | None = None
+
+    @field_validator("worker_type", mode="before")
+    @classmethod
+    def normalize_worker_type(cls, value: Any) -> Any:
+        return normalize_worker_type(value)
 
 
 class PersistMemoryEntry(OrchestratorModel):

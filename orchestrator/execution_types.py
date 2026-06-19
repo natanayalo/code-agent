@@ -8,15 +8,38 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from db.enums import HumanInteractionStatus, ProposalType, TaskStatus, WorkerType
+from db.enums import (
+    HumanInteractionStatus,
+    ProposalType,
+    TaskStatus,
+    WorkerType,
+    coerce_worker_type,
+)
 from orchestrator.execution_policy import validate_callback_url
 from orchestrator.state import TaskSpec
+from workers.base import normalize_worker_profile_name
 
 
 class ExecutionModel(BaseModel):
     """Base model for task-execution service payloads."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("worker_override", mode="before", check_fields=False)
+    @classmethod
+    def normalize_worker_override(cls, value: object) -> object:
+        """Normalize canonical worker names at execution boundaries."""
+        if value is None:
+            return None
+        return coerce_worker_type(value)
+
+    @field_validator("worker_profile_override", mode="before", check_fields=False)
+    @classmethod
+    def normalize_profile_override(cls, value: object) -> object:
+        """Trim optional worker profile override names."""
+        if value is None or isinstance(value, str):
+            return normalize_worker_profile_name(value)
+        return value
 
 
 class InteractionResponse(ExecutionModel):

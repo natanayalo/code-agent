@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
@@ -191,3 +192,35 @@ def test_queue_state_helpers_update_retry_and_terminal_status_consistently() -> 
         assert terminal_task.status is TaskStatus.CANCELLED
         assert terminal_task.lease_owner is None
         assert terminal_task.next_attempt_at is None
+
+
+@pytest.mark.anyio
+async def test_run_queued_task_fails_retired_persisted_profile_override() -> None:
+    """Queued tasks with retired persisted profile overrides should fail explicitly."""
+    service, session_factory = _make_task_service()
+    task_snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(task_text="Reject retired profile")
+    )
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(task_snapshot.task_id)
+        assert task is not None
+        task.constraints = {"worker_profile_override": "gemini-native-executor"}
+
+    claim = service.claim_next_task(worker_id="worker-invalid-profile", lease_seconds=30)
+    assert claim is not None
+    assert claim.task_id == task_snapshot.task_id
+
+    await service.run_queued_task(
+        task_id=task_snapshot.task_id,
+        worker_id="worker-invalid-profile",
+    )
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(task_snapshot.task_id)
+        assert task is not None
+        assert task.status is TaskStatus.FAILED
+        assert task.lease_owner is None
+        assert task.lease_expires_at is None
+        assert task.next_attempt_at is None
+        assert task.last_error is not None
+        assert "Gemini profile names are no longer supported" in task.last_error

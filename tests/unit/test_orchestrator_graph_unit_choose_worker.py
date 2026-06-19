@@ -21,7 +21,7 @@ def test_choose_worker_architecture_default():
         {"task": {"task_text": "demo"}, "task_kind": "architecture"}
     )
     res = choose_worker(state)
-    assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["chosen_worker"] == "antigravity"
     assert res["route"]["route_reason"] == "high_stakes_refactor"
 
 
@@ -45,7 +45,7 @@ def test_build_choose_worker_node_applies_brain_worker_suggestion() -> None:
         async def suggest_route(self, **kwargs):
             del kwargs
             return RouteBrainSuggestion(
-                suggested_worker="gemini",
+                suggested_worker="antigravity",
                 rationale="Prefer higher-quality reasoning for this task.",
             )
 
@@ -58,13 +58,13 @@ def test_build_choose_worker_node_applies_brain_worker_suggestion() -> None:
     )
     res = asyncio.run(node(state))
 
-    assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["chosen_worker"] == "antigravity"
     assert res["route"]["route_reason"] == "brain_recommendation"
     brain_payload = res["timeline_events"][0].payload["brain"]
     assert brain_payload["provider"] == "_Brain"
     assert brain_payload["applied"] is True
     assert brain_payload["ignored_fields"] == []
-    assert brain_payload["final_chosen_worker"] == "gemini"
+    assert brain_payload["final_chosen_worker"] == "antigravity"
     assert brain_payload["final_route_reason"] == "brain_recommendation"
 
 
@@ -78,8 +78,8 @@ def test_build_choose_worker_node_applies_brain_profile_suggestion_with_worker_c
             del kwargs
             return RouteBrainSuggestion(
                 suggested_worker="codex",
-                suggested_profile="gemini-native-executor",
-                rationale="Use the gemini native profile despite worker hint mismatch.",
+                suggested_profile="antigravity-native-executor",
+                rationale="Use the antigravity native profile despite worker hint mismatch.",
             )
 
     state = OrchestratorState.model_validate(
@@ -87,19 +87,19 @@ def test_build_choose_worker_node_applies_brain_profile_suggestion_with_worker_c
     )
     node = build_choose_worker_node(
         _ALL_WORKERS,
-        available_profiles=_PROFILED_CODEX_GEMINI,
+        available_profiles=_PROFILED_CODEX_ANTIGRAVITY,
         orchestrator_brain=_Brain(),
     )
     res = asyncio.run(node(state))
 
-    assert res["route"]["chosen_worker"] == "gemini"
-    assert res["route"]["chosen_profile"] == "gemini-native-executor"
+    assert res["route"]["chosen_worker"] == "antigravity"
+    assert res["route"]["chosen_profile"] == "antigravity-native-executor"
     assert res["route"]["runtime_mode"] == "native_agent"
     assert res["route"]["route_reason"] == "brain_recommendation"
     brain_payload = res["timeline_events"][0].payload["brain"]
     assert brain_payload["applied"] is True
     assert brain_payload["ignored_fields"] == ["suggested_worker"]
-    assert brain_payload["final_chosen_profile"] == "gemini-native-executor"
+    assert brain_payload["final_chosen_profile"] == "antigravity-native-executor"
 
 
 def test_build_choose_worker_node_falls_back_when_brain_suggestion_is_unavailable() -> None:
@@ -144,7 +144,7 @@ def test_build_choose_worker_node_skips_brain_for_manual_override() -> None:
             return RouteBrainSuggestion(suggested_worker="codex")
 
     state = OrchestratorState.model_validate(
-        {"task": {"task_text": "demo", "worker_override": "gemini"}}
+        {"task": {"task_text": "demo", "worker_override": "antigravity"}}
     )
     node = build_choose_worker_node(
         _ALL_WORKERS,
@@ -152,7 +152,7 @@ def test_build_choose_worker_node_skips_brain_for_manual_override() -> None:
     )
     res = asyncio.run(node(state))
 
-    assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["chosen_worker"] == "antigravity"
     assert res["route"]["route_reason"] == "manual_override"
     assert "brain" not in res["timeline_events"][0].payload
 
@@ -260,7 +260,7 @@ def test_build_choose_worker_node_ignores_invalid_brain_retry_hint() -> None:
     )
     res = asyncio.run(node(state))
 
-    assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["chosen_worker"] == "antigravity"
     assert res["route"]["route_reason"] == "previous_worker_failed"
     brain_payload = res["timeline_events"][0].payload["brain"]
     assert brain_payload["applied"] is False
@@ -339,7 +339,7 @@ def test_build_choose_worker_node_prevents_brain_from_bypassing_escalation() -> 
     node = build_choose_worker_node(_ALL_WORKERS, orchestrator_brain=_Brain())
     res = asyncio.run(node(state))
 
-    assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["chosen_worker"] == "antigravity"
     assert res["route"]["route_reason"] == "previous_worker_failed"
     brain_payload = res["timeline_events"][0].payload["brain"]
     assert brain_payload["applied"] is False
@@ -376,7 +376,7 @@ def test_build_choose_worker_node_handles_hallucinated_brain_retry_strategy() ->
     res = asyncio.run(node(state))
 
     brain_payload = res["timeline_events"][0].payload["brain"]
-    assert res["route"]["chosen_worker"] == "gemini"
+    assert res["route"]["chosen_worker"] == "antigravity"
     assert res["route"]["route_reason"] == "previous_worker_failed"
     assert brain_payload["applied"] is False
     assert brain_payload["ignored_fields"] == ["suggested_retry_strategy"]
@@ -405,7 +405,7 @@ def test_apply_brain_retry_strategy_only_logs_provided_ignored_fields() -> None:
     prior_worker, allowed_strategy = _resolve_brain_retry_context(state)
     route, ignored = _apply_brain_retry_strategy(
         suggestion=suggestion,
-        available_workers=frozenset({"codex", "gemini"}),
+        available_workers=frozenset({"codex", "antigravity"}),
         available_profiles=None,
         routable_profiles={},
         prior_worker=prior_worker,
@@ -424,8 +424,8 @@ def test_build_choose_worker_node_applies_brain_read_only_profile_on_mutable_tas
         async def suggest_route(self, **kwargs):
             del kwargs
             return RouteBrainSuggestion(
-                suggested_worker="gemini",
-                suggested_profile="gemini-native-executor-read-only",
+                suggested_worker="antigravity",
+                suggested_profile="antigravity-native-executor-read-only",
                 rationale="Use read-only executor for this command-only task.",
             )
 
@@ -433,9 +433,9 @@ def test_build_choose_worker_node_applies_brain_read_only_profile_on_mutable_tas
         {"task": {"task_text": "print PWD and HOME"}, "task_kind": "implementation"}
     )
     profiles = {
-        "gemini-native-executor-read-only": WorkerProfile(
-            name="gemini-native-executor-read-only",
-            worker_type="gemini",
+        "antigravity-native-executor-read-only": WorkerProfile(
+            name="antigravity-native-executor-read-only",
+            worker_type="antigravity",
             runtime_mode="native_agent",
             mutation_policy="read_only",
             capability_tags=["execution"],
@@ -456,6 +456,6 @@ def test_build_choose_worker_node_applies_brain_read_only_profile_on_mutable_tas
     )
     res = asyncio.run(node(state))
 
-    assert res["route"]["chosen_worker"] == "gemini"
-    assert res["route"]["chosen_profile"] == "gemini-native-executor-read-only"
+    assert res["route"]["chosen_worker"] == "antigravity"
+    assert res["route"]["chosen_profile"] == "antigravity-native-executor-read-only"
     assert res["route"]["route_reason"] == "brain_recommendation"

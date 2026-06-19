@@ -34,7 +34,10 @@ def test_dispatch_job_preserves_attempt_count_on_retry():
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "demo"},
-            "route": {"chosen_worker": "gemini", "route_reason": "verifier_failed_previous_run"},
+            "route": {
+                "chosen_worker": "antigravity",
+                "route_reason": "verifier_failed_previous_run",
+            },
             "attempt_count": 1,
         }
     )

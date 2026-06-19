@@ -349,7 +349,7 @@ def test_gemini_cli_worker_warns_when_legacy_tool_loop_mode_is_used(tmp_path: Pa
                     branch="main",
                     task_text="Inspect only",
                     runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
-                    worker_profile="gemini-tool-loop-executor",
+                    worker_profile="antigravity-tool-loop-executor",
                 )
             )
         )

@@ -164,7 +164,7 @@ def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factor
         )
         run_repo.create(
             task_id=t2.id,
-            worker_type=WorkerType.GEMINI,
+            worker_type=WorkerType.ANTIGRAVITY,
             runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
             started_at=now - timedelta(minutes=10),
             finished_at=now - timedelta(minutes=2),  # 8 min duration
@@ -194,7 +194,7 @@ def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factor
 
     # Run metrics
     assert data["worker_usage"]["codex"] == 2
-    assert data["worker_usage"]["gemini"] == 1
+    assert data["worker_usage"]["antigravity"] == 1
     assert data["runtime_mode_usage"]["native_agent"] == 2
     assert data["runtime_mode_usage"]["tool_loop"] == 1
     assert data["legacy_tool_loop_usage"]["codex"] == 1

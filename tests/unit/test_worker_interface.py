@@ -49,8 +49,8 @@ def test_worker_result_non_success_defaults_failure_kind() -> None:
     assert result.failure_kind == "unknown"
 
 
-def test_worker_profile_supports_milestone_17_runtime_shapes() -> None:
-    """Profiles validate codex/gemini/openrouter plus planner/reviewer runtime modes."""
+def test_worker_profile_supports_runtime_shapes() -> None:
+    """Profiles validate codex/antigravity/openrouter plus planner/reviewer runtime modes."""
     codex_profile = WorkerProfile(
         name="codex-native-executor",
         worker_type="codex",
@@ -58,18 +58,18 @@ def test_worker_profile_supports_milestone_17_runtime_shapes() -> None:
         capability_tags=["execution"],
         supported_delivery_modes=["workspace", "branch", "draft_pr"],
     )
-    gemini_planner_profile = WorkerProfile(
-        name="gemini-planner",
-        worker_type="gemini",
+    antigravity_planner_profile = WorkerProfile(
+        name="antigravity-planner",
+        worker_type="antigravity",
         runtime_mode="planner_only",
         capability_tags=["planning"],
         mutation_policy="read_only",
         self_review_policy="never",
         supported_delivery_modes=["summary"],
     )
-    gemini_reviewer_profile = WorkerProfile(
-        name="gemini-reviewer",
-        worker_type="gemini",
+    antigravity_reviewer_profile = WorkerProfile(
+        name="antigravity-reviewer",
+        worker_type="antigravity",
         runtime_mode="reviewer_only",
         capability_tags=["review"],
         mutation_policy="read_only",
@@ -86,9 +86,20 @@ def test_worker_profile_supports_milestone_17_runtime_shapes() -> None:
     )
 
     assert codex_profile.runtime_mode == "native_agent"
-    assert gemini_planner_profile.runtime_mode == "planner_only"
-    assert gemini_reviewer_profile.runtime_mode == "reviewer_only"
+    assert antigravity_planner_profile.runtime_mode == "planner_only"
+    assert antigravity_reviewer_profile.runtime_mode == "reviewer_only"
     assert openrouter_profile.runtime_mode == "tool_loop"
+
+
+def test_worker_profile_rejects_retired_gemini_worker_type() -> None:
+    """Gemini is no longer accepted as a public worker type."""
+
+    with pytest.raises(ValidationError, match="Input should be"):
+        WorkerProfile(
+            name="retired-gemini",
+            worker_type="gemini",
+            runtime_mode="native_agent",
+        )
 
 
 def test_worker_profile_rejects_unknown_runtime_modes() -> None:
@@ -128,4 +139,4 @@ def test_worker_profile_invalid_unhashable_list_entry_raises_validation_error() 
 
 def test_supported_worker_types_contract_order() -> None:
     """Fallback order should be declared in one shared contract constant."""
-    assert SUPPORTED_WORKER_TYPES == ("gemini", "openrouter", "codex")
+    assert SUPPORTED_WORKER_TYPES == ("antigravity", "openrouter", "codex")

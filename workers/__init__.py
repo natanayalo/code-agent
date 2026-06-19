@@ -17,6 +17,8 @@ from workers.base import (
     WorkerSelfReviewPolicy,
     WorkerTestResult,
     WorkerType,
+    normalize_worker_profile_name,
+    normalize_worker_type,
 )
 from workers.codex_cli_worker import CodexCliWorker
 from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter
@@ -59,6 +61,8 @@ __all__ = [
     "WorkerRuntimeMode",
     "WorkerSelfReviewPolicy",
     "WorkerType",
+    "normalize_worker_profile_name",
+    "normalize_worker_type",
     "ShellWorker",
     "run_native_agent",
 ]

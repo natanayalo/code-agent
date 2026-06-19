@@ -56,7 +56,7 @@ class WorkerRuntimeMode(StrEnum):
 class WorkerType(StrEnum):
     """Supported worker identifiers stored in persistence."""
 
-    GEMINI = "gemini"
+    ANTIGRAVITY = "antigravity"
     CODEX = "codex"
     OPENROUTER = "openrouter"
 
@@ -129,6 +129,16 @@ class ProposalType(StrEnum):
 
     SCOUT = "scout"
     REFLECTION = "reflection"
+
+
+def coerce_worker_type(value: object) -> WorkerType:
+    """Normalize worker identifiers to the canonical worker enum."""
+
+    if isinstance(value, WorkerType):
+        return value
+    if isinstance(value, str):
+        return WorkerType(value.strip().lower())
+    raise ValueError(f"Invalid worker type: {value!r}")
 
 
 def build_sql_enum(enum_class: type[StrEnum], *, name: str) -> SQLAlchemyEnum:

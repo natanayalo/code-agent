@@ -181,8 +181,8 @@ def _get_verifier_workers(
         return []
 
     candidate_order: list[str] = []
-    if "gemini" in worker_factory:
-        candidate_order.append("gemini")
+    if "antigravity" in worker_factory:
+        candidate_order.append("antigravity")
     if "codex" in worker_factory:
         candidate_order.append("codex")
     if "openrouter" in worker_factory:

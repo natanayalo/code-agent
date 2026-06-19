@@ -29,9 +29,9 @@ describe('TaskCard', () => {
     priority: 0,
     repo_url: 'https://github.com/user/repo',
     branch: 'main',
-    chosen_worker: 'gemini',
+    chosen_worker: 'antigravity',
     latest_run_status: TaskStatus.IN_PROGRESS,
-    latest_run_worker: 'gemini',
+    latest_run_worker: 'antigravity',
   };
 
   it('renders task details correctly', () => {
@@ -41,7 +41,7 @@ describe('TaskCard', () => {
     expect(container.querySelector('.status-badge')).toHaveTextContent('in progress');
     expect(screen.getByText('repo')).toBeInTheDocument();
     expect(screen.getByText('main')).toBeInTheDocument();
-    expect(screen.getByText('gemini')).toBeInTheDocument();
+    expect(screen.getByText('antigravity')).toBeInTheDocument();
   });
 
   it('handles click events', () => {

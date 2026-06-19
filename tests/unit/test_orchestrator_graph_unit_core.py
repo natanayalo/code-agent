@@ -379,8 +379,8 @@ async def test_generate_task_spec_and_route_node_applies_unified_brain_route() -
                 non_goals=[],
                 clarification_questions=[],
                 verification_commands=[],
-                suggested_worker="gemini",
-                suggested_profile="gemini-native-executor-read-only",
+                suggested_worker="antigravity",
+                suggested_profile="antigravity-native-executor-read-only",
                 suggested_retry_strategy=None,
                 rationale="u",
             )
@@ -392,9 +392,9 @@ async def test_generate_task_spec_and_route_node_applies_unified_brain_route() -
         }
     )
     profiles = {
-        "gemini-native-executor-read-only": WorkerProfile(
-            name="gemini-native-executor-read-only",
-            worker_type="gemini",
+        "antigravity-native-executor-read-only": WorkerProfile(
+            name="antigravity-native-executor-read-only",
+            worker_type="antigravity",
             runtime_mode="native_agent",
             mutation_policy="read_only",
             capability_tags=["execution"],
@@ -408,8 +408,8 @@ async def test_generate_task_spec_and_route_node_applies_unified_brain_route() -
     res = await node(state)
 
     assert res["current_step"] == "generate_task_spec_and_route"
-    assert res["route"]["chosen_worker"] == "gemini"
-    assert res["route"]["chosen_profile"] == "gemini-native-executor-read-only"
+    assert res["route"]["chosen_worker"] == "antigravity"
+    assert res["route"]["chosen_profile"] == "antigravity-native-executor-read-only"
 
 
 @pytest.mark.asyncio

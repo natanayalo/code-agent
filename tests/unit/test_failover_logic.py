@@ -44,7 +44,7 @@ def _state(
             "task_kind": "implementation",
             "attempt_count": attempt_count,
             "timeline_events": timeline_events or [],
-            "dispatch": {"worker_type": "gemini"} if attempt_count > 0 else {},
+            "dispatch": {"worker_type": "antigravity"} if attempt_count > 0 else {},
             "result": (
                 {"status": "failure", "failure_kind": "provider_error"}
                 if attempt_count > 0
@@ -73,7 +73,7 @@ async def test_brain_fallback_to_secondary_planner():
     state = _state()
     suggestion = await brain.suggest_route(
         state=state,
-        available_workers=frozenset({"codex", "gemini"}),
+        available_workers=frozenset({"codex", "antigravity"}),
         available_profiles=None,
     )
 
@@ -97,7 +97,7 @@ async def test_brain_skips_all_if_all_planners_fail():
     state = _state()
     suggestion = await brain.suggest_route(
         state=state,
-        available_workers=frozenset({"codex", "gemini"}),
+        available_workers=frozenset({"codex", "antigravity"}),
     )
 
     assert suggestion is None
@@ -107,12 +107,12 @@ async def test_brain_skips_all_if_all_planners_fail():
 
 def test_legacy_rotation_avoids_previously_failed_workers():
     """Verify that deterministic rotation skips workers that have already failed."""
-    # Attempt 0: Gemini failed
+    # Attempt 0: Antigravity failed
     events = [
         TaskTimelineEventState(
             event_type=TimelineEventType.WORKER_DISPATCHED,
             attempt_number=0,
-            payload={"worker_type": "gemini"},
+            payload={"worker_type": "antigravity"},
         ),
         TaskTimelineEventState(
             event_type=TimelineEventType.WORKER_FAILED,
@@ -122,27 +122,27 @@ def test_legacy_rotation_avoids_previously_failed_workers():
     ]
 
     state = _state(attempt_count=1, timeline_events=events)
-    # Available workers: gemini, codex, openrouter
-    available = frozenset({"gemini", "codex", "openrouter"})
+    # Available workers: antigravity, codex, openrouter
+    available = frozenset({"antigravity", "codex", "openrouter"})
 
     decision = _compute_legacy_route_decision(state, available)
 
-    # Should NOT pick gemini
-    assert decision.chosen_worker != "gemini"
+    # Should NOT pick antigravity
+    assert decision.chosen_worker != "antigravity"
     # Should pick codex or openrouter (depending on SUPPORTED_WORKER_TYPES order)
     assert decision.chosen_worker in {"codex", "openrouter"}
 
 
 def test_legacy_rotation_falls_back_to_failed_if_all_exhausted():
     """Verify that rotation repeats a failed worker if NO untried workers are available."""
-    # Attempt 0: Gemini failed
+    # Attempt 0: Antigravity failed
     # Attempt 1: Codex failed
     # Attempt 2: OpenRouter failed
     events = [
         TaskTimelineEventState(
             event_type=TimelineEventType.WORKER_DISPATCHED,
             attempt_number=0,
-            payload={"worker_type": "gemini"},
+            payload={"worker_type": "antigravity"},
         ),
         TaskTimelineEventState(
             event_type=TimelineEventType.WORKER_FAILED,
@@ -164,10 +164,10 @@ def test_legacy_rotation_falls_back_to_failed_if_all_exhausted():
     state = _state(attempt_count=2, timeline_events=events)
     state.dispatch.worker_type = "codex"  # Last one tried
 
-    # Available: only gemini and codex
-    available = frozenset({"gemini", "codex"})
+    # Available: only antigravity and codex
+    available = frozenset({"antigravity", "codex"})
 
     decision = _compute_legacy_route_decision(state, available)
 
     # Both have failed, so it should just pick one that is NOT the current one (codex)
-    assert decision.chosen_worker == "gemini"
+    assert decision.chosen_worker == "antigravity"

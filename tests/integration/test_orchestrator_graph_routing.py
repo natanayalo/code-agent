@@ -28,10 +28,10 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
         graph.ainvoke(
             {
                 "task": {
-                    "task_text": "Run a task with explicit gemini override",
+                    "task_text": "Run a task with explicit antigravity override",
                     "repo_url": "https://github.com/natanayalo/code-agent",
                     "branch": "master",
-                    "worker_override": "gemini",
+                    "worker_override": "antigravity",
                 }
             }
         )
@@ -40,10 +40,10 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
     state = OrchestratorState.model_validate(raw_output)
 
     assert state.current_step == "persist_memory"
-    assert state.route.chosen_worker == "gemini"
+    assert state.route.chosen_worker == "antigravity"
     assert state.route.route_reason == "runtime_unavailable"
     assert state.route.override_applied is True
-    assert state.dispatch.worker_type == "gemini"
+    assert state.dispatch.worker_type == "antigravity"
     assert state.dispatch.run_id is None
     assert state.dispatch.workspace_id is None
     assert worker.requests == []
@@ -51,7 +51,7 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
     assert state.result.status == "failure"
     assert (
         state.result.summary
-        == "No worker is available for route 'gemini'. Available workers: codex."
+        == "No worker is available for route 'antigravity'. Available workers: codex."
     )
     assert state.result.next_action_hint == "configure_requested_worker"
     assert state.progress_updates == [
@@ -62,7 +62,7 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
         "memory context loaded",
         "approval not required",
         "worker dispatched",
-        "worker unavailable: gemini",
+        "worker unavailable: antigravity",
         "verification failed",
         "result summarized and session state updated",
         "memory persistence queued",

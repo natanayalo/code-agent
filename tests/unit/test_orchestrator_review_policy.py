@@ -13,7 +13,7 @@ async def test_review_result_suppresses_style_and_low_confidence_findings_by_def
             "task": {"task_text": "demo"},
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
     mock_reviewer = AsyncMock()
@@ -45,7 +45,7 @@ async def test_review_result_suppresses_style_and_low_confidence_findings_by_def
         summary=f"```json\n{json.dumps(review_payload)}\n```",
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert res["review"]["outcome"] == "no_findings"
@@ -72,7 +72,7 @@ async def test_review_result_respects_configured_severity_and_style_overrides():
             },
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
     mock_reviewer = AsyncMock()
@@ -112,7 +112,7 @@ async def test_review_result_respects_configured_severity_and_style_overrides():
         summary=f"```json\n{json.dumps(review_payload)}\n```",
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert res["review"]["outcome"] == "findings"
@@ -127,7 +127,7 @@ async def test_review_result_uses_severity_threshold_over_global_by_default():
             "task": {"task_text": "demo"},
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
     mock_reviewer = AsyncMock()
@@ -151,7 +151,7 @@ async def test_review_result_uses_severity_threshold_over_global_by_default():
         summary=f"```json\n{json.dumps(review_payload)}\n```",
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert res["review"]["outcome"] == "findings"
@@ -174,7 +174,7 @@ async def test_review_result_uses_explicit_global_confidence_as_baseline():
             },
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
     mock_reviewer = AsyncMock()
@@ -206,7 +206,7 @@ async def test_review_result_uses_explicit_global_confidence_as_baseline():
         summary=f"```json\n{json.dumps(review_payload)}\n```",
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert res["review"]["outcome"] == "findings"

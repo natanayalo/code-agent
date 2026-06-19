@@ -93,7 +93,7 @@ async def test_run_independent_verifier_parses_fenced_json_summary() -> None:
 
     status, summary, reason_code = await verification_module.run_independent_verifier(
         state,
-        worker_factory={"gemini": mock_worker},
+        worker_factory={"antigravity": mock_worker},
     )
 
     assert status == "warning"
@@ -115,7 +115,7 @@ async def test_run_independent_verifier_parses_multiple_fenced_blocks() -> None:
 
     status, summary, reason_code = await verification_module.run_independent_verifier(
         state,
-        worker_factory={"gemini": mock_worker},
+        worker_factory={"antigravity": mock_worker},
     )
 
     assert status == "passed"

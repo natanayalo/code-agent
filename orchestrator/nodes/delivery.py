@@ -125,10 +125,10 @@ def _select_delivery_worker(
     state: OrchestratorState, available: dict[str, Worker]
 ) -> tuple[str, Worker | None]:
     # Try to use the worker that was dispatched for the task.
-    # Fallback to gemini if it's shell or not found.
-    worker_id = state.dispatch.worker_type if state.dispatch else "gemini"
+    # Fallback to Antigravity if it's shell or not found.
+    worker_id = state.dispatch.worker_type if state.dispatch else "antigravity"
     if worker_id == "shell" or worker_id not in available:
-        worker_id = "gemini"
+        worker_id = "antigravity"
     return worker_id, available.get(worker_id)
 
 

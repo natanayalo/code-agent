@@ -51,7 +51,8 @@ Responsibilities:
 Active worker/runtime implementations:
 
 - Codex CLI worker (`workers/codex_cli_worker.py`)
-- Gemini CLI worker (`workers/gemini_cli_worker.py`)
+- Antigravity canonical worker identity backed by the current Gemini CLI adapter
+  (`workers/gemini_cli_worker.py`) until the dedicated `agy` adapter lands
 - OpenRouter-backed runtime worker (`workers/openrouter_cli_worker.py`)
 
 - `workers/base.py`
@@ -63,14 +64,14 @@ Before routing, the orchestrator builds and persists a TaskSpec so workers, APIs
 Profile-aware routing toggle and mapping:
 
 - Enable profile-aware routing with `CODE_AGENT_WORKER_PROFILES_ENABLED=1` (wired in API bootstrap).
-- Codex/Gemini default runtime mode is pinned to `native_agent`.
+- Codex/Antigravity default runtime mode is pinned to `native_agent`.
 - `CODE_AGENT_CODEX_RUNTIME_MODE` and `CODE_AGENT_GEMINI_RUNTIME_MODE` still accept
   `native_agent|tool_loop`, but `tool_loop` now emits a deprecation warning and is ignored for
   defaults.
-- Legacy Codex/Gemini `tool_loop` execution profiles are opt-in via
+- Legacy Codex/Antigravity `tool_loop` execution profiles are opt-in via
   `CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED=1` and
   `CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED=1`.
-- Legacy Codex/Gemini profiles are intended for explicit per-task opt-in through
+- Legacy Codex/Antigravity profiles are intended for explicit per-task opt-in through
   `worker_profile_override`; default selection remains native-agent.
 - OpenRouter legacy execution profile is added only when OpenRouter is configured and `CODE_AGENT_OPENROUTER_ENABLED=1`.
 - Execution routing then filters profiles by worker availability, execution capability tag, read-only vs patch-allowed mutation policy, and delivery-mode compatibility before selecting a concrete profile.
@@ -78,10 +79,10 @@ Profile-aware routing toggle and mapping:
 Current default profile matrix:
 
 - **Codex execution**: `codex-native-executor` with explicit read-only variant `codex-native-executor-read-only`
-- **Gemini execution**: `gemini-native-executor` with explicit read-only variant `gemini-native-executor-read-only`
-- **Gemini specialist profiles** (native mode): `gemini-native-planner`, `gemini-native-reviewer`, and `gemini-native-discovery`
+- **Antigravity execution**: `antigravity-native-executor` with explicit read-only variant `antigravity-native-executor-read-only`
+- **Antigravity specialist profiles** (native mode): `antigravity-native-planner`, `antigravity-native-reviewer`, and `antigravity-native-discovery`
 - **OpenRouter legacy execution**: `openrouter-tool-loop-legacy` (explicit opt-in only)
-- **Optional Codex/Gemini legacy execution**: `*-tool-loop-executor` profiles are available only
+- **Optional Codex/Antigravity legacy execution**: `*-tool-loop-executor` profiles are available only
   when the corresponding `*_TOOL_LOOP_LEGACY_ENABLED` env toggle is set.
 
 The selected worker/profile/runtime metadata is persisted on task and worker-run records and returned in task snapshots for operator and dashboard inspection.
@@ -182,7 +183,7 @@ flowchart TD
     ORCH --> ROUTE[Worker Routing]
 
     ROUTE --> CW[Codex Worker]
-    ROUTE --> GW[Gemini Worker]
+    ROUTE --> GW[Antigravity Worker]
     ROUTE --> OW[OpenRouter Worker]
 
     CW --> SB[Sandbox Workspace / Container]
