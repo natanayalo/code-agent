@@ -287,6 +287,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- [codex] Add dashboard QA skill and polish edge states ([#251](https://github.com/natanayalo/code-agent/pull/251))
+
 - Feat/trigger sources t 191 ([#233](https://github.com/natanayalo/code-agent/pull/233))
 
 - Refactor: reduce python size-check waivers for workers and orchestrator ([#212](https://github.com/natanayalo/code-agent/pull/212))
