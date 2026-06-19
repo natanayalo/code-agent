@@ -103,7 +103,11 @@ export function TriggerActionsPage() {
 
   const handleTaskSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submitTaskMutation.isPending) {
+      return;
+    }
     setTaskError(null);
+    setLastSubmittedTask(null);
 
     const normalizedTaskText = taskText.trim();
     if (!normalizedTaskText) {
@@ -142,7 +146,11 @@ export function TriggerActionsPage() {
   };
 
   const handleScoutTrigger = () => {
+    if (triggerScoutMutation.isPending) {
+      return;
+    }
     setScoutError(null);
+    setLastScoutTask(null);
     triggerScoutMutation.mutate();
   };
 

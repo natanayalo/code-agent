@@ -114,6 +114,22 @@ describe('TriggerActionsPage', () => {
     expect(screen.getByRole('button', { name: 'Queue dashboard task' })).toBeDisabled();
   });
 
+  it('ignores duplicate task submissions while the mutation is pending', async () => {
+    vi.mocked(api.submitTask).mockReturnValue(new Promise(() => {}));
+    const { container } = renderPage();
+
+    fireEvent.change(screen.getByLabelText('Task text'), {
+      target: { value: 'Investigate queue behavior' },
+    });
+    const form = container.querySelector('form') as HTMLFormElement;
+
+    fireEvent.submit(form);
+    await screen.findByText('Queueing...');
+    fireEvent.submit(form);
+
+    expect(api.submitTask).toHaveBeenCalledTimes(1);
+  });
+
   it('triggers a configured scout task and shows the queued task id', async () => {
     vi.mocked(api.triggerScoutTask).mockResolvedValue(
       createTaskSnapshot({ task_id: 'task-scout' }),
@@ -126,6 +142,20 @@ describe('TriggerActionsPage', () => {
     await waitFor(() => expect(api.triggerScoutTask).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('Scout queued')).toBeInTheDocument();
     expect(screen.getByText('task-scout')).toBeInTheDocument();
+  });
+
+  it('ignores duplicate scout triggers while the mutation is pending', async () => {
+    vi.mocked(api.triggerScoutTask).mockReturnValue(new Promise(() => {}));
+    renderPage();
+
+    fireEvent.click(screen.getByRole('tab', { name: /Scout/i }));
+    const scoutButton = screen.getByRole('button', { name: 'Trigger configured scout run' });
+
+    fireEvent.click(scoutButton);
+    await screen.findByText('Triggering...');
+    fireEvent.click(scoutButton);
+
+    expect(api.triggerScoutTask).toHaveBeenCalledTimes(1);
   });
 
   it('renders scout trigger errors', async () => {
