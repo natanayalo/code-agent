@@ -73,7 +73,9 @@ def _migrated_mcp_config(settings_path: Path) -> dict[str, Any] | None:
             continue
         server = dict(value)
         if "serverUrl" not in server:
-            legacy_url = server.pop("url", None) or server.pop("httpUrl", None)
+            url = server.pop("url", None)
+            http_url = server.pop("httpUrl", None)
+            legacy_url = url or http_url
             if legacy_url is not None:
                 server["serverUrl"] = legacy_url
         else:

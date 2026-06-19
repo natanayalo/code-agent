@@ -128,7 +128,17 @@ def test_antigravity_workspace_migration_replaces_symlink_and_copies_legacy_conf
         encoding="utf-8",
     )
     (legacy_gemini_home / "settings.json").write_text(
-        json.dumps({"mcpServers": {"remote": {"url": "https://example.com/sse"}}}),
+        json.dumps(
+            {
+                "mcpServers": {
+                    "remote": {
+                        "url": "https://example.com/sse",
+                        "httpUrl": "https://example.com/unused",
+                        "header": "kept",
+                    }
+                }
+            }
+        ),
         encoding="utf-8",
     )
     legacy_workspace_skills = workspace.repo_path / ".gemini" / "skills" / "local-skill"
@@ -156,7 +166,7 @@ def test_antigravity_workspace_migration_replaces_symlink_and_copies_legacy_conf
     assert (gemini_home / "GEMINI.md").read_text(encoding="utf-8") == "global rules\n"
     assert (gemini_home / "antigravity-cli" / "skills" / "global-skill" / "SKILL.md").exists()
     assert json.loads((gemini_home / "config" / "mcp_config.json").read_text()) == {
-        "mcpServers": {"remote": {"serverUrl": "https://example.com/sse"}}
+        "mcpServers": {"remote": {"header": "kept", "serverUrl": "https://example.com/sse"}}
     }
     assert (workspace.repo_path / ".agents" / "skills" / "local-skill" / "SKILL.md").exists()
     assert json.loads((workspace.repo_path / ".agents" / "mcp_config.json").read_text()) == {
