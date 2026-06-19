@@ -25,6 +25,22 @@ class ExecutionModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @field_validator("worker_override", mode="before", check_fields=False)
+    @classmethod
+    def normalize_worker_override(cls, value: object) -> object:
+        """Normalize canonical worker names at execution boundaries."""
+        if value is None:
+            return None
+        return coerce_worker_type(value)
+
+    @field_validator("worker_profile_override", mode="before", check_fields=False)
+    @classmethod
+    def normalize_profile_override(cls, value: object) -> object:
+        """Trim optional worker profile override names."""
+        if value is None or isinstance(value, str):
+            return normalize_worker_profile_name(value)
+        return value
+
 
 class InteractionResponse(ExecutionModel):
     """Payload for submitting a response to a human interaction."""
@@ -64,22 +80,6 @@ class TaskSubmission(ExecutionModel):
         """Ensure callback URLs are safe for outbound progress delivery."""
         return validate_callback_url(value)
 
-    @field_validator("worker_override", mode="before")
-    @classmethod
-    def normalize_worker_override(cls, value: object) -> object:
-        """Normalize canonical worker names at the API boundary."""
-        if value is None:
-            return None
-        return coerce_worker_type(value)
-
-    @field_validator("worker_profile_override", mode="before")
-    @classmethod
-    def normalize_profile_override(cls, value: object) -> object:
-        """Trim optional worker profile override names."""
-        if value is None or isinstance(value, str):
-            return normalize_worker_profile_name(value)
-        return value
-
 
 class TaskApprovalDecision(ExecutionModel):
     """Decision payload for a paused task approval checkpoint."""
@@ -95,22 +95,6 @@ class TaskReplayRequest(ExecutionModel):
     constraints: dict[str, Any] | None = None
     budget: dict[str, Any] | None = None
     secrets: dict[str, str] | None = None
-
-    @field_validator("worker_override", mode="before")
-    @classmethod
-    def normalize_worker_override(cls, value: object) -> object:
-        """Normalize canonical worker names at the replay boundary."""
-        if value is None:
-            return None
-        return coerce_worker_type(value)
-
-    @field_validator("worker_profile_override", mode="before")
-    @classmethod
-    def normalize_profile_override(cls, value: object) -> object:
-        """Trim optional worker profile override names."""
-        if value is None or isinstance(value, str):
-            return normalize_worker_profile_name(value)
-        return value
 
 
 class TaskSubmissionValidationError(ValueError):
