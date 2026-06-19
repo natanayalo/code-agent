@@ -123,7 +123,26 @@ describe('TriggerActionsPage', () => {
     fireEvent.submit(form as HTMLFormElement);
 
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Priority must be a whole number greater than or equal to 0.',
+      'Priority must be a whole number between 0 and 2147483647.',
+    );
+    expect(api.submitTask).not.toHaveBeenCalled();
+  });
+
+  it('rejects task priority values above the database integer limit', () => {
+    const { container } = renderPage();
+
+    fireEvent.change(screen.getByLabelText('Task text'), {
+      target: { value: 'Queue task with huge priority' },
+    });
+    fireEvent.change(screen.getByLabelText('Priority'), { target: { value: '2147483648' } });
+
+    const form = container.querySelector('form');
+    expect(form).not.toBeNull();
+    fireEvent.submit(form as HTMLFormElement);
+
+    expect(screen.getByLabelText('Priority')).toHaveAttribute('max', '2147483647');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Priority must be a whole number between 0 and 2147483647.',
     );
     expect(api.submitTask).not.toHaveBeenCalled();
   });
@@ -137,6 +156,7 @@ describe('TriggerActionsPage', () => {
 
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent('Task text is required.');
+    expect(alert).toHaveClass('trigger-error-banner');
     expect(alert.querySelector('svg')).not.toBeNull();
     expect(api.submitTask).not.toHaveBeenCalled();
   });
@@ -205,6 +225,8 @@ describe('TriggerActionsPage', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Scout/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Trigger configured scout run' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Scout repo is not configured');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Scout repo is not configured');
+    expect(alert).toHaveClass('trigger-error-banner');
   });
 });

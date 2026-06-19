@@ -1649,6 +1649,10 @@ button {
   font-size: 0.86rem;
 }
 
+.trigger-error-banner {
+  justify-content: flex-start;
+}
+
 .retry-button {
   flex: 0 0 auto;
   border-radius: 8px;

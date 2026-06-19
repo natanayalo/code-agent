@@ -29,6 +29,8 @@ const DASHBOARD_SESSION = {
   display_name: 'Dashboard Operator',
 };
 
+const MAX_TASK_PRIORITY = 2_147_483_647;
+
 const TASK_TYPE_OPTIONS: Array<{ label: string; value: DashboardTaskType }> = [
   { label: 'Feature', value: 'feature' },
   { label: 'Bugfix', value: 'bugfix' },
@@ -126,8 +128,12 @@ export function TriggerActionsPage() {
     const normalizedPriority = priority.trim();
     if (normalizedPriority) {
       const parsedPriority = Number(normalizedPriority);
-      if (!Number.isInteger(parsedPriority) || parsedPriority < 0) {
-        setTaskError('Priority must be a whole number greater than or equal to 0.');
+      if (
+        !Number.isInteger(parsedPriority) ||
+        parsedPriority < 0 ||
+        parsedPriority > MAX_TASK_PRIORITY
+      ) {
+        setTaskError(`Priority must be a whole number between 0 and ${MAX_TASK_PRIORITY}.`);
         return;
       }
       payload.priority = parsedPriority;
@@ -265,6 +271,7 @@ export function TriggerActionsPage() {
                     id="trigger-priority"
                     type="number"
                     min="0"
+                    max={MAX_TASK_PRIORITY}
                     step="1"
                     value={priority}
                     onChange={(event) => setPriority(event.target.value)}
@@ -273,7 +280,7 @@ export function TriggerActionsPage() {
               </div>
 
               {taskError ? (
-                <div className="error-banner" role="alert">
+                <div className="error-banner trigger-error-banner" role="alert">
                   <AlertTriangle size={16} />
                   <span>{taskError}</span>
                 </div>
@@ -321,7 +328,7 @@ export function TriggerActionsPage() {
               </dl>
 
               {scoutError ? (
-                <div className="error-banner" role="alert">
+                <div className="error-banner trigger-error-banner" role="alert">
                   <AlertTriangle size={16} />
                   <span>{scoutError}</span>
                 </div>
