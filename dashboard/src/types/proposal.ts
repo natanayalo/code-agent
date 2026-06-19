@@ -10,15 +10,17 @@ export enum ProposalType {
   REFLECTION = 'reflection',
 }
 
+export type ImprovementMetadataScalar = string | number | boolean;
+
 export interface ImprovementSuggestionMetadata {
   title?: string;
   description?: string;
-  value?: string;
-  effort?: string;
-  risk?: string;
-  layer_impact?: string;
-  validation_path?: string;
-  hitl_need?: string;
+  value?: ImprovementMetadataScalar;
+  effort?: ImprovementMetadataScalar;
+  risk?: ImprovementMetadataScalar;
+  layer_impact?: ImprovementMetadataScalar;
+  validation_path?: ImprovementMetadataScalar;
+  hitl_need?: ImprovementMetadataScalar;
 }
 
 export interface FrictionReportMetadata {

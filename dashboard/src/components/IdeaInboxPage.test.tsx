@@ -319,6 +319,10 @@ describe('IdeaInboxPage', () => {
       within(screen.getByText('HITL').closest('.proposal-score-item') as HTMLElement)
         .getByText('Optional'),
     ).toHaveClass('score-medium');
+    expect(
+      within(screen.getByText('Layer').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Sandbox'),
+    ).toHaveClass('score-neutral');
     expect(screen.getAllByText('Sandbox')).toHaveLength(2);
     expect(screen.getByText(/Run sandbox integration smoke\./)).toBeInTheDocument();
     expect(

@@ -20,6 +20,8 @@ const PROPOSAL_FILTERS: Array<{ label: string; value: ProposalFilter }> = [
   { label: 'Improvements', value: ProposalType.REFLECTION },
 ];
 
+const SCORE_METRIC_LABELS = new Set(['Value', 'Effort', 'Risk', 'HITL']);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -98,7 +100,7 @@ function getScoring(proposal: ProposalSnapshot): ImprovementScoringMetadata | nu
 }
 
 function scoreTone(label: string, value: unknown): string {
-  if (typeof value !== 'string') {
+  if (!SCORE_METRIC_LABELS.has(label) || typeof value !== 'string') {
     return 'neutral';
   }
   const normalized = value.trim().toLowerCase();
