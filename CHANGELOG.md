@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add reflection improvement review queue ([#249](https://github.com/natanayalo/code-agent/pull/249))
+
 - Feat: add llm improvement proposal scoring ([#248](https://github.com/natanayalo/code-agent/pull/248))
 
 - Feat: generate scored improvement proposals ([#247](https://github.com/natanayalo/code-agent/pull/247))
