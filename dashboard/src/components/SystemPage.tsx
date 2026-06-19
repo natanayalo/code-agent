@@ -33,8 +33,8 @@ export function SystemPage() {
 
   const toolsRetryActive = isRetryingTools || isFetchingTools;
   const sandboxRetryActive = isRetryingSandbox || isFetchingSandbox;
-  const showToolsError = Boolean(toolsError) || isRetryingTools;
-  const showSandboxError = Boolean(sandboxError) || isRetryingSandbox;
+  const showToolsError = (Boolean(toolsError) || isRetryingTools) && !tools;
+  const showSandboxError = (Boolean(sandboxError) || isRetryingSandbox) && !sandbox;
 
   const handleToolsRetry = async () => {
     if (toolsRetryActive) {

@@ -17,11 +17,12 @@ function renderWithProviders(ui: React.ReactElement) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>{ui}</BrowserRouter>
     </QueryClientProvider>
   );
+  return { ...result, queryClient };
 }
 
 describe('SystemPage', () => {
@@ -147,6 +148,53 @@ describe('SystemPage', () => {
       expect(screen.getByText('No tools registered.')).toBeInTheDocument();
       expect(screen.getByText('python:3.12-slim')).toBeInTheDocument();
     });
+  });
+
+  it('keeps cached system data visible when background refreshes fail', async () => {
+    vi.mocked(api.getSystemTools)
+      .mockResolvedValueOnce([
+        {
+          name: 'execute_bash',
+          description: 'Run bash command',
+          capability_category: 'shell',
+          side_effect_level: 'workspace_write',
+          required_permission: 'workspace_write',
+          timeout_seconds: 60,
+          network_required: false,
+          expected_artifacts: [],
+          required_secrets: [],
+          deterministic: false
+        }
+      ])
+      .mockRejectedValueOnce(new Error('Failed to refresh tools'));
+    vi.mocked(api.getSandboxStatus)
+      .mockResolvedValueOnce({
+        default_image: 'python:3.12-slim',
+        workspace_root: '/tmp/workspaces'
+      })
+      .mockRejectedValueOnce(new Error('Failed to refresh sandbox'));
+
+    const { queryClient } = renderWithProviders(<SystemPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('python:3.12-slim')).toBeInTheDocument();
+      expect(screen.getByText('execute_bash')).toBeInTheDocument();
+    });
+
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['system-tools'] }),
+      queryClient.invalidateQueries({ queryKey: ['system-sandbox'] }),
+    ]);
+
+    await waitFor(() => {
+      expect(api.getSystemTools).toHaveBeenCalledTimes(2);
+      expect(api.getSandboxStatus).toHaveBeenCalledTimes(2);
+    });
+
+    expect(screen.getByText('python:3.12-slim')).toBeInTheDocument();
+    expect(screen.getByText('execute_bash')).toBeInTheDocument();
+    expect(screen.queryByText('Failed to load sandbox status.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Failed to load tool inventory.')).not.toBeInTheDocument();
   });
 
   it('renders empty tool list gracefully', async () => {
