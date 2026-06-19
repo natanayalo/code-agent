@@ -48,13 +48,12 @@ Active focus:
 
 Reference baseline:
 
-- official Antigravity CLI manuals are linked from [Milestone 19.5](roadmap.md#milestone-195-gemini-to-antigravity-migration) and should be rechecked before implementing T-205 through T-211
+- official Antigravity CLI manuals are linked from [Milestone 19.5](roadmap.md#milestone-195-gemini-to-antigravity-migration) and should be rechecked before implementing T-206 through T-211
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
-- T-205: Rename canonical worker identity from Gemini to Antigravity.
 - T-206: Add Antigravity native CLI adapter with `agy -p` / `--print`, settings generation, and permission handling.
 - T-207: Extend native runner to support prompt-as-argv for `agy` with command-log redaction.
 - T-208: Add Docker Antigravity support using official install/auth/keyring mechanisms.
