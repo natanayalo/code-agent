@@ -10,7 +10,7 @@ import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from apps.observability import (
     set_span_status_from_outcome,
@@ -25,6 +25,12 @@ from tools import (
     ToolPermissionLevel,
 )
 from workers.adapter_utils import build_failure_summary, format_native_run_summary
+from workers.antigravity_cli_adapter import AntigravityCliRuntimeAdapter
+from workers.antigravity_cli_worker_native import (
+    antigravity_permission_denied,
+    build_antigravity_native_command,
+    is_antigravity_native_adapter,
+)
 from workers.base import (
     ArtifactReference,
     FailureKind,
@@ -291,6 +297,10 @@ def _workspace_error_result(
 class GeminiCliWorkerNativeMixin:
     """Extracted mixin methods for Gemini CLI worker."""
 
+    def _is_antigravity_native_adapter(self) -> bool:
+        """Return whether this worker is backed by the Antigravity CLI adapter."""
+        return is_antigravity_native_adapter(getattr(self, "runtime_adapter", None))
+
     def _build_native_command(
         self,
         *,
@@ -373,6 +383,11 @@ class GeminiCliWorkerNativeMixin:
         """Map native run outcomes to follow-up hints."""
         if native_result.timed_out:
             return "increase_budget_or_reduce_scope"
+        if (
+            self._is_antigravity_native_adapter()
+            and self._native_failure_kind(native_result) == "permission_denied"
+        ):
+            return "request_higher_permission"
         if native_result.status == "error":
             return "inspect_worker_configuration"
         return "inspect_workspace_artifacts"
@@ -388,6 +403,9 @@ class GeminiCliWorkerNativeMixin:
             summary=format_native_run_summary(native_result),
             final_message=native_result.final_message,
         )
+        if self._is_antigravity_native_adapter():
+            if antigravity_permission_denied(summary):
+                return "permission_denied"
 
         classified = classify_failure_kind(
             status=native_result.status,
@@ -414,6 +432,75 @@ class GeminiCliWorkerNativeMixin:
             base_env.setdefault("SEATBELT_PROFILE", "permissive-closed")
         return base_env or None
 
+    def _build_native_agent_run_request(
+        self,
+        request: WorkerRequest,
+        *,
+        workspace: WorkspaceHandle,
+        runtime_settings: CliRuntimeSettings,
+        runtime_mode: WorkerRuntimeMode,
+        system_prompt_override: str | None,
+    ) -> tuple[NativeAgentRunRequest, dict[str, Any]]:
+        """Build a provider-specific native-agent runner request."""
+        system_prompt = (
+            system_prompt_override
+            if system_prompt_override is not None
+            else build_system_prompt(
+                request,
+                workspace.repo_path,
+                tool_registry=self.tool_registry,  # type: ignore[attr-defined]
+            )
+        )
+        prompt = self._build_native_prompt(
+            system_prompt=system_prompt, request=request, runtime_mode=runtime_mode
+        )
+        events_path: Path | None = None
+        command_redactions: list[str] = []
+        stdin_prompt = True
+        provider_metadata: dict[str, Any] = {}
+        if self._is_antigravity_native_adapter():
+            adapter = self.runtime_adapter  # type: ignore[attr-defined]
+            if not isinstance(adapter, AntigravityCliRuntimeAdapter):
+                raise TypeError("Antigravity native run requires AntigravityCliRuntimeAdapter.")
+            command, events_path, provider_metadata = build_antigravity_native_command(
+                adapter=adapter,
+                workspace=workspace,
+                request=request,
+                prompt=prompt,
+                runtime_settings=runtime_settings,
+                native_sandbox_enabled=self.native_sandbox_enabled,  # type: ignore[attr-defined]
+            )
+            command_redactions.append(prompt)
+            stdin_prompt = False
+        else:
+            command = self._build_native_command(
+                request=request,
+                runtime_mode=runtime_mode,
+            )
+        return (
+            NativeAgentRunRequest(
+                command=command,
+                prompt=prompt,
+                repo_path=workspace.repo_path,
+                workspace_path=workspace.workspace_path,
+                timeout_seconds=runtime_settings.worker_timeout_seconds,
+                diff_timeout_seconds=runtime_settings.command_timeout_seconds,
+                changed_files_timeout_seconds=runtime_settings.command_timeout_seconds,
+                env=self._native_run_env(),
+                events_path=events_path,
+                collect_diff=True,
+                collect_changed_files=True,
+                task_id=request.task_id,
+                session_id=request.session_id,
+                redactor=SecretRedactor(list((request.secrets or {}).values())),
+                stdin_prompt=stdin_prompt,
+                command_redactions=command_redactions,
+                response_format=request.response_format,
+                response_schema=request.response_schema,
+            ),
+            provider_metadata,
+        )
+
     def _execute_native_runtime(
         self,
         request: WorkerRequest,
@@ -434,45 +521,17 @@ class GeminiCliWorkerNativeMixin:
                 next_action_hint="inspect_workspace_artifacts",
             )
 
-        system_prompt = (
-            system_prompt_override
-            if system_prompt_override is not None
-            else build_system_prompt(
-                request,
-                workspace.repo_path,
-                tool_registry=self.tool_registry,  # type: ignore[attr-defined]
-            )
-        )
-        prompt = self._build_native_prompt(
-            system_prompt=system_prompt, request=request, runtime_mode=runtime_mode
-        )
-        command = self._build_native_command(
-            request=request,
+        run_request, provider_metadata = self._build_native_agent_run_request(
+            request,
+            workspace=workspace,
+            runtime_settings=runtime_settings,
             runtime_mode=runtime_mode,
+            system_prompt_override=system_prompt_override,
         )
-        native_result = run_native_agent(
-            NativeAgentRunRequest(
-                command=command,
-                # Prompt is sent via stdin to avoid command-line length limits.
-                prompt=prompt,
-                repo_path=workspace.repo_path,
-                workspace_path=workspace.workspace_path,
-                timeout_seconds=runtime_settings.worker_timeout_seconds,
-                diff_timeout_seconds=runtime_settings.command_timeout_seconds,
-                changed_files_timeout_seconds=runtime_settings.command_timeout_seconds,
-                env=self._native_run_env(),
-                collect_diff=True,
-                collect_changed_files=True,
-                task_id=request.task_id,
-                session_id=request.session_id,
-                redactor=SecretRedactor(list((request.secrets or {}).values())),
-                response_format=request.response_format,
-                response_schema=request.response_schema,
-            )
-        )
+        native_result = run_native_agent(run_request)
 
         return self._build_worker_result_from_native_run(
-            workspace, native_result, runtime_mode, cancel_token
+            workspace, native_result, runtime_mode, cancel_token, provider_metadata
         )
 
     def _build_worker_result_from_native_run(
@@ -481,6 +540,7 @@ class GeminiCliWorkerNativeMixin:
         native_result: NativeAgentRunResult,
         runtime_mode: WorkerRuntimeMode,
         cancel_token: Callable[[], bool] | None,
+        provider_metadata: dict[str, Any] | None = None,
     ) -> WorkerResult:
         summary = build_failure_summary(
             summary=format_native_run_summary(native_result),
@@ -497,6 +557,7 @@ class GeminiCliWorkerNativeMixin:
                     "exit_code": native_result.exit_code,
                     "timed_out": native_result.timed_out,
                     "sandbox_enabled": self.native_sandbox_enabled,  # type: ignore[attr-defined]
+                    **(provider_metadata or {}),
                 },
             },
             commands_run=[

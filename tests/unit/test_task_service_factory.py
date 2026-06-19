@@ -19,12 +19,7 @@ from apps.api.task_service_factory import (
     build_task_service_from_env,
 )
 from orchestrator.brain import RuleBasedOrchestratorBrain
-from workers import (
-    CodexCliWorker,
-    CodexExecCliRuntimeAdapter,
-    GeminiCliWorker,
-    OpenRouterCliWorker,
-)
+from workers import CodexCliWorker, CodexExecCliRuntimeAdapter, GeminiCliWorker, OpenRouterCliWorker
 
 
 def _close_outbound_http_clients(outbound_http_clients) -> None:

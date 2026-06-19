@@ -1,5 +1,6 @@
 """Worker package boundary."""
 
+from workers.antigravity_cli_adapter import AntigravityCliRuntimeAdapter
 from workers.base import (
     SUPPORTED_WORKER_TYPES,
     ArtifactReference,
@@ -36,6 +37,7 @@ from workers.shell_worker import ShellWorker
 
 __all__ = [
     "ArtifactReference",
+    "AntigravityCliRuntimeAdapter",
     "CodexCliWorker",
     "CodexExecCliRuntimeAdapter",
     "FailureKind",

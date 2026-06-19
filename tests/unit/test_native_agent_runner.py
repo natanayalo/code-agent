@@ -214,6 +214,43 @@ raise SystemExit(7)
     assert result.artifacts[1].name == "native-agent-stderr"
 
 
+def test_native_agent_runner_supports_redacted_prompt_as_argv(tmp_path: Path) -> None:
+    """Prompt-as-argv CLIs should not receive stdin or leak prompt text in commands."""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-argv-prompt.py",
+        """#!/usr/bin/env python3
+import json
+import sys
+
+prompt = sys.argv[sys.argv.index("--prompt") + 1]
+stdin_payload = sys.stdin.read()
+print(json.dumps({"prompt": prompt, "stdin": stdin_payload}))
+""",
+    )
+    prompt = "inspect this private task packet"
+
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary), "--prompt", prompt],
+            prompt=prompt,
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+            stdin_prompt=False,
+            command_redactions=[prompt],
+            response_format="json",
+        )
+    )
+
+    assert result.status == "success"
+    assert result.json_payload == {"prompt": prompt, "stdin": ""}
+    assert prompt not in result.command
+    assert "[REDACTED]" in result.command
+
+
 def test_native_agent_runner_marks_confirmation_block_as_infra_error(tmp_path: Path) -> None:
     repo_path = tmp_path / "repo"
     repo_path.mkdir()

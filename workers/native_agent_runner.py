@@ -21,7 +21,7 @@ from apps.observability import (
     start_optional_span,
     with_span_kind,
 )
-from sandbox.redact import sanitize_command
+from sandbox.redact import SecretRedactor, sanitize_command
 from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
@@ -169,6 +169,14 @@ def _build_friction_report_dict(
         "impact": impact,
         "context": context or {},
     }
+
+
+def _sanitize_run_command(command_text: str, request: NativeAgentRunRequest) -> str:
+    """Return the command string safe for logs, spans, and WorkerResult payloads."""
+    sanitized = sanitize_command(command_text, request.redactor)
+    if request.command_redactions:
+        sanitized = SecretRedactor(request.command_redactions).redact(sanitized)
+    return sanitized
 
 
 def _determine_exit_status(
@@ -414,7 +422,7 @@ def _execute_native_agent_subprocess(
 
                 completed = subprocess.run(
                     request.command,
-                    input=request.prompt,
+                    input=request.prompt if request.stdin_prompt else None,
                     check=False,
                     capture_output=True,
                     text=True,
@@ -651,7 +659,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
 
     repo_path, final_message_path, events_path, artifact_root = _setup_native_agent_paths(request)
 
-    command_text = shlex.join(request.command)
+    command_text = _sanitize_run_command(shlex.join(request.command), request)
     started_at = time.perf_counter()
     with start_optional_span(
         tracer_name="workers.native_agent_runner",
