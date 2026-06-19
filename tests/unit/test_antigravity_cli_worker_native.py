@@ -10,7 +10,9 @@ from unittest.mock import patch
 from db.enums import WorkerRuntimeMode
 from sandbox import WorkspaceCleanupPolicy, WorkspaceHandle
 from workers import AntigravityCliRuntimeAdapter, GeminiCliWorker, WorkerRequest
+from workers.antigravity_cli_worker_native import build_antigravity_native_command
 from workers.base import WorkerResult
+from workers.cli_runtime import CliRuntimeSettings
 from workers.native_agent_runner import NativeAgentRunResult
 
 
@@ -101,13 +103,17 @@ def test_antigravity_worker_builds_prompt_argv_command_and_settings(tmp_path: Pa
     command = native_request.command
     assert result.status == "success"
     assert result.summary == "Antigravity run complete."
-    assert command[:3] == ["/opt/bin/agy", "--print", native_request.prompt]
+    assert command[:3] == ["/opt/bin/agy", "-p", native_request.prompt]
+    assert "--cwd" in command
+    assert command[command.index("--cwd") + 1] == str(workspace.repo_path)
     assert "--model" in command
     assert command[command.index("--model") + 1] == "gemini-3-pro"
-    assert "--print-timeout" in command
-    assert "--log-file" in command
     assert native_request.stdin_prompt is False
     assert native_request.command_redactions == [native_request.prompt]
+    assert native_request.env is not None
+    assert native_request.env["GEMINI_HOME"] == str(
+        workspace.workspace_path / ".agent_home" / ".gemini"
+    )
     assert (
         native_request.events_path
         == workspace.workspace_path / ".code-agent" / "antigravity-native.log"
@@ -118,13 +124,67 @@ def test_antigravity_worker_builds_prompt_argv_command_and_settings(tmp_path: Pa
     )
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     assert settings == {
-        "artifactReviewPolicy": "auto",
+        "artifactReviewPolicy": "agent-decides",
         "enableTerminalSandbox": True,
         "toolPermission": "proceed-in-sandbox",
     }
     assert result.budget_usage is not None
     assert result.budget_usage["native_agent"]["provider"] == "antigravity"
     assert result.budget_usage["native_agent"]["tool_permission"] == "proceed-in-sandbox"
+    assert result.budget_usage["native_agent"]["gemini_home"] == str(
+        workspace.workspace_path / ".agent_home" / ".gemini"
+    )
+
+
+def test_antigravity_workspace_migration_replaces_symlink_and_copies_legacy_config(
+    tmp_path: Path,
+) -> None:
+    workspace = _make_workspace(tmp_path / "workspace")
+    legacy_gemini_home = tmp_path / "legacy-gemini"
+    legacy_gemini_home.mkdir()
+    (legacy_gemini_home / "GEMINI.md").write_text("global rules\n", encoding="utf-8")
+    (legacy_gemini_home / "skills" / "global-skill").mkdir(parents=True)
+    (legacy_gemini_home / "skills" / "global-skill" / "SKILL.md").write_text(
+        "---\nname: global\n---\n",
+        encoding="utf-8",
+    )
+    (legacy_gemini_home / "settings.json").write_text(
+        json.dumps({"mcpServers": {"remote": {"url": "https://example.com/sse"}}}),
+        encoding="utf-8",
+    )
+    legacy_workspace_skills = workspace.repo_path / ".gemini" / "skills" / "local-skill"
+    legacy_workspace_skills.mkdir(parents=True)
+    (legacy_workspace_skills / "SKILL.md").write_text("---\nname: local\n---\n", encoding="utf-8")
+    (workspace.repo_path / ".gemini" / "settings.json").write_text(
+        json.dumps({"mcpServers": {"local": {"httpUrl": "https://example.com/ws"}}}),
+        encoding="utf-8",
+    )
+    agent_home = workspace.workspace_path / ".agent_home"
+    agent_home.mkdir()
+    (agent_home / ".gemini").symlink_to(legacy_gemini_home, target_is_directory=True)
+
+    _, _, metadata = build_antigravity_native_command(
+        adapter=AntigravityCliRuntimeAdapter(executable="/opt/bin/agy"),
+        workspace=workspace,
+        request=WorkerRequest(repo_url="https://example.com/repo.git", task_text="run"),
+        prompt="run",
+        runtime_settings=CliRuntimeSettings(),
+        native_sandbox_enabled=True,
+    )
+
+    gemini_home = agent_home / ".gemini"
+    assert not gemini_home.is_symlink()
+    assert (gemini_home / "GEMINI.md").read_text(encoding="utf-8") == "global rules\n"
+    assert (gemini_home / "antigravity-cli" / "skills" / "global-skill" / "SKILL.md").exists()
+    assert json.loads((gemini_home / "config" / "mcp_config.json").read_text()) == {
+        "mcpServers": {"remote": {"serverUrl": "https://example.com/sse"}}
+    }
+    assert (workspace.repo_path / ".agents" / "skills" / "local-skill" / "SKILL.md").exists()
+    assert json.loads((workspace.repo_path / ".agents" / "mcp_config.json").read_text()) == {
+        "mcpServers": {"local": {"serverUrl": "https://example.com/ws"}}
+    }
+    assert not (legacy_gemini_home / "antigravity-cli" / "settings.json").exists()
+    assert "replaced_symlinked_gemini_home" in metadata["migration_actions"]
 
 
 def test_antigravity_worker_read_only_uses_strict_tool_permission(tmp_path: Path) -> None:

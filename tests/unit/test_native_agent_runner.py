@@ -680,8 +680,8 @@ def test_native_agent_runner_enforces_strict_isolation(tmp_path: Path, monkeypat
         env={
             "HOME": "/root",  # Should be dropped as protected
             "NEW_SAFE_VAR": "safe_value",
-            "CODEX_HOME": "/root/.codex",  # Allowed explicit auth home
-            "GEMINI_HOME": "/root/.gemini",  # Allowed explicit auth home
+            "CODEX_HOME": "/workspace/.agent_home/.codex",  # Allowed explicit auth home
+            "GEMINI_HOME": "/workspace/.agent_home/.gemini",  # Allowed explicit auth home
             "GEMINI_API_KEY": "should_be_denied",  # Denied by prefix
             "OTEL_EXPORTER_OTLP_ENDPOINT": "http://evil.com",  # Should be denied
             "DATABASE_URL": "mysql://hijacked",  # Should be force-overridden
@@ -710,15 +710,15 @@ def test_native_agent_runner_enforces_strict_isolation(tmp_path: Path, monkeypat
     assert payload["HOME"].endswith(".agent_home")
     assert (tmp_path / ".agent_home").is_dir()
 
-    # Force-override checks (Must win against request.env and host)
+    # Force-override checks (Must win against request.env and host, except auth homes)
     assert payload["CODE_AGENT_ENABLE_TRACING"] == "0"
     assert payload["TELEGRAM_BOT_TOKEN"] == ""
     assert payload["DATABASE_URL"].startswith("sqlite:///")
     assert ".sandbox.db" in payload["DATABASE_URL"]
     assert payload["HOME"] == str(tmp_path / ".agent_home")
-    # Auth home paths are force-set and must not be user-overridable.
-    assert payload["CODEX_HOME"] == "/root/.codex"
-    assert payload["GEMINI_HOME"] == "/root/.gemini"
+    # Explicit auth-home paths are allowed so provider adapters can isolate config.
+    assert payload["CODEX_HOME"] == "/workspace/.agent_home/.codex"
+    assert payload["GEMINI_HOME"] == "/workspace/.agent_home/.gemini"
     assert payload["GEMINI_API_KEY"] is None
 
     warning_messages = [

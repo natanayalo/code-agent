@@ -52,7 +52,7 @@ def _init_git_repo(repo_path: Path) -> None:
     )
 
 
-def test_antigravity_adapter_from_env_builds_print_command_and_scoped_env(tmp_path: Path) -> None:
+def test_antigravity_adapter_from_env_builds_prompt_command_and_scoped_env(tmp_path: Path) -> None:
     adapter = AntigravityCliRuntimeAdapter.from_env(
         {
             "CODE_AGENT_ANTIGRAVITY_CLI_BIN": "/opt/bin/agy",
@@ -64,27 +64,22 @@ def test_antigravity_adapter_from_env_builds_print_command_and_scoped_env(tmp_pa
             "GOOGLE_API_KEY": "drop-me",
         }
     )
-    log_file = tmp_path / "agy.log"
-
     command = adapter.build_native_command(
         prompt="do the work",
-        print_timeout_seconds=42,
-        log_file=log_file,
+        cwd=tmp_path,
     )
 
     assert command == [
         "/opt/bin/agy",
-        "--print",
+        "-p",
         "do the work",
-        "--print-timeout",
-        "42",
+        "--cwd",
+        str(tmp_path),
         "--model",
         "gemini-3-pro",
-        "--log-file",
-        str(log_file),
     ]
     assert adapter.tool_permission == "strict"
-    assert adapter.artifact_review_policy == "manual"
+    assert adapter.artifact_review_policy == "asks-for-review"
     assert adapter.env == {"XDG_RUNTIME_DIR": "/tmp/runtime"}
 
 
@@ -98,13 +93,13 @@ def test_antigravity_settings_generation_merges_workspace_settings(tmp_path: Pat
     written_path = write_antigravity_settings(
         agent_home=agent_home,
         tool_permission="proceed-in-sandbox",
-        artifact_review_policy="auto",
+        artifact_review_policy="agent-decides",
         enable_terminal_sandbox=True,
     )
 
     assert written_path == settings_path
     assert json.loads(settings_path.read_text(encoding="utf-8")) == {
-        "artifactReviewPolicy": "auto",
+        "artifactReviewPolicy": "agent-decides",
         "enableTerminalSandbox": True,
         "theme": "dark",
         "toolPermission": "proceed-in-sandbox",
@@ -116,6 +111,34 @@ def test_antigravity_settings_reject_invalid_tool_permission() -> None:
         build_antigravity_settings(
             tool_permission="launch-missiles",
             artifact_review_policy="auto",
+            enable_terminal_sandbox=True,
+        )
+
+
+def test_antigravity_settings_maps_legacy_artifact_review_policy_names() -> None:
+    assert (
+        build_antigravity_settings(
+            tool_permission="strict",
+            artifact_review_policy="auto",
+            enable_terminal_sandbox=True,
+        )["artifactReviewPolicy"]
+        == "agent-decides"
+    )
+    assert (
+        build_antigravity_settings(
+            tool_permission="strict",
+            artifact_review_policy="manual",
+            enable_terminal_sandbox=True,
+        )["artifactReviewPolicy"]
+        == "asks-for-review"
+    )
+
+
+def test_antigravity_settings_reject_invalid_artifact_review_policy() -> None:
+    with pytest.raises(ValueError, match="Invalid Antigravity artifact review policy"):
+        build_antigravity_settings(
+            tool_permission="strict",
+            artifact_review_policy="surprise-me",
             enable_terminal_sandbox=True,
         )
 
@@ -133,16 +156,16 @@ import sys
 from pathlib import Path
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--print", dest="prompt", required=True)
-parser.add_argument("--print-timeout", required=True)
+parser.add_argument("-p", dest="prompt", required=True)
+parser.add_argument("--cwd", required=True)
 parser.add_argument("--model")
-parser.add_argument("--log-file", required=True)
 args = parser.parse_args()
 
 if sys.stdin.read():
     raise SystemExit("stdin should be empty")
+if args.cwd != str(Path.cwd()):
+    raise SystemExit("cwd mismatch")
 
-Path(args.log_file).write_text('{"event":"completed"}\\n', encoding="utf-8")
 notes = Path("notes.txt")
 notes.write_text(notes.read_text(encoding="utf-8") + "after\\n", encoding="utf-8")
 print(json.dumps({"response": {"status": "passed", "summary": args.prompt}}))
@@ -156,8 +179,7 @@ print(json.dumps({"response": {"status": "passed", "summary": args.prompt}}))
         NativeAgentRunRequest(
             command=adapter.build_native_command(
                 prompt=prompt,
-                print_timeout_seconds=10,
-                log_file=log_file,
+                cwd=repo_path,
             ),
             prompt=prompt,
             repo_path=repo_path,
@@ -180,7 +202,6 @@ print(json.dumps({"response": {"status": "passed", "summary": args.prompt}}))
     assert {artifact.name for artifact in result.artifacts} == {
         "native-agent-stdout",
         "native-agent-stderr",
-        "native-agent-events",
         "native-agent-diff",
     }
 
@@ -195,9 +216,8 @@ def test_fake_agy_no_change_success_has_empty_changed_files(tmp_path: Path) -> N
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--print", required=True)
-parser.add_argument("--print-timeout", required=True)
-parser.add_argument("--log-file", required=True)
+parser.add_argument("-p", required=True)
+parser.add_argument("--cwd", required=True)
 parser.parse_args()
 print("No changes needed.")
 """,
@@ -208,8 +228,7 @@ print("No changes needed.")
         NativeAgentRunRequest(
             command=adapter.build_native_command(
                 prompt="inspect only",
-                print_timeout_seconds=10,
-                log_file=tmp_path / "agy.log",
+                cwd=repo_path,
             ),
             prompt="inspect only",
             repo_path=repo_path,
@@ -257,8 +276,7 @@ raise SystemExit({exit_code})
         NativeAgentRunRequest(
             command=adapter.build_native_command(
                 prompt="run",
-                print_timeout_seconds=10,
-                log_file=tmp_path / "agy.log",
+                cwd=repo_path,
             ),
             prompt="run",
             repo_path=repo_path,
@@ -292,8 +310,7 @@ time.sleep(2)
         NativeAgentRunRequest(
             command=adapter.build_native_command(
                 prompt="slow run",
-                print_timeout_seconds=1,
-                log_file=tmp_path / "agy.log",
+                cwd=repo_path,
             ),
             prompt="slow run",
             repo_path=repo_path,

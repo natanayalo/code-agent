@@ -15,7 +15,7 @@ from workers.subprocess_env import build_antigravity_subprocess_env
 
 DEFAULT_ANTIGRAVITY_EXECUTABLE: Final[str] = "agy"
 DEFAULT_ANTIGRAVITY_TOOL_PERMISSION: Final[str] = "proceed-in-sandbox"
-DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY: Final[str] = "auto"
+DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY: Final[str] = "agent-decides"
 
 ANTIGRAVITY_EXECUTABLE_ENV_VAR: Final[str] = "CODE_AGENT_ANTIGRAVITY_CLI_BIN"
 ANTIGRAVITY_MODEL_ENV_VAR: Final[str] = "CODE_AGENT_ANTIGRAVITY_MODEL"
@@ -37,12 +37,28 @@ VALID_ANTIGRAVITY_TOOL_PERMISSIONS: Final[frozenset[str]] = frozenset(
         "strict",
     }
 )
+VALID_ANTIGRAVITY_ARTIFACT_REVIEW_POLICIES: Final[frozenset[str]] = frozenset(
+    {
+        "asks-for-review",
+        "agent-decides",
+        "always-proceed",
+    }
+)
+LEGACY_ARTIFACT_REVIEW_POLICY_ALIASES: Final[dict[str, str]] = {
+    "auto": "agent-decides",
+    "manual": "asks-for-review",
+}
 
 AntigravityToolPermission = Literal[
     "request-review",
     "proceed-in-sandbox",
     "always-proceed",
     "strict",
+]
+AntigravityArtifactReviewPolicy = Literal[
+    "asks-for-review",
+    "agent-decides",
+    "always-proceed",
 ]
 
 
@@ -52,6 +68,17 @@ def _normalize_tool_permission(value: str | None) -> AntigravityToolPermission:
         supported = ", ".join(sorted(VALID_ANTIGRAVITY_TOOL_PERMISSIONS))
         raise ValueError(
             f"Invalid Antigravity tool permission: '{value}'. Expected one of: {supported}."
+        )
+    return normalized  # type: ignore[return-value]
+
+
+def _normalize_artifact_review_policy(value: str | None) -> AntigravityArtifactReviewPolicy:
+    normalized = (value or DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY).strip().lower()
+    normalized = LEGACY_ARTIFACT_REVIEW_POLICY_ALIASES.get(normalized, normalized)
+    if normalized not in VALID_ANTIGRAVITY_ARTIFACT_REVIEW_POLICIES:
+        supported = ", ".join(sorted(VALID_ANTIGRAVITY_ARTIFACT_REVIEW_POLICIES))
+        raise ValueError(
+            f"Invalid Antigravity artifact review policy: '{value}'. Expected one of: {supported}."
         )
     return normalized  # type: ignore[return-value]
 
@@ -72,8 +99,7 @@ def build_antigravity_settings(
     """Build the Antigravity settings payload for a non-interactive native run."""
     return {
         "toolPermission": _normalize_tool_permission(tool_permission),
-        "artifactReviewPolicy": artifact_review_policy.strip()
-        or DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY,
+        "artifactReviewPolicy": _normalize_artifact_review_policy(artifact_review_policy),
         "enableTerminalSandbox": enable_terminal_sandbox,
     }
 
@@ -134,9 +160,7 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
             default=DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS,
         )
         self.tool_permission = _normalize_tool_permission(tool_permission)
-        self.artifact_review_policy = (
-            artifact_review_policy.strip() or DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY
-        )
+        self.artifact_review_policy = _normalize_artifact_review_policy(artifact_review_policy)
         self.env = build_antigravity_subprocess_env(resolved_env)
 
     @classmethod
@@ -149,11 +173,13 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
         return cls(
             executable=resolved_env.get(
                 ANTIGRAVITY_EXECUTABLE_ENV_VAR,
-                DEFAULT_ANTIGRAVITY_EXECUTABLE,
+                resolved_env.get("CODE_AGENT_GEMINI_CLI_BIN", DEFAULT_ANTIGRAVITY_EXECUTABLE),
             ),
-            model=resolved_env.get(ANTIGRAVITY_MODEL_ENV_VAR),
+            model=resolved_env.get(ANTIGRAVITY_MODEL_ENV_VAR)
+            or resolved_env.get("CODE_AGENT_GEMINI_MODEL"),
             request_timeout_seconds=coerce_positive_int(
-                resolved_env.get(ANTIGRAVITY_TIMEOUT_ENV_VAR),
+                resolved_env.get(ANTIGRAVITY_TIMEOUT_ENV_VAR)
+                or resolved_env.get("CODE_AGENT_GEMINI_TIMEOUT_SECONDS"),
                 default=DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS,
             ),
             tool_permission=resolved_env.get(
@@ -171,20 +197,14 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
         self,
         *,
         prompt: str,
-        print_timeout_seconds: int,
-        log_file: Path,
+        cwd: Path | None = None,
     ) -> list[str]:
-        """Build the one-shot Antigravity CLI command for `agy --print`."""
-        command = [
-            self.executable,
-            "--print",
-            prompt,
-            "--print-timeout",
-            str(print_timeout_seconds),
-        ]
+        """Build the documented one-shot Antigravity CLI command."""
+        command = [self.executable, "-p", prompt]
+        if cwd is not None:
+            command.extend(["--cwd", str(cwd)])
         if self.model is not None:
             command.extend(["--model", self.model])
-        command.extend(["--log-file", str(log_file)])
         return command
 
     def next_step(

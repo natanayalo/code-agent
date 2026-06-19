@@ -457,6 +457,7 @@ class GeminiCliWorkerNativeMixin:
         events_path: Path | None = None
         command_redactions: list[str] = []
         stdin_prompt = True
+        native_env = self._native_run_env()
         provider_metadata: dict[str, Any] = {}
         if self._is_antigravity_native_adapter():
             adapter = self.runtime_adapter  # type: ignore[attr-defined]
@@ -472,6 +473,8 @@ class GeminiCliWorkerNativeMixin:
             )
             command_redactions.append(prompt)
             stdin_prompt = False
+            native_env = dict(native_env or {})
+            native_env["GEMINI_HOME"] = str(workspace.workspace_path / ".agent_home" / ".gemini")
         else:
             command = self._build_native_command(
                 request=request,
@@ -486,7 +489,7 @@ class GeminiCliWorkerNativeMixin:
                 timeout_seconds=runtime_settings.worker_timeout_seconds,
                 diff_timeout_seconds=runtime_settings.command_timeout_seconds,
                 changed_files_timeout_seconds=runtime_settings.command_timeout_seconds,
-                env=self._native_run_env(),
+                env=native_env,
                 events_path=events_path,
                 collect_diff=True,
                 collect_changed_files=True,

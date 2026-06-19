@@ -47,8 +47,38 @@ def test_build_task_service_from_env_builds_antigravity_worker_when_configured(
         assert service.gemini_worker.runtime_adapter.executable == "/usr/local/bin/agy"
         assert service.gemini_worker.runtime_adapter.model == "gemini-3-pro"
         assert service.gemini_worker.runtime_adapter.tool_permission == "strict"
-        assert service.gemini_worker.runtime_adapter.artifact_review_policy == "manual"
+        assert service.gemini_worker.runtime_adapter.artifact_review_policy == "asks-for-review"
         assert service.gemini_worker.native_sandbox_enabled is True
         assert service.gemini_worker.default_runtime_mode == "native_agent"
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)
+
+
+def test_build_task_service_from_env_treats_legacy_gemini_bin_agy_as_antigravity(
+    tmp_path: Path,
+) -> None:
+    """Operators can migrate by repointing the legacy Gemini executable env to agy."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+            "CODE_AGENT_GEMINI_CLI_BIN": "/usr/local/bin/agy",
+            "CODE_AGENT_GEMINI_MODEL": "gemini-3-pro",
+            "CODE_AGENT_GEMINI_TIMEOUT_SECONDS": "77",
+            "CODE_AGENT_GEMINI_NATIVE_SANDBOX_ENABLED": "1",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert isinstance(service.gemini_worker, GeminiCliWorker)
+        assert isinstance(service.gemini_worker.runtime_adapter, AntigravityCliRuntimeAdapter)
+        assert service.gemini_worker.runtime_adapter.executable == "/usr/local/bin/agy"
+        assert service.gemini_worker.runtime_adapter.model == "gemini-3-pro"
+        assert service.gemini_worker.runtime_adapter.request_timeout_seconds == 77
+        assert service.gemini_worker.native_sandbox_enabled is True
     finally:
         _close_outbound_http_clients(outbound_http_clients)

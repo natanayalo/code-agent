@@ -95,6 +95,9 @@ GEMINI_CONFIG_ENV_VARS: Final[tuple[str, ...]] = (
     GEMINI_MODEL_ENV_VAR,
     GEMINI_TIMEOUT_ENV_VAR,
 )
+ANTIGRAVITY_LEGACY_GEMINI_EXECUTABLE_NAMES: Final[frozenset[str]] = frozenset(
+    {"agy", "antigravity"}
+)
 
 # Default profile names
 ANTIGRAVITY_NATIVE_PLANNER_PROFILE: Final[str] = "antigravity-native-planner"
@@ -342,7 +345,16 @@ def _build_codex_worker(
 def _build_gemini_worker(
     resolved_env: Mapping[str, str], container_manager: DockerSandboxContainerManager
 ) -> GeminiCliWorker | None:
-    antigravity_configured = any(resolved_env.get(k) for k in ANTIGRAVITY_CONFIG_ENV_VARS)
+    legacy_gemini_bin = resolved_env.get(GEMINI_EXECUTABLE_ENV_VAR)
+    legacy_bin_requests_antigravity = (
+        Path(legacy_gemini_bin).name in ANTIGRAVITY_LEGACY_GEMINI_EXECUTABLE_NAMES
+        if legacy_gemini_bin
+        else False
+    )
+    antigravity_configured = (
+        any(resolved_env.get(k) for k in ANTIGRAVITY_CONFIG_ENV_VARS)
+        or legacy_bin_requests_antigravity
+    )
     gemini_configured = any(resolved_env.get(k) for k in GEMINI_CONFIG_ENV_VARS)
     if not (antigravity_configured or gemini_configured):
         return None
@@ -367,11 +379,14 @@ def _build_gemini_worker(
         if antigravity_configured
         else GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR
     )
+    native_sandbox_value = resolved_env.get(native_sandbox_env_var)
+    if antigravity_configured and native_sandbox_value is None:
+        native_sandbox_value = resolved_env.get(GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR)
     return GeminiCliWorker(
         runtime_adapter=runtime_adapter,
         container_manager=container_manager,
         default_runtime_mode=gemini_runtime_mode,
-        native_sandbox_enabled=_is_enabled(resolved_env.get(native_sandbox_env_var)),
+        native_sandbox_enabled=_is_enabled(native_sandbox_value),
     )
 
 

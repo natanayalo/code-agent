@@ -122,6 +122,7 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
     effective_env: dict[str, str] = {
         k: v for k, v in os.environ.items() if k.upper() in SAFE_SYSTEM_ENV_ALLOWLIST
     }
+    auth_home_overrides: dict[str, str] = {}
     agent_home = request.workspace_path / ".agent_home"
     agent_home.mkdir(parents=True, exist_ok=True)
     agent_home_value = str(agent_home)
@@ -134,7 +135,7 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
                 logger.warning("Native agent runner dropped protected environment key: %s", k)
                 continue
             if k_upper in ALLOWED_AUTH_HOME_KEYS:
-                effective_env[k] = v
+                auth_home_overrides[k] = v
                 continue
             is_denied = any(k_upper.startswith(prefix) for prefix in SENSITIVE_ENV_PREFIX_DENYLIST)
             if is_denied:
@@ -154,6 +155,7 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
             "TELEGRAM_BOT_TOKEN": "",
         }
     )
+    effective_env.update(auth_home_overrides)
     return effective_env
 
 
