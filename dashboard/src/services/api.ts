@@ -7,7 +7,7 @@ import {
   ProjectMemorySnapshot,
   ProjectMemoryUpsertRequest,
 } from '../types/memory';
-import { ProposalSnapshot, ProposalStatus } from '../types/proposal';
+import { ProposalSnapshot, ProposalStatus, ProposalType } from '../types/proposal';
 import { ToolDefinition, SandboxStatusResponse } from '../types/system';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -261,11 +261,17 @@ export const api = {
     }
   },
 
-  async listProposals(status?: ProposalStatus | string): Promise<ProposalSnapshot[]> {
+  async listProposals(
+    status?: ProposalStatus | string,
+    proposalType?: ProposalType | string,
+  ): Promise<ProposalSnapshot[]> {
     try {
       const query = new URLSearchParams();
       if (status) {
         query.set('status', status);
+      }
+      if (proposalType) {
+        query.set('proposal_type', proposalType);
       }
       const queryString = query.toString();
       const data = await fetchWithAuth(`/proposals${queryString ? `?${queryString}` : ''}`);
