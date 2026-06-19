@@ -44,7 +44,8 @@ Active focus:
 
 Granular tasks for the active and upcoming milestones:
 
-- T-197: Dashboard UI for Reflection & Improvement Queue (in review).
+- T-198: Dashboard trigger tab for task and scout actions.
+- T-199: Full dashboard QA, visual polish, limits, and reusable QA skill.
 
 ## Completed Work
 
