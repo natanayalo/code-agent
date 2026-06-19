@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
@@ -194,7 +194,8 @@ def test_queue_state_helpers_update_retry_and_terminal_status_consistently() -> 
         assert terminal_task.next_attempt_at is None
 
 
-def test_run_queued_task_fails_retired_persisted_profile_override() -> None:
+@pytest.mark.anyio
+async def test_run_queued_task_fails_retired_persisted_profile_override() -> None:
     """Queued tasks with retired persisted profile overrides should fail explicitly."""
     service, session_factory = _make_task_service()
     task_snapshot, _ = service.create_task(
@@ -209,11 +210,9 @@ def test_run_queued_task_fails_retired_persisted_profile_override() -> None:
     assert claim is not None
     assert claim.task_id == task_snapshot.task_id
 
-    asyncio.run(
-        service.run_queued_task(
-            task_id=task_snapshot.task_id,
-            worker_id="worker-invalid-profile",
-        )
+    await service.run_queued_task(
+        task_id=task_snapshot.task_id,
+        worker_id="worker-invalid-profile",
     )
 
     with session_scope(session_factory) as session:
