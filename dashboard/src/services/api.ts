@@ -1,4 +1,9 @@
-import { TaskReplayRequest, TaskSummarySnapshot, TaskSnapshot } from '../types/task';
+import {
+  TaskReplayRequest,
+  TaskSubmissionRequest,
+  TaskSummarySnapshot,
+  TaskSnapshot,
+} from '../types/task';
 import { SessionSnapshot } from '../types/session';
 import { OperationalMetrics } from '../types/metrics';
 import {
@@ -99,6 +104,29 @@ export const api = {
       return Array.isArray(data) ? data : [];
     } catch (error) {
       console.warn('Failed to fetch tasks from API', error);
+      throw error;
+    }
+  },
+
+  async submitTask(payload: TaskSubmissionRequest): Promise<TaskSnapshot> {
+    try {
+      return await fetchWithAuth('/tasks', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      console.warn('Failed to submit task from dashboard', error);
+      throw error;
+    }
+  },
+
+  async triggerScoutTask(): Promise<TaskSnapshot> {
+    try {
+      return await fetchWithAuth('/tasks/scout/trigger', {
+        method: 'POST',
+      });
+    } catch (error) {
+      console.warn('Failed to trigger scout task', error);
       throw error;
     }
   },

@@ -16,6 +16,7 @@ import { SystemPage } from './components/SystemPage';
 import { TaskDetailPanel } from './components/TaskDetailPanel';
 import { OperatorInbox } from './components/OperatorInbox';
 import { IdeaInboxPage } from './components/IdeaInboxPage';
+import { TriggerActionsPage } from './components/TriggerActionsPage';
 
 const REFRESH_INTERVAL_MS = 30000;
 
@@ -168,6 +169,14 @@ function AppRoutes() {
         element={
           <AuthGuard>
             <IdeaInboxPage />
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/triggers"
+        element={
+          <AuthGuard>
+            <TriggerActionsPage />
           </AuthGuard>
         }
       />

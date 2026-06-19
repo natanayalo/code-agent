@@ -132,6 +132,47 @@ describe('api service', () => {
       expect(result).toEqual(mockTasks);
     });
 
+    it('submitTask sends a dashboard task payload', async () => {
+      const mockSnapshot = { task_id: 'task-new', status: 'pending' };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockSnapshot,
+      });
+
+      const payload = {
+        task_text: 'Run a focused task',
+        repo_url: 'https://github.com/example/repo',
+        priority: 1,
+        constraints: { task_type: 'feature', trigger_source: 'dashboard' },
+      };
+      const result = await api.submitTask(payload);
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/tasks');
+      expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual(payload);
+      expect(result).toEqual(mockSnapshot);
+    });
+
+    it('triggerScoutTask sends the manual scout trigger request', async () => {
+      const mockSnapshot = { task_id: 'task-scout', status: 'pending' };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockSnapshot,
+      });
+
+      const result = await api.triggerScoutTask();
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/tasks/scout/trigger');
+      expect(options.method).toBe('POST');
+      expect(result).toEqual(mockSnapshot);
+    });
+
     it('getTask returns full task snapshot', async () => {
       const mockTask = { task_id: 'task-1', task_text: 'Inspect task', timeline: [] };
       mockFetch.mockResolvedValueOnce({
