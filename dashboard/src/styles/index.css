@@ -1592,7 +1592,7 @@ button {
   font-weight: 800;
 }
 
-.score-high {
+.score-warning {
   color: var(--color-warning);
 }
 
@@ -1600,7 +1600,7 @@ button {
   color: var(--color-accent-primary);
 }
 
-.score-low {
+.score-success {
   color: var(--color-success);
 }
 

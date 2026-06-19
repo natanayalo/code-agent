@@ -64,12 +64,14 @@ function formatText(value: unknown, fallback = 'Not set'): string {
   return fallback;
 }
 
-function formatDate(value: string | undefined): string {
+function formatDate(value: string | null | undefined): string {
   if (!value) {
     return 'N/A';
   }
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'N/A' : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? 'N/A'
+    : date.toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' });
 }
 
 function getProposalType(proposal: ProposalSnapshot): ProposalType {
@@ -95,16 +97,29 @@ function getScoring(proposal: ProposalSnapshot): ImprovementScoringMetadata | nu
   return candidate ? (candidate as ImprovementScoringMetadata) : null;
 }
 
-function scoreTone(value: unknown): string {
+function scoreTone(label: string, value: unknown): string {
   if (typeof value !== 'string') {
     return 'neutral';
   }
   const normalized = value.trim().toLowerCase();
-  if (['high', 'large', 'required'].includes(normalized)) {
-    return 'high';
+  const isHighSignal = ['high', 'large', 'required'].includes(normalized);
+  const isLowSignal = ['low', 'small', 'none'].includes(normalized);
+
+  if (label === 'Value') {
+    if (isHighSignal) {
+      return 'success';
+    }
+    if (isLowSignal) {
+      return 'warning';
+    }
+    return 'medium';
   }
-  if (['low', 'small', 'none'].includes(normalized)) {
-    return 'low';
+
+  if (isHighSignal) {
+    return 'warning';
+  }
+  if (isLowSignal) {
+    return 'success';
   }
   return 'medium';
 }
@@ -164,7 +179,7 @@ function ReflectionProposalDetails({ proposal }: { proposal: ProposalSnapshot })
             {scoreFields.map((field) => (
               <div key={field.label} className="proposal-score-item">
                 <dt>{field.label}</dt>
-                <dd className={`proposal-score-value score-${scoreTone(field.value)}`}>
+                <dd className={`proposal-score-value score-${scoreTone(field.label, field.value)}`}>
                   {formatLabel(field.value)}
                 </dd>
               </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { IdeaInboxPage } from './IdeaInboxPage';
@@ -69,6 +69,35 @@ describe('IdeaInboxPage', () => {
     await waitFor(() => {
       expect(screen.getByText('No pending proposals')).toBeInTheDocument();
     });
+  });
+
+  it('formats proposal timestamps in UTC and falls back for malformed values', async () => {
+    vi.mocked(api.listProposals).mockResolvedValue([
+      createProposal({ proposal_id: 'p-valid-date', title: 'Dated idea' }),
+      createProposal({
+        proposal_id: 'p-invalid-date',
+        title: 'Malformed date idea',
+        created_at: 'invalid-date',
+      }),
+      createProposal({
+        proposal_id: 'p-null-date',
+        title: 'Missing date idea',
+        created_at: null as unknown as string,
+      }),
+    ]);
+
+    renderWithProviders(<IdeaInboxPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Dated idea')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByText(
+        new Date(now).toLocaleString('en-US', { timeZone: 'UTC', timeZoneName: 'short' }),
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText('N/A')).toHaveLength(2);
   });
 
   it('renders scout proposals and handles accept', async () => {
@@ -245,7 +274,7 @@ describe('IdeaInboxPage', () => {
         metadata_payload: {
           improvement_suggestion: {
             value: 'High',
-            effort: 'Medium',
+            effort: 'Large',
             risk: 'Low',
             layer_impact: 'sandbox',
             validation_path: 'Run sandbox integration smoke.',
@@ -274,16 +303,54 @@ describe('IdeaInboxPage', () => {
 
     expect(screen.getByText('Improvement')).toBeInTheDocument();
     expect(screen.getByText('Approve Improvement')).toBeInTheDocument();
-    expect(screen.getByText('High')).toHaveClass('score-high');
-    expect(screen.getByText('Medium')).toHaveClass('score-medium');
-    expect(screen.getByText('Low')).toHaveClass('score-low');
+    expect(
+      within(screen.getByText('Value').closest('.proposal-score-item') as HTMLElement)
+        .getByText('High'),
+    ).toHaveClass('score-success');
+    expect(
+      within(screen.getByText('Effort').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Large'),
+    ).toHaveClass('score-warning');
+    expect(
+      within(screen.getByText('Risk').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Low'),
+    ).toHaveClass('score-success');
+    expect(
+      within(screen.getByText('HITL').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Optional'),
+    ).toHaveClass('score-medium');
     expect(screen.getAllByText('Sandbox')).toHaveLength(2);
-    expect(screen.getByText('Optional')).toBeInTheDocument();
     expect(screen.getByText(/Run sandbox integration smoke\./)).toBeInTheDocument();
     expect(
       screen.getByText('Repeated blocked runs are high-value cleanup candidates.'),
     ).toBeInTheDocument();
     expect(screen.getByText('Sandbox command timed out twice.')).toBeInTheDocument();
+  });
+
+  it('uses warning tone for low-value reflection improvements', async () => {
+    vi.mocked(api.listProposals).mockResolvedValue([
+      createProposal({
+        proposal_id: 'p-low-value',
+        proposal_type: ProposalType.REFLECTION,
+        title: 'Low value reflection improvement',
+        metadata_payload: {
+          improvement_suggestion: {
+            value: 'Low',
+          },
+        },
+      }),
+    ]);
+
+    renderWithProviders(<IdeaInboxPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Low value reflection improvement')).toBeInTheDocument();
+    });
+
+    expect(
+      within(screen.getByText('Value').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Low'),
+    ).toHaveClass('score-warning');
   });
 
   it('does not render empty friction context evidence', async () => {
