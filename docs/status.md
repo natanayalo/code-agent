@@ -7,7 +7,7 @@ Phase 2: bounded autonomy.
 Active focus:
 
 - Milestone 19 (Reflection and Improvement Pipeline) execution
-- continue tightening native-agent observability and verifier acceptance policy
+- dashboard QA and operator polish for reflection/scout workflows
 
 ## Current Capabilities
 
@@ -38,13 +38,12 @@ Active focus:
 
 ## Next Priorities
 
-1. continue tightening native-agent observability and verifier acceptance policy
+1. full dashboard QA, visual polish, limits, and reusable QA skill
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
-- T-198: Dashboard trigger tab for task and scout actions.
 - T-199: Full dashboard QA, visual polish, limits, and reusable QA skill.
 
 ## Completed Work

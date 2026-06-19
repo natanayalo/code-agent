@@ -19,7 +19,8 @@ export type TaskSpecType =
   | 'refactor'
   | 'investigation'
   | 'review_fix'
-  | 'maintenance';
+  | 'maintenance'
+  | 'scout';
 export type TaskDeliveryMode = 'summary' | 'workspace' | 'branch' | 'draft_pr';
 
 export interface TaskSpec {
@@ -160,4 +161,25 @@ export interface TaskReplayRequest {
   constraints?: Record<string, unknown>;
   budget?: Record<string, unknown>;
   secrets?: Record<string, string>;
+}
+
+export interface TaskSubmissionSessionRequest {
+  channel?: string;
+  external_user_id?: string;
+  external_thread_id?: string;
+  display_name?: string | null;
+}
+
+export interface TaskSubmissionRequest {
+  task_text: string;
+  repo_url?: string | null;
+  branch?: string | null;
+  priority?: number;
+  worker_override?: WorkerType;
+  worker_profile_override?: string;
+  constraints?: Record<string, unknown>;
+  budget?: Record<string, unknown>;
+  tools?: string[] | null;
+  callback_url?: string | null;
+  session?: TaskSubmissionSessionRequest;
 }
