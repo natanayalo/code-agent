@@ -16,7 +16,7 @@ async def test_review_result_requests_single_repair_handoff_for_actionable_findi
             },
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
     mock_reviewer = AsyncMock()
@@ -41,7 +41,7 @@ async def test_review_result_requests_single_repair_handoff_for_actionable_findi
         summary=f"```json\n{json.dumps(review_payload)}\n```",
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert res["repair_handoff_requested"] is True
@@ -64,7 +64,7 @@ async def test_review_result_does_not_request_handoff_when_explicitly_disabled()
             },
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
     mock_reviewer = AsyncMock()
@@ -89,7 +89,7 @@ async def test_review_result_does_not_request_handoff_when_explicitly_disabled()
             }
         ),
     )
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
     assert "repair_handoff_requested" not in res
 
 
@@ -107,11 +107,11 @@ async def test_review_result_cleans_repair_handoff_constraints_after_repair_pass
             },
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
 
-    res = await review_result(state, worker_factory={"gemini": AsyncMock()})
+    res = await review_result(state, worker_factory={"antigravity": AsyncMock()})
 
     assert res["current_step"] == "review_result"
     assert res["review"] is None
@@ -134,7 +134,7 @@ async def test_review_result_respects_max_repair_pass_budget():
             },
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
     mock_reviewer = AsyncMock()
@@ -158,7 +158,7 @@ async def test_review_result_respects_max_repair_pass_budget():
         summary=f"```json\n{json.dumps(review_payload)}\n```",
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert "repair_handoff_requested" not in res
@@ -179,7 +179,7 @@ async def test_review_result_keeps_review_enabled_when_repair_budget_not_exhaust
             },
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
     mock_reviewer = AsyncMock()
@@ -203,7 +203,7 @@ async def test_review_result_keeps_review_enabled_when_repair_budget_not_exhaust
         summary=f"```json\n{json.dumps(review_payload)}\n```",
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert res["repair_handoff_requested"] is True

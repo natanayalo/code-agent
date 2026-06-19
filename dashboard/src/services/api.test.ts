@@ -653,7 +653,7 @@ describe('api service', () => {
       });
 
       await api.replayTask('old-task', {
-        worker_override: 'gemini',
+        worker_override: 'antigravity',
         constraints: { max_files: 3 },
         budget: { max_steps: 10 },
         secrets: { API_TOKEN: 'redacted' },
@@ -662,7 +662,7 @@ describe('api service', () => {
       const [, options] = mockFetch.mock.calls[0];
       expect(options.method).toBe('POST');
       expect(JSON.parse(options.body)).toEqual({
-        worker_override: 'gemini',
+        worker_override: 'antigravity',
         constraints: { max_files: 3 },
         budget: { max_steps: 10 },
         secrets: { API_TOKEN: 'redacted' },

@@ -49,7 +49,7 @@ describe('MetricsPage', () => {
       retried_tasks: 10,
       retry_rate: 0.1,
       status_counts: { completed: 80, failed: 20, [longStatus]: 1 },
-      worker_usage: { gemini: 60, codex: 40, [longWorker]: 1 },
+      worker_usage: { antigravity: 60, codex: 40, [longWorker]: 1 },
       avg_duration_seconds: 45.5,
       success_rate: 0.8,
     };
@@ -72,7 +72,7 @@ describe('MetricsPage', () => {
 
     expect(screen.getByText(/completed/i)).toBeInTheDocument();
     expect(screen.getByText('80')).toBeInTheDocument();
-    expect(screen.getByText(/gemini/i)).toBeInTheDocument();
+    expect(screen.getByText(/antigravity/i)).toBeInTheDocument();
     expect(screen.getByText(/60 runs/i)).toBeInTheDocument();
     expect(screen.getByText('codex')).toBeInTheDocument();
     expect(screen.getByText(/40 runs/i)).toBeInTheDocument();

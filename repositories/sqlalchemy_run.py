@@ -153,7 +153,7 @@ class WorkerRunRepository:
             select(WorkerRun.worker_type, func.count(WorkerRun.id))
             .where(
                 WorkerRun.runtime_mode == WorkerRuntimeMode.TOOL_LOOP,
-                WorkerRun.worker_type.in_((WorkerType.CODEX, WorkerType.GEMINI)),
+                WorkerRun.worker_type.in_((WorkerType.CODEX, WorkerType.ANTIGRAVITY)),
             )
             .group_by(WorkerRun.worker_type)
         )

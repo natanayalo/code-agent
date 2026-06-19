@@ -46,18 +46,14 @@ from repositories import (
     WorkerRunRepository,
     session_scope,
 )
+from workers import normalize_worker_profile_name
 
 logger = logging.getLogger("orchestrator.execution")
 
 
 def _normalize_and_validate_submission(self: Any, submission: TaskSubmission) -> TaskSubmission:
     """Normalize execution overrides and validate profile selections before persistence."""
-    normalized_profile_override = (
-        submission.worker_profile_override.strip()
-        if isinstance(submission.worker_profile_override, str)
-        and submission.worker_profile_override.strip()
-        else None
-    )
+    normalized_profile_override = normalize_worker_profile_name(submission.worker_profile_override)
     if (
         normalized_profile_override is not None
         and self.enable_worker_profiles
@@ -210,8 +206,8 @@ def _persist_submission(
             isinstance(submission.worker_profile_override, str)
             and submission.worker_profile_override.strip()
         ):
-            persisted_constraints["worker_profile_override"] = (
-                submission.worker_profile_override.strip()
+            persisted_constraints["worker_profile_override"] = normalize_worker_profile_name(
+                submission.worker_profile_override
             )
         if submission.tools is not None:
             persisted_constraints["tools"] = submission.tools
@@ -361,11 +357,7 @@ def _load_submission_for_task(
             repo_url=task.repo_url,
             branch=task.branch,
             worker_override=task.worker_override,
-            worker_profile_override=(
-                worker_profile_override.strip()
-                if isinstance(worker_profile_override, str) and worker_profile_override.strip()
-                else None
-            ),
+            worker_profile_override=normalize_worker_profile_name(worker_profile_override),
             constraints=task_constraints,
             budget=dict(task.budget or {}),
             secrets=dict(task.secrets or {}),

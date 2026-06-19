@@ -294,8 +294,8 @@ def test_json_payload_extraction_prefers_wrapper_response_over_stats() -> None:
         "non_goals": [],
         "clarification_questions": [],
         "verification_commands": [],
-        "suggested_worker": "gemini",
-        "suggested_profile": "gemini-native-executor-read-only",
+        "suggested_worker": "antigravity",
+        "suggested_profile": "antigravity-native-executor-read-only",
         "suggested_retry_strategy": None,
         "rationale": "read-only task",
     }
@@ -323,8 +323,8 @@ def test_json_payload_extraction_prefers_wrapper_response_over_stats() -> None:
 
 def test_json_payload_extraction_prefers_fenced_schema_json_over_stats_blob() -> None:
     business_payload = {
-        "suggested_worker": "gemini",
-        "suggested_profile": "gemini-native-executor-read-only",
+        "suggested_worker": "antigravity",
+        "suggested_profile": "antigravity-native-executor-read-only",
         "rationale": "use the read-only native profile",
     }
     final_message = "\n".join(

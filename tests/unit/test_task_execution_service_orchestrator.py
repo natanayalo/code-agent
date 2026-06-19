@@ -138,7 +138,7 @@ def test_get_operational_metrics_returns_service_aggregation() -> None:
         )
         run_repo.create(
             task_id=failed.id,
-            worker_type=WorkerType.GEMINI,
+            worker_type=WorkerType.ANTIGRAVITY,
             runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
             started_at=now - timedelta(seconds=30),
             finished_at=now - timedelta(seconds=5),
@@ -151,9 +151,9 @@ def test_get_operational_metrics_returns_service_aggregation() -> None:
     assert metrics.retried_tasks == 1
     assert metrics.retry_rate == 0.5
     assert metrics.status_counts["completed"] == 1
-    assert metrics.worker_usage == {"codex": 1, "gemini": 1}
+    assert metrics.worker_usage == {"codex": 1, "antigravity": 1}
     assert metrics.runtime_mode_usage == {"native_agent": 1, "tool_loop": 1}
-    assert metrics.legacy_tool_loop_usage == {"gemini": 1}
+    assert metrics.legacy_tool_loop_usage == {"antigravity": 1}
     assert metrics.avg_duration_seconds == 17.5
     assert metrics.success_rate == 0.5
 

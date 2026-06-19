@@ -37,6 +37,7 @@ from db.enums import (
     WorkerRuntimeMode,
     WorkerType,
     build_sql_enum,
+    coerce_worker_type,
 )
 
 logger = logging.getLogger(__name__)
@@ -291,7 +292,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
         if value is None:
             return None
-        return WorkerType(value)
+        return coerce_worker_type(value)
 
     @validates("worker_override")
     def _coerce_worker_override(
@@ -302,7 +303,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         """Normalize assigned worker overrides to the canonical enum vocabulary."""
         if value is None:
             return None
-        return WorkerType(value)
+        return coerce_worker_type(value)
 
     @validates("runtime_mode")
     def _coerce_runtime_mode(
@@ -364,7 +365,7 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
     def _coerce_worker_type(self, _key: str, value: WorkerType | str) -> WorkerType:
         """Normalize assigned worker types to the canonical enum."""
 
-        return WorkerType(value)
+        return coerce_worker_type(value)
 
     @validates("status")
     def _coerce_status(

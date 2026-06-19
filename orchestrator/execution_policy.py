@@ -14,7 +14,7 @@ from threading import Lock
 from typing import Any
 from urllib.parse import urlparse
 
-from db.enums import TaskStatus, WorkerRunStatus, WorkerType
+from db.enums import TaskStatus, WorkerRunStatus, WorkerType, coerce_worker_type
 from orchestrator.state import OrchestratorState
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
 
@@ -371,14 +371,14 @@ def _worker_run_status_from_result(state: OrchestratorState) -> WorkerRunStatus:
 def _worker_type_for_persistence(state: OrchestratorState) -> WorkerType:
     """Choose a persisted worker type even when dispatch metadata is incomplete."""
     if state.dispatch.worker_type is not None:
-        return WorkerType(state.dispatch.worker_type)
+        return coerce_worker_type(state.dispatch.worker_type)
 
     if state.route.chosen_worker is not None:
         logger.warning(
             "Persisting worker run with route fallback because dispatch worker type is missing.",
             extra={"route_worker": state.route.chosen_worker},
         )
-        return WorkerType(state.route.chosen_worker)
+        return coerce_worker_type(state.route.chosen_worker)
 
     logger.warning("Persisting worker run with codex default because worker type is missing.")
     return WorkerType.CODEX

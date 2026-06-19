@@ -11,6 +11,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from db.enums import WorkerRuntimeMode
+from db.enums import coerce_worker_type as _coerce_persisted_worker_type
 from workers.review import ReviewResult
 
 logger = logging.getLogger(__name__)
@@ -43,10 +44,10 @@ FailureKind = Literal[
     "unknown",
 ]
 
-WorkerType = Literal["gemini", "codex", "openrouter"]
+WorkerType = Literal["antigravity", "codex", "openrouter"]
 # Ordered by escalation preference in routing fallbacks:
 # quality-first, then balanced, then low-cost.
-SUPPORTED_WORKER_TYPES: Final[tuple[WorkerType, ...]] = ("gemini", "openrouter", "codex")
+SUPPORTED_WORKER_TYPES: Final[tuple[WorkerType, ...]] = ("antigravity", "openrouter", "codex")
 WorkerCapabilityTag = Literal["planning", "execution", "review", "routing", "scout"]
 WorkerPermissionProfile = Literal[
     "read_only",
@@ -58,6 +59,30 @@ WorkerPermissionProfile = Literal[
 WorkerMutationPolicy = Literal["read_only", "patch_allowed"]
 WorkerSelfReviewPolicy = Literal["never", "on_failure", "always"]
 WorkerDeliveryMode = Literal["summary", "workspace", "branch", "draft_pr"]
+
+
+def normalize_worker_type(value: Any) -> Any:
+    """Normalize worker identifiers while preserving clear validation errors."""
+
+    if value is None:
+        return None
+    try:
+        return _coerce_persisted_worker_type(value).value
+    except (TypeError, ValueError):
+        return value
+
+
+def normalize_worker_profile_name(value: str | None) -> str | None:
+    """Normalize legacy Gemini profile names to canonical Antigravity profile names."""
+
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    if stripped.startswith("gemini-"):
+        return f"antigravity-{stripped.removeprefix('gemini-')}"
+    return stripped
 
 
 class WorkerRequest(WorkerModel):
@@ -98,6 +123,11 @@ class WorkerProfile(WorkerModel):
     self_review_policy: WorkerSelfReviewPolicy = "on_failure"
     supported_delivery_modes: list[WorkerDeliveryMode] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("worker_type", mode="before")
+    @classmethod
+    def _normalize_worker_type(cls, value: Any) -> Any:
+        return normalize_worker_type(value)
 
     @field_validator("capability_tags", "supported_delivery_modes", mode="before")
     @classmethod

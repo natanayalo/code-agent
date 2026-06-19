@@ -390,10 +390,10 @@ def test_build_task_service_from_env_ignores_deprecated_gemini_tool_loop_default
         assert service is not None
         assert isinstance(service.gemini_worker, GeminiCliWorker)
         assert service.gemini_worker.default_runtime_mode == "native_agent"
-        assert "gemini-native-executor" in service.worker_profiles
-        assert "gemini-tool-loop-executor" not in service.worker_profiles
-        assert "gemini-native-planner" in service.worker_profiles
-        assert "gemini-native-reviewer" in service.worker_profiles
+        assert "antigravity-native-executor" in service.worker_profiles
+        assert "antigravity-tool-loop-executor" not in service.worker_profiles
+        assert "antigravity-native-planner" in service.worker_profiles
+        assert "antigravity-native-reviewer" in service.worker_profiles
         assert "Ignoring deprecated CODE_AGENT_GEMINI_RUNTIME_MODE=tool_loop" in caplog.text
     finally:
         _close_outbound_http_clients(outbound_http_clients)
@@ -446,10 +446,10 @@ def test_build_task_service_from_env_ignores_gemini_legacy_tool_loop_profiles_wh
         assert service is not None
         assert isinstance(service.gemini_worker, GeminiCliWorker)
         assert service.gemini_worker.default_runtime_mode == "native_agent"
-        assert "gemini-native-executor" in service.worker_profiles
-        assert "gemini-tool-loop-executor" not in service.worker_profiles
-        assert "gemini-native-planner" in service.worker_profiles
-        assert "gemini-native-reviewer" in service.worker_profiles
+        assert "antigravity-native-executor" in service.worker_profiles
+        assert "antigravity-tool-loop-executor" not in service.worker_profiles
+        assert "antigravity-native-planner" in service.worker_profiles
+        assert "antigravity-native-reviewer" in service.worker_profiles
         assert "Ignoring CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED" in caplog.text
     finally:
         _close_outbound_http_clients(outbound_http_clients)

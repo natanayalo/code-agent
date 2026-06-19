@@ -122,7 +122,7 @@ def test_replay_with_worker_override(
 
     replay_response = client.post(
         f"/tasks/{source_id}/replay",
-        json={"worker_override": "gemini"},
+        json={"worker_override": "antigravity"},
     )
 
     assert replay_response.status_code == 201
@@ -131,7 +131,7 @@ def test_replay_with_worker_override(
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(new_task_id)
         assert task is not None
-        assert task.worker_override.value == "gemini"
+        assert task.worker_override.value == "antigravity"
 
 
 def test_replay_with_worker_profile_override(

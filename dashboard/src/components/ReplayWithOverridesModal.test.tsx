@@ -37,7 +37,7 @@ describe('ReplayWithOverridesModal', () => {
     );
 
     fireEvent.change(screen.getByLabelText('Worker Override'), {
-      target: { value: 'gemini' },
+      target: { value: 'antigravity' },
     });
     fireEvent.change(screen.getByLabelText('Constraints Override (JSON object)'), {
       target: { value: '{"max_files": 5}' },
@@ -53,7 +53,7 @@ describe('ReplayWithOverridesModal', () => {
 
     await vi.waitFor(() =>
       expect(api.replayTask).toHaveBeenCalledWith('task-1', {
-        worker_override: 'gemini',
+        worker_override: 'antigravity',
         constraints: { max_files: 5 },
         budget: { max_steps: 20 },
         secrets: { API_TOKEN: 'abc' },

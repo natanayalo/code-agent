@@ -46,7 +46,7 @@ async def test_review_result_runs_and_parses_findings():
                 "files_changed": ["feature.py"],
                 "diff_text": "+++ feature.py\n+new line",
             },
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
 
@@ -74,7 +74,7 @@ async def test_review_result_runs_and_parses_findings():
         summary=f"Here is the review:\n```json\n{json.dumps(review_payload)}\n```",
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert res["review"]["outcome"] == "findings"
@@ -99,7 +99,7 @@ async def test_review_result_uses_json_payload_when_summary_is_stripped():
                 "status": "success",
                 "summary": "added feature",
             },
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
 
@@ -127,7 +127,7 @@ async def test_review_result_uses_json_payload_when_summary_is_stripped():
         json_payload=review_payload,
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert "review" in res
@@ -158,14 +158,14 @@ async def test_review_result_handles_worker_failure_gracefully():
                     }
                 ],
             },
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
 
     mock_reviewer = AsyncMock()
     mock_reviewer.run.side_effect = Exception("API error")
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert "review" not in res
@@ -190,7 +190,7 @@ async def test_review_result_resolves_windows_style_workspace_uri_for_prompt(mon
                     }
                 ],
             },
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
 
@@ -220,7 +220,7 @@ async def test_review_result_resolves_windows_style_workspace_uri_for_prompt(mon
         summary=(f"```json\n{json.dumps(review_payload)}\n```"),
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert captured_workspace_path["path"] == Path("C:/repo/code-agent")
@@ -234,7 +234,7 @@ async def test_review_result_logs_warning_when_workspace_path_missing(caplog):
             "task": {"task_text": "demo"},
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done", "artifacts": []},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
 
@@ -244,7 +244,7 @@ async def test_review_result_logs_warning_when_workspace_path_missing(caplog):
         summary='{"reviewer_kind":"independent_reviewer","summary":"ok","confidence":1.0,"outcome":"no_findings","findings":[]}',
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert (
@@ -285,14 +285,14 @@ async def test_review_result_logs_warnings_for_non_success_and_unparseable_outpu
             "task": {"task_text": "demo"},
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
 
     mock_reviewer = AsyncMock()
     mock_reviewer.run.return_value = WorkerResult(status="error", summary="not-json")
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert "Independent review worker returned non-success status: error" in caplog.text
@@ -312,7 +312,7 @@ async def test_review_result_includes_fallback_session_state_in_review_context(m
                 "files_changed": ["a.py", "b.py"],
                 "diff_text": "+++ a.py\n+print('x')",
             },
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
 
@@ -341,7 +341,7 @@ async def test_review_result_includes_fallback_session_state_in_review_context(m
         summary='{"reviewer_kind":"independent_reviewer","summary":"ok","confidence":1.0,"outcome":"no_findings","findings":[]}',
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert captured_session_state["value"] == {
@@ -358,7 +358,7 @@ async def test_review_result_times_out_worker_run(monkeypatch, caplog):
             "task": {"task_text": "demo task"},
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
 
@@ -376,7 +376,7 @@ async def test_review_result_times_out_worker_run(monkeypatch, caplog):
     mock_reviewer = AsyncMock()
     mock_reviewer.run.side_effect = slow_run
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
     assert "Independent review pass timed out and was skipped." in caplog.text
@@ -390,7 +390,7 @@ async def test_review_result_propagates_cancellation():
             "task": {"task_text": "demo task"},
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done"},
-            "dispatch": {"worker_type": "gemini"},
+            "dispatch": {"worker_type": "antigravity"},
         }
     )
 
@@ -398,7 +398,7 @@ async def test_review_result_propagates_cancellation():
     mock_reviewer.run.side_effect = asyncio.CancelledError()
 
     with pytest.raises(asyncio.CancelledError):
-        await review_result(state, worker_factory={"gemini": mock_reviewer})
+        await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
 
 @pytest.mark.anyio
@@ -408,7 +408,7 @@ async def test_review_result_preserves_workspace_id():
             "task": {"task_text": "demo task"},
             "verification": {"status": "passed", "items": []},
             "result": {"status": "success", "summary": "done", "workspace_id": "ws-123"},
-            "dispatch": {"worker_type": "gemini", "workspace_id": "ws-dispatch-123"},
+            "dispatch": {"worker_type": "antigravity", "workspace_id": "ws-dispatch-123"},
         }
     )
 
@@ -424,7 +424,7 @@ async def test_review_result_preserves_workspace_id():
         summary=f"```json\\n{json.dumps(review_payload)}\\n```",
     )
 
-    res = await review_result(state, worker_factory={"gemini": mock_reviewer})
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
 
     assert res["current_step"] == "review_result"
 

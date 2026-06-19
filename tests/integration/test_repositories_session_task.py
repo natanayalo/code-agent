@@ -33,7 +33,7 @@ def test_session_and_task_repositories_support_crud(session_factory) -> None:
             task_text="Add repository layer",
             repo_url="https://github.com/natanayalo/code-agent",
             branch="master",
-            worker_override="gemini",
+            worker_override="antigravity",
             constraints={"requires_approval": True},
             budget={"max_iterations": 8},
         )
@@ -67,7 +67,7 @@ def test_session_and_task_repositories_support_crud(session_factory) -> None:
         assert stored_task.status is TaskStatus.IN_PROGRESS
         assert stored_task.chosen_worker is WorkerType.CODEX
         assert stored_task.route_reason == "cheap_mechanical_change"
-        assert stored_task.worker_override is WorkerType.GEMINI
+        assert stored_task.worker_override is WorkerType.ANTIGRAVITY
         assert stored_task.constraints == {"requires_approval": True}
         assert stored_task.budget == {"max_iterations": 8}
         stored_session = session_repo.get(conversation_session.id)
@@ -201,7 +201,7 @@ def test_task_listing_uses_run_id_tie_breaker_for_latest_run(session_factory) ->
                     id=higher_id,
                     task_id=task.id,
                     session_id=conversation_session.id,
-                    worker_type=WorkerType.GEMINI,
+                    worker_type=WorkerType.ANTIGRAVITY,
                     started_at=tied_started_at,
                     status=WorkerRunStatus.FAILURE,
                     requested_permission="workspace_write",
@@ -214,6 +214,6 @@ def test_task_listing_uses_run_id_tie_breaker_for_latest_run(session_factory) ->
         listed_task = next(row for row in listed_tasks if row.id == task.id)
 
         assert getattr(listed_task, "_latest_run_id") == higher_id
-        assert getattr(listed_task, "_latest_run_worker") is WorkerType.GEMINI
+        assert getattr(listed_task, "_latest_run_worker") is WorkerType.ANTIGRAVITY
         assert getattr(listed_task, "_latest_run_status") is WorkerRunStatus.FAILURE
         assert getattr(listed_task, "_latest_run_requested_permission") == "workspace_write"

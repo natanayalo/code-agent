@@ -43,7 +43,7 @@ def test_suggest_route_parses_plain_json_payload() -> None:
     suggestion = asyncio.run(
         brain.suggest_route(
             state=_state(),
-            available_workers=frozenset({"codex", "gemini"}),
+            available_workers=frozenset({"codex", "antigravity"}),
             available_profiles=None,
         )
     )
@@ -61,7 +61,7 @@ def test_suggest_route_parses_fenced_json_payload() -> None:
                 status="success",
                 summary=(
                     "```json\n"
-                    '{"suggested_worker":"gemini","suggested_profile":"gemini-native-executor",'
+                    '{"suggested_worker":"antigravity","suggested_profile":"antigravity-native-executor",'
                     '"rationale":"complex task"}\n'
                     "```"
                 ),
@@ -72,14 +72,14 @@ def test_suggest_route_parses_fenced_json_payload() -> None:
     suggestion = asyncio.run(
         brain.suggest_route(
             state=_state(),
-            available_workers=frozenset({"codex", "gemini"}),
+            available_workers=frozenset({"codex", "antigravity"}),
             available_profiles=None,
         )
     )
 
     assert suggestion is not None
-    assert suggestion.suggested_worker == "gemini"
-    assert suggestion.suggested_profile == "gemini-native-executor"
+    assert suggestion.suggested_worker == "antigravity"
+    assert suggestion.suggested_profile == "antigravity-native-executor"
     assert suggestion.rationale == "complex task"
 
 
@@ -174,7 +174,7 @@ def test_suggest_route_surfaces_unavailable_planner_profile() -> None:
         planner_worker=_StaticWorker(
             WorkerResult(
                 status="failure",
-                summary="worker profile 'gemini-native-planner' is unavailable",
+                summary="worker profile 'antigravity-native-planner' is unavailable",
             )
         )
     )

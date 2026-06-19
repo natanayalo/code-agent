@@ -21,8 +21,8 @@ async def test_suggest_task_spec_and_route_parses_unified_payload() -> None:
                 '{"assumptions":["a1"],"acceptance_criteria":[],"non_goals":[],'
                 '"clarification_questions":[],"verification_commands":[],'
                 '"suggested_risk_level":null,"suggested_task_type":null,'
-                '"suggested_delivery_mode":null,"suggested_worker":"gemini",'
-                '"suggested_profile":"gemini-native-executor-read-only",'
+                '"suggested_delivery_mode":null,"suggested_worker":"antigravity",'
+                '"suggested_profile":"antigravity-native-executor-read-only",'
                 '"suggested_retry_strategy":null,"rationale":"use gemini read-only"}'
             ),
         )
@@ -34,13 +34,13 @@ async def test_suggest_task_spec_and_route_parses_unified_payload() -> None:
     suggestion = await brain.suggest_task_spec_and_route(
         state=state,
         task_spec=state.task_spec,
-        available_workers=frozenset({"codex", "gemini"}),
+        available_workers=frozenset({"codex", "antigravity"}),
         available_profiles=None,
     )
 
     assert suggestion is not None
-    assert suggestion.suggested_worker == "gemini"
-    assert suggestion.suggested_profile == "gemini-native-executor-read-only"
+    assert suggestion.suggested_worker == "antigravity"
+    assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
 
 
 @pytest.mark.asyncio
@@ -54,7 +54,7 @@ async def test_suggest_task_spec_and_route_parses_wrapped_unified_payload() -> N
                 '\\"clarification_questions\\":[],\\"verification_commands\\":[],'
                 '\\"suggested_risk_level\\":null,\\"suggested_task_type\\":null,'
                 '\\"suggested_delivery_mode\\":null,\\"suggested_worker\\":\\"gemini\\",'
-                '\\"suggested_profile\\":\\"gemini-native-executor-read-only\\",'
+                '\\"suggested_profile\\":\\"antigravity-native-executor-read-only\\",'
                 '\\"suggested_retry_strategy\\":null,\\"rationale\\":\\"use gemini\\"}'
                 '\\n```","stats":{"models":{}}}'
             ),
@@ -67,13 +67,13 @@ async def test_suggest_task_spec_and_route_parses_wrapped_unified_payload() -> N
     suggestion = await brain.suggest_task_spec_and_route(
         state=state,
         task_spec=state.task_spec,
-        available_workers=frozenset({"codex", "gemini"}),
+        available_workers=frozenset({"codex", "antigravity"}),
         available_profiles=None,
     )
 
     assert suggestion is not None
-    assert suggestion.suggested_worker == "gemini"
-    assert suggestion.suggested_profile == "gemini-native-executor-read-only"
+    assert suggestion.suggested_worker == "antigravity"
+    assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
 
 
 @pytest.mark.asyncio
@@ -85,8 +85,8 @@ async def test_suggest_task_spec_and_route_salvages_route_when_task_type_invalid
                 '{"assumptions":[],"acceptance_criteria":[],"non_goals":[],'
                 '"clarification_questions":[],"verification_commands":[],'
                 '"suggested_risk_level":"low","suggested_task_type":"not_a_real_type",'
-                '"suggested_delivery_mode":"summary","suggested_worker":"gemini",'
-                '"suggested_profile":"gemini-native-executor-read-only",'
+                '"suggested_delivery_mode":"summary","suggested_worker":"antigravity",'
+                '"suggested_profile":"antigravity-native-executor-read-only",'
                 '"suggested_retry_strategy":null,"rationale":"use gemini"}'
             ),
         )
@@ -98,13 +98,13 @@ async def test_suggest_task_spec_and_route_salvages_route_when_task_type_invalid
     suggestion = await brain.suggest_task_spec_and_route(
         state=state,
         task_spec=state.task_spec,
-        available_workers=frozenset({"codex", "gemini"}),
+        available_workers=frozenset({"codex", "antigravity"}),
         available_profiles=None,
     )
 
     assert suggestion is not None
-    assert suggestion.suggested_worker == "gemini"
-    assert suggestion.suggested_profile == "gemini-native-executor-read-only"
+    assert suggestion.suggested_worker == "antigravity"
+    assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
     assert suggestion.suggested_task_type is None
 
 
@@ -120,8 +120,8 @@ async def test_suggest_task_spec_and_route_unwraps_json_payload_wrapper() -> Non
                     '{"assumptions":[],"acceptance_criteria":[],"non_goals":[],'
                     '"clarification_questions":[],"verification_commands":[],'
                     '"suggested_risk_level":"low","suggested_task_type":"maintenance",'
-                    '"suggested_delivery_mode":"summary","suggested_worker":"gemini",'
-                    '"suggested_profile":"gemini-native-executor-read-only",'
+                    '"suggested_delivery_mode":"summary","suggested_worker":"antigravity",'
+                    '"suggested_profile":"antigravity-native-executor-read-only",'
                     '"suggested_retry_strategy":null,"rationale":"use gemini"}\n'
                     "```"
                 ),
@@ -136,13 +136,13 @@ async def test_suggest_task_spec_and_route_unwraps_json_payload_wrapper() -> Non
     suggestion = await brain.suggest_task_spec_and_route(
         state=state,
         task_spec=state.task_spec,
-        available_workers=frozenset({"codex", "gemini"}),
+        available_workers=frozenset({"codex", "antigravity"}),
         available_profiles=None,
     )
 
     assert suggestion is not None
-    assert suggestion.suggested_worker == "gemini"
-    assert suggestion.suggested_profile == "gemini-native-executor-read-only"
+    assert suggestion.suggested_worker == "antigravity"
+    assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
 
 
 @pytest.mark.asyncio
@@ -164,8 +164,8 @@ async def test_suggest_task_spec_and_route_falls_back_from_stats_json_payload_to
                 '{"assumptions":[],"acceptance_criteria":[],"non_goals":[],'
                 '"clarification_questions":[],"verification_commands":[],'
                 '"suggested_risk_level":"low","suggested_task_type":"maintenance",'
-                '"suggested_delivery_mode":"summary","suggested_worker":"gemini",'
-                '"suggested_profile":"gemini-native-executor-read-only",'
+                '"suggested_delivery_mode":"summary","suggested_worker":"antigravity",'
+                '"suggested_profile":"antigravity-native-executor-read-only",'
                 '"suggested_retry_strategy":null,"rationale":"use gemini"}\n'
                 "```"
             ),
@@ -178,13 +178,13 @@ async def test_suggest_task_spec_and_route_falls_back_from_stats_json_payload_to
     suggestion = await brain.suggest_task_spec_and_route(
         state=state,
         task_spec=state.task_spec,
-        available_workers=frozenset({"codex", "gemini"}),
+        available_workers=frozenset({"codex", "antigravity"}),
         available_profiles=None,
     )
 
     assert suggestion is not None
-    assert suggestion.suggested_worker == "gemini"
-    assert suggestion.suggested_profile == "gemini-native-executor-read-only"
+    assert suggestion.suggested_worker == "antigravity"
+    assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
 
 
 @pytest.mark.asyncio
@@ -198,8 +198,8 @@ async def test_suggest_task_spec_and_route_prefers_fenced_unified_json_over_stat
                 '{"assumptions":[],"acceptance_criteria":[],"non_goals":[],'
                 '"clarification_questions":[],"verification_commands":[],'
                 '"suggested_risk_level":"low","suggested_task_type":"maintenance",'
-                '"suggested_delivery_mode":"summary","suggested_worker":"gemini",'
-                '"suggested_profile":"gemini-native-executor-read-only",'
+                '"suggested_delivery_mode":"summary","suggested_worker":"antigravity",'
+                '"suggested_profile":"antigravity-native-executor-read-only",'
                 '"suggested_retry_strategy":null,"rationale":"use gemini"}\n'
                 "```\n"
                 '{"input":10922,"prompt":10922,"candidates":349,'
@@ -214,13 +214,13 @@ async def test_suggest_task_spec_and_route_prefers_fenced_unified_json_over_stat
     suggestion = await brain.suggest_task_spec_and_route(
         state=state,
         task_spec=state.task_spec,
-        available_workers=frozenset({"codex", "gemini"}),
+        available_workers=frozenset({"codex", "antigravity"}),
         available_profiles=None,
     )
 
     assert suggestion is not None
-    assert suggestion.suggested_worker == "gemini"
-    assert suggestion.suggested_profile == "gemini-native-executor-read-only"
+    assert suggestion.suggested_worker == "antigravity"
+    assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
 
 
 @pytest.mark.asyncio

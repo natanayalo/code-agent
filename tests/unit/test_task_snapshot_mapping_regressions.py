@@ -86,7 +86,7 @@ def test_map_task_to_summary_uses_loaded_runs_and_pending_interactions() -> None
         worker_run_repo.create(
             task_id=task.id,
             session_id=conversation_session.id,
-            worker_type="gemini",
+            worker_type="antigravity",
             started_at=base_time + timedelta(minutes=1),
             status="failure",
             requested_permission="dangerous_shell",
@@ -124,7 +124,7 @@ def test_map_task_to_summary_uses_loaded_runs_and_pending_interactions() -> None
         summary = service._map_task_to_summary(loaded_task)
 
     assert summary.latest_run_status == WorkerRunStatus.FAILURE.value
-    assert summary.latest_run_worker == "gemini"
+    assert summary.latest_run_worker == "antigravity"
     assert summary.latest_run_requested_permission == "dangerous_shell"
     assert summary.pending_interaction_count == 1
 

@@ -123,7 +123,7 @@ def test_worker_run_repository_complete_handles_missing_and_updates_optional_fie
         run_repo = WorkerRunRepository(session)
         run = run_repo.create(
             task_id=task_id,
-            worker_type="gemini",
+            worker_type="antigravity",
             started_at=datetime.now(UTC),
             status="running",
         )
@@ -180,7 +180,7 @@ def test_worker_run_repository_lists_retained_runs_and_aggregates_runtime_metric
         )
         newer = run_repo.create(
             task_id=task_id,
-            worker_type="gemini",
+            worker_type="antigravity",
             runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
             started_at=now - timedelta(minutes=20),
             finished_at=now - timedelta(minutes=18),
@@ -208,11 +208,11 @@ def test_worker_run_repository_lists_retained_runs_and_aggregates_runtime_metric
         assert [row.id for row in retained] == [oldest.id, newer.id]
 
         metrics = run_repo.get_metrics(since=now - timedelta(hours=3))
-        assert metrics["worker_usage"] == {"codex": 2, "gemini": 1}
+        assert metrics["worker_usage"] == {"codex": 2, "antigravity": 1}
         assert metrics["runtime_mode_usage"] == {
             WorkerRuntimeMode.TOOL_LOOP.value: 2,
             WorkerRuntimeMode.NATIVE_AGENT.value: 1,
         }
-        assert metrics["legacy_tool_loop_usage"] == {"codex": 1, "gemini": 1}
+        assert metrics["legacy_tool_loop_usage"] == {"codex": 1, "antigravity": 1}
         assert metrics["avg_duration_seconds"] > 0
         assert metrics["success_rate"] == pytest.approx(2 / 3)

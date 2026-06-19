@@ -288,7 +288,7 @@ def test_orchestrator_runner_supports_gemini_override() -> None:
         outcomes_by_case_id={
             "gemini-case": WorkerOutcome(status="success", summary="gemini path ok")
         },
-        worker_override="gemini",
+        worker_override="antigravity",
     )
 
     outcome = asyncio.run(runner.run_case(case))

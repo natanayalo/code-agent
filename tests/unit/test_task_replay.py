@@ -125,7 +125,7 @@ def test_replay_with_worker_override() -> None:
     )
 
     replay_request = execution_module.TaskReplayRequest(
-        worker_override=WorkerType.GEMINI,
+        worker_override=WorkerType.ANTIGRAVITY,
     )
     result = service.replay_task(
         source_task_id=source_id,
@@ -139,7 +139,7 @@ def test_replay_with_worker_override() -> None:
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(result.task_snapshot.task_id)
         assert task is not None
-        assert task.worker_override == WorkerType.GEMINI
+        assert task.worker_override == WorkerType.ANTIGRAVITY
 
 
 def test_replay_with_worker_profile_override() -> None:
@@ -378,7 +378,7 @@ def test_replay_without_overrides_preserves_original_parameters() -> None:
         task_text="Build the feature",
         repo_url="https://github.com/example/repo",
         branch="feature-branch",
-        worker_override=WorkerType.GEMINI,
+        worker_override=WorkerType.ANTIGRAVITY,
         constraints={"requires_approval": True},
         budget={"max_minutes": 10},
     )
@@ -393,7 +393,7 @@ def test_replay_without_overrides_preserves_original_parameters() -> None:
         assert task.task_text == "Build the feature"
         assert task.repo_url == "https://github.com/example/repo"
         assert task.branch == "feature-branch"
-        assert task.worker_override == WorkerType.GEMINI
+        assert task.worker_override == WorkerType.ANTIGRAVITY
         assert task.constraints.get("requires_approval") is True
         assert task.budget.get("max_minutes") == 10
 

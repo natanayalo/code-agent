@@ -15,7 +15,8 @@ from workers import Worker, WorkerRequest, WorkerResult, WorkerType
 logger = logging.getLogger(__name__)
 
 CODEX_WORKER: Final[WorkerType] = "codex"
-GEMINI_WORKER: Final[WorkerType] = "gemini"
+ANTIGRAVITY_WORKER: Final[WorkerType] = "antigravity"
+GEMINI_WORKER: Final[WorkerType] = ANTIGRAVITY_WORKER
 OPENROUTER_WORKER: Final[WorkerType] = "openrouter"
 
 _COMPLEX_TASK_PATTERN = re.compile(
@@ -59,7 +60,7 @@ def _available_workers(
     """Return the workers that are actually wired into the graph."""
     result: dict[str, Worker] = {CODEX_WORKER: worker or _DefaultFakeWorker()}
     if gemini_worker is not None:
-        result[GEMINI_WORKER] = gemini_worker
+        result[ANTIGRAVITY_WORKER] = gemini_worker
     if openrouter_worker is not None:
         result[OPENROUTER_WORKER] = openrouter_worker
     if shell_worker is not None:

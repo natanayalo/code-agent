@@ -304,7 +304,7 @@ def test_load_submission_for_task_restores_execution_overrides_and_budget() -> N
             task_text="Needs approval",
             repo_url="https://github.com/natanayalo/code-agent",
             worker_override="gemini",
-            worker_profile_override="gemini-tool-loop-executor",
+            worker_profile_override="gemini-native-executor",
             constraints={"requires_approval": True, "approval_reason": "manual gate"},
             budget={"max_iterations": 5},
         )
@@ -313,8 +313,8 @@ def test_load_submission_for_task_restores_execution_overrides_and_budget() -> N
     loaded = service._load_submission_for_task(task_id=task_snapshot.task_id)
     assert loaded is not None
     submission, _ = loaded
-    assert submission.worker_override == "gemini"
-    assert submission.worker_profile_override == "gemini-tool-loop-executor"
+    assert submission.worker_override == "antigravity"
+    assert submission.worker_profile_override == "antigravity-native-executor"
     assert submission.constraints == {"requires_approval": True, "approval_reason": "manual gate"}
     assert submission.budget == {"max_iterations": 5}
 

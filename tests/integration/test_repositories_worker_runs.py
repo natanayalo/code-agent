@@ -158,7 +158,7 @@ def test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics(
         second_run = worker_run_repo.create(
             task_id=task.id,
             session_id=conversation_session.id,
-            worker_type="gemini",
+            worker_type="antigravity",
             started_at=datetime(2026, 1, 4, tzinfo=UTC),
             status="running",
             runtime_mode=None,
@@ -206,7 +206,7 @@ def test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics(
         assert [row.id for row in expired] == [first_run.id]
 
         metrics = worker_run_repo.get_metrics(since=datetime(2026, 1, 1, tzinfo=UTC))
-        assert metrics["worker_usage"] == {"codex": 1, "gemini": 1}
+        assert metrics["worker_usage"] == {"codex": 1, "antigravity": 1}
         assert metrics["runtime_mode_usage"] == {"native_agent": 1, "unknown": 1}
         assert metrics["legacy_tool_loop_usage"] == {}
         assert metrics["avg_duration_seconds"] == 7.5

@@ -8,7 +8,13 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from db.enums import HumanInteractionStatus, ProposalType, TaskStatus, WorkerType
+from db.enums import (
+    HumanInteractionStatus,
+    ProposalType,
+    TaskStatus,
+    WorkerType,
+    coerce_worker_type,
+)
 from orchestrator.execution_policy import validate_callback_url
 from orchestrator.state import TaskSpec
 
@@ -57,6 +63,14 @@ class TaskSubmission(ExecutionModel):
         """Ensure callback URLs are safe for outbound progress delivery."""
         return validate_callback_url(value)
 
+    @field_validator("worker_override", mode="before")
+    @classmethod
+    def normalize_worker_override(cls, value: object) -> object:
+        """Accept temporary legacy worker aliases at the API boundary."""
+        if value is None:
+            return None
+        return coerce_worker_type(value)
+
 
 class TaskApprovalDecision(ExecutionModel):
     """Decision payload for a paused task approval checkpoint."""
@@ -72,6 +86,14 @@ class TaskReplayRequest(ExecutionModel):
     constraints: dict[str, Any] | None = None
     budget: dict[str, Any] | None = None
     secrets: dict[str, str] | None = None
+
+    @field_validator("worker_override", mode="before")
+    @classmethod
+    def normalize_worker_override(cls, value: object) -> object:
+        """Accept temporary legacy worker aliases at the replay boundary."""
+        if value is None:
+            return None
+        return coerce_worker_type(value)
 
 
 class TaskSubmissionValidationError(ValueError):

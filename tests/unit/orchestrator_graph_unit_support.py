@@ -47,12 +47,12 @@ from orchestrator.state import OrchestratorState
 from orchestrator.task_spec import is_destructive_task
 from workers import Worker, WorkerProfile, WorkerRequest, WorkerResult
 
-_ALL_WORKERS: frozenset[str] = frozenset({"codex", "gemini", "openrouter"})
+_ALL_WORKERS: frozenset[str] = frozenset({"codex", "antigravity", "openrouter"})
 _CODEX_ONLY: frozenset[str] = frozenset({"codex"})
-_GEMINI_ONLY: frozenset[str] = frozenset({"gemini"})
+_ANTIGRAVITY_ONLY: frozenset[str] = frozenset({"antigravity"})
 _OPENROUTER_ONLY: frozenset[str] = frozenset({"openrouter"})
 
-_PROFILED_CODEX_GEMINI: dict[str, WorkerProfile] = {
+_PROFILED_CODEX_ANTIGRAVITY: dict[str, WorkerProfile] = {
     "codex-native-executor": WorkerProfile(
         name="codex-native-executor",
         worker_type="codex",
@@ -60,9 +60,9 @@ _PROFILED_CODEX_GEMINI: dict[str, WorkerProfile] = {
         capability_tags=["execution"],
         supported_delivery_modes=["workspace", "branch", "draft_pr"],
     ),
-    "gemini-native-executor": WorkerProfile(
-        name="gemini-native-executor",
-        worker_type="gemini",
+    "antigravity-native-executor": WorkerProfile(
+        name="antigravity-native-executor",
+        worker_type="antigravity",
         runtime_mode="native_agent",
         capability_tags=["execution"],
         supported_delivery_modes=["workspace", "branch", "draft_pr"],

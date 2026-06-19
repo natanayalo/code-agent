@@ -65,7 +65,7 @@ async def test_run_deliver_result_missing_worker():
             "task": {"task_text": "demo"},
             "result": {"status": "success", "summary": "ok"},
             "task_spec": {"delivery_mode": "branch", "goal": "demo"},
-            "dispatch": {"workspace_id": "ws-1", "worker_type": "gemini"},
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "antigravity"},
         }
     )
     # Available workers will fall back to gemini, which is not provided as an argument.
@@ -85,7 +85,7 @@ async def test_run_deliver_result_missing_gh_token_for_pr(monkeypatch):
             "task": {"task_text": "demo"},
             "result": {"status": "success", "summary": "ok"},
             "task_spec": {"delivery_mode": "draft_pr", "goal": "demo"},
-            "dispatch": {"workspace_id": "ws-1", "worker_type": "gemini"},
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "antigravity"},
         }
     )
     worker_mock = AsyncMock()
@@ -108,7 +108,7 @@ async def test_run_deliver_result_success(monkeypatch):
             "task": {"task_text": "demo"},
             "result": {"status": "success", "summary": "ok"},
             "task_spec": {"delivery_mode": "branch", "goal": "demo"},
-            "dispatch": {"workspace_id": "ws-1", "worker_type": "gemini"},
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "antigravity"},
         }
     )
     worker_mock = AsyncMock()
@@ -134,7 +134,7 @@ async def test_run_deliver_result_worker_runtime_error(monkeypatch):
             "task": {"task_text": "demo"},
             "result": {"status": "success", "summary": "ok"},
             "task_spec": {"delivery_mode": "branch", "goal": "demo"},
-            "dispatch": {"workspace_id": "ws-1", "worker_type": "gemini"},
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "antigravity"},
         }
     )
     worker_mock = AsyncMock()
@@ -159,7 +159,7 @@ async def test_run_deliver_result_worker_status_failure(monkeypatch):
             "task": {"task_text": "demo"},
             "result": {"status": "success", "summary": "ok"},
             "task_spec": {"delivery_mode": "branch", "goal": "demo"},
-            "dispatch": {"workspace_id": "ws-1", "worker_type": "gemini"},
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "antigravity"},
         }
     )
     worker_mock = AsyncMock()
@@ -217,7 +217,7 @@ async def test_run_deliver_result_rejects_invalid_branch_names(branch_name: str)
                 "goal": "demo",
                 "delivery_branch": branch_name,
             },
-            "dispatch": {"workspace_id": "ws-1", "worker_type": "gemini"},
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "antigravity"},
         }
     )
     res = await _run_deliver_result(state, gemini_worker=AsyncMock())
@@ -243,7 +243,7 @@ async def test_run_deliver_result_merges_worker_result_on_success() -> None:
                 "goal": "demo",
                 "delivery_branch": "valid-branch",
             },
-            "dispatch": {"workspace_id": "ws-1", "worker_type": "gemini"},
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "antigravity"},
         }
     )
     worker_mock = AsyncMock()
@@ -282,7 +282,7 @@ async def test_run_deliver_result_merge_omits_missing_summary_text() -> None:
                 "goal": "demo",
                 "delivery_branch": "valid-branch",
             },
-            "dispatch": {"workspace_id": "ws-1", "worker_type": "gemini"},
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "antigravity"},
         }
     )
     worker_mock = AsyncMock()

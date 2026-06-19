@@ -67,7 +67,7 @@ def _planner_failure_reason_code(result: WorkerResult | None, exc: Exception | N
 
 DEFAULT_ROUTE_BRAIN_TIMEOUT_SECONDS = DEFAULT_DISCOVERY_TIMEOUT_SECONDS
 DEFAULT_TASK_SPEC_BRAIN_TIMEOUT_SECONDS = DEFAULT_DISCOVERY_TIMEOUT_SECONDS
-DEFAULT_ROUTE_PLANNER_PROFILE = "gemini-native-discovery"
+DEFAULT_ROUTE_PLANNER_PROFILE = "antigravity-native-discovery"
 DEFAULT_BRAIN_TIMEOUT_BUFFER_SECONDS: Final = 5
 
 _ROUTE_SYSTEM_PROMPT = """
@@ -82,7 +82,7 @@ Output contract:
 - Return exactly one JSON object, and no extra prose.
 - JSON schema:
   {
-    "suggested_worker": "codex" | "gemini" | "openrouter" | null,
+    "suggested_worker": "codex" | "antigravity" | "openrouter" | null,
     "suggested_profile": "<profile-name>" | null,
     "suggested_retry_strategy": "retry_same_worker" | "escalate_to_alternate" | null,
     "rationale": "<short reason>"
@@ -221,7 +221,9 @@ def _coerce_worker_type(value: object) -> WorkerType | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip().lower()
-    if normalized in {"codex", "gemini", "openrouter"}:
+    if normalized == "gemini":
+        return "antigravity"
+    if normalized in {"codex", "antigravity", "openrouter"}:
         return cast(WorkerType, normalized)
     return None
 
