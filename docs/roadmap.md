@@ -385,7 +385,7 @@ Assumptions:
 - Milestone 19 remains active; Milestone 19.5 is the migration bridge before Phase 3
 - existing Milestones 20 and 21 keep their numbers
 - Docker support is required for the milestone to complete, but auth must use official Antigravity mechanisms only
-- if official Antigravity CLI cannot authenticate non-interactively in Docker, T-201 documents the blocker and the milestone remains incomplete rather than shipping an unsafe workaround
+- if official Antigravity CLI cannot authenticate non-interactively in Docker, T-208 documents the blocker and the milestone remains incomplete rather than shipping an unsafe workaround
 
 ## Milestone 20: Operational Self-Awareness
 
