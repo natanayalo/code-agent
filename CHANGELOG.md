@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add dashboard trigger actions ([#250](https://github.com/natanayalo/code-agent/pull/250))
+
 - Feat: add reflection improvement review queue ([#249](https://github.com/natanayalo/code-agent/pull/249))
 
 - Feat: add llm improvement proposal scoring ([#248](https://github.com/natanayalo/code-agent/pull/248))
