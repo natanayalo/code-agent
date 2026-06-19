@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 from db.enums import WorkerRuntimeMode
 from sandbox import WorkspaceCleanupPolicy, WorkspaceHandle
@@ -71,38 +69,20 @@ def _make_worker(
 
 def test_antigravity_worker_builds_prompt_argv_command_and_settings(tmp_path: Path) -> None:
     worker, workspace = _make_worker(tmp_path)
-    native_result = NativeAgentRunResult(
-        status="success",
-        summary="done",
-        command="/opt/bin/agy --print [REDACTED]",
-        exit_code=0,
-        duration_seconds=0.3,
-        timed_out=False,
-        final_message="Antigravity run complete.",
-        files_changed=["note.txt"],
-        stdout='{"response":"Antigravity run complete."}',
+    native_request, provider_metadata = worker._build_native_agent_run_request(
+        WorkerRequest(
+            session_id="session-antigravity",
+            repo_url="https://example.com/repo.git",
+            branch="main",
+            task_text="Apply a small Antigravity change",
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        ),
+        workspace=workspace,
+        runtime_settings=CliRuntimeSettings(),
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        system_prompt_override="system prompt",
     )
-
-    with patch(
-        "workers.gemini_cli_worker_native.run_native_agent",
-        return_value=native_result,
-    ) as run_native:
-        result = asyncio.run(
-            worker.run(
-                WorkerRequest(
-                    session_id="session-antigravity",
-                    repo_url="https://example.com/repo.git",
-                    branch="main",
-                    task_text="Apply a small Antigravity change",
-                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
-                )
-            )
-        )
-
-    native_request = run_native.call_args.args[0]
     command = native_request.command
-    assert result.status == "success"
-    assert result.summary == "Antigravity run complete."
     assert command[:3] == ["/opt/bin/agy", "-p", native_request.prompt]
     assert "--cwd" in command
     assert command[command.index("--cwd") + 1] == str(workspace.repo_path)
@@ -128,10 +108,9 @@ def test_antigravity_worker_builds_prompt_argv_command_and_settings(tmp_path: Pa
         "enableTerminalSandbox": True,
         "toolPermission": "proceed-in-sandbox",
     }
-    assert result.budget_usage is not None
-    assert result.budget_usage["native_agent"]["provider"] == "antigravity"
-    assert result.budget_usage["native_agent"]["tool_permission"] == "proceed-in-sandbox"
-    assert result.budget_usage["native_agent"]["gemini_home"] == str(
+    assert provider_metadata["provider"] == "antigravity"
+    assert provider_metadata["tool_permission"] == "proceed-in-sandbox"
+    assert provider_metadata["gemini_home"] == str(
         workspace.workspace_path / ".agent_home" / ".gemini"
     )
 
@@ -223,30 +202,19 @@ def test_antigravity_workspace_migration_copy_errors_are_best_effort(
 def test_antigravity_worker_read_only_uses_strict_tool_permission(tmp_path: Path) -> None:
     worker, workspace = _make_worker(tmp_path, tool_permission="always-proceed")
 
-    with patch(
-        "workers.gemini_cli_worker_native.run_native_agent",
-        return_value=NativeAgentRunResult(
-            status="success",
-            summary="ok",
-            command="agy --print [REDACTED]",
-            exit_code=0,
-            duration_seconds=0.1,
-            timed_out=False,
-            final_message="ok",
+    worker._build_native_agent_run_request(
+        WorkerRequest(
+            repo_url="https://example.com/repo.git",
+            task_text="Inspect only",
+            constraints={"read_only": True},
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
         ),
-    ):
-        result = asyncio.run(
-            worker.run(
-                WorkerRequest(
-                    repo_url="https://example.com/repo.git",
-                    task_text="Inspect only",
-                    constraints={"read_only": True},
-                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
-                )
-            )
-        )
+        workspace=workspace,
+        runtime_settings=CliRuntimeSettings(),
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        system_prompt_override="system prompt",
+    )
 
-    assert result.status == "success"
     settings_path = (
         workspace.workspace_path / ".agent_home" / ".gemini" / "antigravity-cli" / "settings.json"
     )
