@@ -46,6 +46,22 @@ def _json_object_from_file(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _path_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        logger.warning("Failed to inspect Antigravity path", extra={"path": str(path)})
+        return False
+
+
+def _path_is_dir(path: Path) -> bool:
+    try:
+        return path.is_dir()
+    except OSError:
+        logger.warning("Failed to inspect Antigravity directory", extra={"path": str(path)})
+        return False
+
+
 def _migrated_mcp_config(settings_path: Path) -> dict[str, Any] | None:
     settings = _json_object_from_file(settings_path)
     servers = settings.get("mcpServers")
@@ -68,7 +84,7 @@ def _migrated_mcp_config(settings_path: Path) -> dict[str, Any] | None:
 
 
 def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> bool:
-    if path.exists():
+    if _path_exists(path):
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -82,7 +98,7 @@ def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> bool:
 
 
 def _copytree_if_missing(source: Path, target: Path) -> bool:
-    if not source.exists() or target.exists():
+    if not _path_exists(source) or _path_exists(target):
         return False
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -97,7 +113,7 @@ def _copytree_if_missing(source: Path, target: Path) -> bool:
 
 
 def _copy_file_if_missing(source: Path, target: Path) -> bool:
-    if not source.exists() or target.exists():
+    if not _path_exists(source) or _path_exists(target):
         return False
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -153,7 +169,7 @@ def prepare_antigravity_workspace_migration(
 
     for source in _candidate_gemini_homes(adapter, symlink_source):
         source = source.expanduser()
-        if not source.exists() or not source.is_dir():
+        if not _path_exists(source) or not _path_is_dir(source):
             continue
         if _copy_file_if_missing(source / "GEMINI.md", gemini_home / "GEMINI.md"):
             actions.append("copied_global_gemini_context")

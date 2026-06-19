@@ -199,6 +199,43 @@ def test_antigravity_workspace_migration_copy_errors_are_best_effort(
     assert "replaced_symlinked_gemini_home" in metadata["migration_actions"]
 
 
+def test_antigravity_workspace_migration_skips_inaccessible_candidate_home(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = _make_workspace(tmp_path / "workspace")
+    blocked_home = Path("/root/.gemini")
+
+    def _candidate_gemini_homes(_adapter, _symlink_source):
+        yield blocked_home
+
+    original_exists = Path.exists
+
+    def _exists(path: Path, *args: object, **kwargs: object) -> bool:
+        if path == blocked_home:
+            raise PermissionError("blocked root gemini home")
+        return original_exists(path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        "workers.antigravity_cli_worker_native._candidate_gemini_homes",
+        _candidate_gemini_homes,
+    )
+    monkeypatch.setattr(Path, "exists", _exists)
+
+    command, _, metadata = build_antigravity_native_command(
+        adapter=AntigravityCliRuntimeAdapter(executable="/opt/bin/agy"),
+        workspace=workspace,
+        request=WorkerRequest(repo_url="https://example.com/repo.git", task_text="run"),
+        prompt="run",
+        runtime_settings=CliRuntimeSettings(),
+        native_sandbox_enabled=True,
+    )
+
+    assert command[:2] == ["/opt/bin/agy", "-p"]
+    assert metadata["migration_actions"] == []
+    assert (workspace.workspace_path / ".agent_home" / ".gemini").is_dir()
+
+
 def test_antigravity_worker_read_only_uses_strict_tool_permission(tmp_path: Path) -> None:
     worker, workspace = _make_worker(tmp_path, tool_permission="always-proceed")
 
