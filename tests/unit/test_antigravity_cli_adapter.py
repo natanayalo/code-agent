@@ -106,6 +106,39 @@ def test_antigravity_settings_generation_merges_workspace_settings(tmp_path: Pat
     }
 
 
+def test_antigravity_settings_ignores_unreadable_existing_settings(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    agent_home = tmp_path / ".agent_home"
+    settings_dir = agent_home / ".gemini" / "antigravity-cli"
+    settings_dir.mkdir(parents=True)
+    settings_path = settings_dir / "settings.json"
+    settings_path.write_text('{"theme":"dark"}', encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def _read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path == settings_path:
+            raise OSError("settings file is locked")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _read_text)
+
+    written_path = write_antigravity_settings(
+        agent_home=agent_home,
+        tool_permission="strict",
+        artifact_review_policy="always-proceed",
+        enable_terminal_sandbox=False,
+    )
+
+    assert written_path == settings_path
+    assert json.loads(original_read_text(settings_path, encoding="utf-8")) == {
+        "artifactReviewPolicy": "always-proceed",
+        "enableTerminalSandbox": False,
+        "toolPermission": "strict",
+    }
+
+
 def test_antigravity_settings_reject_invalid_tool_permission() -> None:
     with pytest.raises(ValueError, match="Invalid Antigravity tool permission"):
         build_antigravity_settings(

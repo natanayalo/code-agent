@@ -463,7 +463,7 @@ class GeminiCliWorkerNativeMixin:
         native_env = self._native_run_env()
         provider_metadata: dict[str, Any] = {}
         if self._is_antigravity_native_adapter():
-            adapter = self.runtime_adapter  # type: ignore[attr-defined]
+            adapter = getattr(self, "runtime_adapter", None)
             if not isinstance(adapter, AntigravityCliRuntimeAdapter):
                 raise TypeError("Antigravity native run requires AntigravityCliRuntimeAdapter.")
             command, events_path, provider_metadata = build_antigravity_native_command(

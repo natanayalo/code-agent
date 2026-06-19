@@ -111,7 +111,7 @@ def write_antigravity_settings(
     if settings_path.exists():
         try:
             payload = json.loads(settings_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, OSError):
             payload = {}
         if isinstance(payload, dict):
             existing = payload
