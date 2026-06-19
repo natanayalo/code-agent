@@ -7,19 +7,62 @@ import { getPermissionStyle, getNetworkStyle, getCategoryThemeClass } from '../u
 import { formatLabel } from '../utils/formatters';
 
 export function SystemPage() {
-  const { data: tools, isLoading: toolsLoading, error: toolsError } = useQuery({
+  const [isRetryingTools, setIsRetryingTools] = React.useState(false);
+  const [isRetryingSandbox, setIsRetryingSandbox] = React.useState(false);
+  const {
+    data: tools,
+    isLoading: toolsLoading,
+    isFetching: isFetchingTools,
+    error: toolsError,
+    refetch: refetchTools,
+  } = useQuery({
     queryKey: ['system-tools'],
     queryFn: () => api.getSystemTools(),
   });
 
-  const { data: sandbox, isLoading: sandboxLoading, error: sandboxError } = useQuery({
+  const {
+    data: sandbox,
+    isLoading: sandboxLoading,
+    isFetching: isFetchingSandbox,
+    error: sandboxError,
+    refetch: refetchSandbox,
+  } = useQuery({
     queryKey: ['system-sandbox'],
     queryFn: () => api.getSandboxStatus(),
   });
 
+  const toolsRetryActive = isRetryingTools || isFetchingTools;
+  const sandboxRetryActive = isRetryingSandbox || isFetchingSandbox;
+  const showToolsError = (Boolean(toolsError) || isRetryingTools) && !tools;
+  const showSandboxError = (Boolean(sandboxError) || isRetryingSandbox) && !sandbox;
+
+  const handleToolsRetry = async () => {
+    if (toolsRetryActive) {
+      return;
+    }
+    setIsRetryingTools(true);
+    try {
+      await refetchTools();
+    } finally {
+      setIsRetryingTools(false);
+    }
+  };
+
+  const handleSandboxRetry = async () => {
+    if (sandboxRetryActive) {
+      return;
+    }
+    setIsRetryingSandbox(true);
+    try {
+      await refetchSandbox();
+    } finally {
+      setIsRetryingSandbox(false);
+    }
+  };
+
   return (
     <DashboardLayout>
-      <div className="dashboard-content-inner">
+      <div className="system-page-content">
         <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
           <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--color-text-primary)' }}>
             <Server size={24} />
@@ -36,12 +79,22 @@ export function SystemPage() {
               <HardDrive size={20} color="var(--color-accent-primary)" />
               Sandbox Status
             </h3>
-            {sandboxLoading ? (
-              <div className="loading-spinner">Loading sandbox status...</div>
-            ) : sandboxError ? (
-              <div className="error-message">
-                <AlertTriangle size={16} /> Failed to load sandbox status.
+            {showSandboxError ? (
+              <div className="error-banner system-error-banner" role="alert">
+                <span>
+                  <AlertTriangle size={16} /> Failed to load sandbox status.
+                </span>
+                <button
+                  type="button"
+                  className="retry-button"
+                  onClick={() => void handleSandboxRetry()}
+                  disabled={sandboxRetryActive}
+                >
+                  {sandboxRetryActive ? 'Retrying...' : 'Retry Sandbox'}
+                </button>
               </div>
+            ) : sandboxLoading ? (
+              <div className="loading-spinner">Loading sandbox status...</div>
             ) : sandbox ? (
               <dl className="key-value-list">
                 <dt className="key-value-dt">Default Image</dt>
@@ -58,12 +111,22 @@ export function SystemPage() {
               <Wrench size={20} color="var(--color-accent-primary)" />
               Tool Inventory
             </h3>
-            {toolsLoading ? (
-              <div className="loading-spinner">Loading tool inventory...</div>
-            ) : toolsError ? (
-              <div className="error-message">
-                <AlertTriangle size={16} /> Failed to load tool inventory.
+            {showToolsError ? (
+              <div className="error-banner system-error-banner" role="alert">
+                <span>
+                  <AlertTriangle size={16} /> Failed to load tool inventory.
+                </span>
+                <button
+                  type="button"
+                  className="retry-button"
+                  onClick={() => void handleToolsRetry()}
+                  disabled={toolsRetryActive}
+                >
+                  {toolsRetryActive ? 'Retrying...' : 'Retry Tools'}
+                </button>
               </div>
+            ) : toolsLoading ? (
+              <div className="loading-spinner">Loading tool inventory...</div>
             ) : tools && tools.length > 0 ? (
               <div className="inventory-table-container">
                 <table className="inventory-table" aria-label="Tool Inventory">

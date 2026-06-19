@@ -14,6 +14,7 @@ Priority sequence:
 
 1. Milestone 18: Controlled Autonomy / Scout Mode
 2. Milestone 19: Reflection and Improvement Pipeline
+3. Milestone 19.5: Gemini to Antigravity Migration
 
 Planned next phases:
 
@@ -315,6 +316,77 @@ Manual-only zones:
 - approval core logic
 - deployment/billing controls
 
+## Milestone 19.5: Gemini to Antigravity Migration
+
+Goal:
+
+- make Antigravity CLI the canonical public worker identity and migration target for the current Gemini CLI worker lane
+
+Planned deliverables:
+
+- canonical `antigravity` worker type and profile names
+- Antigravity native CLI adapter using `agy -p` / `agy --print`
+- prompt-as-argv support in the native runner for CLIs that require it
+- Docker worker support using official Antigravity install/auth mechanisms
+- updated e2e QA, runbook, compose, env, dashboard/API labels, and operator guidance
+- removal of Gemini CLI defaults after Antigravity Docker e2e is proven
+
+Public interface direction:
+
+- canonical worker type becomes `antigravity`; `gemini` is not the long-term public name
+- canonical profiles become `antigravity-native-executor`, `antigravity-native-executor-read-only`, `antigravity-native-planner`, `antigravity-native-reviewer`, and `antigravity-native-discovery`
+- Antigravity env vars are `CODE_AGENT_ANTIGRAVITY_CLI_BIN`, `CODE_AGENT_ANTIGRAVITY_MODEL`, `CODE_AGENT_ANTIGRAVITY_TIMEOUT_SECONDS`, `CODE_AGENT_ANTIGRAVITY_AUTH_DIR`, `CODE_AGENT_ANTIGRAVITY_NATIVE_SANDBOX_ENABLED`, `CODE_AGENT_ANTIGRAVITY_TOOL_PERMISSION`, and `CODE_AGENT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY`
+- temporary `gemini` compatibility aliases are allowed only as a migration bridge, with warnings and tests
+
+Manual-derived constraints:
+
+- `agy` one-shot automation uses prompt-as-argv (`agy -p "<prompt>"`, also exposed locally as `--print`); command logging must redact prompt text because it is no longer stdin-only
+- Antigravity stores preferences and permissions in `~/.gemini/antigravity-cli/settings.json`, including `toolPermission`, `artifactReviewPolicy`, and `enableTerminalSandbox`
+- supported permission modes include `request-review`, `proceed-in-sandbox`, `always-proceed`, and `strict`; the platform must map worker profiles to these modes explicitly instead of relying on interactive prompts
+- Antigravity auth uses the operating-system secure keyring (Apple Keychain, Linux Secret Service over DBus, or Windows Credential Manager), so `CODE_AGENT_ANTIGRAVITY_AUTH_DIR` must not imply host keychain copying or secret scraping
+- Antigravity parses workspace `AGENTS.md`; migration docs must also cover legacy plugin import, skills paths, and MCP config movement into `.agents/`
+- desktop app installation can share settings with the CLI, but it does not by itself prove auth is available inside a Linux Docker worker
+
+Reference manuals:
+
+- [Antigravity CLI overview](https://antigravity.google/docs/cli-overview)
+- [Antigravity CLI reference](https://antigravity.google/docs/cli-reference)
+- [Antigravity CLI install](https://antigravity.google/docs/cli-install)
+- [Antigravity CLI getting started](https://antigravity.google/docs/cli-getting-started)
+- [Antigravity CLI troubleshooting](https://antigravity.google/docs/cli-troubleshooting)
+- [Antigravity CLI best practices](https://antigravity.google/docs/cli-best-practices)
+- [Antigravity CLI sandbox](https://antigravity.google/docs/cli-sandbox)
+- [Antigravity CLI permissions](https://antigravity.google/docs/cli-permissions)
+- [Gemini CLI to Antigravity migration](https://antigravity.google/docs/gcli-migration)
+
+Task list:
+
+| ID | Priority | Description | Implementation notes | Acceptance criteria | Likely touched files | Risks / dependencies | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| T-205 | P0 | Rename canonical worker identity from Gemini to Antigravity. | Add `antigravity` worker type, profile names, API/dashboard labels, and DB enum/check-constraint migration from persisted `gemini` rows to `antigravity`. Keep temporary `gemini` aliases only where needed for migration. | Existing `gemini` task/run rows upgrade to `antigravity`; new submissions accept `antigravity`; deprecated `gemini` inputs warn or map predictably during the bridge period. | `db/enums.py`, `workers/base.py`, `db/migrations/versions/*`, routing/API tests | Broad type/name churn can break replay, snapshots, and dashboards if aliases are inconsistent. | Not Started |
+| T-206 | P0 | Add Antigravity native CLI adapter. | Build an adapter around `agy -p` / `agy --print <prompt> --print-timeout ... --model ... --log-file ...`; generate or mount the per-run Antigravity settings needed for `toolPermission`, `artifactReviewPolicy`, and `enableTerminalSandbox`; map stdout, JSON responses, provider/auth errors, timeout, diff, and changed files into `WorkerResult`. | Fake `agy` tests cover success, JSON output, timeout, auth/provider failure, permission prompt/denial, no-change success, settings generation, and changed-file collection. | `workers/*antigravity*`, `apps/api/task_service_factory.py`, worker tests | `agy -p` / `--print` consumes the prompt as an argument and differs from Gemini CLI flags, permissions, and auth behavior; it must not be treated as a drop-in binary rename. | Not Started |
+| T-207 | P0 | Support prompt-as-argv in native runner. | Extend native-agent execution so adapters can place the prompt in argv while existing CLIs keep stdin prompt delivery. Redact prompt text from logged/sanitized command strings. | Native runner tests prove stdin remains default, `agy` prompt-in-argv works, command logs do not expose full prompt/secrets, and timeouts still collect artifacts. | `workers/native_agent_runner.py`, `workers/native_agent_models.py`, runner tests | Long prompts can hit argv limits; adapter must fail clearly or use a bounded strategy. | Not Started |
+| T-208 | P0 | Add Docker Antigravity support. | Install Antigravity CLI in the worker image using the official CLI install path and prove auth works inside compose through official Antigravity keyring mechanisms. For Linux containers, validate Secret Service/DBus requirements or document the official blocker. Do not invent keychain bypasses or scrape host secrets. | Docker smoke passes for `agy models` and `agy --print 'Reply with OK only'`; permission settings are deterministic for non-interactive runs; if official non-interactive auth is unavailable, the blocker is documented and the milestone remains incomplete. | `Dockerfile.worker`, `docker-compose.yml`, `.env.example`, Docker/e2e scripts | Antigravity desktop/keychain auth may not transfer safely into Linux containers, and headless DBus/keyring support may require an official container-friendly auth path. | Not Started |
+| T-209 | P1 | Update e2e QA and operator docs. | Replace Gemini defaults and auth guidance with Antigravity guidance in e2e scripts, README, runbook, compose docs, and env examples. Include `agy` install/PATH guidance, keyring/DBus troubleshooting, permission presets, `AGENTS.md` context behavior, legacy plugin import, skills path migration, and MCP config relocation. | Local e2e instructions use `worker_override=antigravity`; stale `gemini auth login` guidance is removed or marked legacy; operator docs explain how to diagnose `agy: command not found`, locked keyrings, and permission-prompt timeouts. | `.agents/skills/e2e-qa/scripts/*`, `README.md`, `docs/runbook.md`, `.env.example` | Docs can drift if code-level aliases remain during the migration bridge. | Not Started |
+| T-210 | P1 | Update dashboard/API worker labels. | Update operator-visible worker/profile labels and frontend/API contract fixtures to show `antigravity` names. | Dashboard and API tests cover `worker_override=antigravity`, Antigravity profiles, and legacy alias display behavior. | `dashboard/src/*`, `apps/api/routes/*`, API/dashboard tests | UI/API compatibility must be explicit for existing saved tasks and replays. | Not Started |
+| T-211 | P1 | Remove Gemini CLI defaults after Antigravity e2e passes. | Drop Gemini CLI from the default worker image/config and leave only documented temporary aliases if still needed. | Default compose image uses Antigravity, full webhook e2e passes with `antigravity`, and Gemini CLI is no longer required for local happy path. | `Dockerfile.worker`, `docker-compose.yml`, docs/tests | Removing Gemini too early can break enterprise/API-key users before the migration bridge is verified. | Not Started |
+
+Testing and acceptance:
+
+- unit tests cover worker enum/profile validation, service factory wiring, Antigravity command construction, env allowlist, and native-runner prompt delivery mode
+- migration integration tests prove existing `gemini` task/run rows upgrade to `antigravity` and constraints accept the new canonical value set
+- fake `agy` tests cover success, JSON output, timeout, auth/provider failure, permission prompt/denial, settings generation, and changed-file collection
+- Docker smoke covers `agy models` and `agy --print 'Reply with OK only'` inside the worker container
+- full webhook e2e passes with `worker_override=antigravity` after Docker auth is proven
+- dashboard/API contract tests cover worker override and profile names
+
+Assumptions:
+
+- Milestone 19 remains active; Milestone 19.5 is the migration bridge before Phase 3
+- existing Milestones 20 and 21 keep their numbers
+- Docker support is required for the milestone to complete, but auth must use official Antigravity mechanisms only
+- if official Antigravity CLI cannot authenticate non-interactively in Docker, T-208 documents the blocker and the milestone remains incomplete rather than shipping an unsafe workaround
+
 ## Milestone 20: Operational Self-Awareness
 
 Goal:
@@ -366,6 +438,7 @@ Phase 2:
 
 1. Milestone 18
 2. Milestone 19
+3. Milestone 19.5
 
 Phase 3:
 

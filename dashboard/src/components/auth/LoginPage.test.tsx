@@ -55,6 +55,7 @@ describe('LoginPage', () => {
     });
 
     expect(await screen.findByText('Invalid secret')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Invalid secret');
   });
 
   it('handles generic login failure', async () => {

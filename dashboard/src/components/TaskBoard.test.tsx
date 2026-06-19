@@ -106,7 +106,7 @@ describe('TaskBoard', () => {
   });
 
   it('handles refresh button', () => {
-    render(
+    const { container } = render(
       <TaskBoard
         tasks={mockTasks}
         loading={false}
@@ -117,8 +117,44 @@ describe('TaskBoard', () => {
     );
 
     const refreshButton = screen.getByLabelText('Refresh tasks');
+    expect(container.querySelector('.board-header')).toContainElement(screen.getByText('Task Status Board'));
+    expect(container.querySelector('.board-actions')).toContainElement(refreshButton);
     fireEvent.click(refreshButton);
     expect(mockRefetch).toHaveBeenCalled();
+  });
+
+  it('keeps long task text and metadata in constrained card regions', () => {
+    const longToken = `edge-${'x'.repeat(96)}`;
+    const longTask = {
+      task_id: 'long-task',
+      task_text: `Investigate ${longToken}`,
+      status: TaskStatus.PENDING,
+      created_at: new Date().toISOString(),
+      repo_url: `https://github.com/natanayalo/${longToken}.git`,
+      branch: `feature/${longToken}`,
+      latest_run_worker: `codex-${longToken}`,
+      approval_status: 'pending',
+      approval_type: 'shell',
+      approval_reason: `Needs permission for ${longToken}`,
+    } as unknown as import('../types/task').TaskSummarySnapshot;
+
+    const { container } = render(
+      <TaskBoard
+        tasks={[longTask]}
+        loading={false}
+        isFetching={false}
+        error={null}
+        refetch={mockRefetch}
+      />
+    );
+
+    expect(screen.getByText(`Investigate ${longToken}`)).toHaveClass('task-title-text');
+    expect(container.querySelector('.task-board')).toBeInTheDocument();
+    expect(container.querySelector('.task-meta span')).toHaveTextContent(`codex-${longToken}`);
+    expect(screen.getByText(`Needs permission for ${longToken}`)).toHaveClass(
+      'approval-reason',
+      'truncate'
+    );
   });
 
   it('sorts tasks by date in columns', () => {

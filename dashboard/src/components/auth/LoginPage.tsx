@@ -133,12 +133,22 @@ export const LoginPage: React.FC = () => {
           display: flex;
           align-items: center;
           gap: 0.5rem;
+          min-width: 0;
           background: rgba(239, 68, 68, 0.1);
           border: 1px solid rgba(239, 68, 68, 0.2);
           color: #ef4444;
           padding: 0.75rem;
           border-radius: 0.5rem;
           font-size: 0.875rem;
+        }
+
+        .error-message svg {
+          flex-shrink: 0;
+        }
+
+        .error-message span {
+          min-width: 0;
+          overflow-wrap: anywhere;
         }
 
         .animate-spin {
@@ -175,7 +185,7 @@ export const LoginPage: React.FC = () => {
           </div>
 
           {error && (
-            <div className="error-message">
+            <div className="error-message" role="alert">
               <ShieldAlert size={18} />
               <span>{error}</span>
             </div>
