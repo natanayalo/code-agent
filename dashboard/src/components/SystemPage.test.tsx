@@ -101,6 +101,54 @@ describe('SystemPage', () => {
     });
   });
 
+  it('disables retry buttons while refetching failed requests', async () => {
+    let resolveToolsRetry: (value: []) => void = () => {};
+    let resolveSandboxRetry: (value: { default_image: string; workspace_root: string }) => void =
+      () => {};
+
+    vi.mocked(api.getSystemTools)
+      .mockRejectedValueOnce(new Error('Failed to load tools'))
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          resolveToolsRetry = resolve;
+        })
+      );
+    vi.mocked(api.getSandboxStatus)
+      .mockRejectedValueOnce(new Error('Failed to load sandbox'))
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          resolveSandboxRetry = resolve;
+        })
+      );
+
+    renderWithProviders(<SystemPage />);
+
+    const sandboxRetry = await screen.findByRole('button', { name: 'Retry Sandbox' });
+    const toolsRetry = screen.getByRole('button', { name: 'Retry Tools' });
+
+    fireEvent.click(sandboxRetry);
+    fireEvent.click(toolsRetry);
+
+    await waitFor(() => {
+      expect(api.getSandboxStatus).toHaveBeenCalledTimes(2);
+      expect(api.getSystemTools).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      const retryingButtons = screen.getAllByRole('button', { name: 'Retrying...' });
+      expect(retryingButtons).toHaveLength(2);
+      expect(retryingButtons[0]).toBeDisabled();
+      expect(retryingButtons[1]).toBeDisabled();
+    });
+
+    resolveSandboxRetry({ default_image: 'python:3.12-slim', workspace_root: '/tmp/workspaces' });
+    resolveToolsRetry([]);
+
+    await waitFor(() => {
+      expect(screen.getByText('No tools registered.')).toBeInTheDocument();
+      expect(screen.getByText('python:3.12-slim')).toBeInTheDocument();
+    });
+  });
+
   it('renders empty tool list gracefully', async () => {
     vi.mocked(api.getSystemTools).mockResolvedValue([]);
     vi.mocked(api.getSandboxStatus).mockResolvedValue({

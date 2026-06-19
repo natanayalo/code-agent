@@ -7,9 +7,12 @@ import { getPermissionStyle, getNetworkStyle, getCategoryThemeClass } from '../u
 import { formatLabel } from '../utils/formatters';
 
 export function SystemPage() {
+  const [isRetryingTools, setIsRetryingTools] = React.useState(false);
+  const [isRetryingSandbox, setIsRetryingSandbox] = React.useState(false);
   const {
     data: tools,
     isLoading: toolsLoading,
+    isFetching: isFetchingTools,
     error: toolsError,
     refetch: refetchTools,
   } = useQuery({
@@ -20,12 +23,42 @@ export function SystemPage() {
   const {
     data: sandbox,
     isLoading: sandboxLoading,
+    isFetching: isFetchingSandbox,
     error: sandboxError,
     refetch: refetchSandbox,
   } = useQuery({
     queryKey: ['system-sandbox'],
     queryFn: () => api.getSandboxStatus(),
   });
+
+  const toolsRetryActive = isRetryingTools || isFetchingTools;
+  const sandboxRetryActive = isRetryingSandbox || isFetchingSandbox;
+  const showToolsError = Boolean(toolsError) || isRetryingTools;
+  const showSandboxError = Boolean(sandboxError) || isRetryingSandbox;
+
+  const handleToolsRetry = async () => {
+    if (toolsRetryActive) {
+      return;
+    }
+    setIsRetryingTools(true);
+    try {
+      await refetchTools();
+    } finally {
+      setIsRetryingTools(false);
+    }
+  };
+
+  const handleSandboxRetry = async () => {
+    if (sandboxRetryActive) {
+      return;
+    }
+    setIsRetryingSandbox(true);
+    try {
+      await refetchSandbox();
+    } finally {
+      setIsRetryingSandbox(false);
+    }
+  };
 
   return (
     <DashboardLayout>
@@ -46,9 +79,7 @@ export function SystemPage() {
               <HardDrive size={20} color="var(--color-accent-primary)" />
               Sandbox Status
             </h3>
-            {sandboxLoading ? (
-              <div className="loading-spinner">Loading sandbox status...</div>
-            ) : sandboxError ? (
+            {showSandboxError ? (
               <div className="error-banner system-error-banner" role="alert">
                 <span>
                   <AlertTriangle size={16} /> Failed to load sandbox status.
@@ -56,11 +87,14 @@ export function SystemPage() {
                 <button
                   type="button"
                   className="retry-button"
-                  onClick={() => refetchSandbox()}
+                  onClick={() => void handleSandboxRetry()}
+                  disabled={sandboxRetryActive}
                 >
-                  Retry Sandbox
+                  {sandboxRetryActive ? 'Retrying...' : 'Retry Sandbox'}
                 </button>
               </div>
+            ) : sandboxLoading ? (
+              <div className="loading-spinner">Loading sandbox status...</div>
             ) : sandbox ? (
               <dl className="key-value-list">
                 <dt className="key-value-dt">Default Image</dt>
@@ -77,9 +111,7 @@ export function SystemPage() {
               <Wrench size={20} color="var(--color-accent-primary)" />
               Tool Inventory
             </h3>
-            {toolsLoading ? (
-              <div className="loading-spinner">Loading tool inventory...</div>
-            ) : toolsError ? (
+            {showToolsError ? (
               <div className="error-banner system-error-banner" role="alert">
                 <span>
                   <AlertTriangle size={16} /> Failed to load tool inventory.
@@ -87,11 +119,14 @@ export function SystemPage() {
                 <button
                   type="button"
                   className="retry-button"
-                  onClick={() => refetchTools()}
+                  onClick={() => void handleToolsRetry()}
+                  disabled={toolsRetryActive}
                 >
-                  Retry Tools
+                  {toolsRetryActive ? 'Retrying...' : 'Retry Tools'}
                 </button>
               </div>
+            ) : toolsLoading ? (
+              <div className="loading-spinner">Loading tool inventory...</div>
             ) : tools && tools.length > 0 ? (
               <div className="inventory-table-container">
                 <table className="inventory-table" aria-label="Tool Inventory">
