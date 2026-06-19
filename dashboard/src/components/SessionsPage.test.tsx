@@ -238,16 +238,23 @@ describe('SessionsPage', () => {
   });
 
   it('handles sessions with missing or null IDs and optional fields', async () => {
+    const longToken = `edge-${'x'.repeat(72)}`;
     const mockSessions = [
       {
         session_id: 's-null-task',
         user_id: 'u-long-identifier-that-should-be-truncated-in-the-ui-to-prevent-layout-issues',
-        channel: 'http',
+        channel: `http-${longToken}`,
         external_thread_id: 'thread-long-identifier-that-should-also-be-truncated',
         active_task_id: null,
         status: SessionStatus.CLOSED,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        working_context: {
+          active_goal: `Keep ${longToken} contained in the session card`,
+          identified_risks: { [longToken]: 'risk entry with long key' },
+          decisions_made: { [longToken]: 'decision entry with long key' },
+          files_touched: [`dashboard/src/${longToken}.tsx`],
+        },
       },
     ];
 
@@ -267,6 +274,8 @@ describe('SessionsPage', () => {
     // Verify status class mapping (closed -> success)
     const badge = screen.getByText('closed');
     expect(badge.className).toContain('status-success');
+    expect(screen.getByText(`http-${longToken}`)).toBeInTheDocument();
+    expect(screen.getAllByText(/edge-/i)[0].closest('.session-card')).toBeInTheDocument();
   });
 
   it('maps "failed" session status to "error" class and handles unknown status', async () => {

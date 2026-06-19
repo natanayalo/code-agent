@@ -55,11 +55,14 @@ describe('KnowledgeBasePage', () => {
   });
 
   it('renders personal and project memory entries', async () => {
+    const longToken = `edge-${'x'.repeat(72)}`;
+    const personalKey = `communication_style_${longToken}`;
+    const projectKey = `build_command_${longToken}`;
     vi.mocked(api.listPersonalMemory).mockResolvedValue([
       {
         memory_id: 'pm-1',
         user_id: 'user-1',
-        memory_key: 'communication_style',
+        memory_key: personalKey,
         value: { style: 'concise' },
         confidence: 0.8,
         scope: 'global',
@@ -73,8 +76,8 @@ describe('KnowledgeBasePage', () => {
     vi.mocked(api.listProjectMemory).mockResolvedValue([
       {
         memory_id: 'pj-1',
-        repo_url: 'https://github.com/natanayalo/code-agent',
-        memory_key: 'build_command',
+        repo_url: `https://github.com/natanayalo/${longToken}`,
+        memory_key: projectKey,
         value: { cmd: '.venv/bin/pytest' },
         confidence: 1.0,
         scope: 'repo',
@@ -90,8 +93,9 @@ describe('KnowledgeBasePage', () => {
 
     expect(await screen.findByRole('heading', { name: /Knowledge Base/i })).toBeInTheDocument();
     fireEvent.change(await screen.findByLabelText('Personal User ID'), { target: { value: 'user-1' } });
-    expect(await screen.findByText('communication_style')).toBeInTheDocument();
-    expect(await screen.findByText('build_command')).toBeInTheDocument();
+    expect(await screen.findByText(personalKey)).toBeInTheDocument();
+    expect(await screen.findByText(projectKey)).toBeInTheDocument();
+    expect(screen.getByText(projectKey).closest('.knowledge-entry-header')).toBeInTheDocument();
   });
 
   it('submits personal memory upsert payload', async () => {
@@ -204,12 +208,14 @@ describe('KnowledgeBasePage', () => {
   });
 
   it('shows project-section load error and retries project query', async () => {
+    const longError = `project failed ${'x'.repeat(96)}`;
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
-    vi.mocked(api.listProjectMemory).mockRejectedValue(new Error('project failed'));
+    vi.mocked(api.listProjectMemory).mockRejectedValue(new Error(longError));
 
     renderKnowledgeBasePage();
 
     expect(await screen.findByText('Error loading project memory')).toBeInTheDocument();
+    expect(screen.getByText(longError).closest('.error-container')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Retry Project Memory' }));
 
     await waitFor(() => {

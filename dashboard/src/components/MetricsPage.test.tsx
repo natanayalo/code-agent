@@ -42,12 +42,14 @@ describe('MetricsPage', () => {
   });
 
   it('renders metrics when data is loaded', async () => {
+    const longStatus = `edge_case_status_${'x'.repeat(64)}`;
+    const longWorker = `codex-worker-${'x'.repeat(64)}`;
     const mockMetrics = {
       total_tasks: 100,
       retried_tasks: 10,
       retry_rate: 0.1,
-      status_counts: { completed: 80, failed: 20 },
-      worker_usage: { gemini: 60, codex: 40 },
+      status_counts: { completed: 80, failed: 20, [longStatus]: 1 },
+      worker_usage: { gemini: 60, codex: 40, [longWorker]: 1 },
       avg_duration_seconds: 45.5,
       success_rate: 0.8,
     };
@@ -72,8 +74,12 @@ describe('MetricsPage', () => {
     expect(screen.getByText('80')).toBeInTheDocument();
     expect(screen.getByText(/gemini/i)).toBeInTheDocument();
     expect(screen.getByText(/60 runs/i)).toBeInTheDocument();
-    expect(screen.getByText(/codex/i)).toBeInTheDocument();
+    expect(screen.getByText('codex')).toBeInTheDocument();
     expect(screen.getByText(/40 runs/i)).toBeInTheDocument();
+    expect(screen.getByText(longStatus.replace(/_/g, ' '))).toHaveClass('status-label');
+    expect(screen.getByText(longWorker)).toHaveClass('worker-label');
+    expect(document.querySelector('.metrics-details-grid')).toBeInTheDocument();
+    expect(document.querySelectorAll('.metric-detail-card')).toHaveLength(2);
   });
 
   it('renders low success rate with failure color', async () => {

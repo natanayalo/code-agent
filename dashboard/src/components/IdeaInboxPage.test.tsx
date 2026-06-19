@@ -101,8 +101,11 @@ describe('IdeaInboxPage', () => {
   });
 
   it('renders scout proposals and handles accept', async () => {
+    const longToken = `edge-${'x'.repeat(72)}`;
+    const longTitle = `Idea ${longToken}`;
+    const longSummary = `Summary contains ${longToken}`;
     vi.mocked(api.listProposals).mockResolvedValue([
-      createProposal({ proposal_id: 'p1', title: 'Idea 1', summary: 'Summary 1' }),
+      createProposal({ proposal_id: 'p1', title: longTitle, summary: longSummary }),
     ]);
     vi.mocked(api.acceptProposal).mockResolvedValue({
       task_id: 't1',
@@ -112,8 +115,8 @@ describe('IdeaInboxPage', () => {
     renderWithProviders(<IdeaInboxPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Idea 1')).toBeInTheDocument();
-      expect(screen.getByText('Summary 1')).toBeInTheDocument();
+      expect(screen.getByText(longTitle)).toHaveClass('memory-key');
+      expect(screen.getByText(longSummary)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByText('Accept Idea'));

@@ -7,19 +7,29 @@ import { getPermissionStyle, getNetworkStyle, getCategoryThemeClass } from '../u
 import { formatLabel } from '../utils/formatters';
 
 export function SystemPage() {
-  const { data: tools, isLoading: toolsLoading, error: toolsError } = useQuery({
+  const {
+    data: tools,
+    isLoading: toolsLoading,
+    error: toolsError,
+    refetch: refetchTools,
+  } = useQuery({
     queryKey: ['system-tools'],
     queryFn: () => api.getSystemTools(),
   });
 
-  const { data: sandbox, isLoading: sandboxLoading, error: sandboxError } = useQuery({
+  const {
+    data: sandbox,
+    isLoading: sandboxLoading,
+    error: sandboxError,
+    refetch: refetchSandbox,
+  } = useQuery({
     queryKey: ['system-sandbox'],
     queryFn: () => api.getSandboxStatus(),
   });
 
   return (
     <DashboardLayout>
-      <div className="dashboard-content-inner">
+      <div className="system-page-content">
         <div className="panel-header" style={{ marginBottom: '1.5rem' }}>
           <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--color-text-primary)' }}>
             <Server size={24} />
@@ -39,8 +49,17 @@ export function SystemPage() {
             {sandboxLoading ? (
               <div className="loading-spinner">Loading sandbox status...</div>
             ) : sandboxError ? (
-              <div className="error-message">
-                <AlertTriangle size={16} /> Failed to load sandbox status.
+              <div className="error-banner system-error-banner" role="alert">
+                <span>
+                  <AlertTriangle size={16} /> Failed to load sandbox status.
+                </span>
+                <button
+                  type="button"
+                  className="retry-button"
+                  onClick={() => refetchSandbox()}
+                >
+                  Retry Sandbox
+                </button>
               </div>
             ) : sandbox ? (
               <dl className="key-value-list">
@@ -61,8 +80,17 @@ export function SystemPage() {
             {toolsLoading ? (
               <div className="loading-spinner">Loading tool inventory...</div>
             ) : toolsError ? (
-              <div className="error-message">
-                <AlertTriangle size={16} /> Failed to load tool inventory.
+              <div className="error-banner system-error-banner" role="alert">
+                <span>
+                  <AlertTriangle size={16} /> Failed to load tool inventory.
+                </span>
+                <button
+                  type="button"
+                  className="retry-button"
+                  onClick={() => refetchTools()}
+                >
+                  Retry Tools
+                </button>
               </div>
             ) : tools && tools.length > 0 ? (
               <div className="inventory-table-container">

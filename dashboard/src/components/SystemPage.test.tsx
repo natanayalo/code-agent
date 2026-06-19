@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import { SystemPage } from './SystemPage';
@@ -60,7 +60,7 @@ describe('SystemPage', () => {
       workspace_root: '/tmp/workspaces'
     });
 
-    renderWithProviders(<SystemPage />);
+    const { container } = renderWithProviders(<SystemPage />);
 
     await waitFor(() => {
       expect(screen.getByText('python:3.12-slim')).toBeInTheDocument();
@@ -71,6 +71,9 @@ describe('SystemPage', () => {
     // Verify table structure
     expect(screen.getByRole('table', { name: 'Tool Inventory' })).toBeInTheDocument();
     expect(screen.getByText('Shell')).toBeInTheDocument();
+    expect(container.querySelector('.system-page-content')).toBeInTheDocument();
+    expect(container.querySelector('.system-section-container')).toBeInTheDocument();
+    expect(container.querySelector('.dashboard-content-inner')).not.toBeInTheDocument();
   });
 
   it('renders error states when API fails', async () => {
@@ -82,6 +85,19 @@ describe('SystemPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Failed to load sandbox status.')).toBeInTheDocument();
       expect(screen.getByText('Failed to load tool inventory.')).toBeInTheDocument();
+    });
+
+    const alerts = screen.getAllByRole('alert');
+    expect(alerts).toHaveLength(2);
+    expect(alerts[0]).toHaveClass('error-banner', 'system-error-banner');
+    expect(alerts[1]).toHaveClass('error-banner', 'system-error-banner');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Sandbox' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Tools' }));
+
+    await waitFor(() => {
+      expect(api.getSandboxStatus).toHaveBeenCalledTimes(2);
+      expect(api.getSystemTools).toHaveBeenCalledTimes(2);
     });
   });
 
