@@ -12,7 +12,7 @@ from tests.unit.orchestrator_brain_support import _state, _StaticWorker
 from workers import WorkerResult
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_suggest_task_spec_and_route_parses_unified_payload() -> None:
     worker = _StaticWorker(
         WorkerResult(
@@ -43,7 +43,7 @@ async def test_suggest_task_spec_and_route_parses_unified_payload() -> None:
     assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_suggest_task_spec_and_route_ignores_retired_worker_names() -> None:
     worker = _StaticWorker(
         WorkerResult(
@@ -76,7 +76,7 @@ async def test_suggest_task_spec_and_route_ignores_retired_worker_names() -> Non
     assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_suggest_task_spec_and_route_salvages_route_when_task_type_invalid() -> None:
     worker = _StaticWorker(
         WorkerResult(
@@ -108,7 +108,7 @@ async def test_suggest_task_spec_and_route_salvages_route_when_task_type_invalid
     assert suggestion.suggested_task_type is None
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_suggest_task_spec_and_route_unwraps_json_payload_wrapper() -> None:
     worker = _StaticWorker(
         WorkerResult(
@@ -145,7 +145,7 @@ async def test_suggest_task_spec_and_route_unwraps_json_payload_wrapper() -> Non
     assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_suggest_task_spec_and_route_falls_back_from_stats_json_payload_to_summary() -> None:
     worker = _StaticWorker(
         WorkerResult(
@@ -187,7 +187,7 @@ async def test_suggest_task_spec_and_route_falls_back_from_stats_json_payload_to
     assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_suggest_task_spec_and_route_prefers_fenced_unified_json_over_stats_blob() -> None:
     worker = _StaticWorker(
         WorkerResult(
@@ -223,7 +223,7 @@ async def test_suggest_task_spec_and_route_prefers_fenced_unified_json_over_stat
     assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_suggest_task_spec_and_route_uses_empty_secrets() -> None:
     worker = _StaticWorker(
         WorkerResult(
@@ -253,7 +253,7 @@ async def test_suggest_task_spec_and_route_uses_empty_secrets() -> None:
     assert worker.requests[-1].secrets == {}
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_suggest_task_spec_and_route_uses_default_brain_timeout_budget() -> None:
     worker = _StaticWorker(
         WorkerResult(
@@ -282,7 +282,7 @@ async def test_suggest_task_spec_and_route_uses_default_brain_timeout_budget() -
     assert worker.requests[-1].budget["worker_timeout_seconds"] == 45
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_suggest_task_spec_and_route_records_recovered_planner_fallback() -> None:
     primary = _StaticWorker(
         WorkerResult(status="error", summary="Native agent command timed out after 120s.")
