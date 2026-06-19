@@ -71,7 +71,13 @@ def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> bool:
     if path.exists():
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except OSError:
+        logger.warning(
+            "Failed to write migrated Antigravity JSON config", extra={"path": str(path)}
+        )
+        return False
     return True
 
 
@@ -79,7 +85,14 @@ def _copytree_if_missing(source: Path, target: Path) -> bool:
     if not source.exists() or target.exists():
         return False
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, target)
+    try:
+        shutil.copytree(source, target)
+    except OSError:
+        logger.warning(
+            "Failed to copy migrated Antigravity directory",
+            extra={"source": str(source), "target": str(target)},
+        )
+        return False
     return True
 
 
@@ -87,7 +100,14 @@ def _copy_file_if_missing(source: Path, target: Path) -> bool:
     if not source.exists() or target.exists():
         return False
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
+    try:
+        shutil.copy2(source, target)
+    except OSError:
+        logger.warning(
+            "Failed to copy migrated Antigravity file",
+            extra={"source": str(source), "target": str(target)},
+        )
+        return False
     return True
 
 

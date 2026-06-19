@@ -187,6 +187,39 @@ def test_antigravity_workspace_migration_replaces_symlink_and_copies_legacy_conf
     assert "replaced_symlinked_gemini_home" in metadata["migration_actions"]
 
 
+def test_antigravity_workspace_migration_copy_errors_are_best_effort(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = _make_workspace(tmp_path / "workspace")
+    legacy_gemini_home = tmp_path / "legacy-gemini"
+    (legacy_gemini_home / "skills" / "global-skill").mkdir(parents=True)
+    agent_home = workspace.workspace_path / ".agent_home"
+    agent_home.mkdir()
+    (agent_home / ".gemini").symlink_to(legacy_gemini_home, target_is_directory=True)
+
+    def _raise_copy_error(*_args, **_kwargs):
+        raise OSError("blocked legacy skills")
+
+    monkeypatch.setattr(
+        "workers.antigravity_cli_worker_native.shutil.copytree",
+        _raise_copy_error,
+    )
+
+    command, _, metadata = build_antigravity_native_command(
+        adapter=AntigravityCliRuntimeAdapter(executable="/opt/bin/agy"),
+        workspace=workspace,
+        request=WorkerRequest(repo_url="https://example.com/repo.git", task_text="run"),
+        prompt="run",
+        runtime_settings=CliRuntimeSettings(),
+        native_sandbox_enabled=True,
+    )
+
+    assert command[:2] == ["/opt/bin/agy", "-p"]
+    assert "copied_global_skills" not in metadata["migration_actions"]
+    assert "replaced_symlinked_gemini_home" in metadata["migration_actions"]
+
+
 def test_antigravity_worker_read_only_uses_strict_tool_permission(tmp_path: Path) -> None:
     worker, workspace = _make_worker(tmp_path, tool_permission="always-proceed")
 
