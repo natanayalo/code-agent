@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: rename worker identity to antigravity ([#252](https://github.com/natanayalo/code-agent/pull/252))
+
 - Feat: add dashboard trigger actions ([#250](https://github.com/natanayalo/code-agent/pull/250))
 
 - Feat: add reflection improvement review queue ([#249](https://github.com/natanayalo/code-agent/pull/249))
