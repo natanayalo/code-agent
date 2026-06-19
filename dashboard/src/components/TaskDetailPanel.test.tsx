@@ -139,6 +139,7 @@ describe('TaskDetailPanel', () => {
     const task = buildTask({
       timeline: [
         {
+          id: 'timeline-worker-selected',
           event_type: 'worker_selected',
           attempt_number: 0,
           sequence_number: 1,
@@ -163,6 +164,7 @@ describe('TaskDetailPanel', () => {
         verifier_outcome: { status: 'passed' },
         commands_run: [
           {
+            id: 'command-done',
             command: "printf 'done\\n' > note.txt",
             exit_code: 0,
             duration_seconds: 0.1,
@@ -174,6 +176,7 @@ describe('TaskDetailPanel', () => {
         files_changed: ['note.txt'],
         artifact_index: [
           {
+            id: 'artifact-index-workspace',
             name: 'workspace',
             uri: '/tmp/workspace-task-1',
             artifact_type: 'workspace',
@@ -260,6 +263,7 @@ describe('TaskDetailPanel', () => {
     const task = buildTask({
       timeline: [
         {
+          id: 'timeline-worker-completed',
           event_type: 'worker_completed',
           attempt_number: 0,
           sequence_number: 10,
@@ -393,6 +397,7 @@ describe('TaskDetailPanel', () => {
       task_spec: null,
       timeline: [
         {
+          id: 'timeline-circular-payload',
           event_type: 'worker_selected',
           attempt_number: 2,
           sequence_number: 7,
@@ -404,16 +409,19 @@ describe('TaskDetailPanel', () => {
       latest_run: buildLatestRun({
         commands_run: [
           {
+            id: 'command-timeout',
             command: 'sleep 2',
             exit_code: 124,
             timed_out: true,
             duration_seconds: 2,
           },
           {
+            id: 'command-no-duration',
             command: 'echo no-duration',
             exit_code: 0,
           },
           {
+            id: 'command-bad-duration',
             command: 'echo bad-duration',
             exit_code: 0,
             duration_seconds: Number.NaN,
@@ -463,6 +471,7 @@ describe('TaskDetailPanel', () => {
       },
       timeline: [
         {
+          id: 'timeline-z-event',
           event_type: 'z_event',
           attempt_number: 0,
           sequence_number: 1,
@@ -471,6 +480,7 @@ describe('TaskDetailPanel', () => {
           created_at: '',
         },
         {
+          id: 'timeline-a-event',
           event_type: 'a_event',
           attempt_number: 0,
           sequence_number: 1,
@@ -482,11 +492,12 @@ describe('TaskDetailPanel', () => {
       latest_run: buildLatestRun({
         commands_run: [
           {
+            id: 'command-sparse',
             exit_code: 0,
           },
         ],
         artifact_index: [
-          {},
+          { id: 'artifact-index-sparse' },
         ],
       }),
     });
@@ -509,6 +520,7 @@ describe('TaskDetailPanel', () => {
     const task = buildTask({
       timeline: [
         {
+          id: 'timeline-third',
           event_type: 'worker_selected',
           attempt_number: 0,
           sequence_number: 2,
@@ -517,6 +529,7 @@ describe('TaskDetailPanel', () => {
           created_at: '2026-04-28T00:03:00.000Z',
         },
         {
+          id: 'timeline-second',
           event_type: 'task_ingested',
           attempt_number: 0,
           sequence_number: 1,
@@ -525,6 +538,7 @@ describe('TaskDetailPanel', () => {
           created_at: '2026-04-28T00:02:00.000Z',
         },
         {
+          id: 'timeline-first',
           event_type: 'task_ingested',
           attempt_number: 0,
           sequence_number: 1,

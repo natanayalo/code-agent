@@ -125,15 +125,21 @@ describe('TaskBoard', () => {
     const sameStatusTasks = [
       {
         task_id: 'old',
+        session_id: 'session-old',
         task_text: 'Old Task',
         status: TaskStatus.COMPLETED,
+        priority: 0,
         created_at: '2024-01-01T10:00:00Z',
+        updated_at: '2024-01-01T10:00:00Z',
       },
       {
         task_id: 'new',
+        session_id: 'session-new',
         task_text: 'New Task',
         status: TaskStatus.COMPLETED,
+        priority: 0,
         created_at: '2024-01-01T11:00:00Z',
+        updated_at: '2024-01-01T11:00:00Z',
       },
     ];
 
