@@ -17,7 +17,7 @@ from apps.observability import (
     set_current_span_attribute,
     set_span_status_from_outcome,
 )
-from db.enums import WorkerRuntimeMode
+from db.enums import WorkerRuntimeMode, coerce_worker_type
 from orchestrator.constants import RISK_ORDER
 from orchestrator.improvement_suggestions import (
     ImprovementSuggestionScoringContext,
@@ -221,11 +221,10 @@ def _coerce_worker_type(value: object) -> WorkerType | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip().lower()
-    if normalized == "gemini":
-        return "antigravity"
-    if normalized in {"codex", "antigravity", "openrouter"}:
-        return cast(WorkerType, normalized)
-    return None
+    try:
+        return cast(WorkerType, coerce_worker_type(normalized))
+    except ValueError:
+        return None
 
 
 def _coerce_literal_string(value: object, allowed: tuple[str, ...]) -> str | None:

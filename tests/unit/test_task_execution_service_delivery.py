@@ -319,6 +319,21 @@ def test_load_submission_for_task_restores_execution_overrides_and_budget() -> N
     assert submission.budget == {"max_iterations": 5}
 
 
+def test_execution_boundary_models_normalize_legacy_profile_overrides() -> None:
+    """Task execution boundary models should canonicalize legacy Gemini profile names."""
+
+    submission = execution_module.TaskSubmission(
+        task_text="Run task",
+        worker_profile_override=" gemini-native-executor ",
+    )
+    replay_request = execution_module.TaskReplayRequest(
+        worker_profile_override="gemini-native-reviewer",
+    )
+
+    assert submission.worker_profile_override == "antigravity-native-executor"
+    assert replay_request.worker_profile_override == "antigravity-native-reviewer"
+
+
 def test_load_submission_for_task_returns_none_when_persisted_scaffolding_is_missing() -> None:
     """Queued task reloads should fail closed when task, session, or user rows disappear."""
     service, session_factory = _make_task_service()

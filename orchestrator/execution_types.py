@@ -17,6 +17,7 @@ from db.enums import (
 )
 from orchestrator.execution_policy import validate_callback_url
 from orchestrator.state import TaskSpec
+from workers.base import normalize_worker_profile_name
 
 
 class ExecutionModel(BaseModel):
@@ -71,6 +72,14 @@ class TaskSubmission(ExecutionModel):
             return None
         return coerce_worker_type(value)
 
+    @field_validator("worker_profile_override", mode="before")
+    @classmethod
+    def normalize_profile_override(cls, value: object) -> object:
+        """Normalize legacy Gemini profile names to canonical Antigravity profile names."""
+        if value is None or isinstance(value, str):
+            return normalize_worker_profile_name(value)
+        return value
+
 
 class TaskApprovalDecision(ExecutionModel):
     """Decision payload for a paused task approval checkpoint."""
@@ -94,6 +103,14 @@ class TaskReplayRequest(ExecutionModel):
         if value is None:
             return None
         return coerce_worker_type(value)
+
+    @field_validator("worker_profile_override", mode="before")
+    @classmethod
+    def normalize_profile_override(cls, value: object) -> object:
+        """Normalize legacy Gemini profile names to canonical Antigravity profile names."""
+        if value is None or isinstance(value, str):
+            return normalize_worker_profile_name(value)
+        return value
 
 
 class TaskSubmissionValidationError(ValueError):

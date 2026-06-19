@@ -46,22 +46,21 @@ from repositories import (
     WorkerRunRepository,
     session_scope,
 )
-from workers import normalize_worker_profile_name
 
 logger = logging.getLogger("orchestrator.execution")
 
 
 def _normalize_and_validate_submission(self: Any, submission: TaskSubmission) -> TaskSubmission:
     """Normalize execution overrides and validate profile selections before persistence."""
-    normalized_profile_override = normalize_worker_profile_name(submission.worker_profile_override)
     if (
-        normalized_profile_override is not None
+        submission.worker_profile_override is not None
         and self.enable_worker_profiles
-        and normalized_profile_override not in self.worker_profiles
+        and submission.worker_profile_override not in self.worker_profiles
     ):
         raise TaskSubmissionValidationError(
             "worker_profile_override must reference a configured worker profile "
-            f"when profile routing is enabled. Unknown profile: '{normalized_profile_override}'."
+            "when profile routing is enabled. Unknown profile: "
+            f"'{submission.worker_profile_override}'."
         )
     try:
         normalized_constraints, normalized_budget = normalize_scout_submission(
@@ -71,7 +70,6 @@ def _normalize_and_validate_submission(self: Any, submission: TaskSubmission) ->
         raise TaskSubmissionValidationError(str(e)) from e
     return submission.model_copy(
         update={
-            "worker_profile_override": normalized_profile_override,
             "constraints": normalized_constraints,
             "budget": normalized_budget,
         }
@@ -206,9 +204,7 @@ def _persist_submission(
             isinstance(submission.worker_profile_override, str)
             and submission.worker_profile_override.strip()
         ):
-            persisted_constraints["worker_profile_override"] = normalize_worker_profile_name(
-                submission.worker_profile_override
-            )
+            persisted_constraints["worker_profile_override"] = submission.worker_profile_override
         if submission.tools is not None:
             persisted_constraints["tools"] = submission.tools
         task_spec = build_task_spec(
@@ -357,7 +353,7 @@ def _load_submission_for_task(
             repo_url=task.repo_url,
             branch=task.branch,
             worker_override=task.worker_override,
-            worker_profile_override=normalize_worker_profile_name(worker_profile_override),
+            worker_profile_override=worker_profile_override,
             constraints=task_constraints,
             budget=dict(task.budget or {}),
             secrets=dict(task.secrets or {}),
