@@ -27,6 +27,7 @@ from tools import (
 from workers.adapter_utils import build_failure_summary, format_native_run_summary
 from workers.antigravity_cli_adapter import AntigravityCliRuntimeAdapter
 from workers.antigravity_cli_worker_native import (
+    AntigravityCommandConfig,
     antigravity_permission_denied,
     build_antigravity_native_command,
     is_antigravity_native_adapter,
@@ -466,7 +467,7 @@ class GeminiCliWorkerNativeMixin:
             adapter = getattr(self, "runtime_adapter", None)
             if not isinstance(adapter, AntigravityCliRuntimeAdapter):
                 raise TypeError("Antigravity native run requires AntigravityCliRuntimeAdapter.")
-            command, events_path, provider_metadata = build_antigravity_native_command(
+            config = AntigravityCommandConfig(
                 adapter=adapter,
                 workspace=workspace,
                 request=request,
@@ -474,6 +475,7 @@ class GeminiCliWorkerNativeMixin:
                 runtime_settings=runtime_settings,
                 native_sandbox_enabled=getattr(self, "native_sandbox_enabled", True),
             )
+            command, events_path, provider_metadata = build_antigravity_native_command(config)
             command_redactions.append(prompt)
             stdin_prompt = False
             native_env = dict(native_env or {})

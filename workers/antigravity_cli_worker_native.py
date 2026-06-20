@@ -6,6 +6,7 @@ import json
 import logging
 import shutil
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,16 @@ from workers.cli_runtime import CliRuntimeSettings
 ANTIGRAVITY_READ_ONLY_TOOL_PERMISSION = "strict"
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AntigravityCommandConfig:
+    adapter: AntigravityCliRuntimeAdapter
+    workspace: WorkspaceHandle
+    request: WorkerRequest
+    prompt: str
+    runtime_settings: CliRuntimeSettings
+    native_sandbox_enabled: bool
 
 
 def is_antigravity_native_adapter(adapter: object) -> bool:
@@ -208,15 +219,14 @@ def prepare_antigravity_workspace_migration(
 
 
 def build_antigravity_native_command(
-    *,
-    adapter: AntigravityCliRuntimeAdapter,
-    workspace: WorkspaceHandle,
-    request: WorkerRequest,
-    prompt: str,
-    runtime_settings: CliRuntimeSettings,
-    native_sandbox_enabled: bool,
+    config: AntigravityCommandConfig,
 ) -> tuple[list[str], Path, dict[str, Any]]:
     """Build `agy -p` command and per-run settings for Antigravity."""
+    adapter = config.adapter
+    workspace = config.workspace
+    request = config.request
+    prompt = config.prompt
+    native_sandbox_enabled = config.native_sandbox_enabled
     tool_permission = antigravity_tool_permission(adapter, request)
     agent_home = workspace.workspace_path / ".agent_home"
     gemini_home, migration_actions = prepare_antigravity_workspace_migration(

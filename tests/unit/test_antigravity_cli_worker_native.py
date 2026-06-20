@@ -8,7 +8,10 @@ from pathlib import Path
 from db.enums import WorkerRuntimeMode
 from sandbox import WorkspaceCleanupPolicy, WorkspaceHandle
 from workers import AntigravityCliRuntimeAdapter, GeminiCliWorker, WorkerRequest
-from workers.antigravity_cli_worker_native import build_antigravity_native_command
+from workers.antigravity_cli_worker_native import (
+    AntigravityCommandConfig,
+    build_antigravity_native_command,
+)
 from workers.base import WorkerResult
 from workers.cli_runtime import CliRuntimeSettings
 from workers.native_agent_runner import NativeAgentRunResult
@@ -153,12 +156,14 @@ def test_antigravity_workspace_migration_replaces_symlink_and_copies_legacy_conf
     (agent_home / ".gemini").symlink_to(legacy_gemini_home, target_is_directory=True)
 
     _, _, metadata = build_antigravity_native_command(
-        adapter=AntigravityCliRuntimeAdapter(executable="/opt/bin/agy"),
-        workspace=workspace,
-        request=WorkerRequest(repo_url="https://example.com/repo.git", task_text="run"),
-        prompt="run",
-        runtime_settings=CliRuntimeSettings(),
-        native_sandbox_enabled=True,
+        AntigravityCommandConfig(
+            adapter=AntigravityCliRuntimeAdapter(executable="/opt/bin/agy"),
+            workspace=workspace,
+            request=WorkerRequest(repo_url="https://example.com/repo.git", task_text="run"),
+            prompt="run",
+            runtime_settings=CliRuntimeSettings(),
+            native_sandbox_enabled=True,
+        )
     )
 
     gemini_home = agent_home / ".gemini"
@@ -196,12 +201,14 @@ def test_antigravity_workspace_migration_copy_errors_are_best_effort(
     )
 
     command, _, metadata = build_antigravity_native_command(
-        adapter=AntigravityCliRuntimeAdapter(executable="/opt/bin/agy"),
-        workspace=workspace,
-        request=WorkerRequest(repo_url="https://example.com/repo.git", task_text="run"),
-        prompt="run",
-        runtime_settings=CliRuntimeSettings(),
-        native_sandbox_enabled=True,
+        AntigravityCommandConfig(
+            adapter=AntigravityCliRuntimeAdapter(executable="/opt/bin/agy"),
+            workspace=workspace,
+            request=WorkerRequest(repo_url="https://example.com/repo.git", task_text="run"),
+            prompt="run",
+            runtime_settings=CliRuntimeSettings(),
+            native_sandbox_enabled=True,
+        )
     )
 
     assert command[:2] == ["/opt/bin/agy", "-p"]
@@ -233,12 +240,14 @@ def test_antigravity_workspace_migration_skips_inaccessible_candidate_home(
     monkeypatch.setattr(Path, "exists", _exists)
 
     command, _, metadata = build_antigravity_native_command(
-        adapter=AntigravityCliRuntimeAdapter(executable="/opt/bin/agy"),
-        workspace=workspace,
-        request=WorkerRequest(repo_url="https://example.com/repo.git", task_text="run"),
-        prompt="run",
-        runtime_settings=CliRuntimeSettings(),
-        native_sandbox_enabled=True,
+        AntigravityCommandConfig(
+            adapter=AntigravityCliRuntimeAdapter(executable="/opt/bin/agy"),
+            workspace=workspace,
+            request=WorkerRequest(repo_url="https://example.com/repo.git", task_text="run"),
+            prompt="run",
+            runtime_settings=CliRuntimeSettings(),
+            native_sandbox_enabled=True,
+        )
     )
 
     assert command[:2] == ["/opt/bin/agy", "-p"]
