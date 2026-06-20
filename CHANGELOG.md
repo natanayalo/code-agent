@@ -471,6 +471,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: remove completed milestones from roadmap ([#261](https://github.com/natanayalo/code-agent/pull/261))
+
 - Docs: update e2e QA and operator docs for Antigravity migration ([#256](https://github.com/natanayalo/code-agent/pull/256))
 
 - Docs: add generated changelog workflow ([#238](https://github.com/natanayalo/code-agent/pull/238))
