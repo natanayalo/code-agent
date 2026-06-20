@@ -457,8 +457,6 @@ class RouteBrainSuggestion(OrchestratorModel):
     @field_validator("suggested_worker", mode="before", check_fields=False)
     @classmethod
     def _coerce_worker(cls, value: object) -> object:
-        from db.enums import coerce_worker_type
-
         if value is None:
             return None
         try:
@@ -496,8 +494,6 @@ class UnifiedOrchestratorSuggestion(OrchestratorModel):
     @field_validator("suggested_worker", mode="before", check_fields=False)
     @classmethod
     def _coerce_worker(cls, value: object) -> object:
-        from db.enums import coerce_worker_type
-
         if value is None:
             return None
         try:
