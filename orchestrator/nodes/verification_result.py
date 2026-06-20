@@ -334,7 +334,8 @@ def _check_test_results(state: OrchestratorState) -> VerificationReportItem:
 def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
     result = state.result
     assert result is not None
-    is_read_only = state.task.constraints.get("read_only") is True
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    is_read_only = constraints.get("read_only") is True
 
     if result.status == "success" and not result.files_changed:
         if _requires_deliverable_evidence(state) and not _has_meaningful_deliverable(state):

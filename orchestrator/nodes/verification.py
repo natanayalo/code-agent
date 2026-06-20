@@ -127,7 +127,8 @@ async def _run_independent_step(
     if not enable_independent_verifier or deterministic_verifier_outcome[0] == "failed":
         return None, None
 
-    is_read_only = state.task.constraints.get("read_only") is True
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    is_read_only = constraints.get("read_only") is True
     no_files_changed = not (state.result and state.result.files_changed)
 
     if is_read_only or no_files_changed:

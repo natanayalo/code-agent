@@ -420,7 +420,8 @@ def _repair_handoff_update(
 
 
 def _check_skip_review(state: OrchestratorState) -> dict[str, Any] | None:
-    is_read_only = state.task.constraints.get("read_only") is True
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    is_read_only = constraints.get("read_only") is True
     if state.result is None:
         logger.warning("Worker result is None, falling back to default.")
         no_files_changed = False
@@ -430,10 +431,10 @@ def _check_skip_review(state: OrchestratorState) -> dict[str, Any] | None:
     if is_read_only or no_files_changed:
         reason = "read-only task" if is_read_only else "no files changed"
         updated_task = state.task
-        if state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT) is not None:
+        if constraints.get(REPAIR_REQUEST_CONSTRAINT) is not None:
             updated_task = state.task.model_copy(
                 update={
-                    "constraints": _cleanup_repair_handoff_constraints(state.task.constraints),
+                    "constraints": _cleanup_repair_handoff_constraints(constraints),
                 }
             )
 
@@ -448,8 +449,8 @@ def _check_skip_review(state: OrchestratorState) -> dict[str, Any] | None:
         }
 
     if (
-        state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT) is not None
-        and state.task.constraints.get(SKIP_INDEPENDENT_REVIEW_CONSTRAINT) is True
+        constraints.get(REPAIR_REQUEST_CONSTRAINT) is not None
+        and constraints.get(SKIP_INDEPENDENT_REVIEW_CONSTRAINT) is True
     ):
         updated_task = state.task.model_copy(
             update={

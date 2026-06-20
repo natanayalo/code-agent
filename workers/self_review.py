@@ -42,6 +42,8 @@ DEFAULT_SELF_REVIEW_DIFF_MAX_CHARACTERS = 12000
 
 def should_skip_self_review(constraints: Mapping[str, Any]) -> bool:
     """Return True when worker constraints explicitly disable self-review."""
+    if not constraints:
+        return False
     if constraints.get("read_only") is True:
         return True
 
