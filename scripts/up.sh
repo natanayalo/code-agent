@@ -46,14 +46,14 @@ FALLBACK_CODEX_AUTH_DIR="$EXPECTED_HOME/.codex"
 FALLBACK_ANTIGRAVITY_AUTH_DIR="$EXPECTED_HOME/.gemini"
 
 if [ ! -f "$CODE_AGENT_CODEX_AUTH_DIR/auth.json" ] && [ -f "$FALLBACK_CODEX_AUTH_DIR/auth.json" ]; then
-  echo "[run-production-like][warn] CODE_AGENT_CODEX_AUTH_DIR points to a missing path: $CODE_AGENT_CODEX_AUTH_DIR" >&2
-  echo "[run-production-like][warn] Falling back to detected path: $FALLBACK_CODEX_AUTH_DIR" >&2
+  echo "[run-production-like][warn] CODE_AGENT_CODEX_AUTH_DIR points to a path missing the token." >&2
+  echo "[run-production-like][warn] Falling back to detected path." >&2
   export CODE_AGENT_CODEX_AUTH_DIR="$FALLBACK_CODEX_AUTH_DIR"
 fi
 
 if [ ! -f "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR/antigravity-cli/antigravity-oauth-token" ] && [ -f "$FALLBACK_ANTIGRAVITY_AUTH_DIR/antigravity-cli/antigravity-oauth-token" ]; then
-  echo "[run-production-like][warn] CODE_AGENT_ANTIGRAVITY_AUTH_DIR points to a path missing the token: $CODE_AGENT_ANTIGRAVITY_AUTH_DIR" >&2
-  echo "[run-production-like][warn] Falling back to detected path: $FALLBACK_ANTIGRAVITY_AUTH_DIR" >&2
+  echo "[run-production-like][warn] CODE_AGENT_ANTIGRAVITY_AUTH_DIR points to a path missing the token." >&2
+  echo "[run-production-like][warn] Falling back to detected path." >&2
   export CODE_AGENT_ANTIGRAVITY_AUTH_DIR="$FALLBACK_ANTIGRAVITY_AUTH_DIR"
 fi
 
@@ -62,7 +62,7 @@ if [ ! -d "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR" ]; then
 fi
 
 if [ ! -f "$CODE_AGENT_CODEX_AUTH_DIR/auth.json" ]; then
-  echo "[run-production-like][error] Codex auth was not found at $CODE_AGENT_CODEX_AUTH_DIR/auth.json" >&2
+  echo "[run-production-like][error] Codex auth was not found." >&2
   echo "[run-production-like][error] Run one-time login in worker container:" >&2
   echo "[run-production-like][error]   docker compose run --rm --no-deps worker codex login" >&2
   echo "[run-production-like][error] Or set CODE_AGENT_CODEX_AUTH_DIR to the directory containing auth.json." >&2
@@ -70,7 +70,7 @@ if [ ! -f "$CODE_AGENT_CODEX_AUTH_DIR/auth.json" ]; then
 fi
 
 if [ ! -f "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR/antigravity-cli/antigravity-oauth-token" ]; then
-  echo "[run-production-like][warn] Antigravity auth token was not found in $CODE_AGENT_ANTIGRAVITY_AUTH_DIR" >&2
+  echo "[run-production-like][warn] Antigravity auth token was not found." >&2
   echo "[run-production-like][warn] Antigravity worker may fail until you run 'agy auth login' on host." >&2
 fi
 
