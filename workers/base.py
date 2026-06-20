@@ -80,8 +80,8 @@ def normalize_worker_profile_name(value: str | None) -> str | None:
     stripped = value.strip()
     if not stripped:
         return None
-    if stripped.startswith("gemini-"):
-        return stripped.replace("gemini-", "antigravity-", 1)
+    if stripped.lower().startswith("gemini-"):
+        return "antigravity-" + stripped[7:]
     return stripped
 
 

@@ -254,6 +254,23 @@ def _coerce_string_list(value: object) -> list[str]:
     return out
 
 
+def _coerce_suggested_worker(value: object) -> object:
+    """Shared validator helper to coerce legacy worker types."""
+    if value is None:
+        return None
+    try:
+        return coerce_worker_type(value)
+    except ValueError:
+        return value
+
+
+def _coerce_suggested_profile(value: object) -> object:
+    """Shared validator helper to coerce legacy worker profiles."""
+    if isinstance(value, str):
+        return normalize_worker_profile_name(value)
+    return value
+
+
 def _coerce_unified_suggestion_tolerant(
     payload: Mapping[str, Any],
 ) -> UnifiedOrchestratorSuggestion:
@@ -457,19 +474,12 @@ class RouteBrainSuggestion(OrchestratorModel):
     @field_validator("suggested_worker", mode="before", check_fields=False)
     @classmethod
     def _coerce_worker(cls, value: object) -> object:
-        if value is None:
-            return None
-        try:
-            return coerce_worker_type(value)
-        except ValueError:
-            return value
+        return _coerce_suggested_worker(value)
 
     @field_validator("suggested_profile", mode="before", check_fields=False)
     @classmethod
     def _coerce_profile(cls, value: object) -> object:
-        if isinstance(value, str):
-            return normalize_worker_profile_name(value)
-        return value
+        return _coerce_suggested_profile(value)
 
 
 class UnifiedOrchestratorSuggestion(OrchestratorModel):
@@ -494,19 +504,12 @@ class UnifiedOrchestratorSuggestion(OrchestratorModel):
     @field_validator("suggested_worker", mode="before", check_fields=False)
     @classmethod
     def _coerce_worker(cls, value: object) -> object:
-        if value is None:
-            return None
-        try:
-            return coerce_worker_type(value)
-        except ValueError:
-            return value
+        return _coerce_suggested_worker(value)
 
     @field_validator("suggested_profile", mode="before", check_fields=False)
     @classmethod
     def _coerce_profile(cls, value: object) -> object:
-        if isinstance(value, str):
-            return normalize_worker_profile_name(value)
-        return value
+        return _coerce_suggested_profile(value)
 
 
 class ImprovementScoringBrainSuggestion(OrchestratorModel):
