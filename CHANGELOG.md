@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: remove Gemini CLI defaults and migrate to Antigravity (T-211) ([#260](https://github.com/natanayalo/code-agent/pull/260))
+
 - Feat: coerce legacy gemini worker types to antigravity ([#259](https://github.com/natanayalo/code-agent/pull/259))
 
 - Feat(ui): format worker labels for antigravity migration [T-210] ([#258](https://github.com/natanayalo/code-agent/pull/258))
