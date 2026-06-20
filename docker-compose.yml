@@ -97,6 +97,15 @@ services:
       CODE_AGENT_GEMINI_CLI_BIN: ${CODE_AGENT_GEMINI_CLI_BIN:-gemini}
       CODE_AGENT_GEMINI_MODEL: ${CODE_AGENT_GEMINI_MODEL:-gemini-2.5-pro}
       GEMINI_HOME: /root/.gemini
+      CODE_AGENT_ANTIGRAVITY_CLI_BIN: ${CODE_AGENT_ANTIGRAVITY_CLI_BIN:-agy}
+      CODE_AGENT_ANTIGRAVITY_MODEL: ${CODE_AGENT_ANTIGRAVITY_MODEL:-gemini-2.5-pro}
+      CODE_AGENT_ANTIGRAVITY_TIMEOUT_SECONDS: ${CODE_AGENT_ANTIGRAVITY_TIMEOUT_SECONDS:-120}
+      CODE_AGENT_ANTIGRAVITY_NATIVE_SANDBOX_ENABLED: ${CODE_AGENT_ANTIGRAVITY_NATIVE_SANDBOX_ENABLED:-0}
+      CODE_AGENT_ANTIGRAVITY_TOOL_PERMISSION: ${CODE_AGENT_ANTIGRAVITY_TOOL_PERMISSION:-proceed-in-sandbox}
+      CODE_AGENT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY: ${CODE_AGENT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY:-agent-decides}
+      AGY_CLI_DISABLE_AUTO_UPDATE: ${AGY_CLI_DISABLE_AUTO_UPDATE:-true}
+      # Experimental Linux-only socket mount environment for secure keyring over D-Bus:
+      # DBUS_SESSION_BUS_ADDRESS: unix:path=/run/user/1000/bus
       CODE_AGENT_SANDBOX_IMAGE: ${CODE_AGENT_SANDBOX_IMAGE:-code-agent-worker}
       CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS: ${CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS:-2}
       CODE_AGENT_QUEUE_LEASE_SECONDS: ${CODE_AGENT_QUEUE_LEASE_SECONDS:-60}
@@ -125,6 +134,9 @@ services:
       - ${CODE_AGENT_CODEX_AUTH_DIR?Please set CODE_AGENT_CODEX_AUTH_DIR in env}:/root/.codex
       - ${CODE_AGENT_GEMINI_AUTH_DIR?Please set CODE_AGENT_GEMINI_AUTH_DIR in env}:/root/.gemini
       - ${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}:${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}
+      # Experimental Linux-only socket mounts for secure keyring over D-Bus:
+      # - /run/user/1000/bus:/run/user/1000/bus
+      # - /var/lib/dbus/machine-id:/var/lib/dbus/machine-id:ro
   phoenix:
     image: arizephoenix/phoenix:latest
     ports:
