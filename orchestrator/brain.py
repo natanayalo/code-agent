@@ -259,7 +259,7 @@ def _coerce_suggested_worker(value: object) -> object:
     if value is None:
         return None
     try:
-        return coerce_worker_type(value)
+        return coerce_worker_type(value).value
     except ValueError:
         return value
 
