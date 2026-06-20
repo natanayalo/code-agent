@@ -15,7 +15,7 @@ The platform is built for one operator-first use case: reliable coding execution
 - durable task/session/run persistence in Postgres
 - queue + lease worker runtime split (`api` process and `worker` process)
 - LangGraph orchestrator with routing, approval checkpoints, retries, verifier stage, and timeline events
-- CLI-driven worker adapters for Codex CLI, Gemini CLI, and OpenRouter-backed runtime
+- CLI-driven worker adapters for Codex CLI, Antigravity CLI, and OpenRouter-backed runtime
 - persistent Docker sandbox workspaces with audit artifacts and retention
 - structured skeptical memory + compact session state persistence
 - replay and approval-decision task controls via API

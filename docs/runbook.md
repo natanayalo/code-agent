@@ -43,20 +43,12 @@ cp .env.example .env
 scripts/up.sh
 ```
 
-## 2.1) Codex/Gemini Runtime Mode Deprecation Controls
+## 2.1) Codex and Antigravity Runtime Mode Deprecation
 
-Codex and Gemini defaults are pinned to native-agent execution.
+Codex and Antigravity native execution workers are now native-only.
 
-- `CODE_AGENT_CODEX_RUNTIME_MODE` and `CODE_AGENT_GEMINI_RUNTIME_MODE` support
-  `native_agent|tool_loop`, but `tool_loop` is deprecated for defaults and is ignored (with a
-  startup warning).
-- To keep legacy compatibility, explicitly enable legacy profiles:
-  - `CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED=1`
-  - `CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED=1`
-- Legacy profiles should be selected per task using top-level `worker_profile_override`
-  (for `/tasks` or `/webhook` payloads), for example `codex-tool-loop-executor`.
-- `/metrics` exposes `runtime_mode_usage` and `legacy_tool_loop_usage` so operators can track
-  migration progress away from legacy tool-loop execution.
+- `CODE_AGENT_CODEX_RUNTIME_MODE`, `CODE_AGENT_GEMINI_RUNTIME_MODE`, and legacy tool-loop configurations (e.g., `CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED`, `CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED`) are deprecated, ignored by the factory, and no longer create operation-selector profiles like `codex-tool-loop-executor` or `gemini-tool-loop-executor`.
+- `/metrics` still exposes `runtime_mode_usage` and `legacy_tool_loop_usage` for historical migration tracking.
 
 ## 2.2) Reflection Proposal Scoring Controls
 
