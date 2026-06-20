@@ -130,7 +130,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${CODE_AGENT_CODEX_AUTH_DIR?Please set CODE_AGENT_CODEX_AUTH_DIR in env}:/root/.codex
-      - ${CODE_AGENT_GEMINI_AUTH_DIR?Please set CODE_AGENT_GEMINI_AUTH_DIR in env}:/root/.gemini
+      - ${CODE_AGENT_ANTIGRAVITY_AUTH_DIR?Please set CODE_AGENT_ANTIGRAVITY_AUTH_DIR in env}:/root/.gemini
       - ${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}:${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}
   phoenix:
     image: arizephoenix/phoenix:latest

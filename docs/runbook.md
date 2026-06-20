@@ -6,25 +6,25 @@ This runbook describes how to boot, operate, debug, and recover the current `cod
 
 ## 1) Worker CLI Auth Bootstrap
 
-Worker containers rely on login-based host auth directories that are mounted into the worker runtime.
+Worker containers rely on login-based host auth directories that are mounted into the worker runtime. Note that Antigravity (`agy`) auth uses operating-system secure keyrings (Keychain, DBus Secret Service, etc.), so the auth directory mount (`CODE_AGENT_ANTIGRAVITY_AUTH_DIR`) does not simply copy a plain text token file.
 
 Expected mounts:
 
 - `${CODE_AGENT_CODEX_AUTH_DIR}` -> `/root/.codex` (required)
-- `${CODE_AGENT_GEMINI_AUTH_DIR}` -> `/root/.gemini` (optional unless Gemini worker is used)
+- `${CODE_AGENT_ANTIGRAVITY_AUTH_DIR}` -> `/root/.gemini` (optional unless Antigravity worker is used)
 
-Bootstrap on host:
+Bootstrap on host (ensure CLIs are installed and in PATH):
 
 ```bash
 codex login
-gemini auth login
+agy auth login
 ```
 
-Fallback bootstrap via container:
+Fallback bootstrap via container (may not work for Antigravity depending on host OS keyring integration):
 
 ```bash
 docker compose run --rm --no-deps worker codex login
-docker compose run --rm --no-deps worker gemini auth login
+docker compose run --rm --no-deps worker agy auth login
 ```
 
 ## 2) Process Model
@@ -198,6 +198,17 @@ Checks:
 - ensure auth dirs are mounted and non-empty
 - repeat login commands and restart worker process
 
+### Antigravity (`agy`) specific issues
+
+**`agy: command not found`**
+Ensure that the Antigravity CLI is installed and its binary is available in the `PATH` environment variable of the context executing the command (host or Docker worker).
+
+**Locked Keyrings or DBus Errors**
+Antigravity stores auth tokens in OS keyrings. In a headless environment (like Linux Docker containers), you might see DBus errors or locked keyrings. Ensure a compatible Secret Service is running or fallback auth mechanisms are configured correctly per official Antigravity documentation.
+
+**Permission-prompt timeouts**
+If `agy` runs hang and eventually timeout, it might be prompting for user permission interactively. Verify that `CODE_AGENT_ANTIGRAVITY_TOOL_PERMISSION` is set to a non-interactive mode (e.g. `proceed-in-sandbox`) and that settings are propagated correctly.
+
 ## Callback delivery rejections
 
 Checks:
@@ -245,10 +256,24 @@ Use replay endpoint instead of manually cloning task rows:
 For full pipeline testing (API -> Orchestrator -> Sandbox Worker -> DB), use the automated QA runbook. Ensure your `.env` has test credentials and the stack is running.
 
 ```bash
-python scripts/run_e2e_qa.py
+poetry run python .agents/skills/e2e-qa/scripts/run_e2e_qa.py
 ```
 
-## 10) Minimal Operational Checklist
+To verify the delivery integration variant, use:
+
+```bash
+poetry run python .agents/skills/e2e-qa/scripts/run_e2e_qa_delivery.py
+```
+
+## 10) Antigravity Migration Guide
+
+When migrating existing workspaces and settings to Antigravity:
+- **Context Behavior**: Antigravity parses `AGENTS.md` automatically from the workspace. Ensure context instructions are moved there.
+- **Legacy Plugin Import**: Any legacy plugins used via Gemini need to be translated or imported into Antigravity's plugin architecture.
+- **Skills Path Migration**: Custom skills should be moved into the `.agents/skills/` directory within your workspace.
+- **MCP Config Relocation**: Move any MCP configurations into `.agents/` as Antigravity reads configurations from the local workspace settings.
+
+## 11) Minimal Operational Checklist
 
 Before running tasks:
 

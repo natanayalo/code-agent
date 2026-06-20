@@ -15,9 +15,9 @@ This skill provides an automated E2E QA script that:
 
 ## Prerequisites
 
-Before running this script, your local environment must be fully running via Docker Compose:
+Before running this script, your local environment must be fully running via the project startup script:
 ```bash
-docker compose up -d
+scripts/up.sh
 ```
 Ensure the API is listening on `http://127.0.0.1:8000` (which is the default).
 
@@ -41,4 +41,4 @@ Ensure the API is listening on `http://127.0.0.1:8000` (which is the default).
 
 ## Customizing the QA
 
-You can edit `.agents/skills/e2e-qa/scripts/run_e2e_qa.py` to test different worker profiles (e.g. Codex instead of Gemini) by changing the `worker_override` in the JSON payload, or to test different failure scenarios (like providing an invalid repository URL).
+You can edit `.agents/skills/e2e-qa/scripts/run_e2e_qa.py` to test different worker profiles (e.g. Codex instead of Antigravity) by changing the `worker_override` in the JSON payload, or to test different failure scenarios (like providing an invalid repository URL).
