@@ -187,10 +187,20 @@ export function TriggerActionsPage() {
     setScoutError(null);
     setLastScoutTask(null);
 
+    const parsedMaxProposals = Number(scoutMaxProposals);
+    if (
+      !Number.isInteger(parsedMaxProposals) ||
+      parsedMaxProposals < 1 ||
+      parsedMaxProposals > 20
+    ) {
+      setScoutError("Max Proposals must be a whole number between 1 and 20.");
+      return;
+    }
+
     const payload: ScoutTriggerRequest = {
       mode: scoutMode,
       depth: scoutDepth,
-      max_proposals: Number(scoutMaxProposals),
+      max_proposals: parsedMaxProposals,
     };
 
     const normalizedRepoKey = normalizeOptional(scoutRepoKey);

@@ -141,14 +141,22 @@ def trigger_scout_task(
         ),
     )
 
-    try:
-        task_snapshot, _ = task_service.create_task(submission)
-        return task_snapshot
-    except TaskSubmissionValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(exc),
-        ) from exc
+    with start_optional_span(
+        tracer_name="api.tasks",
+        span_name="api.tasks.scout.trigger",
+        attributes=with_span_kind(SPAN_KIND_AGENT),
+    ):
+        set_span_input_output(input_data=submission.model_dump(exclude={"secrets"}))
+        try:
+            task_snapshot, _ = task_service.create_task(submission)
+            set_current_span_attribute(TASK_ID_ATTRIBUTE, task_snapshot.task_id)
+            set_current_span_attribute(SESSION_ID_ATTRIBUTE, task_snapshot.session_id)
+            return task_snapshot
+        except TaskSubmissionValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
 
 
 @router.get("", response_model=list[TaskSummarySnapshot])
