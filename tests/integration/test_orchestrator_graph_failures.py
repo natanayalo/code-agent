@@ -51,6 +51,7 @@ def test_orchestrator_graph_returns_a_structured_timeout_result() -> None:
         "worker dispatched",
         "worker timed out after 1s",
         "verification failed",
+        "independent code-change review skipped (no files changed)",
         "result summarized and session state updated",
         "memory persistence queued",
     ]
@@ -103,6 +104,7 @@ def test_orchestrator_graph_surfaces_worker_cancellation_as_a_result() -> None:
             "worker dispatched",
             "worker execution cancelled",
             "verification failed",
+            "independent code-change review skipped (no files changed)",
             "result summarized and session state updated",
             "memory persistence queued",
         ]
@@ -147,6 +149,7 @@ def test_orchestrator_graph_returns_a_structured_error_for_worker_crashes() -> N
         "worker dispatched",
         "worker crashed unexpectedly",
         "verification failed",
+        "independent code-change review skipped (no files changed)",
         "result summarized and session state updated",
         "memory persistence queued",
     ]
@@ -190,6 +193,7 @@ def test_orchestrator_graph_timeout_path_tolerates_cleanup_exceptions() -> None:
         "worker dispatched",
         "worker timed out after 1s",
         "verification failed",
+        "independent code-change review skipped (no files changed)",
         "result summarized and session state updated",
         "memory persistence queued",
     ]
