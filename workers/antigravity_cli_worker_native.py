@@ -243,6 +243,14 @@ def prepare_antigravity_workspace_migration(
             )
             if did_migrate_global_mcp:
                 actions.append("migrated_global_mcp_config")
+
+        # Copy file-based OAuth token for environments without Keyring/D-Bus
+        oauth_token = source / "antigravity-cli" / "antigravity-oauth-token"
+        if _copy_file_if_missing(
+            oauth_token, gemini_home / "antigravity-cli" / "antigravity-oauth-token"
+        ):
+            actions.append("copied_oauth_token")
+
         break
 
     migrated_workspace_agents = False
