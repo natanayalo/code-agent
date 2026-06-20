@@ -41,4 +41,4 @@ Ensure the API is listening on `http://127.0.0.1:8000` (which is the default).
 
 ## Customizing the QA
 
-You can edit `.agents/skills/e2e-qa/scripts/run_e2e_qa.py` to test different worker profiles (e.g. Codex instead of Gemini) by changing the `worker_override` in the JSON payload, or to test different failure scenarios (like providing an invalid repository URL).
+You can edit `.agents/skills/e2e-qa/scripts/run_e2e_qa.py` to test different worker profiles (e.g. Codex instead of Antigravity) by changing the `worker_override` in the JSON payload, or to test different failure scenarios (like providing an invalid repository URL).

@@ -98,7 +98,7 @@ async def main():
         print(f"[+] Task ingested successfully. Task ID: {task_id}")
 
         print("[*] Polling for task completion...")
-        max_attempts = 150  # Gemini is an LLM so it might take ~1-2 min
+        max_attempts = 150  # Antigravity uses an LLM so it might take ~1-2 min
         for attempt in range(max_attempts):
             try:
                 resp = await client.get(

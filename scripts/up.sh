@@ -34,7 +34,7 @@ source "$ENV_FILE"
 set +a
 
 export CODE_AGENT_CODEX_AUTH_DIR="${CODE_AGENT_CODEX_AUTH_DIR:-$HOME/.codex}"
-export CODE_AGENT_GEMINI_AUTH_DIR="${CODE_AGENT_GEMINI_AUTH_DIR:-$HOME/.gemini}"
+export CODE_AGENT_ANTIGRAVITY_AUTH_DIR="${CODE_AGENT_ANTIGRAVITY_AUTH_DIR:-$HOME/.gemini}"
 export CODE_AGENT_WORKSPACE_ROOT="${CODE_AGENT_WORKSPACE_ROOT:-$HOME/.code-agent/workspaces}"
 export CODE_AGENT_CODEX_SANDBOX="${CODE_AGENT_CODEX_SANDBOX:-workspace-write}"
 ALLOW_READ_ONLY_SANDBOX="${CODE_AGENT_ALLOW_READ_ONLY_SANDBOX:-0}"
@@ -43,7 +43,7 @@ if [ -z "$EXPECTED_HOME" ] || [ "$EXPECTED_HOME" = "~$(id -un)" ]; then
   EXPECTED_HOME="$HOME"
 fi
 FALLBACK_CODEX_AUTH_DIR="$EXPECTED_HOME/.codex"
-FALLBACK_GEMINI_AUTH_DIR="$EXPECTED_HOME/.gemini"
+FALLBACK_ANTIGRAVITY_AUTH_DIR="$EXPECTED_HOME/.gemini"
 
 if [ ! -f "$CODE_AGENT_CODEX_AUTH_DIR/auth.json" ] && [ -f "$FALLBACK_CODEX_AUTH_DIR/auth.json" ]; then
   echo "[run-production-like][warn] CODE_AGENT_CODEX_AUTH_DIR points to a missing path: $CODE_AGENT_CODEX_AUTH_DIR" >&2
@@ -51,10 +51,10 @@ if [ ! -f "$CODE_AGENT_CODEX_AUTH_DIR/auth.json" ] && [ -f "$FALLBACK_CODEX_AUTH
   export CODE_AGENT_CODEX_AUTH_DIR="$FALLBACK_CODEX_AUTH_DIR"
 fi
 
-if [ ! -f "$CODE_AGENT_GEMINI_AUTH_DIR/oauth_creds.json" ] && [ -f "$FALLBACK_GEMINI_AUTH_DIR/oauth_creds.json" ]; then
-  echo "[run-production-like][warn] CODE_AGENT_GEMINI_AUTH_DIR points to a missing path: $CODE_AGENT_GEMINI_AUTH_DIR" >&2
-  echo "[run-production-like][warn] Falling back to detected path: $FALLBACK_GEMINI_AUTH_DIR" >&2
-  export CODE_AGENT_GEMINI_AUTH_DIR="$FALLBACK_GEMINI_AUTH_DIR"
+if [ ! -d "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR" ] && [ -d "$FALLBACK_ANTIGRAVITY_AUTH_DIR" ]; then
+  echo "[run-production-like][warn] CODE_AGENT_ANTIGRAVITY_AUTH_DIR points to a missing path: $CODE_AGENT_ANTIGRAVITY_AUTH_DIR" >&2
+  echo "[run-production-like][warn] Falling back to detected path: $FALLBACK_ANTIGRAVITY_AUTH_DIR" >&2
+  export CODE_AGENT_ANTIGRAVITY_AUTH_DIR="$FALLBACK_ANTIGRAVITY_AUTH_DIR"
 fi
 
 if [ ! -f "$CODE_AGENT_CODEX_AUTH_DIR/auth.json" ]; then
@@ -65,9 +65,9 @@ if [ ! -f "$CODE_AGENT_CODEX_AUTH_DIR/auth.json" ]; then
   exit 1
 fi
 
-if [ ! -f "$CODE_AGENT_GEMINI_AUTH_DIR/oauth_creds.json" ]; then
-  echo "[run-production-like][warn] Gemini auth was not found at $CODE_AGENT_GEMINI_AUTH_DIR/oauth_creds.json" >&2
-  echo "[run-production-like][warn] Gemini worker may fail until you run 'gemini auth login' on host." >&2
+if [ ! -d "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR" ]; then
+  echo "[run-production-like][warn] Antigravity auth dir was not found at $CODE_AGENT_ANTIGRAVITY_AUTH_DIR" >&2
+  echo "[run-production-like][warn] Antigravity worker may fail until you run 'agy auth login' on host." >&2
 fi
 
 if [ "$CODE_AGENT_CODEX_SANDBOX" = "read-only" ] && [ "$ALLOW_READ_ONLY_SANDBOX" != "1" ]; then

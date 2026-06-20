@@ -164,18 +164,18 @@ npm run build
 
 ## CLI Worker Auth Bootstrap
 
-Before running real worker tasks with mounted auth directories:
+Before running real worker tasks with mounted auth directories, ensure the CLIs are installed and in your `PATH`, then run:
 
 ```bash
 codex login
-gemini auth login
+agy auth login
 ```
 
 If host CLIs are unavailable, run one-time login through the worker image:
 
 ```bash
 docker compose run --rm --no-deps worker codex login
-docker compose run --rm --no-deps worker gemini auth login
+docker compose run --rm --no-deps worker agy auth login
 ```
 
 ### Dashboard Authentication
