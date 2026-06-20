@@ -54,6 +54,33 @@ def test_suggest_route_parses_plain_json_payload() -> None:
     assert suggestion.rationale == "prefer codex"
 
 
+def test_suggest_route_coerces_retired_worker_names() -> None:
+    brain = RuleBasedOrchestratorBrain(
+        planner_worker=_StaticWorker(
+            WorkerResult(
+                status="success",
+                summary=(
+                    '{"suggested_worker":"gemini","suggested_profile":"gemini-native-executor",'
+                    '"rationale":"use gemini"}'
+                ),
+            )
+        )
+    )
+
+    suggestion = asyncio.run(
+        brain.suggest_route(
+            state=_state(),
+            available_workers=frozenset({"codex", "antigravity"}),
+            available_profiles=None,
+        )
+    )
+
+    assert suggestion is not None
+    assert suggestion.suggested_worker == "antigravity"
+    assert suggestion.suggested_profile == "antigravity-native-executor"
+    assert suggestion.rationale == "use gemini"
+
+
 def test_suggest_route_parses_fenced_json_payload() -> None:
     brain = RuleBasedOrchestratorBrain(
         planner_worker=_StaticWorker(

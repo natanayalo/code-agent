@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import Any, Final, Protocol, cast, get_args
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from apps.observability import (
     add_current_span_event,
@@ -44,7 +44,13 @@ from orchestrator.state import (
     TaskSpecType,
     WorkerType,
 )
-from workers.base import Worker, WorkerProfile, WorkerRequest, WorkerResult
+from workers.base import (
+    Worker,
+    WorkerProfile,
+    WorkerRequest,
+    WorkerResult,
+    normalize_worker_profile_name,
+)
 from workers.constants import DEFAULT_DISCOVERY_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -248,6 +254,23 @@ def _coerce_string_list(value: object) -> list[str]:
     return out
 
 
+def _coerce_suggested_worker(value: object) -> object:
+    """Shared validator helper to coerce legacy worker types."""
+    if value is None:
+        return None
+    try:
+        return coerce_worker_type(value).value
+    except ValueError:
+        return value
+
+
+def _coerce_suggested_profile(value: object) -> object:
+    """Shared validator helper to coerce legacy worker profiles."""
+    if isinstance(value, str):
+        return normalize_worker_profile_name(value)
+    return value
+
+
 def _coerce_unified_suggestion_tolerant(
     payload: Mapping[str, Any],
 ) -> UnifiedOrchestratorSuggestion:
@@ -448,6 +471,16 @@ class RouteBrainSuggestion(OrchestratorModel):
     suggested_retry_strategy: str | None = None
     rationale: str | None = None
 
+    @field_validator("suggested_worker", mode="before", check_fields=False)
+    @classmethod
+    def _coerce_worker(cls, value: object) -> object:
+        return _coerce_suggested_worker(value)
+
+    @field_validator("suggested_profile", mode="before", check_fields=False)
+    @classmethod
+    def _coerce_profile(cls, value: object) -> object:
+        return _coerce_suggested_profile(value)
+
 
 class UnifiedOrchestratorSuggestion(OrchestratorModel):
     """Structured unified suggestion for TaskSpec enrichment and route recommendation."""
@@ -467,6 +500,16 @@ class UnifiedOrchestratorSuggestion(OrchestratorModel):
     suggested_profile: str | None = None
     suggested_retry_strategy: str | None = None
     rationale: str | None = None
+
+    @field_validator("suggested_worker", mode="before", check_fields=False)
+    @classmethod
+    def _coerce_worker(cls, value: object) -> object:
+        return _coerce_suggested_worker(value)
+
+    @field_validator("suggested_profile", mode="before", check_fields=False)
+    @classmethod
+    def _coerce_profile(cls, value: object) -> object:
+        return _coerce_suggested_profile(value)
 
 
 class ImprovementScoringBrainSuggestion(OrchestratorModel):

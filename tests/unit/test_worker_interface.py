@@ -91,15 +91,15 @@ def test_worker_profile_supports_runtime_shapes() -> None:
     assert openrouter_profile.runtime_mode == "tool_loop"
 
 
-def test_worker_profile_rejects_retired_gemini_worker_type() -> None:
-    """Gemini is no longer accepted as a public worker type."""
+def test_worker_profile_coerces_retired_gemini_worker_type() -> None:
+    """Gemini is coerced to Antigravity for backward compatibility."""
 
-    with pytest.raises(ValidationError, match="Input should be"):
-        WorkerProfile(
-            name="retired-gemini",
-            worker_type="gemini",
-            runtime_mode="native_agent",
-        )
+    profile = WorkerProfile(
+        name="test",
+        worker_type="gemini",  # type: ignore
+        runtime_mode="native_agent",
+    )
+    assert profile.worker_type == "antigravity"
 
 
 def test_worker_profile_rejects_unknown_runtime_modes() -> None:
