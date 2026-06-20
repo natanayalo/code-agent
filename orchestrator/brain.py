@@ -44,7 +44,13 @@ from orchestrator.state import (
     TaskSpecType,
     WorkerType,
 )
-from workers.base import Worker, WorkerProfile, WorkerRequest, WorkerResult
+from workers.base import (
+    Worker,
+    WorkerProfile,
+    WorkerRequest,
+    WorkerResult,
+    normalize_worker_profile_name,
+)
 from workers.constants import DEFAULT_DISCOVERY_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -463,8 +469,6 @@ class RouteBrainSuggestion(OrchestratorModel):
     @field_validator("suggested_profile", mode="before", check_fields=False)
     @classmethod
     def _coerce_profile(cls, value: object) -> object:
-        from workers.base import normalize_worker_profile_name
-
         if isinstance(value, str):
             return normalize_worker_profile_name(value)
         return value
@@ -504,8 +508,6 @@ class UnifiedOrchestratorSuggestion(OrchestratorModel):
     @field_validator("suggested_profile", mode="before", check_fields=False)
     @classmethod
     def _coerce_profile(cls, value: object) -> object:
-        from workers.base import normalize_worker_profile_name
-
         if isinstance(value, str):
             return normalize_worker_profile_name(value)
         return value
