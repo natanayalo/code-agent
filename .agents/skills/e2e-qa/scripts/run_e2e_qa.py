@@ -22,7 +22,7 @@ if not workspace_root:
             for line in f:
                 parts = line.split("=", 1)
                 if len(parts) == 2 and parts[0].strip() == "CODE_AGENT_WORKSPACE_ROOT":
-                    raw_val = parts[1].split('#', 1)[0].strip()
+                    raw_val = parts[1].split("#", 1)[0].strip()
                     workspace_root = raw_val.strip("'").strip('"')
                     break
 workspace_root = os.path.expandvars(os.path.expanduser(workspace_root))
@@ -34,16 +34,22 @@ def setup_dummy_repo():
     print(f"[*] Setting up dummy repository at {DUMMY_REPO_DIR}")
     shutil.rmtree(DUMMY_REPO_DIR, ignore_errors=True)
     os.makedirs(DUMMY_REPO_DIR, exist_ok=True)
-    subprocess.run(
-        ["git", "init"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
-    )
+    subprocess.run(["git", "init"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True)
     readme_path = os.path.join(DUMMY_REPO_DIR, "README.md")
     with open(readme_path, "w", encoding="utf-8") as f:
         f.write("# Dummy QA Repo\n")
     subprocess.run(["git", "add", "README.md"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "QA User"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True)
     subprocess.run(
-        ["git", "config", "user.email", "qa@example.com"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
+        ["git", "config", "user.name", "QA User"],
+        cwd=DUMMY_REPO_DIR,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "qa@example.com"],
+        cwd=DUMMY_REPO_DIR,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "commit", "-m", "Initial commit"],
@@ -113,7 +119,10 @@ async def main():
                 continue
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code in {502, 503, 504}:
-                    print(f"    - Attempt {attempt + 1}/{max_attempts}: Transient status error {exc.response.status_code}: {exc}")
+                    print(
+                        f"    - Attempt {attempt + 1}/{max_attempts}: Transient status error "
+                        f"{exc.response.status_code}: {exc}"
+                    )
                     await asyncio.sleep(2)
                     continue
                 raise
@@ -123,8 +132,8 @@ async def main():
             if status in ["completed", "success", "failed", "cancelled", "error"]:
                 print(f"\n[+] Task finished with status: {status}")
                 print(f"    - Details: {task_data}")
-                if status not in ['completed', 'success']:
-                    raise RuntimeError(f'Task failed with status: {status}')
+                if status not in ["completed", "success"]:
+                    raise RuntimeError(f"Task failed with status: {status}")
                 break
 
             await asyncio.sleep(2)
@@ -139,7 +148,7 @@ async def main():
     latest_run = task_data.get("latest_run")
     expected_workspace_id = latest_run.get("workspace_id") if latest_run else None
     if not expected_workspace_id:
-        raise RuntimeError('Could not determine workspace_id from task_data')
+        raise RuntimeError("Could not determine workspace_id from task_data")
 
     full_path = os.path.join(workspace_root, expected_workspace_id)
     if os.path.isdir(full_path):
@@ -152,9 +161,9 @@ async def main():
             with open(check_file, encoding="utf-8") as f:
                 print(f"  [+] Content: {f.read().strip()}")
         else:
-            raise RuntimeError('qa-hello.txt NOT FOUND in workspace.')
+            raise RuntimeError("qa-hello.txt NOT FOUND in workspace.")
     else:
-        raise RuntimeError(f'No workspace directory found at {full_path}')
+        raise RuntimeError(f"No workspace directory found at {full_path}")
 
     print("[+] Done.")
 

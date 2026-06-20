@@ -199,7 +199,14 @@ def test_codex_cli_worker_records_no_findings_self_review(tmp_path: Path) -> Non
             ),
         ]
     )
-    session = _make_default_session(container)
+    session = _FakeSession(
+        {
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
+                output=" M main.py\0",
+            )
+        }
+    )
     worker = CodexCliWorker(
         runtime_adapter=adapter,
         workspace_manager=_FakeWorkspaceManager(workspace),

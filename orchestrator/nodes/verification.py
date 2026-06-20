@@ -127,6 +127,19 @@ async def _run_independent_step(
     if not enable_independent_verifier or deterministic_verifier_outcome[0] == "failed":
         return None, None
 
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    is_read_only = constraints.get("read_only") is True
+    no_files_changed = not (state.result and state.result.files_changed)
+
+    if is_read_only or no_files_changed:
+        reason = "read-only task" if is_read_only else "no files changed"
+        logger.info(
+            "Skipping independent verifier (%s)",
+            reason,
+            extra={"task_id": state.task.task_id},
+        )
+        return None, "skip_read_only_or_no_changes"
+
     with start_optional_span(
         tracer_name="orchestrator.graph",
         span_name="orchestrator.node.verify_result.independent",

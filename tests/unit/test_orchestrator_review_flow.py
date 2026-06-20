@@ -9,7 +9,11 @@ from tests.unit.orchestrator_review_support import *  # noqa: F403
 @pytest.mark.anyio
 async def test_review_result_skips_when_not_successful():
     state = OrchestratorState.model_validate(
-        {"task": {"task_text": "demo"}, "verification": {"status": "failed", "items": []}}
+        {
+            "task": {"task_text": "demo"},
+            "verification": {"status": "failed", "items": []},
+            "result": {"status": "success", "files_changed": ["main.py"]},
+        }
     )
 
     res = await review_result(state)
@@ -24,7 +28,7 @@ async def test_review_result_skips_when_explicitly_disabled():
         {
             "task": {"task_text": "demo", "constraints": {"skip_independent_review": True}},
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
         }
     )
 
@@ -98,6 +102,7 @@ async def test_review_result_uses_json_payload_when_summary_is_stripped():
             "result": {
                 "status": "success",
                 "summary": "added feature",
+                "files_changed": ["feature.py"],
             },
             "dispatch": {"worker_type": "antigravity"},
         }
@@ -141,7 +146,7 @@ async def test_review_result_handles_worker_failure_gracefully():
         {
             "task": {"task_text": "demo"},
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "review": {
                 "reviewer_kind": "independent_reviewer",
                 "summary": "stale findings from prior review",
@@ -233,7 +238,12 @@ async def test_review_result_logs_warning_when_workspace_path_missing(caplog):
         {
             "task": {"task_text": "demo"},
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done", "artifacts": []},
+            "result": {
+                "status": "success",
+                "summary": "done",
+                "artifacts": [],
+                "files_changed": ["main.py"],
+            },
             "dispatch": {"worker_type": "antigravity"},
         }
     )
@@ -260,7 +270,7 @@ async def test_review_result_logs_warning_when_using_same_worker_type(caplog):
         {
             "task": {"task_text": "demo"},
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "codex"},
         }
     )
@@ -284,7 +294,7 @@ async def test_review_result_logs_warnings_for_non_success_and_unparseable_outpu
         {
             "task": {"task_text": "demo"},
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "antigravity"},
         }
     )
@@ -357,7 +367,7 @@ async def test_review_result_times_out_worker_run(monkeypatch, caplog):
         {
             "task": {"task_text": "demo task"},
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "antigravity"},
         }
     )
@@ -389,7 +399,7 @@ async def test_review_result_propagates_cancellation():
         {
             "task": {"task_text": "demo task"},
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "antigravity"},
         }
     )
@@ -407,7 +417,12 @@ async def test_review_result_preserves_workspace_id():
         {
             "task": {"task_text": "demo task"},
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done", "workspace_id": "ws-123"},
+            "result": {
+                "status": "success",
+                "summary": "done",
+                "workspace_id": "ws-123",
+                "files_changed": ["main.py"],
+            },
             "dispatch": {"worker_type": "antigravity", "workspace_id": "ws-dispatch-123"},
         }
     )

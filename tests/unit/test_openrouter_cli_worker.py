@@ -127,14 +127,21 @@ def _git_status_command(container_workdir: str = "/workspace/repo") -> str:
     return f"git -C {container_workdir} status --porcelain=v1 -z --untracked-files=all"
 
 
+def _command_result(command: str, output: str = "") -> DockerShellCommandResult:
+    return DockerShellCommandResult(
+        command=command,
+        exit_code=0,
+        output=output,
+        duration_seconds=0.0,
+    )
+
+
 def _make_default_session(container: DockerSandboxContainer) -> _FakeSession:
     return _FakeSession(
         {
-            _git_status_command(container.working_dir): DockerShellCommandResult(
-                command=_git_status_command(container.working_dir),
-                exit_code=0,
-                output="",
-                duration_seconds=0.0,
+            _git_status_command(container.working_dir): _command_result(
+                _git_status_command(container.working_dir),
+                output=" M main.py\0",
             )
         }
     )

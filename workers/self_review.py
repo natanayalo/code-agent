@@ -42,6 +42,11 @@ DEFAULT_SELF_REVIEW_DIFF_MAX_CHARACTERS = 12000
 
 def should_skip_self_review(constraints: Mapping[str, Any]) -> bool:
     """Return True when worker constraints explicitly disable self-review."""
+    if not constraints:
+        return False
+    if constraints.get("read_only") is True:
+        return True
+
     skip_flag = constraints.get("skip_self_review")
     if isinstance(skip_flag, bool):
         return skip_flag
@@ -345,6 +350,9 @@ def run_shared_self_review_fix_loop(
     """Run worker self-review with bounded fix-loop retries, mutating execution in place."""
     review_result: ReviewResult | None = None
     if execution.status != "success" or should_skip_self_review(constraints):
+        return review_result, files_changed, lint_format_result, lint_format_artifacts
+
+    if not files_changed:
         return review_result, files_changed, lint_format_result, lint_format_artifacts
 
     max_fix_iterations = resolve_self_review_max_fix_iterations(constraints)

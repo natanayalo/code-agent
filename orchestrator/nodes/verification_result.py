@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any, Final, Literal
 
@@ -20,6 +21,8 @@ from orchestrator.state import (
 )
 from orchestrator.verification import resolve_verification_commands
 from tools.numeric import coerce_non_negative_int_like
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_INDEPENDENT_VERIFIER_MAX_REPAIR_PASSES = 1
 
@@ -159,6 +162,15 @@ def _check_independent_verifier(
     if not enable_independent_verifier:
         return None
     if independent_verifier_outcome is None:
+        if independent_verifier_reason_code == "skip_read_only_or_no_changes":
+            return VerificationReportItem(
+                label="independent_verifier",
+                status="passed",
+                message=(
+                    "Independent verifier intentionally skipped (read-only or no files changed)."
+                ),
+                reason_code=independent_verifier_reason_code,
+            )
         return VerificationReportItem(
             label="independent_verifier",
             status="warning",
@@ -324,7 +336,29 @@ def _check_test_results(state: OrchestratorState) -> VerificationReportItem:
 
 def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
     result = state.result
-    assert result is not None
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    is_read_only = constraints.get("read_only") is True
+
+    if result is None:
+        logger.warning("Verification result is None")
+        return VerificationReportItem(
+            label="verification_error",
+            status="failed",
+            message="No result received from worker.",
+            reason_code="missing_result",
+        )
+
+    if is_read_only and result.files_changed:
+        return VerificationReportItem(
+            label="file_changes",
+            status="failed",
+            message=(
+                f"Worker reported {result.status} and changed {len(result.files_changed)} files, "
+                "but task was read-only."
+            ),
+            reason_code="scope_mismatch",
+        )
+
     if result.status == "success" and not result.files_changed:
         if _requires_deliverable_evidence(state) and not _has_meaningful_deliverable(state):
             return VerificationReportItem(
@@ -337,6 +371,14 @@ def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
                 reason_code="incomplete_delivery",
             )
         else:
+            if is_read_only:
+                return VerificationReportItem(
+                    label="file_changes",
+                    status="passed",
+                    message=(
+                        "Worker reported success with no files changed (expected for read-only)."
+                    ),
+                )
             return VerificationReportItem(
                 label="file_changes",
                 status="warning",
@@ -351,6 +393,16 @@ def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
             ),
         )
     else:
+        if is_read_only and result.files_changed:
+            return VerificationReportItem(
+                label="file_changes",
+                status="failed",
+                message=(
+                    f"Worker reported success and changed {len(result.files_changed)} files, "
+                    "but task was read-only."
+                ),
+                reason_code="scope_mismatch",
+            )
         return VerificationReportItem(
             label="file_changes",
             status="passed",

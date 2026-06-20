@@ -2,6 +2,7 @@ file_exceptions:
   db/models.py: Central ORM definitions; tightly coupled models.
   orchestrator/brain.py: Optional orchestrator-brain contracts for TaskSpec enrichment and routing. (coupled to models preventing extraction)
   orchestrator/graph.py: LangGraph workflow skeleton for the orchestrator happy path. (coupled to models preventing extraction)
+  orchestrator/nodes/verification_result.py: Maps complex verification states and validation rules into structured report items.
   orchestrator/verification.py: Coordinates the entire verification loop including code building, execution, parsing, and state updates. (Tightly coupled logic boundary)
   workers/native_agent_runner.py: Runner handles complex interactions with native agents including network retries, output capture, and workspace integration. (Cannot easily split further without breaking CLI contract)
 function_exceptions:

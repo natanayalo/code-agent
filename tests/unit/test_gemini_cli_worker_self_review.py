@@ -123,7 +123,7 @@ def _make_default_session(container: DockerSandboxContainer) -> _FakeSession:
             _git_status_command(container.working_dir): DockerShellCommandResult(
                 command=_git_status_command(container.working_dir),
                 exit_code=0,
-                output="",
+                output=" M main.py\0",
                 duration_seconds=0.0,
             )
         }

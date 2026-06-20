@@ -119,7 +119,7 @@ def test_summarize_result_emits_event():
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "hello"},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "codex"},
         }
     )

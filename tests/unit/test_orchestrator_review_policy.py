@@ -12,7 +12,7 @@ async def test_review_result_suppresses_style_and_low_confidence_findings_by_def
         {
             "task": {"task_text": "demo"},
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "antigravity"},
         }
     )
@@ -71,7 +71,7 @@ async def test_review_result_respects_configured_severity_and_style_overrides():
                 },
             },
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "antigravity"},
         }
     )
@@ -126,7 +126,7 @@ async def test_review_result_uses_severity_threshold_over_global_by_default():
         {
             "task": {"task_text": "demo"},
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "antigravity"},
         }
     )
@@ -173,7 +173,7 @@ async def test_review_result_uses_explicit_global_confidence_as_baseline():
                 },
             },
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "antigravity"},
         }
     )
@@ -221,3 +221,26 @@ async def test_review_result_uses_explicit_global_confidence_as_baseline():
 
 def test_coerce_probability_returns_none_for_overflowing_numeric_input() -> None:
     assert review_module._coerce_probability(10**400) is None
+
+
+@pytest.mark.anyio
+async def test_review_result_skips_on_read_only_or_no_files_changed():
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "constraints": {"read_only": True},
+            },
+            "verification": {"status": "passed", "items": []},
+            "result": {"status": "success", "summary": "done", "files_changed": []},
+            "dispatch": {"worker_type": "antigravity"},
+        }
+    )
+    mock_reviewer = AsyncMock()
+
+    res = await review_result(state, worker_factory={"antigravity": mock_reviewer})
+
+    assert res["current_step"] == "review_result"
+    assert res["review"] is None
+    assert any("independent code-change review skipped" in msg for msg in res["progress_updates"])
+    mock_reviewer.run.assert_not_called()

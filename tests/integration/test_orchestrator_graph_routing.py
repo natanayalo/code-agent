@@ -64,6 +64,7 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
         "worker dispatched",
         "worker unavailable: antigravity",
         "verification failed",
+        "independent code-change review skipped (no files changed)",
         "result summarized and session state updated",
         "memory persistence queued",
     ]
