@@ -352,6 +352,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps-dev): bump undici from 7.25.0 to 7.28.0 in /dashboard ([#255](https://github.com/natanayalo/code-agent/pull/255))
+
 - Chore(deps): bump cryptography from 46.0.7 to 48.0.1 ([#241](https://github.com/natanayalo/code-agent/pull/241))
 
 - Chore(deps): bump starlette from 1.2.1 to 1.3.1 ([#240](https://github.com/natanayalo/code-agent/pull/240))
