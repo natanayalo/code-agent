@@ -51,8 +51,8 @@ if [ ! -f "$CODE_AGENT_CODEX_AUTH_DIR/auth.json" ] && [ -f "$FALLBACK_CODEX_AUTH
   export CODE_AGENT_CODEX_AUTH_DIR="$FALLBACK_CODEX_AUTH_DIR"
 fi
 
-if [ ! -d "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR" ] && [ -d "$FALLBACK_ANTIGRAVITY_AUTH_DIR" ]; then
-  echo "[run-production-like][warn] CODE_AGENT_ANTIGRAVITY_AUTH_DIR points to a missing path: $CODE_AGENT_ANTIGRAVITY_AUTH_DIR" >&2
+if [ ! -f "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR/antigravity-cli/antigravity-oauth-token" ] && [ -f "$FALLBACK_ANTIGRAVITY_AUTH_DIR/antigravity-cli/antigravity-oauth-token" ]; then
+  echo "[run-production-like][warn] CODE_AGENT_ANTIGRAVITY_AUTH_DIR points to a path missing the token: $CODE_AGENT_ANTIGRAVITY_AUTH_DIR" >&2
   echo "[run-production-like][warn] Falling back to detected path: $FALLBACK_ANTIGRAVITY_AUTH_DIR" >&2
   export CODE_AGENT_ANTIGRAVITY_AUTH_DIR="$FALLBACK_ANTIGRAVITY_AUTH_DIR"
 fi
