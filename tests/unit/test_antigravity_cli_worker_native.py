@@ -91,8 +91,6 @@ def test_antigravity_worker_builds_prompt_argv_command_and_settings(tmp_path: Pa
     )
     command = native_request.command
     assert command[:3] == ["/opt/bin/agy", "-p", native_request.prompt]
-    assert "--cwd" in command
-    assert command[command.index("--cwd") + 1] == str(workspace.repo_path)
     assert "--model" in command
     assert command[command.index("--model") + 1] == "gemini-3-pro"
     assert native_request.stdin_prompt is False

@@ -192,8 +192,6 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
     ) -> list[str]:
         """Build the documented one-shot Antigravity CLI command."""
         command = [self.executable, "-p", prompt]
-        if cwd is not None:
-            command.extend(["--cwd", str(cwd)])
         if self.model is not None:
             command.extend(["--model", self.model])
         return command
