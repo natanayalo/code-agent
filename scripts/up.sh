@@ -57,6 +57,10 @@ if [ ! -d "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR" ] && [ -d "$FALLBACK_ANTIGRAVITY_AU
   export CODE_AGENT_ANTIGRAVITY_AUTH_DIR="$FALLBACK_ANTIGRAVITY_AUTH_DIR"
 fi
 
+if [ ! -d "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR" ]; then
+  mkdir -p "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR"
+fi
+
 if [ ! -f "$CODE_AGENT_CODEX_AUTH_DIR/auth.json" ]; then
   echo "[run-production-like][error] Codex auth was not found at $CODE_AGENT_CODEX_AUTH_DIR/auth.json" >&2
   echo "[run-production-like][error] Run one-time login in worker container:" >&2
@@ -65,8 +69,8 @@ if [ ! -f "$CODE_AGENT_CODEX_AUTH_DIR/auth.json" ]; then
   exit 1
 fi
 
-if [ ! -d "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR" ]; then
-  echo "[run-production-like][warn] Antigravity auth dir was not found at $CODE_AGENT_ANTIGRAVITY_AUTH_DIR" >&2
+if [ ! -f "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR/antigravity-cli/antigravity-oauth-token" ]; then
+  echo "[run-production-like][warn] Antigravity auth token was not found in $CODE_AGENT_ANTIGRAVITY_AUTH_DIR" >&2
   echo "[run-production-like][warn] Antigravity worker may fail until you run 'agy auth login' on host." >&2
 fi
 
