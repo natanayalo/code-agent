@@ -235,6 +235,69 @@ def build_workflow_instructions_section(request: WorkerRequest) -> str:
     return "\n".join(lines)
 
 
+def build_scout_overlay_section(request: WorkerRequest) -> str | None:
+    """Describe scout mode instructions and proposal-oriented output rules."""
+    if request.constraints.get("task_type") != "scout":
+        return None
+
+    scout_mode = request.constraints.get("scout_mode", "repo")
+    scout_focus = request.constraints.get("scout_focus")
+    scout_depth = request.constraints.get("scout_depth")
+    max_proposals = request.constraints.get("max_proposals") or 3
+
+    lines = [
+        "## Scout Mode Guardrails",
+        "You operate in a strictly read-only mode. Do not attempt to merge, "
+        "deploy, or modify the main codebase.",
+        f"Your final output must be up to {max_proposals} well-structured proposal(s) "
+        "for the Idea Inbox.",
+        "Each proposal must include:",
+        "- Title",
+        "- Evidence (concrete file paths, line numbers, or external references)",
+        "- Impact",
+        "- Suggested implementation slice",
+        "- Verification idea",
+        "- Risk",
+    ]
+
+    lines.append(f"\nMode: `{scout_mode}`")
+    if scout_depth:
+        lines.append(f"Depth: `{scout_depth}`")
+    if scout_focus:
+        lines.append(f"Focus: {scout_focus}")
+
+    lines.append("\nMode Instructions:")
+    if scout_mode == "repo":
+        lines.append(
+            "- Focus on inspecting the local repository to identify technical debt, "
+            "refactoring opportunities, or bugs."
+        )
+    elif scout_mode == "research":
+        lines.append(
+            "- Focus on researching specific topics or external references to propose "
+            "architectural improvements."
+        )
+        if scout_focus:
+            lines.append(f"  Pay close attention to the requested focus area: {scout_focus}")
+        lines.append(
+            "- Source Policy: use available/local evidence first, cite external references "
+            "only if tools/network policy permits, and explicitly state when external "
+            "research could not be performed."
+        )
+    elif scout_mode == "deep":
+        lines.append(
+            "- Use a repo-first, then targeted-research structure when available; "
+            "do not exceed the task budget."
+        )
+        lines.append(
+            "- Source Policy: use available/local evidence first, cite external references "
+            "only if tools/network policy permits, and explicitly state when external "
+            "research could not be performed."
+        )
+
+    return "\n".join(lines)
+
+
 def build_system_prompt(
     request: WorkerRequest,
     workspace_path: Path,
@@ -275,6 +338,7 @@ def build_system_prompt(
 
     sections = [
         build_role_description_section(request),
+        build_scout_overlay_section(request) or "",
         build_available_tools_section(tool_registry, tool_client, allowed_tool_names)
         if not is_native
         else "",
