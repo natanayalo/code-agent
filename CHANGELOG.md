@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat(ui): format worker labels for antigravity migration [T-210] ([#258](https://github.com/natanayalo/code-agent/pull/258))
+
 - Feat: add Docker Antigravity support using official install mechanisms ([#254](https://github.com/natanayalo/code-agent/pull/254))
 
 - Feat: add Antigravity native CLI adapter ([#253](https://github.com/natanayalo/code-agent/pull/253))
