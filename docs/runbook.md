@@ -256,7 +256,13 @@ Use replay endpoint instead of manually cloning task rows:
 For full pipeline testing (API -> Orchestrator -> Sandbox Worker -> DB), use the automated QA runbook. Ensure your `.env` has test credentials and the stack is running.
 
 ```bash
-python scripts/run_e2e_qa.py
+poetry run python .agents/skills/e2e-qa/scripts/run_e2e_qa.py
+```
+
+To verify the delivery integration variant, use:
+
+```bash
+poetry run python .agents/skills/e2e-qa/scripts/run_e2e_qa_delivery.py
 ```
 
 ## 10) Antigravity Migration Guide
