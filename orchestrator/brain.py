@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import Any, Final, Protocol, cast, get_args
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from apps.observability import (
     add_current_span_event,
@@ -448,6 +448,27 @@ class RouteBrainSuggestion(OrchestratorModel):
     suggested_retry_strategy: str | None = None
     rationale: str | None = None
 
+    @field_validator("suggested_worker", mode="before", check_fields=False)
+    @classmethod
+    def _coerce_worker(cls, value: object) -> object:
+        from db.enums import coerce_worker_type
+
+        if value is None:
+            return None
+        try:
+            return coerce_worker_type(value)
+        except ValueError:
+            return value
+
+    @field_validator("suggested_profile", mode="before", check_fields=False)
+    @classmethod
+    def _coerce_profile(cls, value: object) -> object:
+        from workers.base import normalize_worker_profile_name
+
+        if isinstance(value, str):
+            return normalize_worker_profile_name(value)
+        return value
+
 
 class UnifiedOrchestratorSuggestion(OrchestratorModel):
     """Structured unified suggestion for TaskSpec enrichment and route recommendation."""
@@ -467,6 +488,27 @@ class UnifiedOrchestratorSuggestion(OrchestratorModel):
     suggested_profile: str | None = None
     suggested_retry_strategy: str | None = None
     rationale: str | None = None
+
+    @field_validator("suggested_worker", mode="before", check_fields=False)
+    @classmethod
+    def _coerce_worker(cls, value: object) -> object:
+        from db.enums import coerce_worker_type
+
+        if value is None:
+            return None
+        try:
+            return coerce_worker_type(value)
+        except ValueError:
+            return value
+
+    @field_validator("suggested_profile", mode="before", check_fields=False)
+    @classmethod
+    def _coerce_profile(cls, value: object) -> object:
+        from workers.base import normalize_worker_profile_name
+
+        if isinstance(value, str):
+            return normalize_worker_profile_name(value)
+        return value
 
 
 class ImprovementScoringBrainSuggestion(OrchestratorModel):

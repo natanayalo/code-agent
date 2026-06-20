@@ -44,7 +44,7 @@ async def test_suggest_task_spec_and_route_parses_unified_payload() -> None:
 
 
 @pytest.mark.anyio
-async def test_suggest_task_spec_and_route_ignores_retired_worker_names() -> None:
+async def test_suggest_task_spec_and_route_coerces_retired_worker_names() -> None:
     worker = _StaticWorker(
         WorkerResult(
             status="success",
@@ -72,7 +72,7 @@ async def test_suggest_task_spec_and_route_ignores_retired_worker_names() -> Non
     )
 
     assert suggestion is not None
-    assert suggestion.suggested_worker is None
+    assert suggestion.suggested_worker == "antigravity"
     assert suggestion.suggested_profile == "antigravity-native-executor-read-only"
 
 

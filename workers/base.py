@@ -81,7 +81,7 @@ def normalize_worker_profile_name(value: str | None) -> str | None:
     if not stripped:
         return None
     if stripped.startswith("gemini-"):
-        raise ValueError("Gemini profile names are no longer supported; use antigravity profiles.")
+        return stripped.replace("gemini-", "antigravity-", 1)
     return stripped
 
 

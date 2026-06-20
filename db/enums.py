@@ -137,7 +137,10 @@ def coerce_worker_type(value: object) -> WorkerType:
     if isinstance(value, WorkerType):
         return value
     if isinstance(value, str):
-        return WorkerType(value.strip().lower())
+        normalized = value.strip().lower()
+        if normalized == "gemini":
+            return WorkerType.ANTIGRAVITY
+        return WorkerType(normalized)
     raise ValueError(f"Invalid worker type: {value!r}")
 
 

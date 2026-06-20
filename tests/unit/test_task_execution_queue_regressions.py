@@ -195,11 +195,11 @@ def test_queue_state_helpers_update_retry_and_terminal_status_consistently() -> 
 
 
 @pytest.mark.anyio
-async def test_run_queued_task_fails_retired_persisted_profile_override() -> None:
-    """Queued tasks with retired persisted profile overrides should fail explicitly."""
+async def test_run_queued_task_coerces_retired_persisted_profile_override() -> None:
+    """Queued tasks with retired persisted profile overrides should be coerced and succeed."""
     service, session_factory = _make_task_service()
     task_snapshot, _ = service.create_task(
-        execution_module.TaskSubmission(task_text="Reject retired profile")
+        execution_module.TaskSubmission(task_text="Accept retired profile")
     )
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(task_snapshot.task_id)
@@ -218,9 +218,8 @@ async def test_run_queued_task_fails_retired_persisted_profile_override() -> Non
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(task_snapshot.task_id)
         assert task is not None
-        assert task.status is TaskStatus.FAILED
+        assert task.status is TaskStatus.COMPLETED
         assert task.lease_owner is None
         assert task.lease_expires_at is None
         assert task.next_attempt_at is None
-        assert task.last_error is not None
-        assert "Gemini profile names are no longer supported" in task.last_error
+        assert task.last_error is None

@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-from pydantic import ValidationError
-
 from tests.unit.task_execution_service_support import *  # noqa: F403
 
 
@@ -336,20 +334,16 @@ def test_execution_boundary_models_trim_profile_overrides() -> None:
     assert replay_request.worker_profile_override == "antigravity-native-reviewer"
 
 
-def test_execution_boundary_models_reject_retired_gemini_inputs() -> None:
-    """Task execution boundaries should accept only canonical Antigravity names."""
+def test_execution_boundary_models_coerce_retired_gemini_inputs() -> None:
+    """Task execution boundaries should coerce legacy Gemini names to Antigravity."""
 
-    with pytest.raises(ValidationError, match="not a valid WorkerType"):
-        execution_module.TaskSubmission(
-            task_text="Run task",
-            worker_override="gemini",
-        )
-
-    with pytest.raises(ValidationError, match="Gemini profile names are no longer supported"):
-        execution_module.TaskSubmission(
-            task_text="Run task",
-            worker_profile_override="gemini-native-executor",
-        )
+    submission = execution_module.TaskSubmission(
+        task_text="Run task",
+        worker_override="gemini",
+        worker_profile_override="gemini-native-executor",
+    )
+    assert submission.worker_override == "antigravity"
+    assert submission.worker_profile_override == "antigravity-native-executor"
 
 
 def test_load_submission_for_task_returns_none_when_persisted_scaffolding_is_missing() -> None:
