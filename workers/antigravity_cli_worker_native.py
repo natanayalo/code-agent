@@ -246,9 +246,15 @@ def prepare_antigravity_workspace_migration(
 
         # Copy file-based OAuth token for environments without Keyring/D-Bus
         auth_file_path = source / "antigravity-cli" / "antigravity-oauth-token"
-        if _copy_file_if_missing(
-            auth_file_path, gemini_home / "antigravity-cli" / "antigravity-oauth-token"
-        ):
+        target_token = gemini_home / "antigravity-cli" / "antigravity-oauth-token"
+        if _copy_file_if_missing(auth_file_path, target_token):
+            try:
+                target_token.chmod(0o600)
+            except OSError:
+                logger.warning(
+                    "Failed to restrict permissions on copied OAuth token",
+                    extra={"file": "antigravity-oauth-token"},
+                )
             actions.append("copied_oauth_token")
 
         break

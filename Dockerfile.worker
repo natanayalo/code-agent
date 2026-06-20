@@ -30,7 +30,7 @@ RUN set -eu; \
     install -m 0755 /tmp/docker/docker /usr/local/bin/docker; \
     rm -rf /tmp/docker /tmp/docker.tgz; \
     npm install -g @openai/codex @google/gemini-cli && \
-    npm cache clean --force; \
+    npm cache clean --force && \
     curl -fsSL https://antigravity.google/cli/install.sh > /tmp/install.sh && \
     bash /tmp/install.sh -d /root/.local/bin && \
     rm /tmp/install.sh && \

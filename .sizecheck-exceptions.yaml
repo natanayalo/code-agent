@@ -18,8 +18,8 @@ function_exceptions:
     suggest_route: Complex routing heuristics evaluating multiple fallback rules in sequence.
     suggest_task_spec_and_route: Orchestrates concurrent async planner calls for routing and specs.
   orchestrator/execution_outcome_service.py:
-    _persist_friction_proposals_if_needed: Gathers evidence from state and delegates to proposal persistence, cohesive logic block.
     _persist_execution_outcome: Master orchestrator logic that persists artifacts, task state, and reflection proposals, highly cohesive.
+    _persist_friction_proposals_if_needed: Gathers evidence from state and delegates to proposal persistence, cohesive logic block.
   orchestrator/execution_proposal_service.py:
     accept_proposal: Cohesive execution orchestration flow spanning DB retrieval, task building, and conditional SQL atomic updates; splitting degrades readability.
   orchestrator/execution_submission_service.py:
@@ -40,6 +40,8 @@ function_exceptions:
     test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics: Highly stateful logic for test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics; splitting requires unnatural parameter coupling.
   tests/integration/test_vertical_slice_e2e.py:
     test_vertical_slice_e2e_happy_path: Highly stateful logic for test_vertical_slice_e2e_happy_path; splitting requires unnatural parameter coupling.
+  workers/antigravity_cli_worker_native.py:
+    prepare_antigravity_workspace_migration: Copies various files and configs sequentially to construct an isolated workspace; breaking it down would be artificial.
   workers/native_agent_runner.py:
     _collect_native_agent_results: Coordinates async result collection from the agent and tool runner; tightly coupled logic.
     _determine_exit_status: Parses and classifies error markers from native execution logs; cohesive matching block.
