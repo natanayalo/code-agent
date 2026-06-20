@@ -54,7 +54,7 @@ LEGACY_ARTIFACT_REVIEW_POLICY_ALIASES: Final[dict[str, AntigravityArtifactReview
 
 
 def _normalize_tool_permission(value: str | None) -> AntigravityToolPermission:
-    normalized = (value or DEFAULT_ANTIGRAVITY_TOOL_PERMISSION).strip().lower()
+    normalized = (value or "").strip().lower() or DEFAULT_ANTIGRAVITY_TOOL_PERMISSION
     if normalized not in VALID_ANTIGRAVITY_TOOL_PERMISSIONS:
         supported = ", ".join(sorted(VALID_ANTIGRAVITY_TOOL_PERMISSIONS))
         raise ValueError(
@@ -64,7 +64,7 @@ def _normalize_tool_permission(value: str | None) -> AntigravityToolPermission:
 
 
 def _normalize_artifact_review_policy(value: str | None) -> AntigravityArtifactReviewPolicy:
-    normalized = (value or DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY).strip().lower()
+    normalized = (value or "").strip().lower() or DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY
     normalized = LEGACY_ARTIFACT_REVIEW_POLICY_ALIASES.get(normalized, normalized)
     if normalized not in VALID_ANTIGRAVITY_ARTIFACT_REVIEW_POLICIES:
         supported = ", ".join(sorted(VALID_ANTIGRAVITY_ARTIFACT_REVIEW_POLICIES))

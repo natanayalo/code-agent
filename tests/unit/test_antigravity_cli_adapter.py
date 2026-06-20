@@ -148,6 +148,18 @@ def test_antigravity_settings_reject_invalid_tool_permission() -> None:
         )
 
 
+def test_antigravity_settings_defaults_whitespace_only_values() -> None:
+    assert build_antigravity_settings(
+        tool_permission="   ",
+        artifact_review_policy="\t\n",
+        enable_terminal_sandbox=True,
+    ) == {
+        "artifactReviewPolicy": "agent-decides",
+        "enableTerminalSandbox": True,
+        "toolPermission": "proceed-in-sandbox",
+    }
+
+
 def test_antigravity_settings_maps_legacy_artifact_review_policy_names() -> None:
     assert (
         build_antigravity_settings(
