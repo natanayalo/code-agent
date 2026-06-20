@@ -245,7 +245,7 @@ def prepare_antigravity_workspace_migration(
                 actions.append("migrated_global_mcp_config")
 
         # Link file-based OAuth token for environments without Keyring/D-Bus
-        auth_file_path = source / "antigravity-cli" / "antigravity-oauth-token"
+        auth_file_path = (source / "antigravity-cli" / "antigravity-oauth-token").resolve()
         target_token = gemini_home / "antigravity-cli" / "antigravity-oauth-token"
         if _path_exists(auth_file_path):
             try:
