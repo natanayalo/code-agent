@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Final, Literal, cast, get_args
 
 from db.enums import WorkerRuntimeMode
 from tools import McpToolClient, ToolRegistry
@@ -235,12 +235,17 @@ def build_workflow_instructions_section(request: WorkerRequest) -> str:
     return "\n".join(lines)
 
 
+ScoutMode = Literal["repo", "research", "deep"]
+SCOUT_MODES: Final[tuple[ScoutMode, ...]] = get_args(ScoutMode)
+
+
 def build_scout_overlay_section(request: WorkerRequest) -> str | None:
     """Describe scout mode instructions and proposal-oriented output rules."""
     if request.constraints.get("task_type") != "scout":
         return None
 
-    scout_mode = request.constraints.get("scout_mode", "repo")
+    raw_mode = request.constraints.get("scout_mode")
+    scout_mode = cast(ScoutMode, raw_mode) if raw_mode in SCOUT_MODES else cast(ScoutMode, "repo")
     scout_focus = request.constraints.get("scout_focus")
     scout_depth = request.constraints.get("scout_depth")
     max_proposals = request.constraints.get("max_proposals") or 3
