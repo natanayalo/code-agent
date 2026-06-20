@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any, Final, Literal
 
@@ -20,6 +21,8 @@ from orchestrator.state import (
 )
 from orchestrator.verification import resolve_verification_commands
 from tools.numeric import coerce_non_negative_int_like
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_INDEPENDENT_VERIFIER_MAX_REPAIR_PASSES = 1
 
@@ -333,9 +336,28 @@ def _check_test_results(state: OrchestratorState) -> VerificationReportItem:
 
 def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
     result = state.result
-    assert result is not None
     constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
     is_read_only = constraints.get("read_only") is True
+
+    if result is None:
+        logger.warning("Verification result is None")
+        return VerificationReportItem(
+            label="verification_error",
+            status="failed",
+            message="No result received from worker.",
+            reason_code="missing_result",
+        )
+
+    if is_read_only and result.files_changed:
+        return VerificationReportItem(
+            label="file_changes",
+            status="failed",
+            message=(
+                f"Worker reported {result.status} and changed {len(result.files_changed)} files, "
+                "but task was read-only."
+            ),
+            reason_code="scope_mismatch",
+        )
 
     if result.status == "success" and not result.files_changed:
         if _requires_deliverable_evidence(state) and not _has_meaningful_deliverable(state):
