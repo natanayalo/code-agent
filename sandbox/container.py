@@ -211,8 +211,7 @@ def _validate_local_repo_mount_path(local_repo_path: str, workspace_path: Path) 
 
     if not _is_allowed_local_remote(resolved_path):
         raise DockerSandboxContainerError(
-            f"Local repo path {resolved_path} is outside the "
-            f"allowed workspace root {allowed_root}"
+            f"Local repo path {resolved_path} is outside the allowed workspace root {allowed_root}"
         )
 
 

@@ -15,7 +15,7 @@ async def test_review_result_requests_single_repair_handoff_for_actionable_findi
                 "constraints": {"independent_review_enable_repair_handoff": True},
             },
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "antigravity"},
         }
     )
@@ -63,7 +63,7 @@ async def test_review_result_does_not_request_handoff_when_explicitly_disabled()
                 "constraints": {"independent_review_enable_repair_handoff": False},
             },
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "antigravity"},
         }
     )
@@ -106,7 +106,7 @@ async def test_review_result_cleans_repair_handoff_constraints_after_repair_pass
                 },
             },
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "antigravity"},
         }
     )
@@ -133,7 +133,7 @@ async def test_review_result_respects_max_repair_pass_budget():
                 },
             },
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "antigravity"},
         }
     )
@@ -178,7 +178,7 @@ async def test_review_result_keeps_review_enabled_when_repair_budget_not_exhaust
                 },
             },
             "verification": {"status": "passed", "items": []},
-            "result": {"status": "success", "summary": "done"},
+            "result": {"status": "success", "summary": "done", "files_changed": ["main.py"]},
             "dispatch": {"worker_type": "antigravity"},
         }
     )

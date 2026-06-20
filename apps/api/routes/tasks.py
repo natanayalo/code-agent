@@ -65,8 +65,7 @@ def trigger_scout_task(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "Scout functionality is not fully configured "
-                "(missing CODE_AGENT_SCOUT_REPO_URL)."
+                "Scout functionality is not fully configured (missing CODE_AGENT_SCOUT_REPO_URL)."
             ),
         )
 

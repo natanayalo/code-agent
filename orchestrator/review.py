@@ -420,6 +420,29 @@ def _repair_handoff_update(
 
 
 def _check_skip_review(state: OrchestratorState) -> dict[str, Any] | None:
+    is_read_only = state.task.constraints.get("read_only") is True
+    no_files_changed = not (state.result and state.result.files_changed)
+
+    if is_read_only or no_files_changed:
+        reason = "read-only task" if is_read_only else "no files changed"
+        updated_task = state.task
+        if state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT) is not None:
+            updated_task = state.task.model_copy(
+                update={
+                    "constraints": _cleanup_repair_handoff_constraints(state.task.constraints),
+                }
+            )
+
+        return {
+            "current_step": "review_result",
+            "task": updated_task.model_dump(),
+            "review": None,
+            "progress_updates": [
+                *state.progress_updates,
+                f"independent code-change review skipped ({reason})",
+            ],
+        }
+
     if (
         state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT) is not None
         and state.task.constraints.get(SKIP_INDEPENDENT_REVIEW_CONSTRAINT) is True

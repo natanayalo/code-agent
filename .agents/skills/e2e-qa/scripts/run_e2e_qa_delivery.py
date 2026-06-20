@@ -22,7 +22,7 @@ if not workspace_root:
             for line in f:
                 parts = line.split("=", 1)
                 if len(parts) == 2 and parts[0].strip() == "CODE_AGENT_WORKSPACE_ROOT":
-                    raw_val = parts[1].split('#', 1)[0].strip()
+                    raw_val = parts[1].split("#", 1)[0].strip()
                     workspace_root = raw_val.strip("'").strip('"')
                     break
 workspace_root = os.path.expandvars(os.path.expanduser(workspace_root))
@@ -36,22 +36,31 @@ def setup_dummy_repo():
     shutil.rmtree(DUMMY_REMOTE_DIR, ignore_errors=True)
     os.makedirs(DUMMY_REMOTE_DIR, exist_ok=True)
     subprocess.run(
-        ["git", "init", "--bare", "--initial-branch=master"], cwd=DUMMY_REMOTE_DIR, check=True, capture_output=True
+        ["git", "init", "--bare", "--initial-branch=master"],
+        cwd=DUMMY_REMOTE_DIR,
+        check=True,
+        capture_output=True,
     )
 
     print(f"[*] Setting up dummy repository at {DUMMY_REPO_DIR}")
     shutil.rmtree(DUMMY_REPO_DIR, ignore_errors=True)
     os.makedirs(DUMMY_REPO_DIR, exist_ok=True)
-    subprocess.run(
-        ["git", "init"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
-    )
+    subprocess.run(["git", "init"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True)
     readme_path = os.path.join(DUMMY_REPO_DIR, "README.md")
     with open(readme_path, "w", encoding="utf-8") as f:
         f.write("# Dummy QA Repo\n")
     subprocess.run(["git", "add", "README.md"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "QA User"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True)
     subprocess.run(
-        ["git", "config", "user.email", "qa@example.com"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
+        ["git", "config", "user.name", "QA User"],
+        cwd=DUMMY_REPO_DIR,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "qa@example.com"],
+        cwd=DUMMY_REPO_DIR,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["git", "commit", "-m", "Initial commit"],
@@ -63,10 +72,16 @@ def setup_dummy_repo():
         ["git", "branch", "-M", "master"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
     )
     subprocess.run(
-        ["git", "remote", "add", "origin", f"file://{DUMMY_REMOTE_DIR}"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
+        ["git", "remote", "add", "origin", f"file://{DUMMY_REMOTE_DIR}"],
+        cwd=DUMMY_REPO_DIR,
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
-        ["git", "push", "-u", "origin", "master"], cwd=DUMMY_REPO_DIR, check=True, capture_output=True
+        ["git", "push", "-u", "origin", "master"],
+        cwd=DUMMY_REPO_DIR,
+        check=True,
+        capture_output=True,
     )
 
 
@@ -92,16 +107,14 @@ async def main():
     print("[*] Submitting task via webhook")
     payload = {
         "task_text": (
-            "Create a file named qa-hello.txt containing the text 'Hello QA Delivery' and commit it."
+            "Create a file named qa-hello.txt containing the text 'Hello QA Delivery' "
+            "and commit it."
         ),
         "repo_url": f"file://{DUMMY_REMOTE_DIR}",
         "branch": "master",
         "source": "qa",
         "worker_override": os.environ.get("CODE_AGENT_WORKER_OVERRIDE", "antigravity"),
-        "constraints": {
-            "delivery_mode": "branch",
-            "delivery_branch": "qa/test-delivery"
-        }
+        "constraints": {"delivery_mode": "branch", "delivery_branch": "qa/test-delivery"},
     }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -116,7 +129,8 @@ async def main():
         print(f"[+] Task ingested successfully. Task ID: {task_id}")
 
         print("[*] Polling for task completion...")
-        max_attempts = 450  # Increased timeout since multiple agents (exec, verify, review, delivery) are running
+        # Increased timeout since multiple agents (exec, verify, review, delivery) are running
+        max_attempts = 450
         for attempt in range(max_attempts):
             try:
                 resp = await client.get(
@@ -131,7 +145,10 @@ async def main():
                 continue
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code in {502, 503, 504}:
-                    print(f"    - Attempt {attempt + 1}/{max_attempts}: Transient status error {exc.response.status_code}: {exc}")
+                    print(
+                        f"    - Attempt {attempt + 1}/{max_attempts}: Transient status error "
+                        f"{exc.response.status_code}: {exc}"
+                    )
                     await asyncio.sleep(2)
                     continue
                 raise
@@ -148,7 +165,7 @@ async def main():
             raise RuntimeError("Task timed out.")
 
     print("\n[*] Verifying dummy remote repository for the delivered branch")
-    
+
     # We check the bare repo for the new branch
     result = subprocess.run(
         ["git", "branch", "-a"], cwd=DUMMY_REMOTE_DIR, capture_output=True, text=True
@@ -158,7 +175,7 @@ async def main():
     else:
         print("  [-] Branch qa/test-delivery NOT FOUND in the remote.")
         print(f"  [-] Remote branches: {result.stdout}")
-        
+
         # Check task timeline for delivery failed
         for event in task_data.get("timeline_events", []):
             print(f"  [*] Timeline event: {event.get('event_type')} - {event.get('message')}")

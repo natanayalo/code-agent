@@ -159,6 +159,15 @@ def _check_independent_verifier(
     if not enable_independent_verifier:
         return None
     if independent_verifier_outcome is None:
+        if independent_verifier_reason_code == "skip_read_only_or_no_changes":
+            return VerificationReportItem(
+                label="independent_verifier",
+                status="passed",
+                message=(
+                    "Independent verifier intentionally skipped (read-only or no files changed)."
+                ),
+                reason_code=independent_verifier_reason_code,
+            )
         return VerificationReportItem(
             label="independent_verifier",
             status="warning",
@@ -325,6 +334,8 @@ def _check_test_results(state: OrchestratorState) -> VerificationReportItem:
 def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
     result = state.result
     assert result is not None
+    is_read_only = state.task.constraints.get("read_only") is True
+
     if result.status == "success" and not result.files_changed:
         if _requires_deliverable_evidence(state) and not _has_meaningful_deliverable(state):
             return VerificationReportItem(
@@ -351,6 +362,16 @@ def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
             ),
         )
     else:
+        if is_read_only and result.files_changed:
+            return VerificationReportItem(
+                label="file_changes",
+                status="failed",
+                message=(
+                    f"Worker reported success and changed {len(result.files_changed)} files, "
+                    "but task was read-only."
+                ),
+                reason_code="scope_mismatch",
+            )
         return VerificationReportItem(
             label="file_changes",
             status="passed",

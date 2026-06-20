@@ -30,6 +30,7 @@ from workers.self_review_packet import (
 
 
 def test_should_skip_self_review():
+    assert should_skip_self_review({"read_only": True}) is True
     assert should_skip_self_review({"skip_self_review": True}) is True
     assert should_skip_self_review({"skip_self_review": "true"}) is True
     assert should_skip_self_review({"skip_self_review": "1"}) is True
