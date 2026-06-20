@@ -3,7 +3,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
-    PATH="/root/.local/bin:/opt/poetry-venv/bin:$PATH" \
+    PATH="/opt/poetry-venv/bin:$PATH" \
     AGY_CLI_DISABLE_AUTO_UPDATE=true
 
 WORKDIR /app
@@ -32,7 +32,7 @@ RUN set -eu; \
     npm install -g @openai/codex @google/gemini-cli && \
     npm cache clean --force && \
     curl -fsSL https://antigravity.google/cli/install.sh > /tmp/install.sh && \
-    bash /tmp/install.sh -d /root/.local/bin && \
+    bash /tmp/install.sh -d /usr/local/bin && \
     rm /tmp/install.sh && \
     rm -rf /var/lib/apt/lists/*
 
