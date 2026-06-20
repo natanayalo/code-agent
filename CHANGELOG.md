@@ -354,6 +354,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump langsmith from 0.8.4 to 0.8.18 ([#257](https://github.com/natanayalo/code-agent/pull/257))
+
 - Chore(deps-dev): bump undici from 7.25.0 to 7.28.0 in /dashboard ([#255](https://github.com/natanayalo/code-agent/pull/255))
 
 - Chore(deps): bump cryptography from 46.0.7 to 48.0.1 ([#241](https://github.com/natanayalo/code-agent/pull/241))
