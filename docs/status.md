@@ -54,7 +54,6 @@ Reference baseline:
 
 Granular tasks for the active and upcoming milestones:
 
-- T-210: Update dashboard/API types and labels for `antigravity` worker/profile names.
 - T-211: Remove Gemini CLI defaults after Antigravity Docker e2e passes.
 - T-200: Skip change-oriented review for read-only tasks.
 - T-201: Add structured Scout trigger parameters and repo allowlist.
