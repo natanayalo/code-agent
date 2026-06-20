@@ -54,7 +54,6 @@ Reference baseline:
 
 Granular tasks for the active and upcoming milestones:
 
-- T-207: Extend native runner to support prompt-as-argv for `agy` with command-log redaction.
 - T-208: Add Docker Antigravity support using official install/auth/keyring mechanisms.
 - T-209: Update e2e QA scripts, README, runbook, `.env.example`, compose docs, and operator guidance for install, keyring/DBus auth, permissions, context files, skills, and MCP migration.
 - T-210: Update dashboard/API types and labels for `antigravity` worker/profile names.
