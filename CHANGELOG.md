@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add Docker Antigravity support using official install mechanisms ([#254](https://github.com/natanayalo/code-agent/pull/254))
+
 - Feat: add Antigravity native CLI adapter ([#253](https://github.com/natanayalo/code-agent/pull/253))
 
 - Feat: rename worker identity to antigravity ([#252](https://github.com/natanayalo/code-agent/pull/252))
