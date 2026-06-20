@@ -176,8 +176,13 @@ def _build_friction_report_dict(
 def _sanitize_run_command(command_text: str, request: NativeAgentRunRequest) -> str:
     """Return the command string safe for logs, spans, and WorkerResult payloads."""
     sanitized = sanitize_command(command_text, request.redactor)
-    if request.command_redactions:
-        sanitized = SecretRedactor(request.command_redactions).redact(sanitized)
+    active_redactions = [
+        clean
+        for redaction in request.command_redactions
+        if (clean := (redaction or "").strip() or None)
+    ]
+    if active_redactions:
+        sanitized = SecretRedactor(active_redactions).redact(sanitized)
     return sanitized
 
 

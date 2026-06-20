@@ -251,6 +251,37 @@ print(json.dumps({"prompt": prompt, "stdin": stdin_payload}))
     assert "[REDACTED]" in result.command
 
 
+def test_native_agent_runner_filters_blank_command_redactions(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured_redactions: list[list[str]] = []
+
+    class _CapturingRedactor:
+        def __init__(self, secrets: list[str]) -> None:
+            captured_redactions.append(secrets)
+
+        def redact(self, text: str) -> str:
+            return text.replace("private-token", "[REDACTED]")
+
+    monkeypatch.setattr(native_runner, "SecretRedactor", _CapturingRedactor)
+    request = NativeAgentRunRequest(
+        command=["fake-native", "--token", "private-token"],
+        prompt="task",
+        repo_path=tmp_path,
+        workspace_path=tmp_path,
+        command_redactions=["", "   ", "private-token", "\t"],
+    )
+
+    sanitized = native_runner._sanitize_run_command(  # noqa: SLF001
+        "fake-native --token private-token",
+        request,
+    )
+
+    assert captured_redactions == [["private-token"]]
+    assert sanitized == "fake-native --token [REDACTED]"
+
+
 def test_native_agent_runner_marks_confirmation_block_as_infra_error(tmp_path: Path) -> None:
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
