@@ -75,6 +75,7 @@ SAFE_SYSTEM_ENV_ALLOWLIST: Final[frozenset[str]] = frozenset(
         "GPG_KEY",
         "PYTHON_VERSION",
         "PYTHON_SHA256",
+        "AGY_CLI_DISABLE_AUTO_UPDATE",
         "PWD",
         "USER",
         "HOSTNAME",

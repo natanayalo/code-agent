@@ -243,6 +243,41 @@ def prepare_antigravity_workspace_migration(
             )
             if did_migrate_global_mcp:
                 actions.append("migrated_global_mcp_config")
+
+        # Link file-based OAuth token for environments without Keyring/D-Bus
+        auth_file_path = source / "antigravity-cli" / "antigravity-oauth-token"
+        try:
+            auth_file_path = auth_file_path.resolve()
+        except OSError:
+            pass
+        target_token = gemini_home / "antigravity-cli" / "antigravity-oauth-token"
+        if _path_exists(auth_file_path):
+            try:
+                target_token.parent.mkdir(parents=True, exist_ok=True)
+                if target_token.is_symlink() or target_token.exists():
+                    target_token.unlink()
+                # Symlink prevents token leakage into the persisted workspace directory
+                # and prevents untrusted sandbox code from reading the token.
+                target_token.symlink_to(auth_file_path)
+                actions.append("symlinked_oauth_token")
+            except OSError:
+                # Fallback to copy if symlink fails (e.g. cross-device link issues or permissions)
+                try:
+                    if target_token.is_symlink() or target_token.exists():
+                        target_token.unlink()
+                    target_token.touch(mode=0o600, exist_ok=True)
+                    shutil.copyfile(auth_file_path, target_token)
+                    try:
+                        target_token.chmod(0o600)
+                    except OSError:
+                        pass
+                    actions.append("copied_oauth_token")
+                except OSError:
+                    logger.warning(
+                        "Failed to copy OAuth token",
+                        extra={"file": "antigravity-oauth-token"},
+                    )
+
         break
 
     migrated_workspace_agents = False

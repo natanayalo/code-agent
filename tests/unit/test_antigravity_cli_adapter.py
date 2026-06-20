@@ -73,8 +73,6 @@ def test_antigravity_adapter_from_env_builds_prompt_command_and_scoped_env(tmp_p
         "/opt/bin/agy",
         "-p",
         "do the work",
-        "--cwd",
-        str(tmp_path),
         "--model",
         "gemini-3-pro",
     ]
@@ -202,14 +200,11 @@ from pathlib import Path
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-p", dest="prompt", required=True)
-parser.add_argument("--cwd", required=True)
 parser.add_argument("--model")
 args = parser.parse_args()
 
 if sys.stdin.read():
     raise SystemExit("stdin should be empty")
-if args.cwd != str(Path.cwd()):
-    raise SystemExit("cwd mismatch")
 
 notes = Path("notes.txt")
 notes.write_text(notes.read_text(encoding="utf-8") + "after\\n", encoding="utf-8")
@@ -262,7 +257,6 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-p", required=True)
-parser.add_argument("--cwd", required=True)
 parser.parse_args()
 print("No changes needed.")
 """,

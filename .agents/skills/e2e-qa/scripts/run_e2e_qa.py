@@ -83,7 +83,7 @@ async def main():
         "repo_url": f"file://{DUMMY_REPO_DIR}",
         "branch": "master",
         "source": "qa",
-        "worker_override": "gemini",
+        "worker_override": os.environ.get("CODE_AGENT_WORKER_OVERRIDE", "antigravity"),
     }
 
     async with httpx.AsyncClient() as client:

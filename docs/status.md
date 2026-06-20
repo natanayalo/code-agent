@@ -54,7 +54,6 @@ Reference baseline:
 
 Granular tasks for the active and upcoming milestones:
 
-- T-208: Add Docker Antigravity support using official install/auth/keyring mechanisms.
 - T-209: Update e2e QA scripts, README, runbook, `.env.example`, compose docs, and operator guidance for install, keyring/DBus auth, permissions, context files, skills, and MCP migration.
 - T-210: Update dashboard/API types and labels for `antigravity` worker/profile names.
 - T-211: Remove Gemini CLI defaults after Antigravity Docker e2e passes.

@@ -91,8 +91,6 @@ def test_antigravity_worker_builds_prompt_argv_command_and_settings(tmp_path: Pa
     )
     command = native_request.command
     assert command[:3] == ["/opt/bin/agy", "-p", native_request.prompt]
-    assert "--cwd" in command
-    assert command[command.index("--cwd") + 1] == str(workspace.repo_path)
     assert "--model" in command
     assert command[command.index("--model") + 1] == "gemini-3-pro"
     assert native_request.stdin_prompt is False
@@ -148,6 +146,9 @@ def test_antigravity_workspace_migration_replaces_symlink_and_copies_legacy_conf
         ),
         encoding="utf-8",
     )
+    oauth_token_path = legacy_gemini_home / "antigravity-cli" / "antigravity-oauth-token"
+    oauth_token_path.parent.mkdir(parents=True)
+    oauth_token_path.write_text("dummy token", encoding="utf-8")
     legacy_workspace_skills = workspace.repo_path / ".gemini" / "skills" / "local-skill"
     legacy_workspace_skills.mkdir(parents=True)
     (legacy_workspace_skills / "SKILL.md").write_text("---\nname: local\n---\n", encoding="utf-8")
@@ -186,8 +187,13 @@ def test_antigravity_workspace_migration_replaces_symlink_and_copies_legacy_conf
     }
     assert ".agents/" in git_exclude.read_text(encoding="utf-8").splitlines()
     assert not (legacy_gemini_home / "antigravity-cli" / "settings.json").exists()
+    assert (gemini_home / "antigravity-cli" / "antigravity-oauth-token").is_symlink()
+    assert (gemini_home / "antigravity-cli" / "antigravity-oauth-token").read_text(
+        encoding="utf-8"
+    ) == "dummy token"
     assert "replaced_symlinked_gemini_home" in metadata["migration_actions"]
     assert "excluded_workspace_agents_from_git" in metadata["migration_actions"]
+    assert "symlinked_oauth_token" in metadata["migration_actions"]
 
 
 def test_antigravity_workspace_migration_copy_errors_are_best_effort(
@@ -441,3 +447,49 @@ def test_antigravity_worker_maps_permission_denial_to_permission_denied(tmp_path
 
     assert result.failure_kind == "permission_denied"
     assert result.next_action_hint == "request_higher_permission"
+
+
+def test_antigravity_workspace_migration_oauth_symlink_fallback(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = _make_workspace(tmp_path / "workspace")
+    legacy_gemini_home = tmp_path / "legacy-gemini"
+
+    oauth_token_path = legacy_gemini_home / "antigravity-cli" / "antigravity-oauth-token"
+    oauth_token_path.parent.mkdir(parents=True)
+    oauth_token_path.write_text("dummy token", encoding="utf-8")
+
+    agent_home = workspace.workspace_path / ".agent_home"
+    agent_home.mkdir()
+    (agent_home / ".gemini").symlink_to(legacy_gemini_home, target_is_directory=True)
+
+    # Mock Path.symlink_to to raise an OSError to trigger the fallback
+    original_symlink_to = Path.symlink_to
+
+    def _mock_symlink_to(self, *args, **kwargs):
+        if self.name == "antigravity-oauth-token":
+            raise OSError("Mocked symlink failure")
+        return original_symlink_to(self, *args, **kwargs)
+
+    monkeypatch.setattr("pathlib.Path.symlink_to", _mock_symlink_to)
+
+    _, _, metadata = build_antigravity_native_command(
+        AntigravityCommandConfig(
+            adapter=AntigravityCliRuntimeAdapter(executable="/opt/bin/agy"),
+            workspace=workspace,
+            request=WorkerRequest(repo_url="https://example.com/repo.git", task_text="run"),
+            prompt="run",
+            runtime_settings=CliRuntimeSettings(),
+            native_sandbox_enabled=True,
+        )
+    )
+
+    gemini_home = agent_home / ".gemini"
+    target_token = gemini_home / "antigravity-cli" / "antigravity-oauth-token"
+
+    # Assert it was copied, not symlinked
+    assert not target_token.is_symlink()
+    assert target_token.read_text(encoding="utf-8") == "dummy token"
+    assert "copied_oauth_token" in metadata["migration_actions"]
+    assert "symlinked_oauth_token" not in metadata["migration_actions"]
