@@ -190,7 +190,7 @@ describe('TaskDetailPanel', () => {
     render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
 
     expect(screen.getByText('Run Observability')).toBeInTheDocument();
-    expect(screen.getByText('codex-native-executor')).toBeInTheDocument();
+    expect(screen.getByText('Codex Native Executor')).toBeInTheDocument();
     expect(screen.getByText('Native Agent')).toBeInTheDocument();
     expect(screen.getByText('note.txt')).toBeInTheDocument();
     expect(screen.getByText('Verification Outcome')).toBeInTheDocument();

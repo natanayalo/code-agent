@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { TaskSummarySnapshot, TaskStatus } from '../types/task';
 import { api } from '../services/api';
+import { formatLabel } from '../utils/formatters';
 import { TaskApprovalSection } from './TaskApprovalSection';
 
 interface TaskCardProps {
@@ -156,7 +157,7 @@ export function TaskCard({
         <div className="card-footer">
           <div className="task-meta">
             <Terminal size={14} />
-            <span>{task.latest_run_worker || task.chosen_worker || 'auto'}</span>
+            <span>{formatLabel(task.latest_run_worker || task.chosen_worker || 'auto')}</span>
           </div>
           <div className="footer-actions">
             {isTerminal && (

@@ -74,10 +74,11 @@ describe('MetricsPage', () => {
     expect(screen.getByText('80')).toBeInTheDocument();
     expect(screen.getByText(/antigravity/i)).toBeInTheDocument();
     expect(screen.getByText(/60 runs/i)).toBeInTheDocument();
-    expect(screen.getByText('codex')).toBeInTheDocument();
+    expect(screen.getByText('Codex')).toBeInTheDocument();
     expect(screen.getByText(/40 runs/i)).toBeInTheDocument();
     expect(screen.getByText(longStatus.replace(/_/g, ' '))).toHaveClass('status-label');
-    expect(screen.getByText(longWorker)).toHaveClass('worker-label');
+    const expectedLongWorker = `Codex Worker ${'X' + 'x'.repeat(63)}`;
+    expect(screen.getByText(expectedLongWorker)).toHaveClass('worker-label');
     expect(document.querySelector('.metrics-details-grid')).toBeInTheDocument();
     expect(document.querySelectorAll('.metric-detail-card')).toHaveLength(2);
   });

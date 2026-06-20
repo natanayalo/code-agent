@@ -17,6 +17,7 @@ import {
   WORKER_OPTIONS,
 } from '../types/task';
 import { DashboardLayout } from './layout/DashboardLayout';
+import { formatLabel } from '../utils/formatters';
 
 type TriggerTab = 'task' | 'scout';
 type DashboardTaskType = Exclude<TaskSpecType, 'scout'>;
@@ -260,7 +261,7 @@ export function TriggerActionsPage() {
                     <option value="">Auto</option>
                     {WORKER_OPTIONS.map((worker) => (
                       <option key={worker} value={worker}>
-                        {worker}
+                        {formatLabel(worker)}
                       </option>
                     ))}
                   </select>

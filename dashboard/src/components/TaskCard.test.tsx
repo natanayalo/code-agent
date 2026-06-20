@@ -41,7 +41,7 @@ describe('TaskCard', () => {
     expect(container.querySelector('.status-badge')).toHaveTextContent('in progress');
     expect(screen.getByText('repo')).toBeInTheDocument();
     expect(screen.getByText('main')).toBeInTheDocument();
-    expect(screen.getByText('antigravity')).toBeInTheDocument();
+    expect(screen.getByText('Antigravity')).toBeInTheDocument();
   });
 
   it('handles click events', () => {

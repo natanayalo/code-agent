@@ -150,7 +150,7 @@ describe('TaskBoard', () => {
 
     expect(screen.getByText(`Investigate ${longToken}`)).toHaveClass('task-title-text');
     expect(container.querySelector('.task-board')).toBeInTheDocument();
-    expect(container.querySelector('.task-meta span')).toHaveTextContent(`codex-${longToken}`);
+    expect(container.querySelector('.task-meta span')).toHaveTextContent(`Codex Edge Xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`);
     expect(screen.getByText(`Needs permission for ${longToken}`)).toHaveClass(
       'approval-reason',
       'truncate'
