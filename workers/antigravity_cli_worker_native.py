@@ -141,12 +141,35 @@ def _copy_file_if_missing(source: Path, target: Path) -> bool:
     return True
 
 
-def _exclude_local_git_path_if_present(repo_path: Path, pattern: str) -> bool:
-    exclude_path = repo_path / ".git" / "info" / "exclude"
-    if not _path_exists(exclude_path):
-        return False
+def _local_git_dir(repo_path: Path) -> Path | None:
+    git_path = repo_path / ".git"
+    if not _path_exists(git_path):
+        return None
+    if _path_is_dir(git_path):
+        return git_path
     try:
-        exclude_content = exclude_path.read_text(encoding="utf-8")
+        gitfile_content = git_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        logger.warning("Failed to read local Git dir file", extra={"path": str(git_path)})
+        return None
+    if not gitfile_content.startswith("gitdir:"):
+        return None
+    git_dir = Path(gitfile_content.split("gitdir:", 1)[1].strip())
+    if not git_dir.is_absolute():
+        git_dir = (repo_path / git_dir).resolve()
+    return git_dir
+
+
+def _exclude_local_git_path_if_present(repo_path: Path, pattern: str) -> bool:
+    git_dir = _local_git_dir(repo_path)
+    if git_dir is None:
+        return False
+    exclude_path = git_dir / "info" / "exclude"
+    try:
+        exclude_path.parent.mkdir(parents=True, exist_ok=True)
+        exclude_content = (
+            exclude_path.read_text(encoding="utf-8") if _path_exists(exclude_path) else ""
+        )
         exclude_lines = {line.strip() for line in exclude_content.splitlines()}
         if pattern in exclude_lines:
             return False

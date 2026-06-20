@@ -316,6 +316,28 @@ def test_antigravity_git_exclude_update_is_idempotent(tmp_path: Path) -> None:
     assert exclude_path.read_text(encoding="utf-8") == "# local excludes\n.agents/\n"
 
 
+def test_antigravity_git_exclude_update_creates_missing_exclude(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    git_dir = repo_path / ".git"
+    git_dir.mkdir(parents=True)
+
+    assert _exclude_local_git_path_if_present(repo_path, ".agents/") is True
+    assert (git_dir / "info" / "exclude").read_text(encoding="utf-8") == ".agents/\n"
+
+
+def test_antigravity_git_exclude_update_supports_gitdir_file(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    worktree_git_dir = tmp_path / "git-common" / "worktrees" / "repo"
+    (repo_path / ".git").write_text(
+        "gitdir: ../git-common/worktrees/repo\n",
+        encoding="utf-8",
+    )
+
+    assert _exclude_local_git_path_if_present(repo_path, ".agents/") is True
+    assert (worktree_git_dir / "info" / "exclude").read_text(encoding="utf-8") == ".agents/\n"
+
+
 def test_antigravity_workspace_migration_skips_inaccessible_candidate_home(
     tmp_path: Path,
     monkeypatch,
