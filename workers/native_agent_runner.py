@@ -21,7 +21,7 @@ from apps.observability import (
     start_optional_span,
     with_span_kind,
 )
-from sandbox.redact import sanitize_command
+from sandbox.redact import SecretRedactor, sanitize_command
 from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_from_repo_path
@@ -122,6 +122,7 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
     effective_env: dict[str, str] = {
         k: v for k, v in os.environ.items() if k.upper() in SAFE_SYSTEM_ENV_ALLOWLIST
     }
+    auth_home_overrides: dict[str, str] = {}
     agent_home = request.workspace_path / ".agent_home"
     agent_home.mkdir(parents=True, exist_ok=True)
     agent_home_value = str(agent_home)
@@ -134,7 +135,7 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
                 logger.warning("Native agent runner dropped protected environment key: %s", k)
                 continue
             if k_upper in ALLOWED_AUTH_HOME_KEYS:
-                effective_env[k] = v
+                auth_home_overrides[k] = v
                 continue
             is_denied = any(k_upper.startswith(prefix) for prefix in SENSITIVE_ENV_PREFIX_DENYLIST)
             if is_denied:
@@ -154,6 +155,9 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
             "TELEGRAM_BOT_TOKEN": "",
         }
     )
+    if "DBUS_SESSION_BUS_ADDRESS" not in effective_env and "DBUS_SESSION_BUS_ADDRESS" in os.environ:
+        effective_env["DBUS_SESSION_BUS_ADDRESS"] = os.environ["DBUS_SESSION_BUS_ADDRESS"]
+    effective_env.update(auth_home_overrides)
     return effective_env
 
 
@@ -169,6 +173,19 @@ def _build_friction_report_dict(
         "impact": impact,
         "context": context or {},
     }
+
+
+def _sanitize_run_command(command_text: str, request: NativeAgentRunRequest) -> str:
+    """Return the command string safe for logs, spans, and WorkerResult payloads."""
+    sanitized = sanitize_command(command_text, request.redactor)
+    active_redactions = [
+        clean
+        for redaction in request.command_redactions
+        if (clean := (redaction or "").strip() or None)
+    ]
+    if active_redactions:
+        sanitized = SecretRedactor(active_redactions).redact(sanitized)
+    return sanitized
 
 
 def _determine_exit_status(
@@ -411,10 +428,12 @@ def _execute_native_agent_subprocess(
                 kind=request.span_kind,
             ):
                 effective_env = _build_effective_env(request)
+                stdin = None if request.stdin_prompt else subprocess.DEVNULL
 
                 completed = subprocess.run(
                     request.command,
-                    input=request.prompt,
+                    input=request.prompt if request.stdin_prompt else None,
+                    stdin=stdin,
                     check=False,
                     capture_output=True,
                     text=True,
@@ -651,7 +670,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
 
     repo_path, final_message_path, events_path, artifact_root = _setup_native_agent_paths(request)
 
-    command_text = shlex.join(request.command)
+    command_text = _sanitize_run_command(shlex.join(request.command), request)
     started_at = time.perf_counter()
     with start_optional_span(
         tracer_name="workers.native_agent_runner",

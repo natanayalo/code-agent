@@ -63,8 +63,10 @@ _GEMINI_ALLOWED_ENV_KEYS = (
     "GOOGLE_APPLICATION_CREDENTIALS",
     "GOOGLE_CONFIG_DIR",
 )
+_ANTIGRAVITY_ALLOWED_ENV_KEYS = ("GEMINI_HOME", "DBUS_SESSION_BUS_ADDRESS")
 _CODEX_FULL_ALLOWLIST = _BASE_ALLOWED_ENV_KEYS.union(_CODEX_ALLOWED_ENV_KEYS)
 _GEMINI_FULL_ALLOWLIST = _BASE_ALLOWED_ENV_KEYS.union(_GEMINI_ALLOWED_ENV_KEYS)
+_ANTIGRAVITY_FULL_ALLOWLIST = _BASE_ALLOWED_ENV_KEYS.union(_ANTIGRAVITY_ALLOWED_ENV_KEYS)
 
 
 def _build_scoped_env(
@@ -89,3 +91,8 @@ def build_codex_subprocess_env(environ: Mapping[str, str]) -> dict[str, str]:
 def build_gemini_subprocess_env(environ: Mapping[str, str]) -> dict[str, str]:
     """Build a minimal subprocess environment for Gemini CLI invocation."""
     return _build_scoped_env(environ, allowlist=_GEMINI_FULL_ALLOWLIST)
+
+
+def build_antigravity_subprocess_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """Build a minimal subprocess environment for Antigravity CLI invocation."""
+    return _build_scoped_env(environ, allowlist=_ANTIGRAVITY_FULL_ALLOWLIST)

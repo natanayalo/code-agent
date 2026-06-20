@@ -23,6 +23,7 @@ from repositories import create_engine_from_url, create_session_factory
 from sandbox import DockerSandboxContainerManager
 from sandbox.workspace import default_workspace_root
 from workers import (
+    AntigravityCliRuntimeAdapter,
     CodexCliWorker,
     CodexExecCliRuntimeAdapter,
     GeminiCliRuntimeAdapter,
@@ -33,6 +34,15 @@ from workers import (
     Worker,
     WorkerProfile,
     WorkerType,
+)
+from workers.antigravity_cli_adapter import (
+    ANTIGRAVITY_ARTIFACT_REVIEW_POLICY_ENV_VAR,
+    ANTIGRAVITY_AUTH_DIR_ENV_VAR,
+    ANTIGRAVITY_EXECUTABLE_ENV_VAR,
+    ANTIGRAVITY_MODEL_ENV_VAR,
+    ANTIGRAVITY_NATIVE_SANDBOX_ENABLED_ENV_VAR,
+    ANTIGRAVITY_TIMEOUT_ENV_VAR,
+    ANTIGRAVITY_TOOL_PERMISSION_ENV_VAR,
 )
 from workers.codex_exec_adapter import CODEX_SANDBOX_ENV_VAR
 from workers.gemini_cli_adapter import (
@@ -71,6 +81,23 @@ CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TOOL_LOOP
 GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED"
 CODEX_TRUSTED_REPO_PATTERNS_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TRUSTED_REPO_PATTERNS"
 GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_NATIVE_SANDBOX_ENABLED"
+
+ANTIGRAVITY_CONFIG_ENV_VARS: Final[tuple[str, ...]] = (
+    ANTIGRAVITY_EXECUTABLE_ENV_VAR,
+    ANTIGRAVITY_MODEL_ENV_VAR,
+    ANTIGRAVITY_TIMEOUT_ENV_VAR,
+    ANTIGRAVITY_NATIVE_SANDBOX_ENABLED_ENV_VAR,
+    ANTIGRAVITY_TOOL_PERMISSION_ENV_VAR,
+    ANTIGRAVITY_ARTIFACT_REVIEW_POLICY_ENV_VAR,
+)
+GEMINI_CONFIG_ENV_VARS: Final[tuple[str, ...]] = (
+    GEMINI_EXECUTABLE_ENV_VAR,
+    GEMINI_MODEL_ENV_VAR,
+    GEMINI_TIMEOUT_ENV_VAR,
+)
+ANTIGRAVITY_LEGACY_GEMINI_EXECUTABLE_NAMES: Final[frozenset[str]] = frozenset(
+    {"agy", "antigravity"}
+)
 
 # Default profile names
 ANTIGRAVITY_NATIVE_PLANNER_PROFILE: Final[str] = "antigravity-native-planner"
@@ -318,22 +345,48 @@ def _build_codex_worker(
 def _build_gemini_worker(
     resolved_env: Mapping[str, str], container_manager: DockerSandboxContainerManager
 ) -> GeminiCliWorker | None:
-    if not any(
-        resolved_env.get(k)
-        for k in (GEMINI_EXECUTABLE_ENV_VAR, GEMINI_MODEL_ENV_VAR, GEMINI_TIMEOUT_ENV_VAR)
-    ):
+    legacy_gemini_bin = resolved_env.get(GEMINI_EXECUTABLE_ENV_VAR)
+    legacy_bin_requests_antigravity = (
+        Path(legacy_gemini_bin).name in ANTIGRAVITY_LEGACY_GEMINI_EXECUTABLE_NAMES
+        if legacy_gemini_bin
+        else False
+    )
+    antigravity_configured = (
+        any(resolved_env.get(k) for k in ANTIGRAVITY_CONFIG_ENV_VARS)
+        or legacy_bin_requests_antigravity
+    )
+    gemini_configured = any(resolved_env.get(k) for k in GEMINI_CONFIG_ENV_VARS)
+    if not (antigravity_configured or gemini_configured):
         return None
+    if resolved_env.get(ANTIGRAVITY_AUTH_DIR_ENV_VAR):
+        logger.info(
+            "CODE_AGENT_ANTIGRAVITY_AUTH_DIR is configured for operator guidance only; "
+            "Antigravity auth remains keyring-backed and is not copied by the worker."
+        )
     gemini_runtime_mode = _resolve_default_runtime_mode(
         resolved_env.get(GEMINI_RUNTIME_MODE_ENV_VAR),
         default=WorkerRuntimeMode.NATIVE_AGENT,
-        worker_name="Gemini",
+        worker_name="Antigravity" if antigravity_configured else "Gemini",
         env_var_name=GEMINI_RUNTIME_MODE_ENV_VAR,
     )
+    runtime_adapter = (
+        AntigravityCliRuntimeAdapter.from_env(resolved_env)
+        if antigravity_configured
+        else GeminiCliRuntimeAdapter.from_env(resolved_env)
+    )
+    native_sandbox_env_var = (
+        ANTIGRAVITY_NATIVE_SANDBOX_ENABLED_ENV_VAR
+        if antigravity_configured
+        else GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR
+    )
+    native_sandbox_value = resolved_env.get(native_sandbox_env_var)
+    if antigravity_configured and native_sandbox_value is None:
+        native_sandbox_value = resolved_env.get(GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR)
     return GeminiCliWorker(
-        runtime_adapter=GeminiCliRuntimeAdapter.from_env(resolved_env),
+        runtime_adapter=runtime_adapter,
         container_manager=container_manager,
         default_runtime_mode=gemini_runtime_mode,
-        native_sandbox_enabled=_is_enabled(resolved_env.get(GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR)),
+        native_sandbox_enabled=_is_enabled(native_sandbox_value),
     )
 
 

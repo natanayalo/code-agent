@@ -88,6 +88,7 @@ print(json.dumps({
     "HOST_VAR": os.environ.get("HOST_VAR"),
     "DATABASE_URL": os.environ.get("DATABASE_URL"),
     "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY"),
+    "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS"),
     "LANG": os.environ.get("LANG"),
     "PATH": os.environ.get("PATH"),
     "HOME": os.environ.get("HOME"),
@@ -212,6 +213,107 @@ raise SystemExit(7)
     assert len(result.artifacts) == 2
     assert result.artifacts[0].name == "native-agent-stdout"
     assert result.artifacts[1].name == "native-agent-stderr"
+
+
+def test_native_agent_runner_supports_redacted_prompt_as_argv(tmp_path: Path) -> None:
+    """Prompt-as-argv CLIs should not receive stdin or leak prompt text in commands."""
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-argv-prompt.py",
+        """#!/usr/bin/env python3
+import json
+import sys
+
+prompt = sys.argv[sys.argv.index("--prompt") + 1]
+stdin_payload = sys.stdin.read()
+print(json.dumps({"prompt": prompt, "stdin": stdin_payload}))
+""",
+    )
+    prompt = "inspect this private task packet"
+
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary), "--prompt", prompt],
+            prompt=prompt,
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+            stdin_prompt=False,
+            command_redactions=[prompt],
+            response_format="json",
+        )
+    )
+
+    assert result.status == "success"
+    assert result.json_payload == {"prompt": prompt, "stdin": ""}
+    assert prompt not in result.command
+    assert "[REDACTED]" in result.command
+
+
+def test_native_agent_runner_filters_blank_command_redactions(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured_redactions: list[list[str]] = []
+
+    class _CapturingRedactor:
+        def __init__(self, secrets: list[str]) -> None:
+            captured_redactions.append(secrets)
+
+        def redact(self, text: str) -> str:
+            return text.replace("private-token", "[REDACTED]")
+
+    monkeypatch.setattr(native_runner, "SecretRedactor", _CapturingRedactor)
+    request = NativeAgentRunRequest(
+        command=["fake-native", "--token", "private-token"],
+        prompt="task",
+        repo_path=tmp_path,
+        workspace_path=tmp_path,
+        command_redactions=["", "   ", "private-token", "\t"],
+    )
+
+    sanitized = native_runner._sanitize_run_command(  # noqa: SLF001
+        "fake-native --token private-token",
+        request,
+    )
+
+    assert captured_redactions == [["private-token"]]
+    assert sanitized == "fake-native --token [REDACTED]"
+
+
+def test_native_agent_runner_uses_devnull_when_prompt_is_argv(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured_kwargs: dict[str, object] = {}
+
+    def _capture_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured_kwargs.update(kwargs)
+        return subprocess.CompletedProcess(["fake-native"], 0, "ok", "")
+
+    monkeypatch.setattr(subprocess, "run", _capture_run)
+    request = NativeAgentRunRequest(
+        command=["fake-native", "--prompt", "task"],
+        prompt="task",
+        repo_path=tmp_path,
+        workspace_path=tmp_path,
+        stdin_prompt=False,
+    )
+
+    completed = native_runner._execute_native_agent_subprocess(  # noqa: SLF001
+        request,
+        tmp_path,
+        "fake-native --prompt task",
+        started_at=0.0,
+        artifact_root=tmp_path / ".code-agent",
+        events_path=None,
+    )
+
+    assert isinstance(completed, subprocess.CompletedProcess)
+    assert captured_kwargs["input"] is None
+    assert captured_kwargs["stdin"] == subprocess.DEVNULL
 
 
 def test_native_agent_runner_marks_confirmation_block_as_infra_error(tmp_path: Path) -> None:
@@ -631,6 +733,7 @@ def test_native_agent_runner_enforces_strict_isolation(tmp_path: Path, monkeypat
     monkeypatch.setenv("DATABASE_URL", "postgresql://real-db")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
     # Variables that should be allowed
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
     monkeypatch.setenv("LANG", "en_US.UTF-8")
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
@@ -643,8 +746,8 @@ def test_native_agent_runner_enforces_strict_isolation(tmp_path: Path, monkeypat
         env={
             "HOME": "/root",  # Should be dropped as protected
             "NEW_SAFE_VAR": "safe_value",
-            "CODEX_HOME": "/root/.codex",  # Allowed explicit auth home
-            "GEMINI_HOME": "/root/.gemini",  # Allowed explicit auth home
+            "CODEX_HOME": "/workspace/.agent_home/.codex",  # Allowed explicit auth home
+            "GEMINI_HOME": "/workspace/.agent_home/.gemini",  # Allowed explicit auth home
             "GEMINI_API_KEY": "should_be_denied",  # Denied by prefix
             "OTEL_EXPORTER_OTLP_ENDPOINT": "http://evil.com",  # Should be denied
             "DATABASE_URL": "mysql://hijacked",  # Should be force-overridden
@@ -666,6 +769,7 @@ def test_native_agent_runner_enforces_strict_isolation(tmp_path: Path, monkeypat
     assert not payload["DATABASE_URL"].startswith("mysql://")  # Hijacked value was suppressed
 
     # Allowlist checks
+    assert payload["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
     assert payload["LANG"] == "en_US.UTF-8"
     assert payload["PATH"] == "/usr/bin:/bin"
 
@@ -673,15 +777,15 @@ def test_native_agent_runner_enforces_strict_isolation(tmp_path: Path, monkeypat
     assert payload["HOME"].endswith(".agent_home")
     assert (tmp_path / ".agent_home").is_dir()
 
-    # Force-override checks (Must win against request.env and host)
+    # Force-override checks (Must win against request.env and host, except auth homes)
     assert payload["CODE_AGENT_ENABLE_TRACING"] == "0"
     assert payload["TELEGRAM_BOT_TOKEN"] == ""
     assert payload["DATABASE_URL"].startswith("sqlite:///")
     assert ".sandbox.db" in payload["DATABASE_URL"]
     assert payload["HOME"] == str(tmp_path / ".agent_home")
-    # Auth home paths are force-set and must not be user-overridable.
-    assert payload["CODEX_HOME"] == "/root/.codex"
-    assert payload["GEMINI_HOME"] == "/root/.gemini"
+    # Explicit auth-home paths are allowed so provider adapters can isolate config.
+    assert payload["CODEX_HOME"] == "/workspace/.agent_home/.codex"
+    assert payload["GEMINI_HOME"] == "/workspace/.agent_home/.gemini"
     assert payload["GEMINI_API_KEY"] is None
 
     warning_messages = [

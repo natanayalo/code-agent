@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from workers.subprocess_env import build_codex_subprocess_env, build_gemini_subprocess_env
+from workers.subprocess_env import (
+    build_antigravity_subprocess_env,
+    build_codex_subprocess_env,
+    build_gemini_subprocess_env,
+)
 
 
 def test_codex_subprocess_env_keeps_ssl_cert_dir_and_xdg_dirs() -> None:
@@ -42,6 +46,27 @@ def test_gemini_subprocess_env_keeps_ssl_cert_dir_and_xdg_dirs() -> None:
         "SSL_CERT_DIR": "/opt/custom-certs",
         "XDG_STATE_HOME": "/tmp/state-home",
         "XDG_RUNTIME_DIR": "/tmp/runtime-dir",
+    }
+
+
+def test_antigravity_subprocess_env_keeps_keyring_runtime_without_new_secret_scopes() -> None:
+    """Antigravity env scoping should preserve runtime dirs but not provider secrets."""
+    scoped = build_antigravity_subprocess_env(
+        {
+            "PATH": "/usr/bin",
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+            "XDG_RUNTIME_DIR": "/tmp/runtime-dir",
+            "GEMINI_HOME": "/workspace/.agent_home/.gemini",
+            "GOOGLE_API_KEY": "drop-me",
+            "CODE_AGENT_ANTIGRAVITY_AUTH_DIR": "/host/keyring",
+        }
+    )
+
+    assert scoped == {
+        "PATH": "/usr/bin",
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+        "XDG_RUNTIME_DIR": "/tmp/runtime-dir",
+        "GEMINI_HOME": "/workspace/.agent_home/.gemini",
     }
 
 
