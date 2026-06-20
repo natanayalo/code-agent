@@ -15,9 +15,9 @@ This skill provides an automated E2E QA script that:
 
 ## Prerequisites
 
-Before running this script, your local environment must be fully running via Docker Compose:
+Before running this script, your local environment must be fully running via the project startup script:
 ```bash
-docker compose up -d
+scripts/up.sh
 ```
 Ensure the API is listening on `http://127.0.0.1:8000` (which is the default).
 
