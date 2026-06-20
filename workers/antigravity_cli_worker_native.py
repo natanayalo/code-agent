@@ -259,6 +259,8 @@ def prepare_antigravity_workspace_migration(
             except OSError:
                 # Fallback to copy if symlink fails (e.g. cross-device link issues or permissions)
                 try:
+                    if target_token.is_symlink() or target_token.exists():
+                        target_token.unlink()
                     shutil.copy(auth_file_path, target_token)
                     try:
                         target_token.chmod(0o600)
