@@ -64,7 +64,7 @@ Profile-aware routing toggle and mapping:
 
 - Enable profile-aware routing with `CODE_AGENT_WORKER_PROFILES_ENABLED=1` (wired in API bootstrap).
 - Codex/Antigravity default runtime mode is pinned to `native_agent`.
-- `CODE_AGENT_CODEX_RUNTIME_MODE` and `CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED` are deprecated and ignored; Codex is now native-only and legacy tool-loop profiles are no longer created.
+- `CODE_AGENT_CODEX_RUNTIME_MODE`, `CODE_AGENT_GEMINI_RUNTIME_MODE`, `CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED`, and `CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED` are deprecated and ignored; Codex and Antigravity are now native-only and legacy tool-loop profiles are no longer created.
 - OpenRouter legacy execution profile is added only when OpenRouter is configured and `CODE_AGENT_OPENROUTER_ENABLED=1`.
 - Execution routing then filters profiles by worker availability, execution capability tag, read-only vs patch-allowed mutation policy, and delivery-mode compatibility before selecting a concrete profile.
 
@@ -74,8 +74,7 @@ Current default profile matrix:
 - **Antigravity execution**: `antigravity-native-executor` with explicit read-only variant `antigravity-native-executor-read-only`
 - **Antigravity specialist profiles** (native mode): `antigravity-native-planner`, `antigravity-native-reviewer`, and `antigravity-native-discovery`
 - **OpenRouter legacy execution**: `openrouter-tool-loop-legacy` (explicit opt-in only)
-- **Optional Codex/Antigravity legacy execution**: `*-tool-loop-executor` profiles are available only
-  when the corresponding `*_TOOL_LOOP_LEGACY_ENABLED` env toggle is set.
+
 
 The selected worker/profile/runtime metadata is persisted on task and worker-run records and returned in task snapshots for operator and dashboard inspection.
 

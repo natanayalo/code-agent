@@ -43,11 +43,11 @@ cp .env.example .env
 scripts/up.sh
 ```
 
-## 2.1) Codex Runtime Mode Deprecation
+## 2.1) Codex and Antigravity Runtime Mode Deprecation
 
-Codex native execution workers are now native-only.
+Codex and Antigravity native execution workers are now native-only.
 
-- `CODE_AGENT_CODEX_RUNTIME_MODE` and legacy tool-loop configurations (e.g., `CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED`) are deprecated, ignored by the factory, and no longer create operation-selector profiles like `codex-tool-loop-executor`.
+- `CODE_AGENT_CODEX_RUNTIME_MODE`, `CODE_AGENT_GEMINI_RUNTIME_MODE`, and legacy tool-loop configurations (e.g., `CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED`, `CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED`) are deprecated, ignored by the factory, and no longer create operation-selector profiles like `codex-tool-loop-executor` or `gemini-tool-loop-executor`.
 - `/metrics` still exposes `runtime_mode_usage` and `legacy_tool_loop_usage` for historical migration tracking.
 
 ## 2.2) Reflection Proposal Scoring Controls
