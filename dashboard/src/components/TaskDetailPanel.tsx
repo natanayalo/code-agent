@@ -607,10 +607,10 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
               <>
                 <div className="task-detail-grid">
                   <p>
-                    <strong>Worker:</strong> {run.worker_type || task.chosen_worker || 'unknown'}
+                    <strong>Worker:</strong> {formatLabel(run.worker_type || task.chosen_worker || 'unknown')}
                   </p>
                   <p>
-                    <strong>Profile:</strong> {run.worker_profile || task.chosen_profile || 'n/a'}
+                    <strong>Profile:</strong> {run.worker_profile || task.chosen_profile ? formatLabel(run.worker_profile || task.chosen_profile) : 'N/A'}
                   </p>
                   <p>
                     <strong>Runtime Mode:</strong>{' '}

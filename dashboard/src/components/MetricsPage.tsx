@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { DashboardLayout } from './layout/DashboardLayout';
 import { Activity, Clock, Database, Cpu, TrendingUp } from 'lucide-react';
+import { formatLabel } from '../utils/formatters';
 
 const METRICS_REFETCH_INTERVAL_MS = 60000;
 const SUCCESS_RATE_HEALTHY_THRESHOLD = 0.8;
@@ -105,7 +106,7 @@ export function MetricsPage() {
                 {sortedWorkerUsage.map(([worker, count]) => (
                   <div key={worker} className="worker-item">
                     <Cpu size={16} />
-                    <span className="worker-label">{worker}</span>
+                    <span className="worker-label">{formatLabel(worker)}</span>
                     <span className="worker-count">{count} runs</span>
                   </div>
                 ))}

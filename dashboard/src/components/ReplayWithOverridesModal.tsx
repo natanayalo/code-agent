@@ -2,6 +2,7 @@ import React from 'react';
 import { RotateCcw, X } from 'lucide-react';
 import { api } from '../services/api';
 import { TaskReplayRequest, WORKER_OPTIONS, WorkerType } from '../types/task';
+import { formatLabel } from '../utils/formatters';
 
 interface ReplayWithOverridesModalProps {
   taskId: string;
@@ -172,7 +173,7 @@ export function ReplayWithOverridesModal({
             <option value="">Original worker selection</option>
             {WORKER_OPTIONS.map((worker, index) => (
               <option key={`${worker}-${index}`} value={worker}>
-                {worker}
+                {formatLabel(worker)}
               </option>
             ))}
           </select>
