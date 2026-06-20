@@ -348,6 +348,14 @@ def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
                 reason_code="incomplete_delivery",
             )
         else:
+            if is_read_only:
+                return VerificationReportItem(
+                    label="file_changes",
+                    status="passed",
+                    message=(
+                        "Worker reported success with no files changed (expected for read-only)."
+                    ),
+                )
             return VerificationReportItem(
                 label="file_changes",
                 status="warning",

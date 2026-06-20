@@ -421,7 +421,11 @@ def _repair_handoff_update(
 
 def _check_skip_review(state: OrchestratorState) -> dict[str, Any] | None:
     is_read_only = state.task.constraints.get("read_only") is True
-    no_files_changed = not (state.result and state.result.files_changed)
+    if state.result is None:
+        logger.warning("Worker result is None, falling back to default.")
+        no_files_changed = False
+    else:
+        no_files_changed = not state.result.files_changed
 
     if is_read_only or no_files_changed:
         reason = "read-only task" if is_read_only else "no files changed"
