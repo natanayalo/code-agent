@@ -99,8 +99,8 @@ def _migrated_mcp_config(settings_path: Path) -> dict[str, Any] | None:
 def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> bool:
     if _path_exists(path):
         return False
-    path.parent.mkdir(parents=True, exist_ok=True)
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except OSError:
         logger.warning(
@@ -113,14 +113,15 @@ def _write_json_if_missing(path: Path, payload: dict[str, Any]) -> bool:
 def _copytree_if_missing(source: Path, target: Path) -> bool:
     if not _path_exists(source) or _path_exists(target):
         return False
-    target.parent.mkdir(parents=True, exist_ok=True)
     try:
+        target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source, target)
     except OSError:
         logger.warning(
             "Failed to copy migrated Antigravity directory",
             extra={"source": str(source), "target": str(target)},
         )
+        shutil.rmtree(target, ignore_errors=True)
         return False
     return True
 
@@ -128,8 +129,8 @@ def _copytree_if_missing(source: Path, target: Path) -> bool:
 def _copy_file_if_missing(source: Path, target: Path) -> bool:
     if not _path_exists(source) or _path_exists(target):
         return False
-    target.parent.mkdir(parents=True, exist_ok=True)
     try:
+        target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
     except OSError:
         logger.warning(

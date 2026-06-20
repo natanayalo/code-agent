@@ -10,6 +10,9 @@ from sandbox import WorkspaceCleanupPolicy, WorkspaceHandle
 from workers import AntigravityCliRuntimeAdapter, GeminiCliWorker, WorkerRequest
 from workers.antigravity_cli_worker_native import (
     AntigravityCommandConfig,
+    _copy_file_if_missing,
+    _copytree_if_missing,
+    _write_json_if_missing,
     build_antigravity_native_command,
 )
 from workers.base import WorkerResult
@@ -214,6 +217,87 @@ def test_antigravity_workspace_migration_copy_errors_are_best_effort(
     assert command[:2] == ["/opt/bin/agy", "-p"]
     assert "copied_global_skills" not in metadata["migration_actions"]
     assert "replaced_symlinked_gemini_home" in metadata["migration_actions"]
+
+
+def test_antigravity_write_json_handles_parent_mkdir_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    target = tmp_path / "readonly" / "mcp_config.json"
+    original_mkdir = Path.mkdir
+
+    def _raise_target_mkdir_error(path: Path, *args: object, **kwargs: object) -> None:
+        if path == target.parent:
+            raise OSError("blocked config directory")
+        original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", _raise_target_mkdir_error)
+
+    assert _write_json_if_missing(target, {"mcpServers": {}}) is False
+    assert not target.exists()
+
+
+def test_antigravity_copytree_handles_parent_mkdir_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "source-skills"
+    source.mkdir()
+    target = tmp_path / "readonly" / "skills"
+    original_mkdir = Path.mkdir
+
+    def _raise_target_mkdir_error(path: Path, *args: object, **kwargs: object) -> None:
+        if path == target.parent:
+            raise OSError("blocked skills directory")
+        original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", _raise_target_mkdir_error)
+
+    assert _copytree_if_missing(source, target) is False
+    assert not target.exists()
+
+
+def test_antigravity_copytree_cleans_partial_target_on_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "source-skills"
+    source.mkdir()
+    target = tmp_path / "agent-home" / "skills"
+
+    def _raise_after_partial_copy(source_path: Path, target_path: Path) -> None:
+        assert source_path == source
+        target_path.mkdir(parents=True)
+        (target_path / "partial.txt").write_text("partial\n", encoding="utf-8")
+        raise OSError("interrupted copy")
+
+    monkeypatch.setattr(
+        "workers.antigravity_cli_worker_native.shutil.copytree",
+        _raise_after_partial_copy,
+    )
+
+    assert _copytree_if_missing(source, target) is False
+    assert not target.exists()
+
+
+def test_antigravity_copy_file_handles_parent_mkdir_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "GEMINI.md"
+    source.write_text("rules\n", encoding="utf-8")
+    target = tmp_path / "readonly" / "GEMINI.md"
+    original_mkdir = Path.mkdir
+
+    def _raise_target_mkdir_error(path: Path, *args: object, **kwargs: object) -> None:
+        if path == target.parent:
+            raise OSError("blocked file directory")
+        original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", _raise_target_mkdir_error)
+
+    assert _copy_file_if_missing(source, target) is False
+    assert not target.exists()
 
 
 def test_antigravity_workspace_migration_skips_inaccessible_candidate_home(
