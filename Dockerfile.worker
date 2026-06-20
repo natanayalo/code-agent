@@ -29,7 +29,7 @@ RUN set -eu; \
     tar -xzf /tmp/docker.tgz -C /tmp; \
     install -m 0755 /tmp/docker/docker /usr/local/bin/docker; \
     rm -rf /tmp/docker /tmp/docker.tgz; \
-    npm install -g @openai/codex @google/gemini-cli && \
+    npm install -g @openai/codex && \
     npm cache clean --force && \
     curl -fsSL https://antigravity.google/cli/install.sh > /tmp/install.sh && \
     bash /tmp/install.sh -d /usr/local/bin && \
@@ -38,6 +38,7 @@ RUN set -eu; \
 
 RUN git config --system --add safe.directory '*'
 
+# Antigravity compatibility: keep ripgrep linked under .gemini where the adapter/config might still expect it
 RUN mkdir -p /root/.gemini/tmp/bin && ln -sf /usr/bin/rg /root/.gemini/tmp/bin/rg
 
 COPY pyproject.toml poetry.lock /app/
