@@ -141,6 +141,29 @@ def _copy_file_if_missing(source: Path, target: Path) -> bool:
     return True
 
 
+def _exclude_local_git_path_if_present(repo_path: Path, pattern: str) -> bool:
+    exclude_path = repo_path / ".git" / "info" / "exclude"
+    if not _path_exists(exclude_path):
+        return False
+    try:
+        exclude_content = exclude_path.read_text(encoding="utf-8")
+        exclude_lines = {line.strip() for line in exclude_content.splitlines()}
+        if pattern in exclude_lines:
+            return False
+        separator = "" if not exclude_content or exclude_content.endswith("\n") else "\n"
+        exclude_path.write_text(
+            f"{exclude_content}{separator}{pattern}\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        logger.warning(
+            "Failed to update local Git exclude file",
+            extra={"path": str(exclude_path), "pattern": pattern},
+        )
+        return False
+    return True
+
+
 def _candidate_gemini_homes(
     adapter: AntigravityCliRuntimeAdapter,
     symlink_source: Path | None,
@@ -199,9 +222,11 @@ def prepare_antigravity_workspace_migration(
                 actions.append("migrated_global_mcp_config")
         break
 
+    migrated_workspace_agents = False
     legacy_workspace_skills = workspace.repo_path / ".gemini" / "skills"
     if _copytree_if_missing(legacy_workspace_skills, workspace.repo_path / ".agents" / "skills"):
         actions.append("copied_workspace_skills")
+        migrated_workspace_agents = True
 
     legacy_workspace_settings = workspace.repo_path / ".gemini" / "settings.json"
     workspace_mcp_config = _migrated_mcp_config(legacy_workspace_settings)
@@ -210,6 +235,13 @@ def prepare_antigravity_workspace_migration(
         workspace_mcp_config,
     ):
         actions.append("migrated_workspace_mcp_config")
+        migrated_workspace_agents = True
+
+    if migrated_workspace_agents and _exclude_local_git_path_if_present(
+        workspace.repo_path,
+        ".agents/",
+    ):
+        actions.append("excluded_workspace_agents_from_git")
 
     if actions:
         logger.info(

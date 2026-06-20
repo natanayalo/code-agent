@@ -12,6 +12,7 @@ from workers.antigravity_cli_worker_native import (
     AntigravityCommandConfig,
     _copy_file_if_missing,
     _copytree_if_missing,
+    _exclude_local_git_path_if_present,
     _write_json_if_missing,
     build_antigravity_native_command,
 )
@@ -154,6 +155,9 @@ def test_antigravity_workspace_migration_replaces_symlink_and_copies_legacy_conf
         json.dumps({"mcpServers": {"local": {"httpUrl": "https://example.com/ws"}}}),
         encoding="utf-8",
     )
+    git_exclude = workspace.repo_path / ".git" / "info" / "exclude"
+    git_exclude.parent.mkdir(parents=True)
+    git_exclude.write_text("# local excludes\n", encoding="utf-8")
     agent_home = workspace.workspace_path / ".agent_home"
     agent_home.mkdir()
     (agent_home / ".gemini").symlink_to(legacy_gemini_home, target_is_directory=True)
@@ -180,8 +184,10 @@ def test_antigravity_workspace_migration_replaces_symlink_and_copies_legacy_conf
     assert json.loads((workspace.repo_path / ".agents" / "mcp_config.json").read_text()) == {
         "mcpServers": {"local": {"serverUrl": "https://example.com/ws"}}
     }
+    assert ".agents/" in git_exclude.read_text(encoding="utf-8").splitlines()
     assert not (legacy_gemini_home / "antigravity-cli" / "settings.json").exists()
     assert "replaced_symlinked_gemini_home" in metadata["migration_actions"]
+    assert "excluded_workspace_agents_from_git" in metadata["migration_actions"]
 
 
 def test_antigravity_workspace_migration_copy_errors_are_best_effort(
@@ -298,6 +304,16 @@ def test_antigravity_copy_file_handles_parent_mkdir_error(
 
     assert _copy_file_if_missing(source, target) is False
     assert not target.exists()
+
+
+def test_antigravity_git_exclude_update_is_idempotent(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    exclude_path = repo_path / ".git" / "info" / "exclude"
+    exclude_path.parent.mkdir(parents=True)
+    exclude_path.write_text("# local excludes\n.agents/\n", encoding="utf-8")
+
+    assert _exclude_local_git_path_if_present(repo_path, ".agents/") is False
+    assert exclude_path.read_text(encoding="utf-8") == "# local excludes\n.agents/\n"
 
 
 def test_antigravity_workspace_migration_skips_inaccessible_candidate_home(

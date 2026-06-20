@@ -54,6 +54,7 @@ def test_antigravity_subprocess_env_keeps_keyring_runtime_without_new_secret_sco
     scoped = build_antigravity_subprocess_env(
         {
             "PATH": "/usr/bin",
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
             "XDG_RUNTIME_DIR": "/tmp/runtime-dir",
             "GEMINI_HOME": "/workspace/.agent_home/.gemini",
             "GOOGLE_API_KEY": "drop-me",
@@ -63,6 +64,7 @@ def test_antigravity_subprocess_env_keeps_keyring_runtime_without_new_secret_sco
 
     assert scoped == {
         "PATH": "/usr/bin",
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
         "XDG_RUNTIME_DIR": "/tmp/runtime-dir",
         "GEMINI_HOME": "/workspace/.agent_home/.gemini",
     }

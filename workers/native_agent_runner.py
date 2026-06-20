@@ -155,6 +155,8 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
             "TELEGRAM_BOT_TOKEN": "",
         }
     )
+    if "DBUS_SESSION_BUS_ADDRESS" not in effective_env and "DBUS_SESSION_BUS_ADDRESS" in os.environ:
+        effective_env["DBUS_SESSION_BUS_ADDRESS"] = os.environ["DBUS_SESSION_BUS_ADDRESS"]
     effective_env.update(auth_home_overrides)
     return effective_env
 
@@ -426,10 +428,12 @@ def _execute_native_agent_subprocess(
                 kind=request.span_kind,
             ):
                 effective_env = _build_effective_env(request)
+                stdin = None if request.stdin_prompt else subprocess.DEVNULL
 
                 completed = subprocess.run(
                     request.command,
                     input=request.prompt if request.stdin_prompt else None,
+                    stdin=stdin,
                     check=False,
                     capture_output=True,
                     text=True,

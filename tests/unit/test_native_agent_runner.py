@@ -88,6 +88,7 @@ print(json.dumps({
     "HOST_VAR": os.environ.get("HOST_VAR"),
     "DATABASE_URL": os.environ.get("DATABASE_URL"),
     "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY"),
+    "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS"),
     "LANG": os.environ.get("LANG"),
     "PATH": os.environ.get("PATH"),
     "HOME": os.environ.get("HOME"),
@@ -280,6 +281,39 @@ def test_native_agent_runner_filters_blank_command_redactions(
 
     assert captured_redactions == [["private-token"]]
     assert sanitized == "fake-native --token [REDACTED]"
+
+
+def test_native_agent_runner_uses_devnull_when_prompt_is_argv(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured_kwargs: dict[str, object] = {}
+
+    def _capture_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured_kwargs.update(kwargs)
+        return subprocess.CompletedProcess(["fake-native"], 0, "ok", "")
+
+    monkeypatch.setattr(subprocess, "run", _capture_run)
+    request = NativeAgentRunRequest(
+        command=["fake-native", "--prompt", "task"],
+        prompt="task",
+        repo_path=tmp_path,
+        workspace_path=tmp_path,
+        stdin_prompt=False,
+    )
+
+    completed = native_runner._execute_native_agent_subprocess(  # noqa: SLF001
+        request,
+        tmp_path,
+        "fake-native --prompt task",
+        started_at=0.0,
+        artifact_root=tmp_path / ".code-agent",
+        events_path=None,
+    )
+
+    assert isinstance(completed, subprocess.CompletedProcess)
+    assert captured_kwargs["input"] is None
+    assert captured_kwargs["stdin"] == subprocess.DEVNULL
 
 
 def test_native_agent_runner_marks_confirmation_block_as_infra_error(tmp_path: Path) -> None:
@@ -699,6 +733,7 @@ def test_native_agent_runner_enforces_strict_isolation(tmp_path: Path, monkeypat
     monkeypatch.setenv("DATABASE_URL", "postgresql://real-db")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
     # Variables that should be allowed
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
     monkeypatch.setenv("LANG", "en_US.UTF-8")
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
@@ -734,6 +769,7 @@ def test_native_agent_runner_enforces_strict_isolation(tmp_path: Path, monkeypat
     assert not payload["DATABASE_URL"].startswith("mysql://")  # Hijacked value was suppressed
 
     # Allowlist checks
+    assert payload["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
     assert payload["LANG"] == "en_US.UTF-8"
     assert payload["PATH"] == "/usr/bin:/bin"
 
