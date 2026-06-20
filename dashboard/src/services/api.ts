@@ -3,6 +3,7 @@ import {
   TaskSubmissionRequest,
   TaskSummarySnapshot,
   TaskSnapshot,
+  ScoutTriggerRequest,
 } from '../types/task';
 import { SessionSnapshot } from '../types/session';
 import { OperationalMetrics } from '../types/metrics';
@@ -120,10 +121,11 @@ export const api = {
     }
   },
 
-  async triggerScoutTask(): Promise<TaskSnapshot> {
+  async triggerScoutTask(payload?: ScoutTriggerRequest): Promise<TaskSnapshot> {
     try {
       return await fetchWithAuth('/tasks/scout/trigger', {
         method: 'POST',
+        ...(payload ? { body: JSON.stringify(payload) } : {}),
       });
     } catch (error) {
       console.warn('Failed to trigger scout task', error);

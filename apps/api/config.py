@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from apps.runtime import _is_enabled, coerce_non_negative_int_env
 from sandbox.container import DEFAULT_SANDBOX_IMAGE
@@ -29,6 +29,7 @@ class SystemConfig:
     scout_task_text: str = DEFAULT_SCOUT_TASK_TEXT
     scout_repo_url: str | None = None
     scout_branch: str | None = None
+    scout_allowed_repos: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load_from_env(cls, env: Mapping[str, str] | None = None) -> SystemConfig:
@@ -38,6 +39,17 @@ class SystemConfig:
         workspace_root = environ.get("CODE_AGENT_WORKSPACE_ROOT", "").strip() or str(
             default_workspace_root(environ)
         )
+
+        allowed_repos_str = environ.get("CODE_AGENT_SCOUT_ALLOWED_REPOS", "").strip()
+        scout_allowed_repos: dict[str, str] = {}
+        if allowed_repos_str:
+            for pair in allowed_repos_str.split(","):
+                if ":" in pair:
+                    key, url = pair.split(":", 1)
+                    key = key.strip()
+                    url = url.strip()
+                    if key and url:
+                        scout_allowed_repos[key] = url
 
         return cls(
             default_image=image,
@@ -55,4 +67,5 @@ class SystemConfig:
             or DEFAULT_SCOUT_TASK_TEXT,
             scout_repo_url=(environ.get("CODE_AGENT_SCOUT_REPO_URL") or "").strip() or None,
             scout_branch=(environ.get("CODE_AGENT_SCOUT_BRANCH") or "").strip() or None,
+            scout_allowed_repos=scout_allowed_repos,
         )

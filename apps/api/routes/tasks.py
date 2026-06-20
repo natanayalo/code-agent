@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field, model_validator
 
 from apps.api.config import SystemConfig
 from apps.api.dependencies import get_system_config, get_task_service, require_any_valid_auth
@@ -27,6 +30,33 @@ from orchestrator.execution import (
     TaskSubmissionValidationError,
     TaskSummarySnapshot,
 )
+
+
+class ScoutTriggerRequest(BaseModel):
+    """Payload for manually triggering a scout task."""
+
+    mode: Literal["repo", "research", "deep"] = "repo"
+    repo_key: str | None = None
+    branch: str | None = None
+    focus: str | None = None
+    depth: Literal["shallow", "standard", "deep"] = "standard"
+    max_proposals: int = Field(default=5)
+
+    @model_validator(mode="after")
+    def _normalize_and_validate(self) -> ScoutTriggerRequest:
+        if self.repo_key is not None:
+            self.repo_key = self.repo_key.strip() or None
+        if self.branch is not None:
+            self.branch = self.branch.strip() or None
+        if self.focus is not None:
+            self.focus = self.focus.strip() or None
+
+        self.max_proposals = max(1, min(20, self.max_proposals))
+
+        if self.mode == "research" and not self.focus:
+            raise ValueError("Research mode requires a focus topic.")
+        return self
+
 
 router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(require_any_valid_auth)])
 
@@ -57,27 +87,52 @@ def submit_task(
 
 @router.post("/scout/trigger", response_model=TaskSnapshot, status_code=status.HTTP_202_ACCEPTED)
 def trigger_scout_task(
+    payload: ScoutTriggerRequest | None = None,
     task_service: TaskExecutionService = Depends(get_task_service),
     config: SystemConfig = Depends(get_system_config),
 ) -> TaskSnapshot:
     """Manually trigger a scout task using system defaults."""
-    if not config.scout_repo_url:
+    req = payload or ScoutTriggerRequest()
+
+    repo_url = config.scout_repo_url
+    branch = config.scout_branch
+
+    if req.repo_key:
+        if req.repo_key not in config.scout_allowed_repos:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Repo key '{req.repo_key}' is not in the allowlist.",
+            )
+        repo_url = config.scout_allowed_repos[req.repo_key]
+
+    if not repo_url:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "Scout functionality is not fully configured (missing CODE_AGENT_SCOUT_REPO_URL)."
+                "Scout functionality is not fully configured "
+                "(missing repo_url or valid repo_key)."
             ),
         )
 
+    if req.branch:
+        branch = req.branch
+
+    constraints = {
+        "task_type": "scout",
+        "trigger_source": "manual",
+        "scout_mode": req.mode,
+        "scout_depth": req.depth,
+        "max_proposals": req.max_proposals,
+    }
+    if req.focus:
+        constraints["scout_focus"] = req.focus
+
     submission = TaskSubmission(
         task_text=config.scout_task_text,
-        repo_url=config.scout_repo_url,
-        branch=config.scout_branch,
+        repo_url=repo_url,
+        branch=branch,
         priority=0,
-        constraints={
-            "task_type": "scout",
-            "trigger_source": "manual",
-        },
+        constraints=constraints,
         session=SubmissionSession(
             channel="scheduler",
             external_user_id="system:scout-scheduler",
@@ -86,14 +141,22 @@ def trigger_scout_task(
         ),
     )
 
-    try:
-        task_snapshot, _ = task_service.create_task(submission)
-        return task_snapshot
-    except TaskSubmissionValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(exc),
-        ) from exc
+    with start_optional_span(
+        tracer_name="api.tasks",
+        span_name="api.tasks.scout.trigger",
+        attributes=with_span_kind(SPAN_KIND_AGENT),
+    ):
+        set_span_input_output(input_data=submission.model_dump(exclude={"secrets"}))
+        try:
+            task_snapshot, _ = task_service.create_task(submission)
+            set_current_span_attribute(TASK_ID_ATTRIBUTE, task_snapshot.task_id)
+            set_current_span_attribute(SESSION_ID_ATTRIBUTE, task_snapshot.session_id)
+            return task_snapshot
+        except TaskSubmissionValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
 
 
 @router.get("", response_model=list[TaskSummarySnapshot])

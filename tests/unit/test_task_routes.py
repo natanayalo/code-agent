@@ -480,8 +480,120 @@ def test_trigger_scout_task_returns_created_snapshot() -> None:
     assert submission.task_text == "Scout text"
     assert submission.repo_url == "https://github.com/scout/repo"
     assert submission.branch == "main"
-    assert submission.constraints == {"task_type": "scout", "trigger_source": "manual"}
+    assert submission.constraints == {
+        "task_type": "scout",
+        "trigger_source": "manual",
+        "scout_mode": "repo",
+        "scout_depth": "standard",
+        "max_proposals": 5,
+    }
     assert submission.session.external_user_id == "system:scout-scheduler"
+
+
+def test_trigger_scout_task_with_explicit_parameters() -> None:
+    """POST /tasks/scout/trigger should accept explicit parameters and cap max_proposals."""
+    service = _FakeTaskService()
+    service.created_snapshot = _task_snapshot(task_id="task-scout-2", status="pending")
+
+    with _task_client(service) as client:
+        client.app.state.system_config = SystemConfig(
+            default_image="test",
+            workspace_root="/tmp",
+            scout_allowed_repos={"test-key": "https://github.com/allowed/repo"},
+        )
+        response = client.post(
+            "/tasks/scout/trigger",
+            json={
+                "mode": "research",
+                "repo_key": "test-key",
+                "branch": "feature",
+                "focus": "improve performance",
+                "depth": "deep",
+                "max_proposals": 999,  # Should be capped at 20
+            },
+        )
+
+    assert response.status_code == 202
+    assert response.json()["task_id"] == "task-scout-2"
+    assert len(service.create_calls) == 1
+
+    submission = service.create_calls[0]
+    assert submission.repo_url == "https://github.com/allowed/repo"
+    assert submission.branch == "feature"
+    assert submission.constraints == {
+        "task_type": "scout",
+        "trigger_source": "manual",
+        "scout_mode": "research",
+        "scout_depth": "deep",
+        "max_proposals": 20,
+        "scout_focus": "improve performance",
+    }
+
+
+def test_trigger_scout_task_normalizes_blank_strings() -> None:
+    """POST /tasks/scout/trigger should treat blank strings as omitted."""
+    service = _FakeTaskService()
+    service.created_snapshot = _task_snapshot()
+
+    with _task_client(service) as client:
+        client.app.state.system_config = SystemConfig(
+            default_image="test",
+            workspace_root="/tmp",
+            scout_repo_url="https://github.com/fallback/repo",
+            scout_branch="main",
+        )
+        response = client.post(
+            "/tasks/scout/trigger",
+            json={
+                "repo_key": "   ",
+                "branch": "   ",
+                "focus": "   ",
+            },
+        )
+
+    assert response.status_code == 202
+    submission = service.create_calls[0]
+    assert submission.repo_url == "https://github.com/fallback/repo"
+    assert submission.branch == "main"
+    assert "scout_focus" not in submission.constraints
+
+
+def test_trigger_scout_task_returns_400_for_unknown_repo_key() -> None:
+    """POST /tasks/scout/trigger should return 400 if repo_key is provided but unknown."""
+    service = _FakeTaskService()
+
+    with _task_client(service) as client:
+        client.app.state.system_config = SystemConfig(
+            default_image="test",
+            workspace_root="/tmp",
+            scout_allowed_repos={"known": "https://github.com/known/repo"},
+        )
+        response = client.post(
+            "/tasks/scout/trigger",
+            json={"repo_key": "unknown"},
+        )
+
+    assert response.status_code == 400
+    assert "not in the allowlist" in response.json()["detail"]
+
+
+def test_trigger_scout_task_returns_422_when_research_focus_is_missing() -> None:
+    """POST /tasks/scout/trigger should return 422 if mode is research but focus is omitted."""
+    service = _FakeTaskService()
+
+    with _task_client(service) as client:
+        client.app.state.system_config = SystemConfig(
+            default_image="test",
+            workspace_root="/tmp",
+            scout_repo_url="https://github.com/fallback/repo",
+        )
+        response = client.post(
+            "/tasks/scout/trigger",
+            json={"mode": "research", "focus": "   "},
+        )
+
+    assert response.status_code == 422
+    assert "requires a focus topic" in response.json()["detail"][0]["msg"]
 
 
 def test_trigger_scout_task_returns_400_when_unconfigured() -> None:
@@ -497,5 +609,5 @@ def test_trigger_scout_task_returns_400_when_unconfigured() -> None:
         response = client.post("/tasks/scout/trigger")
 
     assert response.status_code == 400
-    assert "missing CODE_AGENT_SCOUT_REPO_URL" in response.json()["detail"]
+    assert "missing repo_url or valid repo_key" in response.json()["detail"]
     assert len(service.create_calls) == 0

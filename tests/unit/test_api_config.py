@@ -51,3 +51,22 @@ def test_load_from_env_parses_non_negative_scout_triggers() -> None:
 
     assert config.scout_idle_trigger_minutes == 0
     assert config.scout_schedule_interval_minutes == 0
+
+
+def test_load_from_env_parses_scout_allowed_repos() -> None:
+    """Allowed repos should be parsed correctly, handling whitespace and ignoring
+    invalid entries.
+    """
+    config = SystemConfig.load_from_env(
+        {
+            "CODE_AGENT_SCOUT_ALLOWED_REPOS": (
+                "repo1:https://github.com/repo1, repo2 : https://github.com/repo2 , "
+                "invalid, :nou , keyonly:  "
+            )
+        }
+    )
+
+    assert config.scout_allowed_repos == {
+        "repo1": "https://github.com/repo1",
+        "repo2": "https://github.com/repo2",
+    }
