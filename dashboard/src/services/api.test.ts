@@ -156,7 +156,7 @@ describe('api service', () => {
       expect(result).toEqual(mockSnapshot);
     });
 
-    it('triggerScoutTask sends the manual scout trigger request', async () => {
+    it('triggerScoutTask sends the manual scout trigger request with payload', async () => {
       const mockSnapshot = { task_id: 'task-scout', status: 'pending' };
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -165,11 +165,13 @@ describe('api service', () => {
         json: async () => mockSnapshot,
       });
 
-      const result = await api.triggerScoutTask();
+      const payload = { mode: 'research' as const, max_proposals: 10, depth: 'deep' as const };
+      const result = await api.triggerScoutTask(payload);
 
       const [url, options] = mockFetch.mock.calls[0];
       expect(url).toContain('/tasks/scout/trigger');
       expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual(payload);
       expect(result).toEqual(mockSnapshot);
     });
 

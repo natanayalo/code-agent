@@ -1,5 +1,5 @@
-import React from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import React from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -7,39 +7,40 @@ import {
   Loader2,
   Radar,
   Send,
-} from 'lucide-react';
-import { api } from '../services/api';
+} from "lucide-react";
+import { api } from "../services/api";
 import {
+  ScoutTriggerRequest,
   TaskSnapshot,
   TaskSpecType,
   TaskSubmissionRequest,
   WorkerType,
   WORKER_OPTIONS,
-} from '../types/task';
-import { DashboardLayout } from './layout/DashboardLayout';
-import { formatLabel } from '../utils/formatters';
+} from "../types/task";
+import { DashboardLayout } from "./layout/DashboardLayout";
+import { formatLabel } from "../utils/formatters";
 
-type TriggerTab = 'task' | 'scout';
-type DashboardTaskType = Exclude<TaskSpecType, 'scout'>;
-type WorkerSelection = WorkerType | '';
+type TriggerTab = "task" | "scout";
+type DashboardTaskType = Exclude<TaskSpecType, "scout">;
+type WorkerSelection = WorkerType | "";
 
 const DASHBOARD_SESSION = {
-  channel: 'dashboard',
-  external_user_id: 'dashboard:operator',
-  external_thread_id: 'dashboard-triggers',
-  display_name: 'Dashboard Operator',
+  channel: "dashboard",
+  external_user_id: "dashboard:operator",
+  external_thread_id: "dashboard-triggers",
+  display_name: "Dashboard Operator",
 };
 
 const MAX_TASK_PRIORITY = 2_147_483_647;
 
 const TASK_TYPE_OPTIONS: Array<{ label: string; value: DashboardTaskType }> = [
-  { label: 'Feature', value: 'feature' },
-  { label: 'Bugfix', value: 'bugfix' },
-  { label: 'Investigation', value: 'investigation' },
-  { label: 'Maintenance', value: 'maintenance' },
-  { label: 'Docs', value: 'docs' },
-  { label: 'Refactor', value: 'refactor' },
-  { label: 'Review Fix', value: 'review_fix' },
+  { label: "Feature", value: "feature" },
+  { label: "Bugfix", value: "bugfix" },
+  { label: "Investigation", value: "investigation" },
+  { label: "Maintenance", value: "maintenance" },
+  { label: "Docs", value: "docs" },
+  { label: "Refactor", value: "refactor" },
+  { label: "Review Fix", value: "review_fix" },
 ];
 
 function normalizeOptional(value: string): string | undefined {
@@ -51,9 +52,15 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-function TriggerResult({ task, label }: { task: TaskSnapshot | null; label: string }) {
+function TriggerResult({
+  task,
+  label,
+}: {
+  task: TaskSnapshot | null;
+  label: string;
+}) {
   return (
-    <div className={task ? 'trigger-result' : undefined} role="status">
+    <div className={task ? "trigger-result" : undefined} role="status">
       {task ? (
         <>
           <CheckCircle2 size={18} />
@@ -67,40 +74,56 @@ function TriggerResult({ task, label }: { task: TaskSnapshot | null; label: stri
 
 export function TriggerActionsPage() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = React.useState<TriggerTab>('task');
-  const [taskText, setTaskText] = React.useState('');
-  const [repoUrl, setRepoUrl] = React.useState('');
-  const [branch, setBranch] = React.useState('');
-  const [priority, setPriority] = React.useState('');
-  const [taskType, setTaskType] = React.useState<DashboardTaskType>('feature');
-  const [workerOverride, setWorkerOverride] = React.useState<WorkerSelection>('');
+  const [activeTab, setActiveTab] = React.useState<TriggerTab>("task");
+  const [taskText, setTaskText] = React.useState("");
+  const [repoUrl, setRepoUrl] = React.useState("");
+  const [branch, setBranch] = React.useState("");
+  const [priority, setPriority] = React.useState("");
+  const [taskType, setTaskType] = React.useState<DashboardTaskType>("feature");
+  const [workerOverride, setWorkerOverride] =
+    React.useState<WorkerSelection>("");
   const [taskError, setTaskError] = React.useState<string | null>(null);
   const [scoutError, setScoutError] = React.useState<string | null>(null);
-  const [lastSubmittedTask, setLastSubmittedTask] = React.useState<TaskSnapshot | null>(null);
-  const [lastScoutTask, setLastScoutTask] = React.useState<TaskSnapshot | null>(null);
+  const [lastSubmittedTask, setLastSubmittedTask] =
+    React.useState<TaskSnapshot | null>(null);
+  const [lastScoutTask, setLastScoutTask] = React.useState<TaskSnapshot | null>(
+    null,
+  );
+
+  const [scoutMode, setScoutMode] = React.useState<
+    "repo" | "research" | "deep"
+  >("repo");
+  const [scoutRepoKey, setScoutRepoKey] = React.useState("");
+  const [scoutBranch, setScoutBranch] = React.useState("");
+  const [scoutFocus, setScoutFocus] = React.useState("");
+  const [scoutDepth, setScoutDepth] = React.useState<
+    "shallow" | "standard" | "deep"
+  >("standard");
+  const [scoutMaxProposals, setScoutMaxProposals] = React.useState("5");
 
   const submitTaskMutation = useMutation({
     mutationFn: (payload: TaskSubmissionRequest) => api.submitTask(payload),
     onSuccess: (task) => {
       setLastSubmittedTask(task);
       setTaskError(null);
-      setTaskText('');
-      void queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      setTaskText("");
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
     onError: (error) => {
-      setTaskError(getErrorMessage(error, 'Failed to submit task.'));
+      setTaskError(getErrorMessage(error, "Failed to submit task."));
     },
   });
 
   const triggerScoutMutation = useMutation({
-    mutationFn: () => api.triggerScoutTask(),
+    mutationFn: (payload?: ScoutTriggerRequest) =>
+      api.triggerScoutTask(payload),
     onSuccess: (task) => {
       setLastScoutTask(task);
       setScoutError(null);
-      void queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
     onError: (error) => {
-      setScoutError(getErrorMessage(error, 'Failed to trigger scout task.'));
+      setScoutError(getErrorMessage(error, "Failed to trigger scout task."));
     },
   });
 
@@ -114,7 +137,7 @@ export function TriggerActionsPage() {
 
     const normalizedTaskText = taskText.trim();
     if (!normalizedTaskText) {
-      setTaskError('Task text is required.');
+      setTaskError("Task text is required.");
       return;
     }
 
@@ -122,7 +145,7 @@ export function TriggerActionsPage() {
       task_text: normalizedTaskText,
       constraints: {
         task_type: taskType,
-        trigger_source: 'dashboard',
+        trigger_source: "dashboard",
       },
       session: DASHBOARD_SESSION,
     };
@@ -134,7 +157,9 @@ export function TriggerActionsPage() {
         parsedPriority < 0 ||
         parsedPriority > MAX_TASK_PRIORITY
       ) {
-        setTaskError(`Priority must be a whole number between 0 and ${MAX_TASK_PRIORITY}.`);
+        setTaskError(
+          `Priority must be a whole number between 0 and ${MAX_TASK_PRIORITY}.`,
+        );
         return;
       }
       payload.priority = parsedPriority;
@@ -154,13 +179,35 @@ export function TriggerActionsPage() {
     submitTaskMutation.mutate(payload);
   };
 
-  const handleScoutTrigger = () => {
+  const handleScoutSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     if (triggerScoutMutation.isPending) {
       return;
     }
     setScoutError(null);
     setLastScoutTask(null);
-    triggerScoutMutation.mutate();
+
+    const payload: ScoutTriggerRequest = {
+      mode: scoutMode,
+      depth: scoutDepth,
+      max_proposals: Number(scoutMaxProposals),
+    };
+
+    const normalizedRepoKey = normalizeOptional(scoutRepoKey);
+    if (normalizedRepoKey) payload.repo_key = normalizedRepoKey;
+
+    const normalizedBranch = normalizeOptional(scoutBranch);
+    if (normalizedBranch) payload.branch = normalizedBranch;
+
+    const normalizedFocus = normalizeOptional(scoutFocus);
+    if (normalizedFocus) payload.focus = normalizedFocus;
+
+    if (scoutMode === "research" && !normalizedFocus) {
+      setScoutError("Focus is required for research mode.");
+      return;
+    }
+
+    triggerScoutMutation.mutate(payload);
   };
 
   return (
@@ -173,15 +220,19 @@ export function TriggerActionsPage() {
           </div>
         </header>
 
-        <div className="trigger-tab-list" role="tablist" aria-label="Trigger actions">
+        <div
+          className="trigger-tab-list"
+          role="tablist"
+          aria-label="Trigger actions"
+        >
           <button
             type="button"
             id="trigger-tab-task"
             role="tab"
-            aria-selected={activeTab === 'task'}
+            aria-selected={activeTab === "task"}
             aria-controls="trigger-panel-task"
-            className={`trigger-tab-button ${activeTab === 'task' ? 'active' : ''}`}
-            onClick={() => setActiveTab('task')}
+            className={`trigger-tab-button ${activeTab === "task" ? "active" : ""}`}
+            onClick={() => setActiveTab("task")}
           >
             <ClipboardList size={16} />
             <span>Task</span>
@@ -190,17 +241,17 @@ export function TriggerActionsPage() {
             type="button"
             id="trigger-tab-scout"
             role="tab"
-            aria-selected={activeTab === 'scout'}
+            aria-selected={activeTab === "scout"}
             aria-controls="trigger-panel-scout"
-            className={`trigger-tab-button ${activeTab === 'scout' ? 'active' : ''}`}
-            onClick={() => setActiveTab('scout')}
+            className={`trigger-tab-button ${activeTab === "scout" ? "active" : ""}`}
+            onClick={() => setActiveTab("scout")}
           >
             <Radar size={16} />
             <span>Scout</span>
           </button>
         </div>
 
-        {activeTab === 'task' ? (
+        {activeTab === "task" ? (
           <section
             id="trigger-panel-task"
             role="tabpanel"
@@ -242,7 +293,9 @@ export function TriggerActionsPage() {
                   <select
                     id="trigger-task-type"
                     value={taskType}
-                    onChange={(event) => setTaskType(event.target.value as DashboardTaskType)}
+                    onChange={(event) =>
+                      setTaskType(event.target.value as DashboardTaskType)
+                    }
                   >
                     {TASK_TYPE_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -256,7 +309,9 @@ export function TriggerActionsPage() {
                   <select
                     id="trigger-worker"
                     value={workerOverride}
-                    onChange={(event) => setWorkerOverride(event.target.value as WorkerSelection)}
+                    onChange={(event) =>
+                      setWorkerOverride(event.target.value as WorkerSelection)
+                    }
                   >
                     <option value="">Auto</option>
                     {WORKER_OPTIONS.map((worker) => (
@@ -298,7 +353,11 @@ export function TriggerActionsPage() {
                   ) : (
                     <Send size={16} />
                   )}
-                  <span>{submitTaskMutation.isPending ? 'Queueing...' : 'Queue Task'}</span>
+                  <span>
+                    {submitTaskMutation.isPending
+                      ? "Queueing..."
+                      : "Queue Task"}
+                  </span>
                 </button>
                 <TriggerResult task={lastSubmittedTask} label="Task queued" />
               </div>
@@ -311,21 +370,91 @@ export function TriggerActionsPage() {
             aria-labelledby="trigger-tab-scout"
             className="trigger-panel"
           >
-            <div className="trigger-scout-body">
-              <dl className="trigger-summary-grid" aria-label="Scout trigger summary">
-                <div>
-                  <dt>Lane</dt>
-                  <dd>Scout</dd>
+            <form className="trigger-form" onSubmit={handleScoutSubmit}>
+              <div className="trigger-form-row">
+                <div className="trigger-form-field">
+                  <label htmlFor="scout-mode">Mode</label>
+                  <select
+                    id="scout-mode"
+                    value={scoutMode}
+                    onChange={(e) =>
+                      setScoutMode(
+                        e.target.value as "repo" | "research" | "deep",
+                      )
+                    }
+                  >
+                    <option value="repo">Repo</option>
+                    <option value="research">Research</option>
+                    <option value="deep">Deep</option>
+                  </select>
                 </div>
-                <div>
-                  <dt>Source</dt>
-                  <dd>Manual</dd>
+                <div className="trigger-form-field">
+                  <label htmlFor="scout-depth">Depth</label>
+                  <select
+                    id="scout-depth"
+                    value={scoutDepth}
+                    onChange={(e) =>
+                      setScoutDepth(
+                        e.target.value as "shallow" | "standard" | "deep",
+                      )
+                    }
+                  >
+                    <option value="shallow">Shallow</option>
+                    <option value="standard">Standard</option>
+                    <option value="deep">Deep</option>
+                  </select>
                 </div>
-                <div>
-                  <dt>Delivery</dt>
-                  <dd>Idea Inbox</dd>
+              </div>
+
+              <div className="trigger-form-row">
+                <div className="trigger-form-field">
+                  <label htmlFor="scout-repo-key">Repo Key (Optional)</label>
+                  <input
+                    id="scout-repo-key"
+                    value={scoutRepoKey}
+                    onChange={(e) => setScoutRepoKey(e.target.value)}
+                  />
                 </div>
-              </dl>
+                <div className="trigger-form-field">
+                  <label htmlFor="scout-branch">Branch (Optional)</label>
+                  <input
+                    id="scout-branch"
+                    value={scoutBranch}
+                    onChange={(e) => setScoutBranch(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="trigger-form-field">
+                <label htmlFor="scout-focus">
+                  Focus{" "}
+                  {scoutMode === "research"
+                    ? "(Required for research mode)"
+                    : "(Optional)"}
+                </label>
+                <input
+                  id="scout-focus"
+                  value={scoutFocus}
+                  onChange={(e) => setScoutFocus(e.target.value)}
+                  required={scoutMode === "research"}
+                />
+              </div>
+
+              <div className="trigger-form-field trigger-priority-field">
+                <label htmlFor="scout-max-proposals">
+                  Max Proposals (1-20)
+                </label>
+                <input
+                  id="scout-max-proposals"
+                  type="number"
+                  min="1"
+                  max="20"
+                  step="1"
+                  value={scoutMaxProposals}
+                  onChange={(e) => setScoutMaxProposals(e.target.value)}
+                  required
+                />
+              </div>
 
               {scoutError ? (
                 <div className="error-banner trigger-error-banner" role="alert">
@@ -336,21 +465,24 @@ export function TriggerActionsPage() {
 
               <div className="trigger-actions-footer">
                 <button
-                  type="button"
+                  type="submit"
                   className="button button-success trigger-primary-button"
                   disabled={triggerScoutMutation.isPending}
-                  onClick={handleScoutTrigger}
                 >
                   {triggerScoutMutation.isPending ? (
                     <Loader2 className="spin" size={16} />
                   ) : (
                     <Radar size={16} />
                   )}
-                  <span>{triggerScoutMutation.isPending ? 'Triggering...' : 'Trigger Scout'}</span>
+                  <span>
+                    {triggerScoutMutation.isPending
+                      ? "Triggering..."
+                      : "Trigger Scout"}
+                  </span>
                 </button>
                 <TriggerResult task={lastScoutTask} label="Scout queued" />
               </div>
-            </div>
+            </form>
           </section>
         )}
       </div>

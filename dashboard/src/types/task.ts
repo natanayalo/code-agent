@@ -183,3 +183,12 @@ export interface TaskSubmissionRequest {
   callback_url?: string | null;
   session?: TaskSubmissionSessionRequest;
 }
+
+export interface ScoutTriggerRequest {
+  mode?: 'repo' | 'research' | 'deep';
+  repo_key?: string | null;
+  branch?: string | null;
+  focus?: string | null;
+  depth?: 'shallow' | 'standard' | 'deep';
+  max_proposals?: number;
+}

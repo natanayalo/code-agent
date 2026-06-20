@@ -54,7 +54,6 @@ Reference baseline:
 
 Granular tasks for the active and upcoming milestones:
 
-- T-201: Add structured Scout trigger parameters and repo allowlist.
 - T-202: Add task-type prompt overlays for Scout modes.
 - T-203: Implement Repo Scout and Research Scout modes.
 - T-204: Implement Deep Scout chaining.
