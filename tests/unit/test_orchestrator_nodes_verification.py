@@ -43,6 +43,7 @@ async def test_verify_node_handles_independent_verifier_status(
 ) -> None:
     state = _state()
     state.task_spec.verification_commands = ["pytest -q"]  # type: ignore[union-attr]
+    state.task_spec.allowed_actions = ["modify_workspace_files"]  # type: ignore[union-attr]
     state.result = WorkerResult(
         status="success",
         summary="ok",
@@ -124,3 +125,112 @@ async def test_verify_node_skips_independent_verifier_on_read_only(
     )
     assert ind_item["status"] == "passed"
     assert "intentionally skipped" in ind_item["message"]
+
+
+@pytest.mark.anyio
+async def test_verify_node_fully_short_circuits_for_scout_task_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scout tasks (task_spec.task_type='scout') skip ALL verification steps.
+
+    Regression: scout tasks were erroneously running the deterministic verifier
+    (which executed the default smoke `printf` command) even though they never
+    modify code. The fix short-circuits the entire verify_result node for scout.
+    """
+    state = _state()
+    state.task_spec.task_type = "scout"  # type: ignore[union-attr]
+    state.task_spec.verification_commands = [  # type: ignore[union-attr]
+        'printf \'%s\\n%s\\n\' "$PWD" "$HOME"'  # default smoke command for read-only tasks
+    ]
+    state.result = WorkerResult(
+        status="success",
+        summary="Scout research complete.",
+        files_changed=[],
+        test_results=[],
+        commands_run=[],
+    )
+
+    det_mock = AsyncMock(return_value=("passed", "ok", None))
+    monkeypatch.setattr(
+        "orchestrator.nodes.verification.run_deterministic_verification",
+        det_mock,
+    )
+    ind_mock = AsyncMock()
+    monkeypatch.setattr(
+        "orchestrator.nodes.verification.run_independent_verifier",
+        ind_mock,
+    )
+
+    node = build_verify_result_node(enable_independent_verifier=True)
+    response = await node(state)
+
+    # Both verification steps must be skipped for scout tasks
+    det_mock.assert_not_called()
+    ind_mock.assert_not_called()
+
+    # Node still returns a valid verify_result step response
+    assert response["current_step"] == "verify_result"
+
+
+@pytest.mark.anyio
+async def test_verify_node_fully_short_circuits_for_scout_with_worker_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scout task with worker_override must still skip verification entirely.
+
+    Regression: when worker_override was passed, classify_task returned
+    'implementation' but the constraints (task_type=scout) were correctly
+    ingested and the task_spec.task_type was persisted as 'scout'. The
+    verify_result node should honour the task_spec contract and skip all
+    verification regardless of the route source.
+    """
+    state = OrchestratorState.model_validate(
+        {
+            "session": {
+                "session_id": "s1",
+                "user_id": "u1",
+                "channel": "http",
+                "external_thread_id": "t1",
+            },
+            "task": {
+                "task_id": "task-scout-override",
+                "task_text": "Examine this code and write a dummy proposal.",
+                "constraints": {"task_type": "scout", "read_only": True},
+                "worker_override": "antigravity",
+            },
+            "task_kind": "implementation",  # simulate classify_task returning wrong kind
+            "dispatch": {"worker_type": "antigravity"},
+            "task_spec": {
+                "goal": "Examine this code and write a dummy proposal.",
+                "task_type": "scout",
+                "allowed_actions": ["read_repo_files", "run_non_destructive_checks"],
+                "verification_commands": ['printf \'%s\\n%s\\n\' "$PWD" "$HOME"'],
+            },
+            "result": {
+                "status": "success",
+                "summary": "Research done.",
+                "files_changed": [],
+                "test_results": [],
+                "commands_run": [],
+            },
+        }
+    )
+
+    det_mock = AsyncMock(return_value=("passed", "ok", None))
+    monkeypatch.setattr(
+        "orchestrator.nodes.verification.run_deterministic_verification",
+        det_mock,
+    )
+    ind_mock = AsyncMock()
+    monkeypatch.setattr(
+        "orchestrator.nodes.verification.run_independent_verifier",
+        ind_mock,
+    )
+
+    node = build_verify_result_node(enable_independent_verifier=True)
+    response = await node(state)
+
+    # Both verification steps must be skipped: task_spec.task_type == "scout" is authoritative
+    det_mock.assert_not_called()
+    ind_mock.assert_not_called()
+    assert response["current_step"] == "verify_result"

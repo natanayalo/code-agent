@@ -312,7 +312,11 @@ def test_verify_result_runs_independent_verifier_when_enabled(tmp_path: Path) ->
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "demo"},
-            "task_spec": {"goal": "demo", "verification_commands": ["ls"]},
+            "task_spec": {
+                "goal": "demo",
+                "verification_commands": ["ls"],
+                "allowed_actions": ["modify_workspace_files"],
+            },
             "result": {
                 "status": "success",
                 "files_changed": ["README.md"],
@@ -349,7 +353,11 @@ def test_verify_result_fails_when_independent_verifier_command_fails(tmp_path: P
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "demo"},
-            "task_spec": {"goal": "demo", "verification_commands": ["ls does-not-exist"]},
+            "task_spec": {
+                "goal": "demo",
+                "verification_commands": ["ls does-not-exist"],
+                "allowed_actions": ["modify_workspace_files"],
+            },
             "result": {
                 "status": "success",
                 "files_changed": ["README.md"],
@@ -387,7 +395,11 @@ def test_verify_result_warns_when_independent_verifier_command_is_unsafe(tmp_pat
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "demo"},
-            "task_spec": {"goal": "demo", "verification_commands": ["rm -rf ."]},
+            "task_spec": {
+                "goal": "demo",
+                "verification_commands": ["rm -rf ."],
+                "allowed_actions": ["modify_workspace_files"],
+            },
             "result": {
                 "status": "success",
                 "files_changed": ["README.md"],

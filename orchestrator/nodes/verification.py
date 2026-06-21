@@ -26,6 +26,7 @@ from orchestrator.nodes.verification_result import (
 )
 from orchestrator.state import (
     OrchestratorState,
+    is_task_read_only,
 )
 from orchestrator.verification import (
     resolve_verification_commands,
@@ -48,6 +49,13 @@ def _check_short_circuit_verification(state: OrchestratorState) -> bool:
     if state.result is None:
         logger.warning(
             "Skipping verification node: no worker result available",
+            extra={"task_id": state.task.task_id},
+        )
+        return True
+
+    if state.task_spec is not None and state.task_spec.task_type == "scout":
+        logger.info(
+            "Short-circuiting verification: scout task produces no code changes to verify",
             extra={"task_id": state.task.task_id},
         )
         return True
@@ -127,8 +135,7 @@ async def _run_independent_step(
     if not enable_independent_verifier or deterministic_verifier_outcome[0] == "failed":
         return None, None
 
-    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
-    is_read_only = constraints.get("read_only") is True
+    is_read_only = is_task_read_only(state)
     no_files_changed = not (state.result and state.result.files_changed)
 
     if is_read_only or no_files_changed:

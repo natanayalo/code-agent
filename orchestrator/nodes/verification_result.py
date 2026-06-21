@@ -18,6 +18,7 @@ from orchestrator.state import (
     VerificationFailureKind,
     VerificationReport,
     VerificationReportItem,
+    is_task_read_only,
 )
 from orchestrator.verification import resolve_verification_commands
 from tools.numeric import coerce_non_negative_int_like
@@ -336,8 +337,7 @@ def _check_test_results(state: OrchestratorState) -> VerificationReportItem:
 
 def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
     result = state.result
-    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
-    is_read_only = constraints.get("read_only") is True
+    is_read_only = is_task_read_only(state)
 
     if result is None:
         logger.warning("Verification result is None")

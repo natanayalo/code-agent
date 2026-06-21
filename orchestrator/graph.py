@@ -783,7 +783,7 @@ async def generate_task_spec(
         route_reason=state.route.route_reason if state.route else None,
         verification_summary=state.verification.summary if state.verification else None,
     ):
-        task_spec = build_task_spec_for_request(
+        task_spec = state.task_spec or build_task_spec_for_request(
             state.task,
             task_kind=state.task_kind,
             task_plan=state.task_plan,
@@ -824,7 +824,7 @@ def build_generate_task_spec_and_route_node(
             route_reason=state.route.route_reason if state.route else None,
             verification_summary=state.verification.summary if state.verification else None,
         ):
-            task_spec = build_task_spec_for_request(
+            task_spec = state.task_spec or build_task_spec_for_request(
                 state.task,
                 task_kind=state.task_kind,
                 task_plan=state.task_plan,
