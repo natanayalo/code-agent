@@ -54,7 +54,6 @@ Reference baseline:
 
 Granular tasks for the active and upcoming milestones:
 
-- T-203: Implement Repo Scout and Research Scout modes.
 - T-204: Implement Deep Scout chaining.
 
 ## Completed Work

@@ -245,6 +245,32 @@ describe('IdeaInboxPage', () => {
     expect(screen.getAllByText('N/A').length).toBeGreaterThan(0);
   });
 
+  it('renders explicit scout mode metadata correctly', async () => {
+    const pMode = createProposal({
+      proposal_id: 'p-mode',
+      title: 'Idea Mode',
+      metadata_payload: {
+        scout_mode: 'research',
+        scout_depth: 'deep',
+        scout_focus: 'React Hooks',
+      },
+    });
+
+    vi.mocked(api.listProposals).mockResolvedValue([pMode]);
+    renderWithProviders(<IdeaInboxPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Idea Mode')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Mode')).toBeInTheDocument();
+    expect(screen.getByText('Research')).toBeInTheDocument();
+    expect(screen.getByText('Depth')).toBeInTheDocument();
+    expect(screen.getByText('Deep')).toBeInTheDocument();
+    expect(screen.getByText('Focus')).toBeInTheDocument();
+    expect(screen.getByText('React Hooks')).toBeInTheDocument();
+  });
+
   it('does not render scout metadata details for explicit null fields', async () => {
     vi.mocked(api.listProposals).mockResolvedValue([
       createProposal({
@@ -253,6 +279,9 @@ describe('IdeaInboxPage', () => {
         metadata_payload: {
           files_changed: null,
           diff_text: null,
+          scout_mode: null,
+          scout_depth: null,
+          scout_focus: null,
         },
       }),
     ]);

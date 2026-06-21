@@ -235,7 +235,18 @@ function ReflectionProposalDetails({ proposal }: { proposal: ProposalSnapshot })
 function ScoutProposalDetails({ proposal }: { proposal: ProposalSnapshot }) {
   const filesChanged = proposal.metadata_payload?.files_changed;
   const diffText = proposal.metadata_payload?.diff_text;
-  if (!proposal.content && filesChanged == null && diffText == null) {
+  const scoutMode = proposal.metadata_payload?.scout_mode;
+  const scoutDepth = proposal.metadata_payload?.scout_depth;
+  const scoutFocus = proposal.metadata_payload?.scout_focus;
+
+  if (
+    !proposal.content &&
+    filesChanged == null &&
+    diffText == null &&
+    scoutMode == null &&
+    scoutDepth == null &&
+    scoutFocus == null
+  ) {
     return null;
   }
 
@@ -243,6 +254,32 @@ function ScoutProposalDetails({ proposal }: { proposal: ProposalSnapshot }) {
     <details className="proposal-details-panel">
       <summary>View Details</summary>
       {proposal.content ? <pre className="json-viewer">{proposal.content}</pre> : null}
+
+      {scoutMode != null || scoutDepth != null || scoutFocus != null ? (
+        <div className="proposal-scout-metadata" style={{ marginBottom: '1rem' }}>
+          <dl className="proposal-evidence-grid">
+            {scoutMode != null ? (
+              <div>
+                <dt>Mode</dt>
+                <dd className="proposal-score-value score-neutral">{formatLabel(scoutMode)}</dd>
+              </div>
+            ) : null}
+            {scoutDepth != null ? (
+              <div>
+                <dt>Depth</dt>
+                <dd className="proposal-score-value score-neutral">{formatLabel(scoutDepth)}</dd>
+              </div>
+            ) : null}
+            {scoutFocus != null ? (
+              <div className="proposal-evidence-wide">
+                <dt>Focus</dt>
+                <dd>{formatText(scoutFocus)}</dd>
+              </div>
+            ) : null}
+          </dl>
+        </div>
+      ) : null}
+
       {filesChanged != null ? (
         <div className="metadata-section">
           <strong>Files Changed:</strong>

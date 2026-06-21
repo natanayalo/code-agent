@@ -292,6 +292,9 @@ def test_persist_execution_outcome_creates_proposal_for_scout(session_factory) -
         assert proposals[0].status == ProposalStatus.PENDING_REVIEW
         assert proposals[0].summary == "Found some interesting files."
         assert proposals[0].metadata_payload["source"] == "scout"
+        assert proposals[0].metadata_payload["scout_mode"] == "repo"
+        assert "scout_depth" not in proposals[0].metadata_payload
+        assert "scout_focus" not in proposals[0].metadata_payload
         assert proposals[0].metadata_payload["files_changed"] == ["a.txt"]
         assert proposals[0].metadata_payload["budget_usage"] == {"cost": 1.0}
         assert proposals[0].metadata_payload["diff_text"] == "diff content"
@@ -307,7 +310,69 @@ def test_persist_execution_outcome_creates_proposal_for_scout(session_factory) -
 
     with session_scope(session_factory) as session:
         proposals = ProposalRepository(session).list_proposals(task_id=task_id)
-        assert len(proposals) == 1  # Still 1, idempotency works
+        assert len(proposals) == 1
+
+
+def test_persist_execution_outcome_creates_proposal_for_scout_with_metadata(
+    session_factory,
+) -> None:
+    """Scout tasks should pass through mode, depth, and focus metadata correctly."""
+    service = MockExecutionService(session_factory)
+
+    with session_scope(session_factory) as session:
+        task_id = _setup_task(session)
+        task = TaskRepository(session).get(task_id)
+        assert task is not None
+        task.constraints = {
+            "scout_mode": "research",
+            "scout_depth": "deep",
+            "scout_focus": "React best practices",
+            "empty_ignored": "   ",
+        }
+        task_session_id = task.session_id
+
+    state = OrchestratorState(
+        task=TaskRequest(task_text="scout this", task_id=task_id),
+        session=None,
+        route=RouteDecision(chosen_worker="codex", route_reason="scout route"),
+        dispatch=WorkerDispatch(),
+        approval=ApprovalCheckpoint(required=False, status="not_required"),
+        task_spec=TaskSpec(
+            goal="scout this",
+            task_type="scout",
+            delivery_mode="summary",
+        ),
+        result=WorkerResult(
+            status="success",
+            summary="Research complete.",
+            files_changed=[],
+            commands_run=[],
+            test_results=[],
+            artifacts=[],
+            budget_usage={"cost": 2.0},
+        ),
+    )
+
+    now = datetime.now(UTC)
+
+    _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+    )
+
+    with session_scope(session_factory) as session:
+        proposals = ProposalRepository(session).list_proposals(task_id=task_id)
+        assert len(proposals) == 1
+        assert proposals[0].session_id == task_session_id
+        assert proposals[0].metadata_payload["source"] == "scout"
+        assert proposals[0].metadata_payload["scout_mode"] == "research"
+        assert proposals[0].metadata_payload["scout_depth"] == "deep"
+        assert (
+            proposals[0].metadata_payload["scout_focus"] == "React best practices"
+        )  # Still 1, idempotency works
 
 
 def test_persist_execution_outcome_creates_scored_improvement_proposal(session_factory) -> None:

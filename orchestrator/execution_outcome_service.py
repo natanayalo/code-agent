@@ -213,22 +213,42 @@ def _persist_scout_proposal_if_needed(
         return
 
     assert state.result is not None
+
+    constraints = dict(task.constraints) if isinstance(task.constraints, dict) else {}
+    raw_mode = constraints.get("scout_mode")
+    scout_mode = str(raw_mode).strip() if isinstance(raw_mode, str) and raw_mode.strip() else "repo"
+    raw_depth = constraints.get("scout_depth")
+    scout_depth = (
+        str(raw_depth).strip() if isinstance(raw_depth, str) and raw_depth.strip() else None
+    )
+    raw_focus = constraints.get("scout_focus")
+    scout_focus = (
+        str(raw_focus).strip() if isinstance(raw_focus, str) and raw_focus.strip() else None
+    )
+
+    metadata_payload: dict[str, Any] = {
+        "source": "scout",
+        "scout_mode": scout_mode,
+        "task_id": task.id,
+        "worker_run_id": worker_run_id,
+        "files_changed": state.result.files_changed,
+        "artifacts": [artifact.model_dump(mode="json") for artifact in artifacts],
+        "budget_usage": state.result.budget_usage,
+        "diff_text": getattr(state.result, "diff_text", None),
+        "json_payload": getattr(state.result, "json_payload", None),
+    }
+    if scout_depth:
+        metadata_payload["scout_depth"] = scout_depth
+    if scout_focus:
+        metadata_payload["scout_focus"] = scout_focus
+
     proposal = proposal_repo.create_proposal(
         session_id=task.session_id,
         task_id=task.id,
         title=f"Scout Output for Task {task.id}",
         summary=state.result.summary or "Scout task completed without summary.",
         status=ProposalStatus.PENDING_REVIEW,
-        metadata_payload={
-            "source": "scout",
-            "task_id": task.id,
-            "worker_run_id": worker_run_id,
-            "files_changed": state.result.files_changed,
-            "artifacts": [artifact.model_dump(mode="json") for artifact in artifacts],
-            "budget_usage": state.result.budget_usage,
-            "diff_text": getattr(state.result, "diff_text", None),
-            "json_payload": getattr(state.result, "json_payload", None),
-        },
+        metadata_payload=metadata_payload,
     )
     logger.info(
         "Persisted scout proposal",
