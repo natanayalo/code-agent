@@ -303,6 +303,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Feat: add task-type prompt overlays for Scout modes (T-202) ([#264](https://github.com/natanayalo/code-agent/pull/264))
+
 - [codex] Add dashboard QA skill and polish edge states ([#251](https://github.com/natanayalo/code-agent/pull/251))
 
 - Feat/trigger sources t 191 ([#233](https://github.com/natanayalo/code-agent/pull/233))
