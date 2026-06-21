@@ -54,7 +54,7 @@ Reference baseline:
 
 Granular tasks for the active and upcoming milestones:
 
-- T-204: Implement Deep Scout chaining.
+- T-199: Full dashboard QA, visual polish, limits, and reusable QA skill.
 
 ## Completed Work
 
