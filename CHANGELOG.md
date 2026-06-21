@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: implement Repo and Research Scout mode metadata (T-203) ([#265](https://github.com/natanayalo/code-agent/pull/265))
+
 - Feat: add structured Scout trigger parameters and repo allowlist (T-201) ([#263](https://github.com/natanayalo/code-agent/pull/263))
 
 - Feat: skip change-oriented reviews for read-only tasks (T-200) ([#262](https://github.com/natanayalo/code-agent/pull/262))
