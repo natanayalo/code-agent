@@ -246,8 +246,11 @@ def build_scout_overlay_section(request: WorkerRequest) -> str:
 
     raw_mode = request.constraints.get("scout_mode")
     scout_mode = cast(ScoutMode, raw_mode) if raw_mode in SCOUT_MODES else cast(ScoutMode, "repo")
-    scout_focus = (request.constraints.get("scout_focus") or "").strip() or None
-    scout_depth = (request.constraints.get("scout_depth") or "").strip() or None
+    raw_focus = request.constraints.get("scout_focus")
+    scout_focus = raw_focus.strip() or None if isinstance(raw_focus, str) else None
+
+    raw_depth = request.constraints.get("scout_depth")
+    scout_depth = raw_depth.strip() or None if isinstance(raw_depth, str) else None
 
     raw_max_proposals = request.constraints.get("max_proposals")
     try:

@@ -193,3 +193,24 @@ def test_build_system_prompt_omits_scout_overlay_for_normal_tasks(tmp_path) -> N
     )
     prompt = build_system_prompt(request, tmp_path)
     assert "Scout Mode Guardrails" not in prompt
+
+
+def test_build_system_prompt_ignores_non_string_scout_constraints(tmp_path) -> None:
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Research DB patterns",
+        repo_url="https://example.com/repo.git",
+        constraints={
+            "task_type": "scout",
+            "scout_mode": "research",
+            "scout_focus": ["not", "a", "string"],
+            "scout_depth": {"invalid": "type"},
+            "max_proposals": 2,
+        },
+    )
+    prompt = build_system_prompt(request, tmp_path)
+    assert "## Scout Mode Guardrails" in prompt
+    assert "Mode: `research`" in prompt
+    # Since depth and focus are invalid, they should be omitted
+    assert "Depth:" not in prompt
+    assert "Focus:" not in prompt
