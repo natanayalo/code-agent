@@ -6,9 +6,9 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, cast
+from typing import Any, Final, Literal, cast, get_args
 
-from db.enums import ArtifactType, ProposalStatus, TaskStatus, WorkerType
+from db.enums import ArtifactType, ProposalStatus, ProposalType, TaskStatus, WorkerType
 from orchestrator.execution_improvement_proposal_service import (
     _persist_friction_proposals_if_needed,
 )
@@ -37,6 +37,9 @@ from repositories import (
 )
 
 logger = logging.getLogger("orchestrator.execution")
+
+ScoutMode = Literal["repo", "research", "deep"]
+ALLOWED_SCOUT_MODES: Final[set[str]] = set(get_args(ScoutMode))
 
 
 @dataclass(frozen=True)
@@ -208,27 +211,51 @@ def _persist_scout_proposal_if_needed(
     if not _should_create_scout_proposal(state):
         return
 
-    existing_proposals = proposal_repo.list_proposals(task_id=task.id, limit=1)
+    existing_proposals = proposal_repo.list_proposals(
+        task_id=task.id, proposal_type=ProposalType.SCOUT, limit=1
+    )
     if existing_proposals:
         return
 
     assert state.result is not None
+
+    constraints = task.constraints if isinstance(task.constraints, dict) else {}
+
+    raw_mode = constraints.get("scout_mode")
+    scout_mode_str = str(raw_mode or "").strip() or "repo"
+    if scout_mode_str not in ALLOWED_SCOUT_MODES:
+        scout_mode_str = "repo"
+    scout_mode = cast(ScoutMode, scout_mode_str)
+
+    raw_depth = constraints.get("scout_depth")
+    scout_depth = str(raw_depth or "").strip() or None
+
+    raw_focus = constraints.get("scout_focus")
+    scout_focus = str(raw_focus or "").strip() or None
+
+    metadata_payload: dict[str, Any] = {
+        "source": "scout",
+        "scout_mode": scout_mode,
+        "task_id": task.id,
+        "worker_run_id": worker_run_id,
+        "files_changed": state.result.files_changed,
+        "artifacts": [artifact.model_dump(mode="json") for artifact in artifacts],
+        "budget_usage": state.result.budget_usage,
+        "diff_text": getattr(state.result, "diff_text", None),
+        "json_payload": getattr(state.result, "json_payload", None),
+    }
+    if scout_depth:
+        metadata_payload["scout_depth"] = scout_depth
+    if scout_focus:
+        metadata_payload["scout_focus"] = scout_focus
+
     proposal = proposal_repo.create_proposal(
         session_id=task.session_id,
         task_id=task.id,
         title=f"Scout Output for Task {task.id}",
         summary=state.result.summary or "Scout task completed without summary.",
         status=ProposalStatus.PENDING_REVIEW,
-        metadata_payload={
-            "source": "scout",
-            "task_id": task.id,
-            "worker_run_id": worker_run_id,
-            "files_changed": state.result.files_changed,
-            "artifacts": [artifact.model_dump(mode="json") for artifact in artifacts],
-            "budget_usage": state.result.budget_usage,
-            "diff_text": getattr(state.result, "diff_text", None),
-            "json_payload": getattr(state.result, "json_payload", None),
-        },
+        metadata_payload=metadata_payload,
     )
     logger.info(
         "Persisted scout proposal",
