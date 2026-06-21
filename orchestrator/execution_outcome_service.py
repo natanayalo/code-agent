@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, cast
 
-from db.enums import ArtifactType, ProposalStatus, TaskStatus, WorkerType
+from db.enums import ArtifactType, ProposalStatus, ProposalType, TaskStatus, WorkerType
 from orchestrator.execution_improvement_proposal_service import (
     _persist_friction_proposals_if_needed,
 )
@@ -208,23 +208,26 @@ def _persist_scout_proposal_if_needed(
     if not _should_create_scout_proposal(state):
         return
 
-    existing_proposals = proposal_repo.list_proposals(task_id=task.id, limit=1)
+    existing_proposals = proposal_repo.list_proposals(
+        task_id=task.id, proposal_type=ProposalType.SCOUT, limit=1
+    )
     if existing_proposals:
         return
 
     assert state.result is not None
 
     constraints = dict(task.constraints) if isinstance(task.constraints, dict) else {}
+
     raw_mode = constraints.get("scout_mode")
-    scout_mode = str(raw_mode).strip() if isinstance(raw_mode, str) and raw_mode.strip() else "repo"
+    scout_mode = str(raw_mode or "").strip() or "repo"
+    if scout_mode not in ("repo", "research", "deep"):
+        scout_mode = "repo"
+
     raw_depth = constraints.get("scout_depth")
-    scout_depth = (
-        str(raw_depth).strip() if isinstance(raw_depth, str) and raw_depth.strip() else None
-    )
+    scout_depth = str(raw_depth or "").strip() or None
+
     raw_focus = constraints.get("scout_focus")
-    scout_focus = (
-        str(raw_focus).strip() if isinstance(raw_focus, str) and raw_focus.strip() else None
-    )
+    scout_focus = str(raw_focus or "").strip() or None
 
     metadata_payload: dict[str, Any] = {
         "source": "scout",

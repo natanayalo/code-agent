@@ -370,9 +370,60 @@ def test_persist_execution_outcome_creates_proposal_for_scout_with_metadata(
         assert proposals[0].metadata_payload["source"] == "scout"
         assert proposals[0].metadata_payload["scout_mode"] == "research"
         assert proposals[0].metadata_payload["scout_depth"] == "deep"
-        assert (
-            proposals[0].metadata_payload["scout_focus"] == "React best practices"
-        )  # Still 1, idempotency works
+        assert proposals[0].metadata_payload["scout_focus"] == "React best practices"
+
+
+def test_persist_execution_outcome_creates_proposal_for_bogus_scout_mode(session_factory) -> None:
+    """Scout tasks with an invalid mode should fall back to 'repo' mode."""
+    service = MockExecutionService(session_factory)
+
+    with session_scope(session_factory) as session:
+        task_id = _setup_task(session)
+        task = TaskRepository(session).get(task_id)
+        assert task is not None
+        task.constraints = {
+            "scout_mode": "bogus",
+        }
+        task_session_id = task.session_id
+
+    state = OrchestratorState(
+        task=TaskRequest(task_text="scout this", task_id=task_id),
+        session=None,
+        route=RouteDecision(chosen_worker="codex", route_reason="scout route"),
+        dispatch=WorkerDispatch(),
+        approval=ApprovalCheckpoint(required=False, status="not_required"),
+        task_spec=TaskSpec(
+            goal="scout this",
+            task_type="scout",
+            delivery_mode="summary",
+        ),
+        result=WorkerResult(
+            status="success",
+            summary="Research complete.",
+            files_changed=[],
+            commands_run=[],
+            test_results=[],
+            artifacts=[],
+            budget_usage={"cost": 2.0},
+        ),
+    )
+
+    now = datetime.now(UTC)
+
+    _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+    )
+
+    with session_scope(session_factory) as session:
+        proposals = ProposalRepository(session).list_proposals(task_id=task_id)
+        assert len(proposals) == 1
+        assert proposals[0].session_id == task_session_id
+        assert proposals[0].metadata_payload["source"] == "scout"
+        assert proposals[0].metadata_payload["scout_mode"] == "repo"
 
 
 def test_persist_execution_outcome_creates_scored_improvement_proposal(session_factory) -> None:
