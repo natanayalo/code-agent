@@ -229,7 +229,7 @@ def _merge_scout_phase_result(
         all_artifacts.extend([artifact.model_dump(mode="json") for artifact in pr_res.artifacts])
 
     for k, v in (pr_res.budget_usage or {}).items():
-        if isinstance(v, int | float):
+        if isinstance(v, int | float) and not isinstance(v, bool):
             budget_usage[k] = budget_usage.get(k, 0) + v
 
 

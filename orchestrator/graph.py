@@ -544,7 +544,7 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
 
     memory_context = state.memory.model_dump()
     if state.scout_phase == "research" and state.scout_phase_results:
-        repo_result = state.scout_phase_results[-1].result
+        repo_result = next((r.result for r in state.scout_phase_results if r.phase == "repo"), None)
         if repo_result is None:
             logger.warning("Repo phase result is None in scout_phase_results.")
             repo_summary = "Repo phase completed with no summary."
@@ -2553,6 +2553,14 @@ def _route_after_await_result(state_input: OrchestratorState) -> str:
         and state.result is not None
         and state.result.status == "success"
     ):
+        has_file_changes = len(state.result.files_changed) > 0
+        has_failed_tests = any(
+            test.status in ("failed", "error") for test in (state.result.test_results or [])
+        )
+        has_failed_commands = any(cmd.exit_code != 0 for cmd in (state.result.commands_run or []))
+        if has_file_changes or has_failed_tests or has_failed_commands:
+            return "verify_result"
+
         return "transition_to_research_phase"
 
     return "verify_result"

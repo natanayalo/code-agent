@@ -88,3 +88,19 @@ def test_build_worker_request_injects_phase_metadata():
     # Check that repo summary is injected into memory context
     session_mem = req.memory_context.get("session", {})
     assert session_mem.get("repo_phase_summary") == "Found the bug in api.py"
+
+
+def test_deep_scout_repo_success_with_files_changed_routes_to_verify():
+    state = OrchestratorState(
+        task=TaskRequest(task_text="x", constraints={"scout_mode": "deep"}),
+        result=WorkerResult(
+            status="success",
+            summary="Repo ok",
+            next_action_hint="persist_memory",
+            commands_run=[],
+            files_changed=["unexpected.py"],
+            test_results=[],
+            artifacts=[],
+        ),
+    )
+    assert _route_after_await_result(state) == "verify_result"
