@@ -212,12 +212,14 @@ def _merge_scout_phase_result(
     """Merge an individual scout phase result into the aggregated payload."""
     if pr_res is None:
         logger.warning("Scout phase result is None for phase: %s", phase)
-        scout_phase_metadata.append({"phase": phase, "summary": "No summary available."})
-        summary_parts.append(f"{phase.capitalize()} phase: No summary available.")
+        summary = "No summary available."
+        scout_phase_metadata.append({"phase": phase, "summary": summary})
+        summary_parts.append(f"{phase.capitalize()} phase: {summary}")
         return
 
-    scout_phase_metadata.append({"phase": phase, "summary": pr_res.summary})
-    summary_parts.append(f"{phase.capitalize()} phase: {pr_res.summary or 'No summary.'}")
+    summary = (pr_res.summary or "").strip() or "No summary available."
+    scout_phase_metadata.append({"phase": phase, "summary": summary})
+    summary_parts.append(f"{phase.capitalize()} phase: {summary}")
 
     if pr_res.files_changed:
         for f in pr_res.files_changed:
@@ -272,7 +274,7 @@ def _persist_scout_proposal_if_needed(
     else:
         files_changed = list(state.result.files_changed)
         budget_usage = dict(state.result.budget_usage or {})
-        summary = state.result.summary or "Scout task completed without summary."
+        summary = (state.result.summary or "").strip() or "Scout task completed without summary."
 
     all_artifacts = [artifact.model_dump(mode="json") for artifact in artifacts]
     scout_phase_metadata: list[dict[str, Any]] | None = None
