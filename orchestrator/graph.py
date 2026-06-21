@@ -2564,10 +2564,8 @@ def transition_to_research_phase(state_input: OrchestratorState) -> dict[str, An
     if state.result is None:
         return {"current_step": "transition_to_research_phase"}
 
-    new_results = [res.model_dump(mode="json") for res in state.scout_phase_results]
-    new_results.append(
-        {"phase": state.scout_phase or "repo", "result": state.result.model_dump(mode="json")}
-    )
+    new_results: list[Any] = list(state.scout_phase_results)
+    new_results.append({"phase": state.scout_phase or "repo", "result": state.result})
 
     return {
         "current_step": "transition_to_research_phase",
