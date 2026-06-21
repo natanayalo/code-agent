@@ -22,6 +22,7 @@ function_exceptions:
   orchestrator/execution_outcome_service.py:
     _persist_execution_outcome: Master orchestrator logic that persists artifacts, task state, and reflection proposals, highly cohesive.
     _persist_friction_proposals_if_needed: Gathers evidence from state and delegates to proposal persistence, cohesive logic block.
+    _persist_scout_proposal_if_needed: Gathers scout findings and chain metadata; tightly coupled mapping logic.
   orchestrator/execution_proposal_service.py:
     accept_proposal: Cohesive execution orchestration flow spanning DB retrieval, task building, and conditional SQL atomic updates; splitting degrades readability.
   orchestrator/execution_submission_service.py:
@@ -31,6 +32,7 @@ function_exceptions:
   orchestrator/graph.py:
     _apply_brain_route_suggestion: Applies routing suggestions by merging them securely into state; tightly coupled mapping block.
     build_await_result_node: Graph node builder for awaiting worker results, handling parsing, progress, and fallback logic cleanly without artificial splitting.
+    _add_orchestrator_complex_nodes: Graph node builder block; splitting degrades readability.
   orchestrator/task_spec.py:
     apply_task_spec_brain_suggestion: Merges AI suggestions into TaskSpec; involves deep nested dictionary and model updates.
     build_task_spec: Parses raw request into structured contract; highly coupled to input validation rules.

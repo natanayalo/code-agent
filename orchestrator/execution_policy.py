@@ -64,6 +64,14 @@ SCOUT_BUDGET_CAPS: dict[str, Any] = {
     "max_shell_commands": 8,
     "max_retries": 0,
 }
+DEEP_SCOUT_BUDGET_CAPS: dict[str, Any] = {
+    "execution_mode": UNATTENDED_EXECUTION_MODE,
+    "max_iterations": 5,
+    "worker_timeout_seconds": 360,
+    "max_tool_calls": 16,
+    "max_shell_commands": 16,
+    "max_retries": 0,
+}
 NON_NEGATIVE_BUDGET_KEYS = frozenset(
     {"max_retries", "max_verifier_passes", "max_tool_calls", "max_shell_commands"}
 )
@@ -150,10 +158,13 @@ def normalize_scout_submission(
     normalized_constraints = dict(safe_constraints)
     normalized_constraints["read_only"] = True
 
-    normalized_budget = dict(safe_budget)
-    normalized_budget["execution_mode"] = SCOUT_BUDGET_CAPS["execution_mode"]
+    is_deep = str(safe_constraints.get("scout_mode") or "").strip() == "deep"
+    caps = DEEP_SCOUT_BUDGET_CAPS if is_deep else SCOUT_BUDGET_CAPS
 
-    for key, cap in SCOUT_BUDGET_CAPS.items():
+    normalized_budget = dict(safe_budget)
+    normalized_budget["execution_mode"] = caps["execution_mode"]
+
+    for key, cap in caps.items():
         if key == "execution_mode":
             continue
         val = normalized_budget.get(key)

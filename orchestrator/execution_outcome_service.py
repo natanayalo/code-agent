@@ -233,14 +233,46 @@ def _persist_scout_proposal_if_needed(
     raw_focus = constraints.get("scout_focus")
     scout_focus = str(raw_focus or "").strip() or None
 
+    files_changed = list(state.result.files_changed)
+    all_artifacts = [artifact.model_dump(mode="json") for artifact in artifacts]
+    budget_usage = dict(state.result.budget_usage or {})
+    summary = state.result.summary or "Scout task completed without summary."
+    scout_phase_metadata = None
+
+    if scout_mode == "deep" and state.scout_phase_results:
+        scout_phase_metadata = []
+        summary_parts = []
+        for phase_result in state.scout_phase_results:
+            phase = phase_result.phase
+            pr_res = phase_result.result
+            scout_phase_metadata.append({"phase": phase, "summary": pr_res.summary})
+            summary_parts.append(f"{phase.capitalize()} phase: {pr_res.summary or 'No summary.'}")
+
+            files_changed.extend([f for f in pr_res.files_changed if f not in files_changed])
+            all_artifacts.extend(
+                [artifact.model_dump(mode="json") for artifact in pr_res.artifacts]
+            )
+
+            for k, v in (pr_res.budget_usage or {}).items():
+                if isinstance(v, int | float):
+                    budget_usage[k] = budget_usage.get(k, 0) + v
+
+        scout_phase_metadata.append(
+            {"phase": state.scout_phase or "research", "summary": state.result.summary}
+        )
+        p_name = (state.scout_phase or "research").capitalize()
+        p_sum = state.result.summary or "No summary."
+        summary_parts.append(f"{p_name} phase: {p_sum}")
+        summary = "\n\n".join(summary_parts)
+
     metadata_payload: dict[str, Any] = {
         "source": "scout",
         "scout_mode": scout_mode,
         "task_id": task.id,
         "worker_run_id": worker_run_id,
-        "files_changed": state.result.files_changed,
-        "artifacts": [artifact.model_dump(mode="json") for artifact in artifacts],
-        "budget_usage": state.result.budget_usage,
+        "files_changed": files_changed,
+        "artifacts": all_artifacts,
+        "budget_usage": budget_usage or None,
         "diff_text": getattr(state.result, "diff_text", None),
         "json_payload": getattr(state.result, "json_payload", None),
     }
@@ -248,12 +280,14 @@ def _persist_scout_proposal_if_needed(
         metadata_payload["scout_depth"] = scout_depth
     if scout_focus:
         metadata_payload["scout_focus"] = scout_focus
+    if scout_phase_metadata:
+        metadata_payload["scout_phase_metadata"] = scout_phase_metadata
 
     proposal = proposal_repo.create_proposal(
         session_id=task.session_id,
         task_id=task.id,
         title=f"Scout Output for Task {task.id}",
-        summary=state.result.summary or "Scout task completed without summary.",
+        summary=summary,
         status=ProposalStatus.PENDING_REVIEW,
         metadata_payload=metadata_payload,
     )

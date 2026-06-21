@@ -51,6 +51,7 @@ WorkflowStep = Literal[
     "init_environment",
     "dispatch_job",
     "await_result",
+    "transition_to_research_phase",
     "await_permission_escalation",
     "verify_result",
     "review_result",
@@ -269,6 +270,13 @@ class TaskTimelineEventState(OrchestratorModel):
     created_at: datetime | None = None
 
 
+class ScoutPhaseResult(OrchestratorModel):
+    """Result of an intermediate phase in a chained task execution."""
+
+    phase: Literal["repo", "research"]
+    result: WorkerResult
+
+
 class OrchestratorState(OrchestratorModel):
     """Top-level state handed between orchestrator workflow nodes."""
 
@@ -295,6 +303,8 @@ class OrchestratorState(OrchestratorModel):
     errors: list[str] = Field(default_factory=list)
     attempt_count: int = Field(default=0, ge=0)
     session_state_update: SessionStateUpdate | None = None
+    scout_phase: Literal["repo", "research"] | None = None
+    scout_phase_results: list[ScoutPhaseResult] = Field(default_factory=list)
 
 
 def compute_interaction_content_hash(
