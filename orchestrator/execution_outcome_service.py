@@ -200,6 +200,39 @@ def _should_create_scout_proposal(state: OrchestratorState) -> bool:
     )
 
 
+def _merge_scout_phase_result(
+    pr_res: Any,
+    phase: str,
+    scout_phase_metadata: list[dict[str, Any]],
+    summary_parts: list[str],
+    files_changed: list[str],
+    all_artifacts: list[Any],
+    budget_usage: dict[str, Any],
+) -> None:
+    """Merge an individual scout phase result into the aggregated payload."""
+    if pr_res is None:
+        logger.warning("Scout phase result is None for phase: %s", phase)
+        summary = "No summary available."
+        scout_phase_metadata.append({"phase": phase, "summary": summary})
+        summary_parts.append(f"{phase.capitalize()} phase: {summary}")
+        return
+
+    summary = (pr_res.summary or "").strip() or "No summary available."
+    scout_phase_metadata.append({"phase": phase, "summary": summary})
+    summary_parts.append(f"{phase.capitalize()} phase: {summary}")
+
+    if pr_res.files_changed:
+        for f in pr_res.files_changed:
+            if f not in files_changed:
+                files_changed.append(f)
+    if pr_res.artifacts:
+        all_artifacts.extend([artifact.model_dump(mode="json") for artifact in pr_res.artifacts])
+
+    for k, v in (pr_res.budget_usage or {}).items():
+        if isinstance(v, int | float) and not isinstance(v, bool):
+            budget_usage[k] = budget_usage.get(k, 0) + v
+
+
 def _persist_scout_proposal_if_needed(
     proposal_repo: ProposalRepository,
     *,
@@ -233,14 +266,58 @@ def _persist_scout_proposal_if_needed(
     raw_focus = constraints.get("scout_focus")
     scout_focus = str(raw_focus or "").strip() or None
 
+    if state.result is None:
+        logger.warning("Execution result is None, falling back to default.")
+        files_changed = []
+        budget_usage = {}
+        summary = "Scout task completed without summary."
+    else:
+        files_changed = list(state.result.files_changed or [])
+        budget_usage = dict(state.result.budget_usage or {})
+        summary = (state.result.summary or "").strip() or "Scout task completed without summary."
+
+    all_artifacts = [artifact.model_dump(mode="json") for artifact in artifacts]
+    scout_phase_metadata: list[dict[str, Any]] | None = None
+
+    if scout_mode == "deep":
+        scout_phase_metadata = []
+        summary_parts: list[str] = []
+
+        files_changed = []
+        all_artifacts = []
+        budget_usage = {}
+
+        for phase_result in state.scout_phase_results or []:
+            _merge_scout_phase_result(
+                phase_result.result,
+                phase_result.phase,
+                scout_phase_metadata,
+                summary_parts,
+                files_changed,
+                all_artifacts,
+                budget_usage,
+            )
+
+        _merge_scout_phase_result(
+            state.result,
+            state.scout_phase or "research",
+            scout_phase_metadata,
+            summary_parts,
+            files_changed,
+            all_artifacts,
+            budget_usage,
+        )
+
+        summary = "\n\n".join(summary_parts)
+
     metadata_payload: dict[str, Any] = {
         "source": "scout",
         "scout_mode": scout_mode,
         "task_id": task.id,
         "worker_run_id": worker_run_id,
-        "files_changed": state.result.files_changed,
-        "artifacts": [artifact.model_dump(mode="json") for artifact in artifacts],
-        "budget_usage": state.result.budget_usage,
+        "files_changed": files_changed,
+        "artifacts": all_artifacts,
+        "budget_usage": budget_usage or None,
         "diff_text": getattr(state.result, "diff_text", None),
         "json_payload": getattr(state.result, "json_payload", None),
     }
@@ -248,12 +325,14 @@ def _persist_scout_proposal_if_needed(
         metadata_payload["scout_depth"] = scout_depth
     if scout_focus:
         metadata_payload["scout_focus"] = scout_focus
+    if scout_phase_metadata:
+        metadata_payload["scout_phase_metadata"] = scout_phase_metadata
 
     proposal = proposal_repo.create_proposal(
         session_id=task.session_id,
         task_id=task.id,
         title=f"Scout Output for Task {task.id}",
-        summary=state.result.summary or "Scout task completed without summary.",
+        summary=summary,
         status=ProposalStatus.PENDING_REVIEW,
         metadata_payload=metadata_payload,
     )

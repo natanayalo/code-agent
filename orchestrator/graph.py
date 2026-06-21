@@ -538,16 +538,34 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
 
     worker_profile = state.dispatch.worker_profile or state.route.chosen_profile
 
+    constraints = dict(state.task.constraints)
+    if str(constraints.get("scout_mode") or "").strip() == "deep":
+        constraints["scout_mode"] = state.scout_phase or "repo"
+
+    memory_context = state.memory.model_dump()
+    if state.scout_phase == "research" and state.scout_phase_results:
+        repo_result = next((r.result for r in state.scout_phase_results if r.phase == "repo"), None)
+        if repo_result is None:
+            logger.warning("Repo phase result is None in scout_phase_results.")
+            repo_summary = "Repo phase completed with no summary."
+            artifact_list = []
+        else:
+            repo_summary = repo_result.summary or "Repo phase completed."
+            artifact_list = [a.name for a in (repo_result.artifacts or [])]
+        session_mem = memory_context.setdefault("session", {})
+        session_mem["repo_phase_summary"] = repo_summary
+        session_mem["repo_phase_artifacts"] = artifact_list
+
     return WorkerRequest(
         session_id=state.session.session_id if state.session is not None else None,
         task_id=state.task.task_id,
         repo_url=state.task.repo_url,
         branch=state.task.branch,
         task_text=task_text,
-        memory_context=state.memory.model_dump(),
+        memory_context=memory_context,
         task_plan=state.task_plan.model_dump(mode="json") if state.task_plan is not None else None,
         task_spec=state.task_spec.model_dump(mode="json") if state.task_spec is not None else None,
-        constraints=dict(state.task.constraints),
+        constraints=constraints,
         budget=dict(state.task.budget),
         secrets=dict((state.task.secrets or {}) | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
         tools=state.task.tools,
@@ -2523,11 +2541,46 @@ def build_await_result_node(
 
 
 def _route_after_await_result(state_input: OrchestratorState) -> str:
-    """Route from await_result either to verify_result or await_permission_escalation."""
+    """Route from await_result either to verify_result, permission escalation, or research phase."""
     state = _ensure_state(state_input)
     if state.result is not None and state.result.next_action_hint == "request_higher_permission":
         return "await_permission_escalation"
+
+    is_deep_scout = str(state.task.constraints.get("scout_mode") or "").strip() == "deep"
+    if (
+        is_deep_scout
+        and (state.scout_phase == "repo" or not state.scout_phase)
+        and state.result is not None
+        and state.result.status == "success"
+    ):
+        has_file_changes = len(state.result.files_changed or []) > 0
+        has_failed_tests = any(
+            test.status in ("failed", "error") for test in (state.result.test_results or [])
+        )
+        has_failed_commands = any(cmd.exit_code != 0 for cmd in (state.result.commands_run or []))
+        if has_file_changes or has_failed_tests or has_failed_commands:
+            return "verify_result"
+
+        return "transition_to_research_phase"
+
     return "verify_result"
+
+
+def transition_to_research_phase(state_input: OrchestratorState) -> dict[str, Any]:
+    """Transition state from repo phase to research phase for deep scout."""
+    state = _ensure_state(state_input)
+    if state.result is None:
+        return {"current_step": "transition_to_research_phase"}
+
+    new_results: list[Any] = list(state.scout_phase_results)
+    new_results.append({"phase": state.scout_phase or "repo", "result": state.result})
+
+    return {
+        "current_step": "transition_to_research_phase",
+        "scout_phase_results": new_results,
+        "scout_phase": "research",
+        "result": None,
+    }
 
 
 def await_permission(state_input: OrchestratorState) -> dict[str, Any]:
@@ -2993,6 +3046,10 @@ def _add_orchestrator_complex_nodes(
             build_deliver_result_node(worker, gemini_worker, openrouter_worker, shell_worker)
         ),
     )
+    builder.add_node(
+        "transition_to_research_phase",
+        RunnableLambda(transition_to_research_phase),
+    )
 
 
 def _add_orchestrator_edges(builder: Any) -> None:
@@ -3043,6 +3100,7 @@ def _add_orchestrator_edges(builder: Any) -> None:
         _route_after_await_result,
         {
             "await_permission_escalation": "await_permission_escalation",
+            "transition_to_research_phase": "transition_to_research_phase",
             "verify_result": "verify_result",
         },
     )
@@ -3066,6 +3124,7 @@ def _add_orchestrator_edges(builder: Any) -> None:
     builder.add_edge("deliver_result", "summarize_result")
     builder.add_edge("summarize_result", "persist_memory")
     builder.add_edge("persist_memory", END)
+    builder.add_edge("transition_to_research_phase", "dispatch_job")
 
 
 def build_orchestrator_graph(
