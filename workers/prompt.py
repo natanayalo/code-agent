@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Final, Literal, cast, get_args
 
 from db.enums import WorkerRuntimeMode
 from tools import McpToolClient, ToolRegistry
@@ -235,6 +235,84 @@ def build_workflow_instructions_section(request: WorkerRequest) -> str:
     return "\n".join(lines)
 
 
+ScoutMode = Literal["repo", "research", "deep"]
+SCOUT_MODES: Final[tuple[ScoutMode, ...]] = get_args(ScoutMode)
+
+
+def build_scout_overlay_section(request: WorkerRequest) -> str:
+    """Describe scout mode instructions and proposal-oriented output rules."""
+    if request.constraints.get("task_type") != "scout":
+        return ""
+
+    raw_mode = request.constraints.get("scout_mode")
+    scout_mode = cast(ScoutMode, raw_mode) if raw_mode in SCOUT_MODES else cast(ScoutMode, "repo")
+    raw_focus = request.constraints.get("scout_focus")
+    scout_focus = raw_focus.strip() or None if isinstance(raw_focus, str) else None
+
+    raw_depth = request.constraints.get("scout_depth")
+    scout_depth = raw_depth.strip() or None if isinstance(raw_depth, str) else None
+
+    raw_max_proposals = request.constraints.get("max_proposals")
+    try:
+        max_proposals = int(raw_max_proposals) if raw_max_proposals is not None else 3
+        if max_proposals <= 0:
+            max_proposals = 3
+    except (ValueError, TypeError):
+        max_proposals = 3
+
+    lines = [
+        "## Scout Mode Guardrails",
+        "You operate in a strictly read-only mode. Do not attempt to merge, "
+        "deploy, or modify the main codebase.",
+        f"Your final output must be up to {max_proposals} well-structured proposal(s) "
+        "for the Idea Inbox.",
+        "Each proposal must include:",
+        "- Title",
+        "- Evidence (concrete file paths, line numbers, or external references)",
+        "- Impact",
+        "- Suggested implementation slice",
+        "- Verification idea",
+        "- Risk",
+    ]
+
+    lines.append(f"\nMode: `{scout_mode}`")
+    if scout_depth:
+        lines.append(f"Depth: `{scout_depth}`")
+    if scout_focus:
+        lines.append(f"Focus: {scout_focus}")
+
+    lines.append("\nMode Instructions:")
+    if scout_mode == "repo":
+        lines.append(
+            "- Focus on inspecting the local repository to identify technical debt, "
+            "refactoring opportunities, or bugs."
+        )
+    elif scout_mode == "research":
+        lines.append(
+            "- Focus on researching specific topics or external references to propose "
+            "architectural improvements."
+        )
+        if scout_focus:
+            lines.append(f"  Pay close attention to the requested focus area: {scout_focus}")
+        lines.append(
+            "- Source Policy: use available/local evidence first, cite external references "
+            "only if tools/network policy permits, and explicitly state when external "
+            "research could not be performed."
+        )
+    elif scout_mode == "deep":
+        lines.append(
+            "- Use a repo-first, then targeted-research structure when available; "
+            "do not exceed the task budget."
+        )
+        lines.append(
+            "- Source Policy: use available/local evidence first, cite external references "
+            "only if tools/network policy permits, and explicitly state when external "
+            "research could not be performed."
+        )
+
+    return "\n".join(lines)
+
+
 def build_system_prompt(
     request: WorkerRequest,
     workspace_path: Path,
@@ -275,6 +353,7 @@ def build_system_prompt(
 
     sections = [
         build_role_description_section(request),
+        build_scout_overlay_section(request),
         build_available_tools_section(tool_registry, tool_client, allowed_tool_names)
         if not is_native
         else "",

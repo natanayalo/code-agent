@@ -120,3 +120,97 @@ def test_build_system_prompt_honors_explicit_requested_tool_subset(tmp_path) -> 
     prompt = build_system_prompt(request, tmp_path, tool_registry=DEFAULT_TOOL_REGISTRY)
     assert f"### `{VIEW_FILE_TOOL_NAME}`" in prompt
     assert "execute_bash" not in prompt
+
+
+def test_build_system_prompt_includes_repo_scout_overlay(tmp_path) -> None:
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Inspect debt",
+        repo_url="https://example.com/repo.git",
+        constraints={
+            "task_type": "scout",
+            "scout_mode": "repo",
+            "max_proposals": 5,
+        },
+    )
+    prompt = build_system_prompt(request, tmp_path)
+    assert "## Scout Mode Guardrails" in prompt
+    assert "up to 5 well-structured proposal(s)" in prompt
+    assert "Mode: `repo`" in prompt
+    assert "Focus on inspecting the local repository" in prompt
+
+
+def test_build_system_prompt_includes_research_scout_overlay(tmp_path) -> None:
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Research DB patterns",
+        repo_url="https://example.com/repo.git",
+        constraints={
+            "task_type": "scout",
+            "scout_mode": "research",
+            "scout_focus": "SQLAlchemy migrations",
+            "scout_depth": "deep",
+            "max_proposals": 2,
+        },
+    )
+    prompt = build_system_prompt(request, tmp_path)
+    assert "## Scout Mode Guardrails" in prompt
+    assert "up to 2 well-structured proposal(s)" in prompt
+    assert "Mode: `research`" in prompt
+    assert "Depth: `deep`" in prompt
+    assert "Focus: SQLAlchemy migrations" in prompt
+    assert "Pay close attention to the requested focus area" in prompt
+    assert "Source Policy: use available/local evidence first" in prompt
+
+
+def test_build_system_prompt_includes_deep_scout_overlay(tmp_path) -> None:
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Deep dive on architecture",
+        repo_url="https://example.com/repo.git",
+        constraints={
+            "task_type": "scout",
+            "scout_mode": "deep",
+        },
+    )
+    prompt = build_system_prompt(request, tmp_path)
+    assert "## Scout Mode Guardrails" in prompt
+    assert "up to 3 well-structured proposal(s)" in prompt
+    assert "Mode: `deep`" in prompt
+    assert "Use a repo-first, then targeted-research structure" in prompt
+    assert "Source Policy: use available/local evidence first" in prompt
+
+
+def test_build_system_prompt_omits_scout_overlay_for_normal_tasks(tmp_path) -> None:
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Fix bug",
+        repo_url="https://example.com/repo.git",
+        constraints={
+            "task_type": "feature",
+            "scout_mode": "repo",  # Should be ignored if not scout
+        },
+    )
+    prompt = build_system_prompt(request, tmp_path)
+    assert "Scout Mode Guardrails" not in prompt
+
+
+def test_build_system_prompt_ignores_non_string_scout_constraints(tmp_path) -> None:
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Research DB patterns",
+        repo_url="https://example.com/repo.git",
+        constraints={
+            "task_type": "scout",
+            "scout_mode": "research",
+            "scout_focus": ["not", "a", "string"],
+            "scout_depth": {"invalid": "type"},
+            "max_proposals": 2,
+        },
+    )
+    prompt = build_system_prompt(request, tmp_path)
+    assert "## Scout Mode Guardrails" in prompt
+    assert "Mode: `research`" in prompt
+    # Since depth and focus are invalid, they should be omitted
+    assert "Depth:" not in prompt
+    assert "Focus:" not in prompt
