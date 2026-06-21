@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: implement deep scout chaining architecture ([#266](https://github.com/natanayalo/code-agent/pull/266))
+
 - Feat: implement Repo and Research Scout mode metadata (T-203) ([#265](https://github.com/natanayalo/code-agent/pull/265))
 
 - Feat: add structured Scout trigger parameters and repo allowlist (T-201) ([#263](https://github.com/natanayalo/code-agent/pull/263))
