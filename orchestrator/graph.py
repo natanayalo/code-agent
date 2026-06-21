@@ -545,8 +545,13 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
     memory_context = state.memory.model_dump()
     if state.scout_phase == "research" and state.scout_phase_results:
         repo_result = state.scout_phase_results[-1].result
-        repo_summary = repo_result.summary or "Repo phase completed."
-        artifact_list = [a.name for a in repo_result.artifacts]
+        if repo_result is None:
+            logger.warning("Repo phase result is None in scout_phase_results.")
+            repo_summary = "Repo phase completed with no summary."
+            artifact_list = []
+        else:
+            repo_summary = repo_result.summary or "Repo phase completed."
+            artifact_list = [a.name for a in (repo_result.artifacts or [])]
         session_mem = memory_context.setdefault("session", {})
         session_mem["repo_phase_summary"] = repo_summary
         session_mem["repo_phase_artifacts"] = artifact_list

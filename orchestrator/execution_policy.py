@@ -64,7 +64,7 @@ SCOUT_BUDGET_CAPS: dict[str, Any] = {
     "max_shell_commands": 8,
     "max_retries": 0,
 }
-DEEP_SCOUT_BUDGET_CAPS: dict[str, Any] = {
+DEEP_SCOUT_PER_PHASE_BUDGET_CAPS: dict[str, Any] = {
     "execution_mode": UNATTENDED_EXECUTION_MODE,
     "max_iterations": 5,
     "worker_timeout_seconds": 360,
@@ -147,7 +147,10 @@ def _apply_execution_budget_policy(
 def normalize_scout_submission(
     constraints: dict[str, Any] | None, budget: dict[str, Any] | None
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Enforce Scout mode constraints and clamp budget caps."""
+    """Enforce Scout mode constraints and clamp budget caps.
+
+    For chained deep scouts, these budget caps are applied per-phase.
+    """
     safe_constraints = dict(constraints or {})
     safe_budget = dict(budget or {})
 
@@ -159,7 +162,7 @@ def normalize_scout_submission(
     normalized_constraints["read_only"] = True
 
     is_deep = str(safe_constraints.get("scout_mode") or "").strip() == "deep"
-    caps = DEEP_SCOUT_BUDGET_CAPS if is_deep else SCOUT_BUDGET_CAPS
+    caps = DEEP_SCOUT_PER_PHASE_BUDGET_CAPS if is_deep else SCOUT_BUDGET_CAPS
 
     normalized_budget = dict(safe_budget)
     normalized_budget["execution_mode"] = caps["execution_mode"]

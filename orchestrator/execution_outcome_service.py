@@ -245,13 +245,21 @@ def _persist_scout_proposal_if_needed(
         for phase_result in state.scout_phase_results:
             phase = phase_result.phase
             pr_res = phase_result.result
+            if pr_res is None:
+                logger.warning("Scout phase result is None for phase: %s", phase)
+                scout_phase_metadata.append({"phase": phase, "summary": "No summary available."})
+                summary_parts.append(f"{phase.capitalize()} phase: No summary available.")
+                continue
+
             scout_phase_metadata.append({"phase": phase, "summary": pr_res.summary})
             summary_parts.append(f"{phase.capitalize()} phase: {pr_res.summary or 'No summary.'}")
 
-            files_changed.extend([f for f in pr_res.files_changed if f not in files_changed])
-            all_artifacts.extend(
-                [artifact.model_dump(mode="json") for artifact in pr_res.artifacts]
-            )
+            if pr_res.files_changed:
+                files_changed.extend([f for f in pr_res.files_changed if f not in files_changed])
+            if pr_res.artifacts:
+                all_artifacts.extend(
+                    [artifact.model_dump(mode="json") for artifact in pr_res.artifacts]
+                )
 
             for k, v in (pr_res.budget_usage or {}).items():
                 if isinstance(v, int | float):
