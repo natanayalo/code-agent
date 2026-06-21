@@ -239,10 +239,13 @@ function ScoutProposalDetails({ proposal }: { proposal: ProposalSnapshot }) {
   const scoutDepth = proposal.metadata_payload?.scout_depth;
   const scoutFocus = proposal.metadata_payload?.scout_focus;
 
+  const hasFilesChanged = Array.isArray(filesChanged) ? filesChanged.length > 0 : filesChanged != null;
+  const hasDiffText = typeof diffText === 'string' ? diffText.trim().length > 0 : diffText != null;
+
   if (
     !proposal.content &&
-    filesChanged == null &&
-    diffText == null &&
+    !hasFilesChanged &&
+    !hasDiffText &&
     scoutMode == null &&
     scoutDepth == null &&
     scoutFocus == null
