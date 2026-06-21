@@ -2553,7 +2553,7 @@ def _route_after_await_result(state_input: OrchestratorState) -> str:
         and state.result is not None
         and state.result.status == "success"
     ):
-        has_file_changes = len(state.result.files_changed) > 0
+        has_file_changes = len(state.result.files_changed or []) > 0
         has_failed_tests = any(
             test.status in ("failed", "error") for test in (state.result.test_results or [])
         )

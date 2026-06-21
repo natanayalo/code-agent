@@ -272,14 +272,14 @@ def _persist_scout_proposal_if_needed(
         budget_usage = {}
         summary = "Scout task completed without summary."
     else:
-        files_changed = list(state.result.files_changed)
+        files_changed = list(state.result.files_changed or [])
         budget_usage = dict(state.result.budget_usage or {})
         summary = (state.result.summary or "").strip() or "Scout task completed without summary."
 
     all_artifacts = [artifact.model_dump(mode="json") for artifact in artifacts]
     scout_phase_metadata: list[dict[str, Any]] | None = None
 
-    if scout_mode == "deep" and state.scout_phase_results:
+    if scout_mode == "deep":
         scout_phase_metadata = []
         summary_parts: list[str] = []
 
@@ -287,7 +287,7 @@ def _persist_scout_proposal_if_needed(
         all_artifacts = []
         budget_usage = {}
 
-        for phase_result in state.scout_phase_results:
+        for phase_result in state.scout_phase_results or []:
             _merge_scout_phase_result(
                 phase_result.result,
                 phase_result.phase,
