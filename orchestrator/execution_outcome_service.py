@@ -6,7 +6,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, cast
+from typing import Any, Final, Literal, cast, get_args
 
 from db.enums import ArtifactType, ProposalStatus, ProposalType, TaskStatus, WorkerType
 from orchestrator.execution_improvement_proposal_service import (
@@ -37,6 +37,9 @@ from repositories import (
 )
 
 logger = logging.getLogger("orchestrator.execution")
+
+ScoutMode = Literal["repo", "research", "deep"]
+ALLOWED_SCOUT_MODES: Final[set[str]] = set(get_args(ScoutMode))
 
 
 @dataclass(frozen=True)
@@ -216,12 +219,13 @@ def _persist_scout_proposal_if_needed(
 
     assert state.result is not None
 
-    constraints = dict(task.constraints) if isinstance(task.constraints, dict) else {}
+    constraints = task.constraints if isinstance(task.constraints, dict) else {}
 
     raw_mode = constraints.get("scout_mode")
-    scout_mode = str(raw_mode or "").strip() or "repo"
-    if scout_mode not in ("repo", "research", "deep"):
-        scout_mode = "repo"
+    scout_mode_str = str(raw_mode or "").strip() or "repo"
+    if scout_mode_str not in ALLOWED_SCOUT_MODES:
+        scout_mode_str = "repo"
+    scout_mode = cast(ScoutMode, scout_mode_str)
 
     raw_depth = constraints.get("scout_depth")
     scout_depth = str(raw_depth or "").strip() or None
