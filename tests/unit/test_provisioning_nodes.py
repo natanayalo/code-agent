@@ -113,10 +113,11 @@ async def test_init_environment_skips_gitignore_hardening_for_read_only_route(
 
     result = await node(state)
 
-    assert shell_worker.run.call_count == 2
+    assert shell_worker.run.call_count == 1
     assert "poetry install" in shell_worker.run.call_args_list[0][0][0].task_text
     payload = result["timeline_events"][0].payload
     assert payload.get("hardened_ignores") == []
+    assert payload.get("hardening_skipped_reason") == "read_only_task"
 
 
 @pytest.mark.asyncio
@@ -151,9 +152,10 @@ async def test_init_environment_skips_gitignore_hardening_for_no_mutation_task_s
 
     result = await node(state)
 
-    assert shell_worker.run.call_count == 2
+    assert shell_worker.run.call_count == 1
     payload = result["timeline_events"][0].payload
     assert payload.get("hardened_ignores") == []
+    assert payload.get("hardening_skipped_reason") == "read_only_task"
 
 
 @pytest.mark.asyncio
@@ -176,7 +178,10 @@ async def test_init_environment_runs_gitignore_hardening_for_mutation_capable_ta
     state = OrchestratorState.model_validate(
         {
             "task": {"task_id": "t1", "repo_url": "r1", "task_text": "setup"},
-            "task_spec": {"goal": "edit files"},
+            "task_spec": {
+                "goal": "edit files",
+                "allowed_actions": ["modify_workspace_files"],
+            },
             "route": {"chosen_profile": "codex-native-executor"},
             "dispatch": {"workspace_id": "ws-1"},
         }
