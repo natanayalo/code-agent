@@ -113,11 +113,10 @@ async def test_init_environment_skips_gitignore_hardening_for_read_only_route(
 
     result = await node(state)
 
-    assert shell_worker.run.call_count == 1
+    assert shell_worker.run.call_count == 2
     assert "poetry install" in shell_worker.run.call_args_list[0][0][0].task_text
     payload = result["timeline_events"][0].payload
-    assert payload["hardened_ignores"] == []
-    assert payload["hardening_skipped_reason"] == "read_only_or_no_modification_task"
+    assert payload.get("hardened_ignores") == []
 
 
 @pytest.mark.asyncio
@@ -152,10 +151,9 @@ async def test_init_environment_skips_gitignore_hardening_for_no_mutation_task_s
 
     result = await node(state)
 
-    assert shell_worker.run.call_count == 1
+    assert shell_worker.run.call_count == 2
     payload = result["timeline_events"][0].payload
-    assert payload["hardened_ignores"] == []
-    assert payload["hardening_skipped_reason"] == "read_only_or_no_modification_task"
+    assert payload.get("hardened_ignores") == []
 
 
 @pytest.mark.asyncio
@@ -518,7 +516,8 @@ async def test_init_environment_node_no_setup_file(tmp_path: Path) -> None:
     result = await node(state)
     assert result["current_step"] == "init_environment"
     assert result.get("result") is None
-    shell_worker.run.assert_not_called()
+    shell_worker.run.assert_called_once()
+    assert "MISSING" in shell_worker.run.call_args[0][0].task_text
 
 
 @pytest.mark.asyncio
@@ -577,7 +576,7 @@ async def test_init_environment_node_hardens_gitignore(tmp_path: Path) -> None:
     init_events = [
         e for e in result.get("timeline_events", []) if e.event_type == "environment_initialized"
     ]
-    assert any("Proactively hardened .gitignore" in e.message for e in init_events)
+    assert any("Proactively hardened .git/info/exclude" in e.message for e in init_events)
     # The consolidated payload in the final event
     final_event = init_events[-1]
     assert final_event.payload["hardened_ignores"] == [".cache", "__pycache__"]

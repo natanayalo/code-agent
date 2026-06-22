@@ -70,7 +70,8 @@ async def test_init_environment_node_no_markers(tmp_path: Path) -> None:
 
     assert result["current_step"] == "init_environment"
     assert result.get("result") is None
-    shell_worker.run.assert_not_called()
+    shell_worker.run.assert_called_once()
+    assert "MISSING" in shell_worker.run.call_args[0][0].task_text
 
 
 @pytest.mark.asyncio
