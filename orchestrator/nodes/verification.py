@@ -22,6 +22,7 @@ from orchestrator.nodes.verification_result import (
     VERIFIER_REPAIR_MAX_PASSES_CONSTRAINT,
     VERIFIER_REPAIR_PASSES_USED_CONSTRAINT,
     VERIFIER_REPAIR_REQUEST_CONSTRAINT,
+    _progress_update,
     verify_result,
 )
 from orchestrator.state import (
@@ -45,13 +46,14 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-def _check_short_circuit_verification(state: OrchestratorState) -> bool:
+def _check_short_circuit_reason(state: OrchestratorState) -> str | None:
+    """Return a skip reason if verification should short-circuit, None otherwise."""
     if state.result is None:
         logger.warning(
             "Skipping verification node: no worker result available",
             extra={"task_id": state.task.task_id},
         )
-        return True
+        return "verification skipped: no result"
 
     constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
     is_scout = (
@@ -62,7 +64,7 @@ def _check_short_circuit_verification(state: OrchestratorState) -> bool:
             "Short-circuiting verification: scout task produces no code changes to verify",
             extra={"task_id": state.task.task_id},
         )
-        return True
+        return "verification skipped: scout task (read-only, no code changes to verify)"
 
     worker_failed = state.result.status != "success"
     tests_failed = any(t.status in ("failed", "error") for t in state.result.test_results)
@@ -77,8 +79,8 @@ def _check_short_circuit_verification(state: OrchestratorState) -> bool:
                 ),
             },
         )
-        return True
-    return False
+        return "verification skipped: worker or test failure"
+    return None
 
 
 async def _run_deterministic_step(
@@ -243,12 +245,16 @@ def build_verify_result_node(
                 },
             )
 
-            if _check_short_circuit_verification(state):
+            sc_reason = _check_short_circuit_reason(state)
+            if sc_reason is not None:
                 if state.result is not None:
                     set_span_input_output(
                         input_data=state.result.status, output_data="short-circuited"
                     )
-                return verify_result(state)
+                return {
+                    "current_step": "verify_result",
+                    "progress_updates": _progress_update(state, sc_reason),
+                }
 
             (
                 deterministic_verifier_outcome,

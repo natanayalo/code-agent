@@ -36,6 +36,8 @@ _IGNORED_PATH_SEGMENTS: typing.Final[set[str]] = {
     ".yarn",
     ".coverage",
     ".env",  # Usually sensitive/transient
+    ".agent_home",  # Native agent scratch dir (Antigravity/Gemini CLI cache, auth, logs)
+    ".code-agent",  # Internal runner logs and metadata written by native_agent_runner
 }
 
 
