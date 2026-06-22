@@ -234,3 +234,59 @@ async def test_verify_node_fully_short_circuits_for_scout_with_worker_override(
     det_mock.assert_not_called()
     ind_mock.assert_not_called()
     assert response["current_step"] == "verify_result"
+
+
+@pytest.mark.anyio
+async def test_verify_node_short_circuits_for_scout_via_constraints_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scout identification via constraints is the fallback when task_spec is None.
+
+    If task_spec has not been built yet (e.g., very early failure phases or
+    unusual restored states), verification should still short-circuit when
+    constraints.task_type == 'scout'.
+    """
+    state = OrchestratorState.model_validate(
+        {
+            "session": {
+                "session_id": "s1",
+                "user_id": "u1",
+                "channel": "http",
+                "external_thread_id": "t1",
+            },
+            "task": {
+                "task_id": "task-scout-no-spec",
+                "task_text": "Scout this repo.",
+                "constraints": {"task_type": "scout", "read_only": True},
+            },
+            "dispatch": {"worker_type": "antigravity"},
+            # task_spec intentionally absent
+            "result": {
+                "status": "success",
+                "summary": "Done.",
+                "files_changed": [],
+                "test_results": [],
+                "commands_run": [],
+            },
+        }
+    )
+    assert state.task_spec is None  # precondition
+
+    det_mock = AsyncMock(return_value=("passed", "ok", None))
+    monkeypatch.setattr(
+        "orchestrator.nodes.verification.run_deterministic_verification",
+        det_mock,
+    )
+    ind_mock = AsyncMock()
+    monkeypatch.setattr(
+        "orchestrator.nodes.verification.run_independent_verifier",
+        ind_mock,
+    )
+
+    node = build_verify_result_node(enable_independent_verifier=True)
+    response = await node(state)
+
+    # Constraints fallback must prevent any verification from running
+    det_mock.assert_not_called()
+    ind_mock.assert_not_called()
+    assert response["current_step"] == "verify_result"
