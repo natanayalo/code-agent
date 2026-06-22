@@ -123,12 +123,14 @@ async def _execute_gitignore_hardening(
     ]
     patterns_str = " ".join(noise_patterns)
     hardening_script = (
+        "GIT_DIR=$(git rev-parse --git-dir 2>/dev/null || echo .git); "
         f"MISSING=''; for p in {patterns_str}; do "
         'if ! git check-ignore -q "$p" 2>/dev/null; then '
-        "mkdir -p .git/info; "
-        'if [ -f .git/info/exclude ] && [ -n "$(tail -c1 .git/info/exclude 2>/dev/null)" ]; '
-        'then echo "" >> .git/info/exclude; fi; '
-        'echo "$p" >> .git/info/exclude; MISSING="$MISSING $p"; fi; done; '
+        'mkdir -p "$GIT_DIR/info"; '
+        'if [ -f "$GIT_DIR/info/exclude" ] && '
+        '[ -n "$(tail -c1 "$GIT_DIR/info/exclude" 2>/dev/null)" ]; '
+        'then echo "" >> "$GIT_DIR/info/exclude"; fi; '
+        'echo "$p" >> "$GIT_DIR/info/exclude"; MISSING="$MISSING $p"; fi; done; '
         'if [ -n "$MISSING" ]; then echo "hardened:$MISSING"; fi'
     )
 

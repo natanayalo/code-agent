@@ -329,4 +329,4 @@ def is_task_read_only(state: OrchestratorState) -> bool:
         )
 
     constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
-    return constraints.get("read_only") is True
+    return constraints.get("read_only") is True or constraints.get("task_type") == "scout"
