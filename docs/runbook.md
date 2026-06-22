@@ -52,9 +52,8 @@ Codex and Antigravity native execution workers are now native-only.
 
 ## 2.2) Reflection Proposal Scoring Controls
 
-- `CODE_AGENT_IMPROVEMENT_LLM_SCORING_ENABLED=1` allows configured planner workers to revise
-  reflection improvement proposal scoring fields and attach model rationale.
-- Deterministic scoring remains the fallback when model scoring is disabled, unavailable, invalid,
+- Configured planner workers revise reflection improvement proposal scoring fields and attach model rationale.
+- Deterministic scoring remains the fallback when model scoring is unavailable, invalid,
   or timed out. Proposal metadata records the scoring mode, provider, rationale, and fallback reason.
 
 ## 3) Queue + Lease Behavior

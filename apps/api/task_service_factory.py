@@ -67,16 +67,13 @@ TELEGRAM_API_BASE_URL_ENV_VAR: Final[str] = "CODE_AGENT_TELEGRAM_API_BASE_URL"
 CHECKPOINT_DB_PATH_ENV_VAR: Final[str] = "CODE_AGENT_CHECKPOINT_DB_PATH"
 WORKSPACE_ROOT_ENV_VAR: Final[str] = "CODE_AGENT_WORKSPACE_ROOT"
 SANDBOX_IMAGE_ENV_VAR: Final[str] = "CODE_AGENT_SANDBOX_IMAGE"
-WORKER_PROFILES_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_WORKER_PROFILES_ENABLED"
+
 CODEX_RUNTIME_MODE_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_RUNTIME_MODE"
 GEMINI_RUNTIME_MODE_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_RUNTIME_MODE"
 OPENROUTER_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_ENABLED"
 NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: Final[str] = (
     "CODE_AGENT_NATIVE_AGENT_EVENT_CAPTURE_ENABLED"
 )
-INDEPENDENT_VERIFIER_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED"
-ORCHESTRATOR_BRAIN_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED"
-IMPROVEMENT_LLM_SCORING_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_IMPROVEMENT_LLM_SCORING_ENABLED"
 CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED"
 GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED"
 CODEX_TRUSTED_REPO_PATTERNS_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TRUSTED_REPO_PATTERNS"
@@ -461,8 +458,7 @@ def _setup_worker_profiles(
     gemini_worker: GeminiCliWorker | None,
     openrouter_worker: OpenRouterCliWorker | None,
 ) -> dict[str, WorkerProfile] | None:
-    if not _is_enabled(resolved_env.get(WORKER_PROFILES_ENABLED_ENV_VAR)):
-        return None
+    # Worker profiles are permanently enabled
 
     codex_legacy_tool_loop_requested = _is_enabled(
         resolved_env.get(CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR)
@@ -499,8 +495,7 @@ def _build_brain_provider(
     gemini_worker: GeminiCliWorker | None,
     openrouter_worker: OpenRouterCliWorker | None,
 ) -> RuleBasedOrchestratorBrain | None:
-    if not (enable_orchestrator_brain or enable_improvement_llm_scoring):
-        return None
+    # Orchestrator brain is permanently enabled
     fallback_planners: list[Worker] = [codex_worker]
     if openrouter_worker is not None:
         fallback_planners.append(openrouter_worker)
@@ -532,12 +527,10 @@ def build_task_service_from_env(
         container_manager=container_manager,
     )
 
-    enable_worker_profiles = _is_enabled(resolved_env.get(WORKER_PROFILES_ENABLED_ENV_VAR))
+    enable_worker_profiles = True
     worker_profiles = _setup_worker_profiles(resolved_env, gemini_worker, openrouter_worker)
-    enable_orchestrator_brain = _is_enabled(resolved_env.get(ORCHESTRATOR_BRAIN_ENABLED_ENV_VAR))
-    enable_improvement_llm_scoring = _is_enabled(
-        resolved_env.get(IMPROVEMENT_LLM_SCORING_ENABLED_ENV_VAR)
-    )
+    enable_orchestrator_brain = True
+    enable_improvement_llm_scoring = True
     brain_provider = _build_brain_provider(
         enable_orchestrator_brain=enable_orchestrator_brain,
         enable_improvement_llm_scoring=enable_improvement_llm_scoring,
@@ -560,12 +553,10 @@ def build_task_service_from_env(
         shell_worker=shell_worker,
         worker_profiles=worker_profiles,
         enable_worker_profiles=enable_worker_profiles,
-        enable_independent_verifier=_is_enabled(
-            resolved_env.get(INDEPENDENT_VERIFIER_ENABLED_ENV_VAR)
-        ),
-        orchestrator_brain=brain_provider if enable_orchestrator_brain else None,
-        improvement_scorer=brain_provider if enable_improvement_llm_scoring else None,
-        enable_improvement_llm_scoring=enable_improvement_llm_scoring,
+        enable_independent_verifier=True,
+        orchestrator_brain=brain_provider,
+        improvement_scorer=brain_provider,
+        enable_improvement_llm_scoring=True,
         progress_notifier=CompositeProgressNotifier(progress_notifiers),
         default_task_max_attempts=_coerce_positive_int(
             resolved_env.get(DEFAULT_TASK_MAX_ATTEMPTS_ENV_VAR),

@@ -560,6 +560,7 @@ def verify_result(
     independent_verifier_reason_code: str | None = None,
     extra_timeline_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]]
     | None = None,
+    sc_reason: str | None = None,
 ) -> dict[str, Any]:
     """Perform deterministic checks on the worker output before summarization."""
     state = _ensure_state(state_input)
@@ -575,10 +576,9 @@ def verify_result(
     items.append(_check_test_results(state))
 
     # 2. Deterministic Verification Commands (from run_deterministic_verification)
-    det_item = _check_deterministic_commands(
+    if det_item := _check_deterministic_commands(
         deterministic_verifier_outcome, deterministic_verifier_metadata
-    )
-    if det_item is not None:
+    ):
         items.append(det_item)
 
     # 3. File Changes
@@ -591,12 +591,11 @@ def verify_result(
     items.append(_check_post_run_lint(state))
 
     # 6. Optional independent verifier execution (T-158)
-    indep_item = _check_independent_verifier(
+    if indep_item := _check_independent_verifier(
         enable_independent_verifier,
         independent_verifier_outcome,
         independent_verifier_reason_code,
-    )
-    if indep_item is not None:
+    ):
         items.append(indep_item)
 
     # Calculate overall status
@@ -620,7 +619,9 @@ def verify_result(
         report,
         deterministic_verifier_metadata,
         extra_timeline_events,
-        progress_message,
+        sc_reason
+        if sc_reason is not None and sc_reason != "worker_or_test_failure"
+        else progress_message,
         updated_task,
         updated_result,
         repair_handoff_requested,

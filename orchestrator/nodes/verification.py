@@ -22,7 +22,6 @@ from orchestrator.nodes.verification_result import (
     VERIFIER_REPAIR_MAX_PASSES_CONSTRAINT,
     VERIFIER_REPAIR_PASSES_USED_CONSTRAINT,
     VERIFIER_REPAIR_REQUEST_CONSTRAINT,
-    _progress_update,
     verify_result,
 )
 from orchestrator.state import (
@@ -79,7 +78,7 @@ def _check_short_circuit_reason(state: OrchestratorState) -> str | None:
                 ),
             },
         )
-        return "verification skipped: worker or test failure"
+        return "worker_or_test_failure"
     return None
 
 
@@ -251,10 +250,11 @@ def build_verify_result_node(
                     set_span_input_output(
                         input_data=state.result.status, output_data="short-circuited"
                     )
-                return {
-                    "current_step": "verify_result",
-                    "progress_updates": _progress_update(state, sc_reason),
-                }
+                return verify_result(
+                    state,
+                    enable_independent_verifier=enable_independent_verifier,
+                    sc_reason=sc_reason,
+                )
 
             (
                 deterministic_verifier_outcome,

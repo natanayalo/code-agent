@@ -172,6 +172,7 @@ def test_orchestrator_graph_clarification_resume_token_resolution_allows_progres
                     "task_type": "investigation",
                     "risk_level": "low",
                     "delivery_mode": "workspace",
+                    "allowed_actions": ["modify_workspace_files"],
                     "forbidden_actions": ["hardcode_secrets"],
                     "requires_clarification": True,
                     "clarification_questions": ["new question wording"],
@@ -233,7 +234,7 @@ def test_orchestrator_graph_scout_task_skips_delivery() -> None:
         WorkerResult(
             status="success",
             commands_run=[],
-            files_changed=["orchestrator/graph.py"],
+            files_changed=[],
             test_results=[],
             artifacts=[],
             next_action_hint="persist_memory",

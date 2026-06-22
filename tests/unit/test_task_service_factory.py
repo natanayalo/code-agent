@@ -119,16 +119,15 @@ def test_build_task_service_from_env_builds_a_codex_cli_worker(tmp_path: Path) -
         _close_outbound_http_clients(outbound_http_clients)
 
 
-def test_build_task_service_from_env_enables_independent_verifier_flag(
+def test_build_task_service_from_env_wires_independent_verifier_by_default(
     tmp_path: Path,
 ) -> None:
-    """Bootstrap should expose the independent verifier graph toggle when configured."""
+    """Bootstrap should wire the independent verifier graph by default."""
     database_path = tmp_path / "code-agent.db"
     outbound_http_clients = create_outbound_http_clients()
     service = build_task_service_from_env(
         {
             "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
-            "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED": "1",
             "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
         },
         outbound_http_clients=outbound_http_clients,
@@ -141,16 +140,15 @@ def test_build_task_service_from_env_enables_independent_verifier_flag(
         _close_outbound_http_clients(outbound_http_clients)
 
 
-def test_build_task_service_from_env_enables_orchestrator_brain_flag(
+def test_build_task_service_from_env_wires_orchestrator_brain_by_default(
     tmp_path: Path,
 ) -> None:
-    """Bootstrap should wire the optional orchestrator-brain provider when configured."""
+    """Bootstrap should wire the orchestrator-brain provider by default."""
     database_path = tmp_path / "code-agent.db"
     outbound_http_clients = create_outbound_http_clients()
     service = build_task_service_from_env(
         {
             "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
-            "CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED": "1",
             "CODE_AGENT_GEMINI_CLI_BIN": "/usr/local/bin/gemini",
             "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
         },
@@ -167,13 +165,12 @@ def test_build_task_service_from_env_enables_orchestrator_brain_flag(
 def test_build_task_service_from_env_wires_planner_worker_into_orchestrator_brain(
     tmp_path: Path,
 ) -> None:
-    """Brain-enabled bootstrap should wire Gemini as the planner backend when available."""
+    """Bootstrap should wire Gemini as the planner backend when available."""
     database_path = tmp_path / "code-agent.db"
     outbound_http_clients = create_outbound_http_clients()
     service = build_task_service_from_env(
         {
             "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
-            "CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED": "1",
             "CODE_AGENT_GEMINI_CLI_BIN": "/usr/local/bin/gemini",
             "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
         },
@@ -189,16 +186,15 @@ def test_build_task_service_from_env_wires_planner_worker_into_orchestrator_brai
         _close_outbound_http_clients(outbound_http_clients)
 
 
-def test_build_task_service_from_env_wires_improvement_scorer_without_brain(
+def test_build_task_service_from_env_wires_improvement_scorer_by_default(
     tmp_path: Path,
 ) -> None:
-    """Improvement scoring flag should not implicitly enable brain routing."""
+    """Bootstrap should wire improvement scoring and orchestrator brain by default."""
     database_path = tmp_path / "code-agent.db"
     outbound_http_clients = create_outbound_http_clients()
     service = build_task_service_from_env(
         {
             "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
-            "CODE_AGENT_IMPROVEMENT_LLM_SCORING_ENABLED": "1",
             "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
         },
         outbound_http_clients=outbound_http_clients,
@@ -208,7 +204,6 @@ def test_build_task_service_from_env_wires_improvement_scorer_without_brain(
         assert service is not None
         assert service.enable_improvement_llm_scoring is True
         assert isinstance(service.improvement_scorer, RuleBasedOrchestratorBrain)
-        assert service.orchestrator_brain is None
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
@@ -237,16 +232,15 @@ def test_build_task_service_from_env_propagates_gemini_native_sandbox_toggle(
         _close_outbound_http_clients(outbound_http_clients)
 
 
-def test_build_task_service_from_env_enables_profile_routing_with_defaults(
+def test_build_task_service_from_env_wires_profile_routing_by_default(
     tmp_path: Path,
 ) -> None:
-    """Profile-aware mode should attach codex-native defaults when explicitly enabled."""
+    """Profile-aware mode should attach codex-native defaults by default."""
     database_path = tmp_path / "code-agent.db"
     outbound_http_clients = create_outbound_http_clients()
     service = build_task_service_from_env(
         {
             "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
-            "CODE_AGENT_WORKER_PROFILES_ENABLED": "1",
             "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
         },
         outbound_http_clients=outbound_http_clients,
