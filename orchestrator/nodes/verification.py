@@ -56,8 +56,10 @@ def _check_short_circuit_reason(state: OrchestratorState) -> str | None:
 
     constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
     is_scout = (
-        state.task_spec is not None and state.task_spec.task_type == "scout"
-    ) or constraints.get("task_type") == "scout"
+        state.task_spec.task_type == "scout"
+        if state.task_spec is not None
+        else constraints.get("task_type") == "scout"
+    )
     if is_scout:
         logger.info(
             "Short-circuiting verification: scout task produces no code changes to verify",
