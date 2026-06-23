@@ -287,4 +287,3 @@ async def test_verify_node_runs_independent_verifier_for_scout_via_constraints_f
     det_mock.assert_not_called()
     ind_mock.assert_called_once()
     assert response["current_step"] == "verify_result"
-    assert response["current_step"] == "verify_result"
