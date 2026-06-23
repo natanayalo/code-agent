@@ -368,6 +368,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump sqlalchemy from 2.0.50 to 2.0.51 ([#270](https://github.com/natanayalo/code-agent/pull/270))
+
 - Chore(deps): bump langgraph from 1.2.4 to 1.2.6 ([#269](https://github.com/natanayalo/code-agent/pull/269))
 
 - Chore(deps): bump actions/checkout from 6 to 7 ([#268](https://github.com/natanayalo/code-agent/pull/268))
