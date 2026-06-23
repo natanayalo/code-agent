@@ -289,7 +289,10 @@ function describeCount(value: unknown): string | null {
 
 function getScoutMetadataFields(proposal: ProposalSnapshot): ProposalField[] {
   const fields: ProposalField[] = [];
-  const { metadata_payload: metadata } = proposal;
+  const metadata = proposal.metadata_payload;
+  if (metadata == null) {
+    return fields;
+  }
   if (metadata.scout_mode != null) {
     fields.push({ label: 'Mode', value: metadata.scout_mode });
   }

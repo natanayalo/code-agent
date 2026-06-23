@@ -323,10 +323,10 @@ def compute_interaction_content_hash(
 def is_task_read_only(state: OrchestratorState) -> bool:
     """Determine if a task is read-only based on the TaskSpec contract or legacy constraints."""
     if state.task_spec is not None:
-        return (
-            state.task_spec.task_type == "scout"
-            or "modify_workspace_files" not in state.task_spec.allowed_actions
-        )
+        if state.task_spec.task_type == "scout":
+            return True
+        if state.task_spec.allowed_actions:
+            return "modify_workspace_files" not in state.task_spec.allowed_actions
 
     constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
     return constraints.get("read_only") is True or constraints.get("task_type") == "scout"

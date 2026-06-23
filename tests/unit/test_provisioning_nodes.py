@@ -105,6 +105,7 @@ async def test_init_environment_skips_gitignore_hardening_for_read_only_route(
             "task_spec": {
                 "goal": "print PWD and HOME",
                 "non_goals": ["Do not modify any files."],
+                "allowed_actions": ["read_repo_files"],
             },
             "route": {"chosen_profile": "codex-native-executor-read-only"},
             "dispatch": {"workspace_id": "ws-1"},

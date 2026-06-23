@@ -26,6 +26,7 @@ from orchestrator.execution_serialization import (
 )
 from orchestrator.scout_proposals import (
     ScoutProposal,
+    ScoutProposalValidationError,
     compute_scout_proposal_fingerprint,
     scout_max_proposals_from_constraints,
     validate_scout_proposal_payload,
@@ -391,10 +392,24 @@ def _persist_scout_proposal_if_needed(
         result_entries.append((state.scout_phase, state.result, artifacts))
 
     for scout_phase, result, fallback_artifacts in result_entries:
-        batch = validate_scout_proposal_payload(
-            getattr(result, "json_payload", None),
-            max_proposals=max_proposals,
-        )
+        if result is None:
+            logger.warning(
+                "Scout phase result is None, skipping.",
+                extra={"task_id": task.id, "scout_phase": scout_phase},
+            )
+            continue
+        try:
+            batch = validate_scout_proposal_payload(
+                getattr(result, "json_payload", None),
+                max_proposals=max_proposals,
+            )
+        except ScoutProposalValidationError:
+            logger.warning(
+                "Failed to validate scout proposal payload, skipping.",
+                exc_info=True,
+                extra={"task_id": task.id, "scout_phase": scout_phase},
+            )
+            continue
         metadata_payload = _result_metadata_payload(
             task=task,
             result=result,
@@ -407,6 +422,12 @@ def _persist_scout_proposal_if_needed(
             scout_phase_metadata=scout_phase_metadata,
         )
         for scout_proposal in batch.proposals:
+            if not task.session_id or not task.id:
+                logger.warning(
+                    "Skipping scout proposal persistence: missing session_id or task_id",
+                    extra={"task_id": task.id},
+                )
+                continue
             fingerprint = compute_scout_proposal_fingerprint(
                 scout_proposal,
                 task_id=task.id,
