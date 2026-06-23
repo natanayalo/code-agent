@@ -368,6 +368,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump langchain-core from 1.4.7 to 1.4.8 ([#271](https://github.com/natanayalo/code-agent/pull/271))
+
 - Chore(deps): bump sqlalchemy from 2.0.50 to 2.0.51 ([#270](https://github.com/natanayalo/code-agent/pull/270))
 
 - Chore(deps): bump langgraph from 1.2.4 to 1.2.6 ([#269](https://github.com/natanayalo/code-agent/pull/269))
