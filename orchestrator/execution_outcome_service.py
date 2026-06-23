@@ -288,11 +288,11 @@ def _result_metadata_payload(
         "scout_mode": scout_mode,
         "task_id": task.id,
         "worker_run_id": worker_run_id,
-        "files_changed": list(result.files_changed or []) if result is not None else [],
+        "files_changed": result.files_changed or [],
         "artifacts": _result_artifacts_payload(result, fallback_artifacts),
-        "budget_usage": dict(result.budget_usage or {}) if result is not None else None,
-        "diff_text": getattr(result, "diff_text", None),
-        "json_payload": getattr(result, "json_payload", None),
+        "budget_usage": result.budget_usage or {},
+        "diff_text": result.diff_text,
+        "json_payload": result.json_payload,
     }
     if scout_depth:
         metadata_payload["scout_depth"] = scout_depth

@@ -55,7 +55,7 @@ def _check_short_circuit_reason(state: OrchestratorState) -> str | None:
         return "verification skipped: no result"
 
     worker_failed = state.result.status != "success"
-    tests_failed = any(t.status in ("failed", "error") for t in state.result.test_results)
+    tests_failed = any(t.status in ("failed", "error") for t in (state.result.test_results or []))
 
     if worker_failed or tests_failed:
         logger.info(
