@@ -368,6 +368,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump fastapi from 0.137.0 to 0.138.0 ([#272](https://github.com/natanayalo/code-agent/pull/272))
+
 - Chore(deps): bump langchain-core from 1.4.7 to 1.4.8 ([#271](https://github.com/natanayalo/code-agent/pull/271))
 
 - Chore(deps): bump sqlalchemy from 2.0.50 to 2.0.51 ([#270](https://github.com/natanayalo/code-agent/pull/270))
