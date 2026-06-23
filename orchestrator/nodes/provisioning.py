@@ -16,7 +16,7 @@ from apps.observability import (
 )
 from db.enums import TimelineEventType
 from orchestrator.nodes.utils import _ensure_state, _progress_update, _timeline_event
-from orchestrator.state import OrchestratorState, is_task_read_only
+from orchestrator.state import OrchestratorState
 from sandbox import WorkspaceManager, WorkspaceMode, WorkspaceRequest
 from workers.base import Worker, WorkerRequest
 
@@ -104,9 +104,6 @@ async def _execute_gitignore_hardening(
     state: OrchestratorState,
     workspace_id: str,
 ) -> tuple[list[str], str | None]:
-    if is_task_read_only(state):
-        return [], "read_only_task"
-
     noise_patterns = [
         ".cache",
         ".venv",

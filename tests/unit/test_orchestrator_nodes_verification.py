@@ -77,7 +77,7 @@ async def test_verify_node_handles_independent_verifier_status(
 
 
 @pytest.mark.anyio
-async def test_verify_node_skips_independent_verifier_on_read_only(
+async def test_verify_node_runs_independent_verifier_on_read_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _state()
@@ -97,7 +97,7 @@ async def test_verify_node_skips_independent_verifier_on_read_only(
         det_mock,
     )
 
-    ind_mock = AsyncMock()
+    ind_mock = AsyncMock(return_value=("passed", "ok", None))
     monkeypatch.setattr(
         "orchestrator.nodes.verification.run_independent_verifier",
         ind_mock,
@@ -109,8 +109,8 @@ async def test_verify_node_skips_independent_verifier_on_read_only(
     # Deterministic verifier still ran
     det_mock.assert_called_once()
 
-    # Independent verifier was skipped
-    ind_mock.assert_not_called()
+    # Independent verifier now runs for read-only tasks
+    ind_mock.assert_called_once()
 
     # But files changed in read_only mode is treated as anomalous
     assert response["verification"]["status"] == "failed"
@@ -124,18 +124,17 @@ async def test_verify_node_skips_independent_verifier_on_read_only(
         i for i in response["verification"]["items"] if i["label"] == "independent_verifier"
     )
     assert ind_item["status"] == "passed"
-    assert "intentionally skipped" in ind_item["message"]
+    assert ind_item["message"] == "ok"
 
 
 @pytest.mark.anyio
-async def test_verify_node_fully_short_circuits_for_scout_task_type(
+async def test_verify_node_runs_independent_verifier_for_scout_task_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Scout tasks (task_spec.task_type='scout') skip ALL verification steps.
+    """Scout tasks run verification to validate the summary.
 
-    Regression: scout tasks were erroneously running the deterministic verifier
-    (which executed the default smoke `printf` command) even though they never
-    modify code. The fix short-circuits the entire verify_result node for scout.
+    Regression: scout tasks used to skip all verification steps. They should
+    now execute both deterministic (if configured) and independent verification.
     """
     state = _state()
     state.task_spec.task_type = "scout"  # type: ignore[union-attr]
@@ -155,7 +154,7 @@ async def test_verify_node_fully_short_circuits_for_scout_task_type(
         "orchestrator.nodes.verification.run_deterministic_verification",
         det_mock,
     )
-    ind_mock = AsyncMock()
+    ind_mock = AsyncMock(return_value=("passed", "ok", None))
     monkeypatch.setattr(
         "orchestrator.nodes.verification.run_independent_verifier",
         ind_mock,
@@ -164,25 +163,24 @@ async def test_verify_node_fully_short_circuits_for_scout_task_type(
     node = build_verify_result_node(enable_independent_verifier=True)
     response = await node(state)
 
-    # Both verification steps must be skipped for scout tasks
-    det_mock.assert_not_called()
-    ind_mock.assert_not_called()
+    # Scout tasks now run verification
+    det_mock.assert_called_once()
+    ind_mock.assert_called_once()
 
     # Node still returns a valid verify_result step response
     assert response["current_step"] == "verify_result"
 
 
 @pytest.mark.anyio
-async def test_verify_node_fully_short_circuits_for_scout_with_worker_override(
+async def test_verify_node_runs_independent_verifier_for_scout_with_worker_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Scout task with worker_override must still skip verification entirely.
+    """Scout task with worker_override must still run verification.
 
     Regression: when worker_override was passed, classify_task returned
     'implementation' but the constraints (task_type=scout) were correctly
     ingested and the task_spec.task_type was persisted as 'scout'. The
-    verify_result node should honour the task_spec contract and skip all
-    verification regardless of the route source.
+    verify_result node should run verification.
     """
     state = OrchestratorState.model_validate(
         {
@@ -221,7 +219,7 @@ async def test_verify_node_fully_short_circuits_for_scout_with_worker_override(
         "orchestrator.nodes.verification.run_deterministic_verification",
         det_mock,
     )
-    ind_mock = AsyncMock()
+    ind_mock = AsyncMock(return_value=("passed", "ok", None))
     monkeypatch.setattr(
         "orchestrator.nodes.verification.run_independent_verifier",
         ind_mock,
@@ -230,21 +228,20 @@ async def test_verify_node_fully_short_circuits_for_scout_with_worker_override(
     node = build_verify_result_node(enable_independent_verifier=True)
     response = await node(state)
 
-    # Both verification steps must be skipped: task_spec.task_type == "scout" is authoritative
-    det_mock.assert_not_called()
-    ind_mock.assert_not_called()
+    # Verification must run
+    det_mock.assert_called_once()
+    ind_mock.assert_called_once()
     assert response["current_step"] == "verify_result"
 
 
 @pytest.mark.anyio
-async def test_verify_node_short_circuits_for_scout_via_constraints_fallback(
+async def test_verify_node_runs_independent_verifier_for_scout_via_constraints_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Scout identification via constraints is the fallback when task_spec is None.
 
-    If task_spec has not been built yet (e.g., very early failure phases or
-    unusual restored states), verification should still short-circuit when
-    constraints.task_type == 'scout'.
+    If task_spec has not been built yet, verification should still run the
+    read-only verifier correctly.
     """
     state = OrchestratorState.model_validate(
         {
@@ -277,7 +274,7 @@ async def test_verify_node_short_circuits_for_scout_via_constraints_fallback(
         "orchestrator.nodes.verification.run_deterministic_verification",
         det_mock,
     )
-    ind_mock = AsyncMock()
+    ind_mock = AsyncMock(return_value=("passed", "ok", None))
     monkeypatch.setattr(
         "orchestrator.nodes.verification.run_independent_verifier",
         ind_mock,
@@ -286,7 +283,8 @@ async def test_verify_node_short_circuits_for_scout_via_constraints_fallback(
     node = build_verify_result_node(enable_independent_verifier=True)
     response = await node(state)
 
-    # Constraints fallback must prevent any verification from running
+    # Deterministic verifier is skipped because there are no commands, but independent verifier runs
     det_mock.assert_not_called()
-    ind_mock.assert_not_called()
+    ind_mock.assert_called_once()
+    assert response["current_step"] == "verify_result"
     assert response["current_step"] == "verify_result"

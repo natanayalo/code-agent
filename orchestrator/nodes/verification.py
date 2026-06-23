@@ -54,19 +54,6 @@ def _check_short_circuit_reason(state: OrchestratorState) -> str | None:
         )
         return "verification skipped: no result"
 
-    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
-    is_scout = (
-        state.task_spec.task_type == "scout"
-        if state.task_spec is not None
-        else constraints.get("task_type") == "scout"
-    )
-    if is_scout:
-        logger.info(
-            "Short-circuiting verification: scout task produces no code changes to verify",
-            extra={"task_id": state.task.task_id},
-        )
-        return "verification skipped: scout task (read-only, no code changes to verify)"
-
     worker_failed = state.result.status != "success"
     tests_failed = any(t.status in ("failed", "error") for t in state.result.test_results)
 
@@ -145,14 +132,12 @@ async def _run_independent_step(
     is_read_only = is_task_read_only(state)
     no_files_changed = not (state.result and state.result.files_changed)
 
-    if is_read_only or no_files_changed:
-        reason = "read-only task" if is_read_only else "no files changed"
+    if not is_read_only and no_files_changed:
         logger.info(
-            "Skipping independent verifier (%s)",
-            reason,
+            "Skipping independent verifier (no files changed by mutation task)",
             extra={"task_id": state.task.task_id},
         )
-        return None, "skip_read_only_or_no_changes"
+        return None, "skip_no_files_changed"
 
     with start_optional_span(
         tracer_name="orchestrator.graph",

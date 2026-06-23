@@ -20,7 +20,7 @@ from apps.observability import (
 )
 from db.enums import WorkerRuntimeMode
 from orchestrator.brain import extract_json_block
-from orchestrator.state import OrchestratorState
+from orchestrator.state import OrchestratorState, is_task_read_only
 from tools import ToolPermissionLevel
 from tools.numeric import coerce_positive_int_like
 from workers import Worker, WorkerRequest, WorkerResult
@@ -65,6 +65,33 @@ Output contract:
   {
     "status": "passed" | "failed" | "warning",
     "summary": "<concise explanation of your findings, including evidence of any regressions found>"
+  }
+""".strip()
+
+
+_INDEPENDENT_VERIFIER_READ_ONLY_PROMPT = """
+You are an autonomous QA Verification Agent. Your goal is to rigorously evaluate the
+findings and analysis submitted by a research or scouting worker.
+
+Operational Philosophy:
+- **Think like an Auditor**: Do not just trust that the worker's summary is correct.
+  Validate that their findings actually answer the user's core question or analysis goal.
+- **Strict Read-Only Mode**: You must NOT modify the codebase. All your verification actions
+  (exploring the repo, reading files) must be non-destructive.
+
+Requirements:
+- **Goal Satisfaction**: Verify that the worker's summary directly addresses the task requirements.
+- **Factual Correctness**: If the worker claims a file contains X, use `read_file` or `grep_search`
+  to verify that X is actually there.
+- **Incomplete Findings**: If the worker missed critical files or misunderstood the architecture,
+  report it clearly so they can try again.
+
+Output contract:
+- Return a single JSON object only (no markdown fences, no extra prose).
+- JSON schema:
+  {
+    "status": "passed" | "failed" | "warning",
+    "summary": "<concise explanation of your findings, why worker succeeded/failed>"
   }
 """.strip()
 
@@ -407,8 +434,13 @@ async def _execute_verifier_worker(
             attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
         ):
             set_span_input_output(input_data=request.task_text)
+            prompt = (
+                _INDEPENDENT_VERIFIER_READ_ONLY_PROMPT
+                if is_task_read_only(state)
+                else _INDEPENDENT_VERIFIER_SYSTEM_PROMPT
+            )
             verifier_result = await asyncio.wait_for(
-                worker.run(request, system_prompt=_INDEPENDENT_VERIFIER_SYSTEM_PROMPT),
+                worker.run(request, system_prompt=prompt),
                 timeout=timeout_seconds + _INDEPENDENT_VERIFIER_TIMEOUT_GRACE_SECONDS,
             )
 
