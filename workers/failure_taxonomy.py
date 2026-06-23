@@ -73,6 +73,8 @@ _PROVIDER_CAPACITY_MARKERS = (
     "no capacity available",
     "rate limit",
     "resource exhausted",
+    "usage limit",
+    "quota exceeded",
 )
 INFRA_CRASH_MARKERS: Final = (
     "segmentation fault",

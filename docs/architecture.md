@@ -58,11 +58,9 @@ Active worker/runtime implementations:
 
 ### Worker Routing Policy (Current)
 
-Before routing, the orchestrator builds and persists a TaskSpec so workers, APIs, and operator views share an inspectable task contract. When worker profiles are enabled, routing resolves through a capability matrix and pins dispatch to one concrete `WorkerProfile` (`worker_type`, `runtime_mode`, capability tags, permission/mutation policy, and delivery-mode support).
+Before routing, the orchestrator builds and persists a TaskSpec so workers, APIs, and operator views share an inspectable task contract. Routing resolves through a capability matrix and pins dispatch to one concrete `WorkerProfile` (`worker_type`, `runtime_mode`, capability tags, permission/mutation policy, and delivery-mode support).
 
-Profile-aware routing toggle and mapping:
-
-- Enable profile-aware routing with `CODE_AGENT_WORKER_PROFILES_ENABLED=1` (wired in API bootstrap).
+Profile mapping:
 - Codex/Antigravity default runtime mode is pinned to `native_agent`.
 - `CODE_AGENT_CODEX_RUNTIME_MODE`, `CODE_AGENT_GEMINI_RUNTIME_MODE`, `CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED`, and `CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED` are deprecated and ignored; Codex and Antigravity are now native-only and legacy tool-loop profiles are no longer created.
 - OpenRouter legacy execution profile is added only when OpenRouter is configured and `CODE_AGENT_OPENROUTER_ENABLED=1`.

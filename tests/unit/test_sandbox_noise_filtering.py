@@ -17,6 +17,11 @@ def test_should_ignore_path() -> None:
     assert _should_ignore_path("node_modules/package.json") is True
     assert _should_ignore_path(".DS_Store") is True
 
+    # Native agent scratch dirs must be ignored (scope_mismatch false-positive fix)
+    assert _should_ignore_path(".agent_home/.cache/ms-playwright-go/1.57.0/package/cli.js") is True
+    assert _should_ignore_path(".agent_home/.gemini/antigravity-cli/cli.log") is True
+    assert _should_ignore_path(".code-agent/native-agent-runner/run-123/stdout.txt") is True
+
     # Meaningful files should NOT be ignored
     assert _should_ignore_path("src/main.py") is False
     assert _should_ignore_path("tests/unit/test_cli_runtime.py") is False

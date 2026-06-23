@@ -126,6 +126,157 @@ describe('IdeaInboxPage', () => {
     });
   });
 
+  it('renders structured scout metadata as a reviewable proposal', async () => {
+    vi.mocked(api.listProposals).mockResolvedValue([
+      createProposal({
+        proposal_id: 'p-structured-scout',
+        title: 'Scout Output for Task 80671212-0736-426d-b23a-3ada4ba626ae',
+        summary: 'Create a small skeleton so future tasks can start from a known baseline.',
+        metadata_payload: {
+          scout_focus: 'project bootstrap',
+          scout_proposal: {
+            title: 'Project Initialization & Skeleton Setup',
+            description: 'Create a small skeleton so future tasks can start from a known baseline.',
+            value: 'high',
+            effort: 'small',
+            risk: 'medium',
+            layer_impact: 'worker',
+            validation_path: 'Run targeted worker/orchestrator tests.',
+            hitl_need: 'optional',
+            evidence: ['AGENTS.md:1', 'workers/prompt.py:242'],
+            implementation_slice: 'Add the skeleton setup task as a small implementation PR.',
+          },
+        },
+      }),
+    ]);
+
+    renderWithProviders(<IdeaInboxPage />);
+
+    expect(
+      await screen.findByText('Project Initialization & Skeleton Setup'),
+    ).toHaveClass('memory-key');
+    expect(
+      screen.queryByText('Scout Output for Task 80671212-0736-426d-b23a-3ada4ba626ae'),
+    ).not.toBeInTheDocument();
+
+    expect(
+      screen.getByText('Create a small skeleton so future tasks can start from a known baseline.'),
+    ).toHaveClass('proposal-summary', 'proposal-summary-scout');
+    expect(
+      within(screen.getByText('Value').closest('.proposal-score-item') as HTMLElement)
+        .getByText('High'),
+    ).toHaveClass('score-success');
+    expect(
+      within(screen.getByText('Effort').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Small'),
+    ).toHaveClass('score-success');
+    expect(
+      within(screen.getByText('Risk').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Medium'),
+    ).toHaveClass('score-medium');
+    expect(
+      within(screen.getByText('Layer').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Worker'),
+    ).toHaveClass('score-neutral');
+    expect(
+      within(screen.getByText('HITL').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Optional'),
+    ).toHaveClass('score-medium');
+    expect(screen.getByText(/Run targeted worker\/orchestrator tests\./)).toBeInTheDocument();
+    expect(screen.getByText(/Focus:/)).toBeInTheDocument();
+    expect(screen.getByText('project bootstrap')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Scout evidence'));
+
+    expect(screen.getByText('AGENTS.md:1')).toBeInTheDocument();
+    expect(screen.getByText('workers/prompt.py:242')).toBeInTheDocument();
+    expect(
+      screen.getByText('Add the skeleton setup task as a small implementation PR.'),
+    ).toHaveClass('proposal-text-block');
+    expect(screen.queryByText('Scout Output:')).not.toBeInTheDocument();
+  });
+
+  it('renders legacy markdown scout output as a reviewable proposal fallback', async () => {
+    const scoutSummary = [
+      '[stdout truncated for summary]',
+      '//Users/natanayalo/.code-agent/workspaces/example/AGENTS.md file touched.',
+      '',
+      '---',
+      '',
+      '### Dummy Proposal: Project Initialization & Skeleton Setup',
+      '',
+      'Create a small skeleton so future tasks can start from a known baseline.',
+      '',
+      '- **Value:** High',
+      '- **Effort:** Small',
+      '- **Risk:** Medium',
+      '- **Layer:** Worker',
+      '- **HITL:** Optional',
+      '- **Validation:** Run targeted worker/orchestrator tests.',
+    ].join('\n');
+
+    vi.mocked(api.listProposals).mockResolvedValue([
+      createProposal({
+        proposal_id: 'p-formatted-scout',
+        title: 'Scout Output for Task 80671212-0736-426d-b23a-3ada4ba626ae',
+        summary: scoutSummary,
+      }),
+    ]);
+
+    renderWithProviders(<IdeaInboxPage />);
+
+    expect(
+      await screen.findByText('Project Initialization & Skeleton Setup'),
+    ).toHaveClass('memory-key');
+    expect(
+      screen.queryByText('Scout Output for Task 80671212-0736-426d-b23a-3ada4ba626ae'),
+    ).not.toBeInTheDocument();
+
+    const summaryBlock = screen.getByText(
+      'Create a small skeleton so future tasks can start from a known baseline.',
+    );
+    expect(summaryBlock).toHaveClass('proposal-summary', 'proposal-summary-scout');
+    expect(summaryBlock).not.toHaveClass('json-viewer');
+    expect(screen.queryByText('[stdout truncated for summary]')).not.toBeInTheDocument();
+
+    expect(
+      within(screen.getByText('Value').closest('.proposal-score-item') as HTMLElement)
+        .getByText('High'),
+    ).toHaveClass('score-success');
+    expect(
+      within(screen.getByText('Effort').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Small'),
+    ).toHaveClass('score-success');
+    expect(
+      within(screen.getByText('Risk').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Medium'),
+    ).toHaveClass('score-medium');
+    expect(
+      within(screen.getByText('Layer').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Worker'),
+    ).toHaveClass('score-neutral');
+    expect(
+      within(screen.getByText('HITL').closest('.proposal-score-item') as HTMLElement)
+        .getByText('Optional'),
+    ).toHaveClass('score-medium');
+    expect(
+      screen
+        .getAllByText(/Run targeted worker\/orchestrator tests\./)
+        .some((element) => element.classList.contains('proposal-validation-path')),
+    ).toBe(true);
+
+    fireEvent.click(screen.getByText('Scout evidence'));
+
+    const rawOutputBlock = screen.getByText((content, element) => {
+      return (
+        element?.classList.contains('proposal-text-block') === true &&
+        content.includes('[stdout truncated for summary]') &&
+        content.includes('Project Initialization & Skeleton Setup')
+      );
+    });
+    expect(rawOutputBlock).not.toHaveClass('json-viewer');
+  });
+
   it('renders scout proposals and handles reject with confirmation', async () => {
     const proposal = createProposal({
       proposal_id: 'p2',
@@ -267,7 +418,7 @@ describe('IdeaInboxPage', () => {
     expect(screen.getByText('Research')).toBeInTheDocument();
     expect(screen.getByText('Depth')).toBeInTheDocument();
     expect(screen.getByText('Deep')).toBeInTheDocument();
-    expect(screen.getByText('Focus')).toBeInTheDocument();
+    expect(screen.getByText(/Focus:/)).toBeInTheDocument();
     expect(screen.getByText('React Hooks')).toBeInTheDocument();
   });
 
@@ -292,7 +443,7 @@ describe('IdeaInboxPage', () => {
       expect(screen.getByText('Idea with null metadata')).toBeInTheDocument();
     });
 
-    expect(screen.queryByText('View Details')).not.toBeInTheDocument();
+    expect(screen.queryByText('Scout evidence')).not.toBeInTheDocument();
     expect(screen.queryByText('null')).not.toBeInTheDocument();
   });
 

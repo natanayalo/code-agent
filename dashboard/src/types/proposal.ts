@@ -23,6 +23,19 @@ export interface ImprovementSuggestionMetadata {
   hitl_need?: ImprovementMetadataScalar;
 }
 
+export interface ScoutProposalMetadata {
+  title?: string;
+  description?: string;
+  value?: ImprovementMetadataScalar;
+  effort?: ImprovementMetadataScalar;
+  risk?: ImprovementMetadataScalar;
+  layer_impact?: ImprovementMetadataScalar;
+  validation_path?: ImprovementMetadataScalar;
+  hitl_need?: ImprovementMetadataScalar;
+  evidence?: string[];
+  implementation_slice?: string;
+}
+
 export interface FrictionReportMetadata {
   task_id?: string | null;
   worker_run_id?: string | null;
@@ -45,6 +58,7 @@ export interface ProposalMetadataPayload extends Record<string, unknown> {
   improvement_suggestion?: unknown;
   friction_report?: unknown;
   scoring?: unknown;
+  scout_proposal?: unknown;
   files_changed?: unknown;
   diff_text?: unknown;
 }

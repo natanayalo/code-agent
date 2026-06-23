@@ -18,6 +18,7 @@ from orchestrator.state import (
     VerificationFailureKind,
     VerificationReport,
     VerificationReportItem,
+    is_task_read_only,
 )
 from orchestrator.verification import resolve_verification_commands
 from tools.numeric import coerce_non_negative_int_like
@@ -186,12 +187,15 @@ def _check_independent_verifier(
 
 
 def _check_deterministic_commands(
+    state: OrchestratorState,
     deterministic_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None,
     deterministic_verifier_metadata: dict[str, Any] | None,
 ) -> VerificationReportItem | None:
     if deterministic_verifier_outcome is None:
         return None
     status, summary = deterministic_verifier_outcome
+    if status == "failed" and is_task_read_only(state):
+        status = "warning"
     return VerificationReportItem(
         label="deterministic_commands",
         status=status,
@@ -241,19 +245,27 @@ def _build_verify_response(
         response["repair_handoff_requested"] = True
 
     if report.status == "failed":
-        friction_report = FrictionReport(
-            task_id=state.task.task_id,
-            worker_run_id=state.dispatch.run_id,
-            source="tooling",
-            description=f"Verification failed: {report.summary or 'unknown error'}",
-            impact="blocked",
-            context={
-                "failure_kind": report.failure_kind,
-                "items": [item.model_dump() for item in report.items if item.status == "failed"],
-                "repair_handoff_requested": repair_handoff_requested,
-            },
+        is_infra_error = (
+            state.result is not None
+            and state.result.status == "failure"
+            and state.result.failure_kind in ("provider_error", "timeout", "sandbox_infra")
         )
-        response["friction_reports"] = state.friction_reports + [friction_report]
+        if not is_infra_error:
+            friction_report = FrictionReport(
+                task_id=state.task.task_id,
+                worker_run_id=state.dispatch.run_id,
+                source="tooling",
+                description=f"Verification failed: {report.summary or 'unknown error'}",
+                impact="blocked",
+                context={
+                    "failure_kind": report.failure_kind,
+                    "items": [
+                        item.model_dump() for item in report.items if item.status == "failed"
+                    ],
+                    "repair_handoff_requested": repair_handoff_requested,
+                },
+            )
+            response["friction_reports"] = state.friction_reports + [friction_report]
 
     return response
 
@@ -336,8 +348,7 @@ def _check_test_results(state: OrchestratorState) -> VerificationReportItem:
 
 def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
     result = state.result
-    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
-    is_read_only = constraints.get("read_only") is True
+    is_read_only = is_task_read_only(state)
 
     if result is None:
         logger.warning("Verification result is None")
@@ -560,6 +571,7 @@ def verify_result(
     independent_verifier_reason_code: str | None = None,
     extra_timeline_events: list[tuple[TimelineEventType, str | None, dict[str, Any] | None]]
     | None = None,
+    sc_reason: str | None = None,
 ) -> dict[str, Any]:
     """Perform deterministic checks on the worker output before summarization."""
     state = _ensure_state(state_input)
@@ -575,10 +587,9 @@ def verify_result(
     items.append(_check_test_results(state))
 
     # 2. Deterministic Verification Commands (from run_deterministic_verification)
-    det_item = _check_deterministic_commands(
-        deterministic_verifier_outcome, deterministic_verifier_metadata
-    )
-    if det_item is not None:
+    if det_item := _check_deterministic_commands(
+        state, deterministic_verifier_outcome, deterministic_verifier_metadata
+    ):
         items.append(det_item)
 
     # 3. File Changes
@@ -591,12 +602,11 @@ def verify_result(
     items.append(_check_post_run_lint(state))
 
     # 6. Optional independent verifier execution (T-158)
-    indep_item = _check_independent_verifier(
+    if indep_item := _check_independent_verifier(
         enable_independent_verifier,
         independent_verifier_outcome,
         independent_verifier_reason_code,
-    )
-    if indep_item is not None:
+    ):
         items.append(indep_item)
 
     # Calculate overall status
@@ -620,7 +630,9 @@ def verify_result(
         report,
         deterministic_verifier_metadata,
         extra_timeline_events,
-        progress_message,
+        sc_reason
+        if sc_reason is not None and sc_reason != "worker_or_test_failure"
+        else progress_message,
         updated_task,
         updated_result,
         repair_handoff_requested,

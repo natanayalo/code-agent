@@ -42,6 +42,8 @@ function_exceptions:
     test_task_repository_supports_task_spec_lease_progress_and_metrics: Highly stateful logic for test_task_repository_supports_task_spec_lease_progress_and_metrics; splitting requires unnatural parameter coupling.
   tests/integration/test_repositories_worker_runs.py:
     test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics: Highly stateful logic for test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics; splitting requires unnatural parameter coupling.
+  tests/integration/test_execution_outcome_service.py:
+    test_persist_execution_outcome_creates_proposal_for_scout: Highly stateful logic for test_persist_execution_outcome_creates_proposal_for_scout; splitting requires unnatural parameter coupling.
   tests/integration/test_vertical_slice_e2e.py:
     test_vertical_slice_e2e_happy_path: Highly stateful logic for test_vertical_slice_e2e_happy_path; splitting requires unnatural parameter coupling.
   workers/antigravity_cli_worker_native.py:

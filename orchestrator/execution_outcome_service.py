@@ -24,6 +24,13 @@ from orchestrator.execution_serialization import (
     _serialize_verification_report,
     _workspace_id_from_artifacts,
 )
+from orchestrator.scout_proposals import (
+    ScoutProposal,
+    ScoutProposalValidationError,
+    compute_scout_proposal_fingerprint,
+    scout_max_proposals_from_constraints,
+    validate_scout_proposal_payload,
+)
 from orchestrator.state import OrchestratorState
 from repositories import (
     ArtifactRepository,
@@ -233,6 +240,93 @@ def _merge_scout_phase_result(
             budget_usage[k] = budget_usage.get(k, 0) + v
 
 
+def _existing_scout_fingerprints(
+    proposal_repo: ProposalRepository,
+    *,
+    task_id: str,
+) -> set[str]:
+    existing_fingerprints: set[str] = set()
+    for existing_proposal in proposal_repo.list_proposals(
+        task_id=task_id,
+        proposal_type=ProposalType.SCOUT,
+    ):
+        metadata = existing_proposal.metadata_payload
+        if not isinstance(metadata, dict):
+            continue
+        fingerprint = metadata.get("fingerprint")
+        if isinstance(fingerprint, str):
+            existing_fingerprints.add(fingerprint)
+    return existing_fingerprints
+
+
+def _result_artifacts_payload(
+    result: Any,
+    fallback_artifacts: list[Any] | None = None,
+) -> list[Any]:
+    if result is None:
+        logger.warning("Worker result is None, falling back to default artifacts")
+        source_artifacts = fallback_artifacts or []
+    else:
+        source_artifacts = result.artifacts or fallback_artifacts or []
+    return [artifact.model_dump(mode="json") for artifact in source_artifacts]
+
+
+def _result_metadata_payload(
+    *,
+    task: Any,
+    result: Any,
+    scout_mode: ScoutMode,
+    worker_run_id: str,
+    fallback_artifacts: list[Any],
+    scout_depth: str | None,
+    scout_focus: str | None,
+    scout_phase: str | None,
+    scout_phase_metadata: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    metadata_payload: dict[str, Any] = {
+        "source": "scout",
+        "scout_mode": scout_mode,
+        "task_id": task.id,
+        "worker_run_id": worker_run_id,
+        "files_changed": result.files_changed or [],
+        "artifacts": _result_artifacts_payload(result, fallback_artifacts),
+        "budget_usage": result.budget_usage or {},
+        "diff_text": result.diff_text,
+        "json_payload": result.json_payload,
+    }
+    if scout_depth:
+        metadata_payload["scout_depth"] = scout_depth
+    if scout_focus:
+        metadata_payload["scout_focus"] = scout_focus
+    if scout_phase:
+        metadata_payload["scout_phase"] = scout_phase
+    if scout_phase_metadata:
+        metadata_payload["scout_phase_metadata"] = scout_phase_metadata
+    return metadata_payload
+
+
+def _persist_scout_proposal_item(
+    proposal_repo: ProposalRepository,
+    *,
+    task: Any,
+    proposal: ScoutProposal,
+    fingerprint: str,
+    metadata_payload: dict[str, Any],
+) -> Any:
+    metadata = dict(metadata_payload)
+    metadata["fingerprint"] = fingerprint
+    metadata["scout_proposal"] = proposal.model_dump(mode="json")
+    return proposal_repo.create_proposal(
+        session_id=task.session_id,
+        task_id=task.id,
+        title=proposal.title,
+        summary=proposal.description,
+        status=ProposalStatus.PENDING_REVIEW,
+        proposal_type=ProposalType.SCOUT,
+        metadata_payload=metadata,
+    )
+
+
 def _persist_scout_proposal_if_needed(
     proposal_repo: ProposalRepository,
     *,
@@ -242,12 +336,6 @@ def _persist_scout_proposal_if_needed(
     worker_run_id: str,
 ) -> None:
     if not _should_create_scout_proposal(state):
-        return
-
-    existing_proposals = proposal_repo.list_proposals(
-        task_id=task.id, proposal_type=ProposalType.SCOUT, limit=1
-    )
-    if existing_proposals:
         return
 
     assert state.result is not None
@@ -266,26 +354,15 @@ def _persist_scout_proposal_if_needed(
     raw_focus = constraints.get("scout_focus")
     scout_focus = str(raw_focus or "").strip() or None
 
-    if state.result is None:
-        logger.warning("Execution result is None, falling back to default.")
-        files_changed = []
-        budget_usage = {}
-        summary = "Scout task completed without summary."
-    else:
-        files_changed = list(state.result.files_changed or [])
-        budget_usage = dict(state.result.budget_usage or {})
-        summary = (state.result.summary or "").strip() or "Scout task completed without summary."
-
-    all_artifacts = [artifact.model_dump(mode="json") for artifact in artifacts]
     scout_phase_metadata: list[dict[str, Any]] | None = None
 
     if scout_mode == "deep":
         scout_phase_metadata = []
         summary_parts: list[str] = []
 
-        files_changed = []
-        all_artifacts = []
-        budget_usage = {}
+        files_changed: list[str] = []
+        all_artifacts: list[Any] = []
+        budget_usage: dict[str, Any] = {}
 
         for phase_result in state.scout_phase_results or []:
             _merge_scout_phase_result(
@@ -308,38 +385,77 @@ def _persist_scout_proposal_if_needed(
             budget_usage,
         )
 
-        summary = "\n\n".join(summary_parts)
+    max_proposals = scout_max_proposals_from_constraints(constraints)
+    existing_fingerprints = _existing_scout_fingerprints(proposal_repo, task_id=task.id)
+    result_entries: list[tuple[str | None, Any, list[Any]]] = []
+    if scout_mode == "deep":
+        for phase_result in state.scout_phase_results or []:
+            result_entries.append((phase_result.phase, phase_result.result, []))
+        result_entries.append((state.scout_phase or "research", state.result, artifacts))
+    else:
+        result_entries.append((state.scout_phase, state.result, artifacts))
 
-    metadata_payload: dict[str, Any] = {
-        "source": "scout",
-        "scout_mode": scout_mode,
-        "task_id": task.id,
-        "worker_run_id": worker_run_id,
-        "files_changed": files_changed,
-        "artifacts": all_artifacts,
-        "budget_usage": budget_usage or None,
-        "diff_text": getattr(state.result, "diff_text", None),
-        "json_payload": getattr(state.result, "json_payload", None),
-    }
-    if scout_depth:
-        metadata_payload["scout_depth"] = scout_depth
-    if scout_focus:
-        metadata_payload["scout_focus"] = scout_focus
-    if scout_phase_metadata:
-        metadata_payload["scout_phase_metadata"] = scout_phase_metadata
-
-    proposal = proposal_repo.create_proposal(
-        session_id=task.session_id,
-        task_id=task.id,
-        title=f"Scout Output for Task {task.id}",
-        summary=summary,
-        status=ProposalStatus.PENDING_REVIEW,
-        metadata_payload=metadata_payload,
-    )
-    logger.info(
-        "Persisted scout proposal",
-        extra={"task_id": task.id, "proposal_id": proposal.id, "worker_run_id": worker_run_id},
-    )
+    for scout_phase, result, fallback_artifacts in result_entries:
+        if result is None:
+            logger.warning(
+                "Scout phase result is None, skipping.",
+                extra={"task_id": task.id, "scout_phase": scout_phase},
+            )
+            continue
+        try:
+            batch = validate_scout_proposal_payload(
+                getattr(result, "json_payload", None),
+                max_proposals=max_proposals,
+            )
+        except ScoutProposalValidationError:
+            logger.warning(
+                "Failed to validate scout proposal payload, skipping.",
+                exc_info=True,
+                extra={"task_id": task.id, "scout_phase": scout_phase},
+            )
+            continue
+        metadata_payload = _result_metadata_payload(
+            task=task,
+            result=result,
+            scout_mode=scout_mode,
+            worker_run_id=worker_run_id,
+            fallback_artifacts=fallback_artifacts,
+            scout_depth=scout_depth,
+            scout_focus=scout_focus,
+            scout_phase=scout_phase,
+            scout_phase_metadata=scout_phase_metadata,
+        )
+        for scout_proposal in batch.proposals:
+            if not task.session_id or not task.id:
+                logger.warning(
+                    "Skipping scout proposal persistence: missing session_id or task_id",
+                    extra={"task_id": task.id},
+                )
+                continue
+            fingerprint = compute_scout_proposal_fingerprint(
+                scout_proposal,
+                task_id=task.id,
+                phase=scout_phase,
+            )
+            if fingerprint in existing_fingerprints:
+                continue
+            existing_fingerprints.add(fingerprint)
+            proposal = _persist_scout_proposal_item(
+                proposal_repo,
+                task=task,
+                proposal=scout_proposal,
+                fingerprint=fingerprint,
+                metadata_payload=metadata_payload,
+            )
+            logger.info(
+                "Persisted scout proposal",
+                extra={
+                    "task_id": task.id,
+                    "proposal_id": proposal.id,
+                    "worker_run_id": worker_run_id,
+                    "fingerprint": fingerprint,
+                },
+            )
 
 
 def _update_task_route_and_spec(

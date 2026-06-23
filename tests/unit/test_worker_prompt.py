@@ -135,7 +135,9 @@ def test_build_system_prompt_includes_repo_scout_overlay(tmp_path) -> None:
     )
     prompt = build_system_prompt(request, tmp_path)
     assert "## Scout Mode Guardrails" in prompt
-    assert "up to 5 well-structured proposal(s)" in prompt
+    assert "up to 5 structured proposal(s)" in prompt
+    assert "Return exactly one JSON object" in prompt
+    assert "`implementation_slice`" in prompt
     assert "Mode: `repo`" in prompt
     assert "Focus on inspecting the local repository" in prompt
 
@@ -155,7 +157,7 @@ def test_build_system_prompt_includes_research_scout_overlay(tmp_path) -> None:
     )
     prompt = build_system_prompt(request, tmp_path)
     assert "## Scout Mode Guardrails" in prompt
-    assert "up to 2 well-structured proposal(s)" in prompt
+    assert "up to 2 structured proposal(s)" in prompt
     assert "Mode: `research`" in prompt
     assert "Depth: `deep`" in prompt
     assert "Focus: SQLAlchemy migrations" in prompt
@@ -175,7 +177,7 @@ def test_build_system_prompt_includes_deep_scout_overlay(tmp_path) -> None:
     )
     prompt = build_system_prompt(request, tmp_path)
     assert "## Scout Mode Guardrails" in prompt
-    assert "up to 3 well-structured proposal(s)" in prompt
+    assert "up to 3 structured proposal(s)" in prompt
     assert "Mode: `deep`" in prompt
     assert "Use a repo-first, then targeted-research structure" in prompt
     assert "Source Policy: use available/local evidence first" in prompt

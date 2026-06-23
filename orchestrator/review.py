@@ -17,7 +17,7 @@ from apps.observability import (
     set_span_input_output,
     start_optional_span,
 )
-from orchestrator.state import OrchestratorState
+from orchestrator.state import OrchestratorState, is_task_read_only
 from tools import ToolPermissionLevel
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
 from workers import Worker, WorkerRequest, WorkerRuntimeMode
@@ -420,13 +420,14 @@ def _repair_handoff_update(
 
 
 def _check_skip_review(state: OrchestratorState) -> dict[str, Any] | None:
-    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
-    is_read_only = constraints.get("read_only") is True
+    is_read_only = is_task_read_only(state)
     if state.result is None:
         logger.warning("Worker result is None, falling back to default.")
         no_files_changed = False
     else:
         no_files_changed = not state.result.files_changed
+
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
 
     if is_read_only or no_files_changed:
         reason = "read-only task" if is_read_only else "no files changed"

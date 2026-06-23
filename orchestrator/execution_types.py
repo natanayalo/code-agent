@@ -243,6 +243,7 @@ class TaskSummarySnapshot(ExecutionModel):
     chosen_profile: str | None = None
     runtime_mode: str | None = None
     route_reason: str | None = None
+    constraints: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
     latest_run_id: str | None = None

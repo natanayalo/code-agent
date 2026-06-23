@@ -12,7 +12,6 @@ from apps.api.task_service_factory import (
 def test_antigravity_specialized_profiles_enabled(monkeypatch):
     """Specialized Antigravity profiles should be created when native_agent mode is active."""
     # Setup environment for native_agent mode
-    monkeypatch.setenv("CODE_AGENT_WORKER_PROFILES_ENABLED", "true")
     monkeypatch.setenv("GEMINI_RUNTIME_MODE", "native_agent")
 
     profiles = _build_default_worker_profiles(

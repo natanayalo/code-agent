@@ -16,43 +16,11 @@ from apps.observability import (
 )
 from db.enums import TimelineEventType
 from orchestrator.nodes.utils import _ensure_state, _progress_update, _timeline_event
-from orchestrator.state import OrchestratorState
+from orchestrator.state import OrchestratorState, is_task_read_only
 from sandbox import WorkspaceManager, WorkspaceMode, WorkspaceRequest
 from workers.base import Worker, WorkerRequest
 
 logger = logging.getLogger(__name__)
-_READ_ONLY_HARDENING_SKIP_REASON = "read_only_or_no_modification_task"
-
-
-def _should_skip_gitignore_hardening(state: OrchestratorState) -> bool:
-    """Return whether environment self-healing should avoid repo file edits."""
-    if (state.task.constraints or {}).get("read_only") is True:
-        return True
-
-    route_profile = state.route.chosen_profile if state.route else None
-    dispatch_profile = state.dispatch.worker_profile if state.dispatch else None
-    profile_name = (route_profile or dispatch_profile or "").lower()
-    if "read-only" in profile_name or "read_only" in profile_name:
-        return True
-
-    if state.task_spec is None:
-        return False
-
-    if (
-        state.task_spec.allowed_actions
-        and "modify_workspace_files" not in state.task_spec.allowed_actions
-    ):
-        return True
-
-    no_goal_text = " ".join(state.task_spec.non_goals or []).lower()
-    if "do not modify any files" in no_goal_text:
-        return True
-    if "no files" in no_goal_text and "modified" in no_goal_text:
-        return True
-    if "do not create or modify" in no_goal_text:
-        return True
-
-    return False
 
 
 def _check_env_marker_missing(repo_path: Any) -> bool:
@@ -136,8 +104,8 @@ async def _execute_gitignore_hardening(
     state: OrchestratorState,
     workspace_id: str,
 ) -> tuple[list[str], str | None]:
-    if _should_skip_gitignore_hardening(state):
-        return [], _READ_ONLY_HARDENING_SKIP_REASON
+    if is_task_read_only(state):
+        return [], "read_only_task"
 
     noise_patterns = [
         ".cache",
@@ -150,15 +118,22 @@ async def _execute_gitignore_hardening(
         ".vscode",
         ".DS_Store",
         ".env",
+        ".agent_home",
+        ".code-agent",
     ]
     patterns_str = " ".join(noise_patterns)
     hardening_script = (
+        "GIT_DIR=$(git rev-parse --git-dir 2>/dev/null); "
+        'if [ -n "$GIT_DIR" ]; then '
         f"MISSING=''; for p in {patterns_str}; do "
         'if ! git check-ignore -q "$p" 2>/dev/null; then '
-        'if [ -f .gitignore ] && [ -n "$(tail -c1 .gitignore 2>/dev/null)" ]; '
-        'then echo "" >> .gitignore; fi; '
-        'echo "$p" >> .gitignore; MISSING="$MISSING $p"; fi; done; '
-        'if [ -n "$MISSING" ]; then echo "hardened:$MISSING"; fi'
+        'mkdir -p "$GIT_DIR/info"; '
+        'if [ -f "$GIT_DIR/info/exclude" ] && '
+        '[ -n "$(tail -c1 "$GIT_DIR/info/exclude" 2>/dev/null)" ]; '
+        'then echo "" >> "$GIT_DIR/info/exclude"; fi; '
+        'echo "$p" >> "$GIT_DIR/info/exclude"; MISSING="$MISSING $p"; fi; done; '
+        'if [ -n "$MISSING" ]; then echo "hardened:$MISSING"; fi; '
+        "fi"
     )
 
     try:
@@ -361,24 +336,25 @@ async def _run_init_environment(
     if error_msg:
         return _init_fail(state, error_msg)
 
-    if not setup_command:
-        return {"current_step": "init_environment", "result": None}
-
-    logger.info(
-        "Initializing environment in shared workspace",
-        extra={
-            "workspace_id": workspace_id,
-            "command": setup_command,
-        },
-    )
-
-    result = await _execute_setup_command(shell_worker, state, workspace_id, setup_command)
-    if isinstance(result, dict) and result.get("current_step"):
-        return result
+    result = None
+    if setup_command:
+        logger.info(
+            "Initializing environment in shared workspace",
+            extra={
+                "workspace_id": workspace_id,
+                "command": setup_command,
+            },
+        )
+        result = await _execute_setup_command(shell_worker, state, workspace_id, setup_command)
+        if isinstance(result, dict) and result.get("current_step"):
+            return result
 
     missing_ignores, hardening_skipped_reason = await _execute_gitignore_hardening(
         shell_worker, state, workspace_id
     )
+
+    if not setup_command and not missing_ignores:
+        return {"current_step": "init_environment", "result": None}
 
     return _build_init_response(
         state, setup_command, result, missing_ignores, hardening_skipped_reason
@@ -387,14 +363,20 @@ async def _run_init_environment(
 
 def _build_init_response(
     state: OrchestratorState,
-    setup_command: str,
+    setup_command: str | None,
     result: Any,
     missing_ignores: list[str],
     hardening_skipped_reason: str | None,
 ) -> dict[str, Any]:
-    init_msg = f"Environment initialized successfully via: {setup_command}"
+    if setup_command:
+        init_msg = f"Environment initialized successfully via: {setup_command}"
+    else:
+        init_msg = "Environment setup not required."
+
     if missing_ignores:
-        hardening_msg = f"Proactively hardened .gitignore by adding: {', '.join(missing_ignores)}"
+        hardening_msg = (
+            f"Proactively hardened .git/info/exclude by adding: {', '.join(missing_ignores)}"
+        )
         logger.info(f"Task {state.task.task_id}: {hardening_msg}")
         init_msg += f" ({hardening_msg})"
 

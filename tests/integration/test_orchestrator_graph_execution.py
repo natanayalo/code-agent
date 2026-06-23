@@ -8,6 +8,25 @@ from orchestrator import OrchestratorState, WorkerResult, build_orchestrator_gra
 from tests.integration.orchestrator_graph_support import SequencedWorker, StaticWorker
 
 
+def _scout_json_payload(title: str = "Inspect orchestrator drift") -> dict[str, object]:
+    return {
+        "proposals": [
+            {
+                "title": title,
+                "description": "Review orchestrator paths that accumulate scout output.",
+                "value": "high",
+                "effort": "small",
+                "risk": "medium",
+                "layer_impact": "orchestrator",
+                "validation_path": "Run orchestrator graph execution tests.",
+                "hitl_need": "optional",
+                "evidence": ["orchestrator/graph.py"],
+                "implementation_slice": "Persist structured scout proposals.",
+            }
+        ]
+    }
+
+
 def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
     """The compiled graph should complete the documented happy-path node sequence."""
     worker = StaticWorker(
@@ -172,6 +191,7 @@ def test_orchestrator_graph_clarification_resume_token_resolution_allows_progres
                     "task_type": "investigation",
                     "risk_level": "low",
                     "delivery_mode": "workspace",
+                    "allowed_actions": ["modify_workspace_files"],
                     "forbidden_actions": ["hardcode_secrets"],
                     "requires_clarification": True,
                     "clarification_questions": ["new question wording"],
@@ -233,11 +253,12 @@ def test_orchestrator_graph_scout_task_skips_delivery() -> None:
         WorkerResult(
             status="success",
             commands_run=[],
-            files_changed=["orchestrator/graph.py"],
+            files_changed=[],
             test_results=[],
             artifacts=[],
             next_action_hint="persist_memory",
             summary="Scout complete.",
+            json_payload=_scout_json_payload(),
         )
     )
     graph = build_orchestrator_graph(worker=worker)
@@ -260,4 +281,47 @@ def test_orchestrator_graph_scout_task_skips_delivery() -> None:
     assert state.result is not None
     assert state.result.status == "success"
     assert len(worker.requests) == 1
+    assert worker.requests[0].response_format == "json"
     assert "delivery completed" not in state.progress_updates
+
+
+def test_orchestrator_graph_fails_deep_scout_before_research_for_invalid_json_payload() -> None:
+    """Deep Scout should not advance to research without structured repo-phase JSON."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=[],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary="Scout complete without JSON.",
+            json_payload=None,
+        )
+    )
+    graph = build_orchestrator_graph(worker=worker)
+
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": "Deep scout the orchestrator module",
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                    "constraints": {
+                        "task_type": "scout",
+                        "scout_mode": "deep",
+                        "delivery_mode": "summary",
+                    },
+                }
+            }
+        )
+    )
+    state = OrchestratorState.model_validate(raw_output)
+
+    assert state.result is not None
+    assert state.result.status == "failure"
+    assert state.result.failure_kind == "incomplete_delivery"
+    assert state.current_step == "persist_memory"
+    assert len(worker.requests) == 1
+    assert state.scout_phase is None

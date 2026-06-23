@@ -318,3 +318,15 @@ def compute_interaction_content_hash(
     }
     content = json.dumps(payload, sort_keys=True).encode()
     return hashlib.sha256(content).hexdigest()
+
+
+def is_task_read_only(state: OrchestratorState) -> bool:
+    """Determine if a task is read-only based on the TaskSpec contract or legacy constraints."""
+    if state.task_spec is not None:
+        if state.task_spec.task_type == "scout":
+            return True
+        if state.task_spec.allowed_actions:
+            return "modify_workspace_files" not in state.task_spec.allowed_actions
+
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    return constraints.get("read_only") is True or constraints.get("task_type") == "scout"

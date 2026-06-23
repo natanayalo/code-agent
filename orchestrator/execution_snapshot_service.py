@@ -350,6 +350,7 @@ def _map_task_to_summary(
         chosen_profile=task.chosen_profile,
         runtime_mode=_enum_value(task.runtime_mode),
         route_reason=task.route_reason,
+        constraints=dict(task.constraints) if isinstance(task.constraints, dict) else {},
         created_at=task.created_at,
         updated_at=task.updated_at,
         latest_run_id=latest_run_id,

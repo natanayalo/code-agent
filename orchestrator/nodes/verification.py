@@ -26,6 +26,7 @@ from orchestrator.nodes.verification_result import (
 )
 from orchestrator.state import (
     OrchestratorState,
+    is_task_read_only,
 )
 from orchestrator.verification import (
     resolve_verification_commands,
@@ -44,16 +45,17 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-def _check_short_circuit_verification(state: OrchestratorState) -> bool:
+def _check_short_circuit_reason(state: OrchestratorState) -> str | None:
+    """Return a skip reason if verification should short-circuit, None otherwise."""
     if state.result is None:
         logger.warning(
             "Skipping verification node: no worker result available",
             extra={"task_id": state.task.task_id},
         )
-        return True
+        return "verification skipped: no result"
 
     worker_failed = state.result.status != "success"
-    tests_failed = any(t.status in ("failed", "error") for t in state.result.test_results)
+    tests_failed = any(t.status in ("failed", "error") for t in (state.result.test_results or []))
 
     if worker_failed or tests_failed:
         logger.info(
@@ -65,8 +67,8 @@ def _check_short_circuit_verification(state: OrchestratorState) -> bool:
                 ),
             },
         )
-        return True
-    return False
+        return "worker_or_test_failure"
+    return None
 
 
 async def _run_deterministic_step(
@@ -122,23 +124,19 @@ async def _run_independent_step(
     state: OrchestratorState,
     available_workers: dict,
     enable_independent_verifier: bool,
-    deterministic_verifier_outcome: tuple,
 ) -> tuple[tuple[Literal["passed", "failed", "warning"], str] | None, str | None]:
-    if not enable_independent_verifier or deterministic_verifier_outcome[0] == "failed":
+    if not enable_independent_verifier:
         return None, None
 
-    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
-    is_read_only = constraints.get("read_only") is True
+    is_read_only = is_task_read_only(state)
     no_files_changed = not (state.result and state.result.files_changed)
 
-    if is_read_only or no_files_changed:
-        reason = "read-only task" if is_read_only else "no files changed"
+    if not is_read_only and no_files_changed:
         logger.info(
-            "Skipping independent verifier (%s)",
-            reason,
+            "Skipping independent verifier (no files changed by mutation task)",
             extra={"task_id": state.task.task_id},
         )
-        return None, "skip_read_only_or_no_changes"
+        return None, "skip_no_files_changed"
 
     with start_optional_span(
         tracer_name="orchestrator.graph",
@@ -232,12 +230,17 @@ def build_verify_result_node(
                 },
             )
 
-            if _check_short_circuit_verification(state):
+            sc_reason = _check_short_circuit_reason(state)
+            if sc_reason is not None:
                 if state.result is not None:
                     set_span_input_output(
                         input_data=state.result.status, output_data="short-circuited"
                     )
-                return verify_result(state)
+                return verify_result(
+                    state,
+                    enable_independent_verifier=False,
+                    sc_reason=sc_reason,
+                )
 
             (
                 deterministic_verifier_outcome,
@@ -252,7 +255,6 @@ def build_verify_result_node(
                 state,
                 available_workers,
                 enable_independent_verifier,
-                deterministic_verifier_outcome,
             )
 
             extra_events = _build_extra_events(
