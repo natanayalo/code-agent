@@ -14,7 +14,7 @@ import {
   ProjectMemoryUpsertRequest,
 } from '../types/memory';
 import { ProposalSnapshot, ProposalStatus, ProposalType } from '../types/proposal';
-import { ToolDefinition, SandboxStatusResponse } from '../types/system';
+import { ToolDefinition, SandboxStatusResponse, RuntimeManifest } from '../types/system';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 type InteractionResponseStatus = 'resolved' | 'rejected' | 'cancelled' | 'pending';
@@ -377,6 +377,15 @@ export const api = {
       return await fetchWithAuth('/system/sandbox');
     } catch (error) {
       console.warn('Failed to fetch sandbox status from API', error);
+      throw error;
+    }
+  },
+
+  async getRuntimeManifest(): Promise<RuntimeManifest> {
+    try {
+      return await fetchWithAuth('/system/runtime-manifest');
+    } catch (error) {
+      console.warn('Failed to fetch runtime manifest from API', error);
       throw error;
     }
   },

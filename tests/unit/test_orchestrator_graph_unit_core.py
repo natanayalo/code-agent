@@ -122,6 +122,13 @@ def test_build_worker_request_from_state():
     assert request.budget == {"max_minutes": 15}
     assert request.worker_profile == "codex-native-executor"
     assert request.runtime_mode == "native_agent"
+    assert request.runtime_manifest is not None
+    assert request.runtime_manifest["worker"]["worker_type"] == "codex"
+    assert request.runtime_manifest["worker"]["worker_profile"] == "codex-native-executor"
+    assert request.runtime_manifest["worker"]["runtime_mode"] == "native_agent"
+    assert request.runtime_manifest["task"]["delivery_mode"] == "workspace"
+    assert request.runtime_manifest["task"]["budget"] == {"max_minutes": 15}
+    assert request.runtime_manifest["maintenance_actions"][0]["request_only"] is True
 
 
 def test_build_worker_request_uses_json_schema_for_scout_tasks() -> None:

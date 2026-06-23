@@ -61,6 +61,7 @@ from orchestrator.nodes.verification import (
     verify_result as verify_result,
 )
 from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, review_result
+from orchestrator.runtime_manifest import build_runtime_manifest
 from orchestrator.scout_proposals import (
     normalize_scout_worker_result,
     scout_response_schema_for_constraints,
@@ -513,8 +514,29 @@ def _is_scout_task(state: OrchestratorState) -> bool:
     return state.task.constraints.get("task_type") == "scout"
 
 
-def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
-    """Build the typed worker request from orchestrator state."""
+def _build_worker_request_runtime_manifest(
+    state: OrchestratorState,
+    *,
+    worker_profile: str | None,
+    runtime_mode: Any,
+    read_only: bool,
+) -> dict[str, Any]:
+    """Build the frozen runtime manifest payload for a worker request."""
+    return build_runtime_manifest(
+        worker_type=state.dispatch.worker_type or state.route.chosen_worker,
+        worker_profile=worker_profile,
+        runtime_mode=runtime_mode,
+        workspace_id=state.dispatch.workspace_id,
+        task_spec=state.task_spec,
+        read_only=read_only,
+        network_enabled=False,
+        budget=state.task.budget,
+        requested_tools=state.task.tools,
+    ).model_dump(mode="json")
+
+
+def _build_worker_request_task_text(state: OrchestratorState) -> str:
+    """Select the task text sent to the worker, including repair overrides."""
     task_text = state.normalized_task_text or state.task.task_text
     normalized_verifier_repair_task_text = _normalize_repair_task_text(
         state.task.constraints.get(VERIFIER_REPAIR_REQUEST_CONSTRAINT)
@@ -546,6 +568,12 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
     elif normalized_review_repair_task_text:
         task_text = normalized_review_repair_task_text
 
+    return task_text
+
+
+def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
+    """Build the typed worker request from orchestrator state."""
+    task_text = _build_worker_request_task_text(state)
     worker_profile = state.dispatch.worker_profile or state.route.chosen_profile
 
     constraints = dict(state.task.constraints)
@@ -567,6 +595,14 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         session_mem["repo_phase_artifacts"] = artifact_list
 
     is_scout = _is_scout_task(state)
+    runtime_mode = state.dispatch.runtime_mode or state.route.runtime_mode
+    read_only = state.task.constraints.get("read_only", False)
+    runtime_manifest = _build_worker_request_runtime_manifest(
+        state,
+        worker_profile=worker_profile,
+        runtime_mode=runtime_mode,
+        read_only=bool(read_only),
+    )
 
     return WorkerRequest(
         session_id=state.session.session_id if state.session is not None else None,
@@ -582,9 +618,10 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         secrets=dict((state.task.secrets or {}) | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
         tools=state.task.tools,
         worker_profile=worker_profile,
-        runtime_mode=state.dispatch.runtime_mode or state.route.runtime_mode,
+        runtime_mode=runtime_mode,
+        runtime_manifest=runtime_manifest,
         workspace_id=state.dispatch.workspace_id,
-        read_only=state.task.constraints.get("read_only", False),
+        read_only=read_only,
         response_format="json" if is_scout else "text",
         response_schema=scout_response_schema_for_constraints(constraints) if is_scout else None,
     )
