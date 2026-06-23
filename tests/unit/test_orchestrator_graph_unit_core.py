@@ -124,6 +124,34 @@ def test_build_worker_request_from_state():
     assert request.runtime_mode == "native_agent"
 
 
+def test_build_worker_request_uses_json_schema_for_scout_tasks() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Scout the repo",
+                "constraints": {"max_proposals": 2},
+            },
+            "task_spec": {
+                "goal": "Scout the repo",
+                "task_type": "scout",
+                "delivery_mode": "summary",
+            },
+            "route": {
+                "chosen_worker": "codex",
+                "chosen_profile": "codex-native-executor",
+                "runtime_mode": "native_agent",
+            },
+        }
+    )
+
+    request = _build_worker_request(state)
+
+    assert request.response_format == "json"
+    assert request.response_schema is not None
+    assert request.response_schema["properties"]["proposals"]["maxItems"] == 2
+    assert request.response_schema["$defs"]["ScoutProposal"]["additionalProperties"] is False
+
+
 def test_build_worker_request_does_not_infer_read_only_from_profile_name() -> None:
     state = OrchestratorState.model_validate(
         {

@@ -27,6 +27,7 @@ from orchestrator.state import (
     ApprovalCheckpoint,
     OrchestratorState,
     RouteDecision,
+    ScoutPhaseResult,
     TaskRequest,
     TaskSpec,
     WorkerDispatch,
@@ -141,6 +142,30 @@ def _setup_task(session) -> str:
     return task.id
 
 
+def _scout_proposal_payload(
+    *,
+    title: str = "Inspect queue drift",
+    description: str = "Review queue lease handling for stale worker claims.",
+    layer_impact: str = "orchestrator",
+) -> dict[str, object]:
+    return {
+        "title": title,
+        "description": description,
+        "value": "high",
+        "effort": "small",
+        "risk": "medium",
+        "layer_impact": layer_impact,
+        "validation_path": "Run execution outcome persistence tests.",
+        "hitl_need": "optional",
+        "evidence": ["orchestrator/execution_outcome_service.py"],
+        "implementation_slice": "Persist structured Scout proposals.",
+    }
+
+
+def _scout_json_payload(*proposals: dict[str, object]) -> dict[str, object]:
+    return {"proposals": list(proposals or [_scout_proposal_payload()])}
+
+
 async def _persist_outcome_and_score_improvements(
     service: MockExecutionService,
     *,
@@ -242,7 +267,7 @@ def _assert_sandbox_improvement_proposal(proposal: Any, *, task_id: str) -> None
 
 
 def test_persist_execution_outcome_creates_proposal_for_scout(session_factory) -> None:
-    """Successful scout tasks should produce an idempotent Proposal in the Idea Inbox."""
+    """Successful scout tasks should produce one idempotent Proposal per structured item."""
     service = MockExecutionService(session_factory)
 
     with session_scope(session_factory) as session:
@@ -271,6 +296,17 @@ def test_persist_execution_outcome_creates_proposal_for_scout(session_factory) -
             artifacts=[],
             budget_usage={"cost": 1.0},
             diff_text="diff content",
+            json_payload=_scout_json_payload(
+                _scout_proposal_payload(
+                    title="Inspect queue drift",
+                    description="Review queue lease handling for stale worker claims.",
+                ),
+                _scout_proposal_payload(
+                    title="Harden scout persistence",
+                    description="Store each Scout finding as its own proposal.",
+                    layer_impact="api",
+                ),
+            ),
         ),
     )
 
@@ -287,17 +323,24 @@ def test_persist_execution_outcome_creates_proposal_for_scout(session_factory) -
 
     with session_scope(session_factory) as session:
         proposals = ProposalRepository(session).list_proposals(task_id=task_id)
-        assert len(proposals) == 1
-        assert proposals[0].session_id == task_session_id
-        assert proposals[0].status == ProposalStatus.PENDING_REVIEW
-        assert proposals[0].summary == "Found some interesting files."
-        assert proposals[0].metadata_payload["source"] == "scout"
-        assert proposals[0].metadata_payload["scout_mode"] == "repo"
-        assert "scout_depth" not in proposals[0].metadata_payload
-        assert "scout_focus" not in proposals[0].metadata_payload
-        assert proposals[0].metadata_payload["files_changed"] == ["a.txt"]
-        assert proposals[0].metadata_payload["budget_usage"] == {"cost": 1.0}
-        assert proposals[0].metadata_payload["diff_text"] == "diff content"
+        assert len(proposals) == 2
+        by_title = {proposal.title: proposal for proposal in proposals}
+        assert set(by_title) == {"Inspect queue drift", "Harden scout persistence"}
+        first = by_title["Inspect queue drift"]
+        assert first.session_id == task_session_id
+        assert first.status == ProposalStatus.PENDING_REVIEW
+        assert first.summary == "Review queue lease handling for stale worker claims."
+        assert first.proposal_type == ProposalType.SCOUT
+        assert first.metadata_payload["source"] == "scout"
+        assert first.metadata_payload["scout_mode"] == "repo"
+        assert "scout_depth" not in first.metadata_payload
+        assert "scout_focus" not in first.metadata_payload
+        assert first.metadata_payload["files_changed"] == ["a.txt"]
+        assert first.metadata_payload["budget_usage"] == {"cost": 1.0}
+        assert first.metadata_payload["diff_text"] == "diff content"
+        assert first.metadata_payload["fingerprint"]
+        assert first.metadata_payload["scout_proposal"]["title"] == "Inspect queue drift"
+        assert first.metadata_payload["scout_proposal"]["layer_impact"] == "orchestrator"
 
     # Second persistence call with same task_id should be idempotent
     _persist_execution_outcome(
@@ -310,7 +353,7 @@ def test_persist_execution_outcome_creates_proposal_for_scout(session_factory) -
 
     with session_scope(session_factory) as session:
         proposals = ProposalRepository(session).list_proposals(task_id=task_id)
-        assert len(proposals) == 1
+        assert len(proposals) == 2
 
 
 def test_persist_execution_outcome_creates_proposal_for_scout_with_metadata(
@@ -350,6 +393,13 @@ def test_persist_execution_outcome_creates_proposal_for_scout_with_metadata(
             test_results=[],
             artifacts=[],
             budget_usage={"cost": 2.0},
+            json_payload=_scout_json_payload(
+                _scout_proposal_payload(
+                    title="Research React hooks",
+                    description="Review dashboard hook usage for stale state risks.",
+                    layer_impact="dashboard",
+                )
+            ),
         ),
     )
 
@@ -371,6 +421,7 @@ def test_persist_execution_outcome_creates_proposal_for_scout_with_metadata(
         assert proposals[0].metadata_payload["scout_mode"] == "research"
         assert proposals[0].metadata_payload["scout_depth"] == "deep"
         assert proposals[0].metadata_payload["scout_focus"] == "React best practices"
+        assert proposals[0].metadata_payload["scout_proposal"]["title"] == "Research React hooks"
 
 
 def test_persist_execution_outcome_creates_proposal_for_bogus_scout_mode(session_factory) -> None:
@@ -405,6 +456,12 @@ def test_persist_execution_outcome_creates_proposal_for_bogus_scout_mode(session
             test_results=[],
             artifacts=[],
             budget_usage={"cost": 2.0},
+            json_payload=_scout_json_payload(
+                _scout_proposal_payload(
+                    title="Normalize bogus scout mode",
+                    description="Verify invalid scout modes fall back to repo metadata.",
+                )
+            ),
         ),
     )
 
@@ -424,6 +481,87 @@ def test_persist_execution_outcome_creates_proposal_for_bogus_scout_mode(session
         assert proposals[0].session_id == task_session_id
         assert proposals[0].metadata_payload["source"] == "scout"
         assert proposals[0].metadata_payload["scout_mode"] == "repo"
+
+
+def test_persist_execution_outcome_tags_deep_scout_phase_proposals(session_factory) -> None:
+    """Deep Scout should persist structured proposals from each phase with phase metadata."""
+    service = MockExecutionService(session_factory)
+
+    with session_scope(session_factory) as session:
+        task_id = _setup_task(session)
+        task = TaskRepository(session).get(task_id)
+        assert task is not None
+        task.constraints = {"scout_mode": "deep", "scout_focus": "queue behavior"}
+
+    state = OrchestratorState(
+        task=TaskRequest(task_text="deep scout this", task_id=task_id),
+        session=None,
+        route=RouteDecision(chosen_worker="codex", route_reason="scout route"),
+        dispatch=WorkerDispatch(),
+        approval=ApprovalCheckpoint(required=False, status="not_required"),
+        task_spec=TaskSpec(
+            goal="deep scout this",
+            task_type="scout",
+            delivery_mode="summary",
+        ),
+        scout_phase="research",
+        scout_phase_results=[
+            ScoutPhaseResult(
+                phase="repo",
+                result=WorkerResult(
+                    status="success",
+                    summary="Repo phase complete.",
+                    files_changed=[],
+                    commands_run=[],
+                    test_results=[],
+                    artifacts=[],
+                    json_payload=_scout_json_payload(
+                        _scout_proposal_payload(
+                            title="Repo phase idea",
+                            description="Inspect local queue code paths.",
+                        )
+                    ),
+                ),
+            )
+        ],
+        result=WorkerResult(
+            status="success",
+            summary="Research phase complete.",
+            files_changed=[],
+            commands_run=[],
+            test_results=[],
+            artifacts=[],
+            json_payload=_scout_json_payload(
+                _scout_proposal_payload(
+                    title="Research phase idea",
+                    description="Compare queue behavior against external guidance.",
+                    layer_impact="worker",
+                )
+            ),
+        ),
+    )
+
+    now = datetime.now(UTC)
+    _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+    )
+
+    with session_scope(session_factory) as session:
+        proposals = ProposalRepository(session).list_proposals(task_id=task_id)
+
+    assert len(proposals) == 2
+    by_title = {proposal.title: proposal for proposal in proposals}
+    assert by_title["Repo phase idea"].metadata_payload["scout_phase"] == "repo"
+    assert by_title["Research phase idea"].metadata_payload["scout_phase"] == "research"
+    assert by_title["Repo phase idea"].metadata_payload["scout_focus"] == "queue behavior"
+    assert by_title["Research phase idea"].metadata_payload["scout_phase_metadata"] == [
+        {"phase": "repo", "summary": "Repo phase complete."},
+        {"phase": "research", "summary": "Research phase complete."},
+    ]
 
 
 def test_persist_execution_outcome_creates_scored_improvement_proposal(session_factory) -> None:

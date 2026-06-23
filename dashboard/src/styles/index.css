@@ -1986,6 +1986,36 @@ button {
   overflow-wrap: anywhere;
 }
 
+.proposal-summary {
+  margin: 0;
+}
+
+.proposal-text-block {
+  max-height: 320px;
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--color-text-secondary);
+  padding: var(--spacing-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.proposal-evidence-list {
+  margin: var(--spacing-xs) 0 0;
+  padding-left: var(--spacing-lg);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.proposal-summary-scout {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .proposal-score-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));

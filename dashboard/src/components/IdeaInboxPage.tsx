@@ -9,6 +9,7 @@ import {
   ProposalSnapshot,
   ProposalStatus,
   ProposalType,
+  ScoutProposalMetadata,
 } from '../types/proposal';
 import { DashboardLayout } from './layout/DashboardLayout';
 
@@ -21,6 +22,33 @@ const PROPOSAL_FILTERS: Array<{ label: string; value: ProposalFilter }> = [
 ];
 
 const SCORE_METRIC_LABELS = new Set(['Value', 'Effort', 'Risk', 'HITL']);
+const SCOUT_FIELD_ALIASES: Record<string, string> = {
+  value: 'Value',
+  effort: 'Effort',
+  risk: 'Risk',
+  layer: 'Layer',
+  'layer impact': 'Layer',
+  hitl: 'HITL',
+  'hitl need': 'HITL',
+};
+const SCOUT_VALIDATION_LABELS = new Set(['validation', 'validation path']);
+const SCOUT_DESCRIPTION_LABELS = new Set(['description', 'summary', 'goal']);
+
+interface ProposalField {
+  label: string;
+  value: unknown;
+}
+
+interface ScoutDisplay {
+  title: string;
+  summary: string;
+  rawSummary: string;
+  fields: ProposalField[];
+  validation: string | null;
+  evidence: string[];
+  implementationSlice: string | null;
+  isLegacy: boolean;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -99,6 +127,11 @@ function getScoring(proposal: ProposalSnapshot): ImprovementScoringMetadata | nu
   return candidate ? (candidate as ImprovementScoringMetadata) : null;
 }
 
+function getScoutProposal(proposal: ProposalSnapshot): ScoutProposalMetadata | null {
+  const candidate = asRecord(proposal.metadata_payload?.scout_proposal);
+  return candidate ? (candidate as ScoutProposalMetadata) : null;
+}
+
 function scoreTone(label: string, value: unknown): string {
   if (!SCORE_METRIC_LABELS.has(label) || typeof value !== 'string') {
     return 'neutral';
@@ -134,6 +167,225 @@ function renderMetadataValue(value: unknown): string {
     return 'Unserializable Object value';
   }
   return String(value);
+}
+
+function normalizeMarkdownText(value: string): string {
+  return value.replace(/\*\*/g, '').replace(/`/g, '').trim();
+}
+
+function normalizeFieldLabel(value: string): string {
+  return normalizeMarkdownText(value)
+    .replace(/[_-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function parseMarkdownField(line: string): { label: string; value: string } | null {
+  const match = line
+    .trim()
+    .match(/^(?:[-*]\s*)?(?:\*\*)?([A-Za-z][A-Za-z /_-]{1,32}?)(?:\*\*)?\s*:\s*(.+)$/);
+  if (!match) {
+    return null;
+  }
+  return {
+    label: normalizeFieldLabel(match[1]),
+    value: normalizeMarkdownText(match[2]),
+  };
+}
+
+function isMarkdownHeading(line: string): boolean {
+  return /^#{1,6}\s+\S/.test(line.trim());
+}
+
+function extractHeadingTitle(line: string): string {
+  return normalizeMarkdownText(line.replace(/^#{1,6}\s+/, ''))
+    .replace(/^(?:dummy\s+)?proposal\s*:\s*/i, '')
+    .replace(/^scout\s+idea\s*:\s*/i, '')
+    .trim();
+}
+
+function findScoutHeadingIndex(lines: string[]): number {
+  const proposalHeadingIndex = lines.findIndex((line) => {
+    const heading = line.trim();
+    return isMarkdownHeading(heading) && /proposal|idea/i.test(heading);
+  });
+  if (proposalHeadingIndex >= 0) {
+    return proposalHeadingIndex;
+  }
+  return lines.findIndex(isMarkdownHeading);
+}
+
+function isScoutNoiseLine(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    trimmed.length === 0 ||
+    trimmed === '---' ||
+    /^\[[^\]]*(stdout|stderr|truncated)[^\]]*\]$/i.test(trimmed) ||
+    /^\/{1,2}[\w./-]+/.test(trimmed)
+  );
+}
+
+function extractFirstReadableParagraph(lines: string[]): string | null {
+  const paragraph: string[] = [];
+  for (const line of lines) {
+    const trimmed = normalizeMarkdownText(line);
+    if (isScoutNoiseLine(trimmed)) {
+      if (paragraph.length > 0) {
+        break;
+      }
+      continue;
+    }
+    if (isMarkdownHeading(trimmed)) {
+      if (paragraph.length > 0) {
+        break;
+      }
+      continue;
+    }
+    if (parseMarkdownField(trimmed)) {
+      if (paragraph.length > 0) {
+        break;
+      }
+      continue;
+    }
+    paragraph.push(trimmed.replace(/^[-*]\s+/, ''));
+  }
+  return paragraph.length > 0 ? paragraph.join(' ') : null;
+}
+
+function extractScoutFields(lines: string[]): ProposalField[] {
+  const fields: ProposalField[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const parsed = parseMarkdownField(line);
+    if (!parsed) {
+      continue;
+    }
+    const label = SCOUT_FIELD_ALIASES[parsed.label];
+    if (!label || seen.has(label)) {
+      continue;
+    }
+    seen.add(label);
+    fields.push({ label, value: parsed.value });
+  }
+  return fields;
+}
+
+function extractMarkdownFieldValue(lines: string[], labels: Set<string>): string | null {
+  for (const line of lines) {
+    const parsed = parseMarkdownField(line);
+    if (parsed && labels.has(parsed.label)) {
+      return parsed.value;
+    }
+  }
+  return null;
+}
+
+function describeCount(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    return value.length === 1 ? '1 item' : `${value.length} items`;
+  }
+  return value != null ? 'Captured' : null;
+}
+
+function getScoutMetadataFields(proposal: ProposalSnapshot): ProposalField[] {
+  const fields: ProposalField[] = [];
+  const { metadata_payload: metadata } = proposal;
+  if (metadata.scout_mode != null) {
+    fields.push({ label: 'Mode', value: metadata.scout_mode });
+  }
+  if (metadata.scout_depth != null) {
+    fields.push({ label: 'Depth', value: metadata.scout_depth });
+  }
+  const filesChanged = describeCount(metadata.files_changed);
+  if (filesChanged) {
+    fields.push({ label: 'Files', value: filesChanged });
+  }
+  const artifacts = describeCount(metadata.artifacts);
+  if (artifacts) {
+    fields.push({ label: 'Artifacts', value: artifacts });
+  }
+  return fields;
+}
+
+function getScoutScoreFields(scoutProposal: ScoutProposalMetadata): ProposalField[] {
+  return [
+    { label: 'Value', value: scoutProposal.value },
+    { label: 'Effort', value: scoutProposal.effort },
+    { label: 'Risk', value: scoutProposal.risk },
+    { label: 'Layer', value: scoutProposal.layer_impact },
+    { label: 'HITL', value: scoutProposal.hitl_need },
+  ];
+}
+
+function getScoutEvidence(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => formatText(item, ''))
+    .filter((item) => item.length > 0);
+}
+
+function getScoutDisplay(proposal: ProposalSnapshot): ScoutDisplay {
+  const scoutProposal = getScoutProposal(proposal);
+  if (scoutProposal) {
+    return {
+      title: formatText(scoutProposal.title, proposal.title),
+      summary: formatText(
+        scoutProposal.description,
+        formatText(proposal.summary, 'Scout found a proposal for operator review.'),
+      ),
+      rawSummary: formatText(proposal.summary, ''),
+      fields: getScoutScoreFields(scoutProposal),
+      validation: formatText(scoutProposal.validation_path, ''),
+      evidence: getScoutEvidence(scoutProposal.evidence),
+      implementationSlice: formatText(scoutProposal.implementation_slice, ''),
+      isLegacy: false,
+    };
+  }
+
+  const rawSummary = formatText(proposal.summary, 'No summary provided.');
+  const lines = rawSummary.split(/\r?\n/);
+  const headingIndex = findScoutHeadingIndex(lines);
+  const bodyLines = headingIndex >= 0 ? lines.slice(headingIndex + 1) : lines;
+  const headingTitle = headingIndex >= 0 ? extractHeadingTitle(lines[headingIndex]) : '';
+  const description = extractMarkdownFieldValue(bodyLines, SCOUT_DESCRIPTION_LABELS);
+  const summary = description
+    || extractFirstReadableParagraph(bodyLines)
+    || 'Scout found a proposal for operator review.';
+  const fields = extractScoutFields(bodyLines);
+
+  return {
+    title: headingTitle || proposal.title,
+    summary,
+    rawSummary,
+    fields: fields.length > 0 ? fields : getScoutMetadataFields(proposal),
+    validation: extractMarkdownFieldValue(bodyLines, SCOUT_VALIDATION_LABELS),
+    evidence: [],
+    implementationSlice: null,
+    isLegacy: true,
+  };
+}
+
+function ProposalSummary({
+  proposal,
+  proposalType,
+  scoutDisplay,
+}: {
+  proposal: ProposalSnapshot;
+  proposalType: ProposalType;
+  scoutDisplay?: ScoutDisplay;
+}) {
+  if (proposalType === ProposalType.SCOUT) {
+    return (
+      <p className="proposal-summary proposal-summary-scout">
+        {scoutDisplay?.summary || 'Scout found a proposal for operator review.'}
+      </p>
+    );
+  }
+
+  const summary = formatText(proposal.summary, 'No summary provided.');
+  return <p className="proposal-summary">{summary}</p>;
 }
 
 function ProposalTypeBadge({ proposal }: { proposal: ProposalSnapshot }) {
@@ -232,54 +484,109 @@ function ReflectionProposalDetails({ proposal }: { proposal: ProposalSnapshot })
   );
 }
 
-function ScoutProposalDetails({ proposal }: { proposal: ProposalSnapshot }) {
+function ScoutProposalPreview({
+  proposal,
+  scoutDisplay,
+}: {
+  proposal: ProposalSnapshot;
+  scoutDisplay: ScoutDisplay;
+}) {
+  const scoutFocus = proposal.metadata_payload?.scout_focus;
+  const hasFields = scoutDisplay.fields.length > 0;
+
+  if (!hasFields && !scoutDisplay.validation && scoutFocus == null) {
+    return null;
+  }
+
+  return (
+    <div className="proposal-reflection-details">
+      {hasFields ? (
+        <dl className="proposal-score-grid" aria-label="Scout proposal fields">
+          {scoutDisplay.fields.map((field) => (
+            <div key={field.label} className="proposal-score-item">
+              <dt>{field.label}</dt>
+              <dd className={`proposal-score-value score-${scoreTone(field.label, field.value)}`}>
+                {formatLabel(field.value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+
+      {scoutDisplay.validation ? (
+        <div className="proposal-validation-path">
+          <strong>Validation:</strong> {scoutDisplay.validation}
+        </div>
+      ) : null}
+
+      {scoutFocus != null ? (
+        <div className="proposal-validation-path">
+          <strong>Focus:</strong> {formatText(scoutFocus)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ScoutProposalDetails({
+  proposal,
+  scoutDisplay,
+}: {
+  proposal: ProposalSnapshot;
+  scoutDisplay: ScoutDisplay;
+}) {
   const filesChanged = proposal.metadata_payload?.files_changed;
   const diffText = proposal.metadata_payload?.diff_text;
-  const scoutMode = proposal.metadata_payload?.scout_mode;
-  const scoutDepth = proposal.metadata_payload?.scout_depth;
-  const scoutFocus = proposal.metadata_payload?.scout_focus;
 
   const hasFilesChanged = Array.isArray(filesChanged) ? filesChanged.length > 0 : filesChanged != null;
   const hasDiffText = typeof diffText === 'string' ? diffText.trim().length > 0 : diffText != null;
+  const hasRawSummary = scoutDisplay.isLegacy && scoutDisplay.rawSummary !== scoutDisplay.summary;
+  const hasEvidence = scoutDisplay.evidence.length > 0;
+  const hasImplementationSlice = Boolean(scoutDisplay.implementationSlice);
 
   if (
     !proposal.content &&
     !hasFilesChanged &&
     !hasDiffText &&
-    scoutMode == null &&
-    scoutDepth == null &&
-    scoutFocus == null
+    !hasRawSummary &&
+    !hasEvidence &&
+    !hasImplementationSlice
   ) {
     return null;
   }
 
   return (
     <details className="proposal-details-panel">
-      <summary>View Details</summary>
-      {proposal.content ? <pre className="json-viewer">{proposal.content}</pre> : null}
+      <summary>Scout evidence</summary>
+      {hasRawSummary ? (
+        <div className="metadata-section">
+          <strong>Scout Output:</strong>
+          <div className="proposal-text-block">{scoutDisplay.rawSummary}</div>
+        </div>
+      ) : null}
 
-      {scoutMode != null || scoutDepth != null || scoutFocus != null ? (
-        <div className="proposal-scout-metadata" style={{ marginBottom: '1rem' }}>
-          <dl className="proposal-evidence-grid">
-            {scoutMode != null ? (
-              <div>
-                <dt>Mode</dt>
-                <dd className="proposal-score-value score-neutral">{formatLabel(scoutMode)}</dd>
-              </div>
-            ) : null}
-            {scoutDepth != null ? (
-              <div>
-                <dt>Depth</dt>
-                <dd className="proposal-score-value score-neutral">{formatLabel(scoutDepth)}</dd>
-              </div>
-            ) : null}
-            {scoutFocus != null ? (
-              <div className="proposal-evidence-wide">
-                <dt>Focus</dt>
-                <dd>{formatText(scoutFocus)}</dd>
-              </div>
-            ) : null}
-          </dl>
+      {hasEvidence ? (
+        <div className="metadata-section">
+          <strong>Evidence:</strong>
+          <ul className="proposal-evidence-list">
+            {scoutDisplay.evidence.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {hasImplementationSlice ? (
+        <div className="metadata-section">
+          <strong>Implementation Slice:</strong>
+          <div className="proposal-text-block">{scoutDisplay.implementationSlice}</div>
+        </div>
+      ) : null}
+
+      {proposal.content ? (
+        <div className="metadata-section">
+          <strong>Details:</strong>
+          <div className="proposal-text-block">{proposal.content}</div>
         </div>
       ) : null}
 
@@ -425,6 +732,9 @@ export function IdeaInboxPage() {
             <div className="card-grid proposals-grid">
               {filteredProposals.map((proposal) => {
                 const proposalType = getProposalType(proposal);
+                const scoutDisplay = proposalType === ProposalType.SCOUT
+                  ? getScoutDisplay(proposal)
+                  : null;
                 const acceptLabel = proposalType === ProposalType.REFLECTION
                   ? 'Approve Improvement'
                   : 'Accept Idea';
@@ -442,16 +752,33 @@ export function IdeaInboxPage() {
                             {formatDate(proposal.created_at)}
                           </span>
                         </div>
-                        <h3 className="memory-key">{proposal.title}</h3>
+                        <h3 className="memory-key">{scoutDisplay?.title || proposal.title}</h3>
                       </div>
                     </div>
 
                     <div className="memory-content proposal-card-content">
-                      <p>{proposal.summary}</p>
+                      <ProposalSummary
+                        proposal={proposal}
+                        proposalType={proposalType}
+                        scoutDisplay={scoutDisplay || undefined}
+                      />
                       {proposalType === ProposalType.REFLECTION ? (
                         <ReflectionProposalDetails proposal={proposal} />
                       ) : (
-                        <ScoutProposalDetails proposal={proposal} />
+                        <>
+                          {scoutDisplay ? (
+                            <ScoutProposalPreview
+                              proposal={proposal}
+                              scoutDisplay={scoutDisplay}
+                            />
+                          ) : null}
+                          {scoutDisplay ? (
+                            <ScoutProposalDetails
+                              proposal={proposal}
+                              scoutDisplay={scoutDisplay}
+                            />
+                          ) : null}
+                        </>
                       )}
                     </div>
 

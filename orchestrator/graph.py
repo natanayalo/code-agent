@@ -61,6 +61,10 @@ from orchestrator.nodes.verification import (
     verify_result as verify_result,
 )
 from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, review_result
+from orchestrator.scout_proposals import (
+    normalize_scout_worker_result,
+    scout_response_schema_for_constraints,
+)
 from orchestrator.state import (
     SUPPORTED_WORKER_TYPES,
     ApprovalCheckpoint,
@@ -503,6 +507,12 @@ def _normalize_repair_task_text(value: object) -> str | None:
     return normalized or None
 
 
+def _is_scout_task(state: OrchestratorState) -> bool:
+    if state.task_spec is not None and state.task_spec.task_type == "scout":
+        return True
+    return state.task.constraints.get("task_type") == "scout"
+
+
 def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
     """Build the typed worker request from orchestrator state."""
     task_text = state.normalized_task_text or state.task.task_text
@@ -556,6 +566,8 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         session_mem["repo_phase_summary"] = repo_summary
         session_mem["repo_phase_artifacts"] = artifact_list
 
+    is_scout = _is_scout_task(state)
+
     return WorkerRequest(
         session_id=state.session.session_id if state.session is not None else None,
         task_id=state.task.task_id,
@@ -573,6 +585,8 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         runtime_mode=state.dispatch.runtime_mode or state.route.runtime_mode,
         workspace_id=state.dispatch.workspace_id,
         read_only=state.task.constraints.get("read_only", False),
+        response_format="json" if is_scout else "text",
+        response_schema=scout_response_schema_for_constraints(constraints) if is_scout else None,
     )
 
 
@@ -2511,6 +2525,11 @@ def build_await_result_node(
                     if result.workspace_id is None and state.dispatch.workspace_id:
                         result = result.model_copy(
                             update={"workspace_id": state.dispatch.workspace_id}
+                        )
+                    if _is_scout_task(state):
+                        result = normalize_scout_worker_result(
+                            result,
+                            constraints=state.task.constraints,
                         )
                     progress_updates = _progress_update(state, progress_message)
             response: dict[str, Any] = {

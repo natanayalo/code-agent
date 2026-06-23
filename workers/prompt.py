@@ -237,11 +237,31 @@ def build_workflow_instructions_section(request: WorkerRequest) -> str:
 
 ScoutMode = Literal["repo", "research", "deep"]
 SCOUT_MODES: Final[tuple[ScoutMode, ...]] = get_args(ScoutMode)
+SCOUT_JSON_CONTRACT: Final = (
+    "Return exactly one JSON object and no markdown, no code fence, and no prose outside JSON. "
+    'The object must be `{ "proposals": [...] }`; each proposal item must include '
+    "`title`, `description`, `value`, `effort`, `risk`, `layer_impact`, "
+    "`validation_path`, `hitl_need`, `evidence`, and `implementation_slice`."
+)
+
+
+def _scout_max_proposals_from_constraints(constraints: dict[str, Any]) -> int:
+    raw_max_proposals = constraints.get("max_proposals")
+    try:
+        max_proposals = int(raw_max_proposals) if raw_max_proposals is not None else 3
+        if max_proposals <= 0:
+            return 3
+        return max_proposals
+    except (ValueError, TypeError):
+        return 3
 
 
 def build_scout_overlay_section(request: WorkerRequest) -> str:
     """Describe scout mode instructions and proposal-oriented output rules."""
-    if request.constraints.get("task_type") != "scout":
+    task_spec_type = (
+        request.task_spec.get("task_type") if isinstance(request.task_spec, dict) else None
+    )
+    if request.constraints.get("task_type") != "scout" and task_spec_type != "scout":
         return ""
 
     raw_mode = request.constraints.get("scout_mode")
@@ -252,27 +272,23 @@ def build_scout_overlay_section(request: WorkerRequest) -> str:
     raw_depth = request.constraints.get("scout_depth")
     scout_depth = raw_depth.strip() or None if isinstance(raw_depth, str) else None
 
-    raw_max_proposals = request.constraints.get("max_proposals")
-    try:
-        max_proposals = int(raw_max_proposals) if raw_max_proposals is not None else 3
-        if max_proposals <= 0:
-            max_proposals = 3
-    except (ValueError, TypeError):
-        max_proposals = 3
+    max_proposals = _scout_max_proposals_from_constraints(request.constraints)
 
     lines = [
         "## Scout Mode Guardrails",
         "You operate in a strictly read-only mode. Do not attempt to merge, "
         "deploy, or modify the main codebase.",
-        f"Your final output must be up to {max_proposals} well-structured proposal(s) "
+        f"Your final output must be up to {max_proposals} structured proposal(s) "
         "for the Idea Inbox.",
-        "Each proposal must include:",
-        "- Title",
-        "- Evidence (concrete file paths, line numbers, or external references)",
-        "- Impact",
-        "- Suggested implementation slice",
-        "- Verification idea",
-        "- Risk",
+        SCOUT_JSON_CONTRACT,
+        "Use these exact lowercase enum values:",
+        "- value: `low`, `medium`, or `high`",
+        "- effort: `small`, `medium`, or `large`",
+        "- risk: `low`, `medium`, or `high`",
+        "- layer_impact: `orchestrator`, `worker`, `sandbox`, `api`, `dashboard`, or `other`",
+        "- hitl_need: `required`, `optional`, or `none`",
+        "Evidence must be a non-empty array of concrete file paths, line numbers, "
+        "observed command output, or external references.",
     ]
 
     lines.append(f"\nMode: `{scout_mode}`")

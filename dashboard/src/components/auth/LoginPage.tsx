@@ -37,6 +37,7 @@ export const LoginPage: React.FC = () => {
         }
 
         .login-card {
+          box-sizing: border-box;
           width: 100%;
           max-width: 400px;
           background: var(--bg-card, #1e293b);
@@ -44,6 +45,16 @@ export const LoginPage: React.FC = () => {
           border-radius: 1rem;
           padding: 2.5rem;
           box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+
+        @media (max-width: 480px) {
+          .login-container {
+            padding: 1rem;
+          }
+
+          .login-card {
+            padding: 2rem 1.5rem;
+          }
         }
 
         .login-header {
