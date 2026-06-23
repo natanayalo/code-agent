@@ -516,6 +516,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix: short-circuit verify_result and review_result nodes for scout tasks ([#267](https://github.com/natanayalo/code-agent/pull/267))
+
 - Fix: E2E Forensic Investigation & Runtime Hardening (T-178) + Phase 2 Docs Refresh ([#217](https://github.com/natanayalo/code-agent/pull/217))
 
 - Fix: rename repo_trusted to repo_approved to resolve CodeQL alert 6 ([#203](https://github.com/natanayalo/code-agent/pull/203))
