@@ -126,7 +126,7 @@ async def _run_independent_step(
     enable_independent_verifier: bool,
     deterministic_verifier_outcome: tuple,
 ) -> tuple[tuple[Literal["passed", "failed", "warning"], str] | None, str | None]:
-    if not enable_independent_verifier or deterministic_verifier_outcome[0] == "failed":
+    if not enable_independent_verifier:
         return None, None
 
     is_read_only = is_task_read_only(state)

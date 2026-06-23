@@ -2011,6 +2011,18 @@ def _apply_brain_route_suggestion(
             }
         )
 
+    if suggestion.suggested_retry_strategy is not None and retry_route is None:
+        if suggestion.suggested_worker is not None:
+            ignored_fields.append("suggested_worker")
+        if suggestion.suggested_profile is not None:
+            ignored_fields.append("suggested_profile")
+        return None, report.model_copy(
+            update={
+                "applied": False,
+                "ignored_fields": _dedupe_preserving_order(ignored_fields),
+            }
+        )
+
     # Deterministic escalation safety check: if the policy requires escalation,
     # prevent the brain from suggesting the prior (failed) worker via profile or worker hints.
     disallowed_worker: WorkerType | None = (
