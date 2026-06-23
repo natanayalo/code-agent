@@ -484,8 +484,24 @@ def test_verify_result_failure_kinds() -> None:
         }
     )
     res = verify_result(state, deterministic_verifier_outcome=("failed", "Command failed"))
-    assert res["verification"]["status"] == "warning"
-    assert res["verification"]["failure_kind"] is None
+    assert res["verification"]["status"] == "failed"
+    assert res["verification"]["failure_kind"] == "test_regression"
+
+    state_ro = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "do", "constraints": {"read_only": True}},
+            "result": {
+                "status": "success",
+                "summary": "ok",
+                "commands_run": [],
+                "files_changed": [],
+                "artifacts": [],
+            },
+        }
+    )
+    res_ro = verify_result(state_ro, deterministic_verifier_outcome=("failed", "Command failed"))
+    assert res_ro["verification"]["status"] == "warning"
+    assert res_ro["verification"]["failure_kind"] is None
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "do"},

@@ -187,13 +187,14 @@ def _check_independent_verifier(
 
 
 def _check_deterministic_commands(
+    state: OrchestratorState,
     deterministic_verifier_outcome: tuple[Literal["passed", "failed", "warning"], str] | None,
     deterministic_verifier_metadata: dict[str, Any] | None,
 ) -> VerificationReportItem | None:
     if deterministic_verifier_outcome is None:
         return None
     status, summary = deterministic_verifier_outcome
-    if status == "failed":
+    if status == "failed" and is_task_read_only(state):
         status = "warning"
     return VerificationReportItem(
         label="deterministic_commands",
@@ -587,7 +588,7 @@ def verify_result(
 
     # 2. Deterministic Verification Commands (from run_deterministic_verification)
     if det_item := _check_deterministic_commands(
-        deterministic_verifier_outcome, deterministic_verifier_metadata
+        state, deterministic_verifier_outcome, deterministic_verifier_metadata
     ):
         items.append(det_item)
 

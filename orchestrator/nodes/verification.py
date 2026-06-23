@@ -124,7 +124,6 @@ async def _run_independent_step(
     state: OrchestratorState,
     available_workers: dict,
     enable_independent_verifier: bool,
-    deterministic_verifier_outcome: tuple,
 ) -> tuple[tuple[Literal["passed", "failed", "warning"], str] | None, str | None]:
     if not enable_independent_verifier:
         return None, None
@@ -256,7 +255,6 @@ def build_verify_result_node(
                 state,
                 available_workers,
                 enable_independent_verifier,
-                deterministic_verifier_outcome,
             )
 
             extra_events = _build_extra_events(
