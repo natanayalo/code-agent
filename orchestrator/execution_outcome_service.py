@@ -263,7 +263,11 @@ def _result_artifacts_payload(
     result: Any,
     fallback_artifacts: list[Any] | None = None,
 ) -> list[Any]:
-    source_artifacts = result.artifacts if result is not None else fallback_artifacts or []
+    if result is None:
+        logger.warning("Worker result is None, falling back to default artifacts")
+        source_artifacts = fallback_artifacts or []
+    else:
+        source_artifacts = result.artifacts or fallback_artifacts or []
     return [artifact.model_dump(mode="json") for artifact in source_artifacts]
 
 

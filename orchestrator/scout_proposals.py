@@ -43,8 +43,10 @@ class ScoutProposalValidationError(ValueError):
     """Raised when a Scout worker payload does not match the required contract."""
 
 
-def scout_max_proposals_from_constraints(constraints: Mapping[str, Any]) -> int:
+def scout_max_proposals_from_constraints(constraints: Mapping[str, Any] | None) -> int:
     """Return the normalized per-worker Scout proposal cap."""
+    if not constraints:
+        return DEFAULT_MAX_SCOUT_PROPOSALS
     raw_max_proposals = constraints.get("max_proposals")
     try:
         max_proposals = int(raw_max_proposals) if raw_max_proposals is not None else None
@@ -69,7 +71,7 @@ def _mark_all_object_properties_required(schema_node: Any) -> None:
                 _mark_all_object_properties_required(value)
 
 
-def scout_response_schema_for_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:
+def scout_response_schema_for_constraints(constraints: Mapping[str, Any] | None) -> dict[str, Any]:
     """Return the strict JSON schema supplied to Scout workers."""
     max_proposals = scout_max_proposals_from_constraints(constraints)
     schema = ScoutProposalBatch.model_json_schema()
@@ -105,7 +107,7 @@ def validate_scout_proposal_payload(
 def normalize_scout_worker_result(
     result: WorkerResult,
     *,
-    constraints: Mapping[str, Any],
+    constraints: Mapping[str, Any] | None,
 ) -> WorkerResult:
     """Convert structurally invalid successful Scout output into a worker failure."""
     if result.status != "success":

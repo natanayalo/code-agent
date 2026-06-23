@@ -245,7 +245,9 @@ SCOUT_JSON_CONTRACT: Final = (
 )
 
 
-def _scout_max_proposals_from_constraints(constraints: dict[str, Any]) -> int:
+def _scout_max_proposals_from_constraints(constraints: dict[str, Any] | None) -> int:
+    if not constraints:
+        return 3
     raw_max_proposals = constraints.get("max_proposals")
     try:
         max_proposals = int(raw_max_proposals) if raw_max_proposals is not None else 3
@@ -258,21 +260,22 @@ def _scout_max_proposals_from_constraints(constraints: dict[str, Any]) -> int:
 
 def build_scout_overlay_section(request: WorkerRequest) -> str:
     """Describe scout mode instructions and proposal-oriented output rules."""
+    constraints = request.constraints or {}
     task_spec_type = (
         request.task_spec.get("task_type") if isinstance(request.task_spec, dict) else None
     )
-    if request.constraints.get("task_type") != "scout" and task_spec_type != "scout":
+    if constraints.get("task_type") != "scout" and task_spec_type != "scout":
         return ""
 
-    raw_mode = request.constraints.get("scout_mode")
+    raw_mode = constraints.get("scout_mode")
     scout_mode = cast(ScoutMode, raw_mode) if raw_mode in SCOUT_MODES else cast(ScoutMode, "repo")
-    raw_focus = request.constraints.get("scout_focus")
+    raw_focus = constraints.get("scout_focus")
     scout_focus = raw_focus.strip() or None if isinstance(raw_focus, str) else None
 
-    raw_depth = request.constraints.get("scout_depth")
+    raw_depth = constraints.get("scout_depth")
     scout_depth = raw_depth.strip() or None if isinstance(raw_depth, str) else None
 
-    max_proposals = _scout_max_proposals_from_constraints(request.constraints)
+    max_proposals = _scout_max_proposals_from_constraints(constraints)
 
     lines = [
         "## Scout Mode Guardrails",
