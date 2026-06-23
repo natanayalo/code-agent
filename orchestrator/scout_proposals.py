@@ -61,10 +61,12 @@ def _mark_all_object_properties_required(schema_node: Any) -> None:
         if isinstance(properties, dict):
             schema_node["required"] = list(properties.keys())
         for value in schema_node.values():
-            _mark_all_object_properties_required(value)
+            if isinstance(value, dict | list):
+                _mark_all_object_properties_required(value)
     elif isinstance(schema_node, list):
         for value in schema_node:
-            _mark_all_object_properties_required(value)
+            if isinstance(value, dict | list):
+                _mark_all_object_properties_required(value)
 
 
 def scout_response_schema_for_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:

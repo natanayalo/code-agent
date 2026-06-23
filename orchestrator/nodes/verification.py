@@ -238,7 +238,7 @@ def build_verify_result_node(
                     )
                 return verify_result(
                     state,
-                    enable_independent_verifier=enable_independent_verifier,
+                    enable_independent_verifier=False,
                     sc_reason=sc_reason,
                 )
 
