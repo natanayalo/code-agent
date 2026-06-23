@@ -368,6 +368,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump langgraph from 1.2.4 to 1.2.6 ([#269](https://github.com/natanayalo/code-agent/pull/269))
+
 - Chore(deps): bump actions/checkout from 6 to 7 ([#268](https://github.com/natanayalo/code-agent/pull/268))
 
 - Chore(deps): bump langsmith from 0.8.4 to 0.8.18 ([#257](https://github.com/natanayalo/code-agent/pull/257))
