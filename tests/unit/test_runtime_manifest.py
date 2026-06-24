@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import get_args
+
 from pytest import MonkeyPatch
 
 from orchestrator.runtime_manifest import build_runtime_manifest
 from orchestrator.state import TaskSpec
 from tools.registry import SEARCH_FILE_TOOL_NAME, VIEW_FILE_TOOL_NAME, ToolDefinition, ToolRegistry
+from workers.base import MaintenanceActionType
 
 
 def test_build_runtime_manifest_projects_task_and_worker_context() -> None:
@@ -112,12 +115,8 @@ def test_build_runtime_manifest_is_request_only_for_maintenance_actions() -> Non
     """Maintenance actions advertised to agents must remain request-only."""
     manifest = build_runtime_manifest(default_image="image", workspace_root="/tmp/workspaces")
 
-    assert {action.action for action in manifest.maintenance_actions} == {
-        "restart_worker",
-        "recycle_sandbox",
-        "reload_config",
-        "dependency_refresh",
-        "operator_attention",
-    }
+    assert {action.action for action in manifest.maintenance_actions} == set(
+        get_args(MaintenanceActionType)
+    )
     assert all(action.request_only for action in manifest.maintenance_actions)
     assert all(action.requires_operator_approval for action in manifest.maintenance_actions)

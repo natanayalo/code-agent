@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Final, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -91,27 +91,24 @@ class RuntimeManifest(RuntimeManifestModel):
     maintenance_actions: list[MaintenanceActionDefinition] = Field(default_factory=list)
 
 
-_MAINTENANCE_ACTIONS: tuple[MaintenanceActionDefinition, ...] = (
-    MaintenanceActionDefinition(
-        action="restart_worker",
-        description="Request that an operator restarts a stuck or unhealthy queue worker.",
+_MAINTENANCE_ACTION_DESCRIPTIONS: Final[dict[MaintenanceActionType, str]] = {
+    "restart_worker": "Request that an operator restarts a stuck or unhealthy queue worker.",
+    "recycle_sandbox": "Request disposal and recreation of the current sandbox workspace.",
+    "reload_config": "Request that runtime configuration is reloaded by the operator.",
+    "dependency_refresh": (
+        "Request dependency installation or cache refresh outside normal task flow."
     ),
-    MaintenanceActionDefinition(
-        action="recycle_sandbox",
-        description="Request disposal and recreation of the current sandbox workspace.",
+    "operator_attention": (
+        "Request direct operator attention for an ambiguous or blocked condition."
     ),
+}
+
+_MAINTENANCE_ACTIONS: Final[tuple[MaintenanceActionDefinition, ...]] = tuple(
     MaintenanceActionDefinition(
-        action="reload_config",
-        description="Request that runtime configuration is reloaded by the operator.",
-    ),
-    MaintenanceActionDefinition(
-        action="dependency_refresh",
-        description="Request dependency installation or cache refresh outside normal task flow.",
-    ),
-    MaintenanceActionDefinition(
-        action="operator_attention",
-        description="Request direct operator attention for an ambiguous or blocked condition.",
-    ),
+        action=action,
+        description=_MAINTENANCE_ACTION_DESCRIPTIONS[action],
+    )
+    for action in get_args(MaintenanceActionType)
 )
 
 
