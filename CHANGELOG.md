@@ -307,6 +307,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- [codex] Add runtime operating contract ([#274](https://github.com/natanayalo/code-agent/pull/274))
+
 - Feat: add task-type prompt overlays for Scout modes (T-202) ([#264](https://github.com/natanayalo/code-agent/pull/264))
 
 - [codex] Add dashboard QA skill and polish edge states ([#251](https://github.com/natanayalo/code-agent/pull/251))
