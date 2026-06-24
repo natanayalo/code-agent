@@ -212,6 +212,24 @@ def build_task_context_section(request: WorkerRequest) -> str:
     return "\n".join(lines)
 
 
+def build_runtime_manifest_section(request: WorkerRequest) -> str:
+    """Render the worker-visible runtime operating contract."""
+    if not request.runtime_manifest:
+        return ""
+
+    return "\n".join(
+        [
+            "## Runtime Operating Contract",
+            "This manifest declares the current runtime identity, constraints, tools, "
+            "and request-only maintenance actions. Do not treat maintenance actions as "
+            "permission to execute privileged operations yourself.",
+            "```json",
+            _render_json_block(request.runtime_manifest),
+            "```",
+        ]
+    )
+
+
 def build_workflow_instructions_section(request: WorkerRequest) -> str:
     """Describe the expected worker execution workflow."""
     is_read_only = bool(request.constraints.get("read_only"))
@@ -382,6 +400,7 @@ def build_system_prompt(
         ),
         build_build_test_section(workspace_path) or "",
         build_task_context_section(request),
+        build_runtime_manifest_section(request),
         build_workflow_instructions_section(request),
     ]
     return "\n\n".join(section for section in sections if section.strip())

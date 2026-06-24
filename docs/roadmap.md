@@ -3,180 +3,394 @@
 ## Planning Principles
 
 - prioritize reliability, safety, and inspectability over feature breadth
-- prefer runtime leverage (Codex/Gemini/OpenRouter capabilities) over rebuilding equivalent platform logic
+- prefer runtime leverage (Codex/Antigravity/OpenRouter capabilities) over rebuilding equivalent platform logic
 - keep human-in-the-loop for trust-boundary and high-risk changes
 
 ## Current Phase
 
-Phase 2: bounded autonomy.
+Phase 3: personal reliability before broader autonomy.
 
 Priority sequence:
 
-1. Milestone 18: Controlled Autonomy / Scout Mode
-2. Milestone 19: Reflection and Improvement Pipeline
+1. M20.0: Baseline Eval Harness
+2. Milestone 20: Personal Reliability Program
+3. Milestone 21: Worker Runtime Hotspot Refactor
 
-Planned next phases:
+Planned follow-up phase:
 
-1. Phase 3: deeper platform maturity
+1. Phase 4: Selective Autonomy After Reliability
 
 Past phases:
 
-1. Phase 1: clarity and control (Milestones 15 through 17.5)
+1. Phase 2: bounded autonomy (Milestones 18 through 19.5)
+2. Phase 1: clarity and control (Milestones 15 through 17.5)
 
-## Milestone 18: Controlled Autonomy / Scout Mode
+## Phase 3 North Star
 
-Goal:
+Reduce babysitting for personal coding tasks before expanding broader autonomy.
 
-- add bounded proactive exploration without destabilizing primary execution
+Primary success metrics:
 
-Planned deliverables:
+- human interventions per completed task
+- repeated questions per task
+- tasks requiring manual log inspection
+- validation evidence rate
+- worker/provider failure rate
+- success rate by worker profile
+- latency by orchestrator stage
+- time from task submission to terminal state or draft PR
+- CI/review rejection rate for generated PRs
 
-- separate scout mode lane, queue, and budget policy
-- read-mostly default permissions
-- idea inbox/proposal store
-- trigger sources: schedule, idle time, manual prompts, recurring failure signals
+Phase 3 keeps the product personal-use first. It explicitly does not optimize for:
 
-Required controls:
+- multi-user/team SaaS workflows, tenancy, billing, roles, or organization administration
+- auto-merge or auto-deploy
+- broad multi-agent swarms
+- new model/provider expansion before reliability improves
+- autonomous privileged maintenance
 
-- explicit budget cap
-- no direct production mutation
-- output routed to review inbox only
-
-Task list:
-
-| ID | Priority | Description | Implementation notes | Acceptance criteria | Likely touched files | Risks / dependencies | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| T-186 | P0 | Define Scout Mode task type and lane parameters. | Add `'scout'` to `TaskSpecType` or runtime mode. Map a lower-priority queue lane, define separate budget defaults. | Scout tasks can be created and routed without blocking primary task lane. | `orchestrator/state.py`, `apps/api/routes/tasks.py` | Queue starvation if priorities are not strict. | (Done in #222) |
-| T-187 | P0 | Add Read-Mostly sandbox policy. | Create sandbox profile that only allows reading files. Disable modifying commands except writing to a designated artifact directory. | Scout tasks fail if they attempt `git commit` or `npm install`. | `sandbox/policy.py`, `workers/native_agent_runner.py` | Over-constraining might break some code analysis tools. | (Done in #223) |
-| T-188 | P0 | Implement Idea Inbox / Proposal store. | Add `Proposal` DB model tied to `Session`. Allow tasks to emit ideas instead of final code. | Ideas are durably stored with origin metadata and status (`PENDING_REVIEW`). | `db/models.py`, `repositories/sqlalchemy.py` | Schema migration needs care. | (Done in #224) |
-| T-189 | P0 | Route Scout output to Review Inbox. | Ensure Scout tasks do not merge or deploy. Their artifacts transition to a `PENDING_REVIEW` proposal state. | Scout outputs only show up in the Idea Inbox and never execute mutations on main codebase. | `orchestrator/execution.py`, `orchestrator/graph.py` | Escape via tool loop if boundaries are weak. | (Done in #226) |
-| T-190 | P1 | Dashboard UI for Idea Inbox. | Surface Scout proposals in the dashboard. Operator can review, reject, or promote them to real tasks. | Operator can click "Accept Idea" to turn it into a queued execution task. | `dashboard/src/components/*`, `dashboard/src/services/api.ts` | State drift between UI and backend. | (Done in #227) |
-| T-191 | P2 | Add Trigger Sources: Schedule and Idle time. | Create a cron-like scheduler or API endpoints that spawn Scout tasks based on configured intervals or system idleness. | Background task generation works without human input. | `apps/api/scheduler.py` | Spawning loops could consume budget quickly. | (Done) |
-| T-200 | P0 | Skip change-oriented review for read-only tasks. | Change read-only execution policy so worker self-review and independent code-change review are skipped when `read_only=true` or no files changed; keep deterministic verification only when explicit safe commands exist. | Read-only Scout/investigation tasks no longer run diff-oriented review, while mutable tasks still do. | `workers/self_review.py`, `orchestrator/review.py`, `orchestrator/nodes/verification.py` | Must preserve useful verification for read-only investigations without running change-review prompts. | Done |
-| T-201 | P1 | Add structured Scout trigger parameters and repo allowlist. | Extend Scout trigger request support for `mode`, `repo_key`, optional `branch`, `focus`, `depth`, and capped `max_proposals`; resolve `repo_key` through configured allowlisted repos instead of arbitrary repo URLs. | Default no-body trigger still works; configured repo keys resolve safely; research mode rejects missing focus; invalid/capped params return clear validation errors. | `apps/api/routes/tasks.py`, `apps/api/config.py`, dashboard trigger UI/tests | Input flexibility could expand remote-code intake; keep repo selection allowlisted and server-controlled. | (Done in #263) |
-| T-202 | P1 | Add task-type prompt overlays for Scout modes. | Add prompt overlays on top of the shared worker prompt for `repo_scout`, `research_scout`, and `deep_scout`, with proposal-oriented output rules, evidence requirements, and read-only guardrails. | Scout prompts are mode-specific, generic workers keep the shared base prompt, and tests assert the expected overlay content. | `workers/prompt.py`, worker prompt tests | Prompt drift can make task types inconsistent; keep overlays small and composable. | Done |
-| T-203 | P1 | Implement Repo Scout and Research Scout modes. | Route `mode=repo` to read-only repository inspection and `mode=research` to topic-driven research proposal generation with explicit focus/topic input. | Repo Scout produces repo-evidenced proposals; Research Scout produces source-aware proposals; both land in Idea Inbox with mode metadata. | `orchestrator/task_spec.py`, `orchestrator/execution_outcome_service.py`, Scout API/dashboard tests | Research Scout needs explicit network/source policy to avoid noisy or stale recommendations. | Done |
-| T-204 | P2 | Implement Deep Scout chaining. | Add explicit `mode=deep` / `repo_then_research` flow that chains repo inspection into targeted research with a higher but still capped budget. | Deep Scout runs only when explicitly requested, records chain metadata, and produces a richer Idea Inbox proposal without mutating code. | `orchestrator/graph.py`, `orchestrator/execution_outcome_service.py`, Scout integration tests | Chaining can consume budget quickly; require explicit operator intent and strict caps. | Done |
-
-## Milestone 19: Reflection and Improvement Pipeline
+## M20.0: Baseline Eval Harness
 
 Goal:
 
-- convert execution friction into structured, reviewable improvement proposals
+- establish a small measurement baseline before changing reliability contracts
 
-Planned deliverables:
+Scope:
 
-- friction report schema
-- improvement suggestion schema
-- proposal scoring/planning by value, effort, risk, layer impact, validation path, and HITL need
-- review queue for improvement proposals
+- define 8 to 12 representative real-project tasks
+- cover bugfix, feature, refactor, review-fix, scout/investigation, and blocked-decision cases
+- record whether each task completed, needed human decisions, repeated a question,
+  produced validation evidence, failed due to worker/runtime issues, and reached a usable result
+- capture elapsed time to terminal state
+- break results down by worker profile, orchestrator stage, decision type, validation failure type,
+  and whether manual log inspection was needed
 
-Task list:
+Acceptance criteria:
 
-| ID | Priority | Description | Implementation notes | Acceptance criteria | Likely touched files | Risks / dependencies | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| T-192 | P0 | Define Reflection and Improvement schemas. | Add Pydantic models for `FrictionReport` and `ImprovementSuggestion` (including scoring fields: value, effort, risk, layer_impact, validation_path, hitl_need). | Schemas validate successfully and have robust type definitions. | `orchestrator/reflection.py` (new), `tests/unit/test_reflection_schemas.py` | Schema definitions might drift without strict Pydantic enforcement. | (Done) |
-| T-193 | P0 | Integrate schemas with DB Proposal model. | Add a `proposal_type` column/enum to distinguish reflection improvements from scout ideas. Extend JSON payload mapping. | DB migration applies cleanly; old `Proposal` rows default to `'scout'`. | `db/models.py`, `db/enums.py`, `repositories/sqlalchemy.py` | DB migration schema evolution needs care. | Completed |
-| T-194 | P1 | Capture execution friction from worker runtime. | Modify the worker failure/verifier rejection paths to automatically emit a `FrictionReport` capturing the context, source, and impact. | Friction reports are generated automatically on repeated command/test failures. | `workers/native_agent_runner.py`, `orchestrator/verification.py` | Too much noise if we report on every single small failure. | Completed |
-| T-195 | P1 | Generate Scored Improvement Proposals. | Use deterministic synthesis to analyze `FrictionReport`s and produce scored `ImprovementSuggestion`s with effort/risk scoring. | Emits actionable proposals stored as `PENDING_REVIEW` in the DB. | `orchestrator/improvement_suggestions.py`, `orchestrator/execution_outcome_service.py` | Scoring may require future LLM enrichment, but the first slice avoids model latency. | Completed |
-| T-196 | P1 | Add LLM-Based Improvement Proposal Scoring. | Use an optional model-backed scorer to generate or revise `ImprovementSuggestion` scoring fields and rationale from `FrictionReport` evidence; keep deterministic scoring as fallback. | Feature flag controls LLM scoring; failed/time-out model calls fall back to deterministic suggestions; metadata records model rationale and fallback status; tests cover success, fallback, and disabled-flag behavior. | `orchestrator/improvement_suggestions.py`, `orchestrator/brain.py`, `orchestrator/execution_outcome_service.py` | Model latency and nondeterminism can make proposal quality inconsistent. | Completed |
-| T-197 | P1 | Dashboard UI for Reflection & Improvement Queue. | Extend the Idea Inbox UI to also display Friction Reports and Improvement Suggestions with their new scoring fields. | Operators can view, approve, or reject structural improvements. | `dashboard/src/components/*`, `dashboard/src/services/api.ts` | UI clutter if too many proposals are generated. | Completed |
-| T-198 | P1 | Add dashboard trigger tab for task and scout actions. | Add a dedicated dashboard view for operator-triggered actions using existing APIs, including generic task submission shortcuts and `/tasks/scout/trigger`; do not add a manual reflection trigger in this slice because reflection remains outcome-driven. | Operator can trigger configured Scout runs and submit task-style trigger actions from the dashboard; UI shows clear success/error/loading states and does not expose secrets. | `dashboard/src/components/*`, `dashboard/src/services/api.ts`, dashboard tests | Trigger controls could accidentally encourage budget-heavy runs; keep controls explicit and scoped to existing authenticated APIs. | Completed |
-| T-199 | P1 | Full dashboard QA, visual polish, limits, and reusable QA skill. | Audit the full dashboard in browser across core routes; fix high-confidence bugs, interaction rough edges, visual overflow, empty/error/loading states, and obvious performance issues; document the repeatable workflow as a repo-local dashboard QA skill. | Dashboard QA produces verified fixes, browser evidence, coverage remains above threshold, and `.agents/skills/` contains a reusable QA workflow for future dashboard passes. | `dashboard/src/*`, `.agents/skills/*`, dashboard tests | Scope can sprawl; prioritize bugs, usability regressions, visual limits, and reusable verification over broad redesign. | Planned |
+- baseline tasks are runnable through the existing task API or a thin local harness
+- results are stored in a simple inspectable artifact, not a hidden benchmark service
+- baseline metrics are documented before judging M20.1 through M20.6 improvements
 
-Manual-only zones:
-
-- auth/security
-- secrets/sandbox boundaries
-- approval core logic
-- deployment/billing controls
-
-## Milestone 19.5: Gemini to Antigravity Migration
+## Milestone 20: Personal Reliability Program
 
 Goal:
 
-- make Antigravity CLI the canonical public worker identity and migration target for the current Gemini CLI worker lane
+- reduce operator babysitting by making runtime identity, constraints, decisions,
+  validation, and maintenance paths explicit to workers/operators
 
 Planned deliverables:
 
-- canonical `antigravity` worker type and profile names
-- Antigravity native CLI adapter using `agy -p` / `agy --print`
-- prompt-as-argv support in the native runner for CLIs that require it
-- Docker worker support using official Antigravity install/auth mechanisms
-- updated e2e QA, runbook, compose, env, dashboard/API labels, and operator guidance
-- removal of Gemini CLI defaults after Antigravity Docker e2e is proven
-
-Public interface direction:
-
-- canonical worker type becomes `antigravity`; `gemini` is not the long-term public name
-- canonical profiles become `antigravity-native-executor`, `antigravity-native-executor-read-only`, `antigravity-native-planner`, `antigravity-native-reviewer`, and `antigravity-native-discovery`
-- Antigravity env vars are `CODE_AGENT_ANTIGRAVITY_CLI_BIN`, `CODE_AGENT_ANTIGRAVITY_MODEL`, `CODE_AGENT_ANTIGRAVITY_TIMEOUT_SECONDS`, `CODE_AGENT_ANTIGRAVITY_AUTH_DIR`, `CODE_AGENT_ANTIGRAVITY_NATIVE_SANDBOX_ENABLED`, `CODE_AGENT_ANTIGRAVITY_TOOL_PERMISSION`, and `CODE_AGENT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY`
-- runtime worker inputs use only the canonical `antigravity` identity; historical `gemini` rows are handled by migration
-
-Manual-derived constraints:
-
-- `agy` one-shot automation uses prompt-as-argv (`agy -p "<prompt>"`, also exposed locally as `--print`); command logging must redact prompt text because it is no longer stdin-only
-- Antigravity stores preferences and permissions in `~/.gemini/antigravity-cli/settings.json`, including `toolPermission`, `artifactReviewPolicy`, and `enableTerminalSandbox`
-- supported permission modes include `request-review`, `proceed-in-sandbox`, `always-proceed`, and `strict`; the platform must map worker profiles to these modes explicitly instead of relying on interactive prompts
-- Antigravity auth uses the operating-system secure keyring (Apple Keychain, Linux Secret Service over DBus, or Windows Credential Manager), so `CODE_AGENT_ANTIGRAVITY_AUTH_DIR` must not imply host keychain copying or secret scraping
-- Antigravity parses workspace `AGENTS.md`; migration docs must also cover legacy plugin import, skills paths, and MCP config movement into `.agents/`
-- desktop app installation can share settings with the CLI, but it does not by itself prove auth is available inside a Linux Docker worker
-
-Reference manuals:
-
-- [Antigravity CLI overview](https://antigravity.google/docs/cli-overview)
-- [Antigravity CLI reference](https://antigravity.google/docs/cli-reference)
-- [Antigravity CLI install](https://antigravity.google/docs/cli-install)
-- [Antigravity CLI getting started](https://antigravity.google/docs/cli-getting-started)
-- [Antigravity CLI troubleshooting](https://antigravity.google/docs/cli-troubleshooting)
-- [Antigravity CLI best practices](https://antigravity.google/docs/cli-best-practices)
-- [Antigravity CLI sandbox](https://antigravity.google/docs/cli-sandbox)
-- [Antigravity CLI permissions](https://antigravity.google/docs/cli-permissions)
-- [Gemini CLI to Antigravity migration](https://antigravity.google/docs/gcli-migration)
-
-Task list:
-
-| ID | Priority | Description | Implementation notes | Acceptance criteria | Likely touched files | Risks / dependencies | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| T-205 | P0 | Rename canonical worker identity from Gemini to Antigravity. | Add `antigravity` worker type, profile names, API/dashboard labels, and DB enum/check-constraint migration from persisted `gemini` rows to `antigravity`. Keep `gemini` only in historical migrations and the current implementation adapter until later Antigravity adapter tasks land. | Existing `gemini` task/run rows upgrade to `antigravity`; new submissions accept only the canonical `antigravity` worker identity. | `db/enums.py`, `workers/base.py`, `db/migrations/versions/*`, routing/API tests | Broad type/name churn can break replay, snapshots, and dashboards if aliases are inconsistent. | Done |
-| T-206 | P0 | Add Antigravity native CLI adapter. | Build an adapter around `agy -p` / `agy --print <prompt> --print-timeout ... --model ... --log-file ...`; generate or mount the per-run Antigravity settings needed for `toolPermission`, `artifactReviewPolicy`, and `enableTerminalSandbox`; map stdout, JSON responses, provider/auth errors, timeout, diff, and changed files into `WorkerResult`. | Fake `agy` tests cover success, JSON output, timeout, auth/provider failure, permission prompt/denial, no-change success, settings generation, and changed-file collection. | `workers/*antigravity*`, `apps/api/task_service_factory.py`, worker tests | `agy -p` / `--print` consumes the prompt as an argument and differs from Gemini CLI flags, permissions, and auth behavior; it must not be treated as a drop-in binary rename. | Done |
-| T-207 | P0 | Support prompt-as-argv in native runner. | Extend native-agent execution so adapters can place the prompt in argv while existing CLIs keep stdin prompt delivery. Redact prompt text from logged/sanitized command strings. | Native runner tests prove stdin remains default, `agy` prompt-in-argv works, command logs do not expose full prompt/secrets, and timeouts still collect artifacts. | `workers/native_agent_runner.py`, `workers/native_agent_models.py`, runner tests | Long prompts can hit argv limits; adapter must fail clearly or use a bounded strategy. | Done |
-| T-208 | P0 | Add Docker Antigravity support. | Install Antigravity CLI in the worker image using the official CLI install path and prove auth works inside compose through official Antigravity keyring mechanisms. For Linux containers, validate Secret Service/DBus requirements or document the official blocker. Do not invent keychain bypasses or scrape host secrets. | Docker smoke passes for `agy models` and `agy --print 'Reply with OK only'`; permission settings are deterministic for non-interactive runs; if official non-interactive auth is unavailable, the blocker is documented and the milestone remains incomplete. | `Dockerfile.worker`, `docker-compose.yml`, `.env.example`, Docker/e2e scripts | Antigravity desktop/keychain auth may not transfer safely into Linux containers, and headless DBus/keyring support may require an official container-friendly auth path. | Done |
-| T-209 | P1 | Update e2e QA and operator docs. | Replace Gemini defaults and auth guidance with Antigravity guidance in e2e scripts, README, runbook, compose docs, and env examples. Include `agy` install/PATH guidance, keyring/DBus troubleshooting, permission presets, `AGENTS.md` context behavior, legacy plugin import, skills path migration, and MCP config relocation. | Local e2e instructions use `worker_override=antigravity`; stale `gemini auth login` guidance is removed or marked legacy; operator docs explain how to diagnose `agy: command not found`, locked keyrings, and permission-prompt timeouts. | `.agents/skills/e2e-qa/scripts/*`, `README.md`, `docs/runbook.md`, `.env.example` | Docs can drift if code-level aliases remain during the migration bridge. | Done |
-| T-210 | P1 | Update dashboard/API worker labels. | Update operator-visible worker/profile labels and frontend/API contract fixtures to show `antigravity` names. | Dashboard and API tests cover `worker_override=antigravity`, Antigravity profiles, and canonical display behavior. | `dashboard/src/*`, `apps/api/routes/*`, API/dashboard tests | UI/API compatibility must be explicit for existing saved tasks and replays. | Done |
-| T-211 | P1 | Remove Gemini CLI defaults after Antigravity e2e passes. | Drop Gemini CLI from the default worker image/config and leave only documented temporary aliases if still needed. | Default compose image uses Antigravity, full webhook e2e passes with `antigravity`, and Gemini CLI is no longer required for local happy path. | `Dockerfile.worker`, `docker-compose.yml`, docs/tests | Removing Gemini too early can break enterprise/API-key users before the migration bridge is verified. | Done |
-
-Testing and acceptance:
-
-- unit tests cover worker enum/profile validation, service factory wiring, Antigravity command construction, env allowlist, and native-runner prompt delivery mode
-- migration integration tests prove existing `gemini` task/run rows upgrade to `antigravity` and constraints accept the new canonical value set
-- fake `agy` tests cover success, JSON output, timeout, auth/provider failure, permission prompt/denial, settings generation, and changed-file collection
-- Docker smoke covers `agy models` and `agy --print 'Reply with OK only'` inside the worker container
-- full webhook e2e passes with `worker_override=antigravity` after Docker auth is proven
-- dashboard/API contract tests cover worker override and profile names
-
-Assumptions:
-
-- Milestone 19 remains active; Milestone 19.5 is the migration bridge before Phase 3
-- existing Milestones 20 and 21 keep their numbers
-- Docker support is required for the milestone to complete, but auth must use official Antigravity mechanisms only
-- if official Antigravity CLI cannot authenticate non-interactively in Docker, T-208 documents the blocker and the milestone remains incomplete rather than shipping an unsafe workaround
-
-## Milestone 20: Operational Self-Awareness
-
-Goal:
-
-- make runtime identity, constraints, and maintenance paths explicit to workers/operators
-
-Planned deliverables:
-
-- environment manifest (identity/build/runtime/worker/tool/approval capabilities)
-- agent-visible maintenance request actions (restart, recycle worker, reload config, dependency refresh, operator attention)
-- explicit forbidden action declarations
+- runtime operating contract (identity/build/runtime/worker/tool/approval capabilities)
+- agent-visible request-only maintenance actions (restart, recycle worker, reload config, dependency refresh, operator attention)
+- observable ExecutionPlan spine for complex tasks
+- decision-card inbox for resumable human input
+- worker supervisor and health registry
+- repo validation profiles
+- draft PR / CI repair loop
+- expanded internal complex-task evaluation suite
+- explicit forbidden action declarations carried into worker context
 
 Control rule:
 
-- agent can request privileged maintenance actions; operator/system policy decides execution
+- agents can request privileged maintenance actions; operator/system policy decides execution
+- no privileged maintenance action is auto-executed in Phase 3
+
+Implementation sequence:
+
+1. M20.1 Runtime Operating Contract
+2. M20.2 ExecutionPlan Spine
+3. M20.3 Decision Inbox v2
+4. M20.4 Worker Supervisor v1
+5. M20.5 Repo Validation Profiles
+6. M20.6 Draft PR + CI Repair Loop
+7. M20.7 Expanded Internal Eval Suite
+
+### M20.1 Runtime Operating Contract
+
+Goal:
+
+- make the runtime state visible to both workers and operators
+
+Scope:
+
+- add a versioned `RuntimeManifest`
+- expose current capabilities through `GET /system/runtime-manifest`
+- pass a frozen run-scoped manifest through `WorkerRequest.runtime_manifest`
+- persist the run-scoped manifest as worker-run evidence
+- include service identity, build/environment, sandbox image/root, selected worker/profile/runtime,
+  workspace id, task budget, delivery mode, network/read-only state, tool permissions,
+  forbidden actions, and approval capabilities
+- add request-only `MaintenanceRequest` support for `restart_worker`, `recycle_sandbox`,
+  `reload_config`, `dependency_refresh`, and operator attention
+- show the current runtime manifest on the System dashboard page
+
+Boundaries:
+
+- the system endpoint shows current capabilities
+- the worker request and persisted run evidence show what a specific run saw
+- maintenance requests do not grant permission to execute privileged actions
+
+Acceptance criteria:
+
+- workers receive the manifest in prompt/context
+- operators can inspect the live manifest from API and dashboard
+- completed runs retain the frozen manifest for debugging
+- tests cover manifest building, maintenance request validation, worker prompt rendering,
+  API exposure, and dashboard rendering
+
+### M20.2 ExecutionPlan Spine
+
+Goal:
+
+- make complex task progress observable and resumable without replacing task-level scheduling
+
+Scope:
+
+- add durable `ExecutionPlan` and `ExecutionPlanNode` persistence
+- generate plan nodes from `TaskPlan` / `TaskSpec` for complex tasks
+- expose optional `execution_plan` on `TaskSnapshot`
+- show current node and plan progress in task detail
+
+Node fields:
+
+- `node_id`
+- `parent_node_id` or `depends_on`
+- `status`: pending, active, blocked, completed, failed, skipped
+- `goal`
+- `acceptance_criteria`
+- `assigned_worker_profile`
+- `budget`
+- `validation_commands`
+- `artifacts`
+- `blocker_interaction_id`
+- `retry_count`
+- `started_at` and `finished_at`
+
+Boundaries:
+
+- existing task-level dispatch remains authoritative
+- plan nodes are not individually scheduled in this slice
+- dependency fields prepare for future DAG scheduling without enabling fan-out yet
+- `blocked` is a first-class node status so decision handling can attach to the right work item
+
+Acceptance criteria:
+
+- complex tasks create a visible plan spine
+- task execution can update current-node status
+- blocked tasks identify the blocking node and interaction
+- dashboard shows plan progress without changing queue semantics
+
+### M20.3 Decision Inbox v2
+
+Goal:
+
+- turn human input from ad hoc task prompts into reusable, deduplicated decision cards
+
+Scope:
+
+- upgrade `HumanInteraction` payloads into decision cards
+- dashboard inbox becomes interaction-card based instead of task-count based
+- Telegram/dashboard responses store selected option, optional freeform answer, and optional remember preference
+- support human-in-the-loop modes: `require_approval`, `proceed_with_flag`, and `notify_only`
+- resolved decisions are reused on retry unless the stable decision payload materially changes
+
+Decision payload fields:
+
+- `decision_key`
+- `prompt`
+- `recommended_option_id`
+- `options`
+- `allow_freeform`
+- `risk_level`
+- `scope`
+- affected files or approval categories when relevant
+
+Safety rules:
+
+- high-risk decisions use `require_approval`
+- medium-risk decisions may use `proceed_with_flag` only when repo/task policy allows it
+- low-risk decisions may use `notify_only` when policy and prior outcomes support it
+- remember is allowed only for low/medium-risk categories at first
+- high-risk decisions such as secrets, auth, deployment, destructive migrations, and broad dependency changes remain one-off or require explicit repo policy
+- decision hashing ignores volatile wording, timestamps, task ids, and generated summaries
+
+Acceptance criteria:
+
+- decisions render as cards in dashboard and Telegram-compatible responses
+- selected options resume the correct task/node
+- retries do not re-ask materially identical resolved decisions
+- HITL mode selection is visible in interaction payloads and timeline events
+- tests cover decision-card hashing, response persistence, and retry reuse
+
+### M20.4 Worker Supervisor v1
+
+Goal:
+
+- make worker availability, capacity, and unhealthy profiles explicit
+
+Scope:
+
+- add worker registry and heartbeat persistence
+- track worker id, process/host identity, capabilities, supported profiles, capacity,
+  active task count, last heartbeat, health, and quarantine reason
+- make polling respect capacity and lane/profile compatibility
+- use capacity-aware claiming for safe routing and backpressure, not multi-agent fan-out
+- quarantine provider/auth/sandbox-failing profiles until operator clears them
+- add best-effort cancellation propagation where the runtime supports it
+
+Internal slices:
+
+1. registry and heartbeat
+2. capacity-aware claiming
+3. profile quarantine
+4. best-effort cancellation propagation
+
+Cancellation evidence:
+
+- `cancel_requested_at`
+- `cancel_signal_sent_at`
+- `worker_acknowledged_cancel_at`
+- `subprocess_terminated_at`
+- `container_recycled_at`
+
+Acceptance criteria:
+
+- workers cannot claim tasks beyond declared capacity
+- routing/claiming respects supported profiles
+- quarantined profiles stop receiving new work until cleared
+- cancellation records best-effort propagation evidence without blocking v1 on perfect worker support
+
+### M20.5 Repo Validation Profiles
+
+Goal:
+
+- reduce manual verification by making repo-specific setup and quality gates explicit
+
+Scope:
+
+- add optional repo-root `code-agent.project.yaml`
+- support setup commands, validation tiers, protected paths, approval-required categories,
+  and default delivery mode
+- make `TaskSpec.verification_commands` inherit repo defaults unless explicitly overridden
+- require non-read-only tasks to finish with validation evidence or a bounded failure report
+
+Example profile:
+
+```yaml
+setup:
+  commands:
+    - poetry install
+
+validation:
+  quick:
+    - poetry run pytest tests/unit
+  full:
+    - poetry run pytest
+    - poetry run pre-commit run --all-files
+
+protected_paths:
+  - db/migrations/*
+  - .github/workflows/*
+  - infra/*
+
+approval_required:
+  - dependency_changes
+  - auth_changes
+  - deployment_changes
+  - destructive_migrations
+
+delivery:
+  default_mode: draft_pr
+```
+
+Acceptance criteria:
+
+- repo profiles parse with clear validation errors
+- task specs inherit profile defaults deterministically
+- risk/budget can select quick vs full validation
+- protected-path and approval-required categories trigger human interaction
+- mutable tasks cannot report success without validation evidence or bounded failure evidence
+
+### M20.6 Draft PR + CI Repair Loop
+
+Goal:
+
+- make non-trivial code changes reviewable by default and repair CI failures without manual log spelunking
+
+Scope:
+
+- make `draft_pr` the recommended delivery mode for non-trivial code changes
+- persist delivery metadata as first-class task/run evidence
+- ingest GitHub CI check failures
+- create focused repair tasks from failed checks
+
+V1 boundaries:
+
+- GitHub only
+- draft PR only
+- CI check ingestion only
+- no review-comment repair yet
+- no auto-merge
+- no deployment
+
+Delivery metadata:
+
+- `delivery_mode`
+- `branch_name`
+- `pr_url`
+- `pr_number`
+- `commit_sha`
+- `ci_status`
+- `ci_failed_jobs`
+- `ci_last_checked_at`
+
+Repair task context:
+
+- failing job
+- failing command
+- log excerpt
+- suspected files
+- original task id
+- original PR
+
+Acceptance criteria:
+
+- draft PR metadata is visible on task snapshots/dashboard
+- failed CI creates a focused repair task with enough context to act
+- repair tasks link back to the original task and PR
+- review-comment ingestion remains explicitly deferred
+
+### M20.7 Expanded Internal Eval Suite
+
+Goal:
+
+- use real tasks as the guardrail for future autonomy changes
+
+Scope:
+
+- expand the M20.0 baseline to 20 to 50 tasks
+- classify tasks by babysitting risk
+- track success rate, validation pass rate, repeated questions, human interruptions,
+  repair loops, worker failures, time to PR, and CI/review rejection rate
+- include worker-profile success rates, orchestrator-stage latency, validation-failure categories,
+  provider failure causes, and manual-log-inspection rate
+
+Task classes:
+
+- no decision needed, should finish alone
+- one clarification needed, then should finish
+- permission needed, then should finish
+- validation fails, repair should happen
+- worker/provider failure, reroute or quarantine should happen
+- protected path touched, approval should be requested
+- PR CI fails, repair task should be created
+
+Acceptance criteria:
+
+- eval results compare against M20.0 baseline
+- reliability regressions are visible before merging future autonomy changes
+- metrics emphasize reduced babysitting, not only raw completion rate
+- profile/stage metrics are concrete enough to guide future routing and autonomy policy
 
 ## Milestone 21: Worker Runtime Hotspot Refactor
 
@@ -198,7 +412,118 @@ Approach:
 
 - incremental extraction
 - preserve existing contracts and behavior
+- preserve M20 runtime, plan, decision, supervisor, validation, and delivery contracts
 - prioritize testability and reviewability
+- avoid behavior-changing refactors until reliability milestones define the right boundaries
+
+## Phase 4: Selective Autonomy After Reliability
+
+Goal:
+
+- expand autonomy only where Phase 3 metrics show the system is reliable enough to earn it
+
+Operating rule:
+
+- Phase 4 changes must be justified by M20/M21 evidence, not competitor parity alone
+- personal-use boundaries remain in force
+- high-risk actions still require explicit approval
+
+### M22 Eval-Driven Routing
+
+Goal:
+
+- route tasks by observed worker/profile outcomes instead of static preference alone
+
+Scope:
+
+- use M20.0/M20.7 eval results and production run metrics
+- compare success, validation pass rate, latency, interruption rate, and failure causes by profile
+- update routing policy with explainable profile choices
+
+Boundary:
+
+- routing changes stay policy-driven and inspectable; no opaque auto-training loop
+
+### M23 Semantic Memory Retrieval
+
+Goal:
+
+- improve memory relevance when evals show keyword/recency retrieval is causing misses
+
+Scope:
+
+- add semantic retrieval behind the existing skeptical-memory contract
+- preserve source, confidence, scope, verification, and editability metadata
+- consider pgvector only if metrics justify the new infrastructure dependency
+
+Boundary:
+
+- do not add vector storage just because it is available; add it only when measured retrieval quality needs it
+
+### M24 Decomposed Task DAG
+
+Goal:
+
+- turn the observable ExecutionPlan spine into real subtask decomposition
+
+Scope:
+
+- add a decomposition step that emits sub-TaskSpecs and dependency edges
+- keep execution mostly sequential at first
+- aggregate node outcomes into a single task result and validation story
+
+Boundary:
+
+- DAG scheduling is introduced after the plan spine, decision model, supervisor, and validation gates are stable
+
+### M25 Parallel Worker Fan-Out
+
+Goal:
+
+- run independent plan nodes concurrently where it clearly reduces completion time without reducing reliability
+
+Scope:
+
+- fan out only dependency-independent nodes
+- respect worker capacity, lane quotas, sandbox limits, and repo validation gates
+- add aggregation and reviewer checkpoints before final delivery
+
+Boundary:
+
+- no broad multi-agent swarm behavior; parallelism is selective, bounded, and measured
+
+### M26 Review Comment Repair
+
+Goal:
+
+- extend the PR repair loop from CI failures to review-comment fixes
+
+Scope:
+
+- ingest actionable GitHub PR review comments
+- create focused repair tasks linked to the original PR and comment thread
+- preserve existing no-auto-merge and no-deploy boundaries
+
+Boundary:
+
+- start only after M20.6 CI repair is stable
+
+### M27 Reliability-Based Autonomy Policy
+
+Goal:
+
+- let low-risk work move from blocking approval toward `proceed_with_flag` or `notify_only`
+  when measured outcomes support it
+
+Scope:
+
+- define risk/category thresholds using M20/M22 metrics
+- keep high-risk categories blocking
+- show autonomy policy decisions in task timelines and dashboard
+
+Boundary:
+
+- autonomy increases are reversible and scoped by repo/category
 
 ## Phase Sequencing Summary
 
@@ -217,14 +542,27 @@ Phase 2:
 
 Phase 3:
 
-1. Milestone 20
-2. Milestone 21
+1. M20.0
+2. Milestone 20
+3. Milestone 21
+
+Phase 4:
+
+1. Milestone 22
+2. Milestone 23
+3. Milestone 24
+4. Milestone 25
+5. Milestone 26
+6. Milestone 27
 
 ## Open Planning Questions
 
 1. which public product sentence remains canonical after milestone A rollout?
 2. which runtime owns planning by default in production policy?
-3. should scout mode launch as strictly read-only first?
-4. which proposal categories (if any) can be auto-promoted?
-5. which maintenance actions are request-only vs executable?
-6. which hotspot refactors are highest leverage before autonomy expansion?
+3. should persisted runtime manifests start as artifact-index entries or move directly to a queryable JSON column?
+4. which low/medium-risk decision categories are safe to remember per repo?
+5. which worker runtimes can provide reliable cancellation evidence in v1?
+6. when should CI repair expand beyond GitHub draft PRs?
+7. what metric threshold is good enough to promote a category from blocking approval to proceed-with-flag?
+8. which memory misses justify adding semantic retrieval infrastructure?
+9. which task classes benefit enough from DAG/parallel execution to justify the added complexity?

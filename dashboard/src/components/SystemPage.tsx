@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Server, Wrench, Shield, HardDrive, AlertTriangle } from 'lucide-react';
+import { Server, Wrench, Shield, HardDrive, AlertTriangle, FileJson2 } from 'lucide-react';
 import { DashboardLayout } from './layout/DashboardLayout';
 import { api } from '../services/api';
 import { getPermissionStyle, getNetworkStyle, getCategoryThemeClass } from '../utils/styleHelpers';
@@ -9,6 +9,7 @@ import { formatLabel } from '../utils/formatters';
 export function SystemPage() {
   const [isRetryingTools, setIsRetryingTools] = React.useState(false);
   const [isRetryingSandbox, setIsRetryingSandbox] = React.useState(false);
+  const [isRetryingManifest, setIsRetryingManifest] = React.useState(false);
   const {
     data: tools,
     isLoading: toolsLoading,
@@ -31,10 +32,23 @@ export function SystemPage() {
     queryFn: () => api.getSandboxStatus(),
   });
 
+  const {
+    data: manifest,
+    isLoading: manifestLoading,
+    isFetching: isFetchingManifest,
+    error: manifestError,
+    refetch: refetchManifest,
+  } = useQuery({
+    queryKey: ['system-runtime-manifest'],
+    queryFn: () => api.getRuntimeManifest(),
+  });
+
   const toolsRetryActive = isRetryingTools || isFetchingTools;
   const sandboxRetryActive = isRetryingSandbox || isFetchingSandbox;
+  const manifestRetryActive = isRetryingManifest || isFetchingManifest;
   const showToolsError = (Boolean(toolsError) || isRetryingTools) && !tools;
   const showSandboxError = (Boolean(sandboxError) || isRetryingSandbox) && !sandbox;
+  const showManifestError = (Boolean(manifestError) || isRetryingManifest) && !manifest;
 
   const handleToolsRetry = async () => {
     if (toolsRetryActive) {
@@ -57,6 +71,18 @@ export function SystemPage() {
       await refetchSandbox();
     } finally {
       setIsRetryingSandbox(false);
+    }
+  };
+
+  const handleManifestRetry = async () => {
+    if (manifestRetryActive) {
+      return;
+    }
+    setIsRetryingManifest(true);
+    try {
+      await refetchManifest();
+    } finally {
+      setIsRetryingManifest(false);
     }
   };
 
@@ -102,6 +128,61 @@ export function SystemPage() {
 
                 <dt className="key-value-dt">Workspace Root</dt>
                 <dd className="key-value-dd">{sandbox.workspace_root || 'None'}</dd>
+              </dl>
+            ) : null}
+          </section>
+
+          <section className="dashboard-card">
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+              <FileJson2 size={20} color="var(--color-accent-primary)" />
+              Runtime Manifest
+            </h3>
+            {showManifestError ? (
+              <div className="error-banner system-error-banner" role="alert">
+                <span>
+                  <AlertTriangle size={16} /> Failed to load runtime manifest.
+                </span>
+                <button
+                  type="button"
+                  className="retry-button"
+                  onClick={() => void handleManifestRetry()}
+                  disabled={manifestRetryActive}
+                >
+                  {manifestRetryActive ? 'Retrying...' : 'Retry Manifest'}
+                </button>
+              </div>
+            ) : manifestLoading ? (
+              <div className="loading-spinner">Loading runtime manifest...</div>
+            ) : manifest ? (
+              <dl className="key-value-list">
+                <dt className="key-value-dt">Service</dt>
+                <dd className="key-value-dd">
+                  {manifest.service
+                    ? `${manifest.service.service_name} v${manifest.service.schema_version}`
+                    : 'No service info'}
+                </dd>
+
+                <dt className="key-value-dt">Environment</dt>
+                <dd className="key-value-dd">{manifest.service?.environment || 'None'}</dd>
+
+                <dt className="key-value-dt">Task Defaults</dt>
+                <dd className="key-value-dd">
+                  {manifest.task
+                    ? `${manifest.task.read_only ? 'Read only' : 'Workspace write'} - ${
+                        manifest.task.network_enabled ? 'Network enabled' : 'Network disabled'
+                      }`
+                    : 'No task info'}
+                </dd>
+
+                <dt className="key-value-dt">Maintenance Actions</dt>
+                <dd className="key-value-dd">
+                  {manifest.maintenance_actions
+                    ?.map((action) => formatLabel(action.action))
+                    .join(', ') || 'None'}
+                </dd>
+
+                <dt className="key-value-dt">Tool Contracts</dt>
+                <dd className="key-value-dd">{(manifest.tools || []).length} declared tools</dd>
               </dl>
             ) : null}
           </section>

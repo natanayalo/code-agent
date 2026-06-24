@@ -8,6 +8,7 @@ import workers.prompt as prompt
 from workers.base import WorkerRequest
 from workers.prompt import (
     build_build_test_section,
+    build_runtime_manifest_section,
     build_system_prompt,
     build_task_context_section,
 )
@@ -34,6 +35,35 @@ def test_build_system_prompt_includes_all_expected_sections(tmp_path: Path) -> N
     assert "## Workflow Instructions" in rendered
     assert "Your first action MUST be to read `AGENTS.md`" in rendered
     assert "README.md" in rendered
+
+
+def test_runtime_manifest_section_renders_operating_contract() -> None:
+    """Runtime manifest context should be visible when provided."""
+    request = WorkerRequest(
+        task_text="Run safely",
+        runtime_manifest={
+            "service": {"service_name": "code-agent", "schema_version": 1},
+            "task": {
+                "read_only": True,
+                "forbidden_actions": ["hardcode_secrets"],
+            },
+            "maintenance_actions": [
+                {"action": "operator_attention", "request_only": True},
+            ],
+        },
+    )
+
+    section = build_runtime_manifest_section(request)
+
+    assert "## Runtime Operating Contract" in section
+    assert '"read_only": true' in section
+    assert "hardcode_secrets" in section
+    assert "request-only maintenance actions" in section
+
+
+def test_runtime_manifest_section_omits_blank_contract() -> None:
+    """Prompt rendering should stay unchanged when no runtime manifest exists."""
+    assert build_runtime_manifest_section(WorkerRequest(task_text="Run safely")) == ""
 
 
 def test_build_review_prompt_includes_guidance(tmp_path: Path) -> None:

@@ -104,6 +104,7 @@ class WorkerRequest(WorkerModel):
     budget: dict[str, Any] = Field(default_factory=dict)
     worker_profile: str | None = None
     runtime_mode: WorkerRuntimeMode | None = None
+    runtime_manifest: dict[str, Any] | None = None
     response_format: Literal["text", "json"] = "text"
     response_schema: dict[str, Any] | None = None
     network_enabled: bool = False
@@ -171,6 +172,25 @@ class ArtifactReference(WorkerModel):
     artifact_type: str | None = None
 
 
+MaintenanceActionType = Literal[
+    "restart_worker",
+    "recycle_sandbox",
+    "reload_config",
+    "dependency_refresh",
+    "operator_attention",
+]
+
+
+class MaintenanceRequest(WorkerModel):
+    """Request-only maintenance signal emitted by a worker."""
+
+    action: MaintenanceActionType
+    reason: str = Field(min_length=1)
+    evidence: list[str] = Field(default_factory=list)
+    scope: Literal["task", "worker", "sandbox", "system"] = "task"
+    risk: Literal["low", "medium", "high"] = "medium"
+
+
 class WorkerResult(WorkerModel):
     """Structured result returned from a coding worker."""
 
@@ -188,6 +208,7 @@ class WorkerResult(WorkerModel):
     diff_text: str | None = None
     json_payload: dict[str, Any] | None = None
     friction_reports: list[dict[str, Any]] = Field(default_factory=list)
+    maintenance_requests: list[MaintenanceRequest] = Field(default_factory=list)
     next_action_hint: str | None = None
     stdout: Any | None = None
     stderr: Any | None = None

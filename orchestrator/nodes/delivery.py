@@ -22,6 +22,7 @@ from orchestrator.nodes.utils import (
     _progress_update,
     _timeline_event,
 )
+from orchestrator.runtime_manifest import build_runtime_manifest
 from orchestrator.state import OrchestratorState
 from workers.base import Worker, WorkerRequest, WorkerResult
 
@@ -191,6 +192,28 @@ def _build_delivery_worker_request(
 ) -> WorkerRequest:
     assert state.dispatch is not None
     task_secrets = state.task.secrets or {}
+    worker_profile = state.dispatch.worker_profile or (
+        state.route.chosen_profile if state.route else None
+    )
+    runtime_mode = state.dispatch.runtime_mode or (
+        state.route.runtime_mode if state.route else None
+    )
+    worker_type = state.dispatch.worker_type or (state.route.chosen_worker if state.route else None)
+    budget = {
+        "worker_timeout_seconds": 300,
+        **(state.task.budget or {}),
+    }
+    runtime_manifest = build_runtime_manifest(
+        worker_type=worker_type,
+        worker_profile=worker_profile,
+        runtime_mode=runtime_mode,
+        workspace_id=state.dispatch.workspace_id,
+        task_spec=state.task_spec,
+        read_only=False,
+        network_enabled=True,
+        budget=budget,
+        requested_tools=["execute_bash", "execute_git", "execute_github"],
+    ).model_dump(mode="json")
     return WorkerRequest(
         session_id=state.session.session_id if state.session else None,
         task_id=state.task.task_id,
@@ -199,10 +222,7 @@ def _build_delivery_worker_request(
         workspace_id=state.dispatch.workspace_id,
         task_text=prompt,
         constraints=dict(state.task.constraints or {}),
-        budget={
-            "worker_timeout_seconds": 300,
-            **(state.task.budget or {}),
-        },
+        budget=budget,
         network_enabled=True,
         secrets={
             **task_secrets,
@@ -210,12 +230,9 @@ def _build_delivery_worker_request(
             "GITHUB_TOKEN": gh_token or "",
         },
         tools=["execute_bash", "execute_git", "execute_github"],
-        worker_profile=(
-            state.dispatch.worker_profile or (state.route.chosen_profile if state.route else None)
-        ),
-        runtime_mode=(
-            state.dispatch.runtime_mode or (state.route.runtime_mode if state.route else None)
-        ),
+        worker_profile=worker_profile,
+        runtime_mode=runtime_mode,
+        runtime_manifest=runtime_manifest,
     )
 
 

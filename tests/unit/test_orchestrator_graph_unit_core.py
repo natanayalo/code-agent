@@ -122,6 +122,61 @@ def test_build_worker_request_from_state():
     assert request.budget == {"max_minutes": 15}
     assert request.worker_profile == "codex-native-executor"
     assert request.runtime_mode == "native_agent"
+    assert request.runtime_manifest is not None
+    assert request.runtime_manifest["worker"]["worker_type"] == "codex"
+    assert request.runtime_manifest["worker"]["worker_profile"] == "codex-native-executor"
+    assert request.runtime_manifest["worker"]["runtime_mode"] == "native_agent"
+    assert request.runtime_manifest["task"]["delivery_mode"] == "workspace"
+    assert request.runtime_manifest["task"]["budget"] == {"max_minutes": 15}
+    assert request.runtime_manifest["maintenance_actions"][0]["request_only"] is True
+
+
+def test_build_worker_request_tolerates_missing_route() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Run a task"},
+            "dispatch": {
+                "worker_type": "codex",
+                "worker_profile": "codex-native-executor",
+                "runtime_mode": "native_agent",
+            },
+        }
+    )
+    state.route = None  # type: ignore[assignment]
+
+    request = _build_worker_request(state)
+
+    assert request.worker_profile == "codex-native-executor"
+    assert request.runtime_mode == "native_agent"
+    assert request.runtime_manifest is not None
+    assert request.runtime_manifest["worker"]["worker_type"] == "codex"
+    assert request.runtime_manifest["worker"]["worker_profile"] == "codex-native-executor"
+
+
+def test_build_worker_request_tolerates_missing_dispatch_and_constraints() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Run a task"},
+            "route": {
+                "chosen_worker": "codex",
+                "chosen_profile": "codex-native-executor",
+                "runtime_mode": "native_agent",
+            },
+        }
+    )
+    state.dispatch = None  # type: ignore[assignment]
+    state.task.constraints = None  # type: ignore[assignment]
+
+    request = _build_worker_request(state)
+
+    assert request.worker_profile == "codex-native-executor"
+    assert request.runtime_mode == "native_agent"
+    assert request.constraints == {}
+    assert request.workspace_id is None
+    assert request.runtime_manifest is not None
+    assert request.runtime_manifest["worker"]["worker_type"] == "codex"
+    assert request.runtime_manifest["worker"]["worker_profile"] == "codex-native-executor"
+    assert request.runtime_manifest["worker"]["workspace_id"] is None
 
 
 def test_build_worker_request_uses_json_schema_for_scout_tasks() -> None:

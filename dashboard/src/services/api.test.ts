@@ -757,6 +757,31 @@ describe('api service', () => {
       warnSpy.mockRestore();
     });
 
+    it('getRuntimeManifest sends correct GET request', async () => {
+      const manifestPayload = {
+        service: { service_name: 'code-agent', schema_version: 1 },
+        maintenance_actions: [],
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => manifestPayload,
+      });
+
+      const result = await api.getRuntimeManifest();
+      expect(result).toEqual(manifestPayload);
+      expect(mockFetch.mock.calls[0][0]).toContain('/system/runtime-manifest');
+    });
+
+    it('getRuntimeManifest catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Manifest fail'));
+      await expect(api.getRuntimeManifest()).rejects.toThrow('Manifest fail');
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
     it('listProposals returns array of proposals', async () => {
       const mockProposals = [{ proposal_id: 'p1', title: 'Idea 1' }];
       mockFetch.mockResolvedValueOnce({

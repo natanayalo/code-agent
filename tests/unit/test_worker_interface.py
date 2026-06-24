@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from workers import SUPPORTED_WORKER_TYPES, WorkerProfile, WorkerRequest, WorkerResult
+from workers import (
+    SUPPORTED_WORKER_TYPES,
+    MaintenanceRequest,
+    WorkerProfile,
+    WorkerRequest,
+    WorkerResult,
+)
 
 
 def test_worker_request_supports_contract_fields() -> None:
@@ -21,6 +27,10 @@ def test_worker_request_supports_contract_fields() -> None:
         budget={"max_minutes": 15},
         worker_profile="codex-native-executor",
         runtime_mode="native_agent",
+        runtime_manifest={
+            "service": {"service_name": "code-agent", "schema_version": 1},
+            "task": {"read_only": False},
+        },
     )
 
     assert request.session_id == "session-1"
@@ -29,6 +39,8 @@ def test_worker_request_supports_contract_fields() -> None:
     assert request.task_spec == {"goal": "Define worker interface", "risk_level": "low"}
     assert request.worker_profile == "codex-native-executor"
     assert request.runtime_mode == "native_agent"
+    assert request.runtime_manifest is not None
+    assert request.runtime_manifest["task"] == {"read_only": False}
 
 
 def test_worker_request_rejects_unknown_fields() -> None:
@@ -47,6 +59,32 @@ def test_worker_result_non_success_defaults_failure_kind() -> None:
     """Failure outcomes should always carry an explicit failure taxonomy value."""
     result = WorkerResult(status="failure", summary="something failed")
     assert result.failure_kind == "unknown"
+
+
+def test_worker_result_supports_request_only_maintenance_signals() -> None:
+    """Workers may request maintenance without gaining execution authority."""
+    result = WorkerResult(
+        status="failure",
+        summary="sandbox stopped responding",
+        maintenance_requests=[
+            MaintenanceRequest(
+                action="recycle_sandbox",
+                reason="Command execution stopped producing output.",
+                evidence=["heartbeat expired"],
+                scope="sandbox",
+            )
+        ],
+    )
+
+    assert result.maintenance_requests[0].action == "recycle_sandbox"
+    assert result.maintenance_requests[0].scope == "sandbox"
+    assert result.maintenance_requests[0].risk == "medium"
+
+
+def test_maintenance_request_rejects_unknown_actions() -> None:
+    """Maintenance request action vocabulary should stay explicit."""
+    with pytest.raises(ValidationError, match="Input should be"):
+        MaintenanceRequest(action="deploy_prod", reason="try it")  # type: ignore[arg-type]
 
 
 def test_worker_profile_supports_runtime_shapes() -> None:

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from apps.api.config import SystemConfig
 from apps.api.dependencies import get_system_config, require_any_valid_auth
+from orchestrator.runtime_manifest import RuntimeManifest, build_runtime_manifest
 from tools.registry import DEFAULT_TOOL_REGISTRY, ToolDefinition
 
 router = APIRouter(
@@ -35,6 +36,17 @@ def get_sandbox_status(
 ) -> SandboxStatusResponse:
     """Return the configuration and status of the task sandbox."""
     return SandboxStatusResponse(
+        default_image=config.default_image,
+        workspace_root=config.workspace_root,
+    )
+
+
+@router.get("/runtime-manifest", response_model=RuntimeManifest)
+def get_runtime_manifest(
+    config: SystemConfig = Depends(get_system_config),
+) -> RuntimeManifest:
+    """Return the baseline runtime operating contract for operators."""
+    return build_runtime_manifest(
         default_image=config.default_image,
         workspace_root=config.workspace_root,
     )
