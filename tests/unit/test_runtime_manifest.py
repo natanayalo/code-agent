@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pytest import MonkeyPatch
+
 from orchestrator.runtime_manifest import build_runtime_manifest
 from orchestrator.state import TaskSpec
 from tools.registry import SEARCH_FILE_TOOL_NAME, VIEW_FILE_TOOL_NAME, ToolDefinition, ToolRegistry
@@ -71,6 +73,39 @@ def test_build_runtime_manifest_accepts_raw_string_tool_metadata() -> None:
     assert manifest.tools[0].capability_category == "shell"
     assert manifest.tools[0].side_effect_level == "read_only"
     assert manifest.tools[0].required_permission == "read_only"
+
+
+def test_build_runtime_manifest_resolves_service_identity_from_env(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Runtime manifest service identity should reflect deployed environment metadata."""
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("CODE_AGENT_ENV", "staging")
+    monkeypatch.setenv("BUILD_SHA", "build-123")
+    monkeypatch.setenv("COMMIT_SHA", "commit-456")
+
+    manifest = build_runtime_manifest(default_image="image", workspace_root="/tmp/workspaces")
+
+    assert manifest.service.environment == "production"
+    assert manifest.service.build_sha == "build-123"
+
+
+def test_build_runtime_manifest_service_identity_allows_explicit_overrides(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Explicit service identity fields should win over process environment fallback."""
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BUILD_SHA", "build-123")
+
+    manifest = build_runtime_manifest(
+        default_image="image",
+        workspace_root="/tmp/workspaces",
+        environment="local-dev",
+        build_sha="manual-sha",
+    )
+
+    assert manifest.service.environment == "local-dev"
+    assert manifest.service.build_sha == "manual-sha"
 
 
 def test_build_runtime_manifest_is_request_only_for_maintenance_actions() -> None:

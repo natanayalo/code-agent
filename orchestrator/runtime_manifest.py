@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -164,7 +165,7 @@ def build_runtime_manifest(
     *,
     default_image: str | None = None,
     workspace_root: str | None = None,
-    environment: str = "local",
+    environment: str | None = None,
     build_sha: str | None = None,
     worker_type: Any | None = None,
     worker_profile: str | None = None,
@@ -179,9 +180,15 @@ def build_runtime_manifest(
 ) -> RuntimeManifest:
     """Build a runtime operating contract from existing execution context."""
 
+    resolved_environment = (
+        environment or os.getenv("APP_ENV") or os.getenv("CODE_AGENT_ENV") or "local"
+    )
+    resolved_build_sha = build_sha or os.getenv("BUILD_SHA") or os.getenv("COMMIT_SHA")
     approval_required = bool(_mapping_or_model_value(task_spec, "requires_permission"))
     return RuntimeManifest(
-        service=RuntimeServiceIdentity(environment=environment, build_sha=build_sha),
+        service=RuntimeServiceIdentity(
+            environment=resolved_environment, build_sha=resolved_build_sha
+        ),
         sandbox=RuntimeSandboxManifest(
             default_image=default_image or DEFAULT_SANDBOX_IMAGE,
             workspace_root=workspace_root or str(default_workspace_root()),
