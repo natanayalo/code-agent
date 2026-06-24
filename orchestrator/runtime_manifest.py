@@ -130,7 +130,12 @@ def _mapping_or_model_value(source: Mapping[str, Any] | object | None, key: str)
 def _string_list(value: Any) -> list[str]:
     if not isinstance(value, Iterable) or isinstance(value, str | bytes | Mapping):
         return []
-    return [item for item in value if isinstance(item, str) and item.strip()]
+    result: list[str] = []
+    for item in value:
+        val = _enum_value(item)
+        if val and val.strip():
+            result.append(val)
+    return result
 
 
 def _tool_manifest(tool: ToolDefinition) -> RuntimeToolManifest:
