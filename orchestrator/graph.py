@@ -511,7 +511,8 @@ def _normalize_repair_task_text(value: object) -> str | None:
 def _is_scout_task(state: OrchestratorState) -> bool:
     if state.task_spec is not None and state.task_spec.task_type == "scout":
         return True
-    return state.task.constraints.get("task_type") == "scout"
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    return constraints.get("task_type") == "scout"
 
 
 def _build_worker_request_runtime_manifest(
@@ -523,11 +524,13 @@ def _build_worker_request_runtime_manifest(
 ) -> dict[str, Any]:
     """Build the frozen runtime manifest payload for a worker request."""
     route = state.route
+    dispatch = state.dispatch
     return build_runtime_manifest(
-        worker_type=state.dispatch.worker_type or (route.chosen_worker if route else None),
+        worker_type=(dispatch.worker_type if dispatch else None)
+        or (route.chosen_worker if route else None),
         worker_profile=worker_profile,
         runtime_mode=runtime_mode,
-        workspace_id=state.dispatch.workspace_id,
+        workspace_id=dispatch.workspace_id if dispatch else None,
         task_spec=state.task_spec,
         read_only=read_only,
         network_enabled=False,
@@ -539,11 +542,12 @@ def _build_worker_request_runtime_manifest(
 def _build_worker_request_task_text(state: OrchestratorState) -> str:
     """Select the task text sent to the worker, including repair overrides."""
     task_text = state.normalized_task_text or state.task.task_text
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
     normalized_verifier_repair_task_text = _normalize_repair_task_text(
-        state.task.constraints.get(VERIFIER_REPAIR_REQUEST_CONSTRAINT)
+        constraints.get(VERIFIER_REPAIR_REQUEST_CONSTRAINT)
     )
     normalized_review_repair_task_text = _normalize_repair_task_text(
-        state.task.constraints.get(REPAIR_REQUEST_CONSTRAINT)
+        constraints.get(REPAIR_REQUEST_CONSTRAINT)
     )
 
     if normalized_verifier_repair_task_text and normalized_review_repair_task_text:
@@ -576,9 +580,13 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
     """Build the typed worker request from orchestrator state."""
     task_text = _build_worker_request_task_text(state)
     route = state.route
-    worker_profile = state.dispatch.worker_profile or (route.chosen_profile if route else None)
+    dispatch = state.dispatch
+    worker_profile = (dispatch.worker_profile if dispatch else None) or (
+        route.chosen_profile if route else None
+    )
 
-    constraints = dict(state.task.constraints)
+    task_constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    constraints = dict(task_constraints)
     if str(constraints.get("scout_mode") or "").strip() == "deep":
         constraints["scout_mode"] = state.scout_phase or "repo"
 
@@ -597,8 +605,10 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         session_mem["repo_phase_artifacts"] = artifact_list
 
     is_scout = _is_scout_task(state)
-    runtime_mode = state.dispatch.runtime_mode or (route.runtime_mode if route else None)
-    read_only = state.task.constraints.get("read_only", False)
+    runtime_mode = (dispatch.runtime_mode if dispatch else None) or (
+        route.runtime_mode if route else None
+    )
+    read_only = constraints.get("read_only", False)
     runtime_manifest = _build_worker_request_runtime_manifest(
         state,
         worker_profile=worker_profile,
@@ -622,7 +632,7 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         worker_profile=worker_profile,
         runtime_mode=runtime_mode,
         runtime_manifest=runtime_manifest,
-        workspace_id=state.dispatch.workspace_id,
+        workspace_id=dispatch.workspace_id if dispatch else None,
         read_only=read_only,
         response_format="json" if is_scout else "text",
         response_schema=scout_response_schema_for_constraints(constraints) if is_scout else None,
