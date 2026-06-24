@@ -17,20 +17,20 @@ export interface SandboxStatusResponse {
 }
 
 export interface RuntimeManifest {
-  service: {
+  service?: {
     service_name: string;
     schema_version: number;
     environment: string;
     build_sha?: string | null;
-  };
-  sandbox: SandboxStatusResponse;
-  worker: {
+  } | null;
+  sandbox?: SandboxStatusResponse | null;
+  worker?: {
     worker_type?: string | null;
     worker_profile?: string | null;
     runtime_mode?: string | null;
     workspace_id?: string | null;
-  };
-  task: {
+  } | null;
+  task?: {
     read_only: boolean;
     network_enabled: boolean;
     delivery_mode?: string | null;
@@ -38,20 +38,20 @@ export interface RuntimeManifest {
     allowed_actions: string[];
     forbidden_actions: string[];
     approval_required: boolean;
-  };
-  tools: Array<{
+  } | null;
+  tools?: Array<{
     name: string;
     capability_category: string;
     side_effect_level: string;
     required_permission: string;
     network_required: boolean;
     deterministic: boolean;
-  }>;
-  approval_capabilities: string[];
-  maintenance_actions: Array<{
+  }> | null;
+  approval_capabilities?: string[] | null;
+  maintenance_actions?: Array<{
     action: string;
     description: string;
     request_only: boolean;
     requires_operator_approval: boolean;
-  }>;
+  }> | null;
 }

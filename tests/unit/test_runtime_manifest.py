@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from orchestrator.runtime_manifest import build_runtime_manifest
 from orchestrator.state import TaskSpec
-from tools.registry import SEARCH_FILE_TOOL_NAME, VIEW_FILE_TOOL_NAME
+from tools.registry import SEARCH_FILE_TOOL_NAME, VIEW_FILE_TOOL_NAME, ToolDefinition, ToolRegistry
 
 
 def test_build_runtime_manifest_projects_task_and_worker_context() -> None:
@@ -46,6 +46,31 @@ def test_build_runtime_manifest_projects_task_and_worker_context() -> None:
         "deploy_or_merge_without_approval",
     ]
     assert [tool.name for tool in manifest.tools] == [VIEW_FILE_TOOL_NAME, SEARCH_FILE_TOOL_NAME]
+
+
+def test_build_runtime_manifest_accepts_raw_string_tool_metadata() -> None:
+    """Tool metadata may be plain strings when built from non-validated definitions."""
+    tool = ToolDefinition.model_construct(
+        name="custom_tool",
+        description="A custom tool",
+        capability_category="shell",
+        side_effect_level="read_only",
+        required_permission="read_only",
+        timeout_seconds=5,
+        network_required=False,
+        deterministic=True,
+    )
+    registry = ToolRegistry.model_construct(tools=(tool,))
+
+    manifest = build_runtime_manifest(
+        default_image="image",
+        workspace_root="/tmp/workspaces",
+        tool_registry=registry,
+    )
+
+    assert manifest.tools[0].capability_category == "shell"
+    assert manifest.tools[0].side_effect_level == "read_only"
+    assert manifest.tools[0].required_permission == "read_only"
 
 
 def test_build_runtime_manifest_is_request_only_for_maintenance_actions() -> None:

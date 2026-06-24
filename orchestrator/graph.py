@@ -522,8 +522,9 @@ def _build_worker_request_runtime_manifest(
     read_only: bool,
 ) -> dict[str, Any]:
     """Build the frozen runtime manifest payload for a worker request."""
+    route = state.route
     return build_runtime_manifest(
-        worker_type=state.dispatch.worker_type or state.route.chosen_worker,
+        worker_type=state.dispatch.worker_type or (route.chosen_worker if route else None),
         worker_profile=worker_profile,
         runtime_mode=runtime_mode,
         workspace_id=state.dispatch.workspace_id,
@@ -574,7 +575,8 @@ def _build_worker_request_task_text(state: OrchestratorState) -> str:
 def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
     """Build the typed worker request from orchestrator state."""
     task_text = _build_worker_request_task_text(state)
-    worker_profile = state.dispatch.worker_profile or state.route.chosen_profile
+    route = state.route
+    worker_profile = state.dispatch.worker_profile or (route.chosen_profile if route else None)
 
     constraints = dict(state.task.constraints)
     if str(constraints.get("scout_mode") or "").strip() == "deep":
@@ -595,7 +597,7 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         session_mem["repo_phase_artifacts"] = artifact_list
 
     is_scout = _is_scout_task(state)
-    runtime_mode = state.dispatch.runtime_mode or state.route.runtime_mode
+    runtime_mode = state.dispatch.runtime_mode or (route.runtime_mode if route else None)
     read_only = state.task.constraints.get("read_only", False)
     runtime_manifest = _build_worker_request_runtime_manifest(
         state,

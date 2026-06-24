@@ -323,4 +323,28 @@ describe('SystemPage', () => {
       expect(screen.getByText('0 declared tools')).toBeInTheDocument();
     });
   });
+
+  it('renders fallbacks when runtime manifest sections are missing', async () => {
+    vi.mocked(api.getSystemTools).mockResolvedValue([]);
+    vi.mocked(api.getSandboxStatus).mockResolvedValue({
+      default_image: 'python:3.12-slim',
+      workspace_root: '/tmp/workspaces'
+    });
+    vi.mocked(api.getRuntimeManifest).mockResolvedValue({
+      ...runtimeManifestFixture,
+      service: null,
+      task: null,
+      tools: null,
+      maintenance_actions: null,
+    });
+
+    renderWithProviders(<SystemPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('No service info')).toBeInTheDocument();
+      expect(screen.getByText('No task info')).toBeInTheDocument();
+      expect(screen.getAllByText('None').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText('0 declared tools')).toBeInTheDocument();
+    });
+  });
 });

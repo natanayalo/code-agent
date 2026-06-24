@@ -3,28 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from sandbox.container import DEFAULT_SANDBOX_IMAGE
 from sandbox.workspace import default_workspace_root
 from tools.registry import DEFAULT_TOOL_REGISTRY, ToolDefinition, ToolRegistry
+from workers.base import MaintenanceActionType
 
 
 class RuntimeManifestModel(BaseModel):
     """Base model for runtime manifest contracts."""
 
     model_config = ConfigDict(extra="forbid")
-
-
-MaintenanceActionType = Literal[
-    "restart_worker",
-    "recycle_sandbox",
-    "reload_config",
-    "dependency_refresh",
-    "operator_attention",
-]
 
 
 class MaintenanceActionDefinition(RuntimeManifestModel):
@@ -146,9 +138,9 @@ def _string_list(value: Any) -> list[str]:
 def _tool_manifest(tool: ToolDefinition) -> RuntimeToolManifest:
     return RuntimeToolManifest(
         name=tool.name,
-        capability_category=tool.capability_category.value,
-        side_effect_level=tool.side_effect_level.value,
-        required_permission=tool.required_permission.value,
+        capability_category=_enum_value(tool.capability_category) or "",
+        side_effect_level=_enum_value(tool.side_effect_level) or "",
+        required_permission=_enum_value(tool.required_permission) or "",
         network_required=tool.network_required,
         deterministic=tool.deterministic,
     )

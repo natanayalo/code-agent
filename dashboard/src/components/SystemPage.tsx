@@ -157,27 +157,32 @@ export function SystemPage() {
               <dl className="key-value-list">
                 <dt className="key-value-dt">Service</dt>
                 <dd className="key-value-dd">
-                  {manifest.service.service_name} v{manifest.service.schema_version}
+                  {manifest.service
+                    ? `${manifest.service.service_name} v${manifest.service.schema_version}`
+                    : 'No service info'}
                 </dd>
 
                 <dt className="key-value-dt">Environment</dt>
-                <dd className="key-value-dd">{manifest.service.environment}</dd>
+                <dd className="key-value-dd">{manifest.service?.environment || 'None'}</dd>
 
                 <dt className="key-value-dt">Task Defaults</dt>
                 <dd className="key-value-dd">
-                  {manifest.task.read_only ? 'Read only' : 'Workspace write'} -{' '}
-                  {manifest.task.network_enabled ? 'Network enabled' : 'Network disabled'}
+                  {manifest.task
+                    ? `${manifest.task.read_only ? 'Read only' : 'Workspace write'} - ${
+                        manifest.task.network_enabled ? 'Network enabled' : 'Network disabled'
+                      }`
+                    : 'No task info'}
                 </dd>
 
                 <dt className="key-value-dt">Maintenance Actions</dt>
                 <dd className="key-value-dd">
                   {manifest.maintenance_actions
-                    .map((action) => formatLabel(action.action))
-                    .join(', ')}
+                    ?.map((action) => formatLabel(action.action))
+                    .join(', ') || 'None'}
                 </dd>
 
                 <dt className="key-value-dt">Tool Contracts</dt>
-                <dd className="key-value-dd">{manifest.tools.length} declared tools</dd>
+                <dd className="key-value-dd">{(manifest.tools || []).length} declared tools</dd>
               </dl>
             ) : null}
           </section>
