@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Final, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -128,7 +128,7 @@ def _mapping_or_model_value(source: Mapping[str, Any] | object | None, key: str)
 
 
 def _string_list(value: Any) -> list[str]:
-    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+    if not isinstance(value, Iterable) or isinstance(value, str | bytes | Mapping):
         return []
     return [item for item in value if isinstance(item, str) and item.strip()]
 
