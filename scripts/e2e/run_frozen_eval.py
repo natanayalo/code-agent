@@ -29,8 +29,7 @@ from evaluation import (
 )
 
 
-def _build_argument_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+def _add_suite_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--suite",
         type=Path,
@@ -43,6 +42,9 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional JSON file mapping case ids to deterministic replay outcomes.",
     )
+
+
+def _add_runner_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--runner",
         choices=("replay", "orchestrator"),
@@ -59,6 +61,9 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         default="codex",
         help="Worker override passed to the orchestrator runner.",
     )
+
+
+def _add_output_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--output",
         type=Path,
@@ -76,6 +81,9 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         default=None,
         help=("Optional concurrency cap when --parallel is enabled. Defaults to no cap."),
     )
+
+
+def _add_metadata_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--variant-label",
         type=str,
@@ -100,6 +108,25 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional baseline report JSON path for structured A/B delta computation.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=("correctness", "m20-baseline"),
+        default="correctness",
+        help=(
+            "Evaluation mode. "
+            "'correctness' (default) scores output correctness only. "
+            "'m20-baseline' additionally writes evaluation/baseline_m20.0.json "
+            "with M20.0 reliability aggregate metrics."
+        ),
+    )
+
+
+def _build_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    _add_suite_args(parser)
+    _add_runner_args(parser)
+    _add_output_args(parser)
+    _add_metadata_args(parser)
     return parser
 
 
@@ -146,11 +173,57 @@ async def _async_main() -> int:
         f"score={report.total_score}/{report.max_score}",
         f"output={args.output}",
     )
+    if args.mode == "m20-baseline":
+        _write_m20_baseline(report)
+        _print_reliability_summary(report)
     return 0 if report.passed_cases == report.total_cases else 1
 
 
 def main() -> int:
     return asyncio.run(_async_main())
+
+
+# ---------------------------------------------------------------------------
+# M20.0 baseline helpers
+# ---------------------------------------------------------------------------
+
+_M20_BASELINE_PATH = Path(__file__).resolve().parents[2] / "evaluation" / "baseline_m20.0.json"
+
+
+def _write_m20_baseline(report: EvaluationReport) -> None:
+    """Persist the M20.0 reliability aggregate to evaluation/baseline_m20.0.json."""
+    rr = report.reliability_report
+    payload: dict[str, object] = {
+        "suite_name": report.suite_name,
+        "total_cases": report.total_cases,
+        "reliability_report": rr.to_dict() if rr is not None else None,
+    }
+    _M20_BASELINE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _M20_BASELINE_PATH.open("w", encoding="utf-8") as file:
+        json.dump(payload, file, indent=2, sort_keys=True)
+        file.write("\n")
+    print(f"m20-baseline: wrote {_M20_BASELINE_PATH}")
+
+
+def _print_reliability_summary(report: EvaluationReport) -> None:
+    """Print a human-readable M20.0 reliability summary to stdout."""
+    rr = report.reliability_report
+    if rr is None:
+        print("m20-baseline: no reliability metrics available (replay runner used?)")
+        return
+    print("\nM20.0 Reliability Summary")
+    print(f"  Cases run:                    {rr.total_cases}")
+    print(f"  Needing approval:             {rr.cases_needing_approval}")
+    print(f"  With validation evidence:     {rr.cases_with_validation_evidence}")
+    print(f"  Needing manual log inspect:   {rr.cases_needing_manual_log_inspection}")
+    print(f"  With worker failure:          {rr.cases_with_worker_failure}")
+    if rr.worker_failure_kind_counts:
+        print(f"  Failure kind breakdown:       {rr.worker_failure_kind_counts_dict()}")
+    if rr.mean_commands_run is not None:
+        print(f"  Mean commands run:            {rr.mean_commands_run:.1f}")
+    if rr.mean_files_changed is not None:
+        print(f"  Mean files changed:           {rr.mean_files_changed:.1f}")
+    print(f"  Stage latency available:      {rr.stage_latency_available}")
 
 
 def _parse_optional_review_metrics(payload: dict[str, object]) -> ReviewMetrics | None:

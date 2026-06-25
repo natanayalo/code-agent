@@ -7,135 +7,22 @@ import json
 from dataclasses import dataclass
 from dataclasses import fields as dataclass_fields
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
+from evaluation.models import (
+    EvaluationComparison,
+    EvaluationProfile,
+    FrozenTaskCase,
+    ReliabilityMetrics,
+    ReliabilityReport,
+    ReviewExpectation,
+    ReviewMetrics,
+    WorkerOutcome,
+)
 
-@dataclass(frozen=True, slots=True)
-class ReviewExpectation:
-    """Optional reviewer-quality expectations for one frozen evaluation case."""
-
-    expected_outcome: Literal["no_findings", "findings"] | None = None
-    expect_fix_after_review: bool | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class TaskExpectation:
-    """Expected output constraints for one frozen evaluation case."""
-
-    require_success: bool = True
-    require_tests_passed: bool = False
-    required_files_changed: tuple[str, ...] = ()
-    required_summary_substrings: tuple[str, ...] = ()
-    review: ReviewExpectation | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class FrozenTaskCase:
-    """One deterministic task input from the frozen benchmark suite."""
-
-    case_id: str
-    repo_fixture: str
-    task_text: str
-    expectation: TaskExpectation
-
-
-@dataclass(frozen=True, slots=True)
-class WorkerOutcome:
-    """Normalized execution output used by the local evaluation harness."""
-
-    status: Literal["success", "failure", "error"]
-    summary: str
-    files_changed: tuple[str, ...] = ()
-    tests_passed: bool | None = None
-    review: ReviewOutcome | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ReviewOutcome:
-    """Optional normalized reviewer-quality outcome data for one case."""
-
-    findings_count: int = 0
-    actionable_findings_count: int = 0
-    false_positive_findings_count: int = 0
-    fix_after_review_attempted: bool | None = None
-    fix_after_review_succeeded: bool | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ReviewMetrics:
-    """Aggregate reviewer quality metrics for one report.
-
-    Note: `false_discovery_rate` and the compatibility alias `false_positive_rate`
-    both use the denominator `total_findings` (reported findings count), not `TN`.
-    """
-
-    reviewed_cases: int
-    precision: float | None
-    actionable_rate: float | None
-    false_discovery_rate: float | None
-    false_positive_rate: float | None
-    fix_after_review_success: float | None
-    empty_review_correctness: float | None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "reviewed_cases": self.reviewed_cases,
-            "precision": self.precision,
-            "actionable_rate": self.actionable_rate,
-            "false_discovery_rate": self.false_discovery_rate,
-            # Backward-compatible alias kept for existing dashboards.
-            "false_positive_rate": self.false_positive_rate,
-            "fix_after_review_success": self.fix_after_review_success,
-            "empty_review_correctness": self.empty_review_correctness,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class EvaluationProfile:
-    """Optional run metadata to support A/B comparisons across reviewer variants."""
-
-    variant_label: str | None = None
-    review_prompt_profile: str | None = None
-    reviewer_model_profile: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "variant_label": self.variant_label,
-            "review_prompt_profile": self.review_prompt_profile,
-            "reviewer_model_profile": self.reviewer_model_profile,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class EvaluationComparison:
-    """Structured comparison between two evaluation report variants."""
-
-    baseline_variant_label: str | None
-    candidate_variant_label: str | None
-    delta_passed_cases: int
-    delta_total_score: int
-    delta_reviewed_cases: int
-    delta_precision: float | None
-    delta_actionable_rate: float | None
-    delta_false_discovery_rate: float | None
-    delta_false_positive_rate: float | None
-    delta_fix_after_review_success: float | None
-    delta_empty_review_correctness: float | None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "baseline_variant_label": self.baseline_variant_label,
-            "candidate_variant_label": self.candidate_variant_label,
-            "delta_passed_cases": self.delta_passed_cases,
-            "delta_total_score": self.delta_total_score,
-            "delta_reviewed_cases": self.delta_reviewed_cases,
-            "delta_precision": self.delta_precision,
-            "delta_actionable_rate": self.delta_actionable_rate,
-            "delta_false_discovery_rate": self.delta_false_discovery_rate,
-            "delta_false_positive_rate": self.delta_false_positive_rate,
-            "delta_fix_after_review_success": self.delta_fix_after_review_success,
-            "delta_empty_review_correctness": self.delta_empty_review_correctness,
-        }
+# ---------------------------------------------------------------------------
+# M20.0 Reliability Metrics
+# ---------------------------------------------------------------------------
 
 
 class EvaluationRunner(Protocol):
@@ -143,6 +30,7 @@ class EvaluationRunner(Protocol):
 
     async def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
         """Execute one case and return the normalized outcome."""
+        ...
 
 
 def normalize_path_for_scoring(raw_path: str) -> str:
@@ -191,6 +79,7 @@ class CaseRunResult:
     max_score: int
     failures: tuple[str, ...]
     outcome: WorkerOutcome
+    reliability: ReliabilityMetrics | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -224,6 +113,7 @@ class CaseRunResult:
                     }
                 ),
             },
+            "reliability": (None if self.reliability is None else self.reliability.to_dict()),
         }
 
 
@@ -241,6 +131,7 @@ class EvaluationReport:
     review_metrics: ReviewMetrics | None = None
     profile: EvaluationProfile | None = None
     comparison: EvaluationComparison | None = None
+    reliability_report: ReliabilityReport | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -256,7 +147,85 @@ class EvaluationReport:
             ),
             "profile": None if self.profile is None else self.profile.to_dict(),
             "comparison": None if self.comparison is None else self.comparison.to_dict(),
+            "reliability_report": (
+                None if self.reliability_report is None else self.reliability_report.to_dict()
+            ),
         }
+
+
+def _safe_mean(values: list[int]) -> float | None:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _compute_reliability_report(
+    *,
+    results: tuple[CaseRunResult, ...],
+) -> ReliabilityReport:
+    """Aggregate per-case ReliabilityMetrics into a suite-level report."""
+    reliability_results = [
+        result.reliability for result in results if result.reliability is not None
+    ]
+    total_cases = len(results)
+
+    if not reliability_results:
+        return ReliabilityReport(
+            total_cases=total_cases,
+            cases_needing_approval=0,
+            cases_with_validation_evidence=0,
+            cases_needing_manual_log_inspection=0,
+            cases_with_worker_failure=0,
+            worker_failure_kind_counts=(),
+            mean_commands_run=None,
+            mean_files_changed=None,
+            mean_friction_reports=None,
+            stage_latency_available=False,
+            mean_stage_latency_seconds=(),
+        )
+
+    failure_kind_tally: dict[str, int] = {}
+    stage_latency_sums: dict[str, float] = {}
+    stage_latency_counts: dict[str, int] = {}
+    any_latency_available = False
+
+    for rm in reliability_results:
+        if rm.worker_failure_kind:
+            failure_kind_tally[rm.worker_failure_kind] = (
+                failure_kind_tally.get(rm.worker_failure_kind, 0) + 1
+            )
+        if rm.stage_latency_available:
+            any_latency_available = True
+            for stage, elapsed in rm.stage_latency_seconds:
+                stage_latency_sums[stage] = stage_latency_sums.get(stage, 0.0) + elapsed
+                stage_latency_counts[stage] = stage_latency_counts.get(stage, 0) + 1
+
+    mean_stage: list[tuple[str, float]] = [
+        (stage, stage_latency_sums[stage] / stage_latency_counts[stage])
+        for stage in sorted(stage_latency_sums)
+    ]
+
+    return ReliabilityReport(
+        total_cases=total_cases,
+        cases_needing_approval=sum(1 for rm in reliability_results if rm.approval_required),
+        cases_with_validation_evidence=sum(
+            1 for rm in reliability_results if rm.validation_evidence_present
+        ),
+        cases_needing_manual_log_inspection=sum(
+            1 for rm in reliability_results if rm.manual_log_inspection_needed
+        ),
+        cases_with_worker_failure=sum(
+            1
+            for rm in reliability_results
+            if rm.worker_status is not None and rm.worker_status != "success"
+        ),
+        worker_failure_kind_counts=tuple(sorted(failure_kind_tally.items())),
+        mean_commands_run=_safe_mean([rm.commands_run_count for rm in reliability_results]),
+        mean_files_changed=_safe_mean([rm.files_changed_count for rm in reliability_results]),
+        mean_friction_reports=_safe_mean([rm.friction_report_count for rm in reliability_results]),
+        stage_latency_available=any_latency_available,
+        mean_stage_latency_seconds=tuple(mean_stage),
+    )
 
 
 def _score_case(case: FrozenTaskCase, outcome: WorkerOutcome) -> CaseRunResult:
@@ -302,6 +271,7 @@ def _score_case(case: FrozenTaskCase, outcome: WorkerOutcome) -> CaseRunResult:
         max_score=max_points,
         failures=tuple(failures),
         outcome=outcome,
+        reliability=outcome.reliability,
     )
 
 
@@ -309,6 +279,48 @@ def _safe_ratio(numerator: int, denominator: int) -> float | None:
     if denominator <= 0:
         return None
     return numerator / denominator
+
+
+def _reviewed_results(
+    *,
+    cases: tuple[FrozenTaskCase, ...],
+    results: tuple[CaseRunResult, ...],
+) -> tuple[CaseRunResult, ...]:
+    expectations_by_case_id = {
+        case.case_id: case.expectation.review
+        for case in cases
+        if case.expectation.review is not None
+    }
+    return tuple(
+        result
+        for result in results
+        if result.outcome.review is not None or result.case_id in expectations_by_case_id
+    )
+
+
+def _expected_fix_cases(
+    *,
+    reviewed_results: tuple[CaseRunResult, ...],
+    expectations_by_case_id: dict[str, ReviewExpectation],
+) -> list[CaseRunResult]:
+    return [
+        result
+        for result in reviewed_results
+        if expectations_by_case_id.get(result.case_id, ReviewExpectation()).expect_fix_after_review
+    ]
+
+
+def _expected_empty_cases(
+    *,
+    reviewed_results: tuple[CaseRunResult, ...],
+    expectations_by_case_id: dict[str, ReviewExpectation],
+) -> list[CaseRunResult]:
+    return [
+        result
+        for result in reviewed_results
+        if expectations_by_case_id.get(result.case_id, ReviewExpectation()).expected_outcome
+        == "no_findings"
+    ]
 
 
 def _compute_review_metrics(
@@ -321,11 +333,7 @@ def _compute_review_metrics(
         for case in cases
         if case.expectation.review is not None
     }
-    reviewed_results = [
-        result
-        for result in results
-        if result.outcome.review is not None or result.case_id in expectations_by_case_id
-    ]
+    reviewed_results = _reviewed_results(cases=cases, results=results)
     if not reviewed_results:
         return ReviewMetrics(
             reviewed_cases=0,
@@ -356,14 +364,10 @@ def _compute_review_metrics(
         if result.outcome.review is not None and result.outcome.review.actionable_findings_count > 0
     )
 
-    fix_expected_cases = [
-        result
-        for result in reviewed_results
-        if expectations_by_case_id.get(
-            result.case_id,
-            ReviewExpectation(),
-        ).expect_fix_after_review
-    ]
+    fix_expected_cases = _expected_fix_cases(
+        reviewed_results=reviewed_results,
+        expectations_by_case_id=expectations_by_case_id,
+    )
     fix_successes = sum(
         1
         for result in fix_expected_cases
@@ -371,12 +375,10 @@ def _compute_review_metrics(
         and result.outcome.review.fix_after_review_succeeded is True
     )
 
-    empty_expected_cases = [
-        result
-        for result in reviewed_results
-        if expectations_by_case_id.get(result.case_id, ReviewExpectation()).expected_outcome
-        == "no_findings"
-    ]
+    empty_expected_cases = _expected_empty_cases(
+        reviewed_results=reviewed_results,
+        expectations_by_case_id=expectations_by_case_id,
+    )
     empty_correct_cases = sum(
         1
         for result in empty_expected_cases
@@ -567,6 +569,7 @@ async def evaluate_suite(
     total_score = sum(result.score for result in results)
     max_score = sum(result.max_score for result in results)
     review_metrics = _compute_review_metrics(cases=cases, results=results)
+    reliability_report = _compute_reliability_report(results=results)
 
     return EvaluationReport(
         suite_name=suite_name,
@@ -578,6 +581,7 @@ async def evaluate_suite(
         results=results,
         review_metrics=review_metrics,
         profile=profile,
+        reliability_report=reliability_report,
     )
 
 

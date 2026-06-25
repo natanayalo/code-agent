@@ -354,3 +354,111 @@ def test_report_parser_rejects_total_case_count_mismatch() -> None:
 
     with pytest.raises(ValueError, match="total_cases does not match results length"):
         module._report_from_payload(payload)
+
+
+# ---------------------------------------------------------------------------
+# M20.0 --mode m20-baseline tests
+# ---------------------------------------------------------------------------
+
+
+def test_run_frozen_eval_mode_m20_baseline_writes_baseline_artifact(tmp_path: Path) -> None:
+    """--mode m20-baseline should write evaluation/baseline_m20.0.json."""
+    repo_root = Path(__file__).resolve().parents[2]
+    suite_path = tmp_path / "suite.json"
+    replay_path = tmp_path / "replay.json"
+    output_path = tmp_path / "report.json"
+    _write_suite(suite_path)
+    replay_path.write_text(
+        json.dumps({"case-1": {"status": "success", "summary": "ok"}}),
+        encoding="utf-8",
+    )
+    baseline_path = repo_root / "evaluation" / "baseline_m20.0.json"
+    # Remove artifact if it already exists from a previous run to test creation.
+    if baseline_path.exists():
+        baseline_path.unlink()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(repo_root / "scripts" / "e2e" / "run_frozen_eval.py"),
+            "--runner",
+            "replay",
+            "--suite",
+            str(suite_path),
+            "--replay",
+            str(replay_path),
+            "--output",
+            str(output_path),
+            "--mode",
+            "m20-baseline",
+        ],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert baseline_path.exists(), "baseline_m20.0.json was not created"
+    with baseline_path.open(encoding="utf-8") as f:
+        payload = json.load(f)
+    assert "reliability_report" in payload
+    assert payload["total_cases"] == 1
+    # Clean up.
+    baseline_path.unlink(missing_ok=True)
+
+
+def test_run_frozen_eval_mode_correctness_does_not_write_baseline_artifact(
+    tmp_path: Path,
+) -> None:
+    """Default correctness mode must NOT write baseline_m20.0.json."""
+    repo_root = Path(__file__).resolve().parents[2]
+    suite_path = tmp_path / "suite.json"
+    replay_path = tmp_path / "replay.json"
+    output_path = tmp_path / "report.json"
+    _write_suite(suite_path)
+    replay_path.write_text(
+        json.dumps({"case-1": {"status": "success", "summary": "ok"}}),
+        encoding="utf-8",
+    )
+    baseline_path = repo_root / "evaluation" / "baseline_m20.0.json"
+    existed_before = baseline_path.exists()
+
+    _run_script(
+        suite_path=suite_path,
+        replay_path=replay_path,
+        output_path=output_path,
+    )
+
+    if not existed_before:
+        # The baseline should still not exist (correctness mode did not create it).
+        assert not baseline_path.exists()
+
+
+def test_write_m20_baseline_and_print_summary_via_module_api(tmp_path: Path) -> None:
+    """_write_m20_baseline writes JSON; _print_reliability_summary doesn't crash."""
+    import asyncio
+
+    from evaluation import ReplayRunner, WorkerOutcome, evaluate_suite, load_frozen_suite
+
+    module = _load_run_frozen_eval_module()
+    # Patch the output path to tmp_path to avoid touching the real evaluation/ dir.
+    setattr(module, "_M20_BASELINE_PATH", tmp_path / "baseline_m20.0.json")
+
+    suite = load_frozen_suite()
+    outcomes = {c.case_id: WorkerOutcome(status="success", summary="ok") for c in suite.cases}
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name=suite.suite_name,
+            cases=suite.cases,
+            runner=ReplayRunner(outcomes_by_case_id=outcomes),
+        )
+    )
+
+    module._write_m20_baseline(report)
+    module._print_reliability_summary(report)  # Should not raise.
+
+    assert (tmp_path / "baseline_m20.0.json").exists()
+    with (tmp_path / "baseline_m20.0.json").open() as f:
+        payload = json.load(f)
+    assert "reliability_report" in payload

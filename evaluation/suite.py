@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError, field_validator
 
-from evaluation.harness import (
+from evaluation.models import (
     FrozenTaskCase,
     ReviewExpectation,
     ReviewOutcome,
@@ -52,6 +52,7 @@ class _CasePayload(BaseModel):
     repo_fixture: str
     task_text: str
     expectation: _ExpectationPayload
+    task_class: str | None = None
 
     @field_validator("case_id", "repo_fixture", "task_text")
     @classmethod
@@ -159,6 +160,7 @@ def load_frozen_suite(path: Path | None = None) -> FrozenSuite:
                 repo_fixture=repo_fixture,
                 task_text=task_text,
                 expectation=expectation,
+                task_class=raw_case.task_class,
             )
         )
 

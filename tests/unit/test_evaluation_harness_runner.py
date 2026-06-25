@@ -191,7 +191,7 @@ def test_orchestrator_runner_review_metrics_precision_reflects_suppressed_findin
     assert orchestrator_outcome.review is not None
 
     class _SingleOutcomeRunner:
-        async def run_case(self, _case: FrozenTaskCase) -> WorkerOutcome:
+        async def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
             return orchestrator_outcome
 
     report = asyncio.run(
@@ -333,3 +333,231 @@ def test_orchestrator_runner_handles_approval_interrupt_as_failure() -> None:
 
     assert outcome.status == "failure"
     assert "interrupted awaiting approval" in outcome.summary.lower()
+
+
+# ---------------------------------------------------------------------------
+# M20.0 ReliabilityMetrics extraction tests
+# ---------------------------------------------------------------------------
+
+
+from evaluation.orchestrator_runner import _extract_reliability_metrics  # noqa: E402
+
+
+def _make_minimal_state(
+    *,
+    result_status: str = "success",
+    failure_kind: str | None = None,
+    next_action_hint: str | None = None,
+    friction_reports: list[dict] | None = None,
+    verification_present: bool = True,
+    approval_required: bool = False,
+    approval_status: str = "not_required",
+    timeline_events: list[dict] | None = None,
+    attempt_count: int = 0,
+) -> dict[str, object]:
+    """Build a minimal raw state dict acceptable to OrchestratorState.model_validate."""
+    result: dict[str, object] = {
+        "status": result_status,
+        "summary": "done",
+        "commands_run": [{"command": "pytest", "exit_code": 0, "duration_seconds": 1.0}],
+        "files_changed": ["src/app.py"],
+        "test_results": [{"name": "suite", "status": "passed", "details": "ok"}],
+        "artifacts": [],
+    }
+    if failure_kind is not None:
+        result["failure_kind"] = failure_kind
+    if next_action_hint is not None:
+        result["next_action_hint"] = next_action_hint
+    if friction_reports is not None:
+        result["friction_reports"] = friction_reports
+    return {
+        "task": {"task_text": "Do a thing"},
+        "dispatch": {"worker_type": "codex"},
+        "approval": {
+            "required": approval_required,
+            "status": approval_status,
+        },
+        "result": result,
+        "verification": {"status": "passed", "items": []} if verification_present else None,
+        "timeline_events": timeline_events or [],
+        "attempt_count": attempt_count,
+    }
+
+
+def _parse_state(raw: dict[str, object]):  # type: ignore[return]
+    from orchestrator import OrchestratorState
+
+    return OrchestratorState.model_validate(raw)
+
+
+def test_extract_reliability_metrics_success_case() -> None:
+    state = _parse_state(_make_minimal_state())
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.worker_status == "success"
+    assert metrics.worker_failure_kind is None
+    assert metrics.validation_evidence_present is True
+    assert metrics.manual_log_inspection_needed is False
+    assert metrics.commands_run_count == 1
+    assert metrics.files_changed_count == 1
+    assert metrics.test_results_count == 1
+    assert metrics.attempt_count == 0
+
+
+def test_extract_reliability_metrics_approval_uses_required_field() -> None:
+    state = _parse_state(_make_minimal_state(approval_required=True, approval_status="pending"))
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.approval_required is True
+    assert metrics.approval_status == "pending"
+
+
+def test_extract_reliability_metrics_approval_required_false_when_not_required() -> None:
+    state = _parse_state(
+        _make_minimal_state(approval_required=False, approval_status="not_required")
+    )
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.approval_required is False
+    assert metrics.approval_status == "not_required"
+
+
+def test_extract_reliability_metrics_manual_log_inspection_when_unknown_failure() -> None:
+    state = _parse_state(
+        _make_minimal_state(
+            result_status="failure",
+            failure_kind="unknown",
+            next_action_hint=None,
+            friction_reports=[],
+        )
+    )
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.worker_status == "failure"
+    assert metrics.worker_failure_kind == "unknown"
+    assert metrics.manual_log_inspection_needed is True
+
+
+def test_extract_reliability_metrics_no_manual_log_inspection_when_structured() -> None:
+    state = _parse_state(
+        _make_minimal_state(
+            result_status="failure",
+            failure_kind="test",
+            next_action_hint="retry_with_fix",
+            friction_reports=[{"kind": "test_failure"}],
+        )
+    )
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.manual_log_inspection_needed is False
+
+
+def test_extract_reliability_metrics_manual_log_inspection_when_no_hint_no_friction() -> None:
+    state = _parse_state(
+        _make_minimal_state(
+            result_status="failure",
+            failure_kind="test",
+            next_action_hint=None,
+            friction_reports=[],
+        )
+    )
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.manual_log_inspection_needed is True
+
+
+def test_extract_reliability_metrics_validation_evidence_from_test_results() -> None:
+    state = _parse_state(_make_minimal_state(verification_present=False))
+
+    metrics = _extract_reliability_metrics(state)
+
+    # test_results are present (1 item) so validation_evidence_present is True
+    assert metrics.validation_evidence_present is True
+
+
+def test_extract_reliability_metrics_no_validation_evidence_when_empty() -> None:
+    raw = _make_minimal_state(verification_present=False)
+    # Remove test_results and commands from result
+    result: dict[str, object] = dict(raw["result"])  # type: ignore[arg-type]
+    result["test_results"] = []
+    raw["result"] = result
+    state = _parse_state(raw)
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.validation_evidence_present is False
+
+
+def test_extract_reliability_metrics_stage_latency_not_available_without_timestamps() -> None:
+    state = _parse_state(
+        _make_minimal_state(
+            timeline_events=[
+                {"event_type": "dispatch_job", "sequence_number": 0},
+                {"event_type": "await_result", "sequence_number": 1},
+            ]
+        )
+    )
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.stage_latency_available is False
+    assert metrics.stage_latency_seconds == ()
+
+
+def test_extract_reliability_metrics_human_interaction_estimated_from_timeline() -> None:
+    state = _parse_state(
+        _make_minimal_state(
+            timeline_events=[
+                {"event_type": "dispatch_job", "sequence_number": 0},
+                {"event_type": "clarification_requested", "sequence_number": 1},
+                {"event_type": "permission_denied", "sequence_number": 2},
+            ]
+        )
+    )
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.human_interaction_count == 2
+
+
+def test_extract_reliability_metrics_no_interaction_events_gives_zero() -> None:
+    state = _parse_state(_make_minimal_state(timeline_events=[]))
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.human_interaction_count == 0
+    assert metrics.repeated_question_count == 0
+
+
+def test_extract_reliability_metrics_attempt_count_propagated() -> None:
+    state = _parse_state(_make_minimal_state(attempt_count=3))
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.attempt_count == 3
+
+
+def test_orchestrator_runner_populates_reliability_field_on_outcome() -> None:
+    case = FrozenTaskCase(
+        case_id="reliability-case",
+        repo_fixture="fixtures/empty",
+        task_text="Do a thing",
+        expectation=TaskExpectation(require_success=True),
+    )
+    runner = OrchestratorReplayRunner(
+        outcomes_by_case_id={"reliability-case": WorkerOutcome(status="success", summary="ok")},
+        worker_override="codex",
+    )
+
+    outcome = asyncio.run(runner.run_case(case))
+
+    # Reliability should be populated by the orchestrator path.
+    assert outcome.reliability is not None
+    assert outcome.reliability.worker_status == "success"
+    assert outcome.reliability.worker_failure_kind is None

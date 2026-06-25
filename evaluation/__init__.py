@@ -7,17 +7,18 @@ from evaluation.harness import (
     EvaluationReport,
     EvaluationRunner,
     FrozenTaskCase,
+    ReliabilityMetrics,
+    ReliabilityReport,
     ReplayRunner,
     ReviewExpectation,
     ReviewMetrics,
-    ReviewOutcome,
-    TaskExpectation,
     WorkerOutcome,
     compare_reports,
     evaluate_suite,
     normalize_path_for_scoring,
     write_report,
 )
+from evaluation.models import ReviewOutcome, TaskExpectation
 from evaluation.orchestrator_runner import OrchestratorReplayRunner
 from evaluation.suite import (
     FrozenSuite,
@@ -35,6 +36,8 @@ __all__ = [
     "FrozenSuite",
     "FrozenTaskCase",
     "OrchestratorReplayRunner",
+    "ReliabilityMetrics",
+    "ReliabilityReport",
     "ReviewExpectation",
     "ReviewMetrics",
     "ReviewOutcome",

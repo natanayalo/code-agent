@@ -8,10 +8,11 @@ import logging
 from evaluation.harness import (
     EvaluationRunner,
     FrozenTaskCase,
-    ReviewOutcome,
+    ReliabilityMetrics,
     WorkerOutcome,
     normalize_path_for_scoring,
 )
+from evaluation.models import ReviewOutcome
 from orchestrator import OrchestratorState, build_orchestrator_graph
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.task_spec import is_destructive_task
@@ -126,6 +127,132 @@ class _FrozenOutcomeWorker(Worker):
             artifacts=[ArtifactReference(name="workspace", uri="file:///tmp/mock-eval-workspace")],
             next_action_hint="persist_memory",
         )
+
+
+# ---------------------------------------------------------------------------
+# M20.0 Reliability metric extraction
+# ---------------------------------------------------------------------------
+
+# Timeline event type prefixes that signal a human interaction was needed.
+_INTERACTION_EVENT_PREFIXES = (
+    "human_interaction",
+    "clarification",
+    "permission",
+    "await_clarification",
+    "await_permission",
+)
+
+
+def _extract_worker_metrics(
+    result: WorkerResult | None,
+) -> tuple[
+    str | None,
+    str | None,
+    str | None,
+    int,
+    int,
+    int,
+    int,
+]:
+    if result is None:
+        return None, None, None, 0, 0, 0, 0
+
+    return (
+        result.status,
+        result.failure_kind if result.status != "success" else None,
+        result.next_action_hint,
+        len(result.friction_reports),
+        len(result.files_changed),
+        len(result.commands_run),
+        len(result.test_results),
+    )
+
+
+def _compute_manual_log_inspection(result: WorkerResult | None) -> bool:
+    if result is None or result.status == "success":
+        return False
+    return (
+        result.failure_kind in (None, "unknown")
+        or not result.next_action_hint
+        or not result.friction_reports
+    )
+
+
+def _extract_interaction_metrics(state: OrchestratorState) -> tuple[int, int]:
+    interaction_events = [
+        event
+        for event in state.timeline_events
+        if any(event.event_type.startswith(prefix) for prefix in _INTERACTION_EVENT_PREFIXES)
+    ]
+    human_interaction_count = len(interaction_events)
+    interaction_type_counts: dict[str, int] = {}
+    for event in interaction_events:
+        interaction_type_counts[event.event_type] = (
+            interaction_type_counts.get(event.event_type, 0) + 1
+        )
+    repeated_question_count = sum(
+        count - 1 for count in interaction_type_counts.values() if count > 1
+    )
+    return human_interaction_count, repeated_question_count
+
+
+def _extract_stage_latency(state: OrchestratorState) -> tuple[tuple[tuple[str, float], ...], bool]:
+    stage_latency: dict[str, float] = {}
+    timestamped_events = [event for event in state.timeline_events if event.created_at is not None]
+    for i in range(1, len(timestamped_events)):
+        prev = timestamped_events[i - 1]
+        curr = timestamped_events[i]
+        assert prev.created_at is not None and curr.created_at is not None
+        elapsed = (curr.created_at - prev.created_at).total_seconds()
+        stage = curr.event_type
+        stage_latency[stage] = stage_latency.get(stage, 0.0) + elapsed
+    return tuple(sorted(stage_latency.items())), bool(stage_latency)
+
+
+def _extract_reliability_metrics(state: OrchestratorState) -> ReliabilityMetrics:
+    """Derive M20.0 reliability signals from a completed OrchestratorState.
+
+    All derivations use fields that actually exist on OrchestratorState.
+    Fields that are only accurate in live runs are documented with their
+    replay-mode limitations.
+    """
+    result = state.result
+    approval = state.approval
+
+    (
+        worker_status,
+        worker_failure_kind,
+        next_action_hint,
+        friction_report_count,
+        files_changed_count,
+        commands_run_count,
+        test_results_count,
+    ) = _extract_worker_metrics(result)
+    validation_evidence_present = state.verification is not None or test_results_count > 0
+    manual_log_inspection_needed = _compute_manual_log_inspection(result)
+    approval_required = approval.required
+    approval_status: str | None = approval.status
+    human_interaction_count, repeated_question_count = _extract_interaction_metrics(state)
+    stage_latency_seconds, stage_latency_available = _extract_stage_latency(state)
+
+    return ReliabilityMetrics(
+        human_interaction_count=human_interaction_count,
+        repeated_question_count=repeated_question_count,
+        validation_evidence_present=validation_evidence_present,
+        manual_log_inspection_needed=manual_log_inspection_needed,
+        worker_status=worker_status,
+        worker_failure_kind=worker_failure_kind,
+        next_action_hint=next_action_hint,
+        friction_report_count=friction_report_count,
+        files_changed_count=files_changed_count,
+        commands_run_count=commands_run_count,
+        test_results_count=test_results_count,
+        approval_required=approval_required,
+        approval_status=approval_status,
+        stage_latency_seconds=stage_latency_seconds,
+        stage_latency_available=stage_latency_available,
+        attempt_count=state.attempt_count,
+    )
 
 
 class OrchestratorReplayRunner(EvaluationRunner):
@@ -254,6 +381,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
                 test_result.status == "passed" for test_result in result.test_results
             )
         review_outcome = self._extract_review_outcome(state)
+        reliability = _extract_reliability_metrics(state)
 
         return WorkerOutcome(
             status=result.status,
@@ -261,4 +389,5 @@ class OrchestratorReplayRunner(EvaluationRunner):
             files_changed=tuple(result.files_changed),
             tests_passed=tests_passed,
             review=review_outcome,
+            reliability=reliability,
         )
