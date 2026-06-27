@@ -6,12 +6,12 @@ from typing import Any
 
 
 def compute_interaction_content_hash(
-    interaction_type: str, summary: str, data: dict[str, Any]
+    interaction_type: str, summary: str, data: dict[str, Any] | None = None
 ) -> str:
     """Compute a stable content hash for an interaction requirement, ignoring volatile fields."""
     stable_data = {
         k: v
-        for k, v in data.items()
+        for k, v in (data or {}).items()
         if k not in {"source", "resume_token", "created_at", "updated_at"}
     }
     payload = {

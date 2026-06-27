@@ -51,7 +51,7 @@ class HumanInteractionRepository:
             .where(HumanInteraction.status == HumanInteractionStatus.PENDING)
             .order_by(HumanInteraction.created_at.desc())
         )
-        return list(self.session.execute(statement))  # type: ignore[arg-type]
+        return [(row[0], row[1]) for row in self.session.execute(statement)]
 
     def record_response(
         self,
@@ -159,7 +159,7 @@ class HumanInteractionRepository:
     ) -> bool:
         if any(row.decision_key == decision_key for row in resolved_rows):
             return True
-        if desired_resume_token and desired_resume_token.strip():
+        if (desired_resume_token or "").strip():
             if any(
                 isinstance(row.data, Mapping)
                 and row.data.get("resume_token") == desired_resume_token

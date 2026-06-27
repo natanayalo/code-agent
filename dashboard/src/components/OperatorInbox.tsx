@@ -26,14 +26,14 @@ export function OperatorInbox({ interactions, selectedTaskId, onOpenTask }: Oper
                 }`}
                 onClick={() => onOpenTask(card.task_id)}
               >
-                <div className="operator-inbox-item-content">
+                <span className="operator-inbox-item-content">
                   <span className="operator-inbox-text truncate" title={card.task_text}>
                     {card.task_text}
                   </span>
                   <span className="operator-inbox-summary truncate" title={card.interaction.summary}>
                     {card.interaction.summary}
                   </span>
-                </div>
+                </span>
                 <span className="operator-inbox-type badge">
                   {card.interaction.interaction_type}
                 </span>
