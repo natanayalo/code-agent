@@ -544,6 +544,17 @@ def test_extract_reliability_metrics_tolerates_nullable_worker_lists() -> None:
     assert metrics.validation_evidence_present is False
 
 
+def test_extract_reliability_metrics_tolerates_nullable_timeline_events() -> None:
+    state = _parse_state(_make_minimal_state()).model_copy(update={"timeline_events": None})
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.human_interaction_count == 0
+    assert metrics.repeated_question_count == 0
+    assert metrics.stage_latency_available is False
+    assert metrics.stage_latency_seconds == ()
+
+
 def test_extract_reliability_metrics_stage_latency_not_available_without_timestamps() -> None:
     state = _parse_state(
         _make_minimal_state(

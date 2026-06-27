@@ -181,7 +181,7 @@ def _compute_manual_log_inspection(result: WorkerResult | None) -> bool:
 def _extract_interaction_metrics(state: OrchestratorState) -> tuple[int, int]:
     interaction_event_types = [
         event.event_type
-        for event in state.timeline_events
+        for event in (state.timeline_events or [])
         if event.event_type
         and any(event.event_type.startswith(prefix) for prefix in _INTERACTION_EVENT_PREFIXES)
     ]
@@ -198,7 +198,7 @@ def _extract_interaction_metrics(state: OrchestratorState) -> tuple[int, int]:
 def _extract_stage_latency(state: OrchestratorState) -> tuple[tuple[tuple[str, float], ...], bool]:
     stage_latency: dict[str, float] = {}
     timestamped_events = sorted(
-        [event for event in state.timeline_events if event.created_at is not None],
+        [event for event in (state.timeline_events or []) if event.created_at is not None],
         key=lambda event: event.created_at,
     )
     for i in range(1, len(timestamped_events)):
