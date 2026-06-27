@@ -509,6 +509,7 @@ def _update_task_route_and_spec(
                     depends_on=step.depends_on or [],
                 )
                 existing_nodes[step.step_id] = new_node
+                plan.nodes.append(new_node)
             else:
                 existing_node = existing_nodes[step.step_id]
                 existing_node.goal = step.title or f"Step {step.step_id}"
@@ -517,9 +518,9 @@ def _update_task_route_and_spec(
                 existing_node.depends_on = step.depends_on or []
 
         # Remove orphaned nodes that are no longer in the plan
-        for node_id, node in existing_nodes.items():
+        for node_id, node in list(existing_nodes.items()):
             if node_id not in active_node_ids:
-                plan_repo.session.delete(node)
+                plan.nodes.remove(node)
 
 
 def _persist_execution_outcome(
