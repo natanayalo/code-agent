@@ -498,6 +498,12 @@ def _update_task_route_and_spec(
             if not step or not step.step_id:
                 logger.warning("Encountered null step or step_id in planner task_plan.")
                 continue
+            if step.step_id in active_node_ids:
+                logger.warning(
+                    "Encountered duplicate step_id '%s' in planner task_plan. Skipping duplicate.",
+                    step.step_id,
+                )
+                continue
             active_node_ids.add(step.step_id)
             if step.step_id not in existing_nodes:
                 new_node = plan_repo.add_node(
