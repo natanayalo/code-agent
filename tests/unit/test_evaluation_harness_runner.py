@@ -19,6 +19,8 @@ from evaluation import (
 from evaluation.harness import (
     FrozenTaskCase,
 )
+from evaluation.orchestrator_runner import _extract_reliability_metrics
+from orchestrator.state import TaskTimelineEventState
 
 
 def _make_fake_graph(
@@ -342,9 +344,6 @@ def test_orchestrator_runner_handles_approval_interrupt_as_failure() -> None:
 # ---------------------------------------------------------------------------
 
 
-from evaluation.orchestrator_runner import _extract_reliability_metrics  # noqa: E402
-
-
 def _make_minimal_state(
     *,
     result_status: str = "success",
@@ -572,8 +571,6 @@ def test_extract_reliability_metrics_stage_latency_not_available_without_timesta
 
 
 def test_extract_reliability_metrics_handles_missing_timeline_event_type() -> None:
-    from orchestrator.state import TaskTimelineEventState
-
     timeline_events = [
         TaskTimelineEventState.model_construct(
             event_type="dispatch_job",
@@ -606,8 +603,6 @@ def test_extract_reliability_metrics_handles_missing_timeline_event_type() -> No
 
 
 def test_extract_reliability_metrics_sorts_stage_latency_events_by_timestamp() -> None:
-    from orchestrator.state import TaskTimelineEventState
-
     timeline_events = [
         TaskTimelineEventState.model_construct(
             event_type="clarification_requested",

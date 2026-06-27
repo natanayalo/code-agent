@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from evaluation import (
+    ReliabilityMetrics,
+    ReliabilityReport,
     ReplayRunner,
     ReviewExpectation,
     ReviewOutcome,
@@ -617,8 +619,6 @@ def test_compare_reports_delta_mapping_covers_all_review_metrics() -> None:
 # M20.0 ReliabilityMetrics and ReliabilityReport tests
 # ---------------------------------------------------------------------------
 
-from evaluation.models import ReliabilityMetrics, ReliabilityReport  # noqa: E402
-
 
 def test_reliability_metrics_to_dict_serializes_all_fields() -> None:
     metrics = ReliabilityMetrics(
@@ -703,8 +703,6 @@ def test_reliability_report_to_dict_serializes_all_fields() -> None:
 
 def test_evaluate_suite_populates_reliability_report_from_runner_with_reliability() -> None:
     """ReliabilityReport should aggregate when outcomes carry ReliabilityMetrics."""
-    from evaluation.models import ReliabilityMetrics
-
     metrics_pass = ReliabilityMetrics(
         worker_status="success",
         validation_evidence_present=True,

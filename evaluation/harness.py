@@ -283,14 +283,9 @@ def _safe_ratio(numerator: int, denominator: int) -> float | None:
 
 def _reviewed_results(
     *,
-    cases: tuple[FrozenTaskCase, ...],
     results: tuple[CaseRunResult, ...],
+    expectations_by_case_id: dict[str, ReviewExpectation],
 ) -> tuple[CaseRunResult, ...]:
-    expectations_by_case_id = {
-        case.case_id: case.expectation.review
-        for case in cases
-        if case.expectation.review is not None
-    }
     return tuple(
         result
         for result in results
@@ -334,7 +329,10 @@ def _compute_review_metrics(
         for case in cases
         if case.expectation.review is not None
     }
-    reviewed_results = _reviewed_results(cases=cases, results=results)
+    reviewed_results = _reviewed_results(
+        results=results,
+        expectations_by_case_id=expectations_by_case_id,
+    )
     if not reviewed_results:
         return ReviewMetrics(
             reviewed_cases=0,
