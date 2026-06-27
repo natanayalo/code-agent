@@ -20,9 +20,10 @@ class ExecutionPlanRepository:
 
     def create(self, *, task_id: str) -> ExecutionPlan:
         """Create a new execution plan for a task."""
-        plan = ExecutionPlan(task_id=task_id)
+        from db.base import generate_uuid
+
+        plan = ExecutionPlan(id=generate_uuid(), task_id=task_id)
         self.session.add(plan)
-        self.session.flush()
         return plan
 
     def get_by_task_id(self, task_id: str) -> ExecutionPlan | None:
@@ -56,7 +57,10 @@ class ExecutionPlanRepository:
         artifacts: list[str] | None = None,
     ) -> ExecutionPlanNode:
         """Add a new node to an existing execution plan."""
+        from db.base import generate_uuid
+
         node = ExecutionPlanNode(
+            id=generate_uuid(),
             plan_id=plan_id,
             node_id=node_id,
             sequence_number=sequence_number,
@@ -70,7 +74,6 @@ class ExecutionPlanRepository:
             artifacts=artifacts,
         )
         self.session.add(node)
-        self.session.flush()
         return node
 
     def get_node(self, plan_id: str, node_id: str) -> ExecutionPlanNode | None:
@@ -119,5 +122,4 @@ class ExecutionPlanRepository:
         if finished_at is not ...:
             node.finished_at = finished_at
 
-        self.session.flush()
         return node
