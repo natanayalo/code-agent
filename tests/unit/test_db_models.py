@@ -83,3 +83,9 @@ def test_model_metadata_defines_trace_context_column_type() -> None:
     """Distributed tracing needs a serializable JSON contract on tasks."""
     column_type = Base.metadata.tables["tasks"].c["trace_context"].type
     assert isinstance(column_type, JSON)
+
+
+def test_model_metadata_defines_runtime_manifest_column_type() -> None:
+    """Runtime operating contract metadata needs a JSON column on worker runs."""
+    column_type = Base.metadata.tables["worker_runs"].c["runtime_manifest"].type
+    assert isinstance(column_type, JSON)
