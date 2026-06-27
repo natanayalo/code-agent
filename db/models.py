@@ -662,7 +662,7 @@ class ExecutionPlan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="execution_plan",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        order_by="ExecutionPlanNode.created_at.asc()",
+        order_by="ExecutionPlanNode.sequence_number.asc()",
     )
 
 
@@ -677,6 +677,7 @@ class ExecutionPlanNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
     node_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     depends_on: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[ExecutionPlanNodeStatus] = mapped_column(
         EXECUTION_PLAN_NODE_STATUS_ENUM, nullable=False, default=ExecutionPlanNodeStatus.PENDING

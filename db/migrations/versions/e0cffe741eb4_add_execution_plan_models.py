@@ -42,6 +42,7 @@ def upgrade() -> None:
         "execution_plan_nodes",
         sa.Column("plan_id", sa.String(length=36), nullable=False),
         sa.Column("node_id", sa.String(length=255), nullable=False),
+        sa.Column("sequence_number", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("depends_on", sa.JSON(), nullable=True),
         sa.Column(
             "status",

@@ -156,9 +156,15 @@ export interface ExecutionPlanNodeSnapshot {
   acceptance_criteria?: string | null;
   depends_on?: string[] | null;
   assigned_worker_profile?: string | null;
+  budget?: Record<string, unknown> | null;
+  validation_commands?: string[] | null;
+  artifacts?: string[] | null;
+  blocker_interaction_id?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
   retry_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ExecutionPlanSnapshot {

@@ -493,7 +493,7 @@ def _update_task_route_and_spec(
 
         # Sync nodes
         existing_nodes = {n.node_id: n for n in plan.nodes}
-        for step in state.task_plan.steps:
+        for i, step in enumerate(state.task_plan.steps):
             if not step or not step.step_id:
                 logger.warning("Encountered null step or step_id in planner task_plan.")
                 continue
@@ -502,9 +502,17 @@ def _update_task_route_and_spec(
                     plan_id=plan.id,
                     node_id=step.step_id,
                     goal=step.title or f"Step {step.step_id}",
+                    sequence_number=i,
                     acceptance_criteria=step.expected_outcome,
+                    depends_on=step.depends_on or [],
                 )
                 existing_nodes[step.step_id] = new_node
+            else:
+                existing_node = existing_nodes[step.step_id]
+                existing_node.goal = step.title or f"Step {step.step_id}"
+                existing_node.sequence_number = i
+                existing_node.acceptance_criteria = step.expected_outcome
+                existing_node.depends_on = step.depends_on or []
 
 
 def _persist_execution_outcome(

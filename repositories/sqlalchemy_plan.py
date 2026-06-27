@@ -46,6 +46,7 @@ class ExecutionPlanRepository:
         plan_id: str,
         node_id: str,
         goal: str,
+        sequence_number: int = 0,
         status: ExecutionPlanNodeStatus = ExecutionPlanNodeStatus.PENDING,
         depends_on: list[str] | None = None,
         acceptance_criteria: str | None = None,
@@ -58,6 +59,7 @@ class ExecutionPlanRepository:
         node = ExecutionPlanNode(
             plan_id=plan_id,
             node_id=node_id,
+            sequence_number=sequence_number,
             depends_on=depends_on,
             status=status,
             goal=goal,
@@ -83,38 +85,38 @@ class ExecutionPlanRepository:
         *,
         plan_id: str,
         node_id: str,
-        status: ExecutionPlanNodeStatus | None = None,
-        assigned_worker_profile: str | None = None,
-        budget: dict[str, Any] | None = None,
-        validation_commands: list[str] | None = None,
-        artifacts: list[str] | None = None,
-        blocker_interaction_id: str | None = None,
-        retry_count: int | None = None,
-        started_at: datetime | None = None,
-        finished_at: datetime | None = None,
+        status: ExecutionPlanNodeStatus | Any = ...,
+        assigned_worker_profile: str | None | Any = ...,
+        budget: dict[str, Any] | None | Any = ...,
+        validation_commands: list[str] | None | Any = ...,
+        artifacts: list[str] | None | Any = ...,
+        blocker_interaction_id: str | None | Any = ...,
+        retry_count: int | Any = ...,
+        started_at: datetime | None | Any = ...,
+        finished_at: datetime | None | Any = ...,
     ) -> ExecutionPlanNode | None:
         """Update fields of an execution plan node."""
         node = self.get_node(plan_id, node_id)
         if not node:
             return None
 
-        if status is not None:
+        if status is not ...:
             node.status = status
-        if assigned_worker_profile is not None:
+        if assigned_worker_profile is not ...:
             node.assigned_worker_profile = assigned_worker_profile
-        if budget is not None:
+        if budget is not ...:
             node.budget = budget
-        if validation_commands is not None:
+        if validation_commands is not ...:
             node.validation_commands = validation_commands
-        if artifacts is not None:
+        if artifacts is not ...:
             node.artifacts = artifacts
-        if blocker_interaction_id is not None:
+        if blocker_interaction_id is not ...:
             node.blocker_interaction_id = blocker_interaction_id
-        if retry_count is not None:
+        if retry_count is not ...:
             node.retry_count = retry_count
-        if started_at is not None:
+        if started_at is not ...:
             node.started_at = started_at
-        if finished_at is not None:
+        if finished_at is not ...:
             node.finished_at = finished_at
 
         self.session.flush()
