@@ -149,11 +149,46 @@ export interface HumanInteractionSnapshot {
   updated_at: string;
 }
 
+export enum ExecutionPlanNodeStatus {
+  PENDING = 'pending',
+  ACTIVE = 'active',
+  BLOCKED = 'blocked',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  SKIPPED = 'skipped'
+}
+
+export interface ExecutionPlanNodeSnapshot {
+  node_id: string;
+  goal: string;
+  status: ExecutionPlanNodeStatus;
+  acceptance_criteria?: string | null;
+  depends_on?: string[] | null;
+  assigned_worker_profile?: string | null;
+  budget?: Record<string, unknown> | null;
+  validation_commands?: string[] | null;
+  artifacts?: string[] | null;
+  blocker_interaction_id?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  retry_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExecutionPlanSnapshot {
+  plan_id: string;
+  created_at: string;
+  updated_at: string;
+  nodes: ExecutionPlanNodeSnapshot[];
+}
+
 export interface TaskSnapshot extends TaskSummarySnapshot {
   task_spec?: TaskSpec | null;
   latest_run?: WorkerRunSnapshot | null;
   pending_interactions?: HumanInteractionSnapshot[];
   timeline: TaskTimelineEventSnapshot[];
+  execution_plan?: ExecutionPlanSnapshot | null;
 }
 
 export interface TaskReplayRequest {

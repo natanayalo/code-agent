@@ -135,6 +135,7 @@ class TaskPlanStep(OrchestratorModel):
     step_id: str = Field(min_length=1)
     title: str = Field(min_length=1)
     expected_outcome: str = Field(min_length=1)
+    depends_on: list[str] | None = None
 
 
 class TaskPlan(OrchestratorModel):

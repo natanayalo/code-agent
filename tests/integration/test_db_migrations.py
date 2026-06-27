@@ -11,6 +11,8 @@ from sqlalchemy import create_engine, inspect, text
 EXPECTED_TABLES = {
     "alembic_version",
     "artifacts",
+    "execution_plans",
+    "execution_plan_nodes",
     "human_interactions",
     "inbound_deliveries",
     "memory_personal",
@@ -38,6 +40,16 @@ EXPECTED_CHECK_CONSTRAINTS = {
         "ck_proposals_proposal_type": {
             "scout",
             "reflection",
+        },
+    },
+    "execution_plan_nodes": {
+        "ck_execution_plan_nodes_execution_plan_node_status": {
+            "pending",
+            "active",
+            "blocked",
+            "completed",
+            "failed",
+            "skipped",
         },
     },
     "tasks": {

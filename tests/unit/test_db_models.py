@@ -9,6 +9,7 @@ import db.models  # noqa: F401
 from db.base import Base
 from db.enums import (
     ArtifactType,
+    ExecutionPlanNodeStatus,
     HumanInteractionStatus,
     HumanInteractionType,
     ProposalStatus,
@@ -22,6 +23,8 @@ from db.enums import (
 
 EXPECTED_TABLES = {
     "artifacts",
+    "execution_plans",
+    "execution_plan_nodes",
     "human_interactions",
     "inbound_deliveries",
     "memory_personal",
@@ -56,6 +59,7 @@ def test_model_metadata_uses_canonical_enums_for_constrained_columns() -> None:
         ("proposals", "status"): ProposalStatus,
         ("proposals", "proposal_type"): ProposalType,
         ("task_timeline_events", "event_type"): TimelineEventType,
+        ("execution_plan_nodes", "status"): ExecutionPlanNodeStatus,
     }
 
     for (table_name, column_name), enum_class in expected_columns.items():

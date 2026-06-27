@@ -19,9 +19,11 @@ from repositories.sqlalchemy import (
     UserRepository,
     WorkerRunRepository,
 )
+from repositories.sqlalchemy_plan import ExecutionPlanRepository
 
 __all__ = [
     "ArtifactRepository",
+    "ExecutionPlanRepository",
     "HumanInteractionRepository",
     "InboundDeliveryRepository",
     "PersonalMemoryRepository",

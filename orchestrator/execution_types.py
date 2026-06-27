@@ -288,10 +288,41 @@ class ProposalSnapshot(ExecutionModel):
     updated_at: datetime
 
 
+class ExecutionPlanNodeSnapshot(ExecutionModel):
+    """A node within an execution plan."""
+
+    node_id: str
+    depends_on: list[str] | None = None
+    status: Literal["pending", "active", "blocked", "completed", "failed", "skipped"]
+    goal: str
+    acceptance_criteria: str | None = None
+    assigned_worker_profile: str | None = None
+    budget: dict[str, Any] | None = None
+    validation_commands: list[str] | None = None
+    artifacts: list[str] | None = None
+    blocker_interaction_id: str | None = None
+    retry_count: int = 0
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExecutionPlanSnapshot(ExecutionModel):
+    """An observable spine of planned work for a complex task."""
+
+    plan_id: str
+    task_id: str
+    nodes: list[ExecutionPlanNodeSnapshot] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
 class TaskSnapshot(TaskSummarySnapshot):
     """The full task view with execution history and timeline."""
 
     task_spec: TaskSpec | None = None
+    execution_plan: ExecutionPlanSnapshot | None = None
     latest_run: WorkerRunSnapshot | None = None
     pending_interactions: list[HumanInteractionSnapshot] = Field(default_factory=list)
     timeline: list[TaskTimelineEventSnapshot] = Field(default_factory=list)
