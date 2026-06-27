@@ -2597,6 +2597,10 @@ def build_await_result_node(
                 "current_step": "await_result",
                 "result": result.model_dump(),
                 "progress_updates": progress_updates,
+                "dispatch": {
+                    **state.dispatch.model_dump(),
+                    "runtime_manifest": request.runtime_manifest if "request" in locals() else None,
+                },
                 **_timeline_event(
                     state,
                     (
@@ -2614,7 +2618,7 @@ def build_await_result_node(
                 result.status == "failure" and result.failure_kind in ("timeout", "sandbox_infra")
             )
             if clear_ws and state.dispatch.workspace_id:
-                response["dispatch"] = {**state.dispatch.model_dump(), "workspace_id": None}
+                response["dispatch"]["workspace_id"] = None
             return response
 
     return await_result

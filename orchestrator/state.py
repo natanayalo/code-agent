@@ -211,6 +211,7 @@ class WorkerDispatch(OrchestratorModel):
     worker_profile: str | None = None
     runtime_mode: WorkerRuntimeMode | None = None
     workspace_id: str | None = None
+    runtime_manifest: dict[str, Any] | None = None
 
     @field_validator("worker_type", mode="before")
     @classmethod

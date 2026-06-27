@@ -36,6 +36,7 @@ class WorkerRunRepository:
         files_changed_count: int = 0,
         files_changed: list[str] | None = None,
         artifact_index: list[dict[str, Any]] | None = None,
+        runtime_manifest: dict[str, Any] | None = None,
         retention_expires_at: datetime | None = None,
         worker_profile: str | None = None,
         runtime_mode: str | WorkerRuntimeMode | None = None,
@@ -58,6 +59,7 @@ class WorkerRunRepository:
             files_changed_count=files_changed_count,
             files_changed=files_changed,
             artifact_index=artifact_index,
+            runtime_manifest=runtime_manifest,
             retention_expires_at=retention_expires_at,
         )
         self.session.add(worker_run)

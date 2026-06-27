@@ -37,7 +37,7 @@ Active focus:
 
 ## Next Priorities
 
-1. define and run M20.0 Baseline Eval Harness
+1. finish M20.1 Runtime Operating Contract
 2. implement M20.2 ExecutionPlan Spine as an observable scaffold
 3. defer Milestone 21 Hotspot Refactor until M20 worker/operator contracts stabilize
 4. keep Phase 4 autonomy work gated on Phase 3 reliability metrics
@@ -46,7 +46,7 @@ Active focus:
 
 Granular tasks for the active and upcoming milestones:
 
-- M20.0: define baseline eval tasks and record babysitting, worker-profile, stage-latency, validation, and manual-log-inspection metrics.
+- M20.1: persist the `RuntimeManifest` generated during execution alongside the `WorkerRun` entity.
 - M20.2: add durable ExecutionPlan/ExecutionPlanNode spine without replacing task scheduling or enabling fan-out.
 - M20.3: upgrade HumanInteraction payloads into decision cards, HITL modes, and interaction-based inbox rows.
 - M20.4: add worker registry, heartbeat, capacity, health, and quarantine primitives for safe routing/backpressure.

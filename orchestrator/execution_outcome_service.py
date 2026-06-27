@@ -139,12 +139,15 @@ def _create_worker_run(
             command.model_dump(mode="json")
             for command in (result.commands_run if result is not None else [])
         ],
-        files_changed_count=len(result.files_changed) if result is not None else 0,
-        files_changed=result.files_changed if result is not None else [],
+        files_changed_count=len(result.files_changed)
+        if result is not None and result.files_changed
+        else 0,
+        files_changed=result.files_changed if result is not None else None,
         artifact_index=artifact_index,
+        runtime_manifest=state.dispatch.runtime_manifest if state.dispatch else None,
         retention_expires_at=retention_expires_at,
-        worker_profile=state.route.chosen_profile,
-        runtime_mode=state.route.runtime_mode,
+        worker_profile=state.dispatch.worker_profile if state.dispatch else None,
+        runtime_mode=state.dispatch.runtime_mode if state.dispatch else None,
     )
 
 

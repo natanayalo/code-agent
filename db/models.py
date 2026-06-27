@@ -356,6 +356,7 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
     files_changed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     files_changed: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     artifact_index: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    runtime_manifest: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     task: Mapped[Task] = relationship(back_populates="worker_runs")
     session: Mapped[Session | None] = relationship(back_populates="worker_runs")

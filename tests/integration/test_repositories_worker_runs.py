@@ -38,6 +38,7 @@ def test_worker_run_and_artifact_repositories_support_crud(session_factory) -> N
             started_at=datetime.now(UTC),
             status="running",
             workspace_id="workspace-1",
+            runtime_manifest={"version": 1, "test": "manifest"},
         )
         artifact_repo.create(
             run_id=worker_run.id,
@@ -64,6 +65,7 @@ def test_worker_run_and_artifact_repositories_support_crud(session_factory) -> N
         assert stored_run.status is WorkerRunStatus.SUCCESS
         assert stored_run.session_id == conversation_session.id
         assert stored_run.summary == "Task completed"
+        assert stored_run.runtime_manifest == {"version": 1, "test": "manifest"}
         assert stored_run.requested_permission == "workspace_write"
         assert stored_run.budget_usage == {"iterations_used": 2, "wall_clock_seconds": 1.5}
         assert stored_run.verifier_outcome == {
