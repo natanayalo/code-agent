@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add human interactions pending API and inbox UI data ([#279](https://github.com/natanayalo/code-agent/pull/279))
+
 - Feat: implement execution plan spine for M20.2 ([#277](https://github.com/natanayalo/code-agent/pull/277))
 
 - Feat: retain runtime manifest in worker_runs ([#276](https://github.com/natanayalo/code-agent/pull/276))
