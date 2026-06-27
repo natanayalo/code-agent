@@ -313,6 +313,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Docs/m20.2 completed ([#278](https://github.com/natanayalo/code-agent/pull/278))
+
 - [codex] Add runtime operating contract ([#274](https://github.com/natanayalo/code-agent/pull/274))
 
 - Feat: add task-type prompt overlays for Scout modes (T-202) ([#264](https://github.com/natanayalo/code-agent/pull/264))
