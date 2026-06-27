@@ -670,6 +670,13 @@ class ExecutionPlanNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A single node within an execution plan."""
 
     __tablename__ = "execution_plan_nodes"
+    __table_args__ = (
+        UniqueConstraint(
+            "plan_id",
+            "node_id",
+            name="uq_execution_plan_nodes_plan_id_node_id",
+        ),
+    )
 
     plan_id: Mapped[str] = mapped_column(
         ForeignKey("execution_plans.id", ondelete="CASCADE"),

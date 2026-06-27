@@ -96,6 +96,11 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_execution_plan_nodes")),
+        sa.UniqueConstraint(
+            "plan_id",
+            "node_id",
+            name=op.f("uq_execution_plan_nodes_plan_id_node_id"),
+        ),
     )
     op.create_index(
         op.f("ix_execution_plan_nodes_plan_id"), "execution_plan_nodes", ["plan_id"], unique=False

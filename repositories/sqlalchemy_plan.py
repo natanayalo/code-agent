@@ -6,8 +6,9 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
+from db.base import generate_uuid
 from db.enums import ExecutionPlanNodeStatus
 from db.models import ExecutionPlan, ExecutionPlanNode
 
@@ -20,16 +21,12 @@ class ExecutionPlanRepository:
 
     def create(self, *, task_id: str) -> ExecutionPlan:
         """Create a new execution plan for a task."""
-        from db.base import generate_uuid
-
         plan = ExecutionPlan(id=generate_uuid(), task_id=task_id)
         self.session.add(plan)
         return plan
 
     def get_by_task_id(self, task_id: str) -> ExecutionPlan | None:
         """Retrieve an execution plan and its nodes for a given task ID."""
-        from sqlalchemy.orm import selectinload
-
         stmt = (
             select(ExecutionPlan)
             .where(ExecutionPlan.task_id == task_id)
@@ -57,8 +54,6 @@ class ExecutionPlanRepository:
         artifacts: list[str] | None = None,
     ) -> ExecutionPlanNode:
         """Add a new node to an existing execution plan."""
-        from db.base import generate_uuid
-
         node = ExecutionPlanNode(
             id=generate_uuid(),
             plan_id=plan_id,
