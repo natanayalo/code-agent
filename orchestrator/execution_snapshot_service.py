@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -246,7 +246,7 @@ def _map_execution_plan_to_snapshot(execution_plan: Any) -> ExecutionPlanSnapsho
             ExecutionPlanNodeSnapshot(
                 node_id=node.node_id,
                 depends_on=node.depends_on,
-                status=_enum_value(node.status) or "pending",  # type: ignore[arg-type]
+                status=cast(Any, _enum_value(node.status) or "pending"),
                 goal=node.goal,
                 acceptance_criteria=node.acceptance_criteria,
                 assigned_worker_profile=node.assigned_worker_profile,
