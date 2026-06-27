@@ -17,6 +17,7 @@ from repositories.sqlalchemy import (
     TaskRepository,
     TaskTimelineRepository,
     UserRepository,
+    WorkerNodeRepository,
     WorkerRunRepository,
 )
 from repositories.sqlalchemy_plan import ExecutionPlanRepository
@@ -34,6 +35,7 @@ __all__ = [
     "TaskRepository",
     "TaskTimelineRepository",
     "UserRepository",
+    "WorkerNodeRepository",
     "WorkerRunRepository",
     "create_engine_from_url",
     "create_session_factory",

@@ -23,6 +23,7 @@ from db.enums import (
 )
 from db.models import Task as _Task
 from orchestrator import (
+    execution_heartbeat_service,
     execution_improvement_proposal_service,
     execution_interaction_service,
     execution_outcome_service,
@@ -31,6 +32,7 @@ from orchestrator import (
     execution_runtime_service,
     execution_snapshot_service,
     execution_submission_service,
+    execution_worker_service,
 )
 from orchestrator import (
     execution_policy as _execution_policy_module,
@@ -271,7 +273,7 @@ class TaskExecutionService:
     run_queued_task = execution_runtime_service.run_queued_task
     _update_span_status_from_state = execution_runtime_service._update_span_status_from_state
     _record_execution_span_error = execution_runtime_service._record_execution_span_error
-    _heartbeat_loop = execution_runtime_service._heartbeat_loop
+    _heartbeat_loop = execution_heartbeat_service._heartbeat_loop
     claim_next_task = execution_snapshot_service.claim_next_task
     is_execution_busy = execution_snapshot_service.is_execution_busy
     get_task = execution_snapshot_service.get_task
@@ -324,6 +326,12 @@ class TaskExecutionService:
     _release_task_terminal_failure = execution_submission_service._release_task_terminal_failure
     _record_task_attempt_error = execution_submission_service._record_task_attempt_error
     _heartbeat_task_lease = execution_submission_service._heartbeat_task_lease
+    register_worker_node = execution_worker_service.register_worker_node
+    ensure_worker_node = execution_worker_service.ensure_worker_node
+    heartbeat_worker_node = execution_worker_service.heartbeat_worker_node
+    sweep_worker_nodes = execution_worker_service.sweep_worker_nodes
+    record_worker_node_success = execution_worker_service.record_worker_node_success
+    record_worker_node_failure = execution_worker_service.record_worker_node_failure
 
     async def _run_blocking(
         self,
