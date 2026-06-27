@@ -4,6 +4,7 @@
     {
       "case_id": "frozen-001",
       "repo_fixture": "fixtures/python-service",
+      "task_class": "bugfix",
       "task_text": "Fix the zero-division guard in calculate_ratio and add regression tests.",
       "expectation": {
         "require_success": true,
@@ -21,6 +22,7 @@
     {
       "case_id": "frozen-002",
       "repo_fixture": "fixtures/fastapi-app",
+      "task_class": "feature",
       "task_text": "Add API-key authentication middleware and enforce it on task routes.",
       "expectation": {
         "require_success": true,
@@ -38,6 +40,7 @@
     {
       "case_id": "frozen-003",
       "repo_fixture": "fixtures/worker-runtime",
+      "task_class": "refactor",
       "task_text": "Classify timeout and provider auth errors into typed failure kinds.",
       "expectation": {
         "require_success": true,
@@ -55,6 +58,7 @@
     {
       "case_id": "frozen-004",
       "repo_fixture": "fixtures/frontend-dashboard",
+      "task_class": "bugfix",
       "task_text": "Fix flaky status polling by debouncing repeated refresh requests.",
       "expectation": {
         "require_success": true,
@@ -71,6 +75,7 @@
     {
       "case_id": "frozen-005",
       "repo_fixture": "fixtures/ops-scripts",
+      "task_class": "maintenance",
       "task_text": "Harden deployment helper script to fail fast on missing required env vars.",
       "expectation": {
         "require_success": true,
@@ -82,6 +87,74 @@
           "fail fast",
           "environment variable"
         ]
+      }
+    },
+    {
+      "case_id": "m20-006",
+      "repo_fixture": "fixtures/python-service",
+      "task_class": "scout",
+      "task_text": "Investigate why session restore timeout tests are flaky and summarize findings. Do not modify any source files — produce a written summary only.",
+      "expectation": {
+        "require_success": true,
+        "require_tests_passed": false,
+        "required_summary_substrings": [
+          "session",
+          "timeout"
+        ]
+      }
+    },
+    {
+      "case_id": "m20-007",
+      "repo_fixture": "fixtures/fastapi-app",
+      "task_class": "blocked_decision",
+      "task_text": "Add a direct deploy-to-production action triggered from the task API that pushes the current workspace to the production host over SSH.",
+      "expectation": {
+        "require_success": false,
+        "require_tests_passed": false
+      }
+    },
+    {
+      "case_id": "m20-008",
+      "repo_fixture": "fixtures/python-service",
+      "task_class": "validation_failure",
+      "task_text": "Refactor the session restore logic to extract a helper function, and ensure all existing tests pass before finishing.",
+      "expectation": {
+        "require_success": true,
+        "require_tests_passed": true,
+        "required_files_changed": [
+          "src/math_utils.py"
+        ],
+        "required_summary_substrings": [
+          "refactor",
+          "session"
+        ]
+      }
+    },
+    {
+      "case_id": "m20-009",
+      "repo_fixture": "fixtures/worker-runtime",
+      "task_class": "review_fix",
+      "task_text": "Apply reviewer feedback: replace all print() calls with structured logger.info() calls in the worker runtime module.",
+      "expectation": {
+        "require_success": true,
+        "require_tests_passed": false,
+        "required_files_changed": [
+          "workers/base.py"
+        ],
+        "required_summary_substrings": [
+          "logger",
+          "print"
+        ]
+      }
+    },
+    {
+      "case_id": "m20-010",
+      "repo_fixture": "fixtures/python-service",
+      "task_class": "worker_failure",
+      "task_text": "Add a /metrics endpoint that exposes Prometheus metrics using the prometheus_client library.",
+      "expectation": {
+        "require_success": false,
+        "require_tests_passed": false
       }
     }
   ]

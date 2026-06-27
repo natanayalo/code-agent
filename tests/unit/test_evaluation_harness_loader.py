@@ -294,3 +294,67 @@ def test_load_replay_outcomes_rejects_unexpected_fields(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="unexpected"):
         load_replay_outcomes(replay_path)
+
+
+# ---------------------------------------------------------------------------
+# M20.0 task_class loader tests
+# ---------------------------------------------------------------------------
+
+
+def test_load_frozen_suite_accepts_task_class_field(tmp_path: Path) -> None:
+    suite_path = tmp_path / "task-class-suite.json"
+    suite_path.write_text(
+        json.dumps(
+            {
+                "suite_name": "task-class-suite",
+                "cases": [
+                    {
+                        "case_id": "tc-1",
+                        "repo_fixture": "fixtures/one",
+                        "task_text": "Do something",
+                        "task_class": "scout",
+                        "expectation": {"require_success": True},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    suite = load_frozen_suite(path=suite_path)
+
+    assert suite.cases[0].task_class == "scout"
+
+
+def test_load_frozen_suite_task_class_defaults_to_none(tmp_path: Path) -> None:
+    suite_path = tmp_path / "no-task-class-suite.json"
+    suite_path.write_text(
+        json.dumps(
+            {
+                "suite_name": "no-task-class-suite",
+                "cases": [
+                    {
+                        "case_id": "tc-2",
+                        "repo_fixture": "fixtures/one",
+                        "task_text": "Do something else",
+                        "expectation": {"require_success": True},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    suite = load_frozen_suite(path=suite_path)
+
+    assert suite.cases[0].task_class is None
+
+
+def test_load_frozen_suite_task_class_from_production_suite() -> None:
+    """At least one production case should have task_class after M20.0 annotation."""
+    suite = load_frozen_suite()
+
+    assert any(case.task_class is not None for case in suite.cases)
+    # All cases must have task_class as str or None — no crashes.
+    for case in suite.cases:
+        assert case.task_class is None or isinstance(case.task_class, str)

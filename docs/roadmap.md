@@ -12,9 +12,8 @@ Phase 3: personal reliability before broader autonomy.
 
 Priority sequence:
 
-1. M20.0: Baseline Eval Harness
-2. Milestone 20: Personal Reliability Program
-3. Milestone 21: Worker Runtime Hotspot Refactor
+1. Milestone 20: Personal Reliability Program
+2. Milestone 21: Worker Runtime Hotspot Refactor
 
 Planned follow-up phase:
 
@@ -97,13 +96,14 @@ Control rule:
 
 Implementation sequence:
 
-1. M20.1 Runtime Operating Contract
-2. M20.2 ExecutionPlan Spine
-3. M20.3 Decision Inbox v2
-4. M20.4 Worker Supervisor v1
-5. M20.5 Repo Validation Profiles
-6. M20.6 Draft PR + CI Repair Loop
-7. M20.7 Expanded Internal Eval Suite
+0. [x] M20.0: Baseline Eval Harness
+1. [] M20.1 Runtime Operating Contract
+2. [] M20.2 ExecutionPlan Spine
+3. [] M20.3 Decision Inbox v2
+4. [] M20.4 Worker Supervisor v1
+5. [] M20.5 Repo Validation Profiles
+6. [] M20.6 Draft PR + CI Repair Loop
+7. [] M20.7 Expanded Internal Eval Suite
 
 ### M20.1 Runtime Operating Contract
 

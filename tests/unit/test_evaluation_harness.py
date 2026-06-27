@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from evaluation import (
+    ReliabilityMetrics,
+    ReliabilityReport,
     ReplayRunner,
     ReviewExpectation,
     ReviewOutcome,
@@ -611,3 +613,178 @@ def test_compare_reports_delta_mapping_covers_all_review_metrics() -> None:
 
     assert mapped_metric_fields == review_metric_fields
     assert mapped_comparison_delta_fields == comparison_delta_fields
+
+
+# ---------------------------------------------------------------------------
+# M20.0 ReliabilityMetrics and ReliabilityReport tests
+# ---------------------------------------------------------------------------
+
+
+def test_reliability_metrics_to_dict_serializes_all_fields() -> None:
+    metrics = ReliabilityMetrics(
+        human_interaction_count=2,
+        repeated_question_count=1,
+        validation_evidence_present=True,
+        manual_log_inspection_needed=False,
+        worker_status="success",
+        worker_failure_kind=None,
+        next_action_hint="summarize_result",
+        friction_report_count=0,
+        files_changed_count=3,
+        commands_run_count=5,
+        test_results_count=4,
+        approval_required=False,
+        approval_status="not_required",
+        stage_latency_seconds=(),
+        stage_latency_available=False,
+        attempt_count=1,
+    )
+
+    d = metrics.to_dict()
+
+    assert d["human_interaction_count"] == 2
+    assert d["repeated_question_count"] == 1
+    assert d["validation_evidence_present"] is True
+    assert d["manual_log_inspection_needed"] is False
+    assert d["worker_status"] == "success"
+    assert d["worker_failure_kind"] is None
+    assert d["next_action_hint"] == "summarize_result"
+    assert d["friction_report_count"] == 0
+    assert d["files_changed_count"] == 3
+    assert d["commands_run_count"] == 5
+    assert d["test_results_count"] == 4
+    assert d["approval_required"] is False
+    assert d["approval_status"] == "not_required"
+    assert d["stage_latency_seconds"] == {}
+    assert d["stage_latency_available"] is False
+    assert d["attempt_count"] == 1
+
+
+def test_reliability_metrics_stage_latency_dict() -> None:
+    metrics = ReliabilityMetrics(
+        stage_latency_seconds=(("dispatch_job", 1.5), ("verify_result", 2.3)),
+        stage_latency_available=True,
+    )
+
+    d = metrics.stage_latency_dict()
+
+    assert d == {"dispatch_job": pytest.approx(1.5), "verify_result": pytest.approx(2.3)}
+
+
+def test_reliability_report_to_dict_serializes_all_fields() -> None:
+    report = ReliabilityReport(
+        total_cases=3,
+        cases_needing_approval=1,
+        cases_with_validation_evidence=2,
+        cases_needing_manual_log_inspection=1,
+        cases_with_worker_failure=1,
+        worker_failure_kind_counts=(("unknown", 1),),
+        mean_commands_run=4.0,
+        mean_files_changed=2.0,
+        mean_friction_reports=0.5,
+        stage_latency_available=False,
+        mean_stage_latency_seconds=(),
+    )
+
+    d = report.to_dict()
+
+    assert d["total_cases"] == 3
+    assert d["cases_needing_approval"] == 1
+    assert d["cases_with_validation_evidence"] == 2
+    assert d["cases_needing_manual_log_inspection"] == 1
+    assert d["cases_with_worker_failure"] == 1
+    assert d["worker_failure_kind_counts"] == {"unknown": 1}
+    assert d["mean_commands_run"] == pytest.approx(4.0)
+    assert d["mean_files_changed"] == pytest.approx(2.0)
+    assert d["mean_friction_reports"] == pytest.approx(0.5)
+    assert d["stage_latency_available"] is False
+    assert d["mean_stage_latency_seconds"] == {}
+
+
+def test_evaluate_suite_populates_reliability_report_from_runner_with_reliability() -> None:
+    """ReliabilityReport should aggregate when outcomes carry ReliabilityMetrics."""
+    metrics_pass = ReliabilityMetrics(
+        worker_status="success",
+        validation_evidence_present=True,
+        manual_log_inspection_needed=False,
+        approval_required=False,
+        commands_run_count=3,
+        files_changed_count=2,
+    )
+    metrics_fail = ReliabilityMetrics(
+        worker_status="failure",
+        worker_failure_kind="test",
+        validation_evidence_present=False,
+        manual_log_inspection_needed=True,
+        approval_required=True,
+        approval_status="pending",
+        commands_run_count=1,
+        files_changed_count=0,
+    )
+
+    cases = (
+        FrozenTaskCase(
+            case_id="rel-pass",
+            repo_fixture="fixtures/a",
+            task_text="Pass case",
+            expectation=TaskExpectation(require_success=True),
+        ),
+        FrozenTaskCase(
+            case_id="rel-fail",
+            repo_fixture="fixtures/b",
+            task_text="Fail case",
+            expectation=TaskExpectation(require_success=False),
+        ),
+    )
+
+    class _ReliabilityRunner:
+        async def run_case(self, case: FrozenTaskCase) -> WorkerOutcome:
+            if case.case_id == "rel-pass":
+                return WorkerOutcome(status="success", summary="ok", reliability=metrics_pass)
+            return WorkerOutcome(status="failure", summary="fail", reliability=metrics_fail)
+
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="reliability-suite",
+            cases=cases,
+            runner=_ReliabilityRunner(),
+        )
+    )
+
+    rr = report.reliability_report
+    assert rr is not None
+    assert rr.total_cases == 2
+    assert rr.cases_needing_approval == 1
+    assert rr.cases_with_validation_evidence == 1
+    assert rr.cases_needing_manual_log_inspection == 1
+    assert rr.cases_with_worker_failure == 1
+    assert rr.worker_failure_kind_counts_dict() == {"test": 1}
+    assert rr.mean_commands_run == pytest.approx(2.0)
+    assert rr.mean_files_changed == pytest.approx(1.0)
+    assert rr.stage_latency_available is False
+
+
+def test_evaluate_suite_reliability_report_empty_when_no_reliability_fields() -> None:
+    """ReliabilityReport gracefully handles outcomes with no reliability attached."""
+    case = FrozenTaskCase(
+        case_id="no-rel",
+        repo_fixture="fixtures/a",
+        task_text="A thing",
+        expectation=TaskExpectation(require_success=True),
+    )
+
+    report = asyncio.run(
+        evaluate_suite(
+            suite_name="no-reliability",
+            cases=(case,),
+            runner=ReplayRunner(
+                outcomes_by_case_id={"no-rel": WorkerOutcome(status="success", summary="ok")}
+            ),
+        )
+    )
+
+    rr = report.reliability_report
+    assert rr is not None
+    assert rr.total_cases == 1
+    assert rr.cases_needing_approval == 0
+    assert rr.mean_commands_run is None
