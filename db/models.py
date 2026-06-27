@@ -26,6 +26,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from db.enums import (
     ArtifactType,
+    ExecutionPlanNodeStatus,
     HumanInteractionStatus,
     HumanInteractionType,
     ProposalStatus,
@@ -55,6 +56,9 @@ HUMAN_INTERACTION_STATUS_ENUM = build_sql_enum(
 WORKER_RUNTIME_MODE_ENUM = build_sql_enum(WorkerRuntimeMode, name="worker_runtime_mode")
 PROPOSAL_STATUS_ENUM = build_sql_enum(ProposalStatus, name="proposal_status")
 PROPOSAL_TYPE_ENUM = build_sql_enum(ProposalType, name="proposal_type")
+EXECUTION_PLAN_NODE_STATUS_ENUM = build_sql_enum(
+    ExecutionPlanNodeStatus, name="execution_plan_node_status"
+)
 
 
 class EncryptedJSON(TypeDecorator):
@@ -275,6 +279,9 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         order_by="TaskTimelineEvent.attempt_number.asc(), TaskTimelineEvent.sequence_number.asc()",
     )
     proposals: Mapped[list[Proposal]] = relationship(back_populates="task", passive_deletes=True)
+    execution_plan: Mapped[ExecutionPlan | None] = relationship(
+        back_populates="task", passive_deletes=True
+    )
 
     @validates("status")
     def _coerce_status(self, _key: str, value: TaskStatus | str) -> TaskStatus:
@@ -636,3 +643,64 @@ class Proposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     def _coerce_proposal_type(self, _key: str, value: ProposalType | str) -> ProposalType:
         """Normalize assigned proposal_type to the canonical enum."""
         return ProposalType(value)
+
+
+class ExecutionPlan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """An observable spine of planned work for a complex task."""
+
+    __tablename__ = "execution_plans"
+
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    task: Mapped[Task] = relationship(back_populates="execution_plan")
+    nodes: Mapped[list[ExecutionPlanNode]] = relationship(
+        back_populates="execution_plan",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ExecutionPlanNode.created_at.asc()",
+    )
+
+
+class ExecutionPlanNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A single node within an execution plan."""
+
+    __tablename__ = "execution_plan_nodes"
+
+    plan_id: Mapped[str] = mapped_column(
+        ForeignKey("execution_plans.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    node_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    depends_on: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[ExecutionPlanNodeStatus] = mapped_column(
+        EXECUTION_PLAN_NODE_STATUS_ENUM, nullable=False, default=ExecutionPlanNodeStatus.PENDING
+    )
+    goal: Mapped[str] = mapped_column(Text, nullable=False)
+    acceptance_criteria: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assigned_worker_profile: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    budget: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    validation_commands: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    artifacts: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    blocker_interaction_id: Mapped[str | None] = mapped_column(
+        ForeignKey("human_interactions.id", ondelete="SET NULL"), nullable=True
+    )
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    execution_plan: Mapped[ExecutionPlan] = relationship(back_populates="nodes")
+    blocker_interaction: Mapped[HumanInteraction | None] = relationship()
+
+    @validates("status")
+    def _coerce_status(
+        self, _key: str, value: ExecutionPlanNodeStatus | str
+    ) -> ExecutionPlanNodeStatus:
+        """Normalize assigned plan node statuses to the canonical enum."""
+
+        return ExecutionPlanNodeStatus(value)

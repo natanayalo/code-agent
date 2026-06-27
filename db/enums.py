@@ -24,6 +24,17 @@ class TaskStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ExecutionPlanNodeStatus(StrEnum):
+    """Allowed lifecycle states for execution plan nodes."""
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    BLOCKED = "blocked"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
 class HumanInteractionType(StrEnum):
     """Allowed categories of human interactions."""
 

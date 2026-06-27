@@ -149,11 +149,31 @@ export interface HumanInteractionSnapshot {
   updated_at: string;
 }
 
+export interface ExecutionPlanNodeSnapshot {
+  node_id: string;
+  goal: string;
+  status: string;
+  acceptance_criteria?: string | null;
+  depends_on?: string[] | null;
+  assigned_worker_profile?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  retry_count: number;
+}
+
+export interface ExecutionPlanSnapshot {
+  plan_id: string;
+  created_at: string;
+  updated_at: string;
+  nodes: ExecutionPlanNodeSnapshot[];
+}
+
 export interface TaskSnapshot extends TaskSummarySnapshot {
   task_spec?: TaskSpec | null;
   latest_run?: WorkerRunSnapshot | null;
   pending_interactions?: HumanInteractionSnapshot[];
   timeline: TaskTimelineEventSnapshot[];
+  execution_plan?: ExecutionPlanSnapshot | null;
 }
 
 export interface TaskReplayRequest {

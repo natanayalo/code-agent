@@ -22,6 +22,8 @@ from db.enums import (
 
 EXPECTED_TABLES = {
     "artifacts",
+    "execution_plans",
+    "execution_plan_nodes",
     "human_interactions",
     "inbound_deliveries",
     "memory_personal",

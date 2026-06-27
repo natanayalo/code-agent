@@ -1,0 +1,115 @@
+"""Execution plan SQLAlchemy repositories."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from db.enums import ExecutionPlanNodeStatus
+from db.models import ExecutionPlan, ExecutionPlanNode
+
+
+class ExecutionPlanRepository:
+    """Persist and query task execution plans and their nodes."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(self, *, task_id: str) -> ExecutionPlan:
+        """Create a new execution plan for a task."""
+        plan = ExecutionPlan(task_id=task_id)
+        self.session.add(plan)
+        self.session.flush()
+        return plan
+
+    def get_by_task_id(self, task_id: str) -> ExecutionPlan | None:
+        """Retrieve an execution plan and its nodes for a given task ID."""
+        stmt = select(ExecutionPlan).where(ExecutionPlan.task_id == task_id)
+        return self.session.scalars(stmt).first()
+
+    def get_by_id(self, plan_id: str) -> ExecutionPlan | None:
+        """Retrieve an execution plan by its ID."""
+        return self.session.get(ExecutionPlan, plan_id)
+
+    def add_node(
+        self,
+        *,
+        plan_id: str,
+        node_id: str,
+        goal: str,
+        status: ExecutionPlanNodeStatus = ExecutionPlanNodeStatus.PENDING,
+        depends_on: list[str] | None = None,
+        acceptance_criteria: str | None = None,
+        assigned_worker_profile: str | None = None,
+        budget: dict[str, Any] | None = None,
+        validation_commands: list[str] | None = None,
+        artifacts: list[str] | None = None,
+    ) -> ExecutionPlanNode:
+        """Add a new node to an existing execution plan."""
+        node = ExecutionPlanNode(
+            plan_id=plan_id,
+            node_id=node_id,
+            depends_on=depends_on,
+            status=status,
+            goal=goal,
+            acceptance_criteria=acceptance_criteria,
+            assigned_worker_profile=assigned_worker_profile,
+            budget=budget,
+            validation_commands=validation_commands,
+            artifacts=artifacts,
+        )
+        self.session.add(node)
+        self.session.flush()
+        return node
+
+    def get_node(self, plan_id: str, node_id: str) -> ExecutionPlanNode | None:
+        """Retrieve a specific node from an execution plan."""
+        stmt = select(ExecutionPlanNode).where(
+            ExecutionPlanNode.plan_id == plan_id, ExecutionPlanNode.node_id == node_id
+        )
+        return self.session.scalars(stmt).first()
+
+    def update_node(
+        self,
+        *,
+        plan_id: str,
+        node_id: str,
+        status: ExecutionPlanNodeStatus | None = None,
+        assigned_worker_profile: str | None = None,
+        budget: dict[str, Any] | None = None,
+        validation_commands: list[str] | None = None,
+        artifacts: list[str] | None = None,
+        blocker_interaction_id: str | None = None,
+        retry_count: int | None = None,
+        started_at: datetime | None = None,
+        finished_at: datetime | None = None,
+    ) -> ExecutionPlanNode | None:
+        """Update fields of an execution plan node."""
+        node = self.get_node(plan_id, node_id)
+        if not node:
+            return None
+
+        if status is not None:
+            node.status = status
+        if assigned_worker_profile is not None:
+            node.assigned_worker_profile = assigned_worker_profile
+        if budget is not None:
+            node.budget = budget
+        if validation_commands is not None:
+            node.validation_commands = validation_commands
+        if artifacts is not None:
+            node.artifacts = artifacts
+        if blocker_interaction_id is not None:
+            node.blocker_interaction_id = blocker_interaction_id
+        if retry_count is not None:
+            node.retry_count = retry_count
+        if started_at is not None:
+            node.started_at = started_at
+        if finished_at is not None:
+            node.finished_at = finished_at
+
+        self.session.flush()
+        return node

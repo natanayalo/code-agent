@@ -11,12 +11,21 @@ from sqlalchemy.orm import selectinload
 
 from db.base import utc_now
 from db.enums import ArtifactType, HumanInteractionStatus, TaskStatus, WorkerRunStatus
-from db.models import HumanInteraction, PersonalMemory, ProjectMemory, Task, WorkerRun
+from db.models import (
+    ExecutionPlan,
+    HumanInteraction,
+    PersonalMemory,
+    ProjectMemory,
+    Task,
+    WorkerRun,
+)
 from db.models import Session as ConversationSession
 from orchestrator.execution_serialization import _enum_value, _get_trace_id_from_context
 from orchestrator.execution_tracing import _get_phoenix_url
 from orchestrator.execution_types import (
     ArtifactSnapshot,
+    ExecutionPlanNodeSnapshot,
+    ExecutionPlanSnapshot,
     OperationalMetrics,
     PersonalMemorySnapshot,
     PersonalMemoryUpsertRequest,
@@ -78,6 +87,7 @@ def get_task(self: Any, task_id: str) -> TaskSnapshot | None:
                 selectinload(Task.timeline_events),
                 selectinload(Task.human_interactions),
                 selectinload(Task.worker_runs).selectinload(WorkerRun.artifacts),
+                selectinload(Task.execution_plan).selectinload(ExecutionPlan.nodes),
             )
         )
         task = session.scalar(statement)
@@ -224,6 +234,37 @@ def delete_project_memory(self: Any, *, repo_url: str, memory_key: str) -> bool:
         return memory_repo.delete(repo_url=repo_url, memory_key=memory_key)
 
 
+def _map_execution_plan_to_snapshot(execution_plan: Any) -> ExecutionPlanSnapshot | None:
+    if execution_plan is None:
+        return None
+    return ExecutionPlanSnapshot(
+        plan_id=execution_plan.id,
+        task_id=execution_plan.task_id,
+        created_at=execution_plan.created_at,
+        updated_at=execution_plan.updated_at,
+        nodes=[
+            ExecutionPlanNodeSnapshot(
+                node_id=node.node_id,
+                depends_on=node.depends_on,
+                status=str(node.status),
+                goal=node.goal,
+                acceptance_criteria=node.acceptance_criteria,
+                assigned_worker_profile=node.assigned_worker_profile,
+                budget=node.budget,
+                validation_commands=node.validation_commands,
+                artifacts=node.artifacts,
+                blocker_interaction_id=node.blocker_interaction_id,
+                retry_count=node.retry_count,
+                started_at=node.started_at,
+                finished_at=node.finished_at,
+                created_at=node.created_at,
+                updated_at=node.updated_at,
+            )
+            for node in getattr(execution_plan, "nodes", [])
+        ],
+    )
+
+
 def _map_task_to_snapshot(self: Any, task: Task) -> TaskSnapshot:
     """Map a Task database model to a full TaskSnapshot Pydantic model."""
     latest_run_snapshot: WorkerRunSnapshot | None = None
@@ -274,25 +315,29 @@ def _map_task_to_snapshot(self: Any, task: Task) -> TaskSnapshot:
         )
 
     summary = self._map_task_to_summary(task, latest_run=latest_run_obj)
+    execution_plan_snapshot = _map_execution_plan_to_snapshot(task.execution_plan)
+    timeline = [
+        TaskTimelineEventSnapshot(
+            id=event.id,
+            event_type=_enum_value(event.event_type) or "unknown",
+            attempt_number=event.attempt_number,
+            sequence_number=event.sequence_number,
+            message=event.message,
+            payload=event.payload,
+            created_at=event.created_at,
+        )
+        for event in (task.timeline_events if "timeline_events" in task.__dict__ else [])
+    ]
+
     return TaskSnapshot(
         **summary.model_dump(),
         task_spec=TaskSpec.model_validate(task.task_spec)
         if isinstance(task.task_spec, dict)
         else None,
+        execution_plan=execution_plan_snapshot,
         latest_run=latest_run_snapshot,
         pending_interactions=pending_interactions,
-        timeline=[
-            TaskTimelineEventSnapshot(
-                id=event.id,
-                event_type=_enum_value(event.event_type) or "unknown",
-                attempt_number=event.attempt_number,
-                sequence_number=event.sequence_number,
-                message=event.message,
-                payload=event.payload,
-                created_at=event.created_at,
-            )
-            for event in (task.timeline_events if "timeline_events" in task.__dict__ else [])
-        ],
+        timeline=timeline,
     )
 
 

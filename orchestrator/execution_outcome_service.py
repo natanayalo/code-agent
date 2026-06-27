@@ -34,6 +34,7 @@ from orchestrator.scout_proposals import (
 from orchestrator.state import OrchestratorState
 from repositories import (
     ArtifactRepository,
+    ExecutionPlanRepository,
     HumanInteractionRepository,
     ProposalRepository,
     SessionStateRepository,
@@ -467,6 +468,7 @@ def _update_task_route_and_spec(
     task: Any,
     state: OrchestratorState,
     interaction_repo: HumanInteractionRepository,
+    plan_repo: ExecutionPlanRepository,
 ) -> None:
     if state.route.chosen_worker is not None and state.route.route_reason is not None:
         task.chosen_worker = cast(WorkerType, state.route.chosen_worker)
@@ -480,6 +482,25 @@ def _update_task_route_and_spec(
         interaction_repo.sync_task_spec_flags(
             task_id=task.id, task_spec=cast(dict[str, Any], task.task_spec)
         )
+
+    if state.task_plan is not None and state.task_plan.steps:
+        # Create plan if it doesn't exist
+        if task.execution_plan is None:
+            plan = plan_repo.create(task_id=task.id)
+            task.execution_plan = plan
+        else:
+            plan = task.execution_plan
+
+        # Sync nodes
+        existing_nodes = {n.node_id: n for n in plan.nodes}
+        for step in state.task_plan.steps:
+            if step.step_id not in existing_nodes:
+                plan_repo.add_node(
+                    plan_id=plan.id,
+                    node_id=step.step_id,
+                    goal=step.title,
+                    acceptance_criteria=step.expected_outcome,
+                )
 
 
 def _persist_execution_outcome(
@@ -513,11 +534,13 @@ def _persist_execution_outcome(
         worker_run_repo = WorkerRunRepository(session)
         artifact_repo = ArtifactRepository(session)
 
+        plan_repo = ExecutionPlanRepository(session)
+
         task = task_repo.get(task_id)
         if task is None:
             raise RuntimeError(f"Task '{task_id}' disappeared while persisting execution.")
 
-        _update_task_route_and_spec(task, state, interaction_repo)
+        _update_task_route_and_spec(task, state, interaction_repo, plan_repo)
 
         task.status = force_task_status or _task_status_from_result(state)
 
