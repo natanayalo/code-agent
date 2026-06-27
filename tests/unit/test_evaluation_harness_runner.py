@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 
 import pytest
@@ -480,6 +481,19 @@ def test_extract_reliability_metrics_manual_log_inspection_when_no_hint_no_frict
     metrics = _extract_reliability_metrics(state)
 
     assert metrics.manual_log_inspection_needed is True
+
+
+def test_extract_reliability_metrics_manual_log_inspection_when_result_missing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    state = _parse_state(_make_minimal_state()).model_copy(update={"result": None})
+    caplog.set_level(logging.WARNING, logger="evaluation.orchestrator_runner")
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.worker_status is None
+    assert metrics.manual_log_inspection_needed is True
+    assert "Worker result is None" in caplog.text
 
 
 def test_extract_reliability_metrics_validation_evidence_from_test_results() -> None:

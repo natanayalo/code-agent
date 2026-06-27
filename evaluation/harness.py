@@ -306,7 +306,8 @@ def _expected_fix_cases(
     return [
         result
         for result in reviewed_results
-        if expectations_by_case_id.get(result.case_id, ReviewExpectation()).expect_fix_after_review
+        if (expectation := expectations_by_case_id.get(result.case_id)) is not None
+        and expectation.expect_fix_after_review
     ]
 
 
@@ -318,8 +319,8 @@ def _expected_empty_cases(
     return [
         result
         for result in reviewed_results
-        if expectations_by_case_id.get(result.case_id, ReviewExpectation()).expected_outcome
-        == "no_findings"
+        if (expectation := expectations_by_case_id.get(result.case_id)) is not None
+        and expectation.expected_outcome == "no_findings"
     ]
 
 

@@ -166,7 +166,10 @@ def _extract_worker_metrics(
 
 
 def _compute_manual_log_inspection(result: WorkerResult | None) -> bool:
-    if result is None or result.status == "success":
+    if result is None:
+        logger.warning("Worker result is None; falling back to requiring manual inspection.")
+        return True
+    if result.status == "success":
         return False
     return (
         result.failure_kind in (None, "unknown")
@@ -198,7 +201,8 @@ def _extract_stage_latency(state: OrchestratorState) -> tuple[tuple[tuple[str, f
     for i in range(1, len(timestamped_events)):
         prev = timestamped_events[i - 1]
         curr = timestamped_events[i]
-        assert prev.created_at is not None and curr.created_at is not None
+        if prev.created_at is None or curr.created_at is None:
+            continue
         elapsed = (curr.created_at - prev.created_at).total_seconds()
         stage = curr.event_type or "unknown"
         stage_latency[stage] = stage_latency.get(stage, 0.0) + elapsed
