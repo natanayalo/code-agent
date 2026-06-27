@@ -293,7 +293,7 @@ class ExecutionPlanNodeSnapshot(ExecutionModel):
 
     node_id: str
     depends_on: list[str] | None = None
-    status: str
+    status: Literal["pending", "active", "blocked", "completed", "failed", "skipped"]
     goal: str
     acceptance_criteria: str | None = None
     assigned_worker_profile: str | None = None

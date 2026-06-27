@@ -246,7 +246,7 @@ def _map_execution_plan_to_snapshot(execution_plan: Any) -> ExecutionPlanSnapsho
             ExecutionPlanNodeSnapshot(
                 node_id=node.node_id,
                 depends_on=node.depends_on,
-                status=str(node.status),
+                status=_enum_value(node.status) or "pending",  # type: ignore[arg-type]
                 goal=node.goal,
                 acceptance_criteria=node.acceptance_criteria,
                 assigned_worker_profile=node.assigned_worker_profile,
