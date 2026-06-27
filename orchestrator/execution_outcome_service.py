@@ -493,10 +493,12 @@ def _update_task_route_and_spec(
 
         # Sync nodes
         existing_nodes = {n.node_id: n for n in plan.nodes}
+        active_node_ids = set()
         for i, step in enumerate(state.task_plan.steps):
             if not step or not step.step_id:
                 logger.warning("Encountered null step or step_id in planner task_plan.")
                 continue
+            active_node_ids.add(step.step_id)
             if step.step_id not in existing_nodes:
                 new_node = plan_repo.add_node(
                     plan_id=plan.id,
@@ -513,6 +515,11 @@ def _update_task_route_and_spec(
                 existing_node.sequence_number = i
                 existing_node.acceptance_criteria = step.expected_outcome
                 existing_node.depends_on = step.depends_on or []
+
+        # Remove orphaned nodes that are no longer in the plan
+        for node_id, node in existing_nodes.items():
+            if node_id not in active_node_ids:
+                plan_repo.session.delete(node)
 
 
 def _persist_execution_outcome(

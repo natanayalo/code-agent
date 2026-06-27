@@ -149,10 +149,19 @@ export interface HumanInteractionSnapshot {
   updated_at: string;
 }
 
+export enum ExecutionPlanNodeStatus {
+  PENDING = 'pending',
+  ACTIVE = 'active',
+  BLOCKED = 'blocked',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  SKIPPED = 'skipped'
+}
+
 export interface ExecutionPlanNodeSnapshot {
   node_id: string;
   goal: string;
-  status: string;
+  status: ExecutionPlanNodeStatus;
   acceptance_criteria?: string | null;
   depends_on?: string[] | null;
   assigned_worker_profile?: string | null;
