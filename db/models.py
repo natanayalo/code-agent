@@ -696,7 +696,9 @@ class ExecutionPlanNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     validation_commands: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     artifacts: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     blocker_interaction_id: Mapped[str | None] = mapped_column(
-        ForeignKey("human_interactions.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("human_interactions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

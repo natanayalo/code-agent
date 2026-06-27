@@ -315,7 +315,11 @@ def _map_task_to_snapshot(self: Any, task: Task) -> TaskSnapshot:
         )
 
     summary = self._map_task_to_summary(task, latest_run=latest_run_obj)
-    execution_plan_snapshot = _map_execution_plan_to_snapshot(task.execution_plan)
+    execution_plan_snapshot = (
+        _map_execution_plan_to_snapshot(task.execution_plan)
+        if "execution_plan" in task.__dict__
+        else None
+    )
     timeline = [
         TaskTimelineEventSnapshot(
             id=event.id,
