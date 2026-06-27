@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from db.base import utc_now
 from db.enums import HumanInteractionHitlMode, HumanInteractionStatus, HumanInteractionType
-from db.models import HumanInteraction, InboundDelivery
+from db.models import HumanInteraction, InboundDelivery, Task
 
 
 class HumanInteractionRepository:
@@ -45,16 +45,13 @@ class HumanInteractionRepository:
             statement = statement.where(HumanInteraction.status.in_(statuses))
         return list(self.session.scalars(statement))
 
-    def list_pending_with_task_context(self) -> list[tuple[HumanInteraction, Any]]:
-        from db.models import Task
-
+    def list_pending_with_task_context(self) -> list[tuple[HumanInteraction, Task]]:
         statement = (
             select(HumanInteraction, Task)
             .join(Task, Task.id == HumanInteraction.task_id)
             .where(HumanInteraction.status == HumanInteractionStatus.PENDING)
             .order_by(HumanInteraction.created_at.desc())
         )
-        # Type ignored because Task is a complex model imported dynamically
         rows = self.session.execute(statement).all()
         return [(row[0], row[1]) for row in rows]
 

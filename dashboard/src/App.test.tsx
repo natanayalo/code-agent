@@ -84,7 +84,6 @@ describe('App', () => {
         pending_interaction_count: 1,
       },
     ]);
-    console.log('API object keys:', Object.keys(api));
     vi.mocked(api.listPendingInteractions).mockResolvedValue([
       {
         interaction: {
@@ -92,7 +91,7 @@ describe('App', () => {
           interaction_type: 'clarification',
           status: 'pending',
           summary: 'Task requires clarification before execution can continue.',
-          hitl_mode: 'blocking',
+          hitl_mode: 'require_approval',
           data: {},
           created_at: createdAt,
           updated_at: createdAt,

@@ -18,7 +18,7 @@ describe('OperatorInbox', () => {
               interaction_type: 'clarification',
               status: 'pending',
               summary: 'Need more details',
-              hitl_mode: 'blocking',
+              hitl_mode: 'require_approval',
               data: {},
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
