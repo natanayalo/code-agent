@@ -54,6 +54,14 @@ class HumanInteractionStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class HumanInteractionHitlMode(StrEnum):
+    """Allowed Human-in-the-Loop modes for human interactions."""
+
+    REQUIRE_APPROVAL = "require_approval"
+    PROCEED_WITH_FLAG = "proceed_with_flag"
+    NOTIFY_ONLY = "notify_only"
+
+
 class WorkerRuntimeMode(StrEnum):
     """Supported worker runtime execution modes."""
 

@@ -143,10 +143,22 @@ export interface HumanInteractionSnapshot {
   interaction_type: string;
   status: string;
   summary: string;
+  decision_key?: string | null;
+  hitl_mode: string;
   data: Record<string, unknown>;
   response_data?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface InteractionInboxCard {
+  interaction: HumanInteractionSnapshot;
+  task_id: string;
+  task_text: string;
+  status: string;
+  repo_url?: string | null;
+  branch?: string | null;
+  priority: number;
 }
 
 export enum ExecutionPlanNodeStatus {

@@ -266,10 +266,24 @@ class HumanInteractionSnapshot(ExecutionModel):
     interaction_type: str
     status: str
     summary: str
+    decision_key: str | None = None
+    hitl_mode: str = "require_approval"
     data: dict[str, Any] = Field(default_factory=dict)
     response_data: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class InteractionInboxCard(ExecutionModel):
+    """A pending human interaction paired with its task context for the dashboard."""
+
+    interaction: HumanInteractionSnapshot
+    task_id: str
+    task_text: str
+    status: str
+    repo_url: str | None = None
+    branch: str | None = None
+    priority: int = 0
 
 
 class ProposalSnapshot(ExecutionModel):

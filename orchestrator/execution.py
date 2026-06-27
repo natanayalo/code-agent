@@ -81,6 +81,7 @@ from orchestrator.execution_types import (
     DeliveryKey,
     ExecutionModel,
     HumanInteractionSnapshot,
+    InteractionInboxCard,
     InteractionResponse,
     OperationalMetrics,
     PersonalMemorySnapshot,
@@ -303,6 +304,7 @@ class TaskExecutionService:
     _map_project_memory_to_snapshot = staticmethod(
         execution_snapshot_service._map_project_memory_to_snapshot
     )
+    list_pending_interactions = execution_interaction_service.list_pending_interactions
     record_interaction_response = execution_interaction_service.record_interaction_response
     apply_task_approval_decision = execution_interaction_service.apply_task_approval_decision
     cancel_task = execution_interaction_service.cancel_task
@@ -360,6 +362,7 @@ __all__ = [
     "DeliveryKey",
     "ExecutionModel",
     "HumanInteractionSnapshot",
+    "InteractionInboxCard",
     "InteractionResponse",
     "OperationalMetrics",
     "PersonalMemorySnapshot",

@@ -27,6 +27,7 @@ from db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from db.enums import (
     ArtifactType,
     ExecutionPlanNodeStatus,
+    HumanInteractionHitlMode,
     HumanInteractionStatus,
     HumanInteractionType,
     ProposalStatus,
@@ -52,6 +53,9 @@ TIMELINE_EVENT_TYPE_ENUM = build_sql_enum(TimelineEventType, name="timeline_even
 HUMAN_INTERACTION_TYPE_ENUM = build_sql_enum(HumanInteractionType, name="human_interaction_type")
 HUMAN_INTERACTION_STATUS_ENUM = build_sql_enum(
     HumanInteractionStatus, name="human_interaction_status"
+)
+HUMAN_INTERACTION_HITL_MODE_ENUM = build_sql_enum(
+    HumanInteractionHitlMode, name="human_interaction_hitl_mode"
 )
 WORKER_RUNTIME_MODE_ENUM = build_sql_enum(WorkerRuntimeMode, name="worker_runtime_mode")
 PROPOSAL_STATUS_ENUM = build_sql_enum(ProposalStatus, name="proposal_status")
@@ -571,6 +575,12 @@ class HumanInteraction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("tasks.id", ondelete="CASCADE"),
         nullable=False,
     )
+    decision_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    hitl_mode: Mapped[HumanInteractionHitlMode] = mapped_column(
+        HUMAN_INTERACTION_HITL_MODE_ENUM,
+        nullable=False,
+        default=HumanInteractionHitlMode.REQUIRE_APPROVAL,
+    )
     interaction_type: Mapped[HumanInteractionType] = mapped_column(
         HUMAN_INTERACTION_TYPE_ENUM, nullable=False
     )
@@ -596,6 +606,13 @@ class HumanInteraction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     ) -> HumanInteractionStatus:
         """Normalize assigned status to the canonical enum."""
         return HumanInteractionStatus(value)
+
+    @validates("hitl_mode")
+    def _coerce_hitl_mode(
+        self, _key: str, value: HumanInteractionHitlMode | str
+    ) -> HumanInteractionHitlMode:
+        """Normalize assigned hitl_mode to the canonical enum."""
+        return HumanInteractionHitlMode(value)
 
 
 class Proposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):

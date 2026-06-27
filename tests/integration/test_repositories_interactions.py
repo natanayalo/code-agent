@@ -223,3 +223,50 @@ def test_human_interaction_repository_collapses_duplicate_pending_rows(session_f
         assert (
             sum(row.status is HumanInteractionStatus.CANCELLED for row in clarification_rows) == 1
         )
+
+
+def test_human_interaction_list_pending_with_task_context(session_factory) -> None:
+    """It should retrieve pending interactions joined with their associated task context."""
+    from db.enums import HumanInteractionHitlMode
+
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        interaction_repo = HumanInteractionRepository(session)
+
+        user = user_repo.create(
+            external_user_id="telegram:interaction-context",
+            display_name="Context",
+        )
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-context",
+        )
+        task = task_repo.create(session_id=conversation_session.id, task_text="contextual task")
+
+        from db.models import HumanInteraction
+
+        interaction = HumanInteraction(
+            task_id=task.id,
+            interaction_type=HumanInteractionType.CLARIFICATION,
+            status=HumanInteractionStatus.PENDING,
+            summary="Need context",
+            hitl_mode=HumanInteractionHitlMode.NOTIFY_ONLY,
+            decision_key="abcd123",
+            data={},
+        )
+        session.add(interaction)
+        session.flush()
+
+        pending_with_context = interaction_repo.list_pending_with_task_context()
+        assert len(pending_with_context) >= 1
+
+        # Find our newly inserted row. Session is isolated, but let's be safe.
+        row = next(r for r in pending_with_context if r[0].id == interaction.id)
+        assert row[0].id == interaction.id
+        assert row[0].hitl_mode == HumanInteractionHitlMode.NOTIFY_ONLY
+        assert row[0].decision_key == "abcd123"
+        assert row[1].task_text == "contextual task"
+        assert row[1].priority == task.priority

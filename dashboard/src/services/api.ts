@@ -4,6 +4,7 @@ import {
   TaskSummarySnapshot,
   TaskSnapshot,
   ScoutTriggerRequest,
+  InteractionInboxCard,
 } from '../types/task';
 import { SessionSnapshot } from '../types/session';
 import { OperationalMetrics } from '../types/metrics';
@@ -138,6 +139,16 @@ export const api = {
       return await fetchWithAuth(`/tasks/${taskId}`);
     } catch (error) {
       console.warn(`Failed to fetch task ${taskId}`, error);
+      throw error;
+    }
+  },
+
+  async listPendingInteractions(): Promise<InteractionInboxCard[]> {
+    try {
+      const data = await fetchWithAuth('/tasks/interactions/pending');
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to fetch pending interactions', error);
       throw error;
     }
   },

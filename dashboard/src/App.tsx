@@ -67,10 +67,13 @@ function DashboardContent() {
     );
   }, [tasks]);
 
-  const inboxTasks = useMemo(
-    () => tasks.filter((task) => (task.pending_interaction_count || 0) > 0),
-    [tasks]
-  );
+  const {
+    data: inboxInteractions = [],
+  } = useQuery({
+    queryKey: ['interactions', 'pending'],
+    queryFn: () => api.listPendingInteractions(),
+    refetchInterval: REFRESH_INTERVAL_MS,
+  });
 
   return (
     <DashboardLayout>
@@ -82,7 +85,7 @@ function DashboardContent() {
       </div>
 
       <OperatorInbox
-        tasks={inboxTasks}
+        interactions={inboxInteractions}
         selectedTaskId={selectedTaskId}
         onOpenTask={setSelectedTaskId}
       />

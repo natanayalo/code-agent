@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import datetime
 from operator import add
 from typing import Annotated, Any, Literal
@@ -307,19 +305,6 @@ class OrchestratorState(OrchestratorModel):
     session_state_update: SessionStateUpdate | None = None
     scout_phase: Literal["repo", "research"] | None = None
     scout_phase_results: list[ScoutPhaseResult] = Field(default_factory=list)
-
-
-def compute_interaction_content_hash(
-    interaction_type: str, summary: str, data: dict[str, Any]
-) -> str:
-    """Compute a stable content hash for an interaction requirement."""
-    payload = {
-        "type": str(interaction_type),
-        "summary": summary,
-        "data": data,
-    }
-    content = json.dumps(payload, sort_keys=True).encode()
-    return hashlib.sha256(content).hexdigest()
 
 
 def is_task_read_only(state: OrchestratorState) -> bool:

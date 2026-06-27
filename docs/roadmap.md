@@ -99,7 +99,7 @@ Implementation sequence:
 0. [x] M20.0: Baseline Eval Harness
 1. [x] M20.1 Runtime Operating Contract
 2. [x] M20.2 ExecutionPlan Spine
-3. [] M20.3 Decision Inbox v2
+3. [x] M20.3 Decision Inbox v2
 4. [] M20.4 Worker Supervisor v1
 5. [] M20.5 Repo Validation Profiles
 6. [] M20.6 Draft PR + CI Repair Loop

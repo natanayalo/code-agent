@@ -1,36 +1,41 @@
 import React from 'react';
-import { TaskSummarySnapshot } from '../types/task';
+import { InteractionInboxCard } from '../types/task';
 
 interface OperatorInboxProps {
-  tasks: TaskSummarySnapshot[];
+  interactions: InteractionInboxCard[];
   selectedTaskId: string | null;
   onOpenTask: (taskId: string) => void;
 }
 
-export function OperatorInbox({ tasks, selectedTaskId, onOpenTask }: OperatorInboxProps) {
+export function OperatorInbox({ interactions, selectedTaskId, onOpenTask }: OperatorInboxProps) {
   return (
     <section className="glass-panel operator-inbox">
       <div className="operator-inbox-header">
         <h3>Operator Inbox</h3>
-        <span>{tasks.length} tasks need input</span>
+        <span>{interactions.length} pending interactions</span>
       </div>
-      {tasks.length === 0 ? (
+      {interactions.length === 0 ? (
         <p className="task-detail-muted">No pending interactions.</p>
       ) : (
         <ul className="operator-inbox-list">
-          {tasks.map((task) => (
-            <li key={task.task_id}>
+          {interactions.map((card) => (
+            <li key={card.interaction.interaction_id}>
               <button
                 className={`operator-inbox-item ${
-                  selectedTaskId === task.task_id ? 'selected' : ''
+                  selectedTaskId === card.task_id ? 'selected' : ''
                 }`}
-                onClick={() => onOpenTask(task.task_id)}
+                onClick={() => onOpenTask(card.task_id)}
               >
-                <span className="operator-inbox-text truncate" title={task.task_text}>
-                  {task.task_text}
+                <span className="operator-inbox-item-content">
+                  <span className="operator-inbox-text truncate" title={card.task_text}>
+                    {card.task_text}
+                  </span>
+                  <span className="operator-inbox-summary truncate" title={card.interaction.summary}>
+                    {card.interaction.summary}
+                  </span>
                 </span>
-                <span className="operator-inbox-count">
-                  {task.pending_interaction_count || 0} pending
+                <span className="operator-inbox-type badge">
+                  {card.interaction.interaction_type}
                 </span>
               </button>
             </li>

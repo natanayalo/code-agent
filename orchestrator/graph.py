@@ -24,6 +24,7 @@ from apps.observability import (
     start_optional_span,
 )
 from db.enums import TimelineEventType
+from db.utils import compute_interaction_content_hash
 from orchestrator.brain import (
     OrchestratorBrain,
     RouteBrainMergeReport,
@@ -75,7 +76,6 @@ from orchestrator.state import (
     TaskSpec,
     WorkerDispatch,
     WorkerType,
-    compute_interaction_content_hash,
 )
 from orchestrator.task_spec import (
     apply_task_spec_brain_suggestion,
