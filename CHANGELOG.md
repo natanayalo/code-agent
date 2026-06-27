@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: implement execution plan spine for M20.2 ([#277](https://github.com/natanayalo/code-agent/pull/277))
+
 - Feat: retain runtime manifest in worker_runs ([#276](https://github.com/natanayalo/code-agent/pull/276))
 
 - Feat(evaluation): introduce M20.0 reliability metrics and reporting ([#275](https://github.com/natanayalo/code-agent/pull/275))
