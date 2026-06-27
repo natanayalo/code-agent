@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -13,6 +11,7 @@ from sqlalchemy.orm import Session
 from db.base import utc_now
 from db.enums import HumanInteractionHitlMode, HumanInteractionStatus, HumanInteractionType
 from db.models import HumanInteraction, InboundDelivery, Task
+from db.utils import compute_interaction_content_hash
 
 
 class HumanInteractionRepository:
@@ -52,8 +51,7 @@ class HumanInteractionRepository:
             .where(HumanInteraction.status == HumanInteractionStatus.PENDING)
             .order_by(HumanInteraction.created_at.desc())
         )
-        rows = self.session.execute(statement).all()
-        return [(row[0], row[1]) for row in rows]
+        return list(self.session.execute(statement))  # type: ignore[arg-type]
 
     def record_response(
         self,
@@ -153,23 +151,6 @@ class HumanInteractionRepository:
             )
         return desired
 
-    def _compute_decision_key(
-        self, interaction_type: HumanInteractionType, summary: str, data: dict[str, Any]
-    ) -> str:
-        """Compute a stable decision key ignoring volatile fields."""
-        stable_data = {
-            k: v
-            for k, v in data.items()
-            if k not in {"source", "resume_token", "created_at", "updated_at"}
-        }
-        payload = {
-            "type": str(interaction_type),
-            "summary": summary,
-            "data": stable_data,
-        }
-        content = json.dumps(payload, sort_keys=True).encode()
-        return hashlib.sha256(content).hexdigest()
-
     def _has_resolved_equivalent(
         self,
         decision_key: str,
@@ -213,7 +194,7 @@ class HumanInteractionRepository:
             return
 
         summary, data = desired_payload
-        decision_key = self._compute_decision_key(interaction_type, summary, data)
+        decision_key = compute_interaction_content_hash(interaction_type.value, summary, data)
         desired_resume_token = data.get("resume_token") if isinstance(data, Mapping) else None
 
         if self._has_resolved_equivalent(decision_key, desired_resume_token, resolved_rows):

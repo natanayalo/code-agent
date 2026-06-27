@@ -14,6 +14,7 @@ from db.enums import (
     WorkerRunStatus,
     WorkerType,
 )
+from db.utils import compute_interaction_content_hash
 from orchestrator.execution_serialization import _approval_constraints_payload
 from orchestrator.execution_types import (
     ApprovalDecisionResult,
@@ -21,7 +22,6 @@ from orchestrator.execution_types import (
     InteractionResponse,
     TaskSnapshot,
 )
-from orchestrator.state import compute_interaction_content_hash
 from repositories import (
     HumanInteractionRepository,
     TaskRepository,
