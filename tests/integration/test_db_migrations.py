@@ -42,6 +42,16 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "reflection",
         },
     },
+    "execution_plan_nodes": {
+        "ck_execution_plan_nodes_execution_plan_node_status": {
+            "pending",
+            "active",
+            "blocked",
+            "completed",
+            "failed",
+            "skipped",
+        },
+    },
     "tasks": {
         "ck_tasks_task_status": {
             "pending",

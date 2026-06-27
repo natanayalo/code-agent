@@ -483,7 +483,7 @@ def _update_task_route_and_spec(
             task_id=task.id, task_spec=cast(dict[str, Any], task.task_spec)
         )
 
-    if state.task_plan is not None and state.task_plan.steps:
+    if state.task_plan is not None:
         # Create plan if it doesn't exist
         if task.execution_plan is None:
             plan = plan_repo.create(task_id=task.id)
