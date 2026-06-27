@@ -157,7 +157,7 @@ export interface ExecutionPlanNodeSnapshot {
   depends_on?: string[] | null;
   assigned_worker_profile?: string | null;
   started_at?: string | null;
-  completed_at?: string | null;
+  finished_at?: string | null;
   retry_count: number;
 }
 

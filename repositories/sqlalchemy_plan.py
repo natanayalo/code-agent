@@ -27,7 +27,13 @@ class ExecutionPlanRepository:
 
     def get_by_task_id(self, task_id: str) -> ExecutionPlan | None:
         """Retrieve an execution plan and its nodes for a given task ID."""
-        stmt = select(ExecutionPlan).where(ExecutionPlan.task_id == task_id)
+        from sqlalchemy.orm import selectinload
+
+        stmt = (
+            select(ExecutionPlan)
+            .where(ExecutionPlan.task_id == task_id)
+            .options(selectinload(ExecutionPlan.nodes))
+        )
         return self.session.scalars(stmt).first()
 
     def get_by_id(self, plan_id: str) -> ExecutionPlan | None:

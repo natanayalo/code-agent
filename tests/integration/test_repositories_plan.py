@@ -1,6 +1,6 @@
 """Integration tests for the ExecutionPlanRepository."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from db.enums import ExecutionPlanNodeStatus
 from repositories.session import session_scope
@@ -69,7 +69,7 @@ def test_add_and_update_node(session_factory):
         assert node.depends_on == ["node-0"]
         assert node.assigned_worker_profile == "coder"
 
-        now = datetime.now()
+        now = datetime.now(UTC)
         updated_node = repo.update_node(
             plan_id=plan.id,
             node_id="node-1",

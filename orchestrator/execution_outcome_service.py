@@ -494,13 +494,17 @@ def _update_task_route_and_spec(
         # Sync nodes
         existing_nodes = {n.node_id: n for n in plan.nodes}
         for step in state.task_plan.steps:
+            if not step or not step.step_id:
+                logger.warning("Encountered null step or step_id in planner task_plan.")
+                continue
             if step.step_id not in existing_nodes:
-                plan_repo.add_node(
+                new_node = plan_repo.add_node(
                     plan_id=plan.id,
                     node_id=step.step_id,
-                    goal=step.title,
+                    goal=step.title or f"Step {step.step_id}",
                     acceptance_criteria=step.expected_outcome,
                 )
+                existing_nodes[step.step_id] = new_node
 
 
 def _persist_execution_outcome(
