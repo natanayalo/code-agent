@@ -16,6 +16,7 @@ vi.mock('./services/api', () => ({
   },
   api: {
     listTasks: vi.fn(),
+    listPendingInteractions: vi.fn(),
     getTask: vi.fn(),
     listSessions: vi.fn(),
     listPersonalMemory: vi.fn(),
@@ -51,6 +52,7 @@ describe('App', () => {
     ];
 
     vi.mocked(api.listTasks).mockResolvedValue(mockTasks);
+    vi.mocked(api.listPendingInteractions).mockResolvedValue([]);
     vi.mocked(api.auth.status).mockResolvedValue({ authenticated: true });
 
     const { container } = render(
@@ -81,6 +83,25 @@ describe('App', () => {
         updated_at: createdAt,
         pending_interaction_count: 1,
       },
+    ]);
+    console.log('API object keys:', Object.keys(api));
+    vi.mocked(api.listPendingInteractions).mockResolvedValue([
+      {
+        interaction: {
+          interaction_id: 'hi-1',
+          interaction_type: 'clarification',
+          status: 'pending',
+          summary: 'Task requires clarification before execution can continue.',
+          hitl_mode: 'blocking',
+          data: {},
+          created_at: createdAt,
+          updated_at: createdAt,
+        },
+        task_id: 'task-clarify',
+        task_text: 'Need repo clarification',
+        status: 'pending',
+        priority: 1,
+      }
     ]);
     vi.mocked(api.getTask).mockResolvedValue({
       task_id: 'task-clarify',
@@ -133,7 +154,8 @@ describe('App', () => {
 
     expect(await screen.findByText('Task Detail')).toBeInTheDocument();
     expect(await screen.findByText('Clarify exact repository and file targets')).toBeInTheDocument();
-    expect(await screen.findByText('Task requires clarification before execution can continue.')).toBeInTheDocument();
+    const elements = await screen.findAllByText(/Task requires clarification before execution can continue/i);
+    expect(elements.length).toBeGreaterThan(0);
   });
 
   it('renders login page when not authenticated', async () => {

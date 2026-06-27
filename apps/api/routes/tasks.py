@@ -20,6 +20,7 @@ from apps.observability import (
 )
 from db.enums import TaskStatus
 from orchestrator.execution import (
+    InteractionInboxCard,
     InteractionResponse,
     SubmissionSession,
     TaskApprovalDecision,
@@ -173,6 +174,14 @@ def list_tasks(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/interactions/pending", response_model=list[InteractionInboxCard])
+def list_pending_interactions(
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> list[InteractionInboxCard]:
+    """List all pending interactions across tasks for the operator inbox."""
+    return task_service.list_pending_interactions()
 
 
 @router.get("/{task_id}", response_model=TaskSnapshot)

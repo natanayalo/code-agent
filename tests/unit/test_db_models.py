@@ -10,6 +10,7 @@ from db.base import Base
 from db.enums import (
     ArtifactType,
     ExecutionPlanNodeStatus,
+    HumanInteractionHitlMode,
     HumanInteractionStatus,
     HumanInteractionType,
     ProposalStatus,
@@ -56,6 +57,7 @@ def test_model_metadata_uses_canonical_enums_for_constrained_columns() -> None:
         ("artifacts", "artifact_type"): ArtifactType,
         ("human_interactions", "interaction_type"): HumanInteractionType,
         ("human_interactions", "status"): HumanInteractionStatus,
+        ("human_interactions", "hitl_mode"): HumanInteractionHitlMode,
         ("proposals", "status"): ProposalStatus,
         ("proposals", "proposal_type"): ProposalType,
         ("task_timeline_events", "event_type"): TimelineEventType,

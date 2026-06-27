@@ -428,6 +428,8 @@ def _map_human_interaction_snapshot(interaction: HumanInteraction):  # type: ign
         interaction_type=_enum_value(interaction.interaction_type) or "unknown",
         status=_enum_value(interaction.status) or "unknown",
         summary=interaction.summary,
+        decision_key=interaction.decision_key,
+        hitl_mode=_enum_value(interaction.hitl_mode) or "require_approval",
         data=dict(interaction.data or {}),
         response_data=(
             dict(interaction.response_data or {}) if interaction.response_data is not None else None

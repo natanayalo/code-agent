@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -9,7 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from db.base import utc_now
-from db.enums import HumanInteractionStatus, HumanInteractionType
+from db.enums import HumanInteractionHitlMode, HumanInteractionStatus, HumanInteractionType
 from db.models import HumanInteraction, InboundDelivery
 
 
@@ -42,6 +44,19 @@ class HumanInteractionRepository:
         if statuses is not None:
             statement = statement.where(HumanInteraction.status.in_(statuses))
         return list(self.session.scalars(statement))
+
+    def list_pending_with_task_context(self) -> list[tuple[HumanInteraction, Any]]:
+        from db.models import Task
+
+        statement = (
+            select(HumanInteraction, Task)
+            .join(Task, Task.id == HumanInteraction.task_id)
+            .where(HumanInteraction.status == HumanInteractionStatus.PENDING)
+            .order_by(HumanInteraction.created_at.desc())
+        )
+        # Type ignored because Task is a complex model imported dynamically
+        rows = self.session.execute(statement).all()
+        return [(row[0], row[1]) for row in rows]
 
     def record_response(
         self,
@@ -141,6 +156,40 @@ class HumanInteractionRepository:
             )
         return desired
 
+    def _compute_decision_key(
+        self, interaction_type: HumanInteractionType, summary: str, data: dict[str, Any]
+    ) -> str:
+        """Compute a stable decision key ignoring volatile fields."""
+        stable_data = {
+            k: v
+            for k, v in data.items()
+            if k not in {"source", "resume_token", "created_at", "updated_at"}
+        }
+        payload = {
+            "type": str(interaction_type),
+            "summary": summary,
+            "data": stable_data,
+        }
+        content = json.dumps(payload, sort_keys=True).encode()
+        return hashlib.sha256(content).hexdigest()
+
+    def _has_resolved_equivalent(
+        self,
+        decision_key: str,
+        desired_resume_token: str | None,
+        resolved_rows: list[HumanInteraction],
+    ) -> bool:
+        if any(row.decision_key == decision_key for row in resolved_rows):
+            return True
+        if desired_resume_token and desired_resume_token.strip():
+            if any(
+                isinstance(row.data, Mapping)
+                and row.data.get("resume_token") == desired_resume_token
+                for row in resolved_rows
+            ):
+                return True
+        return False
+
     def _sync_interaction_type(
         self,
         task_id: str,
@@ -167,22 +216,20 @@ class HumanInteractionRepository:
             return
 
         summary, data = desired_payload
+        decision_key = self._compute_decision_key(interaction_type, summary, data)
         desired_resume_token = data.get("resume_token") if isinstance(data, Mapping) else None
-        if isinstance(desired_resume_token, str) and desired_resume_token.strip():
-            resolved_same_token = any(
-                isinstance(row.data, Mapping)
-                and row.data.get("resume_token") == desired_resume_token
-                for row in resolved_rows
-            )
-            if resolved_same_token:
-                for duplicate in pending_rows:
-                    duplicate.status = HumanInteractionStatus.CANCELLED
-                return
+
+        if self._has_resolved_equivalent(decision_key, desired_resume_token, resolved_rows):
+            for duplicate in pending_rows:
+                duplicate.status = HumanInteractionStatus.CANCELLED
+            return
 
         if pending_rows:
             primary = pending_rows[0]
             primary.summary = summary
             primary.data = data
+            primary.decision_key = decision_key
+            primary.hitl_mode = HumanInteractionHitlMode.REQUIRE_APPROVAL
             primary.response_data = None
             primary.status = HumanInteractionStatus.PENDING
             for duplicate in pending_rows[1:]:
@@ -194,6 +241,8 @@ class HumanInteractionRepository:
             if primary.status == HumanInteractionStatus.PENDING:
                 primary.summary = summary
                 primary.data = data
+                primary.decision_key = decision_key
+                primary.hitl_mode = HumanInteractionHitlMode.REQUIRE_APPROVAL
                 primary.response_data = None
                 return
             if primary.summary != summary or primary.data != data:
@@ -203,6 +252,8 @@ class HumanInteractionRepository:
                         interaction_type=interaction_type,
                         status=HumanInteractionStatus.PENDING,
                         summary=summary,
+                        decision_key=decision_key,
+                        hitl_mode=HumanInteractionHitlMode.REQUIRE_APPROVAL,
                         data=data,
                     )
                 )
@@ -214,6 +265,8 @@ class HumanInteractionRepository:
                 interaction_type=interaction_type,
                 status=HumanInteractionStatus.PENDING,
                 summary=summary,
+                decision_key=decision_key,
+                hitl_mode=HumanInteractionHitlMode.REQUIRE_APPROVAL,
                 data=data,
             )
         )

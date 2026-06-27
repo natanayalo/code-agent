@@ -15,7 +15,12 @@ from db.enums import (
     WorkerType,
 )
 from orchestrator.execution_serialization import _approval_constraints_payload
-from orchestrator.execution_types import ApprovalDecisionResult, InteractionResponse, TaskSnapshot
+from orchestrator.execution_types import (
+    ApprovalDecisionResult,
+    InteractionInboxCard,
+    InteractionResponse,
+    TaskSnapshot,
+)
 from orchestrator.state import compute_interaction_content_hash
 from repositories import (
     HumanInteractionRepository,
@@ -24,6 +29,31 @@ from repositories import (
     WorkerRunRepository,
     session_scope,
 )
+
+
+def list_pending_interactions(self: Any) -> list[InteractionInboxCard]:
+    """Retrieve all pending interactions across all tasks, enriched for the inbox."""
+    from orchestrator.execution_snapshot_service import _map_human_interaction_snapshot
+
+    with session_scope(self.session_factory) as session:
+        repo = HumanInteractionRepository(session)
+        rows = repo.list_pending_with_task_context()
+
+        cards = []
+        for interaction_row, task_row in rows:
+            interaction_snapshot = _map_human_interaction_snapshot(interaction_row)
+            cards.append(
+                InteractionInboxCard(
+                    interaction=interaction_snapshot,
+                    task_id=task_row.id,
+                    task_text=task_row.task_text,
+                    status=task_row.status.value if task_row.status else "unknown",
+                    repo_url=task_row.repo_url,
+                    branch=task_row.branch,
+                    priority=task_row.priority,
+                )
+            )
+        return cards
 
 
 def record_interaction_response(

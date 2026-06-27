@@ -2,7 +2,6 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { OperatorInbox } from './OperatorInbox';
-import { TaskStatus } from '../types/task';
 
 describe('OperatorInbox', () => {
   it('renders truncation markup and keeps pending count visible', () => {
@@ -12,16 +11,22 @@ describe('OperatorInbox', () => {
 
     render(
       <OperatorInbox
-        tasks={[
+        interactions={[
           {
+            interaction: {
+              interaction_id: 'int-1',
+              interaction_type: 'clarification',
+              status: 'pending',
+              summary: 'Need more details',
+              hitl_mode: 'blocking',
+              data: {},
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
             task_id: 'task-1',
-            session_id: 'session-1',
-            status: TaskStatus.PENDING,
             task_text: longTaskText,
+            status: 'in_progress',
             priority: 1,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            pending_interaction_count: 12,
           },
         ]}
         selectedTaskId={null}
@@ -31,7 +36,7 @@ describe('OperatorInbox', () => {
 
     const text = screen.getByTitle(longTaskText);
     expect(text).toHaveClass('operator-inbox-text', 'truncate');
-    expect(screen.getByText('12 pending')).toHaveClass('operator-inbox-count');
+    expect(screen.getByText('clarification')).toHaveClass('operator-inbox-type', 'badge');
 
     fireEvent.click(screen.getByRole('button', { name: /very long task text/i }));
     expect(onOpenTask).toHaveBeenCalledWith('task-1');
