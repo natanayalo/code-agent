@@ -354,6 +354,7 @@ def test_load_frozen_suite_task_class_from_production_suite() -> None:
     """At least one production case should have task_class after M20.0 annotation."""
     suite = load_frozen_suite()
 
+    assert any(case.task_class is not None for case in suite.cases)
     # All cases must have task_class as str or None — no crashes.
     for case in suite.cases:
         assert case.task_class is None or isinstance(case.task_class, str)

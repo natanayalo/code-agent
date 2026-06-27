@@ -7,12 +7,9 @@ import logging
 
 from evaluation.harness import (
     EvaluationRunner,
-    FrozenTaskCase,
-    ReliabilityMetrics,
-    WorkerOutcome,
     normalize_path_for_scoring,
 )
-from evaluation.models import ReviewOutcome
+from evaluation.models import FrozenTaskCase, ReliabilityMetrics, ReviewOutcome, WorkerOutcome
 from orchestrator import OrchestratorState, build_orchestrator_graph
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.task_spec import is_destructive_task
@@ -161,10 +158,10 @@ def _extract_worker_metrics(
         result.status,
         result.failure_kind if result.status != "success" else None,
         result.next_action_hint,
-        len(result.friction_reports),
-        len(result.files_changed),
-        len(result.commands_run),
-        len(result.test_results),
+        len(result.friction_reports or []),
+        len(result.files_changed or []),
+        len(result.commands_run or []),
+        len(result.test_results or []),
     )
 
 
@@ -179,17 +176,16 @@ def _compute_manual_log_inspection(result: WorkerResult | None) -> bool:
 
 
 def _extract_interaction_metrics(state: OrchestratorState) -> tuple[int, int]:
-    interaction_events = [
-        event
+    interaction_event_types = [
+        event.event_type
         for event in state.timeline_events
-        if any(event.event_type.startswith(prefix) for prefix in _INTERACTION_EVENT_PREFIXES)
+        if event.event_type
+        and any(event.event_type.startswith(prefix) for prefix in _INTERACTION_EVENT_PREFIXES)
     ]
-    human_interaction_count = len(interaction_events)
+    human_interaction_count = len(interaction_event_types)
     interaction_type_counts: dict[str, int] = {}
-    for event in interaction_events:
-        interaction_type_counts[event.event_type] = (
-            interaction_type_counts.get(event.event_type, 0) + 1
-        )
+    for event_type in interaction_event_types:
+        interaction_type_counts[event_type] = interaction_type_counts.get(event_type, 0) + 1
     repeated_question_count = sum(
         count - 1 for count in interaction_type_counts.values() if count > 1
     )
@@ -204,7 +200,7 @@ def _extract_stage_latency(state: OrchestratorState) -> tuple[tuple[tuple[str, f
         curr = timestamped_events[i]
         assert prev.created_at is not None and curr.created_at is not None
         elapsed = (curr.created_at - prev.created_at).total_seconds()
-        stage = curr.event_type
+        stage = curr.event_type or "unknown"
         stage_latency[stage] = stage_latency.get(stage, 0.0) + elapsed
     return tuple(sorted(stage_latency.items())), bool(stage_latency)
 
@@ -230,8 +226,8 @@ def _extract_reliability_metrics(state: OrchestratorState) -> ReliabilityMetrics
     ) = _extract_worker_metrics(result)
     validation_evidence_present = state.verification is not None or test_results_count > 0
     manual_log_inspection_needed = _compute_manual_log_inspection(result)
-    approval_required = approval.required
-    approval_status: str | None = approval.status
+    approval_required = approval.required if approval is not None else False
+    approval_status: str | None = approval.status if approval is not None else None
     human_interaction_count, repeated_question_count = _extract_interaction_metrics(state)
     stage_latency_seconds, stage_latency_available = _extract_stage_latency(state)
 

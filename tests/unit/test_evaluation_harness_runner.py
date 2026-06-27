@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 import pytest
 
@@ -425,6 +426,15 @@ def test_extract_reliability_metrics_approval_required_false_when_not_required()
     assert metrics.approval_status == "not_required"
 
 
+def test_extract_reliability_metrics_defaults_when_approval_missing() -> None:
+    state = _parse_state(_make_minimal_state()).model_copy(update={"approval": None})
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.approval_required is False
+    assert metrics.approval_status is None
+
+
 def test_extract_reliability_metrics_manual_log_inspection_when_unknown_failure() -> None:
     state = _parse_state(
         _make_minimal_state(
@@ -494,6 +504,32 @@ def test_extract_reliability_metrics_no_validation_evidence_when_empty() -> None
     assert metrics.validation_evidence_present is False
 
 
+def test_extract_reliability_metrics_tolerates_nullable_worker_lists() -> None:
+    from workers import WorkerResult
+
+    result = WorkerResult.model_construct(
+        status="success",
+        summary="done",
+        failure_kind=None,
+        next_action_hint="persist_memory",
+        friction_reports=None,
+        files_changed=None,
+        commands_run=None,
+        test_results=None,
+    )
+    state = _parse_state(_make_minimal_state()).model_copy(
+        update={"result": result, "verification": None}
+    )
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.friction_report_count == 0
+    assert metrics.files_changed_count == 0
+    assert metrics.commands_run_count == 0
+    assert metrics.test_results_count == 0
+    assert metrics.validation_evidence_present is False
+
+
 def test_extract_reliability_metrics_stage_latency_not_available_without_timestamps() -> None:
     state = _parse_state(
         _make_minimal_state(
@@ -508,6 +544,40 @@ def test_extract_reliability_metrics_stage_latency_not_available_without_timesta
 
     assert metrics.stage_latency_available is False
     assert metrics.stage_latency_seconds == ()
+
+
+def test_extract_reliability_metrics_handles_missing_timeline_event_type() -> None:
+    from orchestrator.state import TaskTimelineEventState
+
+    timeline_events = [
+        TaskTimelineEventState.model_construct(
+            event_type="dispatch_job",
+            sequence_number=0,
+            created_at=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+        ),
+        TaskTimelineEventState.model_construct(
+            event_type=None,
+            sequence_number=1,
+            created_at=datetime(2026, 1, 1, 12, 0, 2, tzinfo=UTC),
+        ),
+        TaskTimelineEventState.model_construct(
+            event_type="clarification_requested",
+            sequence_number=2,
+            created_at=datetime(2026, 1, 1, 12, 0, 5, tzinfo=UTC),
+        ),
+    ]
+    state = _parse_state(_make_minimal_state()).model_copy(
+        update={"timeline_events": timeline_events}
+    )
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert metrics.human_interaction_count == 1
+    assert metrics.stage_latency_available is True
+    assert dict(metrics.stage_latency_seconds) == {
+        "clarification_requested": pytest.approx(3.0),
+        "unknown": pytest.approx(2.0),
+    }
 
 
 def test_extract_reliability_metrics_human_interaction_estimated_from_timeline() -> None:
