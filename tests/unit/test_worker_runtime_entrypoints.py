@@ -127,6 +127,7 @@ async def test_run_worker_forever_builds_queue_worker_from_env_and_runs(
             worker_id: str,
             poll_interval_seconds: float,
             lease_seconds: int,
+            capacity: int,
         ) -> None:
             worker_calls.append(
                 {
@@ -134,6 +135,7 @@ async def test_run_worker_forever_builds_queue_worker_from_env_and_runs(
                     "worker_id": worker_id,
                     "poll_interval_seconds": poll_interval_seconds,
                     "lease_seconds": lease_seconds,
+                    "capacity": capacity,
                 }
             )
 
@@ -155,6 +157,7 @@ async def test_run_worker_forever_builds_queue_worker_from_env_and_runs(
     monkeypatch.setenv(worker_main.WORKER_ID_ENV_VAR, "worker-test")
     monkeypatch.setenv(worker_main.POLL_INTERVAL_ENV_VAR, "4.5")
     monkeypatch.setenv(worker_main.LEASE_SECONDS_ENV_VAR, "75")
+    monkeypatch.setenv(worker_main.CAPACITY_ENV_VAR, "3")
 
     await worker_main.run_worker_forever()
 
@@ -163,6 +166,7 @@ async def test_run_worker_forever_builds_queue_worker_from_env_and_runs(
         "worker_id": "worker-test",
         "poll_interval_seconds": 4.5,
         "lease_seconds": 75,
+        "capacity": 3,
     }
     assert worker_calls[1] == {"ran": True}
     assert set(close_calls) == {"telegram", "webhook"}
@@ -186,6 +190,7 @@ async def test_run_worker_forever_bootstraps_observability(monkeypatch: pytest.M
             worker_id: str,
             poll_interval_seconds: float,
             lease_seconds: int,
+            capacity: int,
         ) -> None:
             self.service = service
 

@@ -18,6 +18,7 @@ from repositories.sqlalchemy_session import (
 )
 from repositories.sqlalchemy_task import TaskRepository
 from repositories.sqlalchemy_timeline import TaskTimelineRepository
+from repositories.sqlalchemy_worker import WorkerNodeRepository
 
 __all__ = [
     "ArtifactRepository",
@@ -32,5 +33,6 @@ __all__ = [
     "TaskRepository",
     "TaskTimelineRepository",
     "UserRepository",
+    "WorkerNodeRepository",
     "WorkerRunRepository",
 ]

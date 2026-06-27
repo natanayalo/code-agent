@@ -10,6 +10,7 @@ from repositories import (
     SessionRepository,
     TaskRepository,
     UserRepository,
+    WorkerNodeRepository,
     session_scope,
 )
 
@@ -116,6 +117,93 @@ def test_task_repository_claim_next_returns_fresh_claimed_task(session_factory) 
         assert claimed.status is TaskStatus.IN_PROGRESS
         assert claimed.lease_owner == "worker-a"
         assert claimed.attempt_count == 1
+
+
+def test_task_repository_claim_next_respects_worker_capacity(session_factory) -> None:
+    """A worker cannot claim beyond its registered active capacity."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:capacity", display_name="Capacity")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-capacity",
+        )
+        task_repo.create(session_id=conversation_session.id, task_text="first")
+        task_repo.create(session_id=conversation_session.id, task_text="second")
+        worker_repo.register_worker(
+            worker_id="worker-cap",
+            worker_type="codex",
+            now=datetime.now(UTC),
+            capacity=1,
+        )
+
+        first = task_repo.claim_next(
+            worker_id="worker-cap",
+            now=datetime.now(UTC),
+            lease_seconds=30,
+        )
+        second = task_repo.claim_next(
+            worker_id="worker-cap",
+            now=datetime.now(UTC),
+            lease_seconds=30,
+        )
+        worker = worker_repo.get_by_worker_id("worker-cap")
+
+        assert first is not None
+        assert second is None
+        assert worker is not None
+        assert worker.current_load == 1
+
+
+def test_task_repository_reclaim_expired_leases_rebuilds_worker_load(session_factory) -> None:
+    """Expired lease reconciliation should use remaining active leases as truth."""
+    now = datetime.now(UTC)
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:reclaim", display_name="Reclaim")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-reclaim",
+        )
+        first_task = task_repo.create(session_id=conversation_session.id, task_text="first")
+        second_task = task_repo.create(session_id=conversation_session.id, task_text="second")
+        worker_repo.register_worker(
+            worker_id="worker-reclaim",
+            worker_type="codex",
+            now=now,
+            capacity=2,
+        )
+
+        assert task_repo.claim_next(worker_id="worker-reclaim", now=now, lease_seconds=30)
+        assert task_repo.claim_next(worker_id="worker-reclaim", now=now, lease_seconds=30)
+        worker = worker_repo.get_by_worker_id("worker-reclaim")
+        assert worker is not None
+        assert worker.current_load == 2
+
+        first = task_repo.get(first_task.id)
+        second = task_repo.get(second_task.id)
+        assert first is not None
+        assert second is not None
+        first.lease_expires_at = now - datetime.resolution
+        second.lease_expires_at = now + datetime.resolution
+
+        reclaimed = task_repo.reclaim_expired_leases(now=now)
+
+        assert reclaimed == 1
+        assert first.status is TaskStatus.PENDING
+        assert first.lease_owner is None
+        assert second.status is TaskStatus.IN_PROGRESS
+        assert worker.current_load == 1
 
 
 def test_task_repository_queue_release_guard_paths(session_factory) -> None:

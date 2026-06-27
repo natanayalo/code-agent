@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 WORKER_ID_ENV_VAR: Final[str] = "CODE_AGENT_QUEUE_WORKER_ID"
 POLL_INTERVAL_ENV_VAR: Final[str] = "CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS"
 LEASE_SECONDS_ENV_VAR: Final[str] = "CODE_AGENT_QUEUE_LEASE_SECONDS"
+CAPACITY_ENV_VAR: Final[str] = "CODE_AGENT_QUEUE_CAPACITY"
 
 
 def _coerce_positive_float(value: str | None, *, default: float) -> float:
@@ -67,12 +68,17 @@ async def run_worker_forever() -> None:
             os.environ.get(LEASE_SECONDS_ENV_VAR),
             default=60,
         )
+        capacity = _coerce_positive_int(
+            os.environ.get(CAPACITY_ENV_VAR),
+            default=1,
+        )
 
         queue_worker = TaskQueueWorker(
             service=service,
             worker_id=worker_id,
             poll_interval_seconds=poll_interval,
             lease_seconds=lease_seconds,
+            capacity=capacity,
         )
         await queue_worker.run_forever()
     finally:

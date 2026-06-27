@@ -11,6 +11,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -23,7 +24,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
-from db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, utc_now
 from db.enums import (
     ArtifactType,
     ExecutionPlanNodeStatus,
@@ -35,6 +36,7 @@ from db.enums import (
     SessionStatus,
     TaskStatus,
     TimelineEventType,
+    WorkerNodeStatus,
     WorkerRunStatus,
     WorkerRuntimeMode,
     WorkerType,
@@ -48,6 +50,7 @@ SESSION_STATUS_ENUM = build_sql_enum(SessionStatus, name="session_status")
 TASK_STATUS_ENUM = build_sql_enum(TaskStatus, name="task_status")
 WORKER_TYPE_ENUM = build_sql_enum(WorkerType, name="worker_type")
 WORKER_RUN_STATUS_ENUM = build_sql_enum(WorkerRunStatus, name="worker_run_status")
+WORKER_NODE_STATUS_ENUM = build_sql_enum(WorkerNodeStatus, name="worker_node_status")
 ARTIFACT_TYPE_ENUM = build_sql_enum(ArtifactType, name="artifact_type")
 TIMELINE_EVENT_TYPE_ENUM = build_sql_enum(TimelineEventType, name="timeline_event_type")
 HUMAN_INTERACTION_TYPE_ENUM = build_sql_enum(HumanInteractionType, name="human_interaction_type")
@@ -399,6 +402,52 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
         if value is None:
             return None
         return WorkerRuntimeMode(value)
+
+
+class WorkerNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A queue worker process that can claim and execute persisted tasks."""
+
+    __tablename__ = "worker_nodes"
+    __table_args__ = (
+        CheckConstraint("capacity > 0", name="worker_capacity_positive"),
+        CheckConstraint("current_load >= 0", name="worker_load_nonnegative"),
+        CheckConstraint("current_load <= capacity", name="worker_load_within_capacity"),
+        CheckConstraint("consecutive_failures >= 0", name="worker_failures_nonnegative"),
+    )
+
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    worker_type: Mapped[WorkerType] = mapped_column(WORKER_TYPE_ENUM, nullable=False, index=True)
+    status: Mapped[WorkerNodeStatus] = mapped_column(
+        WORKER_NODE_STATUS_ENUM,
+        nullable=False,
+        default=WorkerNodeStatus.ACTIVE,
+        index=True,
+    )
+    process_identity: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    supported_profiles: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    capabilities: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    last_heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        index=True,
+    )
+    capacity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    current_load: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    quarantine_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @validates("worker_type")
+    def _coerce_worker_type(self, _key: str, value: WorkerType | str) -> WorkerType:
+        """Normalize assigned worker types to the canonical enum."""
+
+        return coerce_worker_type(value)
+
+    @validates("status")
+    def _coerce_status(self, _key: str, value: WorkerNodeStatus | str) -> WorkerNodeStatus:
+        """Normalize assigned worker-node statuses to the canonical enum."""
+
+        return WorkerNodeStatus(value)
 
 
 class Artifact(UUIDPrimaryKeyMixin, TimestampMixin, Base):

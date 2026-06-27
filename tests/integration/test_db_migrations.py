@@ -23,6 +23,7 @@ EXPECTED_TABLES = {
     "tasks",
     "task_timeline_events",
     "users",
+    "worker_nodes",
     "worker_runs",
 }
 
@@ -73,6 +74,19 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "error",
             "cancelled",
         },
+    },
+    "worker_nodes": {
+        "ck_worker_nodes_worker_type": {"antigravity", "codex", "openrouter"},
+        "ck_worker_nodes_worker_node_status": {
+            "active",
+            "draining",
+            "offline",
+            "quarantined",
+        },
+        "ck_worker_nodes_worker_capacity_positive": {"capacity > 0"},
+        "ck_worker_nodes_worker_load_nonnegative": {"current_load >= 0"},
+        "ck_worker_nodes_worker_load_within_capacity": {"current_load <= capacity"},
+        "ck_worker_nodes_worker_failures_nonnegative": {"consecutive_failures >= 0"},
     },
     "artifacts": {
         "ck_artifacts_artifact_type": {
@@ -130,6 +144,46 @@ EXPECTED_CHECK_CONSTRAINTS = {
 }
 
 
+def _column_names(inspector, table_name: str) -> set[str]:
+    return {column["name"] for column in inspector.get_columns(table_name)}
+
+
+def _assert_upgrade_columns(inspector) -> None:
+    assert {"channel", "external_thread_id", "status"} <= _column_names(inspector, "sessions")
+    assert {
+        "task_text",
+        "worker_override",
+        "constraints",
+        "task_spec",
+        "budget",
+        "chosen_worker",
+        "route_reason",
+    } <= _column_names(inspector, "tasks")
+    assert {
+        "session_id",
+        "requested_permission",
+        "budget_usage",
+        "verifier_outcome",
+        "commands_run",
+        "artifact_index",
+        "runtime_manifest",
+        "retention_expires_at",
+        "files_changed_count",
+    } <= _column_names(inspector, "worker_runs")
+    assert {
+        "worker_id",
+        "worker_type",
+        "status",
+        "supported_profiles",
+        "capabilities",
+        "last_heartbeat_at",
+        "capacity",
+        "current_load",
+        "consecutive_failures",
+        "quarantine_reason",
+    } <= _column_names(inspector, "worker_nodes")
+
+
 def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     """Upgrading to head creates the initial persistence schema."""
     database_path = tmp_path / "schema.db"
@@ -143,29 +197,7 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     inspector = inspect(engine)
 
     assert EXPECTED_TABLES == set(inspector.get_table_names())
-    assert {"channel", "external_thread_id", "status"} <= {
-        column["name"] for column in inspector.get_columns("sessions")
-    }
-    assert {
-        "task_text",
-        "worker_override",
-        "constraints",
-        "task_spec",
-        "budget",
-        "chosen_worker",
-        "route_reason",
-    } <= {column["name"] for column in inspector.get_columns("tasks")}
-    assert {
-        "session_id",
-        "requested_permission",
-        "budget_usage",
-        "verifier_outcome",
-        "commands_run",
-        "artifact_index",
-        "runtime_manifest",
-        "retention_expires_at",
-        "files_changed_count",
-    } <= {column["name"] for column in inspector.get_columns("worker_runs")}
+    _assert_upgrade_columns(inspector)
     worker_run_foreign_keys = {
         foreign_key["name"]: foreign_key
         for foreign_key in inspector.get_foreign_keys("worker_runs")
