@@ -37,16 +37,14 @@ Active focus:
 
 ## Next Priorities
 
-1. finish M20.1 Runtime Operating Contract
-2. implement M20.3 Human Interaction Inbox Rows
-3. defer Milestone 21 Hotspot Refactor until M20 worker/operator contracts stabilize
-4. keep Phase 4 autonomy work gated on Phase 3 reliability metrics
+1. implement M20.3 Human Interaction Inbox Rows
+2. defer Milestone 21 Hotspot Refactor until M20 worker/operator contracts stabilize
+3. keep Phase 4 autonomy work gated on Phase 3 reliability metrics
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
-- M20.1: persist the `RuntimeManifest` generated during execution alongside the `WorkerRun` entity.
 - M20.3: upgrade HumanInteraction payloads into decision cards, HITL modes, and interaction-based inbox rows.
 - M20.4: add worker registry, heartbeat, capacity, health, and quarantine primitives for safe routing/backpressure.
 - M20.5: add repo validation profiles and require validation evidence or bounded failure reports.
