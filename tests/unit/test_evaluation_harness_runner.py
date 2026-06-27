@@ -594,6 +594,38 @@ def test_extract_reliability_metrics_handles_missing_timeline_event_type() -> No
     }
 
 
+def test_extract_reliability_metrics_sorts_stage_latency_events_by_timestamp() -> None:
+    from orchestrator.state import TaskTimelineEventState
+
+    timeline_events = [
+        TaskTimelineEventState.model_construct(
+            event_type="clarification_requested",
+            sequence_number=2,
+            created_at=datetime(2026, 1, 1, 12, 0, 5, tzinfo=UTC),
+        ),
+        TaskTimelineEventState.model_construct(
+            event_type="dispatch_job",
+            sequence_number=0,
+            created_at=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+        ),
+        TaskTimelineEventState.model_construct(
+            event_type=None,
+            sequence_number=1,
+            created_at=datetime(2026, 1, 1, 12, 0, 2, tzinfo=UTC),
+        ),
+    ]
+    state = _parse_state(_make_minimal_state()).model_copy(
+        update={"timeline_events": timeline_events}
+    )
+
+    metrics = _extract_reliability_metrics(state)
+
+    assert dict(metrics.stage_latency_seconds) == {
+        "clarification_requested": pytest.approx(3.0),
+        "unknown": pytest.approx(2.0),
+    }
+
+
 def test_extract_reliability_metrics_human_interaction_estimated_from_timeline() -> None:
     state = _parse_state(
         _make_minimal_state(

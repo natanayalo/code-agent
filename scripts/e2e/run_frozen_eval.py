@@ -223,6 +223,8 @@ def _print_reliability_summary(report: EvaluationReport) -> None:
         print(f"  Mean commands run:            {rr.mean_commands_run:.1f}")
     if rr.mean_files_changed is not None:
         print(f"  Mean files changed:           {rr.mean_files_changed:.1f}")
+    if rr.mean_friction_reports is not None:
+        print(f"  Mean friction reports:        {rr.mean_friction_reports:.1f}")
     print(f"  Stage latency available:      {rr.stage_latency_available}")
 
 

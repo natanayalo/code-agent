@@ -197,13 +197,14 @@ def _extract_interaction_metrics(state: OrchestratorState) -> tuple[int, int]:
 
 def _extract_stage_latency(state: OrchestratorState) -> tuple[tuple[tuple[str, float], ...], bool]:
     stage_latency: dict[str, float] = {}
-    timestamped_events = [event for event in state.timeline_events if event.created_at is not None]
+    timestamped_events = sorted(
+        [event for event in state.timeline_events if event.created_at is not None],
+        key=lambda event: event.created_at,
+    )
     for i in range(1, len(timestamped_events)):
         prev = timestamped_events[i - 1]
         curr = timestamped_events[i]
-        if prev.created_at is None or curr.created_at is None:
-            continue
-        elapsed = (curr.created_at - prev.created_at).total_seconds()
+        elapsed = max(0.0, (curr.created_at - prev.created_at).total_seconds())
         stage = curr.event_type or "unknown"
         stage_latency[stage] = stage_latency.get(stage, 0.0) + elapsed
     return tuple(sorted(stage_latency.items())), bool(stage_latency)

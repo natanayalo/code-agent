@@ -462,3 +462,37 @@ def test_write_m20_baseline_and_print_summary_via_module_api(tmp_path: Path) -> 
     with (tmp_path / "baseline_m20.0.json").open() as f:
         payload = json.load(f)
     assert "reliability_report" in payload
+
+
+def test_print_reliability_summary_includes_mean_friction_reports(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from evaluation import EvaluationReport, ReliabilityReport
+
+    module = _load_run_frozen_eval_module()
+    report = EvaluationReport(
+        suite_name="m20-summary",
+        total_cases=1,
+        passed_cases=1,
+        failed_cases=0,
+        total_score=1,
+        max_score=1,
+        results=(),
+        reliability_report=ReliabilityReport(
+            total_cases=1,
+            cases_needing_approval=0,
+            cases_with_validation_evidence=1,
+            cases_needing_manual_log_inspection=0,
+            cases_with_worker_failure=0,
+            worker_failure_kind_counts=(),
+            mean_commands_run=2.0,
+            mean_files_changed=1.0,
+            mean_friction_reports=1.5,
+            stage_latency_available=False,
+            mean_stage_latency_seconds=(),
+        ),
+    )
+
+    module._print_reliability_summary(report)
+
+    assert "Mean friction reports:        1.5" in capsys.readouterr().out
