@@ -146,8 +146,10 @@ def _create_worker_run(
         artifact_index=artifact_index,
         runtime_manifest=state.dispatch.runtime_manifest if state.dispatch else None,
         retention_expires_at=retention_expires_at,
-        worker_profile=state.dispatch.worker_profile if state.dispatch else None,
-        runtime_mode=state.dispatch.runtime_mode if state.dispatch else None,
+        worker_profile=(state.dispatch.worker_profile if state.dispatch else None)
+        or (state.route.chosen_profile if state.route else None),
+        runtime_mode=(state.dispatch.runtime_mode if state.dispatch else None)
+        or (state.route.runtime_mode if state.route else None),
     )
 
 

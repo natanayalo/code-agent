@@ -2543,6 +2543,7 @@ def build_await_result_node(
 
     async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
+        request = None
 
         with start_optional_span(
             tracer_name="orchestrator.graph",
@@ -2599,7 +2600,7 @@ def build_await_result_node(
                 "progress_updates": progress_updates,
                 "dispatch": {
                     **state.dispatch.model_dump(),
-                    "runtime_manifest": request.runtime_manifest if "request" in locals() else None,
+                    "runtime_manifest": request.runtime_manifest if request is not None else None,
                 },
                 **_timeline_event(
                     state,
