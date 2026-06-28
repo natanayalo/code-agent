@@ -103,6 +103,8 @@ class WorkerNodeRepository:
         if node is None:
             return None
         node.last_heartbeat_at = now
+        if node.status == WorkerNodeStatus.OFFLINE:
+            node.status = WorkerNodeStatus.ACTIVE
         self.session.flush()
         return node.status
 

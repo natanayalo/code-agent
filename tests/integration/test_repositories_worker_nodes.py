@@ -125,3 +125,24 @@ def test_worker_node_release_load_never_goes_negative(session_factory) -> None:
         assert node.current_load == 0
         assert repo.release_load(worker_id="worker-release") is True
         assert node.current_load == 0
+
+
+def test_worker_node_heartbeat_recovers_offline_workers(session_factory) -> None:
+    """An OFFLINE worker should be marked ACTIVE again upon successful heartbeat."""
+    now = datetime.now(UTC)
+    with session_scope(session_factory) as session:
+        repo = WorkerNodeRepository(session)
+        node = repo.register_worker(
+            worker_id="worker-recovery",
+            worker_type="codex",
+            now=now - timedelta(minutes=10),
+            capacity=1,
+        )
+
+        repo.sweep_stale_workers(now=now, threshold_seconds=60)
+        assert node.status is WorkerNodeStatus.OFFLINE
+
+        # Heartbeat should recover the worker
+        status = repo.heartbeat(worker_id="worker-recovery", now=now)
+        assert status is WorkerNodeStatus.ACTIVE
+        assert node.status is WorkerNodeStatus.ACTIVE
