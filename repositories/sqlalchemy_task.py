@@ -491,8 +491,8 @@ class TaskRepository:
         task.lease_expires_at = None
         task.next_attempt_at = None
         task.last_error = None
-        WorkerNodeRepository(self.session).release_load(worker_id=worker_id)
         self.session.flush()
+        WorkerNodeRepository(self.session).release_load(worker_id=worker_id)
         return task
 
     def release_failure(
@@ -518,9 +518,9 @@ class TaskRepository:
         else:
             task.status = TaskStatus.PENDING
             task.next_attempt_at = now + timedelta(seconds=max(0, retry_backoff_seconds))
+        self.session.flush()
         if previous_owner:
             WorkerNodeRepository(self.session).release_load(worker_id=previous_owner)
-        self.session.flush()
         return task
 
     def release_terminal_failure(
@@ -533,13 +533,16 @@ class TaskRepository:
         task = self.get(task_id)
         if task is None:
             return None
+        previous_owner = None
         if task.lease_owner == worker_id:
+            previous_owner = task.lease_owner
             task.lease_owner = None
             task.lease_expires_at = None
-            WorkerNodeRepository(self.session).release_load(worker_id=worker_id)
         task.status = status
         task.next_attempt_at = None
         self.session.flush()
+        if previous_owner:
+            WorkerNodeRepository(self.session).release_load(worker_id=previous_owner)
         return task
 
     def cancel(self, *, task_id: str) -> tuple[Task | None, bool]:
@@ -555,8 +558,6 @@ class TaskRepository:
         task.next_attempt_at = None
         task.status = TaskStatus.FAILED
         task.last_error = "Task cancelled by operator."
-        if previous_owner:
-            WorkerNodeRepository(self.session).release_load(worker_id=previous_owner)
         self.session.execute(
             update(HumanInteraction)
             .where(
@@ -566,6 +567,8 @@ class TaskRepository:
             .values(status=HumanInteractionStatus.CANCELLED)
         )
         self.session.flush()
+        if previous_owner:
+            WorkerNodeRepository(self.session).release_load(worker_id=previous_owner)
         return task, True
 
     def record_attempt_error(
