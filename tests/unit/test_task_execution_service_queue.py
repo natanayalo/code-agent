@@ -61,6 +61,11 @@ def _build_fake_orchestrator_state(
     )
 
 
+async def _idle_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
+    """Keep heartbeat alive until run_queued_task cancels it after result handling."""
+    await asyncio.Event().wait()
+
+
 def test_claim_next_task_allows_single_claim_and_lease_reclaim() -> None:
     """Only one worker should claim a pending task until the lease expires."""
     engine = create_engine_from_url(
@@ -239,11 +244,8 @@ def test_run_queued_task_requeues_failed_result_when_retries_remain(monkeypatch)
             result_summary="Simulated failure should be retried.",
         )
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
 
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
 
@@ -274,10 +276,7 @@ def test_run_queued_task_only_quarantines_provider_and_infra_failures(monkeypatc
     )
     service.register_worker_node(worker_id="worker-health", capacity=1)
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
 
     async def fake_test_failure(
         submitted: execution_module.TaskSubmission,
@@ -362,9 +361,6 @@ def test_run_queued_task_wraps_execution_in_restored_trace_context(monkeypatch) 
     ) -> OrchestratorState:
         raise RuntimeError("boom")
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
     async def run_blocking(func, *args, **kwargs):
         return func(*args, **kwargs)
 
@@ -381,7 +377,7 @@ def test_run_queued_task_wraps_execution_in_restored_trace_context(monkeypatch) 
             scope_events["exited"] += 1
 
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
     monkeypatch.setattr(service, "_run_blocking", run_blocking)
     monkeypatch.setattr(
         execution_module,
@@ -490,11 +486,8 @@ def test_run_queued_task_terminal_interrupt_emits_awaiting_approval_without_requ
             next_action_hint="await_manual_follow_up",
         )
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
 
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
 
@@ -554,11 +547,8 @@ def test_run_queued_task_rejected_approval_stays_failed(monkeypatch) -> None:
             next_action_hint="await_manual_follow_up",
         )
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
 
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
 
@@ -613,11 +603,8 @@ def test_apply_task_approval_decision_requeues_approved_task(monkeypatch) -> Non
             next_action_hint="await_manual_follow_up",
         )
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
 
     decision = service.apply_task_approval_decision(task_id=snapshot.task_id, approved=True)
@@ -679,11 +666,8 @@ def test_apply_task_approval_decision_reject_is_terminal_and_conflict_is_reporte
             next_action_hint="await_manual_follow_up",
         )
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
 
     rejected = service.apply_task_approval_decision(task_id=snapshot.task_id, approved=False)
