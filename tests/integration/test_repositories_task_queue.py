@@ -201,49 +201,6 @@ def test_task_repository_claim_next_skips_reservation_when_no_work(
         assert lookup_calls == ["worker-empty"]
 
 
-def test_task_repository_claim_next_reclaims_before_worker_lookup(
-    session_factory,
-    monkeypatch,
-) -> None:
-    """Expired leases should be reconciled before loading worker capacity state."""
-    with session_scope(session_factory) as session:
-        task_repo = TaskRepository(session)
-        worker_repo = WorkerNodeRepository(session)
-        worker_repo.register_worker(
-            worker_id="worker-reclaim-first",
-            worker_type="codex",
-            now=datetime.now(UTC),
-            capacity=1,
-        )
-
-        call_order: list[str] = []
-        original_reclaim = TaskRepository.reclaim_expired_leases
-        original_get = WorkerNodeRepository.get_by_worker_id
-
-        def recording_reclaim(self: TaskRepository, *, now: datetime) -> int:
-            call_order.append("reclaim")
-            return original_reclaim(self, now=now)
-
-        def recording_get_by_worker_id(
-            self: WorkerNodeRepository,
-            worker_id: str,
-        ):
-            call_order.append("get_worker")
-            return original_get(self, worker_id)
-
-        monkeypatch.setattr(TaskRepository, "reclaim_expired_leases", recording_reclaim)
-        monkeypatch.setattr(WorkerNodeRepository, "get_by_worker_id", recording_get_by_worker_id)
-
-        claimed = task_repo.claim_next(
-            worker_id="worker-reclaim-first",
-            now=datetime.now(UTC),
-            lease_seconds=30,
-        )
-
-        assert claimed is None
-        assert call_order[:2] == ["reclaim", "get_worker"]
-
-
 def test_task_repository_claim_next_skips_candidate_filter_for_non_active_worker(
     session_factory,
     monkeypatch,

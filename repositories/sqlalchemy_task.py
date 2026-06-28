@@ -158,7 +158,7 @@ class TaskRepository:
 
         supported_profiles = {
             TaskRepository._normalize_profile_name(profile)
-            for profile in worker_node.supported_profiles
+            for profile in (worker_node.supported_profiles or [])
             if isinstance(profile, str) and profile.strip()
         }
         required_profiles = {
@@ -326,7 +326,7 @@ class TaskRepository:
         now: datetime,
         lease_seconds: int,
     ) -> Task | None:
-        self.reclaim_expired_leases(now=now)
+        # Expired leases are reclaimed asynchronously by the background sweep service
         worker_repo = WorkerNodeRepository(self.session)
         worker_node = self._ensure_worker_node_for_claim(
             worker_repo=worker_repo,
@@ -412,27 +412,8 @@ class TaskRepository:
             list({row.lease_owner for row in expired_tasks_info if row.lease_owner})
         )
 
-        worker_repo = WorkerNodeRepository(self.session)
-        for worker_id in affected_workers:
-            # 1. Lock WorkerNode to serialize with claim_next and prevent deadlocks
-            self.session.scalars(
-                select(WorkerNode.id).where(WorkerNode.worker_id == worker_id).with_for_update()
-            ).all()
-            # 2. Compute remaining load for this worker excluding the expired tasks
-            remaining_load = (
-                self.session.execute(
-                    select(func.count(Task.id)).where(
-                        Task.lease_owner == worker_id,
-                        Task.status == TaskStatus.IN_PROGRESS,
-                        Task.id.not_in(task_ids),
-                    )
-                ).scalar()
-                or 0
-            )
-            # 3. Update the WorkerNode load
-            worker_repo.set_load(worker_id=worker_id, current_load=remaining_load)
-
-        # 4. Lock and update Tasks
+        # 1. Lock and update Tasks first to maintain consistent locking order (Task -> WorkerNode)
+        # and prevent deadlocks with release_success/release_failure.
         updated = self.session.execute(
             update(Task)
             .where(Task.id.in_(task_ids), Task.status == TaskStatus.IN_PROGRESS)
@@ -447,6 +428,24 @@ class TaskRepository:
         updated_count = getattr(updated, "rowcount", 0) or 0
         if updated_count > 0:
             self.session.flush()
+
+        # 2. Update the WorkerNode load for affected workers
+        worker_repo = WorkerNodeRepository(self.session)
+        for worker_id in affected_workers:
+            # Lock WorkerNode after Task to prevent deadlocks
+            self.session.scalars(
+                select(WorkerNode.id).where(WorkerNode.worker_id == worker_id).with_for_update()
+            ).all()
+            remaining_load = (
+                self.session.execute(
+                    select(func.count(Task.id)).where(
+                        Task.lease_owner == worker_id,
+                        Task.status == TaskStatus.IN_PROGRESS,
+                    )
+                ).scalar()
+                or 0
+            )
+            worker_repo.set_load(worker_id=worker_id, current_load=remaining_load)
 
         return updated_count
 

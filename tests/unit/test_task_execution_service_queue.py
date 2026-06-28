@@ -93,6 +93,9 @@ def test_claim_next_task_allows_single_claim_and_lease_reclaim() -> None:
         assert task is not None
         assert task.lease_expires_at is not None
         task.lease_expires_at = task.lease_expires_at - timedelta(seconds=120)
+        import datetime
+
+        TaskRepository(session).reclaim_expired_leases(now=datetime.datetime.now(datetime.UTC))
 
     reclaimed = service.claim_next_task(worker_id="worker-b", lease_seconds=60)
     assert reclaimed is not None
