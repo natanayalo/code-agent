@@ -50,7 +50,9 @@ async def _heartbeat_loop(
                 extra={
                     "task_id": task_id,
                     "worker_id": worker_id,
-                    "worker_status": worker_status.value if worker_status else None,
+                    "worker_status": getattr(worker_status, "value", worker_status)
+                    if worker_status
+                    else None,
                 },
             )
             return None

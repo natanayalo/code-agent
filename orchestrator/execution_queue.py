@@ -73,7 +73,10 @@ class TaskQueueWorker:
                 logger.warning(
                     "Task queue worker registered with non-claiming status; "
                     "entering idle heartbeat mode",
-                    extra={"worker_id": self.worker_id, "status": status.value if status else None},
+                    extra={
+                        "worker_id": self.worker_id,
+                        "status": getattr(status, "value", status) if status else None,
+                    },
                 )
 
             loop = asyncio.get_running_loop()
@@ -96,7 +99,7 @@ class TaskQueueWorker:
                                 "Task queue worker skipping claims due to registry status",
                                 extra={
                                     "worker_id": self.worker_id,
-                                    "status": status.value if status else None,
+                                    "status": getattr(status, "value", status) if status else None,
                                 },
                             )
                     if now >= next_sweep_at:
