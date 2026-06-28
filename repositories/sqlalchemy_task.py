@@ -438,21 +438,29 @@ class TaskRepository:
 
         # 2. Update the WorkerNode load for affected workers
         worker_repo = WorkerNodeRepository(self.session)
-        for worker_id in affected_workers:
-            # Lock WorkerNode after Task to prevent deadlocks
+        if affected_workers:
+            # Lock all affected WorkerNodes in a single sorted query to prevent deadlocks
             self.session.scalars(
-                select(WorkerNode.id).where(WorkerNode.worker_id == worker_id).with_for_update()
+                select(WorkerNode.id)
+                .where(WorkerNode.worker_id.in_(affected_workers))
+                .order_by(WorkerNode.worker_id.asc())
+                .with_for_update()
             ).all()
-            remaining_load = (
-                self.session.execute(
-                    select(func.count(Task.id)).where(
-                        Task.lease_owner == worker_id,
-                        Task.status == TaskStatus.IN_PROGRESS,
-                    )
-                ).scalar()
-                or 0
+
+            # Query remaining loads for all affected workers in a single grouped query
+            loads_query = (
+                select(Task.lease_owner, func.count(Task.id))
+                .where(
+                    Task.lease_owner.in_(affected_workers),
+                    Task.status == TaskStatus.IN_PROGRESS,
+                )
+                .group_by(Task.lease_owner)
             )
-            worker_repo.set_load(worker_id=worker_id, current_load=remaining_load)
+            remaining_loads = {row[0]: row[1] for row in self.session.execute(loads_query).all()}
+
+            for worker_id in affected_workers:
+                remaining_load = remaining_loads.get(worker_id, 0)
+                worker_repo.set_load(worker_id=worker_id, current_load=remaining_load)
 
         return updated_count
 

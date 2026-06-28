@@ -107,7 +107,10 @@ class TaskQueueWorker:
                             self.service.sweep_worker_nodes,
                             stale_seconds=self.stale_worker_seconds,
                         )
-                        next_sweep_at = now + self.lease_seconds
+                        import random
+
+                        jitter = random.uniform(0, self.lease_seconds)
+                        next_sweep_at = now + self.lease_seconds + jitter
 
                     if self._should_stop_claiming(status):
                         await asyncio.sleep(self.poll_interval_seconds)

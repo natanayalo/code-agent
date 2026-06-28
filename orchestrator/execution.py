@@ -274,6 +274,7 @@ class TaskExecutionService:
     _update_span_status_from_state = execution_runtime_service._update_span_status_from_state
     _record_execution_span_error = execution_runtime_service._record_execution_span_error
     _heartbeat_loop = execution_heartbeat_service._heartbeat_loop
+    _heartbeat_task_and_worker = execution_heartbeat_service._heartbeat_task_and_worker
     claim_next_task = execution_snapshot_service.claim_next_task
     is_execution_busy = execution_snapshot_service.is_execution_busy
     get_task = execution_snapshot_service.get_task

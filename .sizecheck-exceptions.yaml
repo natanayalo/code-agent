@@ -59,3 +59,5 @@ function_exceptions:
     _determine_exit_status: Parses and classifies error markers from native execution logs; cohesive matching block.
   workers/self_review.py:
     run_shared_self_review_fix_loop: Bounded retry loop mutating execution in place; heavy local state coupling.
+  orchestrator/execution_queue.py:
+    run_forever: Core background queue polling loop; tightly coupled state machine that cannot be easily split.
