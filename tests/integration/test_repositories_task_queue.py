@@ -164,7 +164,7 @@ def test_task_repository_claim_next_skips_reservation_when_no_work(
     session_factory,
     monkeypatch,
 ) -> None:
-    """Empty polls should not write worker load reservations."""
+    """Empty polls should not write worker load reservations or duplicate lookups."""
     with session_scope(session_factory) as session:
         task_repo = TaskRepository(session)
         worker_repo = WorkerNodeRepository(session)
@@ -178,6 +178,17 @@ def test_task_repository_claim_next_skips_reservation_when_no_work(
         def fail_reserve_load(self: WorkerNodeRepository, *, worker_id: str) -> bool:
             raise AssertionError("reserve_load should not run when no pending tasks match")
 
+        lookup_calls: list[str] = []
+        original_get = WorkerNodeRepository.get_by_worker_id
+
+        def counting_get_by_worker_id(
+            self: WorkerNodeRepository,
+            worker_id: str,
+        ):
+            lookup_calls.append(worker_id)
+            return original_get(self, worker_id)
+
+        monkeypatch.setattr(WorkerNodeRepository, "get_by_worker_id", counting_get_by_worker_id)
         monkeypatch.setattr(WorkerNodeRepository, "reserve_load", fail_reserve_load)
 
         claimed = task_repo.claim_next(
@@ -187,6 +198,7 @@ def test_task_repository_claim_next_skips_reservation_when_no_work(
         )
 
         assert claimed is None
+        assert lookup_calls == ["worker-empty"]
 
 
 def test_task_repository_reclaim_expired_leases_decrements_worker_load(session_factory) -> None:

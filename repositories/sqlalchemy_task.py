@@ -300,8 +300,9 @@ class TaskRepository:
         lease_seconds: int,
     ) -> Task | None:
         worker_repo = WorkerNodeRepository(self.session)
-        if worker_repo.get_by_worker_id(worker_id) is None:
-            worker_repo.register_worker(
+        worker_node = worker_repo.get_by_worker_id(worker_id)
+        if worker_node is None:
+            worker_node = worker_repo.register_worker(
                 worker_id=worker_id,
                 worker_type=WorkerType.CODEX,
                 now=now,
@@ -312,7 +313,6 @@ class TaskRepository:
                 },
             )
         self.reclaim_expired_leases(now=now)
-        worker_node = worker_repo.get_by_worker_id(worker_id)
         if worker_node is None or worker_node.current_load >= worker_node.capacity:
             return None
         candidates = list(
