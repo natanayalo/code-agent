@@ -160,8 +160,37 @@ def test_task_repository_claim_next_respects_worker_capacity(session_factory) ->
         assert worker.current_load == 1
 
 
-def test_task_repository_reclaim_expired_leases_rebuilds_worker_load(session_factory) -> None:
-    """Expired lease reconciliation should use remaining active leases as truth."""
+def test_task_repository_claim_next_skips_reservation_when_no_work(
+    session_factory,
+    monkeypatch,
+) -> None:
+    """Empty polls should not write worker load reservations."""
+    with session_scope(session_factory) as session:
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+        worker_repo.register_worker(
+            worker_id="worker-empty",
+            worker_type="codex",
+            now=datetime.now(UTC),
+            capacity=1,
+        )
+
+        def fail_reserve_load(self: WorkerNodeRepository, *, worker_id: str) -> bool:
+            raise AssertionError("reserve_load should not run when no pending tasks match")
+
+        monkeypatch.setattr(WorkerNodeRepository, "reserve_load", fail_reserve_load)
+
+        claimed = task_repo.claim_next(
+            worker_id="worker-empty",
+            now=datetime.now(UTC),
+            lease_seconds=30,
+        )
+
+        assert claimed is None
+
+
+def test_task_repository_reclaim_expired_leases_decrements_worker_load(session_factory) -> None:
+    """Expired lease reconciliation should release only expired reservations."""
     now = datetime.now(UTC)
     with session_scope(session_factory) as session:
         user_repo = UserRepository(session)

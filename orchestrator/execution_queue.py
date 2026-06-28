@@ -102,7 +102,7 @@ class TaskQueueWorker:
                             self.service.sweep_worker_nodes,
                             stale_seconds=self.stale_worker_seconds,
                         )
-                        next_sweep_at = now + self.heartbeat_interval_seconds
+                        next_sweep_at = now + self.lease_seconds
 
                     claim = await self.service._run_blocking(
                         self.service.claim_next_task,
