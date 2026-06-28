@@ -52,6 +52,26 @@ class _FakeQueueService:
         return None
 
 
+class _IdleThenActiveQueueService(_FakeQueueService):
+    def __init__(self, loop: _FakeLoop) -> None:
+        super().__init__(loop)
+        self.heartbeat_count = 0
+        self.claim_times: list[float] = []
+
+    def register_worker_node(self, **kwargs: object) -> WorkerNodeStatus:
+        return WorkerNodeStatus.QUARANTINED
+
+    def heartbeat_worker_node(self, **kwargs: object) -> WorkerNodeStatus:
+        self.heartbeat_count += 1
+        if self.heartbeat_count < 2:
+            return WorkerNodeStatus.QUARANTINED
+        return WorkerNodeStatus.ACTIVE
+
+    def claim_next_task(self, **kwargs: object) -> None:
+        self.claim_times.append(self.loop.time())
+        raise _StopQueueWorker()
+
+
 @pytest.mark.anyio
 async def test_queue_worker_sweeps_at_lease_cadence(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stale-worker sweeps should run on lease cadence, not heartbeat cadence."""
@@ -75,3 +95,32 @@ async def test_queue_worker_sweeps_at_lease_cadence(monkeypatch: pytest.MonkeyPa
         await queue_worker.run_forever()
 
     assert service.sweep_times == [0.0, 30.0]
+
+
+@pytest.mark.anyio
+async def test_queue_worker_idles_until_registry_status_is_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-claiming registry states should keep heartbeating instead of exiting."""
+    fake_loop = _FakeLoop()
+    service = _IdleThenActiveQueueService(fake_loop)
+
+    async def fake_sleep(delay: float) -> None:
+        fake_loop.current_time += delay
+
+    monkeypatch.setattr(asyncio, "get_running_loop", lambda: fake_loop)
+    monkeypatch.setattr("orchestrator.execution_queue.asyncio.sleep", fake_sleep)
+
+    queue_worker = TaskQueueWorker(
+        service=service,
+        worker_id="worker-idle",
+        poll_interval_seconds=1.0,
+        lease_seconds=15,
+    )
+
+    with pytest.raises(_StopQueueWorker):
+        await queue_worker.run_forever()
+
+    assert service.heartbeat_count == 2
+    assert service.sweep_times == [0.0]
+    assert service.claim_times == [10.0]

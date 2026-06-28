@@ -8,7 +8,13 @@ from typing import Any, cast
 from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
-from db.enums import HumanInteractionStatus, TaskStatus, WorkerRuntimeMode, WorkerType
+from db.enums import (
+    HumanInteractionStatus,
+    TaskStatus,
+    WorkerNodeStatus,
+    WorkerRuntimeMode,
+    WorkerType,
+)
 from db.models import HumanInteraction, Task, WorkerNode, WorkerRun
 from repositories.sqlalchemy_worker import WorkerNodeRepository
 
@@ -292,6 +298,27 @@ class TaskRepository:
         self.session.flush()
         return task
 
+    @staticmethod
+    def _ensure_worker_node_for_claim(
+        *,
+        worker_repo: WorkerNodeRepository,
+        worker_id: str,
+        now: datetime,
+    ) -> WorkerNode:
+        worker_node = worker_repo.get_by_worker_id(worker_id)
+        if worker_node is not None:
+            return worker_node
+        return worker_repo.register_worker(
+            worker_id=worker_id,
+            worker_type=WorkerType.CODEX,
+            now=now,
+            capacity=1,
+            capabilities={
+                "worker_types": [worker_type.value for worker_type in WorkerType],
+                "lanes": ["primary", "scout"],
+            },
+        )
+
     def claim_next(
         self,
         *,
@@ -301,19 +328,16 @@ class TaskRepository:
     ) -> Task | None:
         self.reclaim_expired_leases(now=now)
         worker_repo = WorkerNodeRepository(self.session)
-        worker_node = worker_repo.get_by_worker_id(worker_id)
-        if worker_node is None:
-            worker_node = worker_repo.register_worker(
-                worker_id=worker_id,
-                worker_type=WorkerType.CODEX,
-                now=now,
-                capacity=1,
-                capabilities={
-                    "worker_types": [worker_type.value for worker_type in WorkerType],
-                    "lanes": ["primary", "scout"],
-                },
-            )
-        if worker_node is None or worker_node.current_load >= worker_node.capacity:
+        worker_node = self._ensure_worker_node_for_claim(
+            worker_repo=worker_repo,
+            worker_id=worker_id,
+            now=now,
+        )
+        if (
+            worker_node is None
+            or worker_node.status != WorkerNodeStatus.ACTIVE
+            or worker_node.current_load >= worker_node.capacity
+        ):
             return None
         candidates = list(
             self.session.scalars(

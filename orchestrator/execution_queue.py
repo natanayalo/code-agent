@@ -71,10 +71,10 @@ class TaskQueueWorker:
             )
             if self._should_stop_claiming(status):
                 logger.warning(
-                    "Task queue worker registration returned non-claiming status",
+                    "Task queue worker registered with non-claiming status; "
+                    "entering idle heartbeat mode",
                     extra={"worker_id": self.worker_id, "status": status.value if status else None},
                 )
-                return
 
             loop = asyncio.get_running_loop()
             next_heartbeat_at = loop.time() + self.heartbeat_interval_seconds
@@ -90,19 +90,22 @@ class TaskQueueWorker:
                         next_heartbeat_at = now + self.heartbeat_interval_seconds
                         if self._should_stop_claiming(status):
                             logger.warning(
-                                "Task queue worker stopping claims due to registry status",
+                                "Task queue worker skipping claims due to registry status",
                                 extra={
                                     "worker_id": self.worker_id,
                                     "status": status.value if status else None,
                                 },
                             )
-                            return
                     if now >= next_sweep_at:
                         await self.service._run_blocking(
                             self.service.sweep_worker_nodes,
                             stale_seconds=self.stale_worker_seconds,
                         )
                         next_sweep_at = now + self.lease_seconds
+
+                    if self._should_stop_claiming(status):
+                        await asyncio.sleep(self.poll_interval_seconds)
+                        continue
 
                     claim = await self.service._run_blocking(
                         self.service.claim_next_task,

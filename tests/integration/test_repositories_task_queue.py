@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from db.enums import HumanInteractionStatus, TaskStatus
+from db.enums import HumanInteractionStatus, TaskStatus, WorkerNodeStatus
 from repositories import (
     HumanInteractionRepository,
     SessionRepository,
@@ -242,6 +242,59 @@ def test_task_repository_claim_next_reclaims_before_worker_lookup(
 
         assert claimed is None
         assert call_order[:2] == ["reclaim", "get_worker"]
+
+
+def test_task_repository_claim_next_skips_candidate_filter_for_non_active_worker(
+    session_factory,
+    monkeypatch,
+) -> None:
+    """Non-active workers should fail fast before candidate selection and reservation."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+
+        user = user_repo.create(
+            external_user_id="telegram:draining-worker",
+            display_name="Draining",
+        )
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-draining-worker",
+        )
+        task_repo.create(session_id=conversation_session.id, task_text="pending work")
+        worker = worker_repo.register_worker(
+            worker_id="worker-draining",
+            worker_type="codex",
+            now=datetime.now(UTC),
+            capacity=1,
+        )
+        worker.status = WorkerNodeStatus.DRAINING
+        session.flush()
+
+        def fail_task_match(task, worker_node) -> bool:
+            raise AssertionError("candidate matching should not run for non-active workers")
+
+        def fail_reserve_load(self: WorkerNodeRepository, *, worker_id: str) -> bool:
+            raise AssertionError("reserve_load should not run for non-active workers")
+
+        monkeypatch.setattr(
+            TaskRepository,
+            "_task_matches_worker_node",
+            staticmethod(fail_task_match),
+        )
+        monkeypatch.setattr(WorkerNodeRepository, "reserve_load", fail_reserve_load)
+
+        claimed = task_repo.claim_next(
+            worker_id="worker-draining",
+            now=datetime.now(UTC),
+            lease_seconds=30,
+        )
+
+        assert claimed is None
+        assert worker.current_load == 0
 
 
 def test_task_repository_claim_next_requires_supported_profile(session_factory) -> None:
