@@ -416,9 +416,7 @@ class TaskRepository:
         for worker_id in affected_workers:
             # 1. Lock WorkerNode to serialize with claim_next and prevent deadlocks
             self.session.scalars(
-                select(WorkerNode.id)
-                .where(WorkerNode.worker_id == worker_id)
-                .with_for_update(skip_locked=True)
+                select(WorkerNode.id).where(WorkerNode.worker_id == worker_id).with_for_update()
             ).all()
             # 2. Compute remaining load for this worker excluding the expired tasks
             remaining_load = (

@@ -398,7 +398,7 @@ def test_task_repository_reclaim_expired_leases_decrements_worker_load(
 
         assert reclaimed == 1
         assert locked_queries
-        assert getattr(locked_queries[0]._for_update_arg, "skip_locked", False) is True
+        assert getattr(locked_queries[0]._for_update_arg, "skip_locked", False) is False
         assert first.status is TaskStatus.PENDING
         assert first.lease_owner is None
         assert second.status is TaskStatus.IN_PROGRESS
