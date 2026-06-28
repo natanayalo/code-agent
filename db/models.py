@@ -415,7 +415,7 @@ class WorkerNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("consecutive_failures >= 0", name="worker_failures_nonnegative"),
     )
 
-    worker_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     worker_type: Mapped[WorkerType] = mapped_column(WORKER_TYPE_ENUM, nullable=False, index=True)
     status: Mapped[WorkerNodeStatus] = mapped_column(
         WORKER_NODE_STATUS_ENUM,

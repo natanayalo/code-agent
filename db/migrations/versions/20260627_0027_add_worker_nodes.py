@@ -81,7 +81,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_worker_nodes")),
         sa.UniqueConstraint("worker_id", name=op.f("uq_worker_nodes_worker_id")),
     )
-    op.create_index(op.f("ix_worker_nodes_worker_id"), "worker_nodes", ["worker_id"], unique=True)
+
     op.create_index(
         op.f("ix_worker_nodes_worker_type"),
         "worker_nodes",
@@ -102,5 +102,5 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_worker_nodes_last_heartbeat_at"), table_name="worker_nodes")
     op.drop_index(op.f("ix_worker_nodes_status"), table_name="worker_nodes")
     op.drop_index(op.f("ix_worker_nodes_worker_type"), table_name="worker_nodes")
-    op.drop_index(op.f("ix_worker_nodes_worker_id"), table_name="worker_nodes")
+
     op.drop_table("worker_nodes")
