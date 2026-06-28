@@ -76,7 +76,7 @@ def _supported_worker_types(self: Any) -> set[WorkerType]:
     if getattr(self, "openrouter_worker", None) is not None:
         supported.add(WorkerType.OPENROUTER)
 
-    for profile_name, profile in getattr(self, "worker_profiles", {}).items():
+    for profile_name, profile in (getattr(self, "worker_profiles", None) or {}).items():
         supported.add(_profile_worker_type(profile_name, profile))
     return supported
 
@@ -89,7 +89,7 @@ def _worker_node_registration_payload(
     """Build persisted worker-node capabilities from the configured service."""
     worker_types = sorted(worker_type.value for worker_type in _supported_worker_types(self))
     primary_worker_type = WorkerType.CODEX.value if "codex" in worker_types else worker_types[0]
-    profiles = getattr(self, "worker_profiles", {})
+    profiles = getattr(self, "worker_profiles", None) or {}
     supported_profiles = _supported_profile_names(self, profiles)
     capability_tags = sorted(
         {

@@ -396,37 +396,61 @@ class TaskRepository:
 
     def reclaim_expired_leases(self, *, now: datetime) -> int:
         """Return expired leases to pending and rebuild affected worker load."""
-        expired_tasks = list(
-            self.session.scalars(
-                select(Task)
-                .where(
-                    Task.status == TaskStatus.IN_PROGRESS,
-                    Task.lease_expires_at.is_not(None),
-                    Task.lease_expires_at <= now,
-                )
-                .with_for_update(skip_locked=True)
+        expired_tasks_info = self.session.execute(
+            select(Task.id, Task.lease_owner).where(
+                Task.status == TaskStatus.IN_PROGRESS,
+                Task.lease_expires_at.is_not(None),
+                Task.lease_expires_at <= now,
             )
-        )
-        if not expired_tasks:
+        ).all()
+
+        if not expired_tasks_info:
             return 0
 
-        worker_expired_counts: dict[str, int] = {}
-        for task in expired_tasks:
-            if isinstance(task.lease_owner, str):
-                worker_expired_counts[task.lease_owner] = (
-                    worker_expired_counts.get(task.lease_owner, 0) + 1
-                )
-            task.status = TaskStatus.PENDING
-            task.lease_owner = None
-            task.lease_expires_at = None
-            task.next_attempt_at = now
-        self.session.flush()
+        task_ids = [row.id for row in expired_tasks_info]
+        affected_workers = sorted(
+            list({row.lease_owner for row in expired_tasks_info if row.lease_owner})
+        )
 
         worker_repo = WorkerNodeRepository(self.session)
-        for affected_worker, count in worker_expired_counts.items():
-            worker_repo.release_load(worker_id=affected_worker, count=count)
-        self.session.flush()
-        return len(expired_tasks)
+        for worker_id in affected_workers:
+            # 1. Lock WorkerNode to serialize with claim_next and prevent deadlocks
+            self.session.scalars(
+                select(WorkerNode.id)
+                .where(WorkerNode.worker_id == worker_id)
+                .with_for_update(skip_locked=True)
+            ).all()
+            # 2. Compute remaining load for this worker excluding the expired tasks
+            remaining_load = (
+                self.session.execute(
+                    select(func.count(Task.id)).where(
+                        Task.lease_owner == worker_id,
+                        Task.status == TaskStatus.IN_PROGRESS,
+                        Task.id.not_in(task_ids),
+                    )
+                ).scalar()
+                or 0
+            )
+            # 3. Update the WorkerNode load
+            worker_repo.set_load(worker_id=worker_id, current_load=remaining_load)
+
+        # 4. Lock and update Tasks
+        updated = self.session.execute(
+            update(Task)
+            .where(Task.id.in_(task_ids), Task.status == TaskStatus.IN_PROGRESS)
+            .values(
+                status=TaskStatus.PENDING,
+                lease_owner=None,
+                lease_expires_at=None,
+                next_attempt_at=now,
+            )
+            .execution_options(synchronize_session="fetch")
+        )
+        updated_count = getattr(updated, "rowcount", 0) or 0
+        if updated_count > 0:
+            self.session.flush()
+
+        return updated_count
 
     def heartbeat_lease(
         self,

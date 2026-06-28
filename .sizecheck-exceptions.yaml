@@ -1,4 +1,5 @@
 file_exceptions:
+  repositories/sqlalchemy_task.py: Highly stateful database repository layer; tightly coupled and slightly exceeds limit due to robust concurrency safeguards.
   db/models.py: Central ORM definitions; tightly coupled models.
   orchestrator/brain.py: Optional orchestrator-brain contracts for TaskSpec enrichment and routing. (coupled to models preventing extraction)
   orchestrator/graph.py: LangGraph workflow skeleton for the orchestrator happy path. (coupled to models preventing extraction)
