@@ -163,7 +163,7 @@ class TaskRepository:
         required_profiles = {
             TaskRepository._normalize_profile_name(profile) for profile in required_profiles
         }
-        if supported_profiles and required_profiles and not required_profiles <= supported_profiles:
+        if required_profiles and not required_profiles <= supported_profiles:
             return False
 
         capabilities = (
@@ -374,11 +374,13 @@ class TaskRepository:
         """Return expired leases to pending and rebuild affected worker load."""
         expired_tasks = list(
             self.session.scalars(
-                select(Task).where(
+                select(Task)
+                .where(
                     Task.status == TaskStatus.IN_PROGRESS,
                     Task.lease_expires_at.is_not(None),
                     Task.lease_expires_at <= now,
                 )
+                .with_for_update(skip_locked=True)
             )
         )
         if not expired_tasks:

@@ -201,7 +201,55 @@ def test_task_repository_claim_next_skips_reservation_when_no_work(
         assert lookup_calls == ["worker-empty"]
 
 
-def test_task_repository_reclaim_expired_leases_decrements_worker_load(session_factory) -> None:
+def test_task_repository_claim_next_requires_supported_profile(session_factory) -> None:
+    """Tasks pinned to a profile should not match workers with no supported profiles."""
+    now = datetime.now(UTC)
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:profile", display_name="Profile")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-profile",
+        )
+        task = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="profile-specific",
+            chosen_profile="codex-native-executor",
+        )
+
+        missing_profile_claim = task_repo.claim_next(
+            worker_id="worker-no-profiles",
+            now=now,
+            lease_seconds=30,
+        )
+        assert missing_profile_claim is None
+
+        worker_repo.register_worker(
+            worker_id="worker-with-profile",
+            worker_type="codex",
+            now=now,
+            capacity=1,
+            supported_profiles=["codex-native-executor"],
+        )
+        claimed = task_repo.claim_next(
+            worker_id="worker-with-profile",
+            now=now,
+            lease_seconds=30,
+        )
+
+        assert claimed is not None
+        assert claimed.id == task.id
+
+
+def test_task_repository_reclaim_expired_leases_decrements_worker_load(
+    session_factory,
+    monkeypatch,
+) -> None:
     """Expired lease reconciliation should release only expired reservations."""
     now = datetime.now(UTC)
     with session_scope(session_factory) as session:
@@ -239,10 +287,22 @@ def test_task_repository_reclaim_expired_leases_decrements_worker_load(session_f
         second.lease_expires_at = now + datetime.resolution
         session.flush()
 
+        locked_queries = []
+        original_scalars = session.scalars
+
+        def recording_scalars(statement, *args, **kwargs):
+            for_update_arg = getattr(statement, "_for_update_arg", None)
+            if for_update_arg is not None:
+                locked_queries.append(statement)
+            return original_scalars(statement, *args, **kwargs)
+
+        monkeypatch.setattr(session, "scalars", recording_scalars)
         with session.no_autoflush:
             reclaimed = task_repo.reclaim_expired_leases(now=now)
 
         assert reclaimed == 1
+        assert locked_queries
+        assert getattr(locked_queries[0]._for_update_arg, "skip_locked", False) is True
         assert first.status is TaskStatus.PENDING
         assert first.lease_owner is None
         assert second.status is TaskStatus.IN_PROGRESS
