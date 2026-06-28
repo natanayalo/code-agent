@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import socket
 from uuid import uuid4
 
@@ -107,8 +108,6 @@ class TaskQueueWorker:
                             self.service.sweep_worker_nodes,
                             stale_seconds=self.stale_worker_seconds,
                         )
-                        import random
-
                         jitter = random.uniform(0, self.lease_seconds)
                         next_sweep_at = now + self.lease_seconds + jitter
 
