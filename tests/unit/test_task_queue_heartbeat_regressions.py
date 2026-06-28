@@ -96,11 +96,9 @@ async def test_heartbeat_loop_refreshes_worker_node_during_task(monkeypatch) -> 
     async def fake_run_blocking(func, /, *args, **kwargs):
         name = getattr(func, "__name__", "")
         calls.append(name)
-        if name == "_heartbeat_task_lease":
-            return True
-        if name == "heartbeat_worker_node":
+        if name == "_heartbeat_task_and_worker":
             worker_heartbeat_seen.set()
-            return WorkerNodeStatus.ACTIVE
+            return True, WorkerNodeStatus.ACTIVE
         raise AssertionError(f"unexpected heartbeat call: {name}")
 
     monkeypatch.setattr(
@@ -117,7 +115,7 @@ async def test_heartbeat_loop_refreshes_worker_node_during_task(monkeypatch) -> 
     heartbeat_task.cancel()
     await asyncio.gather(heartbeat_task, return_exceptions=True)
 
-    assert calls[:2] == ["_heartbeat_task_lease", "heartbeat_worker_node"]
+    assert calls[:1] == ["_heartbeat_task_and_worker"]
 
 
 @pytest.mark.anyio
@@ -130,10 +128,8 @@ async def test_heartbeat_loop_aborts_when_worker_node_heartbeat_fails(
 
     async def fake_run_blocking(func, /, *args, **kwargs):
         name = getattr(func, "__name__", "")
-        if name == "_heartbeat_task_lease":
-            return True
-        if name == "heartbeat_worker_node":
-            return None
+        if name == "_heartbeat_task_and_worker":
+            return True, None
         raise AssertionError(f"unexpected heartbeat call: {name}")
 
     monkeypatch.setattr(

@@ -83,6 +83,7 @@ async def test_queue_worker_sweeps_at_lease_cadence(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(asyncio, "get_running_loop", lambda: fake_loop)
     monkeypatch.setattr("orchestrator.execution_queue.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("random.uniform", lambda a, b: 0.0)
 
     queue_worker = TaskQueueWorker(
         service=service,
@@ -110,6 +111,7 @@ async def test_queue_worker_idles_until_registry_status_is_active(
 
     monkeypatch.setattr(asyncio, "get_running_loop", lambda: fake_loop)
     monkeypatch.setattr("orchestrator.execution_queue.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("random.uniform", lambda a, b: 0.0)
 
     queue_worker = TaskQueueWorker(
         service=service,
