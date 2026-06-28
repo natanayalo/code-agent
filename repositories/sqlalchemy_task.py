@@ -533,11 +533,11 @@ class TaskRepository:
         task = self.get(task_id)
         if task is None:
             return None
-        previous_owner = None
-        if task.lease_owner == worker_id:
-            previous_owner = task.lease_owner
-            task.lease_owner = None
-            task.lease_expires_at = None
+        if task.lease_owner != worker_id:
+            return task
+        previous_owner = task.lease_owner
+        task.lease_owner = None
+        task.lease_expires_at = None
         task.status = status
         task.next_attempt_at = None
         self.session.flush()

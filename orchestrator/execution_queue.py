@@ -87,6 +87,9 @@ class TaskQueueWorker:
                             self.service.heartbeat_worker_node,
                             worker_id=self.worker_id,
                         )
+                        if status is None:
+                            logger.warning("Worker heartbeat failed, aborting execution loop")
+                            break
                         next_heartbeat_at = now + self.heartbeat_interval_seconds
                         if self._should_stop_claiming(status):
                             logger.warning(
