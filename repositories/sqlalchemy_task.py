@@ -299,6 +299,7 @@ class TaskRepository:
         now: datetime,
         lease_seconds: int,
     ) -> Task | None:
+        self.reclaim_expired_leases(now=now)
         worker_repo = WorkerNodeRepository(self.session)
         worker_node = worker_repo.get_by_worker_id(worker_id)
         if worker_node is None:
@@ -312,7 +313,6 @@ class TaskRepository:
                     "lanes": ["primary", "scout"],
                 },
             )
-        self.reclaim_expired_leases(now=now)
         if worker_node is None or worker_node.current_load >= worker_node.capacity:
             return None
         candidates = list(

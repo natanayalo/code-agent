@@ -8,7 +8,65 @@ from db.base import utc_now
 from db.enums import WorkerNodeStatus, WorkerType, coerce_worker_type
 from orchestrator.state import OrchestratorState
 from repositories import TaskRepository, WorkerNodeRepository, session_scope
+from workers.base import normalize_worker_profile_name
 from workers.failure_taxonomy import classify_failure_kind
+
+LEGACY_PROFILE_COMPATIBILITY_NAMES = (
+    "antigravity-native-discovery",
+    "antigravity-native-executor",
+    "antigravity-native-executor-read-only",
+    "antigravity-native-planner",
+    "antigravity-native-reviewer",
+    "antigravity-tool-loop-executor",
+    "antigravity-tool-loop-executor-read-only",
+    "codex-native-executor",
+    "codex-native-executor-read-only",
+    "codex-tool-loop-executor",
+    "codex-tool-loop-executor-read-only",
+    "openrouter-tool-loop-legacy",
+)
+
+
+class WorkerProfileConfigurationError(ValueError):
+    """Raised when worker profile routing configuration is malformed."""
+
+
+def _profile_worker_type(profile_name: str, profile: Any) -> WorkerType:
+    if isinstance(profile, dict):
+        raw_worker_type = profile.get("worker_type")
+    else:
+        raw_worker_type = getattr(profile, "worker_type", None)
+    if not raw_worker_type:
+        raise WorkerProfileConfigurationError(
+            f"Invalid worker profile configuration for '{profile_name}': missing worker_type."
+        )
+    try:
+        return coerce_worker_type(raw_worker_type)
+    except (TypeError, ValueError) as exc:
+        raise WorkerProfileConfigurationError(
+            f"Invalid worker profile configuration for '{profile_name}': {exc}"
+        ) from exc
+
+
+def _profile_capability_tags(profile: Any) -> list[Any]:
+    if isinstance(profile, dict):
+        raw_tags = profile.get("capability_tags", [])
+    else:
+        raw_tags = getattr(profile, "capability_tags", [])
+    return raw_tags if isinstance(raw_tags, list) else []
+
+
+def _supported_profile_names(self: Any, profiles: dict[str, Any]) -> list[str]:
+    if profiles:
+        names = {
+            normalized
+            for profile_name in profiles
+            if (normalized := normalize_worker_profile_name(profile_name)) is not None
+        }
+        return sorted(names)
+    if not getattr(self, "enable_worker_profiles", False):
+        return list(LEGACY_PROFILE_COMPATIBILITY_NAMES)
+    return []
 
 
 def _supported_worker_types(self: Any) -> set[WorkerType]:
@@ -18,11 +76,8 @@ def _supported_worker_types(self: Any) -> set[WorkerType]:
     if getattr(self, "openrouter_worker", None) is not None:
         supported.add(WorkerType.OPENROUTER)
 
-    for profile in getattr(self, "worker_profiles", {}).values():
-        try:
-            supported.add(coerce_worker_type(profile.worker_type))
-        except ValueError:
-            continue
+    for profile_name, profile in getattr(self, "worker_profiles", {}).items():
+        supported.add(_profile_worker_type(profile_name, profile))
     return supported
 
 
@@ -35,12 +90,12 @@ def _worker_node_registration_payload(
     worker_types = sorted(worker_type.value for worker_type in _supported_worker_types(self))
     primary_worker_type = WorkerType.CODEX.value if "codex" in worker_types else worker_types[0]
     profiles = getattr(self, "worker_profiles", {})
-    supported_profiles = sorted(profiles)
+    supported_profiles = _supported_profile_names(self, profiles)
     capability_tags = sorted(
         {
             tag
             for profile in profiles.values()
-            for tag in getattr(profile, "capability_tags", [])
+            for tag in _profile_capability_tags(profile)
             if isinstance(tag, str)
         }
     )
