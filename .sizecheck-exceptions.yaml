@@ -44,6 +44,8 @@ function_exceptions:
     test_human_interaction_repository_syncs_task_spec_flags: Highly stateful logic for test_human_interaction_repository_syncs_task_spec_flags; splitting requires unnatural parameter coupling.
   tests/integration/test_repositories_task_queue.py:
     test_task_repository_supports_task_spec_lease_progress_and_metrics: Highly stateful logic for test_task_repository_supports_task_spec_lease_progress_and_metrics; splitting requires unnatural parameter coupling.
+  repositories/sqlalchemy_task.py:
+    claim_next: Database lock ordering logic requires atomic queue transaction; 81 lines.
   tests/integration/test_repositories_worker_runs.py:
     test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics: Highly stateful logic for test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics; splitting requires unnatural parameter coupling.
   tests/integration/test_execution_outcome_service.py:

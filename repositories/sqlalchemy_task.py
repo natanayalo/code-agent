@@ -387,6 +387,7 @@ class TaskRepository:
                             lease_owner=None,
                             lease_expires_at=None,
                             attempt_count=candidate.attempt_count,
+                            last_error=candidate.last_error,
                         )
                         .execution_options(synchronize_session=False)
                     )
