@@ -179,6 +179,8 @@ class WorkerNodeRepository:
         if node is None:
             return None
         if failure_kind not in QUARANTINE_FAILURE_KINDS:
+            node.consecutive_failures = 0
+            self.session.flush()
             return node
 
         node.consecutive_failures += 1
@@ -229,6 +231,6 @@ class WorkerNodeRepository:
         for value in worker_types:
             try:
                 supported.add(coerce_worker_type(cast(object, value)))
-            except ValueError:
+            except (ValueError, TypeError):
                 continue
         return supported

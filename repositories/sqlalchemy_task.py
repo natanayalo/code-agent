@@ -475,18 +475,18 @@ class TaskRepository:
             return True
         return False
 
-    def release_success(self, *, task_id: str) -> Task | None:
+    def release_success(self, *, task_id: str, worker_id: str) -> Task | None:
         task = self.get(task_id)
         if task is None:
             return None
-        previous_owner = task.lease_owner
+        if task.lease_owner != worker_id:
+            return task
         task.status = TaskStatus.COMPLETED
         task.lease_owner = None
         task.lease_expires_at = None
         task.next_attempt_at = None
         task.last_error = None
-        if previous_owner:
-            WorkerNodeRepository(self.session).release_load(worker_id=previous_owner)
+        WorkerNodeRepository(self.session).release_load(worker_id=worker_id)
         self.session.flush()
         return task
 

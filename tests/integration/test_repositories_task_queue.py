@@ -412,7 +412,7 @@ def test_task_repository_queue_release_guard_paths(session_factory) -> None:
         session_repo = SessionRepository(session)
         task_repo = TaskRepository(session)
 
-        assert task_repo.release_success(task_id="missing") is None
+        assert task_repo.release_success(task_id="missing", worker_id="any") is None
         assert (
             task_repo.release_failure(
                 task_id="missing",
@@ -600,7 +600,7 @@ def test_task_repository_supports_task_spec_lease_progress_and_metrics(session_f
             lease_seconds=30,
         )
         assert reclaimed is not None
-        completed = task_repo.release_success(task_id=queued_task.id)
+        completed = task_repo.release_success(task_id=queued_task.id, worker_id="worker-a")
         assert completed is not None
         assert completed.status is TaskStatus.COMPLETED
         assert completed.lease_owner is None

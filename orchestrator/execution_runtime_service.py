@@ -234,7 +234,9 @@ async def _persist_run_queued_task_outcome(
             finished_at=finished_at,
             force_task_status=TaskStatus.COMPLETED,
         )
-        await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
+        await self._run_blocking(
+            self._release_task_success, task_id=persisted.task_id, worker_id=worker_id
+        )
         await self._run_blocking(self.record_worker_node_success, worker_id=worker_id)
     else:
         failure_kind = worker_node_failure_kind_from_state(state)
