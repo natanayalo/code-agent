@@ -6,9 +6,15 @@ import asyncio
 import logging
 from typing import Any
 
+from db.enums import WorkerNodeStatus
 from orchestrator.execution_policy import _heartbeat_interval_seconds
 
 logger = logging.getLogger("orchestrator.execution")
+
+_ABORTING_WORKER_STATUSES = {
+    WorkerNodeStatus.OFFLINE,
+    WorkerNodeStatus.QUARANTINED,
+}
 
 
 async def _heartbeat_loop(
@@ -32,5 +38,19 @@ async def _heartbeat_loop(
             logger.debug(
                 "Heartbeat failed: lease lost or task status changed",
                 extra={"task_id": task_id, "worker_id": worker_id},
+            )
+            return None
+        worker_status = await self._run_blocking(
+            self.heartbeat_worker_node,
+            worker_id=worker_id,
+        )
+        if worker_status is None or worker_status in _ABORTING_WORKER_STATUSES:
+            logger.warning(
+                "Heartbeat failed: worker node is not claimable",
+                extra={
+                    "task_id": task_id,
+                    "worker_id": worker_id,
+                    "worker_status": worker_status.value if worker_status else None,
+                },
             )
             return None

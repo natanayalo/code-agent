@@ -389,6 +389,7 @@ class TaskRepository:
             task.lease_owner = None
             task.lease_expires_at = None
             task.next_attempt_at = now
+        self.session.flush()
 
         worker_repo = WorkerNodeRepository(self.session)
         for affected_worker in affected_workers:

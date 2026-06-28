@@ -196,8 +196,10 @@ def test_task_repository_reclaim_expired_leases_rebuilds_worker_load(session_fac
         assert second is not None
         first.lease_expires_at = now - datetime.resolution
         second.lease_expires_at = now + datetime.resolution
+        session.flush()
 
-        reclaimed = task_repo.reclaim_expired_leases(now=now)
+        with session.no_autoflush:
+            reclaimed = task_repo.reclaim_expired_leases(now=now)
 
         assert reclaimed == 1
         assert first.status is TaskStatus.PENDING

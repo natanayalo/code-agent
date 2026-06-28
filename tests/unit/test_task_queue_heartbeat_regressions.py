@@ -10,8 +10,9 @@ import pytest
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
-from db.enums import TaskStatus
+from db.enums import TaskStatus, WorkerNodeStatus
 from orchestrator import execution as execution_module
+from orchestrator import execution_heartbeat_service, execution_runtime_service
 from repositories import create_engine_from_url, create_session_factory
 from workers import Worker, WorkerRequest, WorkerResult
 
@@ -83,6 +84,73 @@ def _task_snapshot(
         last_error=last_error,
     )
     return execution_module.TaskSnapshot(**summary.model_dump())
+
+
+@pytest.mark.anyio
+async def test_heartbeat_loop_refreshes_worker_node_during_task(monkeypatch) -> None:
+    """In-flight tasks should keep their worker registry heartbeat fresh."""
+    service = _make_task_service()
+    calls: list[str] = []
+    worker_heartbeat_seen = asyncio.Event()
+
+    async def fake_run_blocking(func, /, *args, **kwargs):
+        name = getattr(func, "__name__", "")
+        calls.append(name)
+        if name == "_heartbeat_task_lease":
+            return True
+        if name == "heartbeat_worker_node":
+            worker_heartbeat_seen.set()
+            return WorkerNodeStatus.ACTIVE
+        raise AssertionError(f"unexpected heartbeat call: {name}")
+
+    monkeypatch.setattr(
+        execution_heartbeat_service,
+        "_heartbeat_interval_seconds",
+        lambda *, lease_seconds: 0.01,
+    )
+    monkeypatch.setattr(service, "_run_blocking", fake_run_blocking)
+
+    heartbeat_task = asyncio.create_task(
+        service._heartbeat_loop(task_id="task-1", worker_id="worker-a", lease_seconds=60)
+    )
+    await asyncio.wait_for(worker_heartbeat_seen.wait(), timeout=1)
+    heartbeat_task.cancel()
+    await asyncio.gather(heartbeat_task, return_exceptions=True)
+
+    assert calls[:2] == ["_heartbeat_task_lease", "heartbeat_worker_node"]
+
+
+@pytest.mark.anyio
+async def test_heartbeat_loop_aborts_when_worker_node_heartbeat_fails(
+    monkeypatch,
+    caplog,
+) -> None:
+    """A missing worker node heartbeat should stop result processing for the run."""
+    service = _make_task_service()
+
+    async def fake_run_blocking(func, /, *args, **kwargs):
+        name = getattr(func, "__name__", "")
+        if name == "_heartbeat_task_lease":
+            return True
+        if name == "heartbeat_worker_node":
+            return None
+        raise AssertionError(f"unexpected heartbeat call: {name}")
+
+    monkeypatch.setattr(
+        execution_heartbeat_service,
+        "_heartbeat_interval_seconds",
+        lambda *, lease_seconds: 0.01,
+    )
+    monkeypatch.setattr(service, "_run_blocking", fake_run_blocking)
+
+    with caplog.at_level(logging.WARNING, logger="orchestrator.execution"):
+        result = await asyncio.wait_for(
+            service._heartbeat_loop(task_id="task-1", worker_id="worker-a", lease_seconds=60),
+            timeout=1,
+        )
+
+    assert result is None
+    assert "Heartbeat failed: worker node is not claimable" in caplog.text
 
 
 @pytest.mark.anyio
@@ -248,3 +316,30 @@ async def test_run_queued_task_aborts_when_orchestrator_completes_after_cancella
     )
     assert [event.phase for event in notifier.events] == ["started", "running"]
     assert persist_calls == []
+
+
+@pytest.mark.anyio
+async def test_wait_aborts_when_heartbeat_and_orchestrator_finish_together(caplog) -> None:
+    """Heartbeat failure should win even when the orchestrator result is also ready."""
+    service = _make_task_service()
+
+    async def complete_orchestrator() -> object:
+        return object()
+
+    async def complete_heartbeat() -> None:
+        return None
+
+    orchestrator_task = asyncio.create_task(complete_orchestrator())
+    heartbeat_task = asyncio.create_task(complete_heartbeat())
+    await asyncio.gather(orchestrator_task, heartbeat_task)
+
+    with caplog.at_level(logging.WARNING, logger="orchestrator.execution"):
+        result = await execution_runtime_service._wait_for_orchestrator_or_heartbeat(
+            service,
+            "task-1",
+            orchestrator_task,
+            heartbeat_task,
+        )
+
+    assert result is None
+    assert "Orchestrator task completed while heartbeat failed" in caplog.text

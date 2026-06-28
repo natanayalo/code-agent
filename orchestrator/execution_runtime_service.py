@@ -175,6 +175,13 @@ async def _wait_for_orchestrator_or_heartbeat(
         heartbeat_exc = heartbeat_task.exception()
         if heartbeat_exc is not None:
             raise heartbeat_exc
+        if orchestrator_task in done:
+            logger.warning(
+                "Orchestrator task completed while heartbeat failed. "
+                "Aborting due to heartbeat failure.",
+                extra={"task_id": task_id},
+            )
+            return None
     if orchestrator_task in done:
         return orchestrator_task.result()
 
