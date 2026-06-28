@@ -362,6 +362,50 @@ def test_task_repository_reclaim_expired_leases_decrements_worker_load(
         assert worker.current_load == 1
 
 
+def test_task_repository_reclaim_expired_leases_fails_task_after_max_attempts(
+    session_factory,
+) -> None:
+    """An expired lease on a task at max attempts should be marked FAILED rather than PENDING."""
+    now = datetime.now(UTC)
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:reclaim-max", display_name="ReclaimMax")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-reclaim-max",
+        )
+        task = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="max attempts task",
+            max_attempts=3,
+        )
+        worker_repo.register_worker(
+            worker_id="worker-reclaim-max",
+            worker_type="codex",
+            now=now,
+            capacity=1,
+        )
+
+        # Force the task to the maximum attempts and simulate an expired lease
+        task.attempt_count = 3
+        task.status = TaskStatus.IN_PROGRESS
+        task.lease_owner = "worker-reclaim-max"
+        task.lease_expires_at = now - datetime.resolution
+        session.flush()
+
+        reclaimed = task_repo.reclaim_expired_leases(now=now)
+
+        assert reclaimed == 1
+        assert task.status is TaskStatus.FAILED
+        assert task.lease_owner is None
+        assert task.next_attempt_at is None
+
+
 def test_task_repository_queue_release_guard_paths(session_factory) -> None:
     """Queue release helpers should handle missing rows and ownership mismatches safely."""
     with session_scope(session_factory) as session:

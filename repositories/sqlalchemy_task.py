@@ -425,10 +425,16 @@ class TaskRepository:
             update(Task)
             .where(Task.id.in_(task_ids), Task.status == TaskStatus.IN_PROGRESS)
             .values(
-                status=TaskStatus.PENDING,
+                status=case(
+                    (Task.attempt_count >= Task.max_attempts, TaskStatus.FAILED),
+                    else_=TaskStatus.PENDING,
+                ),
                 lease_owner=None,
                 lease_expires_at=None,
-                next_attempt_at=now,
+                next_attempt_at=case(
+                    (Task.attempt_count >= Task.max_attempts, None),
+                    else_=now,
+                ),
             )
             .execution_options(synchronize_session="fetch")
         )
