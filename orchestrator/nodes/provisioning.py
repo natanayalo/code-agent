@@ -289,6 +289,12 @@ async def _execute_setup_command(
     return result
 
 
+def _task_spec_setup_commands(state: OrchestratorState) -> list[str]:
+    if not state.task_spec:
+        return []
+    return [cmd.strip() for cmd in state.task_spec.setup_commands if cmd.strip()]
+
+
 async def _run_init_environment(
     state_input: OrchestratorState,
     workspace_manager: WorkspaceManager,
@@ -332,7 +338,7 @@ async def _run_init_environment(
     ):
         return {"current_step": "init_environment", "result": None}
 
-    setup_commands = list(state.task_spec.setup_commands) if state.task_spec else []
+    setup_commands = _task_spec_setup_commands(state)
     error_msg = None
 
     if not setup_commands:

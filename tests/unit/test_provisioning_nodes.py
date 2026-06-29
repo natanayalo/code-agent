@@ -86,6 +86,39 @@ async def test_init_environment_node_detects_poetry(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_init_environment_filters_blank_task_spec_setup_commands(
+    tmp_path: Path,
+) -> None:
+    manager = MagicMock()
+    handle = MagicMock()
+    handle.repo_path = tmp_path
+    manager.get_workspace.return_value = handle
+
+    shell_worker = AsyncMock()
+    shell_worker.run.return_value = WorkerResult(status="success", summary="ok")
+
+    node = build_init_environment_node(manager, shell_worker)
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_id": "t1", "repo_url": "r1", "task_text": "setup"},
+            "task_spec": {
+                "goal": "setup",
+                "setup_commands": ["  ", " npm ci ", "\t"],
+                "allowed_actions": ["read_repo_files"],
+            },
+            "dispatch": {"workspace_id": "ws-1"},
+        }
+    )
+
+    result = await node(state)
+
+    assert result["current_step"] == "init_environment"
+    shell_worker.run.assert_called_once()
+    init_call_args = shell_worker.run.call_args_list[0][0][0]
+    assert init_call_args.task_text == "npm ci"
+
+
+@pytest.mark.asyncio
 async def test_init_environment_skips_gitignore_hardening_for_read_only_route(
     tmp_path: Path,
 ) -> None:

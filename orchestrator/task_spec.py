@@ -562,13 +562,21 @@ def _check_task_text_for_escalation(
             text_to_check += " " + step.title.lower() + " " + step.expected_outcome.lower()
 
     if repo_profile.protected_paths:
-        patterns = [
-            fnmatch.translate(protected_path.lower())[4:-3]
-            for protected_path in repo_profile.protected_paths
-        ]
-        combined_regex = re.compile(r"\b(" + "|".join(patterns) + r")\b", re.IGNORECASE)
-        if combined_regex.search(text_to_check):
-            return True, "Task may affect protected paths"
+        patterns = []
+        for protected_path in repo_profile.protected_paths:
+            normalized_path = protected_path.strip().lower()
+            if not normalized_path:
+                continue
+            pattern = fnmatch.translate(normalized_path)[4:-3]
+            if re.match(r"^\w", normalized_path):
+                pattern = r"(?<!\w)" + pattern
+            if re.search(r"\w$", normalized_path):
+                pattern = pattern + r"(?!\w)"
+            patterns.append(pattern)
+        if patterns:
+            combined_regex = re.compile("|".join(patterns), re.IGNORECASE)
+            if combined_regex.search(text_to_check):
+                return True, "Task may affect protected paths"
 
     for category in repo_profile.approval_required:
         cat_word = category.replace("_", " ").lower()

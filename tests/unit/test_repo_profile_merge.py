@@ -91,3 +91,19 @@ def test_apply_repo_profile_escalates_character_set_protected_path_globs():
     assert merged.risk_level == "high"
     assert merged.requires_permission is True
     assert merged.permission_reason == "Task may affect protected paths"
+
+
+def test_apply_repo_profile_escalates_directory_glob_with_non_word_tail():
+    task_spec = TaskSpec(
+        goal="Clean up db/migrations/",
+        verification_commands=[],
+        setup_commands=[],
+        risk_level="low",
+    )
+    profile = RepoProfile.model_validate({"protected_paths": ["db/migrations/*"]})
+
+    merged = apply_repo_profile_to_task_spec(task_spec, profile)
+
+    assert merged.risk_level == "high"
+    assert merged.requires_permission is True
+    assert merged.permission_reason == "Task may affect protected paths"

@@ -35,6 +35,39 @@ def test_protected_paths_unapproved():
     assert "db/migrations/123.py matched db/migrations/*" in report_item.message
 
 
+def test_protected_paths_unapproved_bare_directory_pattern():
+    state = OrchestratorState.model_validate(
+        {
+            "session": {
+                "session_id": "s1",
+                "user_id": "u1",
+                "channel": "http",
+                "external_thread_id": "t1",
+            },
+            "task": {
+                "task_id": "t1",
+                "task_text": "do thing",
+                "repo_url": "foo",
+            },
+            "repo_profile": {
+                "protected_paths": ["db/migrations"],
+            },
+            "result": {
+                "status": "success",
+                "summary": "did it",
+                "files_changed": ["db/migrations/123.py"],
+                "test_results": [],
+                "commands_run": [],
+            },
+        }
+    )
+
+    report_item = _check_file_changes(state)
+    assert report_item.status == "failed"
+    assert report_item.reason_code == "unapproved_protected_path"
+    assert "db/migrations/123.py matched db/migrations" in report_item.message
+
+
 def test_protected_paths_approved():
     state = OrchestratorState.model_validate(
         {

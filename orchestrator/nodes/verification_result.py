@@ -443,7 +443,14 @@ def _check_protected_paths(
     for changed_file in files_changed:
         changed_path = Path(changed_file).as_posix()
         for protected_pattern in state.repo_profile.protected_paths:
-            if fnmatch.fnmatch(changed_path, protected_pattern):
+            normalized_pattern = protected_pattern.strip().rstrip("/")
+            if not normalized_pattern:
+                continue
+            if (
+                fnmatch.fnmatch(changed_path, protected_pattern)
+                or fnmatch.fnmatch(changed_path, normalized_pattern + "/*")
+                or fnmatch.fnmatch(changed_path, normalized_pattern + "/**")
+            ):
                 return VerificationReportItem(
                     label="file_changes",
                     status="failed",
