@@ -489,30 +489,9 @@ def apply_repo_profile_to_task_spec(
         else list(task_spec.setup_commands)
     )
 
-    # Check for risk escalation
-    needs_escalation = False
-    escalation_reason = None
-
-    text_to_check = task_spec.goal.lower()
-    if task_plan and task_plan.steps:
-        for step in task_plan.steps:
-            text_to_check += " " + step.title.lower() + " " + step.expected_outcome.lower()
-
-    for protected in repo_profile.protected_paths:
-        # Simplistic glob match check in text
-        glob_word = protected.replace("*", "").replace("?", "").lower()
-        if glob_word and glob_word in text_to_check:
-            needs_escalation = True
-            escalation_reason = f"Task may affect protected path: {protected}"
-            break
-
-    if not needs_escalation:
-        for category in repo_profile.approval_required:
-            cat_word = category.replace("_", " ").lower()
-            if cat_word in text_to_check:
-                needs_escalation = True
-                escalation_reason = f"Task may involve approval-required category: {category}"
-                break
+    needs_escalation, escalation_reason = _check_task_text_for_escalation(
+        task_spec, repo_profile, task_plan
+    )
 
     risk_level = task_spec.risk_level
     requires_permission = task_spec.requires_permission
@@ -570,3 +549,29 @@ def validate_task_spec_policy(task_spec: TaskSpec) -> list[str]:
     if "hardcode_secrets" not in task_spec.forbidden_actions:
         violations.append("missing_secret_hardcode_forbidden_action")
     return violations
+
+
+def _check_task_text_for_escalation(
+    task_spec: TaskSpec, repo_profile: RepoProfile, task_plan: TaskPlan | None
+) -> tuple[bool, str | None]:
+    """Check task text against repo profile policies for required escalation."""
+    text_to_check = task_spec.goal.lower()
+    if task_plan and task_plan.steps:
+        for step in task_plan.steps:
+            text_to_check += " " + step.title.lower() + " " + step.expected_outcome.lower()
+
+    if repo_profile.protected_paths:
+        patterns = [
+            re.escape(p.lower()).replace(r"\*", ".*").replace(r"\?", ".")
+            for p in repo_profile.protected_paths
+        ]
+        combined_regex = re.compile(r"\b(" + "|".join(patterns) + r")\b", re.IGNORECASE)
+        if combined_regex.search(text_to_check):
+            return True, "Task may affect protected paths"
+
+    for category in repo_profile.approval_required:
+        cat_word = category.replace("_", " ").lower()
+        if cat_word in text_to_check:
+            return True, f"Task may involve approval-required category: {category}"
+
+    return False, None

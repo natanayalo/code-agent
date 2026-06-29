@@ -37,7 +37,7 @@ Active focus:
 
 ## Next Priorities
 
-1. implement M20.5 Repo Validation Profiles
+1. implement M20.6 GitHub CI metadata persistence and repair tasks
 2. defer Milestone 21 Hotspot Refactor until M20 worker/operator contracts stabilize
 3. keep Phase 4 autonomy work gated on Phase 3 reliability metrics
 
@@ -45,7 +45,6 @@ Active focus:
 
 Granular tasks for the active and upcoming milestones:
 
-- M20.5: add repo validation profiles and require validation evidence or bounded failure reports.
 - M20.6: persist GitHub draft PR/CI metadata and create focused repair tasks for failed checks.
 - M20.7: expand the eval suite and compare reliability/profile/stage metrics against the M20.0 baseline.
 - Phase 4: evaluate routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy only after Phase 3 proves reliability.

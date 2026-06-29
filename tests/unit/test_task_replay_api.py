@@ -67,6 +67,9 @@ def client(session_factory) -> Iterator[TestClient]:
         auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     with TestClient(app) as test_client:
+        test_client.app.state.system_config.allowed_repos["example-repo"] = (
+            "https://github.com/example/repo"
+        )
         test_client.headers["X-Webhook-Token"] = (
             "a" * 32  # gitleaks:allow
         )
@@ -77,7 +80,7 @@ def _create_and_complete_task(
     client: TestClient,
     *,
     task_text: str = "Fix the bug",
-    repo_url: str | None = "https://github.com/example/repo",
+    repo_key: str | None = "example-repo",
     branch: str | None = "main",
 ) -> str:
     """Submit a task, run it, and return the task_id."""
@@ -85,7 +88,7 @@ def _create_and_complete_task(
         "/tasks",
         json={
             "task_text": task_text,
-            "repo_url": repo_url,
+            "repo_key": repo_key,
             "branch": branch,
         },
     )
@@ -170,6 +173,9 @@ def test_replay_with_worker_profile_override(
         auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     with TestClient(app) as profiled_client:
+        profiled_client.app.state.system_config.allowed_repos["example-repo"] = (
+            "https://github.com/example/repo"
+        )
         profiled_client.headers["X-Webhook-Token"] = (
             "a" * 32  # gitleaks:allow
         )
@@ -214,6 +220,9 @@ def test_replay_rejects_unknown_worker_profile_override(
         auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
     )
     with TestClient(app) as profiled_client:
+        profiled_client.app.state.system_config.allowed_repos["example-repo"] = (
+            "https://github.com/example/repo"
+        )
         profiled_client.headers["X-Webhook-Token"] = (
             "a" * 32  # gitleaks:allow
         )

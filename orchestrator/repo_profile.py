@@ -86,7 +86,9 @@ def load_repo_profile(repo_url: str | None) -> RepoProfile | None:
     try:
         content = profile_path.read_text(encoding="utf-8")
         parsed = yaml.safe_load(content)
-        if not isinstance(parsed, dict):
+        if parsed is None:
+            parsed = {}
+        elif not isinstance(parsed, dict):
             raise InvalidRepoProfileError(f"Invalid format in {profile_path}: expected dictionary")
         return RepoProfile.model_validate(parsed)
     except yaml.YAMLError as exc:
