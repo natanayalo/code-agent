@@ -382,6 +382,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump actions/cache from 5 to 6 ([#281](https://github.com/natanayalo/code-agent/pull/281))
+
 - Chore(deps): bump openai from 2.41.1 to 2.43.0 ([#273](https://github.com/natanayalo/code-agent/pull/273))
 
 - Chore(deps): bump fastapi from 0.137.0 to 0.138.0 ([#272](https://github.com/natanayalo/code-agent/pull/272))
