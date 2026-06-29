@@ -449,10 +449,9 @@ def _check_protected_paths(
             normalized_pattern = match_pattern.rstrip("/")
             if not normalized_pattern:
                 continue
-            if (
-                fnmatch.fnmatchcase(changed_path, match_pattern)
-                or fnmatch.fnmatchcase(changed_path, normalized_pattern + "/*")
-                or fnmatch.fnmatchcase(changed_path, normalized_pattern + "/**")
+            is_plain_prefix = not any(char in match_pattern for char in "*?[")
+            if fnmatch.fnmatchcase(changed_path, match_pattern) or (
+                is_plain_prefix and changed_path.startswith(normalized_pattern + "/")
             ):
                 return VerificationReportItem(
                     label="file_changes",
