@@ -54,6 +54,7 @@ logger = logging.getLogger("orchestrator.execution")
 
 def claim_next_task(self: Any, *, worker_id: str, lease_seconds: int) -> TaskClaim | None:
     """Claim one queued task for worker execution."""
+    self.ensure_worker_node(worker_id=worker_id)
     with session_scope(self.session_factory) as session:
         task_repo = TaskRepository(session)
         task = task_repo.claim_next(

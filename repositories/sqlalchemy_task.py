@@ -8,8 +8,15 @@ from typing import Any, cast
 from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
-from db.enums import HumanInteractionStatus, TaskStatus, WorkerRuntimeMode, WorkerType
-from db.models import HumanInteraction, Task, WorkerRun
+from db.enums import (
+    HumanInteractionStatus,
+    TaskStatus,
+    WorkerNodeStatus,
+    WorkerRuntimeMode,
+    WorkerType,
+)
+from db.models import HumanInteraction, Task, WorkerNode, WorkerRun
+from repositories.sqlalchemy_worker import WorkerNodeRepository
 
 
 class TaskRepository:
@@ -122,6 +129,58 @@ class TaskRepository:
                 Task.next_attempt_at <= now,
             ),
         )
+
+    @staticmethod
+    def _normalize_profile_name(profile: str) -> str:
+        stripped = profile.strip()
+        if stripped.lower().startswith("gemini-"):
+            return "antigravity-" + stripped[7:]
+        return stripped
+
+    @staticmethod
+    def _task_profile_override(task: Task) -> str | None:
+        constraints = task.constraints if isinstance(task.constraints, dict) else {}
+        raw_profile = constraints.get("worker_profile_override")
+        if isinstance(raw_profile, str) and raw_profile.strip():
+            return TaskRepository._normalize_profile_name(raw_profile)
+        return None
+
+    @staticmethod
+    def _task_matches_worker_node(task: Task, worker_node: WorkerNode) -> bool:
+        supported_worker_types = WorkerNodeRepository.supported_worker_types(worker_node)
+        required_worker_types = {
+            worker_type
+            for worker_type in (task.worker_override, task.chosen_worker)
+            if worker_type is not None
+        }
+        if required_worker_types and not required_worker_types <= supported_worker_types:
+            return False
+
+        supported_profiles = {
+            TaskRepository._normalize_profile_name(profile)
+            for profile in (worker_node.supported_profiles or [])
+            if isinstance(profile, str) and profile.strip()
+        }
+        required_profiles = {
+            profile
+            for profile in (task.chosen_profile, TaskRepository._task_profile_override(task))
+            if profile
+        }
+        required_profiles = {
+            TaskRepository._normalize_profile_name(profile) for profile in required_profiles
+        }
+        if required_profiles and not required_profiles <= supported_profiles:
+            return False
+
+        capabilities = (
+            worker_node.capabilities if isinstance(worker_node.capabilities, dict) else {}
+        )
+        supported_lanes = capabilities.get("lanes")
+        if isinstance(supported_lanes, list):
+            lane_values = {lane for lane in supported_lanes if isinstance(lane, str)}
+            if lane_values and task.queue_lane not in lane_values:
+                return False
+        return True
 
     def list_all(
         self,
@@ -239,6 +298,27 @@ class TaskRepository:
         self.session.flush()
         return task
 
+    @staticmethod
+    def _ensure_worker_node_for_claim(
+        *,
+        worker_repo: WorkerNodeRepository,
+        worker_id: str,
+        now: datetime,
+    ) -> WorkerNode:
+        worker_node = worker_repo.get_by_worker_id(worker_id)
+        if worker_node is not None:
+            return worker_node
+        return worker_repo.register_worker(
+            worker_id=worker_id,
+            worker_type=WorkerType.CODEX,
+            now=now,
+            capacity=1,
+            capabilities={
+                "worker_types": [worker_type.value for worker_type in WorkerType],
+                "lanes": ["primary", "scout"],
+            },
+        )
+
     def claim_next(
         self,
         *,
@@ -246,58 +326,169 @@ class TaskRepository:
         now: datetime,
         lease_seconds: int,
     ) -> Task | None:
-        lease_expires_at = now + timedelta(seconds=max(1, lease_seconds))
-        candidates = list(
-            self.session.scalars(
-                select(Task.id)
-                .where(
-                    or_(
-                        self._claimable_pending_filter(now=now),
-                        and_(
-                            Task.status == TaskStatus.IN_PROGRESS,
-                            Task.lease_expires_at.is_not(None),
-                            Task.lease_expires_at <= now,
-                        ),
-                    )
-                )
-                .order_by(
-                    case((Task.queue_lane == "primary", 1), else_=2).asc(),
-                    Task.priority.desc(),
-                    Task.created_at.asc(),
-                )
-                .limit(25)
-            )
+        # Expired leases are reclaimed asynchronously by the background sweep service
+        worker_repo = WorkerNodeRepository(self.session)
+        worker_node = self._ensure_worker_node_for_claim(
+            worker_repo=worker_repo,
+            worker_id=worker_id,
+            now=now,
         )
-        for task_id in candidates:
-            claimed = self.session.execute(
-                update(Task)
-                .where(
-                    Task.id == task_id,
-                    or_(
-                        self._claimable_pending_filter(now=now),
-                        and_(
-                            Task.status == TaskStatus.IN_PROGRESS,
-                            Task.lease_expires_at.is_not(None),
-                            Task.lease_expires_at <= now,
-                        ),
-                    ),
+        if (
+            worker_node is None
+            or worker_node.status != WorkerNodeStatus.ACTIVE
+            or worker_node.current_load >= worker_node.capacity
+        ):
+            return None
+        limit = 25
+        offset = 0
+        lease_expires_at = now + timedelta(seconds=max(1, lease_seconds))
+
+        while True:
+            candidates = list(
+                self.session.scalars(
+                    select(Task)
+                    .where(self._claimable_pending_filter(now=now))
+                    .order_by(
+                        case((Task.queue_lane == "primary", 1), else_=2).asc(),
+                        Task.priority.desc(),
+                        Task.created_at.asc(),
+                    )
+                    .limit(limit)
+                    .offset(offset)
                 )
-                .values(
-                    status=TaskStatus.IN_PROGRESS,
-                    lease_owner=worker_id,
-                    lease_expires_at=lease_expires_at,
-                    attempt_count=Task.attempt_count + 1,
-                    last_error=None,
-                )
-                .execution_options(synchronize_session=False)
             )
-            claimed_rows = int(getattr(claimed, "rowcount", 0) or 0)
-            if claimed_rows > 0:
-                self.session.flush()
-                return self.session.execute(
-                    select(Task).where(Task.id == task_id).execution_options(populate_existing=True)
-                ).scalar_one_or_none()
-        return None
+            if not candidates:
+                return None
+
+            matching_candidates = [
+                candidate
+                for candidate in candidates
+                if self._task_matches_worker_node(candidate, worker_node)
+            ]
+
+            if not matching_candidates:
+                offset += limit
+                continue
+
+            for candidate in matching_candidates:
+                claimed = self.session.execute(
+                    update(Task)
+                    .where(
+                        Task.id == candidate.id,
+                        self._claimable_pending_filter(now=now),
+                    )
+                    .values(
+                        status=TaskStatus.IN_PROGRESS,
+                        lease_owner=worker_id,
+                        lease_expires_at=lease_expires_at,
+                        attempt_count=Task.attempt_count + 1,
+                        last_error=None,
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                claimed_rows = int(getattr(claimed, "rowcount", 0) or 0)
+                if claimed_rows > 0:
+                    if not worker_repo.reserve_load(worker_id=worker_id):
+                        # Revert the claim if capacity was exceeded concurrently
+                        self.session.execute(
+                            update(Task)
+                            .where(
+                                Task.id == candidate.id,
+                                Task.status == TaskStatus.IN_PROGRESS,
+                                Task.lease_owner == worker_id,
+                            )
+                            .values(
+                                status=TaskStatus.PENDING,
+                                lease_owner=None,
+                                lease_expires_at=None,
+                                attempt_count=candidate.attempt_count,
+                                last_error=candidate.last_error,
+                            )
+                            .execution_options(synchronize_session=False)
+                        )
+                        self.session.flush()
+                        return None
+                    self.session.flush()
+                    return self.session.execute(
+                        select(Task)
+                        .where(Task.id == candidate.id)
+                        .execution_options(populate_existing=True)
+                    ).scalar_one_or_none()
+
+            # If we couldn't claim any of the matching candidates (e.g. concurrent claims),
+            # we can safely just return None and retry next poll, rather than
+            # risking skipping rows with an offset on a mutating dataset.
+            return None
+
+    def reclaim_expired_leases(self, *, now: datetime) -> int:
+        """Return expired leases to pending and rebuild affected worker load."""
+        expired_tasks_info = self.session.execute(
+            select(Task.id, Task.lease_owner).where(
+                Task.status == TaskStatus.IN_PROGRESS,
+                Task.lease_expires_at.is_not(None),
+                Task.lease_expires_at <= now,
+            )
+        ).all()
+
+        if not expired_tasks_info:
+            return 0
+
+        task_ids = [row.id for row in expired_tasks_info]
+        affected_workers = sorted(
+            list({row.lease_owner for row in expired_tasks_info if row.lease_owner})
+        )
+
+        # 1. Lock and update Tasks first to maintain consistent locking order (Task -> WorkerNode)
+        # and prevent deadlocks with release_success/release_failure.
+        updated = self.session.execute(
+            update(Task)
+            .where(Task.id.in_(task_ids), Task.status == TaskStatus.IN_PROGRESS)
+            .values(
+                status=case(
+                    (Task.attempt_count >= Task.max_attempts, TaskStatus.FAILED),
+                    else_=TaskStatus.PENDING,
+                ),
+                lease_owner=None,
+                lease_expires_at=None,
+                next_attempt_at=case(
+                    (Task.attempt_count >= Task.max_attempts, None),
+                    else_=now,
+                ),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        updated_count = getattr(updated, "rowcount", 0) or 0
+        if updated_count <= 0:
+            return 0
+        self.session.flush()
+
+        # 2. Update the WorkerNode load for affected workers
+        worker_repo = WorkerNodeRepository(self.session)
+        if affected_workers:
+            # Lock all affected WorkerNodes in a single sorted query to prevent deadlocks
+            self.session.scalars(
+                select(WorkerNode.id)
+                .where(WorkerNode.worker_id.in_(affected_workers))
+                .order_by(WorkerNode.worker_id.asc())
+                .with_for_update()
+            ).all()
+
+            # Query remaining loads for all affected workers in a single grouped query
+            loads_query = (
+                select(Task.lease_owner, func.count(Task.id))
+                .where(
+                    Task.lease_owner.in_(affected_workers),
+                    Task.status == TaskStatus.IN_PROGRESS,
+                )
+                .group_by(Task.lease_owner)
+            )
+            remaining_loads = {row[0]: row[1] for row in self.session.execute(loads_query).all()}
+
+            for worker_id in affected_workers:
+                remaining_load = remaining_loads.get(worker_id, 0)
+                worker_repo.set_load(worker_id=worker_id, current_load=remaining_load)
+
+        return updated_count
 
     def heartbeat_lease(
         self,
@@ -324,16 +515,19 @@ class TaskRepository:
             return True
         return False
 
-    def release_success(self, *, task_id: str) -> Task | None:
+    def release_success(self, *, task_id: str, worker_id: str) -> Task | None:
         task = self.get(task_id)
         if task is None:
             return None
+        if task.lease_owner != worker_id:
+            return task
         task.status = TaskStatus.COMPLETED
         task.lease_owner = None
         task.lease_expires_at = None
         task.next_attempt_at = None
         task.last_error = None
         self.session.flush()
+        WorkerNodeRepository(self.session).release_load(worker_id=worker_id)
         return task
 
     def release_failure(
@@ -350,6 +544,7 @@ class TaskRepository:
         if task.status != TaskStatus.IN_PROGRESS or task.lease_owner != worker_id:
             return task
 
+        previous_owner = task.lease_owner
         task.lease_owner = None
         task.lease_expires_at = None
         if task.attempt_count >= task.max_attempts:
@@ -359,6 +554,8 @@ class TaskRepository:
             task.status = TaskStatus.PENDING
             task.next_attempt_at = now + timedelta(seconds=max(0, retry_backoff_seconds))
         self.session.flush()
+        if previous_owner:
+            WorkerNodeRepository(self.session).release_load(worker_id=previous_owner)
         return task
 
     def release_terminal_failure(
@@ -371,12 +568,16 @@ class TaskRepository:
         task = self.get(task_id)
         if task is None:
             return None
-        if task.lease_owner == worker_id:
-            task.lease_owner = None
-            task.lease_expires_at = None
+        if task.lease_owner != worker_id:
+            return task
+        previous_owner = task.lease_owner
+        task.lease_owner = None
+        task.lease_expires_at = None
         task.status = status
         task.next_attempt_at = None
         self.session.flush()
+        if previous_owner:
+            WorkerNodeRepository(self.session).release_load(worker_id=previous_owner)
         return task
 
     def cancel(self, *, task_id: str) -> tuple[Task | None, bool]:
@@ -386,6 +587,7 @@ class TaskRepository:
         terminal_statuses = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
         if task.status in terminal_statuses:
             return task, False
+        previous_owner = task.lease_owner
         task.lease_owner = None
         task.lease_expires_at = None
         task.next_attempt_at = None
@@ -400,6 +602,8 @@ class TaskRepository:
             .values(status=HumanInteractionStatus.CANCELLED)
         )
         self.session.flush()
+        if previous_owner:
+            WorkerNodeRepository(self.session).release_load(worker_id=previous_owner)
         return task, True
 
     def record_attempt_error(

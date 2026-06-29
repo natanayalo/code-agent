@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from db.enums import HumanInteractionStatus, TaskStatus
+from db.enums import HumanInteractionStatus, TaskStatus, WorkerNodeStatus
 from repositories import (
     HumanInteractionRepository,
     SessionRepository,
     TaskRepository,
     UserRepository,
+    WorkerNodeRepository,
     session_scope,
 )
 
@@ -118,6 +119,347 @@ def test_task_repository_claim_next_returns_fresh_claimed_task(session_factory) 
         assert claimed.attempt_count == 1
 
 
+def test_task_repository_claim_next_respects_worker_capacity(session_factory) -> None:
+    """A worker cannot claim beyond its registered active capacity."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:capacity", display_name="Capacity")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-capacity",
+        )
+        task_repo.create(session_id=conversation_session.id, task_text="first")
+        task_repo.create(session_id=conversation_session.id, task_text="second")
+        worker_repo.register_worker(
+            worker_id="worker-cap",
+            worker_type="codex",
+            now=datetime.now(UTC),
+            capacity=1,
+        )
+
+        first = task_repo.claim_next(
+            worker_id="worker-cap",
+            now=datetime.now(UTC),
+            lease_seconds=30,
+        )
+        second = task_repo.claim_next(
+            worker_id="worker-cap",
+            now=datetime.now(UTC),
+            lease_seconds=30,
+        )
+        worker = worker_repo.get_by_worker_id("worker-cap")
+
+        assert first is not None
+        assert second is None
+        assert worker is not None
+        assert worker.current_load == 1
+
+
+def test_task_repository_claim_next_skips_reservation_when_no_work(
+    session_factory,
+    monkeypatch,
+) -> None:
+    """Empty polls should not write worker load reservations or duplicate lookups."""
+    with session_scope(session_factory) as session:
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+        worker_repo.register_worker(
+            worker_id="worker-empty",
+            worker_type="codex",
+            now=datetime.now(UTC),
+            capacity=1,
+        )
+
+        def fail_reserve_load(self: WorkerNodeRepository, *, worker_id: str) -> bool:
+            raise AssertionError("reserve_load should not run when no pending tasks match")
+
+        lookup_calls: list[str] = []
+        original_get = WorkerNodeRepository.get_by_worker_id
+
+        def counting_get_by_worker_id(
+            self: WorkerNodeRepository,
+            worker_id: str,
+        ):
+            lookup_calls.append(worker_id)
+            return original_get(self, worker_id)
+
+        monkeypatch.setattr(WorkerNodeRepository, "get_by_worker_id", counting_get_by_worker_id)
+        monkeypatch.setattr(WorkerNodeRepository, "reserve_load", fail_reserve_load)
+
+        claimed = task_repo.claim_next(
+            worker_id="worker-empty",
+            now=datetime.now(UTC),
+            lease_seconds=30,
+        )
+
+        assert claimed is None
+        assert lookup_calls == ["worker-empty"]
+
+
+def test_task_repository_claim_next_skips_candidate_filter_for_non_active_worker(
+    session_factory,
+    monkeypatch,
+) -> None:
+    """Non-active workers should fail fast before candidate selection and reservation."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+
+        user = user_repo.create(
+            external_user_id="telegram:draining-worker",
+            display_name="Draining",
+        )
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-draining-worker",
+        )
+        task_repo.create(session_id=conversation_session.id, task_text="pending work")
+        worker = worker_repo.register_worker(
+            worker_id="worker-draining",
+            worker_type="codex",
+            now=datetime.now(UTC),
+            capacity=1,
+        )
+        worker.status = WorkerNodeStatus.DRAINING
+        session.flush()
+
+        def fail_task_match(task, worker_node) -> bool:
+            raise AssertionError("candidate matching should not run for non-active workers")
+
+        def fail_reserve_load(self: WorkerNodeRepository, *, worker_id: str) -> bool:
+            raise AssertionError("reserve_load should not run for non-active workers")
+
+        monkeypatch.setattr(
+            TaskRepository,
+            "_task_matches_worker_node",
+            staticmethod(fail_task_match),
+        )
+        monkeypatch.setattr(WorkerNodeRepository, "reserve_load", fail_reserve_load)
+
+        claimed = task_repo.claim_next(
+            worker_id="worker-draining",
+            now=datetime.now(UTC),
+            lease_seconds=30,
+        )
+
+        assert claimed is None
+        assert worker.current_load == 0
+
+
+def test_task_repository_claim_next_requires_supported_profile(session_factory) -> None:
+    """Tasks pinned to a profile should not match workers with no supported profiles."""
+    now = datetime.now(UTC)
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:profile", display_name="Profile")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-profile",
+        )
+        task = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="profile-specific",
+            chosen_profile="codex-native-executor",
+        )
+
+        missing_profile_claim = task_repo.claim_next(
+            worker_id="worker-no-profiles",
+            now=now,
+            lease_seconds=30,
+        )
+        assert missing_profile_claim is None
+
+        worker_repo.register_worker(
+            worker_id="worker-with-profile",
+            worker_type="codex",
+            now=now,
+            capacity=1,
+            supported_profiles=["codex-native-executor"],
+        )
+        claimed = task_repo.claim_next(
+            worker_id="worker-with-profile",
+            now=now,
+            lease_seconds=30,
+        )
+
+        assert claimed is not None
+        assert claimed.id == task.id
+
+
+def test_task_repository_reclaim_expired_leases_decrements_worker_load(
+    session_factory,
+    monkeypatch,
+) -> None:
+    """Expired lease reconciliation should release only expired reservations."""
+    now = datetime.now(UTC)
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:reclaim", display_name="Reclaim")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-reclaim",
+        )
+        first_task = task_repo.create(session_id=conversation_session.id, task_text="first")
+        second_task = task_repo.create(session_id=conversation_session.id, task_text="second")
+        worker_repo.register_worker(
+            worker_id="worker-reclaim",
+            worker_type="codex",
+            now=now,
+            capacity=2,
+        )
+
+        assert task_repo.claim_next(worker_id="worker-reclaim", now=now, lease_seconds=30)
+        assert task_repo.claim_next(worker_id="worker-reclaim", now=now, lease_seconds=30)
+        worker = worker_repo.get_by_worker_id("worker-reclaim")
+        assert worker is not None
+        assert worker.current_load == 2
+
+        first = task_repo.get(first_task.id)
+        second = task_repo.get(second_task.id)
+        assert first is not None
+        assert second is not None
+        first.lease_expires_at = now - datetime.resolution
+        second.lease_expires_at = now + datetime.resolution
+        session.flush()
+
+        locked_queries = []
+        original_scalars = session.scalars
+
+        def recording_scalars(statement, *args, **kwargs):
+            for_update_arg = getattr(statement, "_for_update_arg", None)
+            if for_update_arg is not None:
+                locked_queries.append(statement)
+            return original_scalars(statement, *args, **kwargs)
+
+        monkeypatch.setattr(session, "scalars", recording_scalars)
+        with session.no_autoflush:
+            reclaimed = task_repo.reclaim_expired_leases(now=now)
+
+        session.refresh(first)
+        session.refresh(second)
+        assert reclaimed == 1
+        assert locked_queries
+        assert getattr(locked_queries[0]._for_update_arg, "skip_locked", False) is False
+        assert first.status is TaskStatus.PENDING
+        assert first.lease_owner is None
+        assert second.status is TaskStatus.IN_PROGRESS
+        assert worker.current_load == 1
+
+
+def test_task_repository_reclaim_expired_leases_fails_task_after_max_attempts(
+    session_factory,
+) -> None:
+    """An expired lease on a task at max attempts should be marked FAILED rather than PENDING."""
+    now = datetime.now(UTC)
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:reclaim-max", display_name="ReclaimMax")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-reclaim-max",
+        )
+        task = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="max attempts task",
+            max_attempts=3,
+        )
+        worker_repo.register_worker(
+            worker_id="worker-reclaim-max",
+            worker_type="codex",
+            now=now,
+            capacity=1,
+        )
+
+        # Force the task to the maximum attempts and simulate an expired lease
+        task.attempt_count = 3
+        task.status = TaskStatus.IN_PROGRESS
+        task.lease_owner = "worker-reclaim-max"
+        task.lease_expires_at = now - datetime.resolution
+        session.flush()
+
+        reclaimed = task_repo.reclaim_expired_leases(now=now)
+
+        session.refresh(task)
+        assert reclaimed == 1
+        assert task.status is TaskStatus.FAILED
+        assert task.lease_owner is None
+        assert task.next_attempt_at is None
+
+
+def test_task_repository_claim_next_pages_through_incompatible_candidates(
+    session_factory,
+) -> None:
+    """claim_next should page through incompatible tasks to find a match."""
+    now = datetime.now(UTC)
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:page", display_name="Page")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-page",
+        )
+
+        # Create 30 tasks that are incompatible with 'worker-page'
+        for i in range(30):
+            task_repo.create(
+                session_id=conversation_session.id,
+                task_text=f"incompatible {i}",
+                worker_override="gemini",
+            )
+
+        # Create 1 task that is compatible (and was created last, so it's at the end)
+        task_repo.create(
+            session_id=conversation_session.id,
+            task_text="compatible",
+            worker_override="codex",
+        )
+
+        worker_repo.register_worker(
+            worker_id="worker-page",
+            worker_type="codex",
+            now=now,
+            capacity=1,
+        )
+
+        # The worker should be able to claim the 31st task by paging through the first 30
+        claimed = task_repo.claim_next(
+            worker_id="worker-page",
+            now=now,
+            lease_seconds=30,
+        )
+
+        assert claimed is not None
+        assert claimed.task_text == "compatible"
+
+
 def test_task_repository_queue_release_guard_paths(session_factory) -> None:
     """Queue release helpers should handle missing rows and ownership mismatches safely."""
     with session_scope(session_factory) as session:
@@ -125,7 +467,7 @@ def test_task_repository_queue_release_guard_paths(session_factory) -> None:
         session_repo = SessionRepository(session)
         task_repo = TaskRepository(session)
 
-        assert task_repo.release_success(task_id="missing") is None
+        assert task_repo.release_success(task_id="missing", worker_id="any") is None
         assert (
             task_repo.release_failure(
                 task_id="missing",
@@ -313,7 +655,7 @@ def test_task_repository_supports_task_spec_lease_progress_and_metrics(session_f
             lease_seconds=30,
         )
         assert reclaimed is not None
-        completed = task_repo.release_success(task_id=queued_task.id)
+        completed = task_repo.release_success(task_id=queued_task.id, worker_id="worker-a")
         assert completed is not None
         assert completed.status is TaskStatus.COMPLETED
         assert completed.lease_owner is None

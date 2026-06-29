@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from repositories import WorkerNodeRepository
 from tests.unit.task_execution_service_support import *  # noqa: F403
 
 
@@ -60,6 +61,11 @@ def _build_fake_orchestrator_state(
     )
 
 
+async def _idle_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
+    """Keep heartbeat alive until run_queued_task cancels it after result handling."""
+    await asyncio.Event().wait()
+
+
 def test_claim_next_task_allows_single_claim_and_lease_reclaim() -> None:
     """Only one worker should claim a pending task until the lease expires."""
     engine = create_engine_from_url(
@@ -87,6 +93,9 @@ def test_claim_next_task_allows_single_claim_and_lease_reclaim() -> None:
         assert task is not None
         assert task.lease_expires_at is not None
         task.lease_expires_at = task.lease_expires_at - timedelta(seconds=120)
+        import datetime
+
+        TaskRepository(session).reclaim_expired_leases(now=datetime.datetime.now(datetime.UTC))
 
     reclaimed = service.claim_next_task(worker_id="worker-b", lease_seconds=60)
     assert reclaimed is not None
@@ -143,6 +152,7 @@ def test_claim_next_task_orders_by_queue_lane_then_priority_then_age() -> None:
         session_factory=session_factory,
         worker=_StaticWorker(),
     )
+    service.register_worker_node(worker_id="w1", capacity=4)
 
     claims = []
     for _ in range(4):
@@ -232,16 +242,13 @@ def test_run_queued_task_requeues_failed_result_when_retries_remain(monkeypatch)
         return _build_fake_orchestrator_state(
             submitted=_submission,
             persisted=persisted,
-            current_step="run_worker",
+            current_step="await_result",
             result_status="failure",
             result_summary="Simulated failure should be retried.",
         )
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
 
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
 
@@ -255,6 +262,78 @@ def test_run_queued_task_requeues_failed_result_when_retries_remain(monkeypatch)
         assert task.next_attempt_at is not None
         assert task.lease_owner is None
         assert task.lease_expires_at is None
+
+
+def test_run_queued_task_only_quarantines_provider_and_infra_failures(monkeypatch) -> None:
+    """Queued runtime should not quarantine workers for normal test failures."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    service.register_worker_node(worker_id="worker-health", capacity=1)
+
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
+
+    async def fake_test_failure(
+        submitted: execution_module.TaskSubmission,
+        persisted: execution_module.TaskSnapshot,
+    ) -> OrchestratorState:
+        return _build_fake_orchestrator_state(
+            submitted=submitted,
+            persisted=persisted,
+            current_step="await_result",
+            result_status="failure",
+            result_summary="Targeted tests failed.",
+            failure_kind="test",
+        )
+
+    monkeypatch.setattr(service, "_run_orchestrator", fake_test_failure)
+    snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="test failure"))
+    claim = service.claim_next_task(worker_id="worker-health", lease_seconds=45)
+    assert claim is not None
+    asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-health"))
+
+    with session_scope(session_factory) as session:
+        node = WorkerNodeRepository(session).get_by_worker_id("worker-health")
+        assert node is not None
+        assert node.status.value == "active"
+        assert node.consecutive_failures == 0
+
+    async def fake_provider_failure(
+        submitted: execution_module.TaskSubmission,
+        persisted: execution_module.TaskSnapshot,
+    ) -> OrchestratorState:
+        return _build_fake_orchestrator_state(
+            submitted=submitted,
+            persisted=persisted,
+            current_step="await_result",
+            result_status="error",
+            result_summary="Provider returned quota exhausted.",
+            failure_kind="provider_error",
+        )
+
+    monkeypatch.setattr(service, "_run_orchestrator", fake_provider_failure)
+    for index in range(3):
+        snapshot, _ = service.create_task(
+            execution_module.TaskSubmission(task_text=f"provider failure {index}")
+        )
+        claim = service.claim_next_task(worker_id="worker-health", lease_seconds=45)
+        assert claim is not None
+        asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-health"))
+
+    with session_scope(session_factory) as session:
+        node = WorkerNodeRepository(session).get_by_worker_id("worker-health")
+        assert node is not None
+        assert node.status.value == "quarantined"
+        assert node.consecutive_failures == 3
+        assert node.quarantine_reason is not None
 
 
 def test_run_queued_task_wraps_execution_in_restored_trace_context(monkeypatch) -> None:
@@ -285,9 +364,6 @@ def test_run_queued_task_wraps_execution_in_restored_trace_context(monkeypatch) 
     ) -> OrchestratorState:
         raise RuntimeError("boom")
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
     async def run_blocking(func, *args, **kwargs):
         return func(*args, **kwargs)
 
@@ -304,7 +380,7 @@ def test_run_queued_task_wraps_execution_in_restored_trace_context(monkeypatch) 
             scope_events["exited"] += 1
 
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
     monkeypatch.setattr(service, "_run_blocking", run_blocking)
     monkeypatch.setattr(
         execution_module,
@@ -413,11 +489,8 @@ def test_run_queued_task_terminal_interrupt_emits_awaiting_approval_without_requ
             next_action_hint="await_manual_follow_up",
         )
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
 
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
 
@@ -477,11 +550,8 @@ def test_run_queued_task_rejected_approval_stays_failed(monkeypatch) -> None:
             next_action_hint="await_manual_follow_up",
         )
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
 
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
 
@@ -536,11 +606,8 @@ def test_apply_task_approval_decision_requeues_approved_task(monkeypatch) -> Non
             next_action_hint="await_manual_follow_up",
         )
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
 
     decision = service.apply_task_approval_decision(task_id=snapshot.task_id, approved=True)
@@ -602,11 +669,8 @@ def test_apply_task_approval_decision_reject_is_terminal_and_conflict_is_reporte
             next_action_hint="await_manual_follow_up",
         )
 
-    async def fake_heartbeat_loop(*, task_id: str, worker_id: str, lease_seconds: int) -> None:
-        return None
-
     monkeypatch.setattr(service, "_run_orchestrator", fake_run_orchestrator)
-    monkeypatch.setattr(service, "_heartbeat_loop", fake_heartbeat_loop)
+    monkeypatch.setattr(service, "_heartbeat_loop", _idle_heartbeat_loop)
     asyncio.run(service.run_queued_task(task_id=snapshot.task_id, worker_id="worker-a"))
 
     rejected = service.apply_task_approval_decision(task_id=snapshot.task_id, approved=False)

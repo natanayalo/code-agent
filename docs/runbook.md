@@ -71,6 +71,7 @@ Relevant environment controls:
 
 - `CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS` (default `2`)
 - `CODE_AGENT_QUEUE_LEASE_SECONDS` (default `60`)
+- `CODE_AGENT_QUEUE_CAPACITY` (default `1`)
 - `CODE_AGENT_QUEUE_MAX_ATTEMPTS` (default `3`)
 
 ## 3.1) Tracing and Observability (Phoenix OSS)

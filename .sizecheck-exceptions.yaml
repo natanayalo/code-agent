@@ -1,4 +1,5 @@
 file_exceptions:
+  repositories/sqlalchemy_task.py: Highly stateful database repository layer; tightly coupled and slightly exceeds limit due to robust concurrency safeguards.
   db/models.py: Central ORM definitions; tightly coupled models.
   orchestrator/brain.py: Optional orchestrator-brain contracts for TaskSpec enrichment and routing. (coupled to models preventing extraction)
   orchestrator/graph.py: LangGraph workflow skeleton for the orchestrator happy path. (coupled to models preventing extraction)
@@ -43,6 +44,8 @@ function_exceptions:
     test_human_interaction_repository_syncs_task_spec_flags: Highly stateful logic for test_human_interaction_repository_syncs_task_spec_flags; splitting requires unnatural parameter coupling.
   tests/integration/test_repositories_task_queue.py:
     test_task_repository_supports_task_spec_lease_progress_and_metrics: Highly stateful logic for test_task_repository_supports_task_spec_lease_progress_and_metrics; splitting requires unnatural parameter coupling.
+  repositories/sqlalchemy_task.py:
+    claim_next: Database lock ordering logic requires atomic queue transaction; 81 lines.
   tests/integration/test_repositories_worker_runs.py:
     test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics: Highly stateful logic for test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics; splitting requires unnatural parameter coupling.
   tests/integration/test_execution_outcome_service.py:
@@ -56,3 +59,5 @@ function_exceptions:
     _determine_exit_status: Parses and classifies error markers from native execution logs; cohesive matching block.
   workers/self_review.py:
     run_shared_self_review_fix_loop: Bounded retry loop mutating execution in place; heavy local state coupling.
+  orchestrator/execution_queue.py:
+    run_forever: Core background queue polling loop; tightly coupled state machine that cannot be easily split.

@@ -451,9 +451,9 @@ def _mark_task_failed(self: Any, *, task_id: str) -> None:
         TaskRepository(session).update_status(task_id=task_id, status=TaskStatus.FAILED)
 
 
-def _release_task_success(self: Any, *, task_id: str) -> None:
+def _release_task_success(self: Any, *, task_id: str, worker_id: str) -> None:
     with session_scope(self.session_factory) as session:
-        TaskRepository(session).release_success(task_id=task_id)
+        TaskRepository(session).release_success(task_id=task_id, worker_id=worker_id)
 
 
 def _release_task_failure(self: Any, *, task_id: str, worker_id: str) -> None:

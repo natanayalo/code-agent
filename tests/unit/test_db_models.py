@@ -18,6 +18,7 @@ from db.enums import (
     SessionStatus,
     TaskStatus,
     TimelineEventType,
+    WorkerNodeStatus,
     WorkerRunStatus,
     WorkerType,
 )
@@ -36,6 +37,7 @@ EXPECTED_TABLES = {
     "tasks",
     "task_timeline_events",
     "users",
+    "worker_nodes",
     "worker_runs",
 }
 
@@ -52,6 +54,8 @@ def test_model_metadata_uses_canonical_enums_for_constrained_columns() -> None:
         ("sessions", "status"): SessionStatus,
         ("tasks", "status"): TaskStatus,
         ("tasks", "chosen_worker"): WorkerType,
+        ("worker_nodes", "worker_type"): WorkerType,
+        ("worker_nodes", "status"): WorkerNodeStatus,
         ("worker_runs", "worker_type"): WorkerType,
         ("worker_runs", "status"): WorkerRunStatus,
         ("artifacts", "artifact_type"): ArtifactType,

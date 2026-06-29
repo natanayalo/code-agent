@@ -188,7 +188,7 @@ flowchart TD
 
 - API writes tasks as pending records.
 - Worker process polls queue (`CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS`, default `2`).
-- Worker atomically claims tasks with lease ownership and expiry (`CODE_AGENT_QUEUE_LEASE_SECONDS`, default `60`).
+- Worker registers capacity (`CODE_AGENT_QUEUE_CAPACITY`, default `1`) and atomically claims tasks with lease ownership and expiry (`CODE_AGENT_QUEUE_LEASE_SECONDS`, default `60`).
 - Heartbeats extend lease while the run is active.
 - On success/failure, lease is cleared and status transitions persist.
 - Failed attempts are retried up to configured max attempts before terminal failure.

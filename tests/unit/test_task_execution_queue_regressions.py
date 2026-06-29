@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from db.base import Base
 from db.enums import TaskStatus, TimelineEventType, WorkerRunStatus, WorkerRuntimeMode
 from orchestrator import execution as execution_module
+from orchestrator.execution_worker_service import WorkerProfileConfigurationError
 from repositories import (
     TaskRepository,
     TaskTimelineRepository,
@@ -166,7 +167,7 @@ def test_queue_state_helpers_update_retry_and_terminal_status_consistently() -> 
     assert success_claim is not None
     assert success_claim.task_id == success_snapshot.task_id
 
-    service._release_task_success(task_id=success_snapshot.task_id)
+    service._release_task_success(task_id=success_snapshot.task_id, worker_id="worker-b")
     with session_scope(session_factory) as session:
         success_task = TaskRepository(session).get(success_snapshot.task_id)
         assert success_task is not None
@@ -223,3 +224,15 @@ async def test_run_queued_task_coerces_retired_persisted_profile_override() -> N
         assert task.lease_expires_at is None
         assert task.next_attempt_at is None
         assert task.last_error is None
+
+
+def test_worker_node_registration_rejects_profile_without_worker_type() -> None:
+    """Malformed profile routing config should fail with a descriptive error."""
+    service, _ = _make_task_service()
+    service.worker_profiles = {"broken-profile": {"capability_tags": ["execution"]}}
+
+    with pytest.raises(
+        WorkerProfileConfigurationError,
+        match="Invalid worker profile configuration for 'broken-profile': missing worker_type.",
+    ):
+        service.ensure_worker_node(worker_id="worker-bad-profile")

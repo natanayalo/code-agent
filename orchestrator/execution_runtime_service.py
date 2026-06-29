@@ -24,7 +24,6 @@ from db.base import utc_now
 from db.enums import TaskStatus
 from orchestrator.execution_policy import (
     _apply_execution_budget_policy,
-    _heartbeat_interval_seconds,
 )
 from orchestrator.execution_serialization import (
     _completion_progress_phase,
@@ -40,6 +39,10 @@ from orchestrator.execution_types import (
     ProgressPhase,
     TaskSubmission,
     _PersistedTaskContext,
+)
+from orchestrator.execution_worker_service import (
+    worker_node_failure_kind_from_exception,
+    worker_node_failure_kind_from_state,
 )
 from orchestrator.state import OrchestratorState, SessionRef
 from repositories import TaskTimelineRepository, session_scope
@@ -172,6 +175,13 @@ async def _wait_for_orchestrator_or_heartbeat(
         heartbeat_exc = heartbeat_task.exception()
         if heartbeat_exc is not None:
             raise heartbeat_exc
+        if orchestrator_task in done:
+            logger.warning(
+                "Orchestrator task completed while heartbeat failed. "
+                "Aborting due to heartbeat failure.",
+                extra={"task_id": task_id},
+            )
+            return None
     if orchestrator_task in done:
         return orchestrator_task.result()
 
@@ -224,8 +234,12 @@ async def _persist_run_queued_task_outcome(
             finished_at=finished_at,
             force_task_status=TaskStatus.COMPLETED,
         )
-        await self._run_blocking(self._release_task_success, task_id=persisted.task_id)
+        await self._run_blocking(
+            self._release_task_success, task_id=persisted.task_id, worker_id=worker_id
+        )
+        await self._run_blocking(self.record_worker_node_success, worker_id=worker_id)
     else:
+        failure_kind = worker_node_failure_kind_from_state(state)
         terminal_failure = _requires_manual_follow_up(state)
         terminal_status = _terminal_follow_up_status(
             state=state,
@@ -252,6 +266,11 @@ async def _persist_run_queued_task_outcome(
                 task_id=persisted.task_id,
                 worker_id=worker_id,
             )
+        await self._run_blocking(
+            self.record_worker_node_failure,
+            worker_id=worker_id,
+            failure_kind=failure_kind,
+        )
 
 
 async def _persist_execution_outcome_with_reflections(
@@ -328,6 +347,12 @@ async def _handle_run_queued_task_error(
         self._release_task_failure,
         task_id=persisted.task_id,
         worker_id=worker_id,
+    )
+    failure_kind = worker_node_failure_kind_from_exception(exc)
+    await self._run_blocking(
+        self.record_worker_node_failure,
+        worker_id=worker_id,
+        failure_kind=failure_kind,
     )
 
 
@@ -452,31 +477,6 @@ def _record_execution_span_error(self: Any, exc: Exception) -> None:
     logger.debug("Task execution failed: %s", exc, exc_info=True)
     record_span_exception(exc)
     set_span_status_from_outcome("error", str(exc))
-
-
-async def _heartbeat_loop(
-    self: Any,
-    *,
-    task_id: str,
-    worker_id: str,
-    lease_seconds: int,
-) -> None:
-    """Best-effort lease heartbeat while task execution is in progress."""
-    sleep_seconds = _heartbeat_interval_seconds(lease_seconds=lease_seconds)
-    while True:
-        await asyncio.sleep(sleep_seconds)
-        ok = await self._run_blocking(
-            self._heartbeat_task_lease,
-            task_id=task_id,
-            worker_id=worker_id,
-            lease_seconds=lease_seconds,
-        )
-        if not ok:
-            logger.debug(
-                "Heartbeat failed: lease lost or task status changed",
-                extra={"task_id": task_id, "worker_id": worker_id},
-            )
-            return None
 
 
 async def _emit_progress(

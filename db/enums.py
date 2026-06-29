@@ -91,6 +91,15 @@ class WorkerRunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class WorkerNodeStatus(StrEnum):
+    """Allowed lifecycle states for queue worker nodes."""
+
+    ACTIVE = "active"
+    DRAINING = "draining"
+    OFFLINE = "offline"
+    QUARANTINED = "quarantined"
+
+
 class ArtifactType(StrEnum):
     """Allowed categories for persisted run artifacts."""
 
