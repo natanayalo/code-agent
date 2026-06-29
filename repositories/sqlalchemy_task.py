@@ -381,7 +381,11 @@ class TaskRepository:
                     # Revert the claim if capacity was exceeded concurrently
                     self.session.execute(
                         update(Task)
-                        .where(Task.id == candidate.id)
+                        .where(
+                            Task.id == candidate.id,
+                            Task.status == TaskStatus.IN_PROGRESS,
+                            Task.lease_owner == worker_id,
+                        )
                         .values(
                             status=TaskStatus.PENDING,
                             lease_owner=None,
@@ -436,7 +440,7 @@ class TaskRepository:
                     else_=now,
                 ),
             )
-            .execution_options(synchronize_session="fetch")
+            .execution_options(synchronize_session=False)
         )
         updated_count = getattr(updated, "rowcount", 0) or 0
         if updated_count <= 0:
