@@ -102,6 +102,8 @@ def test_worker_node_sweep_marks_stale_active_workers_offline_without_clearing_q
 
         swept = repo.sweep_stale_workers(now=now, threshold_seconds=60)
 
+        session.refresh(active)
+        session.refresh(quarantined)
         assert swept == 1
         assert active.status is WorkerNodeStatus.OFFLINE
         assert quarantined.status is WorkerNodeStatus.QUARANTINED
@@ -140,6 +142,7 @@ def test_worker_node_heartbeat_recovers_offline_workers(session_factory) -> None
         )
 
         repo.sweep_stale_workers(now=now, threshold_seconds=60)
+        session.refresh(node)
         assert node.status is WorkerNodeStatus.OFFLINE
 
         # Heartbeat should recover the worker

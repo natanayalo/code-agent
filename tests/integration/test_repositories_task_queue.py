@@ -353,6 +353,8 @@ def test_task_repository_reclaim_expired_leases_decrements_worker_load(
         with session.no_autoflush:
             reclaimed = task_repo.reclaim_expired_leases(now=now)
 
+        session.refresh(first)
+        session.refresh(second)
         assert reclaimed == 1
         assert locked_queries
         assert getattr(locked_queries[0]._for_update_arg, "skip_locked", False) is False
@@ -400,6 +402,7 @@ def test_task_repository_reclaim_expired_leases_fails_task_after_max_attempts(
 
         reclaimed = task_repo.reclaim_expired_leases(now=now)
 
+        session.refresh(task)
         assert reclaimed == 1
         assert task.status is TaskStatus.FAILED
         assert task.lease_owner is None
