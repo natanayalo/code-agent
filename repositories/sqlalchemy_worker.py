@@ -181,8 +181,6 @@ class WorkerNodeRepository:
         if node is None:
             return None
         if failure_kind not in QUARANTINE_FAILURE_KINDS:
-            node.consecutive_failures = 0
-            self.session.flush()
             return node
 
         node.consecutive_failures += 1

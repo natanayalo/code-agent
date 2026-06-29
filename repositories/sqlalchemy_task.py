@@ -439,8 +439,9 @@ class TaskRepository:
             .execution_options(synchronize_session="fetch")
         )
         updated_count = getattr(updated, "rowcount", 0) or 0
-        if updated_count > 0:
-            self.session.flush()
+        if updated_count <= 0:
+            return 0
+        self.session.flush()
 
         # 2. Update the WorkerNode load for affected workers
         worker_repo = WorkerNodeRepository(self.session)
