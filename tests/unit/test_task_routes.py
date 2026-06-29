@@ -182,11 +182,6 @@ def test_submit_task_returns_created_snapshot() -> None:
             "/tasks",
             json={
                 "task_text": "Create the task",
-                "session": {
-                    "channel": "http",
-                    "external_user_id": "user-1",
-                    "external_thread_id": "thread-1",
-                },
             },
         )
 
@@ -194,7 +189,7 @@ def test_submit_task_returns_created_snapshot() -> None:
     assert response.json()["task_id"] == "task-created"
     assert len(service.create_calls) == 1
     assert service.create_calls[0].task_text == "Create the task"
-    assert service.create_calls[0].session.external_thread_id == "thread-1"
+    assert service.create_calls[0].session.external_thread_id == "http-default"
 
 
 def test_submit_task_returns_422_for_validation_errors() -> None:
@@ -466,7 +461,8 @@ def test_trigger_scout_task_returns_created_snapshot() -> None:
         client.app.state.system_config = SystemConfig(
             default_image="test",
             workspace_root="/tmp",
-            scout_repo_url="https://github.com/scout/repo",
+            scout_repo_key="scout-repo",
+            allowed_repos={"scout-repo": "https://github.com/scout/repo"},
             scout_branch="main",
             scout_task_text="Scout text",
         )
@@ -499,7 +495,7 @@ def test_trigger_scout_task_with_explicit_parameters() -> None:
         client.app.state.system_config = SystemConfig(
             default_image="test",
             workspace_root="/tmp",
-            scout_allowed_repos={"test-key": "https://github.com/allowed/repo"},
+            allowed_repos={"test-key": "https://github.com/allowed/repo"},
         )
         response = client.post(
             "/tasks/scout/trigger",
@@ -539,7 +535,8 @@ def test_trigger_scout_task_normalizes_blank_strings() -> None:
         client.app.state.system_config = SystemConfig(
             default_image="test",
             workspace_root="/tmp",
-            scout_repo_url="https://github.com/fallback/repo",
+            scout_repo_key="fallback-repo",
+            allowed_repos={"fallback-repo": "https://github.com/fallback/repo"},
             scout_branch="main",
         )
         response = client.post(
@@ -566,7 +563,7 @@ def test_trigger_scout_task_returns_400_for_unknown_repo_key() -> None:
         client.app.state.system_config = SystemConfig(
             default_image="test",
             workspace_root="/tmp",
-            scout_allowed_repos={"known": "https://github.com/known/repo"},
+            allowed_repos={"known": "https://github.com/known/repo"},
         )
         response = client.post(
             "/tasks/scout/trigger",
@@ -585,7 +582,8 @@ def test_trigger_scout_task_returns_422_when_research_focus_is_missing() -> None
         client.app.state.system_config = SystemConfig(
             default_image="test",
             workspace_root="/tmp",
-            scout_repo_url="https://github.com/fallback/repo",
+            scout_repo_key="fallback-repo",
+            allowed_repos={"fallback-repo": "https://github.com/fallback/repo"},
         )
         response = client.post(
             "/tasks/scout/trigger",
@@ -604,10 +602,29 @@ def test_trigger_scout_task_returns_400_when_unconfigured() -> None:
         client.app.state.system_config = SystemConfig(
             default_image="test",
             workspace_root="/tmp",
-            scout_repo_url="",  # missing
+            scout_repo_key="",  # missing
         )
         response = client.post("/tasks/scout/trigger")
 
     assert response.status_code == 400
-    assert "missing repo_url or valid repo_key" in response.json()["detail"]
+    assert "missing valid repo_key or default repo" in response.json()["detail"]
     assert len(service.create_calls) == 0
+
+
+def test_trigger_scout_task_rejects_extra_fields() -> None:
+    """POST /tasks/scout/trigger should return 422 if extra fields (like repo_url) are provided."""
+    service = _FakeTaskService()
+
+    with _task_client(service) as client:
+        client.app.state.system_config = SystemConfig(
+            default_image="test",
+            workspace_root="/tmp",
+            scout_repo_key="scout-repo",
+            allowed_repos={"scout-repo": "https://github.com/scout/repo"},
+        )
+        response = client.post(
+            "/tasks/scout/trigger",
+            json={"repo_url": "https://github.com/scout/repo"},
+        )
+
+    assert response.status_code == 422

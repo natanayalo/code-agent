@@ -9,6 +9,8 @@ file_exceptions:
   tests/integration/test_execution_outcome_service.py: Contains comprehensive integration tests for orchestrator state persistence; tightly coupled test cases.
   workers/native_agent_runner.py: Runner handles complex interactions with native agents including network retries, output capture, and workspace integration. (Cannot easily split further without breaking CLI contract)
 function_exceptions:
+  orchestrator/nodes/verification_result.py:
+    _check_file_changes: Checks file changes against repo profile constraints; cohesive rule application.
   .agents/skills/e2e-qa/scripts/run_e2e_qa.py:
     main: E2E QA CLI script coordinates setup, submission, polling, and artifact validation as one operator workflow.
   .agents/skills/e2e-qa/scripts/run_e2e_qa_delivery.py:
@@ -40,6 +42,7 @@ function_exceptions:
   orchestrator/task_spec.py:
     apply_task_spec_brain_suggestion: Merges AI suggestions into TaskSpec; involves deep nested dictionary and model updates.
     build_task_spec: Parses raw request into structured contract; highly coupled to input validation rules.
+    apply_repo_profile_to_task_spec: Applies the repo profile to a TaskSpec; tightly coupled security/approval logic block that degrades readability if split.
   tests/integration/test_repositories_interactions.py:
     test_human_interaction_repository_syncs_task_spec_flags: Highly stateful logic for test_human_interaction_repository_syncs_task_spec_flags; splitting requires unnatural parameter coupling.
   tests/integration/test_repositories_task_queue.py:

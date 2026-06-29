@@ -332,11 +332,18 @@ async def _run_init_environment(
     ):
         return {"current_step": "init_environment", "result": None}
 
-    setup_command, error_msg = _determine_setup_command(repo_path, allow_non_reproducible)
-    if error_msg:
-        return _init_fail(state, error_msg)
+    setup_commands = list(state.task_spec.setup_commands) if state.task_spec else []
+    error_msg = None
+
+    if not setup_commands:
+        heuristic_cmd, error_msg = _determine_setup_command(repo_path, allow_non_reproducible)
+        if error_msg:
+            return _init_fail(state, error_msg)
+        if heuristic_cmd:
+            setup_commands.append(heuristic_cmd)
 
     result = None
+    setup_command = " && ".join(setup_commands) if setup_commands else None
     if setup_command:
         logger.info(
             "Initializing environment in shared workspace",

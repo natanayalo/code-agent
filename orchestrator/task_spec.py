@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from orchestrator.brain import TaskSpecBrainMergeReport, TaskSpecBrainSuggestion
+from orchestrator.repo_profile import RepoProfile
+
+if TYPE_CHECKING:
+    from orchestrator.repo_profile import RepoProfile
 from orchestrator.constants import (
     AMBIGUOUS_ASKS,
     BUGFIX_MARKERS,
@@ -468,6 +472,90 @@ def apply_task_spec_brain_suggestion(
     )
 
     return merged_spec, report
+
+
+def apply_repo_profile_to_task_spec(
+    task_spec: TaskSpec,
+    repo_profile: RepoProfile | None,
+    task_plan: TaskPlan | None = None,
+) -> TaskSpec:
+    """Apply the deterministic repo profile overlay to an existing TaskSpec."""
+    if not repo_profile:
+        return task_spec
+
+    setup_commands = (
+        list(repo_profile.setup.commands)
+        if repo_profile.setup.commands
+        else list(task_spec.setup_commands)
+    )
+
+    # Check for risk escalation
+    needs_escalation = False
+    escalation_reason = None
+
+    text_to_check = task_spec.goal.lower()
+    if task_plan and task_plan.steps:
+        for step in task_plan.steps:
+            text_to_check += " " + step.title.lower() + " " + step.expected_outcome.lower()
+
+    for protected in repo_profile.protected_paths:
+        # Simplistic glob match check in text
+        glob_word = protected.replace("*", "").replace("?", "").lower()
+        if glob_word and glob_word in text_to_check:
+            needs_escalation = True
+            escalation_reason = f"Task may affect protected path: {protected}"
+            break
+
+    if not needs_escalation:
+        for category in repo_profile.approval_required:
+            cat_word = category.replace("_", " ").lower()
+            if cat_word in text_to_check:
+                needs_escalation = True
+                escalation_reason = f"Task may involve approval-required category: {category}"
+                break
+
+    risk_level = task_spec.risk_level
+    requires_permission = task_spec.requires_permission
+    permission_reason = task_spec.permission_reason
+    forbidden_actions = list(task_spec.forbidden_actions)
+
+    if needs_escalation:
+        risk_level = cast(TaskRiskLevel, _max_risk(risk_level, "high"))
+        requires_permission = True
+        permission_reason = escalation_reason or "Repo profile dictates high risk."
+        if "destructive_actions_without_permission" not in forbidden_actions:
+            forbidden_actions.append("destructive_actions_without_permission")
+
+    # Assign verification commands based on risk level
+    verification_commands = list(task_spec.verification_commands)
+    # Only override if empty or if it's the default read-only smoke check
+    is_default_smoke = (
+        len(verification_commands) == 1
+        and "printf" in verification_commands[0]
+        and "$PWD" in verification_commands[0]
+    )
+
+    if not verification_commands or is_default_smoke:
+        if RISK_ORDER[risk_level] >= RISK_ORDER["medium"] and repo_profile.validation.full:
+            verification_commands = list(repo_profile.validation.full)
+        elif repo_profile.validation.quick:
+            verification_commands = list(repo_profile.validation.quick)
+
+    delivery_mode = task_spec.delivery_mode
+    if delivery_mode == "workspace" and repo_profile.delivery.default_mode != "workspace":
+        delivery_mode = repo_profile.delivery.default_mode
+
+    return task_spec.model_copy(
+        update={
+            "setup_commands": setup_commands,
+            "risk_level": risk_level,
+            "requires_permission": requires_permission,
+            "permission_reason": permission_reason,
+            "forbidden_actions": forbidden_actions,
+            "verification_commands": verification_commands,
+            "delivery_mode": delivery_mode,
+        }
+    )
 
 
 def validate_task_spec_policy(task_spec: TaskSpec) -> list[str]:

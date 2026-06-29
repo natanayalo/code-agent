@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import fnmatch
 import logging
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Final, Literal
 
 from db.enums import TimelineEventType
@@ -369,6 +371,24 @@ def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
             ),
             reason_code="scope_mismatch",
         )
+
+    # Enforce protected paths for any task that changes files
+    if result.files_changed and state.repo_profile and state.repo_profile.protected_paths:
+        is_approved = state.approval is not None and state.approval.status == "approved"
+        if not is_approved:
+            for changed_file in result.files_changed:
+                changed_path = Path(changed_file).as_posix()
+                for protected_pattern in state.repo_profile.protected_paths:
+                    if fnmatch.fnmatch(changed_path, protected_pattern):
+                        return VerificationReportItem(
+                            label="file_changes",
+                            status="failed",
+                            message=(
+                                f"Worker modified a protected path without prior approval: "
+                                f"{changed_path} matched {protected_pattern}."
+                            ),
+                            reason_code="unapproved_protected_path",
+                        )
 
     if result.status == "success" and not result.files_changed:
         if _requires_deliverable_evidence(state) and not _has_meaningful_deliverable(state):

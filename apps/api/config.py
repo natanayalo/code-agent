@@ -27,8 +27,9 @@ class SystemConfig:
     scout_idle_trigger_minutes: int = 30
     scout_schedule_interval_minutes: int = 1440
     scout_task_text: str = DEFAULT_SCOUT_TASK_TEXT
-    scout_repo_url: str | None = None
+    scout_repo_key: str | None = None
     scout_branch: str | None = None
+    allowed_repos: dict[str, str] = field(default_factory=dict)
     scout_allowed_repos: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -40,8 +41,11 @@ class SystemConfig:
             default_workspace_root(environ)
         )
 
-        allowed_repos_str = environ.get("CODE_AGENT_SCOUT_ALLOWED_REPOS", "").strip()
-        scout_allowed_repos: dict[str, str] = {}
+        allowed_repos_str = environ.get("CODE_AGENT_ALLOWED_REPOS", "").strip()
+        scout_allowed_repos_str = environ.get("CODE_AGENT_SCOUT_ALLOWED_REPOS", "").strip()
+
+        allowed_repos: dict[str, str] = {}
+        # Parse canonical first
         if allowed_repos_str:
             for pair in allowed_repos_str.split(","):
                 if ":" in pair:
@@ -49,7 +53,20 @@ class SystemConfig:
                     key = key.strip()
                     url = url.strip()
                     if key and url:
+                        allowed_repos[key] = url
+
+        scout_allowed_repos: dict[str, str] = {}
+        if scout_allowed_repos_str:
+            for pair in scout_allowed_repos_str.split(","):
+                if ":" in pair:
+                    key, url = pair.split(":", 1)
+                    key = key.strip()
+                    url = url.strip()
+                    if key and url:
                         scout_allowed_repos[key] = url
+                        # Fallback: if canonical wasn't set, merge scout repos into allowed_repos
+                        if key not in allowed_repos:
+                            allowed_repos[key] = url
 
         return cls(
             default_image=image,
@@ -65,7 +82,19 @@ class SystemConfig:
             ),
             scout_task_text=environ.get("CODE_AGENT_SCOUT_TASK_TEXT", "").strip()
             or DEFAULT_SCOUT_TASK_TEXT,
-            scout_repo_url=(environ.get("CODE_AGENT_SCOUT_REPO_URL") or "").strip() or None,
+            scout_repo_key=(
+                environ.get("CODE_AGENT_SCOUT_REPO_KEY")
+                or environ.get("CODE_AGENT_SCOUT_REPO_URL")
+                or ""
+            ).strip()
+            or None,
             scout_branch=(environ.get("CODE_AGENT_SCOUT_BRANCH") or "").strip() or None,
+            allowed_repos=allowed_repos,
             scout_allowed_repos=scout_allowed_repos,
         )
+
+    def resolve_repo_key(self, key: str | None) -> str | None:
+        """Resolve a repo key to a URL using the allowed_repos registry."""
+        if not key:
+            return None
+        return self.allowed_repos.get(key)

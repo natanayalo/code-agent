@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.api.config import SystemConfig
 from apps.api.dependencies import get_system_config, get_task_service, require_any_valid_auth
@@ -18,7 +18,7 @@ from apps.observability import (
     start_optional_span,
     with_span_kind,
 )
-from db.enums import TaskStatus
+from db.enums import TaskStatus, WorkerType
 from orchestrator.execution import (
     InteractionInboxCard,
     InteractionResponse,
@@ -30,11 +30,14 @@ from orchestrator.execution import (
     TaskSubmission,
     TaskSubmissionValidationError,
     TaskSummarySnapshot,
+    validate_callback_url,
 )
 
 
 class ScoutTriggerRequest(BaseModel):
     """Payload for manually triggering a scout task."""
+
+    model_config = ConfigDict(extra="forbid")
 
     mode: Literal["repo", "research", "deep"] = "repo"
     repo_key: str | None = None
@@ -59,13 +62,44 @@ class ScoutTriggerRequest(BaseModel):
         return self
 
 
+class CreateTaskRequest(BaseModel):
+    """Public HTTP payload for submitting a new task.
+
+    Validates inputs and resolves repository references before mapping
+    to the internal TaskSubmission model.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_text: str = Field(min_length=1)
+    repo_key: str | None = Field(default=None, max_length=255)
+    branch: str | None = Field(default=None, max_length=255)
+    priority: int = Field(default=0, ge=0)
+    worker_override: WorkerType | None = None
+    worker_profile_override: str | None = Field(default=None, min_length=1, max_length=255)
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    budget: dict[str, Any] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
+    tools: list[str] | None = None
+    callback_url: str | None = Field(default=None, max_length=2048)
+    session: SubmissionSession | None = None
+
+    @field_validator("callback_url")
+    @classmethod
+    def _validate_callback_url(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_callback_url(v)
+        return v
+
+
 router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(require_any_valid_auth)])
 
 
 @router.post("", response_model=TaskSnapshot, status_code=status.HTTP_202_ACCEPTED)
 def submit_task(
-    payload: TaskSubmission,
+    payload: CreateTaskRequest,
     task_service: TaskExecutionService = Depends(get_task_service),
+    config: SystemConfig = Depends(get_system_config),
 ) -> TaskSnapshot:
     """Create a task, enqueue it for worker pickup, and return the pollable snapshot."""
     with start_optional_span(
@@ -74,8 +108,36 @@ def submit_task(
         attributes=with_span_kind(SPAN_KIND_AGENT),
     ):
         set_span_input_output(input_data=payload.model_dump(exclude={"secrets"}))
+
+        resolved_repo_url = config.resolve_repo_key(payload.repo_key)
+        if payload.repo_key and not resolved_repo_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Repo key '{payload.repo_key}' is not in the allowlist.",
+            )
+
+        submission = TaskSubmission(
+            task_text=payload.task_text,
+            repo_url=resolved_repo_url,
+            branch=payload.branch,
+            priority=payload.priority,
+            worker_override=payload.worker_override,
+            worker_profile_override=payload.worker_profile_override,
+            constraints=payload.constraints,
+            budget=payload.budget,
+            secrets=payload.secrets,
+            tools=payload.tools,
+            callback_url=payload.callback_url,
+            session=payload.session
+            or SubmissionSession(
+                channel="http",
+                external_user_id="http:anonymous",
+                external_thread_id="http-default",
+            ),
+        )
+
         try:
-            task_snapshot, _ = task_service.create_task(payload)
+            task_snapshot, _ = task_service.create_task(submission)
             set_current_span_attribute(TASK_ID_ATTRIBUTE, task_snapshot.task_id)
             set_current_span_attribute(SESSION_ID_ATTRIBUTE, task_snapshot.session_id)
             return task_snapshot
@@ -95,22 +157,23 @@ def trigger_scout_task(
     """Manually trigger a scout task using system defaults."""
     req = payload or ScoutTriggerRequest()
 
-    repo_url = config.scout_repo_url
     branch = config.scout_branch
-
     if req.repo_key:
-        if req.repo_key not in config.scout_allowed_repos:
+        repo_url = config.resolve_repo_key(req.repo_key)
+        if not repo_url:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Repo key '{req.repo_key}' is not in the allowlist.",
             )
-        repo_url = config.scout_allowed_repos[req.repo_key]
+    else:
+        repo_url = config.resolve_repo_key(config.scout_repo_key)
 
     if not repo_url:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "Scout functionality is not fully configured (missing repo_url or valid repo_key)."
+                "Scout functionality is not fully configured "
+                "(missing valid repo_key or default repo)."
             ),
         )
 

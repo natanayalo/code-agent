@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from operator import add
-from typing import Annotated, Any, Literal
+
+# Delay import to avoid circular dependency
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orchestrator.reflection import FrictionReport
+from orchestrator.repo_profile import RepoProfile
 from workers import (
     SUPPORTED_WORKER_TYPES as WORKER_SUPPORTED_TYPES,
 )
@@ -20,6 +23,9 @@ from workers import (
     normalize_worker_type,
 )
 from workers.review import ReviewResult
+
+if TYPE_CHECKING:
+    from orchestrator.repo_profile import RepoProfile
 
 # Re-export worker fallback order for orchestrator callers that import from this module.
 SUPPORTED_WORKER_TYPES: tuple[WorkerType, ...] = WORKER_SUPPORTED_TYPES
@@ -37,6 +43,7 @@ VerificationFailureKind = Literal[
 ]
 WorkflowStep = Literal[
     "ingest_task",
+    "load_repo_profile",
     "classify_task",
     "plan_task",
     "generate_task_spec_and_route",
@@ -166,6 +173,7 @@ class TaskSpec(OrchestratorModel):
     repo_url: str | None = None
     target_branch: str | None = None
     workspace_mode: TaskWorkspaceMode = "clone"
+    setup_commands: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     acceptance_criteria: list[str] = Field(default_factory=list)
     non_goals: list[str] = Field(default_factory=list)
@@ -287,6 +295,7 @@ class OrchestratorState(OrchestratorModel):
     task_kind: str | None = None
     task_plan: TaskPlan | None = None
     task_spec: TaskSpec | None = None
+    repo_profile: RepoProfile | None = None
     memory: MemoryContext = Field(default_factory=MemoryContext)
     route: RouteDecision = Field(default_factory=RouteDecision)
     approval: ApprovalCheckpoint = Field(default_factory=ApprovalCheckpoint)

@@ -83,16 +83,12 @@ async def main():
 
     print("[*] Submitting task via webhook")
     payload = {
-        "task_text": (
-            "Scout the dummy repository and write a brief summary."
-        ),
+        "task_text": ("Scout the dummy repository and write a brief summary."),
         "repo_url": f"file://{DUMMY_REPO_DIR}",
         "branch": "master",
         "source": "qa",
         "worker_override": os.environ.get("CODE_AGENT_WORKER_OVERRIDE", "antigravity"),
-        "constraints": {
-            "task_type": "scout"
-        }
+        "constraints": {"task_type": "scout"},
     }
 
     async with httpx.AsyncClient() as client:
@@ -160,7 +156,10 @@ async def main():
         print(f"  [+] Found workspace: {workspace_dir}")
         check_file = os.path.join(workspace_dir, "qa-hello.txt")
         if os.path.exists(check_file):
-            raise RuntimeError("qa-hello.txt FOUND in workspace! A scout task should be read-only and not create files.")
+            raise RuntimeError(
+                "qa-hello.txt FOUND in workspace! A scout task should be "
+                "read-only and not create files."
+            )
         else:
             print("  [+] qa-hello.txt correctly NOT FOUND in workspace.")
     else:

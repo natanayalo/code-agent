@@ -8,7 +8,8 @@ import os
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from apps.api.dependencies import get_task_service, require_telegram_webhook_auth
+from apps.api.config import SystemConfig
+from apps.api.dependencies import get_system_config, get_task_service, require_telegram_webhook_auth
 from orchestrator.execution import (
     DeliveryKey,
     SubmissionSession,
@@ -106,7 +107,7 @@ def _build_display_name(user: TelegramUser | None) -> str | None:
     return " ".join(parts) if parts else user.username
 
 
-def _to_task_submission(msg: TelegramMessage, text: str) -> TaskSubmission:
+def _to_task_submission(msg: TelegramMessage, text: str, config: SystemConfig) -> TaskSubmission:
     """Convert a Telegram message and its text into a TaskSubmission."""
     # Use the Telegram chat id as the thread identifier so all messages in
     # the same conversation hit the same Session.
@@ -128,11 +129,12 @@ def _to_task_submission(msg: TelegramMessage, text: str) -> TaskSubmission:
     )
 
     # T-044: Allow a default repo URL for Telegram tasks via environment variable.
-    default_repo = os.environ.get("CODE_AGENT_TELEGRAM_DEFAULT_REPO_URL")
+    default_repo_key = os.environ.get("CODE_AGENT_TELEGRAM_DEFAULT_REPO_KEY")
+    resolved_repo_url = config.resolve_repo_key(default_repo_key)
 
     return TaskSubmission(
         task_text=text,
-        repo_url=default_repo,
+        repo_url=resolved_repo_url,
         session=session,
     )
 
@@ -151,6 +153,7 @@ def receive_telegram_update(
     update: TelegramUpdate,
     _auth: None = Depends(require_telegram_webhook_auth),
     task_service: TaskExecutionService = Depends(get_task_service),
+    config: SystemConfig = Depends(get_system_config),
 ) -> TelegramWebhookResponse:
     """Accept a Telegram Update and enqueue the message text as a task.
 
@@ -182,7 +185,7 @@ def receive_telegram_update(
         )
         return TelegramWebhookResponse(ok=True, detail="text_too_long")
 
-    submission = _to_task_submission(msg, text)
+    submission = _to_task_submission(msg, text, config)
     outcome = task_service.create_task_outcome(
         submission,
         delivery_key=DeliveryKey(
