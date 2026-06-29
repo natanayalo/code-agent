@@ -382,6 +382,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps-dev): bump pytest from 9.1.0 to 9.1.1 ([#282](https://github.com/natanayalo/code-agent/pull/282))
+
 - Chore(deps): bump actions/cache from 5 to 6 ([#281](https://github.com/natanayalo/code-agent/pull/281))
 
 - Chore(deps): bump openai from 2.41.1 to 2.43.0 ([#273](https://github.com/natanayalo/code-agent/pull/273))
