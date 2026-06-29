@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import socket
 from collections.abc import Iterator
+from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -371,16 +372,16 @@ def test_webhook_rejects_unknown_worker_profile_override(session_factory) -> Non
         assert worker.requests == []
 
 
-def test_webhook_uses_default_repo_url_when_omitted(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_webhook_uses_default_repo_url_when_omitted(client: TestClient) -> None:
     """When repo_url is omitted, webhook submissions should use the configured default repo."""
-    client.app.state.system_config.allowed_repos["default-repo"] = (
-        "https://github.com/natanayalo/code-agent.git"
-    )
-    monkeypatch.setenv(
-        "CODE_AGENT_WEBHOOK_DEFAULT_REPO_KEY",
-        "default-repo",
+    config = client.app.state.system_config
+    client.app.state.system_config = replace(
+        config,
+        webhook_default_repo_key="default-repo",
+        allowed_repos={
+            **config.allowed_repos,
+            "default-repo": "https://github.com/natanayalo/code-agent.git",
+        },
     )
 
     response = client.post(

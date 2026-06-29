@@ -447,9 +447,9 @@ def _check_protected_paths(
             if not normalized_pattern:
                 continue
             if (
-                fnmatch.fnmatch(changed_path, protected_pattern)
-                or fnmatch.fnmatch(changed_path, normalized_pattern + "/*")
-                or fnmatch.fnmatch(changed_path, normalized_pattern + "/**")
+                fnmatch.fnmatchcase(changed_path, protected_pattern)
+                or fnmatch.fnmatchcase(changed_path, normalized_pattern + "/*")
+                or fnmatch.fnmatchcase(changed_path, normalized_pattern + "/**")
             ):
                 return VerificationReportItem(
                     label="file_changes",

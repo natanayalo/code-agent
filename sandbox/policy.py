@@ -65,8 +65,12 @@ def is_allowed_local_remote(resolved_path: Path) -> bool:
     allowed_remotes_env = os.environ.get("CODE_AGENT_ALLOWED_LOCAL_REMOTES", "")
     for path_text in allowed_remotes_env.split(","):
         path_text = path_text.strip()
-        if path_text and resolved_path.is_relative_to(Path(path_text).resolve()):
-            return True
+        if path_text:
+            try:
+                if resolved_path.is_relative_to(Path(path_text).resolve()):
+                    return True
+            except ValueError:
+                continue
     return False
 
 
@@ -78,11 +82,17 @@ def raise_if_sibling_workspace(
 ) -> None:
     """Raise LocalRepoPolicyError if the resolved path points to a sibling workspace."""
     if workspace_path is not None:
-        is_sibling = not resolved_path.is_relative_to(workspace_path)
-        if resolved_path == workspace_path or not is_sibling:
-            return
+        try:
+            is_sibling = not resolved_path.is_relative_to(workspace_path)
+            if resolved_path == workspace_path or not is_sibling:
+                return
+        except ValueError:
+            pass
 
-    rel_parts = resolved_path.relative_to(allowed_root).parts
+    try:
+        rel_parts = resolved_path.relative_to(allowed_root).parts
+    except ValueError:
+        return
     if rel_parts and rel_parts[0].startswith("workspace-"):
         raise LocalRepoPolicyError(
             f"Mounting or accessing sibling workspaces is forbidden: {resolved_path}"
@@ -99,13 +109,16 @@ def validate_local_repo_path(local_repo_path: str, workspace_path: Path | None =
     if resolved_path == allowed_root:
         raise LocalRepoPolicyError(f"Accessing the workspace root {allowed_root} is forbidden")
 
-    if resolved_path.is_relative_to(allowed_root):
-        raise_if_sibling_workspace(
-            resolved_path=resolved_path,
-            workspace_path=workspace_path,
-            allowed_root=allowed_root,
-        )
-        return
+    try:
+        if resolved_path.is_relative_to(allowed_root):
+            raise_if_sibling_workspace(
+                resolved_path=resolved_path,
+                workspace_path=workspace_path,
+                allowed_root=allowed_root,
+            )
+            return
+    except ValueError:
+        pass
 
     if not is_allowed_local_remote(resolved_path):
         raise LocalRepoPolicyError(

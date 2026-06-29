@@ -2,7 +2,7 @@ import asyncio
 import os
 import shutil
 import subprocess
-from typing import Final
+from typing import Any, Final
 
 import httpx
 
@@ -28,6 +28,7 @@ if not workspace_root:
 workspace_root = os.path.expandvars(os.path.expanduser(workspace_root))
 
 DUMMY_REPO_DIR = os.path.join(workspace_root, "dummy_repo")
+DUMMY_REPO_KEY: Final[str] = os.environ.get("CODE_AGENT_E2E_DUMMY_REPO_KEY", "dummy-repo")
 
 
 def setup_dummy_repo():
@@ -62,10 +63,7 @@ def setup_dummy_repo():
     )
 
 
-async def main():
-    print("=== Starting E2E Docker QA Automation ===")
-    setup_dummy_repo()
-
+async def wait_for_api_health() -> None:
     print("[*] Waiting for API to become healthy...")
     async with httpx.AsyncClient() as client:
         for _ in range(60):
@@ -78,19 +76,26 @@ async def main():
             await asyncio.sleep(2)
         else:
             raise RuntimeError("API failed to become healthy")
-
     print("[+] API is healthy!")
 
+
+def build_webhook_payload() -> dict[str, Any]:
     print("[*] Submitting task via webhook")
-    payload = {
+    print(
+        f"[*] Using repo_key={DUMMY_REPO_KEY!r}. "
+        f"Ensure CODE_AGENT_ALLOWED_REPOS maps it to file://{DUMMY_REPO_DIR}."
+    )
+    return {
         "task_text": ("Scout the dummy repository and write a brief summary."),
-        "repo_url": f"file://{DUMMY_REPO_DIR}",
+        "repo_key": DUMMY_REPO_KEY,
         "branch": "master",
         "source": "qa",
         "worker_override": os.environ.get("CODE_AGENT_WORKER_OVERRIDE", "antigravity"),
         "constraints": {"task_type": "scout"},
     }
 
+
+async def submit_and_poll_task(payload: dict[str, Any]) -> dict[str, Any]:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{API_URL}/webhook", json=payload, headers={"X-Webhook-Token": SHARED_SECRET}
@@ -138,7 +143,10 @@ async def main():
             await asyncio.sleep(2)
         else:
             raise RuntimeError("Task timed out.")
+    return task_data
 
+
+def verify_dummy_repo_artifacts(task_data: dict[str, Any]) -> None:
     print("\n[*] Verifying dummy repository artifacts")
 
     workspace_dir = None
@@ -166,6 +174,14 @@ async def main():
         raise RuntimeError(f"No workspace directory found at {full_path}")
 
     print("[+] Done.")
+
+
+async def main():
+    print("=== Starting E2E Docker QA Automation ===")
+    setup_dummy_repo()
+    await wait_for_api_health()
+    task_data = await submit_and_poll_task(build_webhook_payload())
+    verify_dummy_repo_artifacts(task_data)
 
 
 if __name__ == "__main__":

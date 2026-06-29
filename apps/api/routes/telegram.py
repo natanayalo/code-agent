@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -128,9 +127,8 @@ def _to_task_submission(msg: TelegramMessage, text: str, config: SystemConfig) -
         display_name=_build_display_name(msg.from_),
     )
 
-    # T-044: Allow a default repo URL for Telegram tasks via environment variable.
-    default_repo_key = os.environ.get("CODE_AGENT_TELEGRAM_DEFAULT_REPO_KEY")
-    resolved_repo_url = config.resolve_repo_key(default_repo_key)
+    # T-044: Allow a default repo key for Telegram tasks via centralized config.
+    resolved_repo_url = config.resolve_repo_key(config.telegram_default_repo_key)
 
     return TaskSubmission(
         task_text=text,

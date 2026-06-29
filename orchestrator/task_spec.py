@@ -567,7 +567,7 @@ def _check_task_text_for_escalation(
             normalized_path = protected_path.strip().lower()
             if not normalized_path:
                 continue
-            pattern = fnmatch.translate(normalized_path)[4:-3]
+            pattern = fnmatch.translate(normalized_path).removeprefix("(?s:").removesuffix(")\\Z")
             if re.match(r"^\w", normalized_path):
                 pattern = r"(?<!\w)" + pattern
             if re.search(r"\w$", normalized_path):

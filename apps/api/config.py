@@ -45,6 +45,8 @@ class SystemConfig:
     scout_task_text: str = DEFAULT_SCOUT_TASK_TEXT
     scout_repo_key: str | None = None
     scout_branch: str | None = None
+    telegram_default_repo_key: str | None = None
+    webhook_default_repo_key: str | None = None
     allowed_repos: dict[str, str] = field(default_factory=dict)
     scout_allowed_repos: dict[str, str] = field(default_factory=dict)
 
@@ -86,6 +88,14 @@ class SystemConfig:
             ).strip()
             or None,
             scout_branch=(environ.get("CODE_AGENT_SCOUT_BRANCH") or "").strip() or None,
+            telegram_default_repo_key=(
+                environ.get("CODE_AGENT_TELEGRAM_DEFAULT_REPO_KEY") or ""
+            ).strip()
+            or None,
+            webhook_default_repo_key=(
+                environ.get("CODE_AGENT_WEBHOOK_DEFAULT_REPO_KEY") or ""
+            ).strip()
+            or None,
             allowed_repos=allowed_repos,
             scout_allowed_repos=scout_allowed_repos,
         )

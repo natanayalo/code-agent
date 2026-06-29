@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import uuid
 from typing import Any
 
@@ -32,7 +31,6 @@ from orchestrator.execution import (
 )
 
 router = APIRouter(prefix="/webhook", tags=["webhook"], dependencies=[Depends(require_api_auth)])
-WEBHOOK_DEFAULT_REPO_KEY_ENV_VAR = "CODE_AGENT_WEBHOOK_DEFAULT_REPO_KEY"
 
 
 class WebhookPayload(BaseModel):
@@ -103,8 +101,7 @@ def _to_task_submission(payload: WebhookPayload, config: SystemConfig) -> TaskSu
             detail=f"Repo key '{payload.repo_key}' is not in the allowlist.",
         )
     elif not resolved_repo_url:
-        default_repo_key = os.environ.get(WEBHOOK_DEFAULT_REPO_KEY_ENV_VAR)
-        resolved_repo_url = config.resolve_repo_key(default_repo_key)
+        resolved_repo_url = config.resolve_repo_key(config.webhook_default_repo_key)
 
     session = SubmissionSession(
         channel=channel,
