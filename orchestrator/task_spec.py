@@ -564,7 +564,7 @@ def _check_task_text_for_escalation(
     if repo_profile.protected_paths:
         patterns = []
         for protected_path in repo_profile.protected_paths:
-            normalized_path = protected_path.strip().lower()
+            normalized_path = (protected_path or "").strip().lower()
             if not normalized_path:
                 continue
             pattern = fnmatch.translate(normalized_path).removeprefix("(?s:").removesuffix(")\\Z")

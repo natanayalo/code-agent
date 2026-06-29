@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 from orchestrator.repo_profile import RepoProfile
 from orchestrator.state import TaskSpec
 from orchestrator.task_spec import apply_repo_profile_to_task_spec
@@ -101,6 +103,23 @@ def test_apply_repo_profile_escalates_directory_glob_with_non_word_tail():
         risk_level="low",
     )
     profile = RepoProfile.model_validate({"protected_paths": ["db/migrations/*"]})
+
+    merged = apply_repo_profile_to_task_spec(task_spec, profile)
+
+    assert merged.risk_level == "high"
+    assert merged.requires_permission is True
+    assert merged.permission_reason == "Task may affect protected paths"
+
+
+def test_apply_repo_profile_ignores_nullable_protected_path_entries():
+    task_spec = TaskSpec(
+        goal="Update db/migrations/001_init.py",
+        verification_commands=[],
+        setup_commands=[],
+        risk_level="low",
+    )
+    profile = RepoProfile.model_validate({"protected_paths": ["db/migrations"]})
+    cast(Any, profile).protected_paths = [None, "   ", "db/migrations"]
 
     merged = apply_repo_profile_to_task_spec(task_spec, profile)
 

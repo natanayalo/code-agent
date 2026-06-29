@@ -85,7 +85,7 @@ async def test_init_environment_node_detects_poetry(tmp_path: Path) -> None:
     assert "poetry install" in init_call_args.task_text
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_init_environment_filters_blank_task_spec_setup_commands(
     tmp_path: Path,
 ) -> None:

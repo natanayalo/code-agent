@@ -361,7 +361,7 @@ async def test_generate_task_spec_creates_policy_checked_contract_before_routing
     assert res["timeline_events"][0].payload["policy_violations"] == []
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_generate_task_spec_applies_loaded_repo_profile_after_generation() -> None:
     state = OrchestratorState.model_validate(
         {
@@ -527,7 +527,7 @@ async def test_generate_task_spec_and_route_node_applies_unified_brain_route() -
     assert res["route"]["chosen_profile"] == "antigravity-native-executor-read-only"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_generate_task_spec_and_route_node_applies_repo_profile_before_route() -> None:
     state = OrchestratorState.model_validate(
         {
