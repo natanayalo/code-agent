@@ -83,6 +83,7 @@ from orchestrator.state import (
     WorkerType,
 )
 from orchestrator.task_spec import (
+    apply_repo_profile_to_task_spec,
     apply_task_spec_brain_suggestion,
     build_task_spec_for_request,
     contains_marker,
@@ -868,6 +869,7 @@ async def generate_task_spec(
             )
             if brain_report is not None:
                 _record_task_spec_brain_telemetry(brain_report)
+        task_spec = _apply_loaded_repo_profile_to_task_spec(state, task_spec)
 
         return _build_task_spec_response(state, task_spec, brain_report)
 
@@ -898,6 +900,7 @@ def build_generate_task_spec_and_route_node(
                 task_kind=state.task_kind,
                 task_plan=state.task_plan,
             )
+            task_spec = _apply_loaded_repo_profile_to_task_spec(state, task_spec)
             state_for_route = state.model_copy(update={"task_spec": task_spec})
             route = _compute_route_decision(
                 state_for_route,
@@ -928,6 +931,7 @@ def build_generate_task_spec_and_route_node(
                     unified_method=unified_method,
                     provider_name=provider_name,
                 )
+                task_spec = _apply_loaded_repo_profile_to_task_spec(state, task_spec)
 
             return _build_task_spec_and_route_response(
                 state=state,
@@ -939,6 +943,20 @@ def build_generate_task_spec_and_route_node(
             )
 
     return generate_task_spec_and_route_node
+
+
+def _apply_loaded_repo_profile_to_task_spec(
+    state: OrchestratorState,
+    task_spec: TaskSpec,
+) -> TaskSpec:
+    """Overlay the loaded repo profile onto newly generated TaskSpecs."""
+    if state.repo_profile is None:
+        return task_spec
+    return apply_repo_profile_to_task_spec(
+        task_spec,
+        state.repo_profile,
+        task_plan=state.task_plan,
+    )
 
 
 def _build_task_spec_response(

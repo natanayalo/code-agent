@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -132,7 +133,7 @@ def submit_task(
             or SubmissionSession(
                 channel="http",
                 external_user_id="http:anonymous",
-                external_thread_id="http-default",
+                external_thread_id=str(uuid.uuid4()),
             ),
         )
 

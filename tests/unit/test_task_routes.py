@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
@@ -189,7 +190,9 @@ def test_submit_task_returns_created_snapshot() -> None:
     assert response.json()["task_id"] == "task-created"
     assert len(service.create_calls) == 1
     assert service.create_calls[0].task_text == "Create the task"
-    assert service.create_calls[0].session.external_thread_id == "http-default"
+    anonymous_thread_id = service.create_calls[0].session.external_thread_id
+    assert anonymous_thread_id != "http-default"
+    assert str(uuid.UUID(anonymous_thread_id)) == anonymous_thread_id
 
 
 def test_submit_task_returns_422_for_validation_errors() -> None:

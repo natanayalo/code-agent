@@ -144,6 +144,16 @@ def test_submit_task_persists_execution_path_and_allows_polling(
     _assert_task_persistence_records(session_factory, task_id, payload)
 
 
+def test_submit_task_without_session_uses_unique_anonymous_sessions(client: TestClient) -> None:
+    """Anonymous HTTP submissions should not share a static session thread."""
+    first_response = client.post("/tasks", json={"task_text": "Create the first note"})
+    second_response = client.post("/tasks", json={"task_text": "Create the second note"})
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    assert first_response.json()["session_id"] != second_response.json()["session_id"]
+
+
 def _assert_profiled_task_metadata(payload: dict, latest_run: dict, worker: StaticWorker) -> None:
     assert payload["chosen_worker"] == "codex"
     assert payload["chosen_profile"] == "codex-native-executor"
