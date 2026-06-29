@@ -315,6 +315,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- [codex] add worker registry backpressure ([#280](https://github.com/natanayalo/code-agent/pull/280))
+
 - Docs/m20.2 completed ([#278](https://github.com/natanayalo/code-agent/pull/278))
 
 - [codex] Add runtime operating contract ([#274](https://github.com/natanayalo/code-agent/pull/274))
