@@ -443,11 +443,14 @@ def _check_protected_paths(
     for changed_file in files_changed:
         changed_path = Path(changed_file).as_posix()
         for protected_pattern in state.repo_profile.protected_paths:
-            normalized_pattern = protected_pattern.strip().rstrip("/")
+            match_pattern = (protected_pattern or "").strip() or None
+            if not match_pattern:
+                continue
+            normalized_pattern = match_pattern.rstrip("/")
             if not normalized_pattern:
                 continue
             if (
-                fnmatch.fnmatchcase(changed_path, protected_pattern)
+                fnmatch.fnmatchcase(changed_path, match_pattern)
                 or fnmatch.fnmatchcase(changed_path, normalized_pattern + "/*")
                 or fnmatch.fnmatchcase(changed_path, normalized_pattern + "/**")
             ):
@@ -456,7 +459,7 @@ def _check_protected_paths(
                     status="failed",
                     message=(
                         f"Worker modified a protected path without prior approval: "
-                        f"{changed_path} matched {protected_pattern}."
+                        f"{changed_path} matched {match_pattern}."
                     ),
                     reason_code="unapproved_protected_path",
                 )
