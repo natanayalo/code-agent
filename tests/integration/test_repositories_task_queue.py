@@ -409,6 +409,57 @@ def test_task_repository_reclaim_expired_leases_fails_task_after_max_attempts(
         assert task.next_attempt_at is None
 
 
+def test_task_repository_claim_next_pages_through_incompatible_candidates(
+    session_factory,
+) -> None:
+    """claim_next should page through incompatible tasks to find a match."""
+    now = datetime.now(UTC)
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_repo = WorkerNodeRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:page", display_name="Page")
+        conversation_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-page",
+        )
+
+        # Create 30 tasks that are incompatible with 'worker-page'
+        for i in range(30):
+            task_repo.create(
+                session_id=conversation_session.id,
+                task_text=f"incompatible {i}",
+                worker_override="gemini",
+            )
+
+        # Create 1 task that is compatible (and was created last, so it's at the end)
+        task_repo.create(
+            session_id=conversation_session.id,
+            task_text="compatible",
+            worker_override="codex",
+        )
+
+        worker_repo.register_worker(
+            worker_id="worker-page",
+            worker_type="codex",
+            now=now,
+            capacity=1,
+        )
+
+        # The worker should be able to claim the 31st task by paging through the first 30
+        claimed = task_repo.claim_next(
+            worker_id="worker-page",
+            now=now,
+            lease_seconds=30,
+        )
+
+        assert claimed is not None
+        assert claimed.task_text == "compatible"
+
+
 def test_task_repository_queue_release_guard_paths(session_factory) -> None:
     """Queue release helpers should handle missing rows and ownership mismatches safely."""
     with session_scope(session_factory) as session:

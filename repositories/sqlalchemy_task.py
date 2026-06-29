@@ -339,71 +339,86 @@ class TaskRepository:
             or worker_node.current_load >= worker_node.capacity
         ):
             return None
-        candidates = list(
-            self.session.scalars(
-                select(Task)
-                .where(self._claimable_pending_filter(now=now))
-                .order_by(
-                    case((Task.queue_lane == "primary", 1), else_=2).asc(),
-                    Task.priority.desc(),
-                    Task.created_at.asc(),
-                )
-                .limit(25)
-            )
-        )
-        matching_candidates = [
-            candidate
-            for candidate in candidates
-            if self._task_matches_worker_node(candidate, worker_node)
-        ]
-        if not matching_candidates:
-            return None
+        limit = 25
+        offset = 0
         lease_expires_at = now + timedelta(seconds=max(1, lease_seconds))
-        for candidate in matching_candidates:
-            claimed = self.session.execute(
-                update(Task)
-                .where(
-                    Task.id == candidate.id,
-                    self._claimable_pending_filter(now=now),
-                )
-                .values(
-                    status=TaskStatus.IN_PROGRESS,
-                    lease_owner=worker_id,
-                    lease_expires_at=lease_expires_at,
-                    attempt_count=Task.attempt_count + 1,
-                    last_error=None,
-                )
-                .execution_options(synchronize_session=False)
-            )
-            claimed_rows = int(getattr(claimed, "rowcount", 0) or 0)
-            if claimed_rows > 0:
-                if not worker_repo.reserve_load(worker_id=worker_id):
-                    # Revert the claim if capacity was exceeded concurrently
-                    self.session.execute(
-                        update(Task)
-                        .where(
-                            Task.id == candidate.id,
-                            Task.status == TaskStatus.IN_PROGRESS,
-                            Task.lease_owner == worker_id,
-                        )
-                        .values(
-                            status=TaskStatus.PENDING,
-                            lease_owner=None,
-                            lease_expires_at=None,
-                            attempt_count=candidate.attempt_count,
-                            last_error=candidate.last_error,
-                        )
-                        .execution_options(synchronize_session=False)
-                    )
-                    self.session.flush()
-                    return None
-                self.session.flush()
-                return self.session.execute(
+
+        while True:
+            candidates = list(
+                self.session.scalars(
                     select(Task)
-                    .where(Task.id == candidate.id)
-                    .execution_options(populate_existing=True)
-                ).scalar_one_or_none()
-        return None
+                    .where(self._claimable_pending_filter(now=now))
+                    .order_by(
+                        case((Task.queue_lane == "primary", 1), else_=2).asc(),
+                        Task.priority.desc(),
+                        Task.created_at.asc(),
+                    )
+                    .limit(limit)
+                    .offset(offset)
+                )
+            )
+            if not candidates:
+                return None
+
+            matching_candidates = [
+                candidate
+                for candidate in candidates
+                if self._task_matches_worker_node(candidate, worker_node)
+            ]
+
+            if not matching_candidates:
+                offset += limit
+                continue
+
+            for candidate in matching_candidates:
+                claimed = self.session.execute(
+                    update(Task)
+                    .where(
+                        Task.id == candidate.id,
+                        self._claimable_pending_filter(now=now),
+                    )
+                    .values(
+                        status=TaskStatus.IN_PROGRESS,
+                        lease_owner=worker_id,
+                        lease_expires_at=lease_expires_at,
+                        attempt_count=Task.attempt_count + 1,
+                        last_error=None,
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                claimed_rows = int(getattr(claimed, "rowcount", 0) or 0)
+                if claimed_rows > 0:
+                    if not worker_repo.reserve_load(worker_id=worker_id):
+                        # Revert the claim if capacity was exceeded concurrently
+                        self.session.execute(
+                            update(Task)
+                            .where(
+                                Task.id == candidate.id,
+                                Task.status == TaskStatus.IN_PROGRESS,
+                                Task.lease_owner == worker_id,
+                            )
+                            .values(
+                                status=TaskStatus.PENDING,
+                                lease_owner=None,
+                                lease_expires_at=None,
+                                attempt_count=candidate.attempt_count,
+                                last_error=candidate.last_error,
+                            )
+                            .execution_options(synchronize_session=False)
+                        )
+                        self.session.flush()
+                        return None
+                    self.session.flush()
+                    return self.session.execute(
+                        select(Task)
+                        .where(Task.id == candidate.id)
+                        .execution_options(populate_existing=True)
+                    ).scalar_one_or_none()
+
+            # If we couldn't claim any of the matching candidates (e.g. concurrent claims),
+            # we can safely just return None and retry next poll, rather than
+            # risking skipping rows with an offset on a mutating dataset.
+            return None
 
     def reclaim_expired_leases(self, *, now: datetime) -> int:
         """Return expired leases to pending and rebuild affected worker load."""
