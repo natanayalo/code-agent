@@ -556,15 +556,15 @@ def _check_task_text_for_escalation(
     task_spec: TaskSpec, repo_profile: RepoProfile, task_plan: TaskPlan | None
 ) -> tuple[bool, str | None]:
     """Check task text against repo profile policies for required escalation."""
-    text_to_check = task_spec.goal.lower()
+    text_to_check = task_spec.goal
     if task_plan and task_plan.steps:
         for step in task_plan.steps:
-            text_to_check += " " + step.title.lower() + " " + step.expected_outcome.lower()
+            text_to_check += " " + step.title + " " + step.expected_outcome
 
     if repo_profile.protected_paths:
         patterns = []
         for protected_path in repo_profile.protected_paths:
-            normalized_path = (protected_path or "").strip().lower()
+            normalized_path = (protected_path or "").strip()
             if not normalized_path:
                 continue
             pattern = fnmatch.translate(normalized_path).removeprefix("(?s:").removesuffix(")\\Z")
@@ -574,13 +574,13 @@ def _check_task_text_for_escalation(
                 pattern = pattern + r"(?!\w)"
             patterns.append(pattern)
         if patterns:
-            combined_regex = re.compile("|".join(patterns), re.IGNORECASE)
+            combined_regex = re.compile("|".join(patterns))
             if combined_regex.search(text_to_check):
                 return True, "Task may affect protected paths"
 
     for category in repo_profile.approval_required:
-        cat_word = category.replace("_", " ").lower()
-        if cat_word in text_to_check:
+        cat_word = category.replace("_", " ").strip()
+        if cat_word and re.search(rf"\b{re.escape(cat_word)}\b", text_to_check):
             return True, f"Task may involve approval-required category: {category}"
 
     return False, None

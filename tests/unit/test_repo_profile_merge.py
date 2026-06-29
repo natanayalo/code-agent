@@ -126,3 +126,51 @@ def test_apply_repo_profile_ignores_nullable_protected_path_entries():
     assert merged.risk_level == "high"
     assert merged.requires_permission is True
     assert merged.permission_reason == "Task may affect protected paths"
+
+
+def test_apply_repo_profile_protected_path_escalation_is_case_sensitive():
+    task_spec = TaskSpec(
+        goal="Update DB/Migrations/001_init.py",
+        verification_commands=[],
+        setup_commands=[],
+        risk_level="low",
+    )
+    profile = RepoProfile.model_validate({"protected_paths": ["db/migrations"]})
+
+    merged = apply_repo_profile_to_task_spec(task_spec, profile)
+
+    assert merged.risk_level == "low"
+    assert merged.requires_permission is False
+    assert merged.permission_reason is None
+
+
+def test_apply_repo_profile_approval_required_uses_whole_word_matching():
+    task_spec = TaskSpec(
+        goal="Investigate undeployed environment state",
+        verification_commands=[],
+        setup_commands=[],
+        risk_level="low",
+    )
+    profile = RepoProfile.model_validate({"approval_required": ["deploy"]})
+
+    merged = apply_repo_profile_to_task_spec(task_spec, profile)
+
+    assert merged.risk_level == "low"
+    assert merged.requires_permission is False
+    assert merged.permission_reason is None
+
+
+def test_apply_repo_profile_approval_required_escalates_whole_word_match():
+    task_spec = TaskSpec(
+        goal="deploy the service",
+        verification_commands=[],
+        setup_commands=[],
+        risk_level="low",
+    )
+    profile = RepoProfile.model_validate({"approval_required": ["deploy"]})
+
+    merged = apply_repo_profile_to_task_spec(task_spec, profile)
+
+    assert merged.risk_level == "high"
+    assert merged.requires_permission is True
+    assert merged.permission_reason == "Task may involve approval-required category: deploy"
