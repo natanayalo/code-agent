@@ -37,7 +37,7 @@ Active focus:
 
 ## Next Priorities
 
-1. implement M20.4 Worker Supervisor v1
+1. implement M20.5 Repo Validation Profiles
 2. defer Milestone 21 Hotspot Refactor until M20 worker/operator contracts stabilize
 3. keep Phase 4 autonomy work gated on Phase 3 reliability metrics
 
@@ -45,7 +45,6 @@ Active focus:
 
 Granular tasks for the active and upcoming milestones:
 
-- M20.4: add worker registry, heartbeat, capacity, health, and quarantine primitives for safe routing/backpressure.
 - M20.5: add repo validation profiles and require validation evidence or bounded failure reports.
 - M20.6: persist GitHub draft PR/CI metadata and create focused repair tasks for failed checks.
 - M20.7: expand the eval suite and compare reliability/profile/stage metrics against the M20.0 baseline.
