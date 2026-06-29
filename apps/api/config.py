@@ -17,6 +17,22 @@ DEFAULT_SCOUT_TASK_TEXT = (
 )
 
 
+def _parse_repo_map(repo_str: str) -> dict[str, str]:
+    """Parse comma-separated key:url pairs into a repository registry."""
+    repos: dict[str, str] = {}
+    if not repo_str:
+        return repos
+    for pair in repo_str.split(","):
+        if ":" not in pair:
+            continue
+        key, url = pair.split(":", 1)
+        key = key.strip()
+        url = url.strip()
+        if key and url:
+            repos[key] = url
+    return repos
+
+
 @dataclass(frozen=True, slots=True)
 class SystemConfig:
     """Consolidated system-level configuration."""
@@ -44,29 +60,10 @@ class SystemConfig:
         allowed_repos_str = environ.get("CODE_AGENT_ALLOWED_REPOS", "").strip()
         scout_allowed_repos_str = environ.get("CODE_AGENT_SCOUT_ALLOWED_REPOS", "").strip()
 
-        allowed_repos: dict[str, str] = {}
-        # Parse canonical first
-        if allowed_repos_str:
-            for pair in allowed_repos_str.split(","):
-                if ":" in pair:
-                    key, url = pair.split(":", 1)
-                    key = key.strip()
-                    url = url.strip()
-                    if key and url:
-                        allowed_repos[key] = url
-
-        scout_allowed_repos: dict[str, str] = {}
-        if scout_allowed_repos_str:
-            for pair in scout_allowed_repos_str.split(","):
-                if ":" in pair:
-                    key, url = pair.split(":", 1)
-                    key = key.strip()
-                    url = url.strip()
-                    if key and url:
-                        scout_allowed_repos[key] = url
-                        # Fallback: if canonical wasn't set, merge scout repos into allowed_repos
-                        if key not in allowed_repos:
-                            allowed_repos[key] = url
+        allowed_repos = _parse_repo_map(allowed_repos_str)
+        scout_allowed_repos = _parse_repo_map(scout_allowed_repos_str)
+        for key, url in scout_allowed_repos.items():
+            allowed_repos.setdefault(key, url)
 
         return cls(
             default_image=image,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
@@ -562,8 +563,8 @@ def _check_task_text_for_escalation(
 
     if repo_profile.protected_paths:
         patterns = [
-            re.escape(p.lower()).replace(r"\*", ".*").replace(r"\?", ".")
-            for p in repo_profile.protected_paths
+            fnmatch.translate(protected_path.lower())[4:-3]
+            for protected_path in repo_profile.protected_paths
         ]
         combined_regex = re.compile(r"\b(" + "|".join(patterns) + r")\b", re.IGNORECASE)
         if combined_regex.search(text_to_check):

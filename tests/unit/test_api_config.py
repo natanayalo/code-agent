@@ -70,3 +70,24 @@ def test_load_from_env_parses_scout_allowed_repos() -> None:
         "repo1": "https://github.com/repo1",
         "repo2": "https://github.com/repo2",
     }
+
+
+def test_load_from_env_merges_allowed_repos_with_canonical_precedence() -> None:
+    """Scout repo fallback should not override canonical repo registry entries."""
+    config = SystemConfig.load_from_env(
+        {
+            "CODE_AGENT_ALLOWED_REPOS": "main:https://github.com/org/main",
+            "CODE_AGENT_SCOUT_ALLOWED_REPOS": (
+                "main:https://github.com/org/scout, scout:https://github.com/org/scout"
+            ),
+        }
+    )
+
+    assert config.allowed_repos == {
+        "main": "https://github.com/org/main",
+        "scout": "https://github.com/org/scout",
+    }
+    assert config.scout_allowed_repos == {
+        "main": "https://github.com/org/scout",
+        "scout": "https://github.com/org/scout",
+    }

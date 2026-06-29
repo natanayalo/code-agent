@@ -75,3 +75,19 @@ def test_apply_repo_profile_respects_custom_verification():
 
     # Custom verification commands should NOT be overridden
     assert merged.verification_commands == ["pytest specific_test.py"]
+
+
+def test_apply_repo_profile_escalates_character_set_protected_path_globs():
+    task_spec = TaskSpec(
+        goal="Update config/app1.yaml",
+        verification_commands=[],
+        setup_commands=[],
+        risk_level="low",
+    )
+    profile = RepoProfile.model_validate({"protected_paths": ["config/app[0-9].yaml"]})
+
+    merged = apply_repo_profile_to_task_spec(task_spec, profile)
+
+    assert merged.risk_level == "high"
+    assert merged.requires_permission is True
+    assert merged.permission_reason == "Task may affect protected paths"
