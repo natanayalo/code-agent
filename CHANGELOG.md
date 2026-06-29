@@ -507,6 +507,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: mark M20.4 Worker Supervisor v1 as completed ([#286](https://github.com/natanayalo/code-agent/pull/286))
+
 - Docs: remove completed milestones from roadmap ([#261](https://github.com/natanayalo/code-agent/pull/261))
 
 - Docs: update e2e QA and operator docs for Antigravity migration ([#256](https://github.com/natanayalo/code-agent/pull/256))
