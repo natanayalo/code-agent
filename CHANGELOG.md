@@ -388,6 +388,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump fastapi from 0.138.0 to 0.138.2 ([#283](https://github.com/natanayalo/code-agent/pull/283))
+
 - Chore(deps-dev): bump pytest from 9.1.0 to 9.1.1 ([#282](https://github.com/natanayalo/code-agent/pull/282))
 
 - Chore(deps): bump actions/cache from 5 to 6 ([#281](https://github.com/natanayalo/code-agent/pull/281))
