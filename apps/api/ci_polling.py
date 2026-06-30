@@ -54,7 +54,8 @@ class CIPollingScheduler:
         try:
             self._loop_ref = asyncio.get_running_loop()
         except RuntimeError:
-            self._loop_ref = None
+            logger.warning("CIPollingScheduler enabled but no running event loop was found.")
+            return
 
         self._running = True
         self._task = asyncio.create_task(self._loop())
@@ -94,6 +95,8 @@ class CIPollingScheduler:
 
         pending_runs = self._get_pending_runs()
         for run in pending_runs:
+            if not self._running:
+                break
             self._poll_run(run)
 
     def _get_pending_runs(self) -> list[dict[str, Any]]:
@@ -228,16 +231,17 @@ class CIPollingScheduler:
         self._update_run_ci_metadata(run_info["run_id"], new_status, failed_checks)
 
         if failed_checks:
-            for check in failed_checks:
-                self._submit_repair_task(
-                    run_info["task_id"],
-                    repo_url,
-                    repo_spec,
-                    branch_name,
-                    head_sha,
-                    check,
-                    env,
-                )
+            # Only submit a repair task for the first failed check to avoid spawning
+            # multiple conflicting tasks on the same branch simultaneously.
+            self._submit_repair_task(
+                run_info["task_id"],
+                repo_url,
+                repo_spec,
+                branch_name,
+                head_sha,
+                failed_checks[0],
+                env,
+            )
 
     def _update_run_ci_metadata(
         self,
@@ -425,6 +429,7 @@ class CIPollingScheduler:
                 env=env,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=30,
                 stdin=subprocess.DEVNULL,
             )
