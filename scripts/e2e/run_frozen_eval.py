@@ -361,24 +361,44 @@ def _coerce_non_negative_int(value: object) -> int:
 
 def _coerce_tuple_of_pairs_str_float(value: object) -> tuple[tuple[str, float], ...]:
     if isinstance(value, dict):
-        return tuple((str(k), float(v)) for k, v in value.items() if v is not None)
-    if isinstance(value, list) or isinstance(value, tuple):
+        res = []
+        for k, v in value.items():
+            if v is not None:
+                try:
+                    res.append((str(k), float(v)))
+                except (ValueError, TypeError):
+                    pass
+        return tuple(res)
+    if isinstance(value, list | tuple):
         res = []
         for item in value:
-            if (isinstance(item, list) or isinstance(item, tuple)) and len(item) == 2:
-                res.append((str(item[0]), float(item[1])))
+            if isinstance(item, list | tuple) and len(item) == 2:
+                try:
+                    res.append((str(item[0]), float(item[1])))
+                except (ValueError, TypeError):
+                    pass
         return tuple(res)
     return ()
 
 
 def _coerce_tuple_of_pairs_str_int(value: object) -> tuple[tuple[str, int], ...]:
     if isinstance(value, dict):
-        return tuple((str(k), int(v)) for k, v in value.items() if v is not None)
-    if isinstance(value, list) or isinstance(value, tuple):
+        res = []
+        for k, v in value.items():
+            if v is not None:
+                try:
+                    res.append((str(k), int(v)))
+                except (ValueError, TypeError):
+                    pass
+        return tuple(res)
+    if isinstance(value, list | tuple):
         res = []
         for item in value:
-            if (isinstance(item, list) or isinstance(item, tuple)) and len(item) == 2:
-                res.append((str(item[0]), int(item[1])))
+            if isinstance(item, list | tuple) and len(item) == 2:
+                try:
+                    res.append((str(item[0]), int(item[1])))
+                except (ValueError, TypeError):
+                    pass
         return tuple(res)
     return ()
 
