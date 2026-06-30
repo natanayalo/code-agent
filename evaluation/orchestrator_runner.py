@@ -236,6 +236,18 @@ def _extract_reliability_metrics(state: OrchestratorState) -> ReliabilityMetrics
     human_interaction_count, repeated_question_count = _extract_interaction_metrics(state)
     stage_latency_seconds, stage_latency_available = _extract_stage_latency(state)
 
+    repair_loops_count = 0
+    time_to_pr_seconds = None
+    ci_rejection_count = 0
+    review_rejection_count = 0
+    validation_failure_category = (
+        state.verification.failure_kind
+        if state.verification and state.verification.status != "passed"
+        else None
+    )
+    worker_profile = state.dispatch.worker_profile if state.dispatch else None
+    provider_failure_cause = None
+
     return ReliabilityMetrics(
         human_interaction_count=human_interaction_count,
         repeated_question_count=repeated_question_count,
@@ -253,6 +265,13 @@ def _extract_reliability_metrics(state: OrchestratorState) -> ReliabilityMetrics
         stage_latency_seconds=stage_latency_seconds,
         stage_latency_available=stage_latency_available,
         attempt_count=state.attempt_count,
+        repair_loops_count=repair_loops_count,
+        time_to_pr_seconds=time_to_pr_seconds,
+        ci_rejection_count=ci_rejection_count,
+        review_rejection_count=review_rejection_count,
+        validation_failure_category=validation_failure_category,
+        worker_profile=worker_profile,
+        provider_failure_cause=provider_failure_cause,
     )
 
 
@@ -356,6 +375,9 @@ class OrchestratorReplayRunner(EvaluationRunner):
             config={"configurable": {"thread_id": f"frozen-eval-{case.case_id}"}},
         )
         if "__interrupt__" in raw_state:
+            safe_state = {k: v for k, v in raw_state.items() if k != "__interrupt__"}
+            state = OrchestratorState.model_validate(safe_state)
+            reliability = _extract_reliability_metrics(state)
             return WorkerOutcome(
                 status="failure",
                 summary=(
@@ -364,6 +386,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
                 ),
                 files_changed=(),
                 tests_passed=False,
+                reliability=reliability,
             )
         state = OrchestratorState.model_validate(raw_state)
         result = state.result

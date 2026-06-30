@@ -53,6 +53,18 @@ class _CasePayload(BaseModel):
     task_text: str
     expectation: _ExpectationPayload
     task_class: str | None = None
+    intervention_risk_class: (
+        Literal[
+            "no_decision_needed",
+            "one_clarification_needed",
+            "permission_needed",
+            "validation_fails",
+            "worker_failure",
+            "protected_path_touched",
+            "pr_ci_fails",
+        ]
+        | None
+    ) = None
 
     @field_validator("case_id", "repo_fixture", "task_text")
     @classmethod
@@ -161,6 +173,7 @@ def load_frozen_suite(path: Path | None = None) -> FrozenSuite:
                 task_text=task_text,
                 expectation=expectation,
                 task_class=raw_case.task_class,
+                intervention_risk_class=raw_case.intervention_risk_class,
             )
         )
 
@@ -208,9 +221,12 @@ def default_replay_outcomes(cases: tuple[FrozenTaskCase, ...]) -> dict[str, Work
     for case in cases:
         suffix_parts = list(case.expectation.required_summary_substrings)
         if not suffix_parts:
-            suffix_parts.append("all acceptance checks passed")
+            if case.expectation.require_success:
+                suffix_parts.append("all acceptance checks passed")
+            else:
+                suffix_parts.append("expected failure")
         outcomes[case.case_id] = WorkerOutcome(
-            status="success",
+            status="success" if case.expectation.require_success else "failure",
             summary="; ".join(suffix_parts),
             files_changed=case.expectation.required_files_changed,
             tests_passed=True if case.expectation.require_tests_passed else None,

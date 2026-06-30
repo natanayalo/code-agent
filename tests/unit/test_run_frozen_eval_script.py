@@ -216,6 +216,8 @@ def test_run_frozen_eval_supports_compare_to_report(tmp_path: Path) -> None:
         output_path=baseline_output_path,
         variant_label="baseline",
     )
+    assert baseline_result.returncode == 0, baseline_result.stderr
+
     candidate_result = _run_script(
         suite_path=suite_path,
         replay_path=replay_path,
@@ -223,11 +225,10 @@ def test_run_frozen_eval_supports_compare_to_report(tmp_path: Path) -> None:
         variant_label="candidate",
         compare_to_report=baseline_output_path,
     )
+    assert candidate_result.returncode == 0, candidate_result.stderr
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
 
-    assert baseline_result.returncode == 0
-    assert candidate_result.returncode == 0
     assert payload["comparison"]["baseline_variant_label"] == "baseline"
     assert payload["comparison"]["candidate_variant_label"] == "candidate"
     assert payload["comparison"]["delta_reviewed_cases"] == 0
@@ -488,6 +489,13 @@ def test_print_reliability_summary_includes_mean_friction_reports(
             mean_commands_run=2.0,
             mean_files_changed=1.0,
             mean_friction_reports=1.5,
+            repair_loops_total=0,
+            mean_time_to_pr_seconds=None,
+            ci_rejection_total=0,
+            review_rejection_total=0,
+            validation_failure_category_counts=(),
+            worker_profile_success_rates=(),
+            provider_failure_cause_counts=(),
             stage_latency_available=False,
             mean_stage_latency_seconds=(),
         ),

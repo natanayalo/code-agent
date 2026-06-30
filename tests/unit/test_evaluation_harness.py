@@ -261,7 +261,7 @@ def test_missing_replay_outcome_is_scored_as_failure() -> None:
     assert "missing replay outcome" in report.results[0].outcome.summary.lower()
 
 
-def test_scoring_omits_success_weight_when_success_not_required() -> None:
+def test_scoring_asserts_failure_when_success_not_required() -> None:
     case = FrozenTaskCase(
         case_id="no-success-weight",
         repo_fixture="fixtures/empty",
@@ -286,8 +286,8 @@ def test_scoring_omits_success_weight_when_success_not_required() -> None:
         )
     )
 
-    assert report.total_score == 1
-    assert report.max_score == 1
+    assert report.total_score == 2
+    assert report.max_score == 2
     assert report.results[0].passed is True
 
 
@@ -308,7 +308,7 @@ def test_scoring_normalizes_required_and_changed_paths() -> None:
             runner=ReplayRunner(
                 outcomes_by_case_id={
                     "path-normalization": WorkerOutcome(
-                        status="success",
+                        status="failure",
                         summary="ok",
                         files_changed=("./src\\app.py",),
                     )
@@ -317,8 +317,8 @@ def test_scoring_normalizes_required_and_changed_paths() -> None:
         )
     )
 
-    assert report.total_score == 1
-    assert report.max_score == 1
+    assert report.total_score == 2
+    assert report.max_score == 2
     assert report.results[0].passed is True
 
 
@@ -607,7 +607,23 @@ def test_compare_reports_delta_mapping_covers_all_review_metrics() -> None:
         field_name
         for field_name in EvaluationComparison.__dataclass_fields__
         if field_name.startswith("delta_")
-        and field_name not in {"delta_passed_cases", "delta_total_score", "delta_reviewed_cases"}
+        and field_name
+        not in {
+            "delta_passed_cases",
+            "delta_total_score",
+            "delta_reviewed_cases",
+            "delta_cases_with_validation_evidence",
+            "delta_cases_needing_approval",
+            "delta_cases_needing_manual_log_inspection",
+            "delta_cases_with_worker_failure",
+            "delta_mean_commands_run",
+            "delta_mean_files_changed",
+            "delta_mean_friction_reports",
+            "delta_repair_loops_total",
+            "delta_mean_time_to_pr_seconds",
+            "delta_ci_rejection_total",
+            "delta_review_rejection_total",
+        }
     }
     mapped_comparison_delta_fields = set(_REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD.values())
 
@@ -682,6 +698,13 @@ def test_reliability_report_to_dict_serializes_all_fields() -> None:
         mean_commands_run=4.0,
         mean_files_changed=2.0,
         mean_friction_reports=0.5,
+        repair_loops_total=0,
+        mean_time_to_pr_seconds=None,
+        ci_rejection_total=0,
+        review_rejection_total=0,
+        validation_failure_category_counts=(),
+        worker_profile_success_rates=(),
+        provider_failure_cause_counts=(),
         stage_latency_available=False,
         mean_stage_latency_seconds=(),
     )
