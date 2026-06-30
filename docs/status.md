@@ -6,7 +6,7 @@ Phase 3: personal reliability before broader autonomy.
 
 Active focus:
 
-- Phase 3 roadmap and M20.0/M20.1 reliability planning
+- M20.6 GitHub CI metadata persistence and repair tasks
 - Milestone 21 (Worker Runtime Hotspot Refactor) boundary extraction after M20 contracts settle
 
 ## Current Capabilities
@@ -21,6 +21,7 @@ Active focus:
 - skeptical memory + compact session state persistence
 - operational controls: task replay, approval decision endpoint, progress callbacks, and metrics
 - generated TaskSpec contract for task goal/risk/type/delivery policy before worker routing
+- repo registry and validation profiles gate public repo selection, protected paths, and validation defaults
 - PR-native delivery fields with GitHub branch/draft-PR delivery integration
 - dashboard visibility for TaskSpec, interactions, timeline events, logs, artifacts, replay controls, traces, memory, and tool inventory
 - CI now measures Python coverage from `tests/unit` only and runs `tests/integration` as a separate pass
