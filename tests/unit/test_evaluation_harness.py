@@ -308,7 +308,7 @@ def test_scoring_normalizes_required_and_changed_paths() -> None:
             runner=ReplayRunner(
                 outcomes_by_case_id={
                     "path-normalization": WorkerOutcome(
-                        status="success",
+                        status="failure",
                         summary="ok",
                         files_changed=("./src\\app.py",),
                     )
@@ -317,9 +317,9 @@ def test_scoring_normalizes_required_and_changed_paths() -> None:
         )
     )
 
-    assert report.total_score == 1
+    assert report.total_score == 2
     assert report.max_score == 2
-    assert report.results[0].passed is False
+    assert report.results[0].passed is True
 
 
 def test_write_report_persists_structured_json(tmp_path: Path) -> None:

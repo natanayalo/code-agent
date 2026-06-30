@@ -573,11 +573,9 @@ def compare_reports(
     b_rel = baseline.reliability_report
     c_rel = candidate.reliability_report
 
-    def rel_diff(attr: str) -> Any:
-        if b_rel is None or c_rel is None:
-            return None
-        b_val = getattr(b_rel, attr)
-        c_val = getattr(c_rel, attr)
+    def rel_diff(attr: str, default_val: Any = None) -> Any:
+        b_val = getattr(b_rel, attr) if b_rel is not None else default_val
+        c_val = getattr(c_rel, attr) if c_rel is not None else default_val
         if b_val is None or c_val is None:
             return None
         return c_val - b_val
@@ -598,18 +596,19 @@ def compare_reports(
         delta_false_positive_rate=delta_payload["delta_false_positive_rate"],
         delta_fix_after_review_success=delta_payload["delta_fix_after_review_success"],
         delta_empty_review_correctness=delta_payload["delta_empty_review_correctness"],
-        delta_cases_with_validation_evidence=rel_diff("cases_with_validation_evidence") or 0,
-        delta_cases_needing_approval=rel_diff("cases_needing_approval") or 0,
-        delta_cases_needing_manual_log_inspection=rel_diff("cases_needing_manual_log_inspection")
-        or 0,
-        delta_cases_with_worker_failure=rel_diff("cases_with_worker_failure") or 0,
+        delta_cases_with_validation_evidence=rel_diff("cases_with_validation_evidence", 0),
+        delta_cases_needing_approval=rel_diff("cases_needing_approval", 0),
+        delta_cases_needing_manual_log_inspection=rel_diff(
+            "cases_needing_manual_log_inspection", 0
+        ),
+        delta_cases_with_worker_failure=rel_diff("cases_with_worker_failure", 0),
         delta_mean_commands_run=rel_diff("mean_commands_run"),
         delta_mean_files_changed=rel_diff("mean_files_changed"),
         delta_mean_friction_reports=rel_diff("mean_friction_reports"),
-        delta_repair_loops_total=rel_diff("repair_loops_total") or 0,
+        delta_repair_loops_total=rel_diff("repair_loops_total", 0),
         delta_mean_time_to_pr_seconds=rel_diff("mean_time_to_pr_seconds"),
-        delta_ci_rejection_total=rel_diff("ci_rejection_total") or 0,
-        delta_review_rejection_total=rel_diff("review_rejection_total") or 0,
+        delta_ci_rejection_total=rel_diff("ci_rejection_total", 0),
+        delta_review_rejection_total=rel_diff("review_rejection_total", 0),
     )
 
 
