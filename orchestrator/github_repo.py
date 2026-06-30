@@ -31,6 +31,9 @@ def github_repo_spec_from_url(repo_url: str | None) -> str | None:
         if repo.endswith(".git"):
             repo = repo[:-4]
 
+        if owner.startswith("-") or repo.startswith("-"):
+            return None
+
         netloc = parsed.netloc
         if "@" in netloc:
             netloc = netloc.split("@")[-1]

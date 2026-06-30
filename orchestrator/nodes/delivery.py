@@ -292,7 +292,7 @@ def _capture_delivery_metadata(
         metadata["pr_url"] = data.get("url")
         metadata["pr_number"] = data.get("number")
         metadata["head_sha"] = data.get("headRefOid")
-    except (subprocess.CalledProcessError, json.JSONDecodeError, OSError) as e:
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as e:
         logger.debug("Failed to capture PR metadata via gh cli: %s", e)
 
     return metadata

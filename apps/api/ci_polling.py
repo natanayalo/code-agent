@@ -274,8 +274,10 @@ class CIPollingScheduler:
                         self._parse_logs_with_llm_async(logs, check_name), self._loop_ref
                     )
                     try:
+                        from concurrent.futures import TimeoutError as FuturesTimeoutError
+
                         parsed_logs = future.result(timeout=60)
-                    except TimeoutError:
+                    except FuturesTimeoutError:
                         logger.warning(f"LLM parsing timed out after 60s for check {check_name}")
                         future.cancel()
                         parsed_logs = logs
