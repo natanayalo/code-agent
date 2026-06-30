@@ -317,6 +317,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- [codex] add GitHub CI repair loop ([#288](https://github.com/natanayalo/code-agent/pull/288))
+
 - [codex] add worker registry backpressure ([#280](https://github.com/natanayalo/code-agent/pull/280))
 
 - Docs/m20.2 completed ([#278](https://github.com/natanayalo/code-agent/pull/278))
