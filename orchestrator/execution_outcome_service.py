@@ -146,6 +146,7 @@ def _create_worker_run(
         files_changed=result.files_changed if result is not None else None,
         artifact_index=artifact_index,
         runtime_manifest=state.dispatch.runtime_manifest if state.dispatch else None,
+        delivery_metadata=result.delivery_metadata if result is not None else None,
         retention_expires_at=retention_expires_at,
         worker_profile=(state.dispatch.worker_profile if state.dispatch else None)
         or (state.route.chosen_profile if state.route else None),

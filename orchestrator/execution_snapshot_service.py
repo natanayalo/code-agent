@@ -267,7 +267,6 @@ def _map_execution_plan_to_snapshot(execution_plan: Any) -> ExecutionPlanSnapsho
 
 
 def _map_task_to_snapshot(self: Any, task: Task) -> TaskSnapshot:
-    """Map a Task database model to a full TaskSnapshot Pydantic model."""
     latest_run_snapshot: WorkerRunSnapshot | None = None
     latest_run_obj: WorkerRun | None = None
     pending_interactions = self._pending_interaction_snapshots(task)
@@ -300,6 +299,7 @@ def _map_task_to_snapshot(self: Any, task: Task) -> TaskSnapshot:
                 for idx, entry in enumerate(latest_run_obj.artifact_index or [])
                 if isinstance(entry, dict)
             ],
+            delivery_metadata=cast(Any, latest_run_obj.delivery_metadata),
             artifacts=[
                 ArtifactSnapshot(
                     artifact_id=artifact.id,
@@ -352,7 +352,6 @@ def _map_task_to_summary(
     *,
     latest_run: WorkerRun | None = None,
 ) -> TaskSummarySnapshot:
-    """Map a Task database model to a lightweight TaskSummarySnapshot."""
     latest_run_id = getattr(task, "_latest_run_id", None)
     latest_run_status = _enum_value(getattr(task, "_latest_run_status", None))
     latest_run_worker = _enum_value(getattr(task, "_latest_run_worker", None))
@@ -414,6 +413,7 @@ def _map_task_to_summary(
         approval_reason=approval_reason,
         trace_id=trace_id,
         trace_url=_get_phoenix_url(trace_id),
+        repair_for_task_id=task.repair_for_task_id,
     )
 
 

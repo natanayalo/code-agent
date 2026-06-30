@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import subprocess
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -16,6 +18,7 @@ from apps.observability import (
     start_optional_span,
 )
 from db.enums import TimelineEventType, WorkerRunStatus
+from orchestrator.github_repo import github_repo_spec_from_url
 from orchestrator.nodes.utils import (
     _available_workers,
     _ensure_state,
@@ -236,6 +239,65 @@ def _build_delivery_worker_request(
     )
 
 
+def _capture_delivery_metadata(
+    state: OrchestratorState,
+    branch_name: str,
+    gh_token: str | None,
+) -> dict[str, Any] | None:
+    if not state.task_spec or not state.task.repo_url:
+        return None
+
+    delivery_mode = state.task_spec.delivery_mode
+    metadata = {
+        "delivery_mode": delivery_mode,
+        "branch_name": branch_name,
+    }
+
+    if delivery_mode != "draft_pr":
+        return metadata
+
+    if not gh_token:
+        return metadata
+
+    repo_spec = github_repo_spec_from_url(state.task.repo_url)
+    if repo_spec is None:
+        logger.debug("Failed to derive GitHub repo spec from repo_url for delivery metadata.")
+        return metadata
+
+    env = os.environ.copy()
+    env["GH_TOKEN"] = gh_token
+
+    cmd = [
+        "gh",
+        "pr",
+        "view",
+        branch_name,
+        "-R",
+        repo_spec,
+        "--json",
+        "url,number,headRefOid,headRefName",
+    ]
+    try:
+        proc = subprocess.run(
+            cmd,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+            stdin=subprocess.DEVNULL,
+        )
+        data = json.loads(proc.stdout)
+
+        metadata["pr_url"] = data.get("url")
+        metadata["pr_number"] = data.get("number")
+        metadata["head_sha"] = data.get("headRefOid")
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as e:
+        logger.debug("Failed to capture PR metadata via gh cli: %s", e)
+
+    return metadata
+
+
 def _record_delivery_worker_output(result: WorkerResult) -> None:
     if hasattr(result, "stdout") and result.stdout:
         set_current_span_attribute(NATIVE_AGENT_STDOUT_ATTRIBUTE, result.stdout)
@@ -338,6 +400,29 @@ def _delivery_completed_response(
     }
 
 
+async def _delivery_success_response(
+    state: OrchestratorState,
+    delivery_result: WorkerResult,
+    branch_name: str,
+    pr_title: str,
+    gh_token: str | None,
+) -> dict[str, Any]:
+    import asyncio
+
+    merged_result = _merge_delivery_result(state.result, delivery_result)
+    delivery_metadata = await asyncio.to_thread(
+        _capture_delivery_metadata, state, branch_name, gh_token
+    )
+    if delivery_metadata:
+        merged_result.delivery_metadata = delivery_metadata
+    return _delivery_completed_response(
+        state,
+        branch_name=branch_name,
+        pr_title=pr_title,
+        merged_result=merged_result,
+    )
+
+
 async def _run_deliver_result(
     state_input: OrchestratorState,
     worker: Worker | None = None,
@@ -410,13 +495,7 @@ async def _run_deliver_result(
         if isinstance(result, dict):
             return result
 
-        merged_result = _merge_delivery_result(state.result, result)
-        return _delivery_completed_response(
-            state,
-            branch_name=branch_name,
-            pr_title=pr_title,
-            merged_result=merged_result,
-        )
+        return await _delivery_success_response(state, result, branch_name, pr_title, gh_token)
 
 
 def build_deliver_result_node(

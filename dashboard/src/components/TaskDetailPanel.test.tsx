@@ -829,4 +829,45 @@ describe('TaskDetailPanel', () => {
 
     expect(screen.queryByText('Cancel conflict')).not.toBeInTheDocument();
   });
+
+  it('renders delivery metadata if present', () => {
+    const task = buildTask({
+      latest_run: buildLatestRun({
+        delivery_metadata: {
+          pr_url: 'https://github.com/test/repo/pull/123',
+          branch_name: 'test-branch',
+          head_sha: 'abcdef123',
+          ci_status: 'failed',
+          ci_failed_jobs: ['test-job-1'],
+        },
+      }),
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Delivery Metadata')).toBeInTheDocument();
+    expect(screen.getByText('https://github.com/test/repo/pull/123')).toBeInTheDocument();
+    expect(screen.getByText('test-branch')).toBeInTheDocument();
+    expect(screen.getByText('abcdef123')).toBeInTheDocument();
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(screen.getByText('Failed CI Jobs')).toBeInTheDocument();
+    expect(screen.getByText('test-job-1')).toBeInTheDocument();
+  });
+
+  it('renders sparse delivery metadata if fields are missing', () => {
+    const task = buildTask({
+      latest_run: buildLatestRun({
+        delivery_metadata: {
+          ci_status: 'passed',
+        },
+      }),
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Delivery Metadata')).toBeInTheDocument();
+    expect(screen.getAllByText('N/A').length).toBeGreaterThan(0);
+    expect(screen.getByText('Passed')).toBeInTheDocument();
+    expect(screen.queryByText('Failed CI Jobs')).not.toBeInTheDocument();
+  });
 });

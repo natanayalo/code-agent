@@ -42,6 +42,10 @@ class SystemConfig:
     scout_scheduler_enabled: bool = False
     scout_idle_trigger_minutes: int = 30
     scout_schedule_interval_minutes: int = 1440
+    ci_polling_enabled: bool = False
+    ci_polling_interval_minutes: int = 15
+    ci_polling_log_limit_bytes: int = 50000
+    ci_polling_llm_profile: str | None = None
     scout_task_text: str = DEFAULT_SCOUT_TASK_TEXT
     scout_repo_key: str | None = None
     scout_branch: str | None = None
@@ -78,6 +82,18 @@ class SystemConfig:
             ),
             scout_schedule_interval_minutes=coerce_non_negative_int_env(
                 environ.get("CODE_AGENT_SCOUT_SCHEDULE_INTERVAL_MINUTES"), default=1440
+            ),
+            ci_polling_enabled=_is_enabled(
+                environ.get("CODE_AGENT_CI_POLLING_ENABLED"), default=False
+            ),
+            ci_polling_interval_minutes=coerce_non_negative_int_env(
+                environ.get("CODE_AGENT_CI_POLLING_INTERVAL_MINUTES"), default=15
+            ),
+            ci_polling_log_limit_bytes=coerce_non_negative_int_env(
+                environ.get("CODE_AGENT_CI_POLLING_LOG_LIMIT_BYTES"), default=50000
+            ),
+            ci_polling_llm_profile=(
+                (environ.get("CODE_AGENT_CI_POLLING_LLM_PROFILE") or "").strip() or None
             ),
             scout_task_text=environ.get("CODE_AGENT_SCOUT_TASK_TEXT", "").strip()
             or DEFAULT_SCOUT_TASK_TEXT,

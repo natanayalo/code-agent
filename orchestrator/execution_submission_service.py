@@ -257,6 +257,7 @@ def _persist_submission(
             next_attempt_at=now,
             priority=submission.priority,
             queue_lane=queue_lane,
+            repair_for_task_id=submission.repair_for_task_id,
         )
         interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
         session_repo.set_active_task(session_id=conversation_session.id, active_task_id=task.id)

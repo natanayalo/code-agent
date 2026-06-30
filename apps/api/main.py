@@ -15,6 +15,7 @@ from apps.api.auth import (  # noqa: E402
     ApiAuthConfig,
     build_api_auth_config_from_env,
 )
+from apps.api.ci_polling import CIPollingScheduler  # noqa: E402
 from apps.api.config import SystemConfig  # noqa: E402
 from apps.api.progress import create_outbound_http_clients  # noqa: E402
 from apps.api.routes.auth import router as auth_router  # noqa: E402
@@ -105,10 +106,15 @@ def _build_lifespan(
                             task_service=app.state.task_service, config=app.state.system_config
                         )
                         scout_scheduler.start()
+                        ci_polling_scheduler = CIPollingScheduler(
+                            task_service=app.state.task_service, config=app.state.system_config
+                        )
+                        ci_polling_scheduler.start()
                         try:
                             yield
                         finally:
                             await scout_scheduler.stop()
+                            await ci_polling_scheduler.stop()
                 else:
                     yield
             finally:

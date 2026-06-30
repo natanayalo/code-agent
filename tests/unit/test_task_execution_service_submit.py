@@ -163,6 +163,30 @@ def test_create_task_clamps_scout_budget_and_forces_read_only() -> None:
         assert budget.get("execution_mode") == "unattended"
 
 
+def test_create_task_persists_repair_for_task_id() -> None:
+    """Repair tasks should keep their source-task link in DB and snapshots."""
+    service, session_factory = _make_task_service()
+    source_snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="Original task",
+            repo_url="https://github.com/natanayalo/code-agent",
+        )
+    )
+    repair_snapshot, persisted = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="Repair failed CI",
+            repo_url="https://github.com/natanayalo/code-agent",
+            repair_for_task_id=source_snapshot.task_id,
+        )
+    )
+
+    assert repair_snapshot.repair_for_task_id == source_snapshot.task_id
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(persisted.task_id)
+        assert task is not None
+        assert task.repair_for_task_id == source_snapshot.task_id
+
+
 def test_create_task_rejects_invalid_scout_budget() -> None:
     """Scout task submission with invalid budget should raise ValueError."""
     service, session_factory = _make_task_service()

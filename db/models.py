@@ -276,6 +276,9 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     route_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     trace_context: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
+    repair_for_task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     session: Mapped[Session] = relationship(back_populates="tasks")
     worker_runs: Mapped[list[WorkerRun]] = relationship(back_populates="task")
@@ -289,6 +292,10 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     execution_plan: Mapped[ExecutionPlan | None] = relationship(
         back_populates="task", passive_deletes=True
     )
+    repair_for_task: Mapped[Task | None] = relationship(
+        remote_side="Task.id", back_populates="repairing_tasks"
+    )
+    repairing_tasks: Mapped[list[Task]] = relationship(back_populates="repair_for_task")
 
     @validates("status")
     def _coerce_status(self, _key: str, value: TaskStatus | str) -> TaskStatus:
@@ -371,6 +378,7 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
     files_changed: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     artifact_index: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     runtime_manifest: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    delivery_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     task: Mapped[Task] = relationship(back_populates="worker_runs")
     session: Mapped[Session | None] = relationship(back_populates="worker_runs")

@@ -73,6 +73,7 @@ class TaskSubmission(ExecutionModel):
     tools: list[str] | None = None
     callback_url: str | None = Field(default=None, max_length=2048)
     session: SubmissionSession = Field(default_factory=SubmissionSession)
+    repair_for_task_id: str | None = None
 
     @field_validator("callback_url")
     @classmethod
@@ -111,6 +112,19 @@ class ArtifactSnapshot(ExecutionModel):
     artifact_metadata: dict[str, Any] | None = None
 
 
+class DeliveryMetadataSnapshot(ExecutionModel):
+    """Metadata captured during task delivery, particularly for PRs and CI status."""
+
+    delivery_mode: str | None = None
+    branch_name: str | None = None
+    pr_url: str | None = None
+    pr_number: int | None = None
+    head_sha: str | None = None
+    ci_status: str | None = None
+    ci_failed_jobs: list[str] = Field(default_factory=list)
+    ci_last_checked_at: datetime | None = None
+
+
 class WorkerRunSnapshot(ExecutionModel):
     """The latest persisted worker run associated with a task."""
 
@@ -132,6 +146,7 @@ class WorkerRunSnapshot(ExecutionModel):
     files_changed: list[str] = Field(default_factory=list)
     artifact_index: list[dict[str, Any]] = Field(default_factory=list)
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
+    delivery_metadata: DeliveryMetadataSnapshot | None = None
 
 
 class TaskTimelineEventSnapshot(ExecutionModel):
@@ -257,6 +272,7 @@ class TaskSummarySnapshot(ExecutionModel):
     approval_reason: str | None = None
     trace_id: str | None = None
     trace_url: str | None = None
+    repair_for_task_id: str | None = None
 
 
 class HumanInteractionSnapshot(ExecutionModel):
