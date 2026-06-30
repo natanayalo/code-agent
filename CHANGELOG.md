@@ -388,6 +388,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump alembic from 1.18.4 to 1.18.5 ([#284](https://github.com/natanayalo/code-agent/pull/284))
+
 - Chore(deps): bump fastapi from 0.138.0 to 0.138.2 ([#283](https://github.com/natanayalo/code-agent/pull/283))
 
 - Chore(deps-dev): bump pytest from 9.1.0 to 9.1.1 ([#282](https://github.com/natanayalo/code-agent/pull/282))
