@@ -388,6 +388,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump openai from 2.43.0 to 2.44.0 ([#285](https://github.com/natanayalo/code-agent/pull/285))
+
 - Chore(deps): bump alembic from 1.18.4 to 1.18.5 ([#284](https://github.com/natanayalo/code-agent/pull/284))
 
 - Chore(deps): bump fastapi from 0.138.0 to 0.138.2 ([#283](https://github.com/natanayalo/code-agent/pull/283))
