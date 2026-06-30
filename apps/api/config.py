@@ -17,6 +17,22 @@ DEFAULT_SCOUT_TASK_TEXT = (
 )
 
 
+def _parse_repo_map(repo_str: str) -> dict[str, str]:
+    """Parse comma-separated key:url pairs into a repository registry."""
+    repos: dict[str, str] = {}
+    if not repo_str:
+        return repos
+    for pair in repo_str.split(","):
+        if ":" not in pair:
+            continue
+        key, url = pair.split(":", 1)
+        key = key.strip()
+        url = url.strip()
+        if key and url:
+            repos[key] = url
+    return repos
+
+
 @dataclass(frozen=True, slots=True)
 class SystemConfig:
     """Consolidated system-level configuration."""
@@ -27,8 +43,11 @@ class SystemConfig:
     scout_idle_trigger_minutes: int = 30
     scout_schedule_interval_minutes: int = 1440
     scout_task_text: str = DEFAULT_SCOUT_TASK_TEXT
-    scout_repo_url: str | None = None
+    scout_repo_key: str | None = None
     scout_branch: str | None = None
+    telegram_default_repo_key: str | None = None
+    webhook_default_repo_key: str | None = None
+    allowed_repos: dict[str, str] = field(default_factory=dict)
     scout_allowed_repos: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -40,16 +59,13 @@ class SystemConfig:
             default_workspace_root(environ)
         )
 
-        allowed_repos_str = environ.get("CODE_AGENT_SCOUT_ALLOWED_REPOS", "").strip()
-        scout_allowed_repos: dict[str, str] = {}
-        if allowed_repos_str:
-            for pair in allowed_repos_str.split(","):
-                if ":" in pair:
-                    key, url = pair.split(":", 1)
-                    key = key.strip()
-                    url = url.strip()
-                    if key and url:
-                        scout_allowed_repos[key] = url
+        allowed_repos_str = environ.get("CODE_AGENT_ALLOWED_REPOS", "").strip()
+        scout_allowed_repos_str = environ.get("CODE_AGENT_SCOUT_ALLOWED_REPOS", "").strip()
+
+        allowed_repos = _parse_repo_map(allowed_repos_str)
+        scout_allowed_repos = _parse_repo_map(scout_allowed_repos_str)
+        for key, url in scout_allowed_repos.items():
+            allowed_repos.setdefault(key, url)
 
         return cls(
             default_image=image,
@@ -65,7 +81,27 @@ class SystemConfig:
             ),
             scout_task_text=environ.get("CODE_AGENT_SCOUT_TASK_TEXT", "").strip()
             or DEFAULT_SCOUT_TASK_TEXT,
-            scout_repo_url=(environ.get("CODE_AGENT_SCOUT_REPO_URL") or "").strip() or None,
+            scout_repo_key=(
+                environ.get("CODE_AGENT_SCOUT_REPO_KEY")
+                or environ.get("CODE_AGENT_SCOUT_REPO_URL")
+                or ""
+            ).strip()
+            or None,
             scout_branch=(environ.get("CODE_AGENT_SCOUT_BRANCH") or "").strip() or None,
+            telegram_default_repo_key=(
+                environ.get("CODE_AGENT_TELEGRAM_DEFAULT_REPO_KEY") or ""
+            ).strip()
+            or None,
+            webhook_default_repo_key=(
+                environ.get("CODE_AGENT_WEBHOOK_DEFAULT_REPO_KEY") or ""
+            ).strip()
+            or None,
+            allowed_repos=allowed_repos,
             scout_allowed_repos=scout_allowed_repos,
         )
+
+    def resolve_repo_key(self, key: str | None) -> str | None:
+        """Resolve a repo key to a URL using the allowed_repos registry."""
+        if not key:
+            return None
+        return self.allowed_repos.get(key)

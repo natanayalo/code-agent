@@ -41,9 +41,10 @@ def test_scheduler_triggers_idle_when_system_is_idle(session_factory) -> None:
         default_image="test",
         workspace_root="/tmp",
         scout_scheduler_enabled=True,
-        scout_repo_url="https://github.com/foo/bar",
+        scout_repo_key="https://github.com/foo/bar",
         scout_idle_trigger_minutes=30,
         scout_schedule_interval_minutes=0,
+        allowed_repos={"https://github.com/foo/bar": "https://github.com/foo/bar"},
     )
     scheduler = ScoutScheduler(task_service, config)
 
@@ -81,9 +82,10 @@ def test_scheduler_does_not_trigger_when_execution_busy(session_factory) -> None
         default_image="test",
         workspace_root="/tmp",
         scout_scheduler_enabled=True,
-        scout_repo_url="https://github.com/foo/bar",
+        scout_repo_key="https://github.com/foo/bar",
         scout_idle_trigger_minutes=30,
         scout_schedule_interval_minutes=0,
+        allowed_repos={"https://github.com/foo/bar": "https://github.com/foo/bar"},
     )
 
     # Make task service busy by creating a task (will be in PENDING state)
@@ -112,9 +114,10 @@ def test_scheduler_triggers_schedule_trigger(session_factory) -> None:
         default_image="test",
         workspace_root="/tmp",
         scout_scheduler_enabled=True,
-        scout_repo_url="https://github.com/foo/bar",
+        scout_repo_key="https://github.com/foo/bar",
         scout_idle_trigger_minutes=0,
         scout_schedule_interval_minutes=60,
+        allowed_repos={"https://github.com/foo/bar": "https://github.com/foo/bar"},
     )
     scheduler = ScoutScheduler(task_service, config)
 
@@ -152,9 +155,10 @@ def test_scheduler_combined_triggers(session_factory) -> None:
         default_image="test",
         workspace_root="/tmp",
         scout_scheduler_enabled=True,
-        scout_repo_url="https://github.com/foo/bar",
+        scout_repo_key="https://github.com/foo/bar",
         scout_idle_trigger_minutes=30,
         scout_schedule_interval_minutes=60,
+        allowed_repos={"https://github.com/foo/bar": "https://github.com/foo/bar"},
     )
     scheduler = ScoutScheduler(task_service, config)
 

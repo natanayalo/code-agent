@@ -1,7 +1,16 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from sandbox.policy import PathPolicy, is_in_container
+import pytest
+
+from sandbox.policy import (
+    LocalRepoPolicyError,
+    PathPolicy,
+    is_allowed_local_remote,
+    is_in_container,
+    raise_if_sibling_workspace,
+    validate_local_repo_path,
+)
 
 
 def test_is_in_container_dockerenv():
@@ -99,3 +108,38 @@ def test_path_policy_value_error_handling():
     # Trigger ValueError in is_relative_to by mocking it
     with patch("pathlib.Path.is_relative_to", side_effect=ValueError("Test")):
         assert policy.check_path("/workspace/test.py") is False
+
+
+def _raise_cross_drive(*args: object, **kwargs: object) -> bool:
+    raise ValueError("different drives")
+
+
+def test_is_allowed_local_remote_ignores_cross_drive_relative_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("CODE_AGENT_ALLOWED_LOCAL_REMOTES", str(tmp_path))
+    monkeypatch.setattr(Path, "is_relative_to", _raise_cross_drive)
+
+    assert is_allowed_local_remote(tmp_path / "repo") is False
+
+
+def test_raise_if_sibling_workspace_ignores_cross_drive_relative_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(Path, "is_relative_to", _raise_cross_drive)
+    monkeypatch.setattr(Path, "relative_to", _raise_cross_drive)
+
+    raise_if_sibling_workspace(
+        resolved_path=tmp_path / "repo",
+        workspace_path=tmp_path / "workspace-current",
+        allowed_root=tmp_path / "workspaces",
+    )
+
+
+def test_validate_local_repo_path_reports_policy_error_for_cross_drive_checks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(Path, "is_relative_to", _raise_cross_drive)
+
+    with pytest.raises(LocalRepoPolicyError, match="outside the allowed workspace root"):
+        validate_local_repo_path(str(tmp_path / "repo"))

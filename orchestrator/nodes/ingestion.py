@@ -20,7 +20,14 @@ from orchestrator.nodes.utils import (
     _task_complexity_reason,
     _timeline_event,
 )
+from orchestrator.repo_profile import (
+    InvalidRepoProfileError,
+)
+from orchestrator.repo_profile import (
+    load_repo_profile as _do_load_repo_profile,
+)
 from orchestrator.state import OrchestratorState, TaskPlan, TaskPlanStep
+from orchestrator.task_spec import apply_repo_profile_to_task_spec
 
 logger = logging.getLogger(__name__)
 
@@ -174,3 +181,52 @@ def plan_task(state_input: OrchestratorState) -> dict[str, Any]:
                 payload={"planning": "generated", **task_plan.model_dump(mode="json")},
             ),
         }
+
+
+def load_repo_profile_node(state_input: OrchestratorState) -> dict[str, Any]:
+    """Load code-agent.project.yaml and apply its overlay to the existing TaskSpec."""
+    state = _ensure_state(state_input)
+    with start_optional_span(
+        tracer_name="orchestrator.graph",
+        span_name="orchestrator.node.load_repo_profile",
+        attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+        task_id=state.task.task_id,
+        session_id=state.session.session_id if state.session else None,
+        attempt=state.attempt_count,
+    ):
+        try:
+            repo_profile = _do_load_repo_profile(state.task.repo_url)
+        except InvalidRepoProfileError as exc:
+            set_span_input_output(input_data=state.task.repo_url, output_data={"error": str(exc)})
+            return {
+                "current_step": "load_repo_profile",
+                "errors": (state.errors or []) + [f"task_spec_policy: {exc}"],
+                "repo_profile": None,
+            }
+
+        if not repo_profile:
+            set_span_input_output(input_data=state.task.repo_url, output_data="no-profile")
+            return {
+                "current_step": "load_repo_profile",
+                "repo_profile": None,
+            }
+
+        set_span_input_output(
+            input_data=state.task.repo_url,
+            output_data=repo_profile.model_dump(mode="json"),
+        )
+
+        updates: dict[str, Any] = {
+            "current_step": "load_repo_profile",
+            "repo_profile": repo_profile,
+        }
+
+        if state.task_spec:
+            updated_spec = apply_repo_profile_to_task_spec(
+                state.task_spec,
+                repo_profile,
+                task_plan=state.task_plan,
+            )
+            updates["task_spec"] = updated_spec
+
+        return updates

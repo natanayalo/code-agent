@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from orchestrator.brain import TaskSpecBrainMergeReport, TaskSpecBrainSuggestion
+from orchestrator.repo_profile import RepoProfile
+
+if TYPE_CHECKING:
+    from orchestrator.repo_profile import RepoProfile
 from orchestrator.constants import (
     AMBIGUOUS_ASKS,
     BUGFIX_MARKERS,
@@ -470,6 +475,69 @@ def apply_task_spec_brain_suggestion(
     return merged_spec, report
 
 
+def apply_repo_profile_to_task_spec(
+    task_spec: TaskSpec,
+    repo_profile: RepoProfile | None,
+    task_plan: TaskPlan | None = None,
+) -> TaskSpec:
+    """Apply the deterministic repo profile overlay to an existing TaskSpec."""
+    if not repo_profile:
+        return task_spec
+
+    setup_commands = (
+        list(repo_profile.setup.commands)
+        if repo_profile.setup.commands
+        else list(task_spec.setup_commands)
+    )
+
+    needs_escalation, escalation_reason = _check_task_text_for_escalation(
+        task_spec, repo_profile, task_plan
+    )
+
+    risk_level = task_spec.risk_level
+    requires_permission = task_spec.requires_permission
+    permission_reason = task_spec.permission_reason
+    forbidden_actions = list(task_spec.forbidden_actions)
+
+    if needs_escalation:
+        risk_level = cast(TaskRiskLevel, _max_risk(risk_level, "high"))
+        requires_permission = True
+        permission_reason = escalation_reason or "Repo profile dictates high risk."
+        if "destructive_actions_without_permission" not in forbidden_actions:
+            forbidden_actions.append("destructive_actions_without_permission")
+
+    # Assign verification commands based on risk level
+    verification_commands = list(task_spec.verification_commands)
+    # Only override if empty or if it's the default read-only smoke check
+    is_default_smoke = (
+        len(verification_commands) == 1
+        and "printf" in verification_commands[0]
+        and "$PWD" in verification_commands[0]
+    )
+
+    if not verification_commands or is_default_smoke:
+        if RISK_ORDER[risk_level] >= RISK_ORDER["medium"] and repo_profile.validation.full:
+            verification_commands = list(repo_profile.validation.full)
+        elif repo_profile.validation.quick:
+            verification_commands = list(repo_profile.validation.quick)
+
+    delivery_mode = task_spec.delivery_mode
+    if delivery_mode == "workspace" and repo_profile.delivery.default_mode != "workspace":
+        delivery_mode = repo_profile.delivery.default_mode
+
+    return task_spec.model_copy(
+        update={
+            "setup_commands": setup_commands,
+            "risk_level": risk_level,
+            "requires_permission": requires_permission,
+            "permission_reason": permission_reason,
+            "forbidden_actions": forbidden_actions,
+            "verification_commands": verification_commands,
+            "delivery_mode": delivery_mode,
+        }
+    )
+
+
 def validate_task_spec_policy(task_spec: TaskSpec) -> list[str]:
     """Return deterministic policy violations for a generated TaskSpec."""
     violations: list[str] = []
@@ -482,3 +550,37 @@ def validate_task_spec_policy(task_spec: TaskSpec) -> list[str]:
     if "hardcode_secrets" not in task_spec.forbidden_actions:
         violations.append("missing_secret_hardcode_forbidden_action")
     return violations
+
+
+def _check_task_text_for_escalation(
+    task_spec: TaskSpec, repo_profile: RepoProfile, task_plan: TaskPlan | None
+) -> tuple[bool, str | None]:
+    """Check task text against repo profile policies for required escalation."""
+    text_to_check = task_spec.goal
+    if task_plan and task_plan.steps:
+        for step in task_plan.steps:
+            text_to_check += " " + step.title + " " + step.expected_outcome
+
+    if repo_profile.protected_paths:
+        patterns = []
+        for protected_path in repo_profile.protected_paths:
+            normalized_path = (protected_path or "").strip()
+            if not normalized_path:
+                continue
+            pattern = fnmatch.translate(normalized_path).removeprefix("(?s:").removesuffix(")\\Z")
+            if re.match(r"^\w", normalized_path):
+                pattern = r"(?<!\w)" + pattern
+            if re.search(r"\w$", normalized_path):
+                pattern = pattern + r"(?!\w)"
+            patterns.append(pattern)
+        if patterns:
+            combined_regex = re.compile("|".join(patterns))
+            if combined_regex.search(text_to_check):
+                return True, "Task may affect protected paths"
+
+    for category in repo_profile.approval_required:
+        cat_word = category.replace("_", " ").strip()
+        if cat_word and re.search(rf"\b{re.escape(cat_word)}\b", text_to_check):
+            return True, f"Task may involve approval-required category: {category}"
+
+    return False, None

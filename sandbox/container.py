@@ -13,6 +13,7 @@ from urllib.request import url2pathname
 
 from pydantic import Field
 
+from sandbox.policy import LocalRepoPolicyError, validate_local_repo_path
 from sandbox.redact import mask_url_credentials as _mask_url_credentials
 from sandbox.workspace import SandboxModel, WorkspaceHandle
 
@@ -164,57 +165,6 @@ def _local_repo_path_from_file_url(repo_url: str) -> str | None:
     return os.path.abspath(url2pathname(parsed_url.path))
 
 
-def _is_allowed_local_remote(resolved_path: Path) -> bool:
-    allowed_remotes_env = os.environ.get("CODE_AGENT_ALLOWED_LOCAL_REMOTES", "")
-    for path_text in allowed_remotes_env.split(","):
-        path_text = path_text.strip()
-        if path_text and resolved_path.is_relative_to(Path(path_text).resolve()):
-            return True
-    return False
-
-
-def _raise_if_sibling_workspace(
-    *,
-    resolved_path: Path,
-    workspace_path: Path,
-    allowed_root: Path,
-) -> None:
-    is_sibling = not resolved_path.is_relative_to(workspace_path)
-    if resolved_path == workspace_path or not is_sibling:
-        return
-
-    rel_parts = resolved_path.relative_to(allowed_root).parts
-    if rel_parts and rel_parts[0].startswith("workspace-"):
-        raise DockerSandboxContainerError(
-            f"Mounting sibling workspaces is forbidden: {resolved_path}"
-        )
-
-
-def _validate_local_repo_mount_path(local_repo_path: str, workspace_path: Path) -> None:
-    from sandbox.workspace import default_workspace_root
-
-    resolved_path = Path(local_repo_path).resolve()
-    allowed_root = default_workspace_root().resolve()
-
-    if resolved_path == allowed_root:
-        raise DockerSandboxContainerError(
-            f"Mounting the workspace root {allowed_root} is forbidden"
-        )
-
-    if resolved_path.is_relative_to(allowed_root):
-        _raise_if_sibling_workspace(
-            resolved_path=resolved_path,
-            workspace_path=workspace_path,
-            allowed_root=allowed_root,
-        )
-        return
-
-    if not _is_allowed_local_remote(resolved_path):
-        raise DockerSandboxContainerError(
-            f"Local repo path {resolved_path} is outside the allowed workspace root {allowed_root}"
-        )
-
-
 def _append_local_repo_mount(
     command: list[str], request: DockerSandboxContainerRequest, workspace_path: Path
 ) -> None:
@@ -225,7 +175,11 @@ def _append_local_repo_mount(
     if local_repo_path is None:
         return
 
-    _validate_local_repo_mount_path(local_repo_path, workspace_path)
+    try:
+        validate_local_repo_path(local_repo_path, workspace_path)
+    except LocalRepoPolicyError as exc:
+        raise DockerSandboxContainerError(str(exc)) from exc
+
     if "," in local_repo_path:
         raise DockerSandboxContainerError(
             "Local repo path contains a comma which is incompatible with "

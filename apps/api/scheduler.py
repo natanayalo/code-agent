@@ -65,8 +65,8 @@ class ScoutScheduler:
         """Evaluate triggers and synchronously submit tasks if needed."""
         if not self.config.scout_scheduler_enabled:
             return
-        if not self.config.scout_repo_url:
-            logger.warning("Scout scheduler enabled but CODE_AGENT_SCOUT_REPO_URL is not set.")
+        if not self.config.scout_repo_key:
+            logger.warning("Scout scheduler enabled but CODE_AGENT_SCOUT_REPO_KEY is not set.")
             return
 
         is_busy = self.task_service.is_execution_busy()
@@ -105,9 +105,17 @@ class ScoutScheduler:
         Returns:
             bool: True if a new task was created, False if deduped or failed.
         """
+        resolved_repo_url = self.config.resolve_repo_key(self.config.scout_repo_key)
+        if not resolved_repo_url:
+            logger.error(
+                "Scout scheduler aborted: scout_repo_key '%s' could not be resolved.",
+                self.config.scout_repo_key,
+            )
+            return False
+
         submission = TaskSubmission(
             task_text=self.config.scout_task_text,
-            repo_url=self.config.scout_repo_url,
+            repo_url=resolved_repo_url,
             branch=self.config.scout_branch,
             priority=0,
             constraints={

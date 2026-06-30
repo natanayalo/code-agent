@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import os
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from apps.api.dependencies import get_task_service, require_api_auth
+from apps.api.config import SystemConfig
+from apps.api.dependencies import get_system_config, get_task_service, require_api_auth
 from apps.observability import (
     SESSION_ID_ATTRIBUTE,
     SPAN_KIND_AGENT,
@@ -31,7 +31,6 @@ from orchestrator.execution import (
 )
 
 router = APIRouter(prefix="/webhook", tags=["webhook"], dependencies=[Depends(require_api_auth)])
-WEBHOOK_DEFAULT_REPO_URL_ENV_VAR = "CODE_AGENT_WEBHOOK_DEFAULT_REPO_URL"
 
 
 class WebhookPayload(BaseModel):
@@ -46,7 +45,7 @@ class WebhookPayload(BaseModel):
 
     # --- task identity fields ---
     task_text: str = Field(min_length=1, max_length=10_000)
-    repo_url: str | None = Field(default=None, max_length=2048)
+    repo_key: str | None = Field(default=None, max_length=255)
     branch: str | None = Field(default=None, max_length=255)
     priority: int = Field(default=0, ge=0)
     worker_override: WorkerType | None = None
@@ -72,7 +71,7 @@ class WebhookPayload(BaseModel):
         return validate_callback_url(value)
 
 
-def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
+def _to_task_submission(payload: WebhookPayload, config: SystemConfig) -> TaskSubmission:
     """Map a generic webhook payload onto the canonical TaskSubmission model."""
     # Always prefix the channel with "webhook:" so webhook-sourced sessions are
     # never confused with native integrations (e.g. "telegram" vs "webhook:telegram").
@@ -94,10 +93,15 @@ def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
     )
     external_thread_id = payload.external_thread_id or str(uuid.uuid4())
 
-    default_repo = os.environ.get(WEBHOOK_DEFAULT_REPO_URL_ENV_VAR)
-    resolved_repo_url = payload.repo_url if payload.repo_url and payload.repo_url.strip() else None
-    if resolved_repo_url is None:
-        resolved_repo_url = default_repo if default_repo and default_repo.strip() else None
+    resolved_repo_url = config.resolve_repo_key(payload.repo_key)
+
+    if payload.repo_key and not resolved_repo_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Repo key '{payload.repo_key}' is not in the allowlist.",
+        )
+    elif not resolved_repo_url:
+        resolved_repo_url = config.resolve_repo_key(config.webhook_default_repo_key)
 
     session = SubmissionSession(
         channel=channel,
@@ -123,6 +127,7 @@ def _to_task_submission(payload: WebhookPayload) -> TaskSubmission:
 def receive_webhook(
     payload: WebhookPayload,
     task_service: TaskExecutionService = Depends(get_task_service),
+    config: SystemConfig = Depends(get_system_config),
 ) -> TaskSnapshot:
     """Accept a generic JSON webhook and enqueue it as a task.
 
@@ -139,7 +144,7 @@ def receive_webhook(
     with span_cm:
         set_span_input_output(input_data=payload.model_dump(exclude={"secrets"}))
 
-        submission = _to_task_submission(payload)
+        submission = _to_task_submission(payload, config)
 
         # We will link the session ID after creating the outcome
 

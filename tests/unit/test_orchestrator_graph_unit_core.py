@@ -361,6 +361,38 @@ async def test_generate_task_spec_creates_policy_checked_contract_before_routing
     assert res["timeline_events"][0].payload["policy_violations"] == []
 
 
+@pytest.mark.anyio
+async def test_generate_task_spec_applies_loaded_repo_profile_after_generation() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Update db/migrations/001_init.py",
+                "repo_url": "https://github.com/natanayalo/code-agent",
+                "branch": "master",
+            },
+            "task_kind": "implementation",
+            "repo_profile": {
+                "setup": {"commands": ["npm ci"]},
+                "validation": {
+                    "quick": ["npm test -- --runInBand"],
+                    "full": ["npm run test:coverage"],
+                },
+                "protected_paths": ["db/migrations"],
+                "delivery": {"default_mode": "branch"},
+            },
+        }
+    )
+
+    res = await generate_task_spec(state)
+
+    assert res["task_spec"]["setup_commands"] == ["npm ci"]
+    assert res["task_spec"]["risk_level"] == "high"
+    assert res["task_spec"]["requires_permission"] is True
+    assert res["task_spec"]["permission_reason"] == "Task may affect protected paths"
+    assert res["task_spec"]["verification_commands"] == ["npm run test:coverage"]
+    assert res["task_spec"]["delivery_mode"] == "branch"
+
+
 @pytest.mark.asyncio
 async def test_generate_task_spec_applies_brain_enrichment_with_policy_clamps() -> None:
     class _FakeBrain:
@@ -493,6 +525,48 @@ async def test_generate_task_spec_and_route_node_applies_unified_brain_route() -
     assert res["current_step"] == "generate_task_spec_and_route"
     assert res["route"]["chosen_worker"] == "antigravity"
     assert res["route"]["chosen_profile"] == "antigravity-native-executor-read-only"
+
+
+@pytest.mark.anyio
+async def test_generate_task_spec_and_route_node_applies_repo_profile_before_route() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "Implement the release note",
+                "worker_override": "codex",
+            },
+            "task_kind": "implementation",
+            "repo_profile": {
+                "delivery": {"default_mode": "draft_pr"},
+            },
+        }
+    )
+    profiles = {
+        "codex-workspace": WorkerProfile(
+            name="codex-workspace",
+            worker_type="codex",
+            runtime_mode="native_agent",
+            capability_tags=["execution"],
+            supported_delivery_modes=["workspace"],
+        ),
+        "codex-draft-pr": WorkerProfile(
+            name="codex-draft-pr",
+            worker_type="codex",
+            runtime_mode="native_agent",
+            capability_tags=["execution"],
+            supported_delivery_modes=["draft_pr"],
+        ),
+    }
+    node = build_generate_task_spec_and_route_node(
+        frozenset({"codex"}),
+        available_profiles=profiles,
+    )
+
+    res = await node(state)
+
+    assert res["task_spec"]["delivery_mode"] == "draft_pr"
+    assert res["route"]["chosen_worker"] == "codex"
+    assert res["route"]["chosen_profile"] == "codex-draft-pr"
 
 
 @pytest.mark.asyncio

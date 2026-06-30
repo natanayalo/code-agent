@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import socket
 from collections.abc import Iterator
+from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -199,11 +200,15 @@ def test_webhook_full_payload_creates_and_completes_task(
     client: TestClient, session_factory
 ) -> None:
     """A full payload should propagate all fields and persist a completed task."""
+    client.app.state.system_config.allowed_repos["code-agent"] = (
+        "https://github.com/natanayalo/code-agent"
+    )
+
     response = client.post(
         "/webhook",
         json={
             "task_text": "Create a README file",
-            "repo_url": "https://github.com/natanayalo/code-agent",
+            "repo_key": "code-agent",
             "branch": "master",
             "priority": 1,
             "source": "github-actions",
@@ -367,13 +372,16 @@ def test_webhook_rejects_unknown_worker_profile_override(session_factory) -> Non
         assert worker.requests == []
 
 
-def test_webhook_uses_default_repo_url_when_omitted(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_webhook_uses_default_repo_url_when_omitted(client: TestClient) -> None:
     """When repo_url is omitted, webhook submissions should use the configured default repo."""
-    monkeypatch.setenv(
-        "CODE_AGENT_WEBHOOK_DEFAULT_REPO_URL",
-        "https://github.com/natanayalo/code-agent.git",
+    config = client.app.state.system_config
+    client.app.state.system_config = replace(
+        config,
+        webhook_default_repo_key="default-repo",
+        allowed_repos={
+            **config.allowed_repos,
+            "default-repo": "https://github.com/natanayalo/code-agent.git",
+        },
     )
 
     response = client.post(
@@ -469,11 +477,9 @@ def test_webhook_rejects_task_text_exceeding_max_length(client: TestClient) -> N
     assert response.status_code == 422
 
 
-def test_webhook_rejects_repo_url_exceeding_max_length(client: TestClient) -> None:
-    """repo_url longer than 2048 characters should be rejected with 422."""
-    response = client.post(
-        "/webhook", json={"task_text": "ok", "repo_url": "https://x.com/" + "a" * 2035}
-    )
+def test_webhook_rejects_repo_key_exceeding_max_length(client: TestClient) -> None:
+    """repo_key longer than 255 characters should be rejected with 422."""
+    response = client.post("/webhook", json={"task_text": "ok", "repo_key": "a" * 256})
     assert response.status_code == 422
 
 
@@ -519,7 +525,7 @@ def test_webhook_rejects_display_name_exceeding_max_length(
 
 def test_webhook_rejects_missing_task_text(client: TestClient) -> None:
     """Missing task_text should be rejected with 422."""
-    response = client.post("/webhook", json={"repo_url": "https://example.com/repo"})
+    response = client.post("/webhook", json={"repo_key": "https://example.com/repo"})
     assert response.status_code == 422
 
 

@@ -251,7 +251,7 @@ def test_build_docker_container_run_command_blocks_workspace_root(tmp_path: Path
     workspace = _workspace_handle(tmp_path)
     workspace.repo_url = f"file://{default_workspace_root().resolve()}"
     request = DockerSandboxContainerRequest(workspace=workspace)
-    with pytest.raises(DockerSandboxContainerError, match="Mounting the workspace root"):
+    with pytest.raises(DockerSandboxContainerError, match="Accessing the workspace root"):
         _build_docker_container_run_command(request, image="python:3.12-slim")
 
 
@@ -264,7 +264,7 @@ def test_build_docker_container_run_command_blocks_sibling_workspace(tmp_path: P
     request = DockerSandboxContainerRequest(workspace=workspace)
     with pytest.raises(
         DockerSandboxContainerError,
-        match="Mounting sibling workspaces is forbidden",
+        match="Mounting or accessing sibling workspaces is forbidden",
     ):
         _build_docker_container_run_command(request, image="python:3.12-slim")
 

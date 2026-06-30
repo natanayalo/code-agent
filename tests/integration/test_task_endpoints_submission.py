@@ -110,11 +110,14 @@ def test_submit_task_persists_execution_path_and_allows_polling(
     client: TestClient, session_factory
 ) -> None:
     """Submitting a task should return a pollable snapshot and persist the eventual result."""
+    client.app.state.system_config.allowed_repos["code-agent"] = (
+        "https://github.com/natanayalo/code-agent"
+    )
     response = client.post(
         "/tasks",
         json={
             "task_text": "Create a note and report the result",
-            "repo_url": "https://github.com/natanayalo/code-agent",
+            "repo_key": "code-agent",
             "branch": "master",
             "session": {
                 "channel": "http",
@@ -139,6 +142,16 @@ def test_submit_task_persists_execution_path_and_allows_polling(
     worker = client.app.state.test_worker
     _assert_completed_task_response(get_response, task_id, payload, latest_run, worker)
     _assert_task_persistence_records(session_factory, task_id, payload)
+
+
+def test_submit_task_without_session_uses_unique_anonymous_sessions(client: TestClient) -> None:
+    """Anonymous HTTP submissions should not share a static session thread."""
+    first_response = client.post("/tasks", json={"task_text": "Create the first note"})
+    second_response = client.post("/tasks", json={"task_text": "Create the second note"})
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    assert first_response.json()["session_id"] != second_response.json()["session_id"]
 
 
 def _assert_profiled_task_metadata(payload: dict, latest_run: dict, worker: StaticWorker) -> None:
@@ -211,12 +224,15 @@ def test_task_endpoints_expose_profile_and_runtime_metadata_when_profile_routing
     app.state.test_worker = worker
 
     with TestClient(app) as profiled_client:
+        profiled_client.app.state.system_config.allowed_repos["code-agent"] = (
+            "https://github.com/natanayalo/code-agent"
+        )
         profiled_client.headers["X-Webhook-Token"] = DEFAULT_SHARED_SECRET
         response = profiled_client.post(
             "/tasks",
             json={
                 "task_text": "Apply a profiled codex native task",
-                "repo_url": "https://github.com/natanayalo/code-agent",
+                "repo_key": "code-agent",
                 "session": {
                     "channel": "http",
                     "external_user_id": "http:test-user-profiled",
@@ -300,12 +316,15 @@ def test_task_endpoints_accept_worker_profile_override_for_explicit_legacy_opt_i
     app.state.test_worker = worker
 
     with TestClient(app) as profiled_client:
+        profiled_client.app.state.system_config.allowed_repos["code-agent"] = (
+            "https://github.com/natanayalo/code-agent"
+        )
         profiled_client.headers["X-Webhook-Token"] = DEFAULT_SHARED_SECRET
         response = profiled_client.post(
             "/tasks",
             json={
                 "task_text": "Run with explicit codex tool-loop legacy profile",
-                "repo_url": "https://github.com/natanayalo/code-agent",
+                "repo_key": "code-agent",
                 "worker_profile_override": "codex-tool-loop-executor",
                 "session": {
                     "channel": "http",
@@ -438,12 +457,15 @@ def test_submit_task_rejects_hostname_callback_urls_resolving_to_private_address
 
 def test_submit_task_rejects_invalid_scout_budget(client: TestClient) -> None:
     """Submissions with invalid budget configurations for scout mode should return 422."""
+    client.app.state.system_config.allowed_repos["code-agent"] = (
+        "https://github.com/natanayalo/code-agent"
+    )
     response = client.post(
         "/tasks",
         headers={},
         json={
             "task_text": "Run a scout task",
-            "repo_url": "https://github.com/natanayalo/code-agent",
+            "repo_key": "code-agent",
             "constraints": {"task_type": "scout"},
             "budget": {"max_iterations": "inf"},
         },
@@ -451,3 +473,17 @@ def test_submit_task_rejects_invalid_scout_budget(client: TestClient) -> None:
 
     assert response.status_code == 422
     assert "Invalid budget configuration for max_iterations: inf" in response.json()["detail"]
+
+
+def test_submit_task_rejects_extra_fields(client: TestClient) -> None:
+    """Submissions with extra fields (like raw repo_url) should return 422."""
+    response = client.post(
+        "/tasks",
+        headers={},
+        json={
+            "task_text": "Run a scout task",
+            "repo_url": "https://github.com/natanayalo/code-agent",
+        },
+    )
+
+    assert response.status_code == 422

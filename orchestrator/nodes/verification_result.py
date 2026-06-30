@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import fnmatch
 import logging
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Final, Literal
 
 from db.enums import TimelineEventType
@@ -370,6 +372,12 @@ def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
             reason_code="scope_mismatch",
         )
 
+    # Enforce protected paths for any task that changes files
+    if result.files_changed and state.repo_profile and state.repo_profile.protected_paths:
+        protected_path_violation = _check_protected_paths(state, result.files_changed)
+        if protected_path_violation:
+            return protected_path_violation
+
     if result.status == "success" and not result.files_changed:
         if _requires_deliverable_evidence(state) and not _has_meaningful_deliverable(state):
             return VerificationReportItem(
@@ -419,6 +427,42 @@ def _check_file_changes(state: OrchestratorState) -> VerificationReportItem:
             status="passed",
             message=f"{len(result.files_changed)} files changed.",
         )
+
+
+def _check_protected_paths(
+    state: OrchestratorState, files_changed: list[str]
+) -> VerificationReportItem | None:
+    """Check if any changed files violate protected path rules without prior approval."""
+    if not state.repo_profile or not state.repo_profile.protected_paths:
+        return None
+
+    is_approved = state.approval is not None and state.approval.status == "approved"
+    if is_approved:
+        return None
+
+    for changed_file in files_changed:
+        changed_path = Path(changed_file).as_posix()
+        for protected_pattern in state.repo_profile.protected_paths:
+            match_pattern = (protected_pattern or "").strip() or None
+            if not match_pattern:
+                continue
+            normalized_pattern = match_pattern.rstrip("/")
+            if not normalized_pattern:
+                continue
+            is_plain_prefix = not any(char in match_pattern for char in "*?[")
+            if fnmatch.fnmatchcase(changed_path, match_pattern) or (
+                is_plain_prefix and changed_path.startswith(normalized_pattern + "/")
+            ):
+                return VerificationReportItem(
+                    label="file_changes",
+                    status="failed",
+                    message=(
+                        f"Worker modified a protected path without prior approval: "
+                        f"{changed_path} matched {match_pattern}."
+                    ),
+                    reason_code="unapproved_protected_path",
+                )
+    return None
 
 
 def _check_command_audit(state: OrchestratorState) -> VerificationReportItem:

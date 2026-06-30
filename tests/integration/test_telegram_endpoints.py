@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -137,6 +138,26 @@ def test_telegram_task_text_propagated_to_worker(client: TestClient) -> None:
     worker = client.app.state.test_worker
     assert len(worker.requests) == 1
     assert worker.requests[0].task_text == "Create a README"
+
+
+def test_telegram_uses_configured_default_repo_key(client: TestClient) -> None:
+    config = client.app.state.system_config
+    client.app.state.system_config = replace(
+        config,
+        telegram_default_repo_key="telegram-repo",
+        allowed_repos={
+            **config.allowed_repos,
+            "telegram-repo": "https://github.com/natanayalo/code-agent.git",
+        },
+    )
+
+    response = client.post("/telegram/webhook", json=_text_update("Create a README"))
+    assert response.status_code == 200
+
+    _run_one_queued_task(client)
+    worker = client.app.state.test_worker
+    assert len(worker.requests) == 1
+    assert worker.requests[0].repo_url == "https://github.com/natanayalo/code-agent.git"
 
 
 def test_telegram_same_chat_reuses_session(client: TestClient) -> None:

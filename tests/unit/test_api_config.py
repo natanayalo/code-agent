@@ -26,11 +26,15 @@ def test_load_from_env_normalizes_explicit_values() -> None:
         {
             "CODE_AGENT_SANDBOX_IMAGE": "  custom-sandbox-image  ",
             "CODE_AGENT_WORKSPACE_ROOT": "  /tmp/custom-workspace-root  ",
+            "CODE_AGENT_TELEGRAM_DEFAULT_REPO_KEY": "  telegram-repo  ",
+            "CODE_AGENT_WEBHOOK_DEFAULT_REPO_KEY": "  webhook-repo  ",
         }
     )
 
     assert config.default_image == "custom-sandbox-image"
     assert config.workspace_root == "/tmp/custom-workspace-root"
+    assert config.telegram_default_repo_key == "telegram-repo"
+    assert config.webhook_default_repo_key == "webhook-repo"
 
 
 def test_load_from_env_falls_back_to_default_image_when_blank() -> None:
@@ -69,4 +73,25 @@ def test_load_from_env_parses_scout_allowed_repos() -> None:
     assert config.scout_allowed_repos == {
         "repo1": "https://github.com/repo1",
         "repo2": "https://github.com/repo2",
+    }
+
+
+def test_load_from_env_merges_allowed_repos_with_canonical_precedence() -> None:
+    """Scout repo fallback should not override canonical repo registry entries."""
+    config = SystemConfig.load_from_env(
+        {
+            "CODE_AGENT_ALLOWED_REPOS": "main:https://github.com/org/main",
+            "CODE_AGENT_SCOUT_ALLOWED_REPOS": (
+                "main:https://github.com/org/scout, scout:https://github.com/org/scout"
+            ),
+        }
+    )
+
+    assert config.allowed_repos == {
+        "main": "https://github.com/org/main",
+        "scout": "https://github.com/org/scout",
+    }
+    assert config.scout_allowed_repos == {
+        "main": "https://github.com/org/scout",
+        "scout": "https://github.com/org/scout",
     }
