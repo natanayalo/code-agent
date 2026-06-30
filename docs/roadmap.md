@@ -102,7 +102,7 @@ Implementation sequence:
 3. [x] M20.3 Decision Inbox v2
 4. [x] M20.4 Worker Supervisor v1
 5. [x] M20.5 Repo Validation Profiles
-6. [] M20.6 Draft PR + CI Repair Loop
+6. [x] M20.6 Draft PR + CI Repair Loop
 7. [] M20.7 Expanded Internal Eval Suite
 
 ### M20.1 Runtime Operating Contract
