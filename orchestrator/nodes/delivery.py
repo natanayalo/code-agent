@@ -278,7 +278,14 @@ def _capture_delivery_metadata(
         "url,number,headRefOid,headRefName",
     ]
     try:
-        proc = subprocess.run(cmd, env=env, capture_output=True, text=True, check=True)
+        proc = subprocess.run(
+            cmd,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+            stdin=subprocess.DEVNULL,
+        )
         data = json.loads(proc.stdout)
 
         metadata["pr_url"] = data.get("url")

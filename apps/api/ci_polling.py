@@ -118,7 +118,7 @@ class CIPollingScheduler:
 
                 ci_status = run.delivery_metadata.get("ci_status")
                 # Only poll if not already finalized
-                if ci_status in ("passed", "success", "failed"):
+                if ci_status in ("passed", "success", "failed", "not_found"):
                     continue
 
                 results.append(
@@ -253,10 +253,10 @@ class CIPollingScheduler:
                     future = asyncio.run_coroutine_threadsafe(
                         self._parse_logs_with_llm_async(logs, check_name), self._loop_ref
                     )
-                    parsed_logs = future.result()
+                    parsed_logs = future.result(timeout=60)
                 else:
                     parsed_logs = asyncio.run(self._parse_logs_with_llm_async(logs, check_name))
-            except Exception as e:
+            except (TimeoutError, Exception) as e:
                 logger.warning(f"Failed to run async LLM parsing: {e}")
                 parsed_logs = logs
         else:
@@ -353,7 +353,14 @@ class CIPollingScheduler:
                 "databaseId,workflowName,status,conclusion",
             ]
             try:
-                proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+                proc = subprocess.run(
+                    cmd,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    stdin=subprocess.DEVNULL,
+                )
                 if proc.returncode == 0:
                     runs = json.loads(proc.stdout)
                     for r in runs:
@@ -367,15 +374,22 @@ class CIPollingScheduler:
                             if r.get("conclusion") == "failure":
                                 run_id = str(r.get("databaseId"))
                                 break
-            except Exception:
-                pass
+            except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as e:
+                logger.debug(f"Failed to list runs: {e}")
 
         if not run_id:
             return None
 
         cmd_log = ["gh", "run", "view", run_id, "--log-failed", "-R", repo_spec]
         try:
-            proc = subprocess.run(cmd_log, env=env, capture_output=True, text=True)
+            proc = subprocess.run(
+                cmd_log,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                stdin=subprocess.DEVNULL,
+            )
             if proc.returncode == 0:
                 log_data = proc.stdout
                 limit = self.config.ci_polling_log_limit_bytes
@@ -384,7 +398,7 @@ class CIPollingScheduler:
                 if len(log_data) > limit:
                     return log_data[-limit:]
                 return log_data
-        except Exception:
-            pass
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.debug(f"Failed to view run log: {e}")
 
         return None
