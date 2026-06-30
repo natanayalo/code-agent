@@ -34,6 +34,7 @@ class CIPollingScheduler:
         self.session_factory: Any | None = getattr(task_service, "session_factory", None)
         self._running = False
         self._task: asyncio.Task[None] | None = None
+        self._loop_ref: asyncio.AbstractEventLoop | None = None
 
     def start(self) -> None:
         """Start the background scheduler loop."""
@@ -49,6 +50,11 @@ class CIPollingScheduler:
         if self.session_factory is None:
             logger.warning("CIPollingScheduler enabled but task service has no session factory.")
             return
+
+        try:
+            self._loop_ref = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop_ref = None
 
         self._running = True
         self._task = asyncio.create_task(self._loop())
@@ -235,7 +241,13 @@ class CIPollingScheduler:
         logs = self._fetch_logs(repo_spec, head_sha, check, env)
         if logs:
             try:
-                parsed_logs = asyncio.run(self._parse_logs_with_llm_async(logs, check_name))
+                if self._loop_ref and self._loop_ref.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._parse_logs_with_llm_async(logs, check_name), self._loop_ref
+                    )
+                    parsed_logs = future.result()
+                else:
+                    parsed_logs = asyncio.run(self._parse_logs_with_llm_async(logs, check_name))
             except Exception as e:
                 logger.warning(f"Failed to run async LLM parsing: {e}")
                 parsed_logs = logs
@@ -356,6 +368,8 @@ class CIPollingScheduler:
             if proc.returncode == 0:
                 log_data = proc.stdout
                 limit = self.config.ci_polling_log_limit_bytes
+                if limit <= 0:
+                    return ""
                 if len(log_data) > limit:
                     return log_data[-limit:]
                 return log_data

@@ -18,6 +18,8 @@ def github_repo_spec_from_url(repo_url: str | None) -> str | None:
     ssh_match = re.match(r"git@([^:]+):([^/]+)/(.+?)(?:\.git)?$", stripped)
     if ssh_match:
         host, owner, repo = ssh_match.groups()
+        if host == "github.com":
+            return f"{owner}/{repo}"
         return f"{host}/{owner}/{repo}"
 
     parsed = urlparse(stripped)
@@ -36,6 +38,8 @@ def github_repo_spec_from_url(repo_url: str | None) -> str | None:
         host, owner, repo = owner_repo_match.groups()
         if repo.endswith(".git"):
             repo = repo[:-4]
+        if host == "github.com":
+            return f"{owner}/{repo}"
         return f"{host}/{owner}/{repo}" if host else f"{owner}/{repo}"
 
     return None

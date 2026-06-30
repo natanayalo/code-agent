@@ -13,7 +13,7 @@ def test_github_repo_spec_from_common_clone_urls() -> None:
     )
     assert (
         github_repo_spec_from_url("git@github.com:natanayalo/code-agent.git")
-        == "github.com/natanayalo/code-agent"
+        == "natanayalo/code-agent"
     )
     assert github_repo_spec_from_url("natanayalo/code-agent") == "natanayalo/code-agent"
     assert github_repo_spec_from_url("") is None

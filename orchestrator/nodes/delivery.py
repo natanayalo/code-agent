@@ -392,15 +392,19 @@ def _delivery_completed_response(
     }
 
 
-def _delivery_success_response(
+async def _delivery_success_response(
     state: OrchestratorState,
     delivery_result: WorkerResult,
     branch_name: str,
     pr_title: str,
     gh_token: str | None,
 ) -> dict[str, Any]:
+    import asyncio
+
     merged_result = _merge_delivery_result(state.result, delivery_result)
-    delivery_metadata = _capture_delivery_metadata(state, branch_name, gh_token)
+    delivery_metadata = await asyncio.to_thread(
+        _capture_delivery_metadata, state, branch_name, gh_token
+    )
     if delivery_metadata:
         merged_result.delivery_metadata = delivery_metadata
     return _delivery_completed_response(
@@ -483,7 +487,7 @@ async def _run_deliver_result(
         if isinstance(result, dict):
             return result
 
-        return _delivery_success_response(state, result, branch_name, pr_title, gh_token)
+        return await _delivery_success_response(state, result, branch_name, pr_title, gh_token)
 
 
 def build_deliver_result_node(
