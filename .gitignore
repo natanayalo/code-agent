@@ -29,3 +29,4 @@ htmlcov/
 # Local databases
 *.db
 *.sqlite
+evaluation/baseline_*.json

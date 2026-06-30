@@ -261,7 +261,7 @@ def test_missing_replay_outcome_is_scored_as_failure() -> None:
     assert "missing replay outcome" in report.results[0].outcome.summary.lower()
 
 
-def test_scoring_omits_success_weight_when_success_not_required() -> None:
+def test_scoring_asserts_failure_when_success_not_required() -> None:
     case = FrozenTaskCase(
         case_id="no-success-weight",
         repo_fixture="fixtures/empty",
@@ -286,8 +286,8 @@ def test_scoring_omits_success_weight_when_success_not_required() -> None:
         )
     )
 
-    assert report.total_score == 1
-    assert report.max_score == 1
+    assert report.total_score == 2
+    assert report.max_score == 2
     assert report.results[0].passed is True
 
 
@@ -318,8 +318,8 @@ def test_scoring_normalizes_required_and_changed_paths() -> None:
     )
 
     assert report.total_score == 1
-    assert report.max_score == 1
-    assert report.results[0].passed is True
+    assert report.max_score == 2
+    assert report.results[0].passed is False
 
 
 def test_write_report_persists_structured_json(tmp_path: Path) -> None:

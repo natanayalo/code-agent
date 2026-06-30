@@ -276,7 +276,7 @@ def _compute_reliability_report(
 def _score_case(case: FrozenTaskCase, outcome: WorkerOutcome) -> CaseRunResult:
     points = 0
     max_points = (
-        int(case.expectation.require_success)
+        1
         + int(case.expectation.require_tests_passed)
         + len(case.expectation.required_files_changed)
         + len(case.expectation.required_summary_substrings)
@@ -288,6 +288,11 @@ def _score_case(case: FrozenTaskCase, outcome: WorkerOutcome) -> CaseRunResult:
             points += 1
         else:
             failures.append("status was not success")
+    else:
+        if outcome.status != "success":
+            points += 1
+        else:
+            failures.append("status was success but expected failure")
 
     if case.expectation.require_tests_passed:
         if outcome.tests_passed is True:

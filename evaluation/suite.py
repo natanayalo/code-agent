@@ -221,9 +221,12 @@ def default_replay_outcomes(cases: tuple[FrozenTaskCase, ...]) -> dict[str, Work
     for case in cases:
         suffix_parts = list(case.expectation.required_summary_substrings)
         if not suffix_parts:
-            suffix_parts.append("all acceptance checks passed")
+            if case.expectation.require_success:
+                suffix_parts.append("all acceptance checks passed")
+            else:
+                suffix_parts.append("expected failure")
         outcomes[case.case_id] = WorkerOutcome(
-            status="success",
+            status="success" if case.expectation.require_success else "failure",
             summary="; ".join(suffix_parts),
             files_changed=case.expectation.required_files_changed,
             tests_passed=True if case.expectation.require_tests_passed else None,
