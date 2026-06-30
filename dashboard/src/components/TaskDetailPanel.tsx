@@ -672,6 +672,40 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
           </section>
 
           <section className="task-detail-section">
+            <h4>Delivery Metadata</h4>
+            {run?.delivery_metadata ? (
+              <>
+                <div className="task-detail-grid">
+                  <p>
+                    <strong>PR URL:</strong>{' '}
+                    {run.delivery_metadata.pr_url ? (
+                      <a href={run.delivery_metadata.pr_url as string} target="_blank" rel="noopener noreferrer">
+                        {run.delivery_metadata.pr_url as string}
+                      </a>
+                    ) : (
+                      'N/A'
+                    )}
+                  </p>
+                  <p>
+                    <strong>Branch:</strong> {run.delivery_metadata.branch_name as string || 'N/A'}
+                  </p>
+                  <p>
+                    <strong>Head SHA:</strong> {run.delivery_metadata.head_sha as string || 'N/A'}
+                  </p>
+                  <p>
+                    <strong>CI Status:</strong> {formatLabel((run.delivery_metadata.ci_status as string) || 'unknown')}
+                  </p>
+                </div>
+                {Array.isArray(run.delivery_metadata.ci_failed_jobs) && run.delivery_metadata.ci_failed_jobs.length > 0 && (
+                  renderStringList('Failed CI Jobs', run.delivery_metadata.ci_failed_jobs as string[])
+                )}
+              </>
+            ) : (
+              <p className="task-detail-muted">No delivery metadata available.</p>
+            )}
+          </section>
+
+          <section className="task-detail-section">
             <h4>Timeline</h4>
             {sortedTimeline.length > 0 ? (
               <ol className="task-timeline-list">

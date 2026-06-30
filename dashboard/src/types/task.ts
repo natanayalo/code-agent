@@ -51,6 +51,7 @@ export interface TaskSummarySnapshot {
   repo_url?: string | null;
   branch?: string | null;
   priority: number;
+  repair_for_task_id?: string | null;
   chosen_worker?: string | null;
   chosen_profile?: string | null;
   runtime_mode?: string | null;
@@ -68,6 +69,18 @@ export interface TaskSummarySnapshot {
   trace_id?: string | null;
   trace_url?: string | null;
 }
+
+export interface DeliveryMetadataSnapshot {
+  branch_name?: string | null;
+  pr_title?: string | null;
+  pr_url?: string | null;
+  pr_number?: number | null;
+  head_sha?: string | null;
+  ci_status?: string | null;
+  ci_failed_jobs?: string[] | null;
+  [key: string]: unknown;
+}
+
 export interface WorkerRunSnapshot {
   run_id: string;
   session_id?: string | null;
@@ -82,6 +95,7 @@ export interface WorkerRunSnapshot {
   requested_permission?: string | null;
   budget_usage?: Record<string, unknown> | null;
   verifier_outcome?: Record<string, unknown> | null;
+  delivery_metadata?: DeliveryMetadataSnapshot | null;
   commands_run: CommandRunSnapshot[];
   files_changed_count: number;
   files_changed: string[];

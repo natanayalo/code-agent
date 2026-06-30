@@ -49,6 +49,7 @@ class TaskRepository:
         runtime_mode: str | WorkerRuntimeMode | None = None,
         route_reason: str | None = None,
         trace_context: dict[str, str] | None = None,
+        repair_for_task_id: str | None = None,
     ) -> Task:
         task = Task(
             session_id=session_id,
@@ -72,6 +73,7 @@ class TaskRepository:
             runtime_mode=cast(WorkerRuntimeMode | None, runtime_mode),
             route_reason=route_reason,
             trace_context=trace_context or {},
+            repair_for_task_id=repair_for_task_id,
         )
         self.session.add(task)
         self.session.flush()

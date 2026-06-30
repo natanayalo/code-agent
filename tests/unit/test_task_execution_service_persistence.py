@@ -136,6 +136,52 @@ def test_persist_execution_outcome_creates_error_worker_run_without_result() -> 
     assert task_snapshot.latest_run.files_changed_count == 0
 
 
+def test_persist_execution_outcome_persists_delivery_metadata() -> None:
+    """Delivery metadata should survive run persistence and snapshot mapping."""
+    session_factory = _setup_persistence_test_db()
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    submission = execution_module.TaskSubmission(
+        task_text="Persist delivery metadata",
+        repo_url="https://github.com/natanayalo/code-agent",
+    )
+    _, persisted = service.create_task(submission)
+    delivery_metadata = {
+        "delivery_mode": "draft_pr",
+        "branch_name": "task/test-ci",
+        "pr_url": "https://github.com/natanayalo/code-agent/pull/123",
+        "pr_number": 123,
+        "head_sha": "abc123",
+        "ci_status": "pending",
+        "ci_failed_jobs": [],
+    }
+    state = _make_base_orchestrator_state(
+        persisted,
+        submission,
+        result=WorkerResult(
+            status="success",
+            summary="done",
+            delivery_metadata=delivery_metadata,
+        ),
+    )
+
+    service._persist_execution_outcome(
+        task_id=persisted.task_id,
+        state=state,
+        started_at=datetime.now(),
+        finished_at=datetime.now(),
+    )
+
+    task_snapshot = service.get_task(persisted.task_id)
+    assert task_snapshot is not None
+    assert task_snapshot.latest_run is not None
+    assert task_snapshot.latest_run.delivery_metadata is not None
+    assert task_snapshot.latest_run.delivery_metadata.pr_url == delivery_metadata["pr_url"]
+    assert task_snapshot.latest_run.delivery_metadata.head_sha == "abc123"
+
+
 def test_retention_cleanup_clears_workspace_files_and_persisted_artifacts(
     tmp_path: Path,
 ) -> None:

@@ -209,6 +209,7 @@ class WorkerResult(WorkerModel):
     json_payload: dict[str, Any] | None = None
     friction_reports: list[dict[str, Any]] = Field(default_factory=list)
     maintenance_requests: list[MaintenanceRequest] = Field(default_factory=list)
+    delivery_metadata: dict[str, Any] | None = None
     next_action_hint: str | None = None
     stdout: Any | None = None
     stderr: Any | None = None
