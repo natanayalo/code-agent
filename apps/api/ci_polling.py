@@ -118,7 +118,7 @@ class CIPollingScheduler:
 
                 ci_status = run.delivery_metadata.get("ci_status")
                 # Only poll if not already finalized
-                if ci_status in ("passed", "success"):
+                if ci_status in ("passed", "success", "failed"):
                     continue
 
                 results.append(
@@ -192,7 +192,9 @@ class CIPollingScheduler:
             elif state in ("PENDING", "IN_PROGRESS", "QUEUED"):
                 all_passed = False
 
-        new_status = "failed" if failed_checks else "passed" if all_passed else "pending"
+        new_status = (
+            "failed" if failed_checks else "passed" if (all_passed and checks) else "pending"
+        )
         self._update_run_ci_metadata(run_info["run_id"], new_status, failed_checks)
 
         if failed_checks:
