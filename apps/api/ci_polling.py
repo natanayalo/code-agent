@@ -31,7 +31,7 @@ class CIPollingScheduler:
     def __init__(self, task_service: TaskExecutionService, config: SystemConfig) -> None:
         self.task_service = task_service
         self.config = config
-        self.session_factory = task_service.session_factory
+        self.session_factory: Any | None = getattr(task_service, "session_factory", None)
         self._running = False
         self._task: asyncio.Task[None] | None = None
 
@@ -46,6 +46,9 @@ class CIPollingScheduler:
             logger.warning("CIPollingScheduler enabled but gh CLI was not found on PATH.")
         if not (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")):
             logger.warning("CIPollingScheduler enabled but GH_TOKEN/GITHUB_TOKEN is not set.")
+        if self.session_factory is None:
+            logger.warning("CIPollingScheduler enabled but task service has no session factory.")
+            return
 
         self._running = True
         self._task = asyncio.create_task(self._loop())
@@ -89,9 +92,12 @@ class CIPollingScheduler:
 
     def _get_pending_runs(self) -> list[dict[str, Any]]:
         # Fetch runs from last 7 days that might have active PRs
+        session_factory = self.session_factory
+        if session_factory is None:
+            return []
         cutoff = datetime.now(UTC) - timedelta(days=7)
         results = []
-        with session_scope(self.session_factory) as session:
+        with session_scope(session_factory) as session:
             stmt = (
                 select(WorkerRun)
                 .options(selectinload(WorkerRun.task))
@@ -175,17 +181,7 @@ class CIPollingScheduler:
                 all_passed = False
 
         new_status = "failed" if failed_checks else "passed" if all_passed else "pending"
-
-        with session_scope(self.session_factory) as session:
-            db_run = session.get(WorkerRun, run_info["run_id"])
-            if db_run and db_run.delivery_metadata:
-                db_run.delivery_metadata["ci_status"] = new_status
-                db_run.delivery_metadata["ci_last_checked_at"] = datetime.now(UTC).isoformat()
-                if new_status == "failed":
-                    db_run.delivery_metadata["ci_failed_jobs"] = [
-                        name for c in failed_checks if isinstance((name := c.get("name")), str)
-                    ]
-                flag_modified(db_run, "delivery_metadata")
+        self._update_run_ci_metadata(run_info["run_id"], new_status, failed_checks)
 
         if failed_checks:
             for check in failed_checks:
@@ -198,6 +194,27 @@ class CIPollingScheduler:
                     check,
                     env,
                 )
+
+    def _update_run_ci_metadata(
+        self,
+        run_id: str,
+        new_status: str,
+        failed_checks: list[dict[str, Any]],
+    ) -> None:
+        session_factory = self.session_factory
+        if session_factory is None:
+            return
+        with session_scope(session_factory) as session:
+            db_run = session.get(WorkerRun, run_id)
+            if not db_run or not db_run.delivery_metadata:
+                return
+            db_run.delivery_metadata["ci_status"] = new_status
+            db_run.delivery_metadata["ci_last_checked_at"] = datetime.now(UTC).isoformat()
+            if new_status == "failed":
+                db_run.delivery_metadata["ci_failed_jobs"] = [
+                    name for c in failed_checks if isinstance((name := c.get("name")), str)
+                ]
+            flag_modified(db_run, "delivery_metadata")
 
     def _submit_repair_task(
         self,
