@@ -116,6 +116,9 @@ class CIPollingScheduler:
                 if not run.delivery_metadata:
                     continue
 
+                if run.delivery_metadata.get("delivery_mode") != "draft_pr":
+                    continue
+
                 ci_status = run.delivery_metadata.get("ci_status")
                 # Only poll if not already finalized
                 if ci_status in ("passed", "success", "failed", "not_found"):
@@ -267,7 +270,7 @@ class CIPollingScheduler:
         check: dict[str, Any],
         env: dict[str, str],
     ) -> None:
-        check_name = str(check.get("name") or "unknown-check")
+        check_name = str(check.get("name") or "unknown-check")[:100]
         delivery_key = DeliveryKey(
             channel="ci_polling",
             delivery_id=f"ci_repair:{task_id}:{head_sha}:{check_name}",
@@ -289,7 +292,8 @@ class CIPollingScheduler:
                         future.cancel()
                         parsed_logs = logs
                 else:
-                    parsed_logs = asyncio.run(self._parse_logs_with_llm_async(logs, check_name))
+                    logger.warning("Main event loop is not running; skipping LLM log parsing.")
+                    parsed_logs = logs
             except Exception as e:
                 logger.warning(f"Failed to run async LLM parsing: {e}")
                 parsed_logs = logs
