@@ -70,11 +70,18 @@ def _supported_profile_names(self: Any, profiles: dict[str, Any]) -> list[str]:
 
 
 def _supported_worker_types(self: Any) -> set[WorkerType]:
-    supported = {WorkerType.CODEX}
-    if getattr(self, "gemini_worker", None) is not None:
-        supported.add(WorkerType.ANTIGRAVITY)
-    if getattr(self, "openrouter_worker", None) is not None:
-        supported.add(WorkerType.OPENROUTER)
+    supported = set()
+    worker = getattr(self, "worker", None)
+    if worker and hasattr(worker, "available_workers"):
+        for w_type in worker.available_workers().keys():
+            if w_type != "shell":
+                try:
+                    supported.add(coerce_worker_type(w_type))
+                except (TypeError, ValueError):
+                    pass
+
+    if not supported:
+        supported.add(WorkerType.CODEX)
 
     for profile_name, profile in (getattr(self, "worker_profiles", None) or {}).items():
         supported.add(_profile_worker_type(profile_name, profile))

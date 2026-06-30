@@ -42,14 +42,22 @@ def test_build_task_service_from_env_builds_antigravity_worker_when_configured(
 
     try:
         assert service is not None
-        assert isinstance(service.gemini_worker, GeminiCliWorker)
-        assert isinstance(service.gemini_worker.runtime_adapter, AntigravityCliRuntimeAdapter)
-        assert service.gemini_worker.runtime_adapter.executable == "/usr/local/bin/agy"
-        assert service.gemini_worker.runtime_adapter.model == "gemini-3-pro"
-        assert service.gemini_worker.runtime_adapter.tool_permission == "strict"
-        assert service.gemini_worker.runtime_adapter.artifact_review_policy == "asks-for-review"
-        assert service.gemini_worker.native_sandbox_enabled is True
-        assert service.gemini_worker.default_runtime_mode == "native_agent"
+        assert isinstance(service.worker.get_worker("antigravity"), GeminiCliWorker)
+        assert isinstance(
+            service.worker.get_worker("antigravity").runtime_adapter, AntigravityCliRuntimeAdapter
+        )
+        assert (
+            service.worker.get_worker("antigravity").runtime_adapter.executable
+            == "/usr/local/bin/agy"
+        )
+        assert service.worker.get_worker("antigravity").runtime_adapter.model == "gemini-3-pro"
+        assert service.worker.get_worker("antigravity").runtime_adapter.tool_permission == "strict"
+        assert (
+            service.worker.get_worker("antigravity").runtime_adapter.artifact_review_policy
+            == "asks-for-review"
+        )
+        assert service.worker.get_worker("antigravity").native_sandbox_enabled is True
+        assert service.worker.get_worker("antigravity").default_runtime_mode == "native_agent"
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
@@ -74,11 +82,18 @@ def test_build_task_service_from_env_treats_legacy_gemini_bin_agy_as_antigravity
 
     try:
         assert service is not None
-        assert isinstance(service.gemini_worker, GeminiCliWorker)
-        assert isinstance(service.gemini_worker.runtime_adapter, AntigravityCliRuntimeAdapter)
-        assert service.gemini_worker.runtime_adapter.executable == "/usr/local/bin/agy"
-        assert service.gemini_worker.runtime_adapter.model == "gemini-3-pro"
-        assert service.gemini_worker.runtime_adapter.request_timeout_seconds == 77
-        assert service.gemini_worker.native_sandbox_enabled is True
+        assert isinstance(service.worker.get_worker("antigravity"), GeminiCliWorker)
+        assert isinstance(
+            service.worker.get_worker("antigravity").runtime_adapter, AntigravityCliRuntimeAdapter
+        )
+        assert (
+            service.worker.get_worker("antigravity").runtime_adapter.executable
+            == "/usr/local/bin/agy"
+        )
+        assert service.worker.get_worker("antigravity").runtime_adapter.model == "gemini-3-pro"
+        assert (
+            service.worker.get_worker("antigravity").runtime_adapter.request_timeout_seconds == 77
+        )
+        assert service.worker.get_worker("antigravity").native_sandbox_enabled is True
     finally:
         _close_outbound_http_clients(outbound_http_clients)

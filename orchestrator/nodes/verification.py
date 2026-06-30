@@ -15,7 +15,6 @@ from apps.observability import (
 from db.enums import TimelineEventType
 from orchestrator.brain import OrchestratorBrain
 from orchestrator.nodes.utils import (
-    _available_workers,
     _ensure_state,
 )
 from orchestrator.nodes.verification_result import (
@@ -197,16 +196,12 @@ def build_verify_result_node(
     *,
     enable_independent_verifier: bool = False,
     worker: Worker | None = None,
-    gemini_worker: Worker | None = None,
-    openrouter_worker: Worker | None = None,
-    shell_worker: Worker | None = None,
     orchestrator_brain: OrchestratorBrain | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
-    """Factory for the verification node."""
-
-    available_workers = _available_workers(
-        worker, gemini_worker, openrouter_worker, shell_worker=shell_worker
-    )
+    """Create the verify-result node."""
+    available_workers = getattr(
+        worker, "available_workers", lambda: {"codex": worker} if worker else {}
+    )()
 
     async def verify_result_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)

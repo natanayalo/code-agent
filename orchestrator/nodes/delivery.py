@@ -20,7 +20,6 @@ from apps.observability import (
 from db.enums import TimelineEventType, WorkerRunStatus
 from orchestrator.github_repo import github_repo_spec_from_url
 from orchestrator.nodes.utils import (
-    _available_workers,
     _ensure_state,
     _progress_update,
     _timeline_event,
@@ -426,9 +425,6 @@ async def _delivery_success_response(
 async def _run_deliver_result(
     state_input: OrchestratorState,
     worker: Worker | None = None,
-    gemini_worker: Worker | None = None,
-    openrouter_worker: Worker | None = None,
-    shell_worker: Worker | None = None,
 ) -> dict[str, Any]:
     state = _ensure_state(state_input)
 
@@ -437,7 +433,7 @@ async def _run_deliver_result(
     assert state.task_spec is not None
     assert state.dispatch is not None
 
-    available = _available_workers(worker, gemini_worker, openrouter_worker, shell_worker)
+    available = getattr(worker, "available_workers", lambda: {"codex": worker} if worker else {})()
     worker_id, delivery_worker = _select_delivery_worker(state, available)
     if not delivery_worker:
         msg = f"Delivery failed: no suitable delivery worker configured (tried {worker_id})."
@@ -500,9 +496,6 @@ async def _run_deliver_result(
 
 def build_deliver_result_node(
     worker: Worker | None = None,
-    gemini_worker: Worker | None = None,
-    openrouter_worker: Worker | None = None,
-    shell_worker: Worker | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Factory for the delivery node."""
     import functools
@@ -510,7 +503,4 @@ def build_deliver_result_node(
     return functools.partial(
         _run_deliver_result,
         worker=worker,
-        gemini_worker=gemini_worker,
-        openrouter_worker=openrouter_worker,
-        shell_worker=shell_worker,
     )

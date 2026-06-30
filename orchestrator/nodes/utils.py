@@ -10,7 +10,7 @@ from db.base import utc_now
 from db.enums import TimelineEventType
 from orchestrator.constants import COMPLEX_TASK_MARKERS
 from orchestrator.state import OrchestratorState, TaskTimelineEventState
-from workers import Worker, WorkerRequest, WorkerResult, WorkerType
+from workers import WorkerType
 
 logger = logging.getLogger(__name__)
 
@@ -24,48 +24,6 @@ _COMPLEX_TASK_PATTERN = re.compile(
 )
 
 MINIMUM_MEANINGFUL_SUMMARY_LENGTH: Final[int] = 100
-
-
-def _default_worker_result_provider(request: WorkerRequest) -> WorkerResult:
-    """Return a fake successful worker result for the skeleton happy path."""
-    return WorkerResult(
-        status="success",
-        commands_run=[],
-        files_changed=[],
-        test_results=[],
-        artifacts=[],
-        next_action_hint="persist_memory",
-        summary=f"Fake worker completed: {request.task_text}",
-    )
-
-
-class _DefaultFakeWorker(Worker):
-    """Fallback worker used until a real provider-specific adapter exists."""
-
-    async def run(
-        self,
-        request: WorkerRequest,
-        *,
-        system_prompt: str | None = None,
-    ) -> WorkerResult:
-        return _default_worker_result_provider(request)
-
-
-def _available_workers(
-    worker: Worker | None = None,
-    gemini_worker: Worker | None = None,
-    openrouter_worker: Worker | None = None,
-    shell_worker: Worker | None = None,
-) -> dict[str, Worker]:
-    """Return the workers that are actually wired into the graph."""
-    result: dict[str, Worker] = {CODEX_WORKER: worker or _DefaultFakeWorker()}
-    if gemini_worker is not None:
-        result[ANTIGRAVITY_WORKER] = gemini_worker
-    if openrouter_worker is not None:
-        result[OPENROUTER_WORKER] = openrouter_worker
-    if shell_worker is not None:
-        result["shell"] = shell_worker
-    return result
 
 
 def _ensure_state(state: OrchestratorState | dict[str, Any]) -> OrchestratorState:

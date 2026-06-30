@@ -112,9 +112,11 @@ def test_build_task_service_from_env_builds_a_codex_cli_worker(tmp_path: Path) -
 
     try:
         assert service is not None
-        assert isinstance(service.worker, CodexCliWorker)
-        assert isinstance(service.worker.runtime_adapter, CodexExecCliRuntimeAdapter)
-        assert service.worker.default_runtime_mode == "native_agent"
+        assert isinstance(service.worker.get_worker("codex"), CodexCliWorker)
+        assert isinstance(
+            service.worker.get_worker("codex").runtime_adapter, CodexExecCliRuntimeAdapter
+        )
+        assert service.worker.get_worker("codex").default_runtime_mode == "native_agent"
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
@@ -180,8 +182,10 @@ def test_build_task_service_from_env_wires_planner_worker_into_orchestrator_brai
     try:
         assert service is not None
         assert isinstance(service.orchestrator_brain, RuleBasedOrchestratorBrain)
-        assert service.gemini_worker is not None
-        assert service.orchestrator_brain.primary_planner is service.gemini_worker
+        assert service.worker.get_worker("antigravity") is not None
+        assert service.orchestrator_brain.primary_planner is service.worker.get_worker(
+            "antigravity"
+        )
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
@@ -226,8 +230,8 @@ def test_build_task_service_from_env_propagates_gemini_native_sandbox_toggle(
 
     try:
         assert service is not None
-        assert isinstance(service.gemini_worker, GeminiCliWorker)
-        assert service.gemini_worker.native_sandbox_enabled is False
+        assert isinstance(service.worker.get_worker("antigravity"), GeminiCliWorker)
+        assert service.worker.get_worker("antigravity").native_sandbox_enabled is False
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
@@ -282,7 +286,7 @@ def test_build_task_service_from_env_ignores_deprecated_codex_tool_loop_default_
         assert service is not None
         assert "codex-native-executor" in service.worker_profiles
         assert "codex-tool-loop-executor" not in service.worker_profiles
-        assert service.worker.default_runtime_mode == "native_agent"
+        assert service.worker.get_worker("codex").default_runtime_mode == "native_agent"
         assert "Ignoring deprecated CODE_AGENT_CODEX_RUNTIME_MODE=tool_loop" in caplog.text
     finally:
         _close_outbound_http_clients(outbound_http_clients)
@@ -303,8 +307,11 @@ def test_build_task_service_from_env_applies_sandbox_image_override(tmp_path: Pa
 
     try:
         assert service is not None
-        assert isinstance(service.worker, CodexCliWorker)
-        assert service.worker.container_manager.default_image == "code-agent-worker"
+        assert isinstance(service.worker.get_worker("codex"), CodexCliWorker)
+        assert (
+            service.worker.get_worker("codex").container_manager.default_image
+            == "code-agent-worker"
+        )
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
@@ -351,8 +358,8 @@ def test_build_task_service_from_env_builds_gemini_worker_when_configured(tmp_pa
 
     try:
         assert service is not None
-        assert isinstance(service.gemini_worker, GeminiCliWorker)
-        assert service.gemini_worker.default_runtime_mode == "native_agent"
+        assert isinstance(service.worker.get_worker("antigravity"), GeminiCliWorker)
+        assert service.worker.get_worker("antigravity").default_runtime_mode == "native_agent"
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
@@ -377,8 +384,8 @@ def test_build_task_service_from_env_ignores_deprecated_gemini_tool_loop_default
 
     try:
         assert service is not None
-        assert isinstance(service.gemini_worker, GeminiCliWorker)
-        assert service.gemini_worker.default_runtime_mode == "native_agent"
+        assert isinstance(service.worker.get_worker("antigravity"), GeminiCliWorker)
+        assert service.worker.get_worker("antigravity").default_runtime_mode == "native_agent"
         assert "antigravity-native-executor" in service.worker_profiles
         assert "antigravity-tool-loop-executor" not in service.worker_profiles
         assert "antigravity-native-planner" in service.worker_profiles
@@ -406,7 +413,7 @@ def test_build_task_service_from_env_ignores_codex_legacy_tool_loop_profiles_whe
 
     try:
         assert service is not None
-        assert service.worker.default_runtime_mode == "native_agent"
+        assert service.worker.get_worker("codex").default_runtime_mode == "native_agent"
         assert "codex-native-executor" in service.worker_profiles
         assert "codex-tool-loop-executor" not in service.worker_profiles
         assert "Ignoring CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED" in caplog.text
@@ -433,8 +440,8 @@ def test_build_task_service_from_env_ignores_gemini_legacy_tool_loop_profiles_wh
 
     try:
         assert service is not None
-        assert isinstance(service.gemini_worker, GeminiCliWorker)
-        assert service.gemini_worker.default_runtime_mode == "native_agent"
+        assert isinstance(service.worker.get_worker("antigravity"), GeminiCliWorker)
+        assert service.worker.get_worker("antigravity").default_runtime_mode == "native_agent"
         assert "antigravity-native-executor" in service.worker_profiles
         assert "antigravity-tool-loop-executor" not in service.worker_profiles
         assert "antigravity-native-planner" in service.worker_profiles
@@ -467,7 +474,7 @@ def test_build_task_service_from_env_builds_openrouter_worker_when_configured(
 
     try:
         assert service is not None
-        assert isinstance(service.openrouter_worker, OpenRouterCliWorker)
+        assert isinstance(service.worker.get_worker("openrouter"), OpenRouterCliWorker)
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 
@@ -496,7 +503,9 @@ def test_build_task_service_from_env_openrouter_profile_requires_opt_in(
 
     try:
         assert service_without_opt_in is not None
-        assert isinstance(service_without_opt_in.openrouter_worker, OpenRouterCliWorker)
+        assert isinstance(
+            service_without_opt_in.worker.get_worker("openrouter"), OpenRouterCliWorker
+        )
         assert "openrouter-tool-loop-legacy" not in service_without_opt_in.worker_profiles
     finally:
         _close_outbound_http_clients(outbound_http_clients)
@@ -515,7 +524,7 @@ def test_build_task_service_from_env_openrouter_profile_requires_opt_in(
 
     try:
         assert service_with_opt_in is not None
-        assert isinstance(service_with_opt_in.openrouter_worker, OpenRouterCliWorker)
+        assert isinstance(service_with_opt_in.worker.get_worker("openrouter"), OpenRouterCliWorker)
         assert "openrouter-tool-loop-legacy" in service_with_opt_in.worker_profiles
     finally:
         _close_outbound_http_clients(outbound_http_clients_opt_in)
@@ -561,7 +570,7 @@ def test_build_task_service_from_env_uses_non_sqlite_engine_path(tmp_path: Path)
 
     try:
         assert service is not None
-        assert isinstance(service.worker, CodexCliWorker)
+        assert isinstance(service.worker.get_worker("codex"), CodexCliWorker)
     finally:
         _close_outbound_http_clients(outbound_http_clients)
 

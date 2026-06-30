@@ -50,7 +50,7 @@ async def test_submit_task_moves_sync_persistence_work_off_thread(monkeypatch) -
     monkeypatch.setattr(
         execution_module,
         "build_orchestrator_graph",
-        lambda *, worker, gemini_worker=None, **kwargs: fake_graph,
+        lambda *, worker, **kwargs: fake_graph,
     )
 
     service = execution_module.TaskExecutionService(

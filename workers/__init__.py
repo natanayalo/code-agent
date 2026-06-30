@@ -24,6 +24,7 @@ from workers.base import (
 )
 from workers.codex_cli_worker import CodexCliWorker
 from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter
+from workers.facade import WorkerFacade
 from workers.gemini_cli_adapter import GeminiCliRuntimeAdapter
 from workers.gemini_cli_worker import GeminiCliWorker
 from workers.native_agent_runner import (
@@ -69,4 +70,5 @@ __all__ = [
     "normalize_worker_type",
     "ShellWorker",
     "run_native_agent",
+    "WorkerFacade",
 ]

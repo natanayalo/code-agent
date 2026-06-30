@@ -6,6 +6,7 @@ import json
 from orchestrator.graph import build_orchestrator_graph
 from orchestrator.state import OrchestratorState
 from workers import Worker, WorkerRequest, WorkerResult
+from workers.facade import WorkerFacade
 
 
 class StaticWorker(Worker):
@@ -61,8 +62,8 @@ def test_independent_review_flow_e2e():
         )
     )
 
-    # 2. Build graph
-    graph = build_orchestrator_graph(worker=main_worker, gemini_worker=gemini_worker)
+    facade = WorkerFacade(codex_worker=main_worker, antigravity_worker=gemini_worker)
+    graph = build_orchestrator_graph(worker=facade)
 
     # 3. Initial state
     initial_input = {

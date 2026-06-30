@@ -341,7 +341,11 @@ class CIPollingScheduler:
         ):
             return logs
 
-        worker = self.task_service.gemini_worker or self.task_service.worker
+        worker_facade = self.task_service.worker
+        if not worker_facade:
+            return logs
+
+        worker = worker_facade.get_worker("antigravity") or worker_facade.get_worker("codex")  # type: ignore[attr-defined]
         if not worker or not logs:
             return logs
 
