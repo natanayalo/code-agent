@@ -607,7 +607,23 @@ def test_compare_reports_delta_mapping_covers_all_review_metrics() -> None:
         field_name
         for field_name in EvaluationComparison.__dataclass_fields__
         if field_name.startswith("delta_")
-        and field_name not in {"delta_passed_cases", "delta_total_score", "delta_reviewed_cases"}
+        and field_name
+        not in {
+            "delta_passed_cases",
+            "delta_total_score",
+            "delta_reviewed_cases",
+            "delta_cases_with_validation_evidence",
+            "delta_cases_needing_approval",
+            "delta_cases_needing_manual_log_inspection",
+            "delta_cases_with_worker_failure",
+            "delta_mean_commands_run",
+            "delta_mean_files_changed",
+            "delta_mean_friction_reports",
+            "delta_repair_loops_total",
+            "delta_mean_time_to_pr_seconds",
+            "delta_ci_rejection_total",
+            "delta_review_rejection_total",
+        }
     }
     mapped_comparison_delta_fields = set(_REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD.values())
 
@@ -682,6 +698,13 @@ def test_reliability_report_to_dict_serializes_all_fields() -> None:
         mean_commands_run=4.0,
         mean_files_changed=2.0,
         mean_friction_reports=0.5,
+        repair_loops_total=0,
+        mean_time_to_pr_seconds=None,
+        ci_rejection_total=0,
+        review_rejection_total=0,
+        validation_failure_category_counts=(),
+        worker_profile_success_rates=(),
+        provider_failure_cause_counts=(),
         stage_latency_available=False,
         mean_stage_latency_seconds=(),
     )

@@ -1,0 +1,24 @@
+{
+  "reliability_report": {
+    "cases_needing_approval": 0,
+    "cases_needing_manual_log_inspection": 0,
+    "cases_with_validation_evidence": 0,
+    "cases_with_worker_failure": 0,
+    "ci_rejection_total": 0,
+    "mean_commands_run": null,
+    "mean_files_changed": null,
+    "mean_friction_reports": null,
+    "mean_stage_latency_seconds": {},
+    "mean_time_to_pr_seconds": null,
+    "provider_failure_cause_counts": {},
+    "repair_loops_total": 0,
+    "review_rejection_total": 0,
+    "stage_latency_available": false,
+    "total_cases": 25,
+    "validation_failure_category_counts": {},
+    "worker_failure_kind_counts": {},
+    "worker_profile_success_rates": {}
+  },
+  "suite_name": "frozen-v1",
+  "total_cases": 25
+}

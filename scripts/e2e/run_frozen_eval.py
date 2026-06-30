@@ -16,6 +16,8 @@ from evaluation import (
     EvaluationProfile,
     EvaluationReport,
     OrchestratorReplayRunner,
+    ReliabilityMetrics,
+    ReliabilityReport,
     ReplayRunner,
     ReviewMetrics,
     ReviewOutcome,
@@ -292,6 +294,31 @@ def _parse_optional_comparison(payload: dict[str, object]) -> EvaluationComparis
         delta_empty_review_correctness=_coerce_optional_float(
             raw_comparison.get("delta_empty_review_correctness")
         ),
+        delta_cases_with_validation_evidence=int(
+            raw_comparison.get("delta_cases_with_validation_evidence", 0)
+        ),
+        delta_cases_needing_approval=int(raw_comparison.get("delta_cases_needing_approval", 0)),
+        delta_cases_needing_manual_log_inspection=int(
+            raw_comparison.get("delta_cases_needing_manual_log_inspection", 0)
+        ),
+        delta_cases_with_worker_failure=int(
+            raw_comparison.get("delta_cases_with_worker_failure", 0)
+        ),
+        delta_mean_commands_run=_coerce_optional_float(
+            raw_comparison.get("delta_mean_commands_run")
+        ),
+        delta_mean_files_changed=_coerce_optional_float(
+            raw_comparison.get("delta_mean_files_changed")
+        ),
+        delta_mean_friction_reports=_coerce_optional_float(
+            raw_comparison.get("delta_mean_friction_reports")
+        ),
+        delta_repair_loops_total=int(raw_comparison.get("delta_repair_loops_total", 0)),
+        delta_mean_time_to_pr_seconds=_coerce_optional_float(
+            raw_comparison.get("delta_mean_time_to_pr_seconds")
+        ),
+        delta_ci_rejection_total=int(raw_comparison.get("delta_ci_rejection_total", 0)),
+        delta_review_rejection_total=int(raw_comparison.get("delta_review_rejection_total", 0)),
     )
 
 
@@ -332,6 +359,30 @@ def _coerce_non_negative_int(value: object) -> int:
     return 0
 
 
+def _coerce_tuple_of_pairs_str_float(value: object) -> tuple[tuple[str, float], ...]:
+    if isinstance(value, dict):
+        return tuple((str(k), float(v)) for k, v in value.items() if v is not None)
+    if isinstance(value, list) or isinstance(value, tuple):
+        res = []
+        for item in value:
+            if (isinstance(item, list) or isinstance(item, tuple)) and len(item) == 2:
+                res.append((str(item[0]), float(item[1])))
+        return tuple(res)
+    return ()
+
+
+def _coerce_tuple_of_pairs_str_int(value: object) -> tuple[tuple[str, int], ...]:
+    if isinstance(value, dict):
+        return tuple((str(k), int(v)) for k, v in value.items() if v is not None)
+    if isinstance(value, list) or isinstance(value, tuple):
+        res = []
+        for item in value:
+            if (isinstance(item, list) or isinstance(item, tuple)) and len(item) == 2:
+                res.append((str(item[0]), int(item[1])))
+        return tuple(res)
+    return ()
+
+
 def _parse_optional_review_outcome(raw_outcome: dict[str, object]) -> ReviewOutcome | None:
     raw_review = raw_outcome.get("review")
     if not isinstance(raw_review, dict):
@@ -349,6 +400,81 @@ def _parse_optional_review_outcome(raw_outcome: dict[str, object]) -> ReviewOutc
         ),
         fix_after_review_succeeded=_coerce_optional_bool(
             raw_review.get("fix_after_review_succeeded")
+        ),
+    )
+
+
+def _parse_optional_reliability_metrics(payload: dict[str, object]) -> ReliabilityMetrics | None:
+    raw = payload.get("reliability")
+    if not isinstance(raw, dict):
+        return None
+    return ReliabilityMetrics(
+        human_interaction_count=_coerce_non_negative_int(raw.get("human_interaction_count")),
+        repeated_question_count=_coerce_non_negative_int(raw.get("repeated_question_count")),
+        validation_evidence_present=_coerce_optional_bool(raw.get("validation_evidence_present"))
+        or False,
+        manual_log_inspection_needed=_coerce_optional_bool(raw.get("manual_log_inspection_needed"))
+        or False,
+        worker_status=_coerce_outcome_status(raw.get("worker_status"))
+        if raw.get("worker_status")
+        else None,
+        worker_failure_kind=_coerce_optional_str(raw.get("worker_failure_kind")),
+        next_action_hint=_coerce_optional_str(raw.get("next_action_hint")),
+        friction_report_count=_coerce_non_negative_int(raw.get("friction_report_count")),
+        files_changed_count=_coerce_non_negative_int(raw.get("files_changed_count")),
+        commands_run_count=_coerce_non_negative_int(raw.get("commands_run_count")),
+        test_results_count=_coerce_non_negative_int(raw.get("test_results_count")),
+        approval_required=_coerce_optional_bool(raw.get("approval_required")) or False,
+        approval_status=_coerce_optional_str(raw.get("approval_status")),
+        stage_latency_seconds=_coerce_tuple_of_pairs_str_float(raw.get("stage_latency_seconds")),
+        stage_latency_available=_coerce_optional_bool(raw.get("stage_latency_available")) or False,
+        attempt_count=_coerce_non_negative_int(raw.get("attempt_count")),
+        repair_loops_count=_coerce_non_negative_int(raw.get("repair_loops_count")),
+        time_to_pr_seconds=_coerce_optional_float(raw.get("time_to_pr_seconds")),
+        ci_rejection_count=_coerce_non_negative_int(raw.get("ci_rejection_count")),
+        review_rejection_count=_coerce_non_negative_int(raw.get("review_rejection_count")),
+        validation_failure_category=_coerce_optional_str(raw.get("validation_failure_category")),
+        worker_profile=_coerce_optional_str(raw.get("worker_profile")),
+        provider_failure_cause=_coerce_optional_str(raw.get("provider_failure_cause")),
+    )
+
+
+def _parse_optional_reliability_report(payload: dict[str, object]) -> ReliabilityReport | None:
+    raw = payload.get("reliability_report")
+    if not isinstance(raw, dict):
+        return None
+    return ReliabilityReport(
+        total_cases=_coerce_non_negative_int(raw.get("total_cases")),
+        cases_needing_approval=_coerce_non_negative_int(raw.get("cases_needing_approval")),
+        cases_with_validation_evidence=_coerce_non_negative_int(
+            raw.get("cases_with_validation_evidence")
+        ),
+        cases_needing_manual_log_inspection=_coerce_non_negative_int(
+            raw.get("cases_needing_manual_log_inspection")
+        ),
+        cases_with_worker_failure=_coerce_non_negative_int(raw.get("cases_with_worker_failure")),
+        worker_failure_kind_counts=_coerce_tuple_of_pairs_str_int(
+            raw.get("worker_failure_kind_counts")
+        ),
+        mean_commands_run=_coerce_optional_float(raw.get("mean_commands_run")),
+        mean_files_changed=_coerce_optional_float(raw.get("mean_files_changed")),
+        mean_friction_reports=_coerce_optional_float(raw.get("mean_friction_reports")),
+        repair_loops_total=_coerce_non_negative_int(raw.get("repair_loops_total")),
+        mean_time_to_pr_seconds=_coerce_optional_float(raw.get("mean_time_to_pr_seconds")),
+        ci_rejection_total=_coerce_non_negative_int(raw.get("ci_rejection_total")),
+        review_rejection_total=_coerce_non_negative_int(raw.get("review_rejection_total")),
+        validation_failure_category_counts=_coerce_tuple_of_pairs_str_int(
+            raw.get("validation_failure_category_counts")
+        ),
+        worker_profile_success_rates=_coerce_tuple_of_pairs_str_float(
+            raw.get("worker_profile_success_rates")
+        ),
+        provider_failure_cause_counts=_coerce_tuple_of_pairs_str_int(
+            raw.get("provider_failure_cause_counts")
+        ),
+        stage_latency_available=_coerce_optional_bool(raw.get("stage_latency_available")) or False,
+        mean_stage_latency_seconds=_coerce_tuple_of_pairs_str_float(
+            raw.get("mean_stage_latency_seconds")
         ),
     )
 
@@ -384,7 +510,9 @@ def _report_from_payload(payload: dict[str, object]) -> EvaluationReport:
                         else None
                     ),
                     review=_parse_optional_review_outcome(raw_outcome),
+                    reliability=_parse_optional_reliability_metrics(raw_result),
                 ),
+                reliability=_parse_optional_reliability_metrics(raw_result),
             )
         )
 
@@ -409,6 +537,7 @@ def _report_from_payload(payload: dict[str, object]) -> EvaluationReport:
         review_metrics=_parse_optional_review_metrics(payload),
         profile=_parse_optional_profile(payload),
         comparison=_parse_optional_comparison(payload),
+        reliability_report=_parse_optional_reliability_report(payload),
     )
 
 

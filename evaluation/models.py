@@ -34,6 +34,7 @@ class FrozenTaskCase:
     task_text: str
     expectation: TaskExpectation
     task_class: str | None = None
+    intervention_risk_class: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +59,13 @@ class ReliabilityMetrics:
     files_changed_count: int = 0
     commands_run_count: int = 0
     test_results_count: int = 0
+    repair_loops_count: int = 0
+    time_to_pr_seconds: float | None = None
+    ci_rejection_count: int = 0
+    review_rejection_count: int = 0
+    validation_failure_category: str | None = None
+    worker_profile: str | None = None
+    provider_failure_cause: str | None = None
 
     approval_required: bool = False
     approval_status: str | None = None
@@ -84,6 +92,13 @@ class ReliabilityMetrics:
             "files_changed_count": self.files_changed_count,
             "commands_run_count": self.commands_run_count,
             "test_results_count": self.test_results_count,
+            "repair_loops_count": self.repair_loops_count,
+            "time_to_pr_seconds": self.time_to_pr_seconds,
+            "ci_rejection_count": self.ci_rejection_count,
+            "review_rejection_count": self.review_rejection_count,
+            "validation_failure_category": self.validation_failure_category,
+            "worker_profile": self.worker_profile,
+            "provider_failure_cause": self.provider_failure_cause,
             "approval_required": self.approval_required,
             "approval_status": self.approval_status,
             "stage_latency_seconds": self.stage_latency_dict(),
@@ -105,11 +120,27 @@ class ReliabilityReport:
     mean_commands_run: float | None
     mean_files_changed: float | None
     mean_friction_reports: float | None
+    repair_loops_total: int
+    mean_time_to_pr_seconds: float | None
+    ci_rejection_total: int
+    review_rejection_total: int
+    validation_failure_category_counts: tuple[tuple[str, int], ...]
+    worker_profile_success_rates: tuple[tuple[str, float], ...]
+    provider_failure_cause_counts: tuple[tuple[str, int], ...]
     stage_latency_available: bool
     mean_stage_latency_seconds: tuple[tuple[str, float], ...]
 
     def worker_failure_kind_counts_dict(self) -> dict[str, int]:
         return dict(self.worker_failure_kind_counts)
+
+    def validation_failure_category_counts_dict(self) -> dict[str, int]:
+        return dict(self.validation_failure_category_counts)
+
+    def worker_profile_success_rates_dict(self) -> dict[str, float]:
+        return dict(self.worker_profile_success_rates)
+
+    def provider_failure_cause_counts_dict(self) -> dict[str, int]:
+        return dict(self.provider_failure_cause_counts)
 
     def mean_stage_latency_dict(self) -> dict[str, float]:
         return dict(self.mean_stage_latency_seconds)
@@ -125,6 +156,13 @@ class ReliabilityReport:
             "mean_commands_run": self.mean_commands_run,
             "mean_files_changed": self.mean_files_changed,
             "mean_friction_reports": self.mean_friction_reports,
+            "repair_loops_total": self.repair_loops_total,
+            "mean_time_to_pr_seconds": self.mean_time_to_pr_seconds,
+            "ci_rejection_total": self.ci_rejection_total,
+            "review_rejection_total": self.review_rejection_total,
+            "validation_failure_category_counts": self.validation_failure_category_counts_dict(),
+            "worker_profile_success_rates": self.worker_profile_success_rates_dict(),
+            "provider_failure_cause_counts": self.provider_failure_cause_counts_dict(),
             "stage_latency_available": self.stage_latency_available,
             "mean_stage_latency_seconds": self.mean_stage_latency_dict(),
         }
@@ -213,6 +251,18 @@ class EvaluationComparison:
     delta_fix_after_review_success: float | None
     delta_empty_review_correctness: float | None
 
+    delta_cases_with_validation_evidence: int
+    delta_cases_needing_approval: int
+    delta_cases_needing_manual_log_inspection: int
+    delta_cases_with_worker_failure: int
+    delta_mean_commands_run: float | None
+    delta_mean_files_changed: float | None
+    delta_mean_friction_reports: float | None
+    delta_repair_loops_total: int
+    delta_mean_time_to_pr_seconds: float | None
+    delta_ci_rejection_total: int
+    delta_review_rejection_total: int
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "baseline_variant_label": self.baseline_variant_label,
@@ -226,4 +276,17 @@ class EvaluationComparison:
             "delta_false_positive_rate": self.delta_false_positive_rate,
             "delta_fix_after_review_success": self.delta_fix_after_review_success,
             "delta_empty_review_correctness": self.delta_empty_review_correctness,
+            "delta_cases_with_validation_evidence": self.delta_cases_with_validation_evidence,
+            "delta_cases_needing_approval": self.delta_cases_needing_approval,
+            "delta_cases_needing_manual_log_inspection": (
+                self.delta_cases_needing_manual_log_inspection
+            ),
+            "delta_cases_with_worker_failure": self.delta_cases_with_worker_failure,
+            "delta_mean_commands_run": self.delta_mean_commands_run,
+            "delta_mean_files_changed": self.delta_mean_files_changed,
+            "delta_mean_friction_reports": self.delta_mean_friction_reports,
+            "delta_repair_loops_total": self.delta_repair_loops_total,
+            "delta_mean_time_to_pr_seconds": self.delta_mean_time_to_pr_seconds,
+            "delta_ci_rejection_total": self.delta_ci_rejection_total,
+            "delta_review_rejection_total": self.delta_review_rejection_total,
         }

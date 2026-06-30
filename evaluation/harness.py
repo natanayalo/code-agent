@@ -180,11 +180,23 @@ def _compute_reliability_report(
             mean_commands_run=None,
             mean_files_changed=None,
             mean_friction_reports=None,
+            repair_loops_total=0,
+            mean_time_to_pr_seconds=None,
+            ci_rejection_total=0,
+            review_rejection_total=0,
+            validation_failure_category_counts=(),
+            worker_profile_success_rates=(),
+            provider_failure_cause_counts=(),
             stage_latency_available=False,
             mean_stage_latency_seconds=(),
         )
 
     failure_kind_tally: dict[str, int] = {}
+    validation_failure_tally: dict[str, int] = {}
+    provider_failure_tally: dict[str, int] = {}
+    worker_profile_attempts: dict[str, int] = {}
+    worker_profile_successes: dict[str, int] = {}
+
     stage_latency_sums: dict[str, float] = {}
     stage_latency_counts: dict[str, int] = {}
     any_latency_available = False
@@ -194,6 +206,22 @@ def _compute_reliability_report(
             failure_kind_tally[rm.worker_failure_kind] = (
                 failure_kind_tally.get(rm.worker_failure_kind, 0) + 1
             )
+        if rm.validation_failure_category:
+            validation_failure_tally[rm.validation_failure_category] = (
+                validation_failure_tally.get(rm.validation_failure_category, 0) + 1
+            )
+        if rm.provider_failure_cause:
+            provider_failure_tally[rm.provider_failure_cause] = (
+                provider_failure_tally.get(rm.provider_failure_cause, 0) + 1
+            )
+        if rm.worker_profile:
+            worker_profile_attempts[rm.worker_profile] = (
+                worker_profile_attempts.get(rm.worker_profile, 0) + 1
+            )
+            if rm.worker_status == "success":
+                worker_profile_successes[rm.worker_profile] = (
+                    worker_profile_successes.get(rm.worker_profile, 0) + 1
+                )
         if rm.stage_latency_available:
             any_latency_available = True
             for stage, elapsed in rm.stage_latency_seconds:
@@ -204,6 +232,16 @@ def _compute_reliability_report(
         (stage, stage_latency_sums[stage] / stage_latency_counts[stage])
         for stage in sorted(stage_latency_sums)
     ]
+
+    worker_profile_rates = [
+        (profile, worker_profile_successes.get(profile, 0) / attempts)
+        for profile, attempts in sorted(worker_profile_attempts.items())
+    ]
+
+    times_to_pr = [
+        rm.time_to_pr_seconds for rm in reliability_results if rm.time_to_pr_seconds is not None
+    ]
+    mean_time_to_pr = sum(times_to_pr) / len(times_to_pr) if times_to_pr else None
 
     return ReliabilityReport(
         total_cases=total_cases,
@@ -223,6 +261,13 @@ def _compute_reliability_report(
         mean_commands_run=_safe_mean([rm.commands_run_count for rm in reliability_results]),
         mean_files_changed=_safe_mean([rm.files_changed_count for rm in reliability_results]),
         mean_friction_reports=_safe_mean([rm.friction_report_count for rm in reliability_results]),
+        repair_loops_total=sum(rm.repair_loops_count for rm in reliability_results),
+        mean_time_to_pr_seconds=mean_time_to_pr,
+        ci_rejection_total=sum(rm.ci_rejection_count for rm in reliability_results),
+        review_rejection_total=sum(rm.review_rejection_count for rm in reliability_results),
+        validation_failure_category_counts=tuple(sorted(validation_failure_tally.items())),
+        worker_profile_success_rates=tuple(worker_profile_rates),
+        provider_failure_cause_counts=tuple(sorted(provider_failure_tally.items())),
         stage_latency_available=any_latency_available,
         mean_stage_latency_seconds=tuple(mean_stage),
     )
@@ -447,7 +492,22 @@ def _metric_delta_payload(
         for field_info in dataclass_fields(EvaluationComparison)
         if field_info.name.startswith("delta_")
         and field_info.name
-        not in {"delta_passed_cases", "delta_total_score", "delta_reviewed_cases"}
+        not in {
+            "delta_passed_cases",
+            "delta_total_score",
+            "delta_reviewed_cases",
+            "delta_cases_with_validation_evidence",
+            "delta_cases_needing_approval",
+            "delta_cases_needing_manual_log_inspection",
+            "delta_cases_with_worker_failure",
+            "delta_mean_commands_run",
+            "delta_mean_files_changed",
+            "delta_mean_friction_reports",
+            "delta_repair_loops_total",
+            "delta_mean_time_to_pr_seconds",
+            "delta_ci_rejection_total",
+            "delta_review_rejection_total",
+        }
     }
     mapped_delta_field_names = set(_REVIEW_METRIC_TO_COMPARISON_DELTA_FIELD.values())
     if comparison_metric_delta_field_names != mapped_delta_field_names:
@@ -504,6 +564,19 @@ def compare_reports(
     candidate_reviewed_cases = (
         candidate_metrics.reviewed_cases if candidate_metrics is not None else 0
     )
+
+    b_rel = baseline.reliability_report
+    c_rel = candidate.reliability_report
+
+    def rel_diff(attr: str) -> Any:
+        if b_rel is None or c_rel is None:
+            return None
+        b_val = getattr(b_rel, attr)
+        c_val = getattr(c_rel, attr)
+        if b_val is None or c_val is None:
+            return None
+        return c_val - b_val
+
     return EvaluationComparison(
         baseline_variant_label=(
             baseline.profile.variant_label if baseline.profile is not None else None
@@ -520,6 +593,18 @@ def compare_reports(
         delta_false_positive_rate=delta_payload["delta_false_positive_rate"],
         delta_fix_after_review_success=delta_payload["delta_fix_after_review_success"],
         delta_empty_review_correctness=delta_payload["delta_empty_review_correctness"],
+        delta_cases_with_validation_evidence=rel_diff("cases_with_validation_evidence") or 0,
+        delta_cases_needing_approval=rel_diff("cases_needing_approval") or 0,
+        delta_cases_needing_manual_log_inspection=rel_diff("cases_needing_manual_log_inspection")
+        or 0,
+        delta_cases_with_worker_failure=rel_diff("cases_with_worker_failure") or 0,
+        delta_mean_commands_run=rel_diff("mean_commands_run"),
+        delta_mean_files_changed=rel_diff("mean_files_changed"),
+        delta_mean_friction_reports=rel_diff("mean_friction_reports"),
+        delta_repair_loops_total=rel_diff("repair_loops_total") or 0,
+        delta_mean_time_to_pr_seconds=rel_diff("mean_time_to_pr_seconds"),
+        delta_ci_rejection_total=rel_diff("ci_rejection_total") or 0,
+        delta_review_rejection_total=rel_diff("review_rejection_total") or 0,
     )
 
 

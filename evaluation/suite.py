@@ -53,6 +53,18 @@ class _CasePayload(BaseModel):
     task_text: str
     expectation: _ExpectationPayload
     task_class: str | None = None
+    intervention_risk_class: (
+        Literal[
+            "no_decision_needed",
+            "one_clarification_needed",
+            "permission_needed",
+            "validation_fails",
+            "worker_failure",
+            "protected_path_touched",
+            "pr_ci_fails",
+        ]
+        | None
+    ) = None
 
     @field_validator("case_id", "repo_fixture", "task_text")
     @classmethod
@@ -161,6 +173,7 @@ def load_frozen_suite(path: Path | None = None) -> FrozenSuite:
                 task_text=task_text,
                 expectation=expectation,
                 task_class=raw_case.task_class,
+                intervention_risk_class=raw_case.intervention_risk_class,
             )
         )
 
