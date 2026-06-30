@@ -30,3 +30,4 @@ htmlcov/
 *.db
 *.sqlite
 evaluation/baseline_*.json
+artifacts/
