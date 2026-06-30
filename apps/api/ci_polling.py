@@ -176,9 +176,15 @@ class CIPollingScheduler:
             logger.debug(f"Error checking PR: {e}")
             return
 
+        if not isinstance(checks, list):
+            logger.debug(f"Unexpected response format from gh pr checks: {type(checks)}")
+            return
+
         all_passed = True
         failed_checks = []
         for check in checks:
+            if not isinstance(check, dict):
+                continue
             state = check.get("state", "").upper()
             if state in ("FAILURE", "STARTUP_FAILURE", "ERROR"):
                 failed_checks.append(check)
@@ -311,6 +317,9 @@ class CIPollingScheduler:
         request = WorkerRequest(**kwargs)
         try:
             result = await worker.run(request)
+            if result is None:
+                logger.warning("LLM parsing returned None result")
+                return logs
             if result.status == "success" and result.summary:
                 return result.summary
         except Exception as e:
