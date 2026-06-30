@@ -126,6 +126,7 @@ class CIPollingScheduler:
                         "run_id": run.id,
                         "task_id": run.task_id,
                         "repo_url": run.task.repo_url if run.task else None,
+                        "secrets": run.task.secrets if run.task else None,
                         "delivery_metadata": run.delivery_metadata,
                     }
                 )
@@ -188,7 +189,13 @@ class CIPollingScheduler:
             )
             return
 
-        gh_token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        task_secrets = run_info.get("secrets") or {}
+        gh_token = (
+            task_secrets.get("GH_TOKEN")
+            or task_secrets.get("GITHUB_TOKEN")
+            or os.environ.get("GH_TOKEN")
+            or os.environ.get("GITHUB_TOKEN")
+        )
         if not gh_token:
             logger.warning("CIPollingScheduler: GH_TOKEN missing")
             return
@@ -205,7 +212,7 @@ class CIPollingScheduler:
         for check in checks:
             if not isinstance(check, dict):
                 continue
-            state = check.get("state", "").upper()
+            state = (check.get("state") or "").upper()
             if state in ("FAILURE", "STARTUP_FAILURE", "ERROR"):
                 failed_checks.append(check)
                 all_passed = False
@@ -362,7 +369,7 @@ class CIPollingScheduler:
         check: dict[str, Any],
         env: dict[str, str],
     ) -> str | None:
-        link = check.get("link", "")
+        link = check.get("link") or ""
         run_id = None
         match = re.search(r"/runs/(\d+)", link)
         if match:
