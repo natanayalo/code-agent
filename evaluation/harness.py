@@ -289,10 +289,10 @@ def _score_case(case: FrozenTaskCase, outcome: WorkerOutcome) -> CaseRunResult:
         else:
             failures.append("status was not success")
     else:
-        if outcome.status != "success":
+        if outcome.status == "failure":
             points += 1
         else:
-            failures.append("status was success but expected failure")
+            failures.append(f"status was {outcome.status} but expected failure")
 
     if case.expectation.require_tests_passed:
         if outcome.tests_passed is True:
