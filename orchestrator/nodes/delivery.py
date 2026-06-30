@@ -284,6 +284,7 @@ def _capture_delivery_metadata(
             capture_output=True,
             text=True,
             check=True,
+            timeout=30,
             stdin=subprocess.DEVNULL,
         )
         data = json.loads(proc.stdout)

@@ -131,6 +131,47 @@ class CIPollingScheduler:
                 )
         return results
 
+    def _get_pr_checks(
+        self, branch_name: str, repo_spec: str, run_id: str, env: dict[str, str]
+    ) -> list[Any] | None:
+        cmd = [
+            "gh",
+            "pr",
+            "checks",
+            branch_name,
+            "-R",
+            repo_spec,
+            "--json",
+            "name,state,link",
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                stdin=subprocess.DEVNULL,
+            )
+            if proc.returncode != 0:
+                logger.debug(f"Failed to check PR checks for {branch_name}: {proc.stderr.strip()}")
+                if (
+                    "no open pull requests" in proc.stderr.lower()
+                    or "no pull requests found" in proc.stderr.lower()
+                ):
+                    self._update_run_ci_metadata(run_id, "not_found", [])
+                return None
+            checks = json.loads(proc.stdout)
+        except Exception as e:
+            logger.debug(f"Error checking PR: {e}")
+            return None
+
+        if not isinstance(checks, list):
+            logger.debug(f"Unexpected response format from gh pr checks: {type(checks)}")
+            return None
+
+        return checks
+
     def _poll_run(self, run_info: dict[str, Any]) -> None:
         metadata = run_info["delivery_metadata"]
         branch_name = metadata.get("branch_name")
@@ -155,29 +196,8 @@ class CIPollingScheduler:
         env = os.environ.copy()
         env["GH_TOKEN"] = gh_token
 
-        # Check PR checks via gh cli
-        cmd = [
-            "gh",
-            "pr",
-            "checks",
-            branch_name,
-            "-R",
-            repo_spec,
-            "--json",
-            "name,state,link",
-        ]
-        try:
-            proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
-            if proc.returncode != 0:
-                logger.debug(f"Failed to check PR checks for {branch_name}")
-                return
-            checks = json.loads(proc.stdout)
-        except Exception as e:
-            logger.debug(f"Error checking PR: {e}")
-            return
-
-        if not isinstance(checks, list):
-            logger.debug(f"Unexpected response format from gh pr checks: {type(checks)}")
+        checks = self._get_pr_checks(branch_name, repo_spec, run_info["run_id"], env)
+        if checks is None:
             return
 
         all_passed = True
@@ -253,10 +273,15 @@ class CIPollingScheduler:
                     future = asyncio.run_coroutine_threadsafe(
                         self._parse_logs_with_llm_async(logs, check_name), self._loop_ref
                     )
-                    parsed_logs = future.result(timeout=60)
+                    try:
+                        parsed_logs = future.result(timeout=60)
+                    except TimeoutError:
+                        logger.warning(f"LLM parsing timed out after 60s for check {check_name}")
+                        future.cancel()
+                        parsed_logs = logs
                 else:
                     parsed_logs = asyncio.run(self._parse_logs_with_llm_async(logs, check_name))
-            except (TimeoutError, Exception) as e:
+            except Exception as e:
                 logger.warning(f"Failed to run async LLM parsing: {e}")
                 parsed_logs = logs
         else:
