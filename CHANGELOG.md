@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: rollout M20.7 frozen evaluation suite ([#289](https://github.com/natanayalo/code-agent/pull/289))
+
 - Feat: implement M20.5 repo validation profiles and repo url lockdown ([#287](https://github.com/natanayalo/code-agent/pull/287))
 
 - Feat: add human interactions pending API and inbox UI data ([#279](https://github.com/natanayalo/code-agent/pull/279))
