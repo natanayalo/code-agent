@@ -23,7 +23,10 @@ def github_repo_spec_from_url(repo_url: str | None) -> str | None:
         else:
             stripped = "https://" + stripped
 
-    parsed = urlparse(stripped)
+    try:
+        parsed = urlparse(stripped)
+    except ValueError:
+        return None
     path_parts = [part for part in parsed.path.strip("/").split("/") if part]
 
     if len(path_parts) >= 2:

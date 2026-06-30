@@ -405,17 +405,20 @@ class CIPollingScheduler:
                 )
                 if proc.returncode == 0:
                     runs = json.loads(proc.stdout)
-                    for r in runs:
-                        if r.get("conclusion") == "failure" and r.get("workflowName") == check.get(
-                            "name"
-                        ):
-                            run_id = str(r.get("databaseId"))
-                            break
-                    if not run_id and runs:
+                    if isinstance(runs, list):
                         for r in runs:
-                            if r.get("conclusion") == "failure":
+                            if (
+                                isinstance(r, dict)
+                                and r.get("conclusion") == "failure"
+                                and r.get("workflowName") == check.get("name")
+                            ):
                                 run_id = str(r.get("databaseId"))
                                 break
+                        if not run_id:
+                            for r in runs:
+                                if isinstance(r, dict) and r.get("conclusion") == "failure":
+                                    run_id = str(r.get("databaseId"))
+                                    break
             except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as e:
                 logger.debug(f"Failed to list runs: {e}")
 
