@@ -295,14 +295,14 @@ def _parse_optional_comparison(payload: dict[str, object]) -> EvaluationComparis
             raw_comparison.get("delta_empty_review_correctness")
         ),
         delta_cases_with_validation_evidence=int(
-            raw_comparison.get("delta_cases_with_validation_evidence", 0)
+            raw_comparison.get("delta_cases_with_validation_evidence") or 0
         ),
-        delta_cases_needing_approval=int(raw_comparison.get("delta_cases_needing_approval", 0)),
+        delta_cases_needing_approval=int(raw_comparison.get("delta_cases_needing_approval") or 0),
         delta_cases_needing_manual_log_inspection=int(
-            raw_comparison.get("delta_cases_needing_manual_log_inspection", 0)
+            raw_comparison.get("delta_cases_needing_manual_log_inspection") or 0
         ),
         delta_cases_with_worker_failure=int(
-            raw_comparison.get("delta_cases_with_worker_failure", 0)
+            raw_comparison.get("delta_cases_with_worker_failure") or 0
         ),
         delta_mean_commands_run=_coerce_optional_float(
             raw_comparison.get("delta_mean_commands_run")
@@ -313,12 +313,12 @@ def _parse_optional_comparison(payload: dict[str, object]) -> EvaluationComparis
         delta_mean_friction_reports=_coerce_optional_float(
             raw_comparison.get("delta_mean_friction_reports")
         ),
-        delta_repair_loops_total=int(raw_comparison.get("delta_repair_loops_total", 0)),
+        delta_repair_loops_total=int(raw_comparison.get("delta_repair_loops_total") or 0),
         delta_mean_time_to_pr_seconds=_coerce_optional_float(
             raw_comparison.get("delta_mean_time_to_pr_seconds")
         ),
-        delta_ci_rejection_total=int(raw_comparison.get("delta_ci_rejection_total", 0)),
-        delta_review_rejection_total=int(raw_comparison.get("delta_review_rejection_total", 0)),
+        delta_ci_rejection_total=int(raw_comparison.get("delta_ci_rejection_total") or 0),
+        delta_review_rejection_total=int(raw_comparison.get("delta_review_rejection_total") or 0),
     )
 
 
