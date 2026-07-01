@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 from apps.observability import (
@@ -29,7 +28,6 @@ from sandbox import (
 from sandbox.workspace import _mask_url_credentials, default_workspace_root
 from tools import (
     DEFAULT_TOOL_REGISTRY,
-    ToolPermissionLevel,
     ToolRegistry,
     UnknownToolError,
 )
@@ -40,43 +38,16 @@ from workers.base import (
     WorkerRequest,
     WorkerResult,
 )
-from workers.cli_adapter_utils import build_worker_result
 from workers.cli_runtime import (
     CliRuntimeAdapter,
-    CliRuntimeExecutionResult,
     CliRuntimeSettings,
     ShellSessionProtocol,
     settings_from_budget,
 )
-from workers.review import ReviewResult
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_CODEX_NATIVE_SANDBOX_MODE = "workspace-write"
-
-
-@dataclass
-class _RuntimeSetup:
-    """Container/session/runtime context prepared before entering the CLI loop."""
-
-    container: DockerSandboxContainer
-    session: ShellSessionProtocol
-    runtime_settings: CliRuntimeSettings
-    granted_permission: ToolPermissionLevel
-    expects_changed_files: bool
-    fallback_command_template: str | None
-    system_prompt: str
-
-
-@dataclass
-class _RuntimeExecutionPhase:
-    """Outputs captured from runtime execution and post-processing phases."""
-
-    execution: CliRuntimeExecutionResult
-    files_changed: list[str]
-    lint_format_result: dict[str, object] | None
-    lint_format_artifacts: list[ArtifactReference]
-    review_result: ReviewResult | None
 
 
 def _slugify(value: str) -> str:
@@ -120,58 +91,6 @@ def _apply_cleanup_outcome(result: WorkerResult, *, workspace_deleted: bool) -> 
             "artifacts": [],
             "next_action_hint": None,
         }
-    )
-
-
-def _next_action_hint(execution: CliRuntimeExecutionResult) -> str:
-    """Return the best follow-up hint for a retained workspace."""
-    if execution.stop_reason == "permission_required":
-        return "request_higher_permission"
-    if execution.stop_reason in {
-        "max_iterations",
-        "worker_timeout",
-        "budget_exceeded",
-        "stalled_in_inspection",
-        "exploration_exhausted",
-        "no_progress_before_budget",
-    }:
-        return "increase_budget_or_reduce_scope"
-    if execution.stop_reason == "context_window":
-        return "reduce_context_or_scope"
-    if execution.stop_reason == "adapter_error":
-        return "inspect_worker_configuration"
-    return "inspect_workspace_artifacts"
-
-
-def _worker_result_from_execution(
-    workspace: WorkspaceHandle,
-    execution: CliRuntimeExecutionResult,
-    *,
-    files_changed: list[str],
-    post_run_lint_format: dict[str, object] | None = None,
-    review_result: ReviewResult | None = None,
-    diff_text: str | None = None,
-    artifacts: list[ArtifactReference] | None = None,
-) -> WorkerResult:
-    """Map the shared CLI runtime output into the worker contract."""
-    requested_permission = (
-        execution.permission_decision.required_permission.value
-        if execution.permission_decision is not None
-        else None
-    )
-    budget_usage = execution.budget_ledger.model_dump(mode="json")
-    if post_run_lint_format is not None:
-        budget_usage["post_run_lint_format"] = post_run_lint_format
-    return build_worker_result(
-        execution=execution,
-        files_changed=files_changed,
-        requested_permission=requested_permission,
-        post_run_lint_format=post_run_lint_format,
-        review_result=review_result,
-        diff_text=diff_text,
-        artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
-        next_action_hint=_next_action_hint(execution),
-        workspace_id=workspace.workspace_id,
     )
 
 
