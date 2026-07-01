@@ -216,7 +216,7 @@ def test_gemini_cli_worker_checks_cancel_before_self_review(tmp_path: Path) -> N
     )
 
     with patch(
-        "workers.gemini_cli_worker_runtime.run_shared_self_review_fix_loop",
+        "workers.runtime_executor.run_shared_self_review_fix_loop",
         return_value=(None, [], None, []),
     ) as review_loop:
         result = asyncio.run(
@@ -261,7 +261,7 @@ def test_gemini_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_path:
     )
 
     with patch(
-        "workers.gemini_cli_worker_runtime.collect_changed_files_and_apply_post_run_lint_format",
+        "workers.runtime_executor.collect_changed_files_and_apply_post_run_lint_format",
         side_effect=[
             (
                 ["workers/gemini_cli_worker.py"],

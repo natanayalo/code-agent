@@ -216,10 +216,11 @@ def _workspace_error_result(
 
 
 from workers.codex_cli_worker_native import CodexCliWorkerNativeMixin  # noqa: E402
-from workers.codex_cli_worker_runtime import CodexCliWorkerRuntimeMixin  # noqa: E402
+from workers.runtime_executor import RuntimeExecutor  # noqa: E402
+from workers.sandbox_adapter import SandboxSessionAdapter  # noqa: E402
 
 
-class CodexCliWorker(CodexCliWorkerRuntimeMixin, CodexCliWorkerNativeMixin, Worker):
+class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
     """Execute a bounded multi-turn CLI runtime inside a persistent sandbox."""
 
     def __init__(
@@ -265,6 +266,17 @@ class CodexCliWorker(CodexCliWorkerRuntimeMixin, CodexCliWorkerNativeMixin, Work
                     self.trusted_repo_patterns.append(re.compile(pattern))
                 except re.error as exc:
                     logger.warning("Ignoring malformed trusted repository pattern: %s", exc)
+
+        self.sandbox_adapter = SandboxSessionAdapter(
+            container_manager=self.container_manager,
+            session_factory=self._session_factory,
+        )
+        self.runtime_executor = RuntimeExecutor(
+            runtime_adapter=self.runtime_adapter,
+            tool_registry=self.tool_registry,
+            sandbox_adapter=self.sandbox_adapter,
+            runtime_settings=self.runtime_settings,
+        )
 
     async def run(
         self, request: WorkerRequest, *, system_prompt: str | None = None
@@ -399,24 +411,13 @@ class CodexCliWorker(CodexCliWorkerRuntimeMixin, CodexCliWorkerNativeMixin, Work
                     "runtime_mode": runtime_mode.value,
                 },
             )
-            runtime_setup = self._setup_runtime_phase(
+            result = self.runtime_executor.execute(
                 request,
                 workspace=workspace,
                 system_prompt_override=system_prompt_override,
-            )
-            runtime_phase = self._execute_runtime_phase(
-                request,
-                workspace=workspace,
-                runtime_setup=runtime_setup,
                 cancel_token=cancel_token,
             )
-            result = self._finalize_runtime_result(
-                workspace,
-                runtime_phase,
-                runtime_settings=runtime_setup.runtime_settings,
-                cancel_token=cancel_token,
-            )
-            return result, runtime_setup.container, runtime_setup.session
+            return result, None, None
         elif runtime_mode == WorkerRuntimeMode.NATIVE_AGENT:
             runtime_settings = settings_from_budget(
                 request.budget,

@@ -44,7 +44,7 @@ Active focus:
 
 Granular tasks for the active and upcoming milestones:
 
-- Milestone 21: worker facade [x], runtime executor, sandbox adapter, and tool extraction.
+- Milestone 21: worker facade [x], runtime executor [x], sandbox adapter [x], and tool extraction.
 - Phase 4: evaluate routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy only after Phase 3 proves reliability.
 
 ## Completed Work

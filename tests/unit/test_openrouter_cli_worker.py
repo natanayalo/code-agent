@@ -423,7 +423,7 @@ def test_openrouter_cli_worker_accumulates_lint_artifacts_across_fix_loops(tmp_p
     )
 
     with patch(
-        "workers.openrouter_cli_worker.collect_changed_files_and_apply_post_run_lint_format",
+        "workers.runtime_executor.collect_changed_files_and_apply_post_run_lint_format",
         side_effect=[
             (
                 ["workers/openrouter_cli_worker.py"],
