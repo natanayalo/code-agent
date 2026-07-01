@@ -20,6 +20,7 @@ from apps.observability import (
 from db.enums import TimelineEventType, WorkerRunStatus
 from orchestrator.github_repo import github_repo_spec_from_url
 from orchestrator.nodes.utils import (
+    _available_workers,
     _ensure_state,
     _progress_update,
     _timeline_event,
@@ -433,7 +434,7 @@ async def _run_deliver_result(
     assert state.task_spec is not None
     assert state.dispatch is not None
 
-    available = getattr(worker, "available_workers", lambda: {"codex": worker} if worker else {})()
+    available = _available_workers(worker)
     worker_id, delivery_worker = _select_delivery_worker(state, available)
     if not delivery_worker:
         msg = f"Delivery failed: no suitable delivery worker configured (tried {worker_id})."

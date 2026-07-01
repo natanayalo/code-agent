@@ -52,6 +52,7 @@ from orchestrator.nodes.utils import (
     CODEX_WORKER,
     GEMINI_WORKER,
     OPENROUTER_WORKER,
+    _available_workers,
     _dedupe_preserving_order,
     _ensure_state,
     _progress_update,
@@ -2558,9 +2559,7 @@ def build_await_result_node(
     available_profile_names: frozenset[str] = frozenset(),
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around the workers wired into the graph."""
-    available_workers = getattr(
-        worker, "available_workers", lambda: {"codex": worker} if worker else {}
-    )()
+    available_workers = _available_workers(worker)
 
     async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
@@ -3017,9 +3016,7 @@ def build_review_result_node(
     worker: Worker | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the review-result node around the workers wired into the graph."""
-    available_workers = getattr(
-        worker, "available_workers", lambda: {"codex": worker} if worker else {}
-    )()
+    available_workers = _available_workers(worker)
 
     async def review_result_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
@@ -3230,9 +3227,7 @@ def build_orchestrator_graph(
 ) -> Any:
     """Build and compile the linear LangGraph happy-path skeleton."""
     builder = StateGraph(OrchestratorState)
-    available_workers_dict = getattr(
-        worker, "available_workers", lambda: {"codex": worker} if worker else {}
-    )()
+    available_workers_dict = _available_workers(worker)
     available_workers: frozenset[str] = frozenset(available_workers_dict.keys())
     shell_worker = getattr(
         worker, "get_shell_worker", lambda: available_workers_dict.get("shell")

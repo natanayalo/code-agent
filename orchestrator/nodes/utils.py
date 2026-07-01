@@ -156,3 +156,11 @@ def _has_meaningful_deliverable(state: OrchestratorState) -> bool:
         if (artifact.artifact_type or "").lower() not in {"log", "workspace"}
     ]
     return bool(non_log_artifacts)
+
+
+def _available_workers(worker: Any) -> dict[str, Any]:
+    """Retrieve available workers from the worker instance."""
+    available_workers_fn = getattr(worker, "available_workers", None)
+    if callable(available_workers_fn):
+        return available_workers_fn()
+    return {"codex": worker} if worker else {}
