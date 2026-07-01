@@ -7,6 +7,7 @@ import asyncio
 from orchestrator import OrchestratorState, WorkerResult, build_orchestrator_graph
 from tests.integration.orchestrator_graph_support import StaticWorker
 from workers import WorkerProfile
+from workers.facade import WorkerFacade
 
 
 def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None:
@@ -22,7 +23,7 @@ def test_orchestrator_graph_errors_when_selected_worker_is_unavailable() -> None
             summary=None,
         )
     )
-    graph = build_orchestrator_graph(worker=worker)
+    graph = build_orchestrator_graph(worker=WorkerFacade(codex_worker=worker))
 
     raw_output = asyncio.run(
         graph.ainvoke(
@@ -84,7 +85,7 @@ def test_orchestrator_graph_errors_when_selected_profile_is_unavailable() -> Non
         )
     )
     graph = build_orchestrator_graph(
-        worker=worker,
+        worker=WorkerFacade(codex_worker=worker),
         enable_worker_profiles=True,
         worker_profiles={
             "codex-native-executor": WorkerProfile(
@@ -154,8 +155,7 @@ def test_orchestrator_graph_worker_override_respects_profile_opt_in() -> None:
         )
     )
     graph = build_orchestrator_graph(
-        worker=worker,
-        openrouter_worker=openrouter_worker,
+        worker=WorkerFacade(codex_worker=worker, openrouter_worker=openrouter_worker),
         enable_worker_profiles=True,
         worker_profiles={
             "codex-native-executor": WorkerProfile(
@@ -209,7 +209,7 @@ def test_orchestrator_graph_profile_override_incompatible_with_constraints() -> 
         )
     )
     graph = build_orchestrator_graph(
-        worker=worker,
+        worker=WorkerFacade(codex_worker=worker),
         enable_worker_profiles=True,
         worker_profiles={
             "codex-native-executor": WorkerProfile(

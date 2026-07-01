@@ -102,6 +102,7 @@ class WorkerRequest(WorkerModel):
     tools: list[str] | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
+    worker_type: WorkerType | None = None
     worker_profile: str | None = None
     runtime_mode: WorkerRuntimeMode | None = None
     runtime_manifest: dict[str, Any] | None = None
@@ -109,6 +110,11 @@ class WorkerRequest(WorkerModel):
     response_schema: dict[str, Any] | None = None
     network_enabled: bool = False
     image: str | None = None
+
+    @field_validator("worker_type", mode="before")
+    @classmethod
+    def _normalize_worker_type(cls, value: Any) -> Any:
+        return normalize_worker_type(value)
 
 
 class WorkerProfile(WorkerModel):

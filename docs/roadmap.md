@@ -400,13 +400,13 @@ Goal:
 
 Planned internal splits:
 
-- worker facade
-- runtime executor
-- sandbox/session adapter
-- prompt assembler
-- tool execution and permission gate
-- post-run pipeline
-- result mapper
+- [x] worker facade
+- [ ] runtime executor
+- [ ] sandbox/session adapter
+- [ ] prompt assembler
+- [ ] tool execution and permission gate
+- [ ] post-run pipeline
+- [ ] result mapper
 
 Approach:
 

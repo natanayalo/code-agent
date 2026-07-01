@@ -6,6 +6,7 @@ from db.enums import TimelineEventType
 from orchestrator.nodes.delivery import _build_delivery_prompt, _run_deliver_result
 from orchestrator.state import OrchestratorState
 from workers.base import WorkerResult
+from workers.facade import WorkerFacade
 
 
 def test_build_delivery_prompt_draft_pr():
@@ -94,7 +95,7 @@ async def test_run_deliver_result_missing_gh_token_for_pr(monkeypatch):
         patch("orchestrator.nodes.delivery.start_optional_span"),
         patch("orchestrator.nodes.delivery.set_span_input_output"),
     ):
-        res = await _run_deliver_result(state, gemini_worker=worker_mock)
+        res = await _run_deliver_result(state, worker=WorkerFacade(antigravity_worker=worker_mock))
         assert "timeline_events" in res
         assert res["timeline_events"][0].event_type == TimelineEventType.DELIVERY_FAILED
         assert "GH_TOKEN" in res["timeline_events"][0].message
@@ -119,7 +120,7 @@ async def test_run_deliver_result_success(monkeypatch):
         patch("orchestrator.nodes.delivery.set_span_input_output"),
         patch("orchestrator.nodes.delivery.set_current_span_attribute"),
     ):
-        res = await _run_deliver_result(state, gemini_worker=worker_mock)
+        res = await _run_deliver_result(state, worker=WorkerFacade(antigravity_worker=worker_mock))
 
         assert res["current_step"] == "deliver_result"
         assert res["timeline_events"][0].event_type == TimelineEventType.DELIVERY_COMPLETED
@@ -144,7 +145,7 @@ async def test_run_deliver_result_worker_runtime_error(monkeypatch):
         patch("orchestrator.nodes.delivery.start_optional_span"),
         patch("orchestrator.nodes.delivery.set_span_input_output"),
     ):
-        res = await _run_deliver_result(state, gemini_worker=worker_mock)
+        res = await _run_deliver_result(state, worker=WorkerFacade(antigravity_worker=worker_mock))
 
         assert "timeline_events" in res
         assert res["timeline_events"][0].event_type == TimelineEventType.DELIVERY_FAILED
@@ -172,7 +173,7 @@ async def test_run_deliver_result_worker_status_failure(monkeypatch):
         patch("orchestrator.nodes.delivery.set_span_input_output"),
         patch("orchestrator.nodes.delivery.set_current_span_attribute"),
     ):
-        res = await _run_deliver_result(state, gemini_worker=worker_mock)
+        res = await _run_deliver_result(state, worker=WorkerFacade(antigravity_worker=worker_mock))
 
         assert "timeline_events" in res
         assert res["timeline_events"][0].event_type == TimelineEventType.DELIVERY_FAILED
@@ -220,7 +221,7 @@ async def test_run_deliver_result_rejects_invalid_branch_names(branch_name: str)
             "dispatch": {"workspace_id": "ws-1", "worker_type": "antigravity"},
         }
     )
-    res = await _run_deliver_result(state, gemini_worker=AsyncMock())
+    res = await _run_deliver_result(state, worker=WorkerFacade(antigravity_worker=AsyncMock()))
     assert res["timeline_events"][0].event_type == TimelineEventType.DELIVERY_FAILED
     assert "invalid or unsafe" in res["timeline_events"][0].message
     assert res["result"].status == "failure"
@@ -258,7 +259,7 @@ async def test_run_deliver_result_merges_worker_result_on_success() -> None:
         patch("orchestrator.nodes.delivery.start_optional_span"),
         patch("orchestrator.nodes.delivery.set_span_input_output"),
     ):
-        res = await _run_deliver_result(state, gemini_worker=worker_mock)
+        res = await _run_deliver_result(state, worker=WorkerFacade(antigravity_worker=worker_mock))
 
         merged_result = res["result"]
         assert merged_result.status == "success"
@@ -292,6 +293,6 @@ async def test_run_deliver_result_merge_omits_missing_summary_text() -> None:
         patch("orchestrator.nodes.delivery.start_optional_span"),
         patch("orchestrator.nodes.delivery.set_span_input_output"),
     ):
-        res = await _run_deliver_result(state, gemini_worker=worker_mock)
+        res = await _run_deliver_result(state, worker=WorkerFacade(antigravity_worker=worker_mock))
 
     assert res["result"].summary == "Delivery completed."

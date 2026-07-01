@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from apps.api.ci_polling import CIPollingScheduler
 from apps.api.config import SystemConfig
@@ -61,7 +64,6 @@ def test_submit_repair_task_uses_idempotency_key_and_repair_link(monkeypatch) ->
         task_service=SimpleNamespace(
             session_factory=None,
             create_task_outcome=create_task_outcome,
-            gemini_worker=None,
             worker=None,
         ),
         config=_config(),
@@ -83,3 +85,32 @@ def test_submit_repair_task_uses_idempotency_key_and_repair_link(monkeypatch) ->
     assert submission.repair_for_task_id == "source-task"
     assert submission.repo_url == "https://github.com/natanayalo/code-agent"
     assert delivery_key.delivery_id == "ci_repair:source-task:abc123:tests"
+
+
+@pytest.mark.anyio
+async def test_parse_logs_with_llm_async_uses_facade() -> None:
+    """LLM parsing should resolve worker from facade when profile is enabled."""
+    worker_mock = AsyncMock()
+    worker_mock.run.return_value = SimpleNamespace(status="success", summary="parsed fail")
+
+    facade_mock = SimpleNamespace(
+        get_worker=lambda worker_type: worker_mock if worker_type == "antigravity" else None
+    )
+
+    scheduler = CIPollingScheduler(
+        task_service=SimpleNamespace(worker=facade_mock),
+        config=SystemConfig(
+            default_image="test",
+            workspace_root="/tmp",
+            ci_polling_enabled=True,
+            ci_polling_llm_profile="default",
+        ),
+    )
+
+    result = await scheduler._parse_logs_with_llm_async("raw logs", "test_job")
+    assert result == "parsed fail"
+
+    worker_mock.run.assert_called_once()
+    req = worker_mock.run.call_args[0][0]
+    assert req.worker_profile == "default"
+    assert " raw logs" in req.task_text or "raw logs" in req.task_text

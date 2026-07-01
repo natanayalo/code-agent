@@ -624,6 +624,7 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
     )
 
     return WorkerRequest(
+        worker_type=dispatch.worker_type if dispatch else None,
         session_id=state.session.session_id if state.session is not None else None,
         task_id=state.task.task_id,
         repo_url=state.task.repo_url,
@@ -2554,16 +2555,11 @@ def _build_unavailable_route_result(
 
 def build_await_result_node(
     worker: Worker | None = None,
-    gemini_worker: Worker | None = None,
-    openrouter_worker: Worker | None = None,
-    shell_worker: Worker | None = None,
     *,
     available_profile_names: frozenset[str] = frozenset(),
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around the workers wired into the graph."""
-    available_workers = _available_workers(
-        worker, gemini_worker, openrouter_worker, shell_worker=shell_worker
-    )
+    available_workers = _available_workers(worker)
 
     async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
@@ -3018,14 +3014,9 @@ def persist_memory(state_input: OrchestratorState) -> dict[str, Any]:
 
 def build_review_result_node(
     worker: Worker | None = None,
-    gemini_worker: Worker | None = None,
-    openrouter_worker: Worker | None = None,
-    shell_worker: Worker | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the review-result node around the workers wired into the graph."""
-    available_workers = _available_workers(
-        worker, gemini_worker, openrouter_worker, shell_worker=shell_worker
-    )
+    available_workers = _available_workers(worker)
 
     async def review_result_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
@@ -3044,8 +3035,6 @@ def _add_orchestrator_nodes(
     profile_names: frozenset[str],
     enable_independent_verifier: bool,
     worker: Worker | None,
-    gemini_worker: Worker | None,
-    openrouter_worker: Worker | None,
 ) -> None:
     for name, func in [
         ("ingest_task", ingest_task),
@@ -3074,8 +3063,6 @@ def _add_orchestrator_nodes(
         profile_names,
         enable_independent_verifier,
         worker,
-        gemini_worker,
-        openrouter_worker,
     )
 
 
@@ -3089,8 +3076,6 @@ def _add_orchestrator_complex_nodes(
     profile_names: frozenset[str],
     enable_independent_verifier: bool,
     worker: Worker | None,
-    gemini_worker: Worker | None,
-    openrouter_worker: Worker | None,
 ) -> None:
     builder.add_node(
         "generate_task_spec_and_route",
@@ -3124,9 +3109,6 @@ def _add_orchestrator_complex_nodes(
         RunnableLambda(
             build_await_result_node(
                 worker,
-                gemini_worker,
-                openrouter_worker,
-                shell_worker=shell_worker,
                 available_profile_names=profile_names,
             )
         ),
@@ -3137,24 +3119,17 @@ def _add_orchestrator_complex_nodes(
             build_verify_result_node(
                 enable_independent_verifier=enable_independent_verifier,
                 worker=worker,
-                gemini_worker=gemini_worker,
-                openrouter_worker=openrouter_worker,
-                shell_worker=shell_worker,
                 orchestrator_brain=orchestrator_brain,
             )
         ),
     )
     builder.add_node(
         "review_result",
-        RunnableLambda(
-            build_review_result_node(worker, gemini_worker, openrouter_worker, shell_worker)
-        ),
+        RunnableLambda(build_review_result_node(worker)),
     )
     builder.add_node(
         "deliver_result",
-        RunnableLambda(
-            build_deliver_result_node(worker, gemini_worker, openrouter_worker, shell_worker)
-        ),
+        RunnableLambda(build_deliver_result_node(worker)),
     )
     builder.add_node(
         "transition_to_research_phase",
@@ -3241,9 +3216,6 @@ def _add_orchestrator_edges(builder: Any) -> None:
 def build_orchestrator_graph(
     *,
     worker: Worker | None = None,
-    gemini_worker: Worker | None = None,
-    openrouter_worker: Worker | None = None,
-    shell_worker: Worker | None = None,
     workspace_manager: WorkspaceManager | None = None,
     worker_profiles: Mapping[str, WorkerProfile] | None = None,
     enable_worker_profiles: bool = False,
@@ -3255,11 +3227,11 @@ def build_orchestrator_graph(
 ) -> Any:
     """Build and compile the linear LangGraph happy-path skeleton."""
     builder = StateGraph(OrchestratorState)
-    available_workers: frozenset[str] = frozenset(
-        _available_workers(
-            worker, gemini_worker, openrouter_worker, shell_worker=shell_worker
-        ).keys()
-    )
+    available_workers_dict = _available_workers(worker)
+    available_workers: frozenset[str] = frozenset(available_workers_dict.keys())
+    shell_worker = getattr(
+        worker, "get_shell_worker", lambda: available_workers_dict.get("shell")
+    )()
     available_profiles = dict(worker_profiles or {})
     active_profiles = available_profiles if enable_worker_profiles else None
     profile_names = frozenset(available_profiles.keys()) if enable_worker_profiles else frozenset()
@@ -3274,8 +3246,6 @@ def build_orchestrator_graph(
         profile_names,
         enable_independent_verifier,
         worker,
-        gemini_worker,
-        openrouter_worker,
     )
     _add_orchestrator_edges(builder)
     return builder.compile(

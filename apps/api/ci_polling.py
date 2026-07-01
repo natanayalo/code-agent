@@ -341,7 +341,16 @@ class CIPollingScheduler:
         ):
             return logs
 
-        worker = self.task_service.gemini_worker or self.task_service.worker
+        worker_facade = self.task_service.worker
+        if not worker_facade:
+            return logs
+
+        get_worker = getattr(worker_facade, "get_worker", None)
+        worker = (
+            get_worker("antigravity") or get_worker("codex") or get_worker("openrouter")
+            if callable(get_worker)
+            else worker_facade
+        )
         if not worker or not logs:
             return logs
 

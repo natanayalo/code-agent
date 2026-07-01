@@ -14,6 +14,7 @@ from orchestrator import OrchestratorState, build_orchestrator_graph
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.task_spec import is_destructive_task
 from workers import ArtifactReference, Worker, WorkerRequest, WorkerResult, WorkerTestResult
+from workers.facade import WorkerFacade
 
 logger = logging.getLogger(__name__)
 
@@ -287,8 +288,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
         self._worker = _FrozenOutcomeWorker(outcomes_by_case_id=outcomes_by_case_id)
         self._worker_override = worker_override
         self._graph = build_orchestrator_graph(
-            worker=self._worker,
-            gemini_worker=self._worker,
+            worker=WorkerFacade(codex_worker=self._worker, antigravity_worker=self._worker),
             checkpointer=create_in_memory_checkpointer(),
         )
 

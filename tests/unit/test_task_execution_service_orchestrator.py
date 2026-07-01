@@ -191,9 +191,7 @@ def test_task_execution_service_reuses_one_compiled_graph(
     fake_graph = _FakeGraph()
     build_calls: list[Worker] = []
 
-    def fake_build_orchestrator_graph(
-        *, worker: Worker, gemini_worker=None, **kwargs
-    ) -> _FakeGraph:
+    def fake_build_orchestrator_graph(*, worker: Worker, **kwargs) -> _FakeGraph:
         build_calls.append(worker)
         return fake_graph
 
@@ -277,7 +275,7 @@ def test_run_orchestrator_propagates_submission_secrets(
     monkeypatch.setattr(
         execution_module,
         "build_orchestrator_graph",
-        lambda *, worker, gemini_worker=None, **kwargs: fake_graph,
+        lambda *, worker, **kwargs: fake_graph,
     )
 
     service = execution_module.TaskExecutionService(
@@ -312,7 +310,7 @@ def test_run_orchestrator_applies_effective_budget_policy_to_payload(monkeypatch
     monkeypatch.setattr(
         execution_module,
         "build_orchestrator_graph",
-        lambda *, worker, gemini_worker=None, **kwargs: fake_graph,
+        lambda *, worker, **kwargs: fake_graph,
     )
 
     service = execution_module.TaskExecutionService(
@@ -354,7 +352,7 @@ def test_run_orchestrator_handles_missing_opentelemetry_import(monkeypatch) -> N
     monkeypatch.setattr(
         execution_module,
         "build_orchestrator_graph",
-        lambda *, worker, gemini_worker=None, **kwargs: fake_graph,
+        lambda *, worker, **kwargs: fake_graph,
     )
 
     service = execution_module.TaskExecutionService(

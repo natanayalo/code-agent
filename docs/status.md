@@ -6,7 +6,7 @@ Phase 3: personal reliability before broader autonomy.
 
 Active focus:
 
-- Milestone 21 (Worker Runtime Hotspot Refactor) boundary extraction after M20 contracts settle
+- Milestone 21 (Worker Runtime Hotspot Refactor) boundary extraction (worker facade completed)
 
 ## Current Capabilities
 
@@ -44,7 +44,7 @@ Active focus:
 
 Granular tasks for the active and upcoming milestones:
 
-- Milestone 21: worker facade, runtime executor, sandbox adapter, and tool extraction.
+- Milestone 21: worker facade [x], runtime executor, sandbox adapter, and tool extraction.
 - Phase 4: evaluate routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy only after Phase 3 proves reliability.
 
 ## Completed Work

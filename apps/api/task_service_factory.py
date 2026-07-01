@@ -32,6 +32,7 @@ from workers import (
     OpenRouterCliWorker,
     ShellWorker,
     Worker,
+    WorkerFacade,
     WorkerProfile,
     WorkerType,
 )
@@ -545,12 +546,16 @@ def build_task_service_from_env(
         )
     progress_notifiers = _build_progress_notifiers(resolved_env, outbound_http_clients)
 
-    return TaskExecutionService(
-        session_factory=session_factory,
-        worker=codex_worker,
-        gemini_worker=gemini_worker,
+    facade = WorkerFacade(
+        codex_worker=codex_worker,
+        antigravity_worker=gemini_worker,
         openrouter_worker=openrouter_worker,
         shell_worker=shell_worker,
+    )
+
+    return TaskExecutionService(
+        session_factory=session_factory,
+        worker=facade,
         worker_profiles=worker_profiles,
         enable_worker_profiles=enable_worker_profiles,
         enable_independent_verifier=True,

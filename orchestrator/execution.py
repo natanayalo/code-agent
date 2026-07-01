@@ -133,9 +133,6 @@ class TaskExecutionService:
         *,
         session_factory: sessionmaker[Session],
         worker: Worker,
-        gemini_worker: Worker | None = None,
-        openrouter_worker: Worker | None = None,
-        shell_worker: Worker | None = None,
         worker_profiles: Mapping[str, WorkerProfile] | None = None,
         enable_worker_profiles: bool = False,
         enable_independent_verifier: bool = False,
@@ -150,9 +147,6 @@ class TaskExecutionService:
     ) -> None:
         self.session_factory = session_factory
         self.worker = worker
-        self.gemini_worker = gemini_worker
-        self.openrouter_worker = openrouter_worker
-        self.shell_worker = shell_worker
         self.worker_profiles = dict(worker_profiles or {})
         self.enable_worker_profiles = enable_worker_profiles
         self.enable_independent_verifier = enable_independent_verifier
@@ -179,9 +173,6 @@ class TaskExecutionService:
         if self._graph is None:
             self._graph = build_orchestrator_graph(
                 worker=self.worker,
-                gemini_worker=self.gemini_worker,
-                openrouter_worker=self.openrouter_worker,
-                shell_worker=self.shell_worker,
                 workspace_manager=self.workspace_manager,
                 worker_profiles=self.worker_profiles,
                 enable_worker_profiles=self.enable_worker_profiles,
