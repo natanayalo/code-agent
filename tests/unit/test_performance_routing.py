@@ -349,3 +349,23 @@ def test_routing_policy_loads_via_symlink(tmp_path: Path) -> None:
     decision = policy.choose_profile("bugfix", {"codex-native-executor": codex_profile})
     assert decision is not None
     assert decision.chosen_profile == "codex-native-executor"
+
+
+def test_routing_policy_metrics_caching(tmp_path: Path) -> None:
+    path = tmp_path / "cached_metrics.json"
+    metrics = {"version": "cached-v1", "profiles": {}}
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(metrics, f)
+
+    # First load
+    policy1 = PerformanceRoutingPolicy(path)
+    assert policy1.metrics_data["version"] == "cached-v1"
+
+    # Modify metrics file on disk
+    metrics_modified = {"version": "cached-v2", "profiles": {}}
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(metrics_modified, f)
+
+    # Second load should hit cache
+    policy2 = PerformanceRoutingPolicy(path)
+    assert policy2.metrics_data["version"] == "cached-v1"

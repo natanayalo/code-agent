@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_METRICS_PATH = Path(__file__).resolve().parents[1] / "evaluation" / "routing_metrics.json"
 
+_METRICS_CACHE: dict[Path, dict[str, Any]] = {}
+
 
 class PerformanceRoutingPolicy:
     """Policy helper to dynamically choose worker profiles based on success rates and latencies."""
@@ -25,6 +27,10 @@ class PerformanceRoutingPolicy:
         self._load_metrics()
 
     def _load_metrics(self) -> None:
+        if self.metrics_path in _METRICS_CACHE:
+            self.metrics_data = _METRICS_CACHE[self.metrics_path]
+            return
+
         if not (self.metrics_path.exists() or self.metrics_path.is_symlink()):
             logger.warning("Routing metrics file not found at: %s", self.metrics_path)
             return
@@ -32,6 +38,7 @@ class PerformanceRoutingPolicy:
             with self.metrics_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
                 self.metrics_data = data if isinstance(data, dict) else {}
+                _METRICS_CACHE[self.metrics_path] = self.metrics_data
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to load/parse routing metrics JSON: %s", e)
             self.metrics_data = {}
