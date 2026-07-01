@@ -22,7 +22,7 @@ class PerformanceRoutingPolicy:
     """Policy helper to dynamically choose worker profiles based on success rates and latencies."""
 
     def __init__(self, metrics_path: Path | None = None) -> None:
-        self.metrics_path = metrics_path or DEFAULT_METRICS_PATH
+        self.metrics_path = (metrics_path or DEFAULT_METRICS_PATH).resolve()
         self.metrics_data: dict[str, Any] = {}
         self._load_metrics()
 
@@ -33,15 +33,30 @@ class PerformanceRoutingPolicy:
 
         if not (self.metrics_path.exists() or self.metrics_path.is_symlink()):
             logger.warning("Routing metrics file not found at: %s", self.metrics_path)
+            self.metrics_data = {}
+            _METRICS_CACHE[self.metrics_path] = self.metrics_data
             return
         try:
             with self.metrics_path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-                self.metrics_data = data if isinstance(data, dict) else {}
+                raw_metrics = data if isinstance(data, dict) else {}
+
+                # Pre-normalize/expand profiles at load time to avoid query-time string manipulation
+                profiles = raw_metrics.get("profiles")
+                if isinstance(profiles, dict):
+                    expanded_profiles = {}
+                    for k, v in profiles.items():
+                        expanded_profiles[k] = v
+                        expanded_profiles[f"{k}-read-only"] = v
+                        expanded_profiles[f"{k}-read-only-executor"] = v
+                    raw_metrics["profiles"] = expanded_profiles
+
+                self.metrics_data = raw_metrics
                 _METRICS_CACHE[self.metrics_path] = self.metrics_data
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to load/parse routing metrics JSON: %s", e)
             self.metrics_data = {}
+            _METRICS_CACHE[self.metrics_path] = self.metrics_data
 
     def choose_profile(
         self,
@@ -107,14 +122,7 @@ class PerformanceRoutingPolicy:
         candidate_metrics_meta: dict[str, Any] = {}
 
         for profile_name, profile in routable_profiles.items():
-            # Normalize profile name (e.g., strip read-only suffixes)
-            normalized_profile_name = profile_name
-            if profile_name.endswith("-read-only"):
-                normalized_profile_name = profile_name.removesuffix("-read-only")
-            elif profile_name.endswith("-read-only-executor"):
-                normalized_profile_name = profile_name.removesuffix("-read-only-executor")
-
-            profile_metric = profiles_metrics.get(normalized_profile_name)
+            profile_metric = profiles_metrics.get(profile_name)
             if not isinstance(profile_metric, dict):
                 candidate_metrics_meta[profile_name] = "no_metrics"
                 continue
