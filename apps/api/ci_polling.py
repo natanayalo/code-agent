@@ -348,7 +348,7 @@ class CIPollingScheduler:
         get_worker = getattr(worker_facade, "get_worker", None)
         worker = (
             get_worker("antigravity") or get_worker("codex")
-            if get_worker is not None
+            if callable(get_worker)
             else worker_facade
         )
         if not worker or not logs:

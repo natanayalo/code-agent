@@ -72,8 +72,9 @@ def _supported_profile_names(self: Any, profiles: dict[str, Any]) -> list[str]:
 def _supported_worker_types(self: Any) -> set[WorkerType]:
     supported = set()
     worker = getattr(self, "worker", None)
-    if worker and hasattr(worker, "available_workers"):
-        for w_type in worker.available_workers().keys():
+    available_workers_fn = getattr(worker, "available_workers", None)
+    if callable(available_workers_fn):
+        for w_type in available_workers_fn().keys():
             if w_type != "shell":
                 try:
                     supported.add(coerce_worker_type(w_type))
