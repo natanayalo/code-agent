@@ -43,8 +43,7 @@ Active focus:
 
 ## Next Priorities
 
-1. verify Phase 3 reliability metrics [x]
-2. plan and implement Milestone 22 dynamic routing policy [x]
+1. plan and implement Milestone 23 semantic memory retrieval
 
 ## Current Backlog
 
