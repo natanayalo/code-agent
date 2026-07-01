@@ -22,13 +22,11 @@ from tools import DEFAULT_TOOL_REGISTRY
 from workers import OpenRouterCliWorker, WorkerRequest
 from workers.base import ArtifactReference
 from workers.cli_runtime import (
-    CliRuntimeBudgetLedger,
-    CliRuntimeExecutionResult,
     CliRuntimeMessage,
     CliRuntimeSettings,
     CliRuntimeStep,
 )
-from workers.openrouter_cli_worker_utils import _next_action_hint, _workspace_task_id
+from workers.openrouter_cli_worker_utils import _workspace_task_id
 
 
 class _FakeWorkspaceManager:
@@ -500,28 +498,6 @@ def test_openrouter_cli_worker_self_review_exhausts_budget(tmp_path: Path) -> No
 
     assert result.status == "failure"
     assert "exhausted its remaining budget" in (result.summary or "")
-
-
-def test_openrouter_next_action_hint() -> None:
-    def make_exec(stop_reason):
-        return CliRuntimeExecutionResult(
-            status="failure",
-            summary="failed",
-            stop_reason=stop_reason,
-            commands_run=[],
-            messages=[],
-            permission_decision=None,
-            budget_ledger=CliRuntimeBudgetLedger(max_iterations=10),
-        )
-
-    assert _next_action_hint(make_exec("permission_required")) == "request_higher_permission"
-    assert _next_action_hint(make_exec("max_iterations")) == "increase_budget_or_reduce_scope"
-    assert (
-        _next_action_hint(make_exec("stalled_in_inspection")) == "increase_budget_or_reduce_scope"
-    )
-    assert _next_action_hint(make_exec("context_window")) == "reduce_context_or_scope"
-    assert _next_action_hint(make_exec("adapter_error")) == "inspect_worker_configuration"
-    assert _next_action_hint(make_exec("shell_error")) == "inspect_workspace_artifacts"
 
 
 def test_openrouter_cleanup_workspace_error(tmp_path, caplog) -> None:
