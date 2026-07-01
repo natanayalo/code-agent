@@ -548,7 +548,7 @@ Phase 3:
 
 Phase 4:
 
-1. Milestone 22
+1. Milestone 22 [x]
 2. Milestone 23
 3. Milestone 24
 4. Milestone 25

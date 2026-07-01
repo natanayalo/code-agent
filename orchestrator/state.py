@@ -127,6 +127,7 @@ class RouteDecision(OrchestratorModel):
     runtime_mode: WorkerRuntimeMode | None = None
     route_reason: str | None = None
     override_applied: bool = False
+    route_metadata: dict[str, Any] | None = None
 
     @field_validator("chosen_worker", mode="before")
     @classmethod

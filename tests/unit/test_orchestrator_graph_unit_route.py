@@ -698,4 +698,4 @@ def test_compute_route_profile_aware_keeps_shell_smoke_on_normal_executor() -> N
 
     assert route.chosen_worker == "codex"
     assert route.chosen_profile == "codex-native-executor"
-    assert route.route_reason == "cheap_mechanical_change"
+    assert route.route_reason == "dynamic_performance_routing"

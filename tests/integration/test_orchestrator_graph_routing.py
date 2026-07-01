@@ -257,3 +257,312 @@ def test_orchestrator_graph_profile_override_incompatible_with_constraints() -> 
     )
     assert state.result.next_action_hint == "configure_requested_worker_profile"
     assert worker.requests == []
+
+
+def test_orchestrator_graph_dynamic_routing_by_performance() -> None:
+    """Task should dynamically route to the profile with best metrics.
+
+    (antigravity-native-executor for bugfix).
+    """
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=["src/math_utils.py"],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary="fixed bug",
+        )
+    )
+    graph = build_orchestrator_graph(
+        worker=WorkerFacade(codex_worker=worker, antigravity_worker=worker),
+        enable_worker_profiles=True,
+        worker_profiles={
+            "codex-native-executor": WorkerProfile(
+                name="codex-native-executor",
+                worker_type="codex",
+                runtime_mode="native_agent",
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            ),
+            "antigravity-native-executor": WorkerProfile(
+                name="antigravity-native-executor",
+                worker_type="antigravity",
+                runtime_mode="native_agent",
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            ),
+        },
+    )
+
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": (
+                        "Fix the zero-division guard in calculate_ratio and add regression tests."
+                    ),
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                }
+            }
+        )
+    )
+    state = OrchestratorState.model_validate(raw_output)
+
+    # For 'bugfix' task type, antigravity-native-executor has higher success rate (0.95 vs 0.82)
+    assert state.route.chosen_profile == "antigravity-native-executor"
+    assert state.route.chosen_worker == "antigravity"
+    assert state.route.route_reason == "dynamic_performance_routing"
+    assert state.route.route_metadata is not None
+    assert state.route.route_metadata["task_class"] == "bugfix"
+    assert state.route.route_metadata["selected_profile"] == "antigravity-native-executor"
+
+
+def test_orchestrator_graph_dynamic_routing_bypassed_by_budget_preference() -> None:
+    """A task with low-cost preference should bypass dynamic routing.
+
+    It should fall back to the legacy cheap worker (codex).
+    """
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=["src/math_utils.py"],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary="fixed bug cheaply",
+        )
+    )
+    graph = build_orchestrator_graph(
+        worker=WorkerFacade(codex_worker=worker, antigravity_worker=worker),
+        enable_worker_profiles=True,
+        worker_profiles={
+            "codex-native-executor": WorkerProfile(
+                name="codex-native-executor",
+                worker_type="codex",
+                runtime_mode="native_agent",
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            ),
+            "antigravity-native-executor": WorkerProfile(
+                name="antigravity-native-executor",
+                worker_type="antigravity",
+                runtime_mode="native_agent",
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            ),
+        },
+    )
+
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": (
+                        "Fix the zero-division guard in calculate_ratio and add regression tests."
+                    ),
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                    "budget": {"prefer_low_cost": True},
+                }
+            }
+        )
+    )
+    state = OrchestratorState.model_validate(raw_output)
+
+    # Budget preference prefer_low_cost should force selection of codex-native-executor.
+    assert state.route.chosen_profile == "codex-native-executor"
+    assert state.route.chosen_worker == "codex"
+    assert state.route.route_reason == "budget_preference"
+    assert state.route.route_metadata is None
+
+
+def test_orchestrator_graph_dynamic_routing_fallback_on_missing_metrics() -> None:
+    """If a task class has no metrics, it should fall back to heuristics.
+
+    (cheap worker like codex).
+    """
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=["src/math_utils.py"],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary="maintenance done",
+        )
+    )
+    graph = build_orchestrator_graph(
+        worker=WorkerFacade(codex_worker=worker, antigravity_worker=worker),
+        enable_worker_profiles=True,
+        worker_profiles={
+            "codex-native-executor": WorkerProfile(
+                name="codex-native-executor",
+                worker_type="codex",
+                runtime_mode="native_agent",
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            ),
+            "antigravity-native-executor": WorkerProfile(
+                name="antigravity-native-executor",
+                worker_type="antigravity",
+                runtime_mode="native_agent",
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            ),
+        },
+    )
+
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": ("Upgrade Python version in dependency manifest files."),
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                }
+            }
+        )
+    )
+    state = OrchestratorState.model_validate(raw_output)
+
+    # Classified as 'maintenance' (contains 'upgrade'), which has no metrics
+    # in routing_metrics.json.
+    # Should fall back to legacy heuristics, choosing codex-native-executor (cheap fallback).
+    assert state.route.chosen_profile == "codex-native-executor"
+    assert state.route.chosen_worker == "codex"
+    assert state.route.route_reason == "cheap_mechanical_change"
+    assert state.route.route_metadata is None
+
+
+def test_orchestrator_graph_dynamic_routing_incompatible_profiles_filtered() -> None:
+    """Read-only profiles should be chosen if task has read_only constraint.
+
+    This filters out incompatible mutation profiles.
+    """
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=[],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary="read-only scout done",
+        )
+    )
+    graph = build_orchestrator_graph(
+        worker=WorkerFacade(codex_worker=worker, antigravity_worker=worker),
+        enable_worker_profiles=True,
+        worker_profiles={
+            "codex-native-executor": WorkerProfile(
+                name="codex-native-executor",
+                worker_type="codex",
+                runtime_mode="native_agent",
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                mutation_policy="patch_allowed",
+            ),
+            "antigravity-native-executor-read-only": WorkerProfile(
+                name="antigravity-native-executor-read-only",
+                worker_type="antigravity",
+                runtime_mode="native_agent",
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+                mutation_policy="read_only",
+            ),
+        },
+    )
+
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": (
+                        "Fix the zero-division guard in calculate_ratio and add regression tests."
+                    ),
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                    "constraints": {"read_only": True},
+                }
+            }
+        )
+    )
+    state = OrchestratorState.model_validate(raw_output)
+
+    # Dynamic routing should pick antigravity-native-executor-read-only since codex-native-executor
+    # is not read-only and thus incompatible.
+    assert state.route.chosen_profile == "antigravity-native-executor-read-only"
+    assert state.route.chosen_worker == "antigravity"
+    assert state.route.route_reason == "dynamic_performance_routing"
+
+
+def test_orchestrator_graph_dynamic_routing_escalation_takes_precedence() -> None:
+    """Prior-failure escalation takes precedence over performance-based routing."""
+    worker = StaticWorker(
+        WorkerResult(
+            status="success",
+            commands_run=[],
+            files_changed=["src/math_utils.py"],
+            test_results=[],
+            artifacts=[],
+            next_action_hint="persist_memory",
+            summary="fixed bug after retry",
+        )
+    )
+    graph = build_orchestrator_graph(
+        worker=WorkerFacade(codex_worker=worker, antigravity_worker=worker),
+        enable_worker_profiles=True,
+        worker_profiles={
+            "codex-native-executor": WorkerProfile(
+                name="codex-native-executor",
+                worker_type="codex",
+                runtime_mode="native_agent",
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            ),
+            "antigravity-native-executor": WorkerProfile(
+                name="antigravity-native-executor",
+                worker_type="antigravity",
+                runtime_mode="native_agent",
+                capability_tags=["execution"],
+                supported_delivery_modes=["workspace", "branch", "draft_pr"],
+            ),
+        },
+    )
+
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "task": {
+                    "task_text": (
+                        "Fix the zero-division guard in calculate_ratio and add regression tests."
+                    ),
+                    "repo_url": "https://github.com/natanayalo/code-agent",
+                    "branch": "master",
+                },
+                "dispatch": {
+                    "worker_type": "antigravity",
+                    "worker_profile": "antigravity-native-executor",
+                },
+                "result": {
+                    "status": "failure",
+                    "failure_kind": "provider_error",
+                    "commands_run": [],
+                    "files_changed": [],
+                },
+                "attempt_count": 1,
+            }
+        )
+    )
+    state = OrchestratorState.model_validate(raw_output)
+
+    # Because antigravity has already failed once, prior-failure escalation takes precedence
+    # and routes to the alternate worker (codex-native-executor).
+    assert state.route.chosen_profile == "codex-native-executor"
+    assert state.route.chosen_worker == "codex"
+    assert state.route.route_reason == "previous_worker_failed"
