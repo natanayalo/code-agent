@@ -347,7 +347,7 @@ class CIPollingScheduler:
 
         get_worker = getattr(worker_facade, "get_worker", None)
         worker = (
-            get_worker("antigravity") or get_worker("codex")
+            get_worker("antigravity") or get_worker("codex") or get_worker("openrouter")
             if callable(get_worker)
             else worker_facade
         )

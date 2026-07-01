@@ -75,7 +75,7 @@ def _supported_worker_types(self: Any) -> set[WorkerType]:
     available_workers_fn = getattr(worker, "available_workers", None)
     if callable(available_workers_fn):
         for w_type in available_workers_fn().keys():
-            if w_type != "shell":
+            if w_type != "shell" and w_type is not None:
                 try:
                     supported.add(coerce_worker_type(w_type))
                 except (TypeError, ValueError):
