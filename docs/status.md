@@ -44,7 +44,7 @@ Active focus:
 ## Next Priorities
 
 1. verify Phase 3 reliability metrics [x]
-2. plan and implement Milestone 22 dynamic routing policy [in progress]
+2. plan and implement Milestone 22 dynamic routing policy [x]
 
 ## Current Backlog
 
