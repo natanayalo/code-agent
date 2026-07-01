@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: implement Milestone 22 dynamic performance-based worker routing ([#292](https://github.com/natanayalo/code-agent/pull/292))
+
 - Feat: integrate WorkerFacade to centralize worker routing ([#290](https://github.com/natanayalo/code-agent/pull/290))
 
 - Feat: rollout M20.7 frozen evaluation suite ([#289](https://github.com/natanayalo/code-agent/pull/289))
