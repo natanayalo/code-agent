@@ -401,12 +401,12 @@ Goal:
 Planned internal splits:
 
 - [x] worker facade
-- [ ] runtime executor
-- [ ] sandbox/session adapter
-- [ ] prompt assembler
-- [ ] tool execution and permission gate
-- [ ] post-run pipeline
-- [ ] result mapper
+- [x] runtime executor
+- [x] sandbox/session adapter
+- [x] prompt assembler
+- [x] tool execution and permission gate
+- [x] post-run pipeline
+- [x] result mapper
 
 Approach:
 

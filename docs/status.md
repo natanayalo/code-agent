@@ -6,10 +6,9 @@ Phase 3: personal reliability before broader autonomy.
 
 Active focus:
 
-- Milestone 21 (Worker Runtime Hotspot Refactor) boundary extraction (worker facade completed)
+- Verify Phase 3 reliability metrics and prepare for Phase 4 selective autonomy
 
 ## Current Capabilities
-
 - API + Telegram ingress for task intake
 - shared-secret API auth for protected ingress routes
 - durable Postgres persistence for users/sessions/tasks/runs/artifacts/memory
@@ -37,8 +36,8 @@ Active focus:
 
 ## Next Priorities
 
-1. start Milestone 21 Hotspot Refactor boundary extraction
-2. keep Phase 4 autonomy work gated on Phase 3 reliability metrics
+1. verify Phase 3 reliability metrics
+2. plan Milestone 22 selective autonomy/routing policy
 
 ## Current Backlog
 
