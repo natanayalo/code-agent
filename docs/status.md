@@ -8,6 +8,13 @@ Active focus:
 
 - Verify Phase 3 reliability metrics and prepare for Phase 4 selective autonomy
 
+## Phase 3 Reliability Baseline
+- **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
+- **Approval requests**: 1 case needing approval.
+- **Validation evidence**: 24 cases with validation evidence present.
+- **Manual log inspection**: 10 cases needing manual log inspection.
+- **Worker failures**: 9 cases with worker failure (expected failure cases).
+
 ## Current Capabilities
 - API + Telegram ingress for task intake
 - shared-secret API auth for protected ingress routes
@@ -36,8 +43,8 @@ Active focus:
 
 ## Next Priorities
 
-1. verify Phase 3 reliability metrics
-2. plan Milestone 22 selective autonomy/routing policy
+1. verify Phase 3 reliability metrics [x]
+2. plan and implement Milestone 22 dynamic routing policy [in progress]
 
 ## Current Backlog
 

@@ -1800,14 +1800,12 @@ def _compute_legacy_route_decision(
     return _compute_route_budget_and_shape(state, available_workers)
 
 
-def _compute_profile_route_decision(
+def _compute_profile_overrides(
     state: OrchestratorState,
-    available_workers: frozenset[str],
+    routable_profiles: Mapping[str, WorkerProfile],
     available_profiles: Mapping[str, WorkerProfile],
-) -> RouteDecision:
-    """Compute routing through configured worker profiles."""
-    routable_profiles = _routable_execution_profiles(state, available_profiles, available_workers)
-
+) -> RouteDecision | None:
+    """Compute overrides for manual profiles or workers."""
     profile_override = state.task.worker_profile_override
     if isinstance(profile_override, str) and profile_override.strip():
         requested_profile = profile_override.strip()
@@ -1861,8 +1859,50 @@ def _compute_profile_route_decision(
             route_reason="runtime_unavailable",
             override_applied=True,
         )
+    return None
+
+
+def _compute_profile_route_decision(
+    state: OrchestratorState,
+    available_workers: frozenset[str],
+    available_profiles: Mapping[str, WorkerProfile],
+) -> RouteDecision:
+    """Compute routing through configured worker profiles."""
+    routable_profiles = _routable_execution_profiles(state, available_profiles, available_workers)
+
+    override_decision = _compute_profile_overrides(state, routable_profiles, available_profiles)
+    if override_decision is not None:
+        return override_decision
 
     profiled_workers = frozenset({p.worker_type for p in routable_profiles.values()})
+
+    # Prior failure escalation takes precedence over metrics and heuristics.
+    escalation_route = _compute_route_escalation(state, profiled_workers)
+    if escalation_route is not None:
+        return _route_from_worker_choice(escalation_route, routable_profiles)
+
+    # Explicit budget/cost preferences supersede dynamic performance routing.
+    budget = state.task.budget
+    constraints = state.task.constraints
+    task_text = state.normalized_task_text or state.task.task_text
+    has_budget_preference = (
+        budget.get("prefer_high_quality")
+        or constraints.get("prefer_high_quality")
+        or contains_marker(task_text, HIGH_QUALITY_REQUEST_MARKERS)
+        or budget.get("prefer_low_cost")
+        or constraints.get("prefer_low_cost")
+        or contains_marker(task_text, LOW_COST_REQUEST_MARKERS)
+    )
+
+    if not has_budget_preference:
+        from orchestrator.performance_routing import PerformanceRoutingPolicy
+
+        policy = PerformanceRoutingPolicy()
+        task_type = state.task_spec.task_type if state.task_spec is not None else None
+        route_choice = policy.choose_profile(task_type, routable_profiles)
+        if route_choice is not None:
+            return route_choice
+
     worker_route = _compute_legacy_route_decision(state, profiled_workers)
     return _route_from_worker_choice(worker_route, routable_profiles)
 

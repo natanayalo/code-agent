@@ -1,0 +1,86 @@
+{
+  "version": "1.0.0",
+  "source": "evaluation/routing_metrics.json",
+  "profiles": {
+    "codex-native-executor": {
+      "task_classes": {
+        "bugfix": {
+          "success_rate": 0.82,
+          "validation_pass_rate": 0.85,
+          "mean_latency_seconds": 120.5,
+          "human_intervention_rate": 0.15,
+          "failure_causes": {
+            "test_failed": 3,
+            "timeout": 1
+          }
+        },
+        "feature": {
+          "success_rate": 0.70,
+          "validation_pass_rate": 0.75,
+          "mean_latency_seconds": 240.2,
+          "human_intervention_rate": 0.35,
+          "failure_causes": {
+            "test_failed": 5,
+            "api_error": 2
+          }
+        },
+        "refactor": {
+          "success_rate": 0.78,
+          "validation_pass_rate": 0.80,
+          "mean_latency_seconds": 180.0,
+          "human_intervention_rate": 0.20,
+          "failure_causes": {
+            "syntax_error": 2
+          }
+        },
+        "scout": {
+          "success_rate": 0.94,
+          "validation_pass_rate": 0.95,
+          "mean_latency_seconds": 60.1,
+          "human_intervention_rate": 0.05,
+          "failure_causes": {
+            "timeout": 1
+          }
+        }
+      }
+    },
+    "antigravity-native-executor": {
+      "task_classes": {
+        "bugfix": {
+          "success_rate": 0.95,
+          "validation_pass_rate": 0.96,
+          "mean_latency_seconds": 85.3,
+          "human_intervention_rate": 0.04,
+          "failure_causes": {
+            "test_failed": 1
+          }
+        },
+        "feature": {
+          "success_rate": 0.88,
+          "validation_pass_rate": 0.90,
+          "mean_latency_seconds": 165.7,
+          "human_intervention_rate": 0.10,
+          "failure_causes": {
+            "test_failed": 2
+          }
+        },
+        "refactor": {
+          "success_rate": 0.91,
+          "validation_pass_rate": 0.92,
+          "mean_latency_seconds": 140.2,
+          "human_intervention_rate": 0.08,
+          "failure_causes": {
+            "syntax_error": 1
+          }
+        },
+        "scout": {
+          "success_rate": 0.98,
+          "validation_pass_rate": 0.99,
+          "mean_latency_seconds": 40.5,
+          "human_intervention_rate": 0.02,
+          "failure_causes": {}
+        }
+      }
+    }
+  }
+}
