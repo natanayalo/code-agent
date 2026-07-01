@@ -321,6 +321,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Refactor: extract RuntimeExecutor and SandboxSessionAdapter to clean up CLI workers ([#291](https://github.com/natanayalo/code-agent/pull/291))
+
 - [codex] add GitHub CI repair loop ([#288](https://github.com/natanayalo/code-agent/pull/288))
 
 - [codex] add worker registry backpressure ([#280](https://github.com/natanayalo/code-agent/pull/280))
