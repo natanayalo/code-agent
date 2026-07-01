@@ -345,7 +345,12 @@ class CIPollingScheduler:
         if not worker_facade:
             return logs
 
-        worker = worker_facade.get_worker("antigravity") or worker_facade.get_worker("codex")  # type: ignore[attr-defined]
+        get_worker = getattr(worker_facade, "get_worker", None)
+        worker = (
+            get_worker("antigravity") or get_worker("codex")
+            if get_worker is not None
+            else worker_facade
+        )
         if not worker or not logs:
             return logs
 

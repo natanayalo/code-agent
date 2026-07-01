@@ -87,7 +87,7 @@ def test_submit_repair_task_uses_idempotency_key_and_repair_link(monkeypatch) ->
     assert delivery_key.delivery_id == "ci_repair:source-task:abc123:tests"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_parse_logs_with_llm_async_uses_facade() -> None:
     """LLM parsing should resolve worker from facade when profile is enabled."""
     worker_mock = AsyncMock()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from workers.base import Worker, WorkerRequest, WorkerResult, WorkerType
+from workers.base import Worker, WorkerRequest, WorkerResult, WorkerType, normalize_worker_type
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class WorkerFacade(Worker):
 
     def get_worker(self, worker_type: WorkerType | str) -> Worker | None:
         """Look up a canonical worker by type."""
-        return self._workers.get(worker_type)
+        return self._workers.get(normalize_worker_type(worker_type))
 
     def get_shell_worker(self) -> Worker | None:
         """Get the specialized shell support worker if configured."""
@@ -78,8 +78,8 @@ class WorkerFacade(Worker):
             and isinstance(request.runtime_manifest.get("worker"), dict)
             and "worker_type" in request.runtime_manifest["worker"]
         ):
-            manifest_type = request.runtime_manifest["worker"]["worker_type"]
-            if request.worker_type != manifest_type:
+            manifest_type = normalize_worker_type(request.runtime_manifest["worker"]["worker_type"])
+            if normalize_worker_type(request.worker_type) != manifest_type:
                 logger.error(
                     "WorkerRequest worker_type %s conflicts with runtime_manifest worker_type %s",
                     request.worker_type,
