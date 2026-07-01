@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: integrate WorkerFacade to centralize worker routing ([#290](https://github.com/natanayalo/code-agent/pull/290))
+
 - Feat: rollout M20.7 frozen evaluation suite ([#289](https://github.com/natanayalo/code-agent/pull/289))
 
 - Feat: implement M20.5 repo validation profiles and repo url lockdown ([#287](https://github.com/natanayalo/code-agent/pull/287))
