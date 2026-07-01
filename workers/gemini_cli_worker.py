@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
 
 from apps.observability import (
     SPAN_KIND_AGENT,
@@ -52,24 +51,12 @@ from workers.gemini_cli_worker_native import (
     _workspace_task_id,
 )
 from workers.runtime_executor import RuntimeExecutor
-from workers.sandbox_adapter import SandboxSessionAdapter
+from workers.sandbox_adapter import SandboxSessionAdapter, ShellSessionFactory
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_GEMINI_NATIVE_SANDBOX_ENABLED = True
 DEFAULT_GEMINI_NATIVE_APPROVAL_MODE = "default"
-
-
-class ShellSessionFactory(Protocol):
-    """Factory for opening a persistent shell session in a running container."""
-
-    def __call__(
-        self,
-        container: DockerSandboxContainer,
-        *,
-        secrets: dict[str, str] | None = None,
-    ) -> ShellSessionProtocol:
-        """Return a ready-to-use shell session."""
 
 
 class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):

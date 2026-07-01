@@ -238,10 +238,11 @@ class RuntimeExecutor:
         lint_format_artifacts: list[ArtifactReference],
         cancel_token: Callable[[], bool] | None,
     ) -> tuple[ReviewResult | None, list[str], dict[str, Any], list[ArtifactReference]]:
+        constraints = request.constraints if isinstance(request.constraints, dict) else {}
         return run_shared_self_review_fix_loop(
             execution=execution,
             task_text=request.task_text,
-            constraints=request.constraints,
+            constraints=constraints,
             runtime_adapter=self.runtime_adapter,
             runtime_settings=runtime_setup.runtime_settings,
             system_prompt=runtime_setup.system_prompt,
@@ -287,7 +288,7 @@ class RuntimeExecutor:
             available_secrets=request.secrets,
         )
 
-        network_enabled = request.network_enabled
+        network_enabled = bool(request.network_enabled)
         if not network_enabled:
             constraints = request.constraints if isinstance(request.constraints, dict) else {}
             granted_permission = granted_permission_from_constraints(constraints)
@@ -338,7 +339,7 @@ class RuntimeExecutor:
                 )
 
             review_result = None
-            if execution.status == "success":
+            if execution.status == "success" and not (cancel_token and cancel_token()):
                 review_result, files_changed, lint_format_result, lint_format_artifacts = (
                     self._run_self_review(
                         request,

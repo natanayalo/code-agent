@@ -8,7 +8,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from apps.observability import (
     set_span_status_from_outcome,
@@ -77,18 +77,6 @@ class _RuntimeExecutionPhase:
     lint_format_result: dict[str, object] | None
     lint_format_artifacts: list[ArtifactReference]
     review_result: ReviewResult | None
-
-
-class ShellSessionFactory(Protocol):
-    """Factory for opening a persistent shell session in a running container."""
-
-    def __call__(
-        self,
-        container: DockerSandboxContainer,
-        *,
-        secrets: dict[str, str] | None = None,
-    ) -> ShellSessionProtocol:
-        """Return a ready-to-use shell session."""
 
 
 def _slugify(value: str) -> str:

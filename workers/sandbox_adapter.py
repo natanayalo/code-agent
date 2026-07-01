@@ -5,13 +5,14 @@ from __future__ import annotations
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Protocol
+from typing import Protocol
 
 from sandbox import (
     DockerSandboxContainer,
     DockerSandboxContainerError,
     DockerSandboxContainerManager,
     DockerSandboxContainerRequest,
+    WorkspaceHandle,
 )
 from workers.cli_runtime import ShellSessionProtocol
 
@@ -45,7 +46,7 @@ class SandboxSessionAdapter:
     def session_context(
         self,
         *,
-        workspace: Any,  # WorkspaceHandle
+        workspace: WorkspaceHandle,
         environment: dict[str, str] | None = None,
         network_enabled: bool = False,
         read_only_workspace: bool = False,
