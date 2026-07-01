@@ -12,7 +12,6 @@ from sandbox import (
     DockerSandboxContainerError,
     DockerSandboxContainerManager,
     DockerSandboxContainerRequest,
-    DockerShellSessionError,
     WorkspaceHandle,
 )
 from workers.cli_runtime import ShellSessionProtocol
@@ -74,7 +73,7 @@ class SandboxSessionAdapter:
             if session is not None:
                 try:
                     session.close()
-                except (OSError, DockerShellSessionError):
+                except Exception:
                     logger.exception("Failed to close persistent shell session")
             try:
                 self.container_manager.stop(container)

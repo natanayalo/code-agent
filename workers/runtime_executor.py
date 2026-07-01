@@ -376,7 +376,7 @@ class RuntimeExecutor:
                 workspace.repo_path,
                 timeout_seconds=runtime_setup.runtime_settings.command_timeout_seconds,
             )
-            if runtime_phase.execution.status == "success"
+            if runtime_phase.execution.status == "success" and not (cancel_token and cancel_token())
             else None,
             artifacts=runtime_phase.lint_format_artifacts,
         )
