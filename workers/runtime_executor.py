@@ -311,11 +311,7 @@ class RuntimeExecutor:
         """Set up, execute, review, and finalize a CLI tool loop run."""
         scoped_secrets, network_enabled = self._resolve_setup_parameters(request)
         constraints = request.constraints if isinstance(request.constraints, dict) else {}
-        read_only_workspace = (
-            request.read_only
-            if request.read_only is not None
-            else bool(constraints.get("read_only"))
-        )
+        read_only_workspace = bool(request.read_only) or bool(constraints.get("read_only"))
         with self.sandbox_adapter.session_context(
             workspace=workspace,
             environment=scoped_secrets,
