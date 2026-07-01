@@ -31,7 +31,11 @@ from workers.base import (
     WorkerRequest,
     WorkerResult,
 )
-from workers.cli_adapter_utils import build_worker_result
+from workers.cli_adapter_utils import (
+    build_worker_result,
+    resolve_runtime_mode,
+    runtime_mode_not_supported_result,
+)
 from workers.cli_runtime import (
     CliRuntimeExecutionResult,
     CliRuntimeSettings,
@@ -219,20 +223,12 @@ if TYPE_CHECKING:
 class CodexCliWorkerNativeMixin:
     def _resolve_runtime_mode(self, request: WorkerRequest) -> WorkerRuntimeMode:
         """Resolve effective runtime mode from request override or worker defaults."""
-        if request.runtime_mode is not None:
-            return request.runtime_mode
-        return self.default_runtime_mode  # type: ignore[attr-defined]
+        return resolve_runtime_mode(request, self.default_runtime_mode)  # type: ignore[attr-defined]
 
     def _runtime_mode_not_supported_result(self, runtime_mode: WorkerRuntimeMode) -> WorkerResult:
         """Return a structured failure for unsupported execution runtime modes."""
-        return WorkerResult(
-            status="failure",
-            summary=(
-                "CodexCliWorker does not support runtime mode "
-                f"`{runtime_mode.value}`. Supported modes: native_agent, tool_loop."
-            ),
-            failure_kind="provider_error",
-            next_action_hint="inspect_worker_configuration",
+        return runtime_mode_not_supported_result(
+            "CodexCliWorker", runtime_mode, ["native_agent", "tool_loop"]
         )
 
     def _build_native_command(

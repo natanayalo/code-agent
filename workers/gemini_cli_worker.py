@@ -37,6 +37,7 @@ from workers.base import (
     WorkerRequest,
     WorkerResult,
 )
+from workers.cli_adapter_utils import resolve_runtime_mode, runtime_mode_not_supported_result
 from workers.cli_runtime import (
     CliRuntimeAdapter,
     CliRuntimeSettings,
@@ -229,20 +230,12 @@ class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
 
     def _resolve_runtime_mode(self, request: WorkerRequest) -> WorkerRuntimeMode:
         """Resolve effective runtime mode from request override or worker defaults."""
-        if request.runtime_mode is not None:
-            return request.runtime_mode
-        return self.default_runtime_mode
+        return resolve_runtime_mode(request, self.default_runtime_mode)
 
     def _runtime_mode_not_supported_result(self, runtime_mode: WorkerRuntimeMode) -> WorkerResult:
         """Return a structured failure for unsupported execution runtime modes."""
-        return WorkerResult(
-            status="failure",
-            summary=(
-                "GeminiCliWorker does not support runtime mode "
-                f"`{runtime_mode.value}`. Supported modes: native_agent, tool_loop."
-            ),
-            failure_kind="provider_error",
-            next_action_hint="inspect_worker_configuration",
+        return runtime_mode_not_supported_result(
+            "GeminiCliWorker", runtime_mode, ["native_agent", "tool_loop"]
         )
 
     def _execute_runtime_mode_switch(
