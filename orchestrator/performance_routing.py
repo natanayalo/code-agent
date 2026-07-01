@@ -49,6 +49,9 @@ class PerformanceRoutingPolicy:
                         expanded_profiles[k] = v
                         expanded_profiles[f"{k}-read-only"] = v
                         expanded_profiles[f"{k}-read-only-executor"] = v
+                        if "-native-executor" in k:
+                            ro_key = k.replace("-native-executor", "-read-only-executor")
+                            expanded_profiles[ro_key] = v
                     raw_metrics["profiles"] = expanded_profiles
 
                 self.metrics_data = raw_metrics
@@ -79,7 +82,7 @@ class PerformanceRoutingPolicy:
             return None
 
         version = self.metrics_data.get("version", "unknown")
-        source = str(self.metrics_data.get("source", "evaluation/routing_metrics.json"))
+        source = str(self.metrics_data.get("source") or self.metrics_path)
 
         candidates, candidate_metrics_meta = self._build_routing_candidates(
             normalized_class, routable_profiles, profiles_metrics

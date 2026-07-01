@@ -369,3 +369,34 @@ def test_routing_policy_metrics_caching(tmp_path: Path) -> None:
     # Second load should hit cache
     policy2 = PerformanceRoutingPolicy(path)
     assert policy2.metrics_data["version"] == "cached-v1"
+
+
+def test_routing_policy_handles_native_to_read_only_executor_mapping(tmp_path: Path) -> None:
+    path = tmp_path / "mapping_metrics.json"
+    metrics = {
+        "version": "1.0",
+        "profiles": {
+            "codex-native-executor": {
+                "task_classes": {
+                    "bugfix": {
+                        "success_rate": 0.98,
+                        "mean_latency_seconds": 50.0,
+                    }
+                }
+            }
+        },
+    }
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(metrics, f)
+
+    policy = PerformanceRoutingPolicy(path)
+    codex_read_only_profile = WorkerProfile(
+        name="codex-read-only-executor",
+        worker_type="codex",
+        runtime_mode="native_agent",
+    )
+    decision = policy.choose_profile(
+        "bugfix", {"codex-read-only-executor": codex_read_only_profile}
+    )
+    assert decision is not None
+    assert decision.chosen_profile == "codex-read-only-executor"
