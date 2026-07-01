@@ -414,7 +414,9 @@ def test_gemini_cli_worker_runtime_error_is_mapped_to_workspace_error(tmp_path: 
         session_factory=lambda _, **__: _FakeSession({}),
     )
 
-    with patch.object(worker, "_setup_runtime_phase", side_effect=RuntimeError("adapter exploded")):
+    with patch.object(
+        worker.runtime_executor, "execute", side_effect=RuntimeError("adapter exploded")
+    ):
         result = asyncio.run(
             worker.run(
                 WorkerRequest(

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
 
 from apps.observability import (
     SPAN_KIND_AGENT,
@@ -29,20 +27,18 @@ from sandbox import (
 from sandbox.workspace import _mask_url_credentials, default_workspace_root
 from tools import (
     DEFAULT_TOOL_REGISTRY,
-    ToolPermissionLevel,
     ToolRegistry,
     UnknownToolError,
 )
 from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import (
-    ArtifactReference,
     Worker,
     WorkerRequest,
     WorkerResult,
 )
+from workers.cli_adapter_utils import resolve_runtime_mode, runtime_mode_not_supported_result
 from workers.cli_runtime import (
     CliRuntimeAdapter,
-    CliRuntimeExecutionResult,
     CliRuntimeSettings,
     ShellSessionProtocol,
     settings_from_budget,
@@ -54,8 +50,8 @@ from workers.gemini_cli_worker_native import (
     _workspace_error_result,
     _workspace_task_id,
 )
-from workers.gemini_cli_worker_runtime import GeminiCliWorkerRuntimeMixin
-from workers.review import ReviewResult
+from workers.runtime_executor import RuntimeExecutor
+from workers.sandbox_adapter import SandboxSessionAdapter, ShellSessionFactory
 
 logger = logging.getLogger(__name__)
 
@@ -63,43 +59,7 @@ DEFAULT_GEMINI_NATIVE_SANDBOX_ENABLED = True
 DEFAULT_GEMINI_NATIVE_APPROVAL_MODE = "default"
 
 
-@dataclass
-class _RuntimeSetup:
-    """Container/session/runtime context prepared before entering the CLI loop."""
-
-    container: DockerSandboxContainer
-    session: ShellSessionProtocol
-    runtime_settings: CliRuntimeSettings
-    granted_permission: ToolPermissionLevel
-    expects_changed_files: bool
-    fallback_command_template: str | None
-    system_prompt: str
-
-
-@dataclass
-class _RuntimeExecutionPhase:
-    """Outputs captured from runtime execution and post-processing phases."""
-
-    execution: CliRuntimeExecutionResult
-    files_changed: list[str]
-    lint_format_result: dict[str, object] | None
-    lint_format_artifacts: list[ArtifactReference]
-    review_result: ReviewResult | None
-
-
-class ShellSessionFactory(Protocol):
-    """Factory for opening a persistent shell session in a running container."""
-
-    def __call__(
-        self,
-        container: DockerSandboxContainer,
-        *,
-        secrets: dict[str, str] | None = None,
-    ) -> ShellSessionProtocol:
-        """Return a ready-to-use shell session."""
-
-
-class GeminiCliWorker(GeminiCliWorkerRuntimeMixin, GeminiCliWorkerNativeMixin, Worker):
+class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
     """Execute a bounded multi-turn CLI runtime inside a persistent sandbox."""
 
     def __init__(
@@ -133,6 +93,17 @@ class GeminiCliWorker(GeminiCliWorkerRuntimeMixin, GeminiCliWorkerNativeMixin, W
         self.runtime_settings = runtime_settings or CliRuntimeSettings()
         self.default_runtime_mode = default_runtime_mode
         self.native_sandbox_enabled = native_sandbox_enabled
+
+        self.sandbox_adapter = SandboxSessionAdapter(
+            container_manager=self.container_manager,
+            session_factory=self._session_factory,
+        )
+        self.runtime_executor = RuntimeExecutor(
+            runtime_adapter=self.runtime_adapter,
+            tool_registry=self.tool_registry,
+            sandbox_adapter=self.sandbox_adapter,
+            runtime_settings=self.runtime_settings,
+        )
 
     async def run(
         self, request: WorkerRequest, *, system_prompt: str | None = None
@@ -244,6 +215,16 @@ class GeminiCliWorker(GeminiCliWorkerRuntimeMixin, GeminiCliWorkerNativeMixin, W
             )
         )
 
+    def _resolve_runtime_mode(self, request: WorkerRequest) -> WorkerRuntimeMode:
+        """Resolve effective runtime mode from request override or worker defaults."""
+        return resolve_runtime_mode(request, self.default_runtime_mode)
+
+    def _runtime_mode_not_supported_result(self, runtime_mode: WorkerRuntimeMode) -> WorkerResult:
+        """Return a structured failure for unsupported execution runtime modes."""
+        return runtime_mode_not_supported_result(
+            "GeminiCliWorker", runtime_mode, ["native_agent", "tool_loop"]
+        )
+
     def _execute_runtime_mode_switch(
         self,
         request: WorkerRequest,
@@ -288,31 +269,13 @@ class GeminiCliWorker(GeminiCliWorkerRuntimeMixin, GeminiCliWorkerNativeMixin, W
                 cancel_token=cancel_token,
             )
         elif runtime_mode == WorkerRuntimeMode.TOOL_LOOP:
-            runtime_setup = self._setup_runtime_phase(
+            result = self.runtime_executor.execute(
                 request,
                 workspace=workspace,
                 system_prompt_override=system_prompt_override,
+                cancel_token=cancel_token,
             )
-            container = runtime_setup.container
-            session = runtime_setup.session
-            try:
-                runtime_phase = self._execute_runtime_phase(
-                    request,
-                    workspace=workspace,
-                    runtime_setup=runtime_setup,
-                    cancel_token=cancel_token,
-                )
-                result = self._finalize_runtime_result(
-                    workspace,
-                    runtime_phase,
-                    runtime_settings=runtime_setup.runtime_settings,
-                    cancel_token=cancel_token,
-                )
-            except Exception as e:
-                logger.debug(f"Exception in runtime loop: {e}", exc_info=True)
-                self._close_session(session)
-                self._stop_container(container)
-                raise
+            return result, None, None
         else:
             result = self._runtime_mode_not_supported_result(runtime_mode)
 

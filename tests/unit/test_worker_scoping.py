@@ -96,13 +96,13 @@ def test_gemini_worker_honors_request_tools_scoping() -> None:
         ) as mock_start_cont,
         patch.object(worker.container_manager, "stop"),
         patch.object(worker, "_session_factory"),
-        patch("workers.gemini_cli_worker_runtime.run_cli_runtime_loop"),
+        patch("workers.runtime_executor.run_cli_runtime_loop"),
         patch(
-            "workers.gemini_cli_worker_runtime.collect_changed_files_and_apply_post_run_lint_format",
+            "workers.runtime_executor.collect_changed_files_and_apply_post_run_lint_format",
             return_value=([], {}, []),
         ),
         patch(
-            "workers.gemini_cli_worker_runtime._worker_result_from_execution",
+            "workers.runtime_executor._worker_result_from_execution",
             return_value=_create_mock_result(),
         ),
     ):
@@ -163,13 +163,13 @@ def test_codex_worker_honors_request_tools_scoping() -> None:
         ) as mock_start_cont,
         patch.object(worker.container_manager, "stop"),
         patch.object(worker, "_session_factory"),
-        patch("workers.codex_cli_worker_runtime.run_cli_runtime_loop"),
+        patch("workers.runtime_executor.run_cli_runtime_loop"),
         patch(
-            "workers.codex_cli_worker_runtime.collect_changed_files_and_apply_post_run_lint_format",
+            "workers.runtime_executor.collect_changed_files_and_apply_post_run_lint_format",
             return_value=([], {}, []),
         ),
         patch(
-            "workers.codex_cli_worker_runtime._worker_result_from_execution",
+            "workers.runtime_executor._worker_result_from_execution",
             return_value=_create_mock_result(),
         ),
     ):

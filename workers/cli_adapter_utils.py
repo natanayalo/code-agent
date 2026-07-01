@@ -4,13 +4,39 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from workers.base import WorkerResult
+from db.enums import WorkerRuntimeMode
+from workers.base import WorkerRequest, WorkerResult
 from workers.failure_taxonomy import build_failure_summary, classify_failure_kind
 
 if TYPE_CHECKING:
     from workers.base import ArtifactReference
     from workers.cli_runtime import CliRuntimeExecutionResult
     from workers.review import ReviewResult
+
+
+def resolve_runtime_mode(
+    request: WorkerRequest, default_mode: WorkerRuntimeMode
+) -> WorkerRuntimeMode:
+    """Resolve effective runtime mode from request override or defaults."""
+    if request.runtime_mode is not None:
+        return request.runtime_mode
+    return default_mode
+
+
+def runtime_mode_not_supported_result(
+    worker_name: str, runtime_mode: WorkerRuntimeMode, supported_modes: list[str]
+) -> WorkerResult:
+    """Return a structured failure for unsupported execution runtime modes."""
+    modes_str = ", ".join(supported_modes)
+    return WorkerResult(
+        status="failure",
+        summary=(
+            f"{worker_name} does not support runtime mode "
+            f"`{runtime_mode.value}`. Supported modes: {modes_str}."
+        ),
+        failure_kind="provider_error",
+        next_action_hint="inspect_worker_configuration",
+    )
 
 
 def build_worker_result(
