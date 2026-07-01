@@ -156,11 +156,12 @@ class RuntimeExecutor:
             session_id=request.session_id,
             read_only=read_only_workspace,
         )
-        granted_permission = granted_permission_from_constraints(request.constraints)
+        constraints = request.constraints if isinstance(request.constraints, dict) else {}
+        granted_permission = granted_permission_from_constraints(constraints)
         bash_tool = self.tool_registry.require_tool(EXECUTE_BASH_TOOL_NAME)
         fallback_command_template = (
-            request.constraints.get("post_run_lint_format_command")
-            if isinstance(request.constraints.get("post_run_lint_format_command"), str)
+            constraints.get("post_run_lint_format_command")
+            if isinstance(constraints.get("post_run_lint_format_command"), str)
             else None
         )
         system_prompt = (
@@ -288,7 +289,8 @@ class RuntimeExecutor:
 
         network_enabled = request.network_enabled
         if not network_enabled:
-            granted_permission = granted_permission_from_constraints(request.constraints)
+            constraints = request.constraints if isinstance(request.constraints, dict) else {}
+            granted_permission = granted_permission_from_constraints(constraints)
             if granted_permission == ToolPermissionLevel.NETWORKED_WRITE:
                 for name in tool_names:
                     if (tool := self.tool_registry.get_tool(name)) and tool.network_required:
@@ -307,7 +309,12 @@ class RuntimeExecutor:
     ) -> WorkerResult:
         """Set up, execute, review, and finalize a CLI tool loop run."""
         scoped_secrets, network_enabled = self._resolve_setup_parameters(request)
-        read_only_workspace = request.read_only or bool(request.constraints.get("read_only"))
+        constraints = request.constraints if isinstance(request.constraints, dict) else {}
+        read_only_workspace = (
+            request.read_only
+            if request.read_only is not None
+            else bool(constraints.get("read_only"))
+        )
         with self.sandbox_adapter.session_context(
             workspace=workspace,
             environment=scoped_secrets,
@@ -319,9 +326,16 @@ class RuntimeExecutor:
                 request, workspace, container, session, system_prompt_override, read_only_workspace
             )
             execution = self._execute_loop(runtime_setup, workspace, request, cancel_token)
-            files_changed, lint_format_result, lint_format_artifacts = self._apply_lint_format(
-                runtime_setup, workspace, execution
-            )
+            files_changed: list[str]
+            lint_format_result: dict[str, Any] | None
+            lint_format_artifacts: list[ArtifactReference]
+
+            if cancel_token and cancel_token():
+                files_changed, lint_format_result, lint_format_artifacts = [], None, []
+            else:
+                files_changed, lint_format_result, lint_format_artifacts = self._apply_lint_format(
+                    runtime_setup, workspace, execution
+                )
 
             review_result = None
             if execution.status == "success":
@@ -346,25 +360,34 @@ class RuntimeExecutor:
                 review_result=review_result,
             )
 
-            result = _worker_result_from_execution(
-                workspace,
-                runtime_phase.execution,
-                files_changed=runtime_phase.files_changed,
-                post_run_lint_format=runtime_phase.lint_format_result,
-                review_result=runtime_phase.review_result,
-                diff_text=collect_diff_for_review(
-                    workspace.repo_path,
-                    timeout_seconds=runtime_setup.runtime_settings.command_timeout_seconds,
-                )
-                if runtime_phase.execution.status == "success"
-                else None,
-                artifacts=runtime_phase.lint_format_artifacts,
-            )
-            if cancel_token and cancel_token():
-                result.status = "error"
-                result.summary = "CLI runtime loop was cancelled by the orchestrator timeout."
-                result.failure_kind = "timeout"
-                result.next_action_hint = "inspect_workspace_artifacts"
+            return self._finalize_result(workspace, runtime_setup, runtime_phase, cancel_token)
 
-            set_span_status_from_outcome(result.status, result.summary)
-            return result
+    def _finalize_result(
+        self,
+        workspace: WorkspaceHandle,
+        runtime_setup: _RuntimeSetup,
+        runtime_phase: _RuntimeExecutionPhase,
+        cancel_token: Callable[[], bool] | None,
+    ) -> WorkerResult:
+        result = _worker_result_from_execution(
+            workspace,
+            runtime_phase.execution,
+            files_changed=runtime_phase.files_changed,
+            post_run_lint_format=runtime_phase.lint_format_result,
+            review_result=runtime_phase.review_result,
+            diff_text=collect_diff_for_review(
+                workspace.repo_path,
+                timeout_seconds=runtime_setup.runtime_settings.command_timeout_seconds,
+            )
+            if runtime_phase.execution.status == "success"
+            else None,
+            artifacts=runtime_phase.lint_format_artifacts,
+        )
+        if cancel_token and cancel_token():
+            result.status = "error"
+            result.summary = "CLI runtime loop was cancelled by the orchestrator timeout."
+            result.failure_kind = "timeout"
+            result.next_action_hint = "inspect_workspace_artifacts"
+
+        set_span_status_from_outcome(result.status, result.summary)
+        return result
