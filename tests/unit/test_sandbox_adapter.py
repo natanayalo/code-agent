@@ -6,7 +6,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from sandbox import DockerSandboxContainer, DockerSandboxContainerRequest, WorkspaceHandle
+from sandbox import (
+    DockerSandboxContainer,
+    DockerSandboxContainerRequest,
+    DockerShellSessionError,
+    WorkspaceHandle,
+)
 from workers.sandbox_adapter import SandboxSessionAdapter
 
 
@@ -103,4 +108,30 @@ def test_sandbox_session_adapter_stops_container_if_session_creation_fails() -> 
         with adapter.session_context(workspace=workspace):
             pass
 
+    mock_container_manager.stop.assert_called_once_with(mock_container)
+
+
+def test_sandbox_session_adapter_stops_container_if_session_close_fails() -> None:
+    """If session.close raises DockerShellSessionError, the container is still stopped."""
+    mock_container_manager = MagicMock()
+    mock_session_factory = MagicMock()
+
+    mock_container = MagicMock(spec=DockerSandboxContainer)
+    mock_container_manager.start.return_value = mock_container
+
+    mock_session = MagicMock()
+    mock_session.close.side_effect = DockerShellSessionError("boom")
+    mock_session_factory.return_value = mock_session
+
+    workspace = MagicMock(spec=WorkspaceHandle)
+
+    adapter = SandboxSessionAdapter(
+        container_manager=mock_container_manager,
+        session_factory=mock_session_factory,
+    )
+
+    with adapter.session_context(workspace=workspace) as (container, session):
+        pass
+
+    mock_session.close.assert_called_once()
     mock_container_manager.stop.assert_called_once_with(mock_container)
