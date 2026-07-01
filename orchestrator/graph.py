@@ -66,6 +66,7 @@ from orchestrator.nodes.verification import (
 from orchestrator.nodes.verification import (
     verify_result as verify_result,
 )
+from orchestrator.performance_routing import PerformanceRoutingPolicy
 from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, review_result
 from orchestrator.runtime_manifest import build_runtime_manifest
 from orchestrator.scout_proposals import (
@@ -1895,8 +1896,6 @@ def _compute_profile_route_decision(
     )
 
     if not has_budget_preference:
-        from orchestrator.performance_routing import PerformanceRoutingPolicy
-
         policy = PerformanceRoutingPolicy()
         task_type = state.task_spec.task_type if state.task_spec is not None else None
         route_choice = policy.choose_profile(task_type, routable_profiles)

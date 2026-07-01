@@ -271,3 +271,81 @@ def test_routing_policy_handles_non_numeric_metrics(tmp_path: Path) -> None:
     }
     decision = policy.choose_profile("bugfix", routable)
     assert decision is None
+
+
+def test_routing_policy_handles_boolean_metrics(tmp_path: Path) -> None:
+    path = tmp_path / "boolean_metrics.json"
+    metrics = {
+        "version": "1.0",
+        "profiles": {
+            "codex-native-executor": {
+                "task_classes": {
+                    "bugfix": {
+                        "success_rate": True,
+                        "mean_latency_seconds": 100.0,
+                    }
+                }
+            },
+            "antigravity-native-executor": {
+                "task_classes": {
+                    "bugfix": {
+                        "success_rate": 0.9,
+                        "mean_latency_seconds": False,
+                    }
+                }
+            },
+        },
+    }
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(metrics, f)
+    policy = PerformanceRoutingPolicy(path)
+    codex_profile = WorkerProfile(
+        name="codex-native-executor",
+        worker_type="codex",
+        runtime_mode="native_agent",
+    )
+    antigravity_profile = WorkerProfile(
+        name="antigravity-native-executor",
+        worker_type="antigravity",
+        runtime_mode="native_agent",
+    )
+    routable = {
+        "codex-native-executor": codex_profile,
+        "antigravity-native-executor": antigravity_profile,
+    }
+    decision = policy.choose_profile("bugfix", routable)
+    assert decision is None
+
+
+def test_routing_policy_loads_via_symlink(tmp_path: Path) -> None:
+    real_path = tmp_path / "real_metrics.json"
+    metrics = {
+        "version": "1.0",
+        "profiles": {
+            "codex-native-executor": {
+                "task_classes": {
+                    "bugfix": {
+                        "success_rate": 0.95,
+                        "mean_latency_seconds": 100.0,
+                    }
+                }
+            }
+        },
+    }
+    with real_path.open("w", encoding="utf-8") as f:
+        json.dump(metrics, f)
+
+    link_path = tmp_path / "symlink_metrics.json"
+    link_path.symlink_to(real_path)
+
+    policy = PerformanceRoutingPolicy(link_path)
+    assert policy.metrics_data["version"] == "1.0"
+
+    codex_profile = WorkerProfile(
+        name="codex-native-executor",
+        worker_type="codex",
+        runtime_mode="native_agent",
+    )
+    decision = policy.choose_profile("bugfix", {"codex-native-executor": codex_profile})
+    assert decision is not None
+    assert decision.chosen_profile == "codex-native-executor"

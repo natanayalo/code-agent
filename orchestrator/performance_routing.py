@@ -25,7 +25,7 @@ class PerformanceRoutingPolicy:
         self._load_metrics()
 
     def _load_metrics(self) -> None:
-        if not self.metrics_path.exists():
+        if not (self.metrics_path.exists() or self.metrics_path.is_symlink()):
             logger.warning("Routing metrics file not found at: %s", self.metrics_path)
             return
         try:
@@ -103,9 +103,9 @@ class PerformanceRoutingPolicy:
             # Normalize profile name (e.g., strip read-only suffixes)
             normalized_profile_name = profile_name
             if profile_name.endswith("-read-only"):
-                normalized_profile_name = profile_name[:-10]
+                normalized_profile_name = profile_name.removesuffix("-read-only")
             elif profile_name.endswith("-read-only-executor"):
-                normalized_profile_name = profile_name[:-19]
+                normalized_profile_name = profile_name.removesuffix("-read-only-executor")
 
             profile_metric = profiles_metrics.get(normalized_profile_name)
             if not isinstance(profile_metric, dict):
@@ -125,7 +125,12 @@ class PerformanceRoutingPolicy:
             success_rate = task_class_metrics.get("success_rate")
             latency = task_class_metrics.get("mean_latency_seconds")
 
-            if not isinstance(success_rate, int | float) or not isinstance(latency, int | float):
+            if (
+                not isinstance(success_rate, int | float)
+                or isinstance(success_rate, bool)
+                or not isinstance(latency, int | float)
+                or isinstance(latency, bool)
+            ):
                 candidate_metrics_meta[profile_name] = "malformed_metrics"
                 continue
 
