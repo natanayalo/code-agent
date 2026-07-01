@@ -167,3 +167,107 @@ def test_routing_policy_returns_none_if_no_matching_metrics(temp_metrics_path: P
     # 'feature' task class has no metrics configured in temporary metrics path.
     decision = policy.choose_profile("feature", routable)
     assert decision is None
+
+
+def test_routing_policy_handles_json_not_a_dict(tmp_path: Path) -> None:
+    path = tmp_path / "list_metrics.json"
+    with path.open("w", encoding="utf-8") as f:
+        json.dump([1, 2, 3], f)
+    policy = PerformanceRoutingPolicy(path)
+    assert policy.metrics_data == {}
+
+
+def test_routing_policy_handles_profiles_not_a_dict(tmp_path: Path) -> None:
+    path = tmp_path / "profiles_list.json"
+    metrics = {"version": "1.0", "profiles": ["codex-native-executor"]}
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(metrics, f)
+    policy = PerformanceRoutingPolicy(path)
+    codex_profile = WorkerProfile(
+        name="codex-native-executor",
+        worker_type="codex",
+        runtime_mode="native_agent",
+    )
+    decision = policy.choose_profile("bugfix", {"codex-native-executor": codex_profile})
+    assert decision is None
+
+
+def test_routing_policy_handles_malformed_profile_structures(tmp_path: Path) -> None:
+    path = tmp_path / "malformed_profile.json"
+    metrics = {
+        "version": "1.0",
+        "profiles": {
+            "codex-native-executor": "not-a-dict",
+            "antigravity-native-executor": {"task_classes": "not-a-dict"},
+            "other-executor": {"task_classes": {"bugfix": "not-a-dict"}},
+        },
+    }
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(metrics, f)
+    policy = PerformanceRoutingPolicy(path)
+    codex_profile = WorkerProfile(
+        name="codex-native-executor",
+        worker_type="codex",
+        runtime_mode="native_agent",
+    )
+    antigravity_profile = WorkerProfile(
+        name="antigravity-native-executor",
+        worker_type="antigravity",
+        runtime_mode="native_agent",
+    )
+    other_profile = WorkerProfile(
+        name="other-executor",
+        worker_type="antigravity",
+        runtime_mode="native_agent",
+    )
+    routable = {
+        "codex-native-executor": codex_profile,
+        "antigravity-native-executor": antigravity_profile,
+        "other-executor": other_profile,
+    }
+    decision = policy.choose_profile("bugfix", routable)
+    assert decision is None
+
+
+def test_routing_policy_handles_non_numeric_metrics(tmp_path: Path) -> None:
+    path = tmp_path / "non_numeric.json"
+    metrics = {
+        "version": "1.0",
+        "profiles": {
+            "codex-native-executor": {
+                "task_classes": {
+                    "bugfix": {
+                        "success_rate": "high",
+                        "mean_latency_seconds": 100.0,
+                    }
+                }
+            },
+            "antigravity-native-executor": {
+                "task_classes": {
+                    "bugfix": {
+                        "success_rate": 0.9,
+                        "mean_latency_seconds": "slow",
+                    }
+                }
+            },
+        },
+    }
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(metrics, f)
+    policy = PerformanceRoutingPolicy(path)
+    codex_profile = WorkerProfile(
+        name="codex-native-executor",
+        worker_type="codex",
+        runtime_mode="native_agent",
+    )
+    antigravity_profile = WorkerProfile(
+        name="antigravity-native-executor",
+        worker_type="antigravity",
+        runtime_mode="native_agent",
+    )
+    routable = {
+        "codex-native-executor": codex_profile,
+        "antigravity-native-executor": antigravity_profile,
+    }
+    decision = policy.choose_profile("bugfix", routable)
+    assert decision is None

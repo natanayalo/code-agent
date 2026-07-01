@@ -30,9 +30,11 @@ class PerformanceRoutingPolicy:
             return
         try:
             with self.metrics_path.open("r", encoding="utf-8") as f:
-                self.metrics_data = json.load(f)
-        except Exception as e:
+                data = json.load(f)
+                self.metrics_data = data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to load/parse routing metrics JSON: %s", e)
+            self.metrics_data = {}
 
     def choose_profile(
         self,
@@ -51,6 +53,9 @@ class PerformanceRoutingPolicy:
             normalized_class = "bugfix"
 
         profiles_metrics = self.metrics_data.get("profiles", {})
+        if not isinstance(profiles_metrics, dict):
+            return None
+
         version = self.metrics_data.get("version", "unknown")
         source = str(self.metrics_data.get("source", "evaluation/routing_metrics.json"))
 
@@ -102,17 +107,25 @@ class PerformanceRoutingPolicy:
             elif profile_name.endswith("-read-only-executor"):
                 normalized_profile_name = profile_name[:-19]
 
-            profile_metric = profiles_metrics.get(normalized_profile_name, {})
-            task_class_metrics = profile_metric.get("task_classes", {}).get(normalized_class)
+            profile_metric = profiles_metrics.get(normalized_profile_name)
+            if not isinstance(profile_metric, dict):
+                candidate_metrics_meta[profile_name] = "no_metrics"
+                continue
 
-            if not task_class_metrics:
+            task_classes = profile_metric.get("task_classes")
+            if not isinstance(task_classes, dict):
+                candidate_metrics_meta[profile_name] = "no_metrics"
+                continue
+
+            task_class_metrics = task_classes.get(normalized_class)
+            if not isinstance(task_class_metrics, dict):
                 candidate_metrics_meta[profile_name] = "no_metrics"
                 continue
 
             success_rate = task_class_metrics.get("success_rate")
             latency = task_class_metrics.get("mean_latency_seconds")
 
-            if success_rate is None or latency is None:
+            if not isinstance(success_rate, int | float) or not isinstance(latency, int | float):
                 candidate_metrics_meta[profile_name] = "malformed_metrics"
                 continue
 
