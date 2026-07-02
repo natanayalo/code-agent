@@ -122,6 +122,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "task_spec_generated",
             "task_spec_and_route_generated",
             "memory_loaded",
+            "memory_persisted",
             "worker_selected",
             "approval_requested",
             "approval_granted",
@@ -139,6 +140,9 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "workspace_provisioned",
             "environment_initialized",
             "infra_failure",
+            "delivery_started",
+            "delivery_completed",
+            "delivery_failed",
         },
     },
 }
@@ -491,6 +495,49 @@ def test_antigravity_worker_type_migration_updates_existing_gemini_rows(
     }
     assert "antigravity" in task_constraints["ck_tasks_worker_type"]
     assert "gemini" not in task_constraints["ck_tasks_worker_type"]
+
+
+def test_memory_persisted_timeline_event_can_be_written_after_upgrade(tmp_path: Path) -> None:
+    """The head migration should permit persisted memory timeline evidence."""
+    database_path = tmp_path / "memory_persisted_timeline.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    now = "2026-07-02T00:00:00+00:00"
+    with engine.begin() as connection:
+        _seed_downgrade_users_and_sessions(connection, now)
+        _seed_downgrade_tasks(connection, now)
+        connection.execute(
+            text(
+                "INSERT INTO task_timeline_events "
+                "(id, task_id, attempt_number, sequence_number, event_type, payload, "
+                "message, created_at, updated_at) "
+                "VALUES (:id, :task_id, :attempt_number, :sequence_number, :event_type, "
+                ":payload, :message, :created_at, :updated_at)"
+            ),
+            {
+                "id": "evt-memory-persisted",
+                "task_id": "t1",
+                "attempt_number": 0,
+                "sequence_number": 0,
+                "event_type": "memory_persisted",
+                "payload": "{}",
+                "message": "Persisted 1 memory entry.",
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+        count = connection.execute(
+            text(
+                "SELECT COUNT(*) FROM task_timeline_events " "WHERE event_type = 'memory_persisted'"
+            )
+        ).scalar_one()
+
+    assert count == 1
 
 
 def test_alembic_downgrade_cleans_review_result_artifacts(tmp_path: Path) -> None:

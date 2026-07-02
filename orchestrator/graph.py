@@ -13,6 +13,7 @@ from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
+from sqlalchemy.orm import Session
 
 from apps.observability import (
     SPAN_KIND_CHAIN,
@@ -76,7 +77,10 @@ from orchestrator.scout_proposals import (
 from orchestrator.state import (
     SUPPORTED_WORKER_TYPES,
     ApprovalCheckpoint,
+    MemoryContext,
+    MemoryEntry,
     OrchestratorState,
+    PersistMemoryEntry,
     RouteDecision,
     SessionStateUpdate,
     TaskSpec,
@@ -90,6 +94,11 @@ from orchestrator.task_spec import (
     contains_marker,
     is_destructive_task,
     validate_task_spec_policy,
+)
+from repositories.sqlalchemy import (
+    PersonalMemoryRepository,
+    ProjectMemoryRepository,
+    SessionStateRepository,
 )
 from sandbox import WorkspaceManager
 from tools import coerce_permission_level
@@ -1512,7 +1521,7 @@ def load_memory(state_input: OrchestratorState) -> dict[str, Any]:
     state = _ensure_state(state_input)
     return {
         "current_step": "load_memory",
-        "memory": state.memory.model_dump(),
+        "memory": state.memory.model_dump(mode="json"),
         "progress_updates": _progress_update(state, "memory context loaded"),
         **_timeline_event(
             state,
@@ -1521,8 +1530,106 @@ def load_memory(state_input: OrchestratorState) -> dict[str, Any]:
                 f"Loaded {len(state.memory.personal)} personal and "
                 f"{len(state.memory.project)} project memory entries."
             ),
+            payload={
+                "personal_count": len(state.memory.personal),
+                "project_count": len(state.memory.project),
+                "session_loaded": bool(state.memory.session),
+            },
         ),
     }
+
+
+def _memory_entry_from_row(row: Any) -> MemoryEntry:
+    """Map a persisted memory row into the orchestrator memory context."""
+    return MemoryEntry(
+        memory_key=row.memory_key,
+        value=dict(row.value or {}),
+        source=row.source,
+        confidence=row.confidence,
+        scope=row.scope,
+        last_verified_at=row.last_verified_at,
+        requires_verification=row.requires_verification,
+    )
+
+
+def _session_state_payload(row: Any | None) -> dict[str, Any]:
+    """Map compact session state to the worker-visible memory context."""
+    if row is None:
+        return {}
+    return {
+        "active_goal": row.active_goal,
+        "decisions_made": dict(row.decisions_made or {}),
+        "identified_risks": dict(row.identified_risks or {}),
+        "files_touched": list(row.files_touched or []),
+    }
+
+
+def build_load_memory_node(
+    session_factory: Callable[[], Session],
+) -> Callable[[OrchestratorState], dict[str, Any]]:
+    """Build a DB-backed memory-loading node."""
+
+    def load_memory_node(state_input: OrchestratorState) -> dict[str, Any]:
+        state = _ensure_state(state_input)
+        user_id = state.session.user_id if state.session is not None else None
+        session_id = state.session.session_id if state.session is not None else None
+        repo_url = state.task.repo_url
+        memory = MemoryContext()
+
+        db_session: Session | None = None
+        try:
+            db_session = session_factory()
+            if user_id:
+                personal_repo = PersonalMemoryRepository(db_session)
+                memory.personal = [
+                    _memory_entry_from_row(row) for row in personal_repo.list_by_user(user_id)
+                ]
+            if repo_url:
+                project_repo = ProjectMemoryRepository(db_session)
+                memory.project = [
+                    _memory_entry_from_row(row) for row in project_repo.list_by_repo(repo_url)
+                ]
+            if session_id:
+                session_state = SessionStateRepository(db_session).get(session_id)
+                memory.session = _session_state_payload(session_state)
+        except Exception:
+            logger.warning(
+                "Failed to load memory context; continuing with empty memory.",
+                exc_info=True,
+                extra={
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "repo_url": repo_url,
+                },
+            )
+            memory = MemoryContext()
+        finally:
+            if db_session is not None:
+                db_session.close()
+
+        return {
+            "current_step": "load_memory",
+            "memory": memory.model_dump(mode="json"),
+            "progress_updates": _progress_update(state, "memory context loaded"),
+            **_timeline_event(
+                state,
+                TimelineEventType.MEMORY_LOADED,
+                message=(
+                    f"Loaded {len(memory.personal)} personal and "
+                    f"{len(memory.project)} project memory entries."
+                ),
+                payload={
+                    "retrieval_mode": "load_all",
+                    "personal_count": len(memory.personal),
+                    "project_count": len(memory.project),
+                    "session_loaded": bool(memory.session),
+                    "personal_keys": [entry.memory_key for entry in memory.personal],
+                    "project_keys": [entry.memory_key for entry in memory.project],
+                },
+            ),
+        }
+
+    return load_memory_node
 
 
 def _route_by_preference(
@@ -2959,6 +3066,67 @@ def _route_after_init_environment(
     return "dispatch_job"
 
 
+def _map_worker_memory_to_persist(
+    state: OrchestratorState,
+    result: WorkerResult,
+) -> list[PersistMemoryEntry]:
+    """Convert worker-produced memory updates into orchestrator persistence entries."""
+    memory_to_persist = list(state.memory_to_persist)
+    user_id = state.session.user_id if state.session is not None else None
+    task_id = state.task.task_id
+
+    for worker_entry in result.memory_to_persist:
+        if worker_entry.category == "personal" and not user_id:
+            logger.warning(
+                "Skipping worker personal memory without a session user.",
+                extra={
+                    "task_id": task_id,
+                    "memory_key": worker_entry.memory_key,
+                },
+            )
+            continue
+        repo_url = worker_entry.repo_url
+        if worker_entry.category == "project":
+            repo_url = repo_url or state.task.repo_url
+            if not repo_url:
+                logger.warning(
+                    "Skipping worker project memory without a repo URL.",
+                    extra={
+                        "task_id": task_id,
+                        "memory_key": worker_entry.memory_key,
+                    },
+                )
+                continue
+
+        memory_to_persist.append(
+            PersistMemoryEntry(
+                category=worker_entry.category,
+                memory_key=worker_entry.memory_key,
+                value=worker_entry.value,
+                repo_url=repo_url,
+                source=worker_entry.source,
+                confidence=worker_entry.confidence,
+                scope=worker_entry.scope,
+                last_verified_at=worker_entry.last_verified_at,
+                requires_verification=worker_entry.requires_verification,
+            )
+        )
+
+    return memory_to_persist
+
+
+def _session_state_update_from_result(
+    state: OrchestratorState,
+    result: WorkerResult,
+) -> SessionStateUpdate:
+    """Build the compact session-state update emitted after worker completion."""
+    return SessionStateUpdate(
+        active_goal=state.normalized_task_text or state.task.task_text,
+        files_touched=result.files_changed,
+        # TODO: extract decisions_made and identified_risks from result.summary or a dedicated field
+    )
+
+
 def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
     """Ensure the worker result has a human-readable summary."""
     state = _ensure_state(state_input)
@@ -3017,17 +3185,14 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
             }
         )
 
-    # Extract session state update (T-062)
-    session_state_update = SessionStateUpdate(
-        active_goal=state.normalized_task_text or state.task.task_text,
-        files_touched=result.files_changed,
-        # TODO: extract decisions_made and identified_risks from result.summary or a dedicated field
-    )
+    session_state_update = _session_state_update_from_result(state, result)
+    memory_to_persist = _map_worker_memory_to_persist(state, result)
 
     return {
         "current_step": "summarize_result",
-        "result": result.model_dump(),
+        "result": result.model_dump(mode="json"),
         "session_state_update": session_state_update.model_dump(),
+        "memory_to_persist": [entry.model_dump(mode="json") for entry in memory_to_persist],
         "progress_updates": _progress_update(state, "result summarized and session state updated"),
         **_timeline_event(
             state,
@@ -3046,9 +3211,114 @@ def persist_memory(state_input: OrchestratorState) -> dict[str, Any]:
     # Placeholder for skeptical memory update
     return {
         "current_step": "persist_memory",
-        "memory_to_persist": [entry.model_dump() for entry in state.memory_to_persist],
+        "memory_to_persist": [entry.model_dump(mode="json") for entry in state.memory_to_persist],
         "progress_updates": _progress_update(state, "memory persistence queued"),
     }
+
+
+def _persist_memory_entry(
+    db_session: Session,
+    state: OrchestratorState,
+    entry: PersistMemoryEntry,
+) -> bool:
+    """Persist one scoped memory entry, returning whether a row was written."""
+    if entry.category == "personal":
+        if state.session is None:
+            logger.warning(
+                "Skipping personal memory persistence without a session user.",
+                extra={
+                    "task_id": state.task.task_id,
+                    "memory_key": entry.memory_key,
+                },
+            )
+            return False
+        PersonalMemoryRepository(db_session).upsert(
+            user_id=state.session.user_id,
+            memory_key=entry.memory_key,
+            value=entry.value,
+            source=entry.source,
+            confidence=entry.confidence,
+            scope=entry.scope,
+            last_verified_at=entry.last_verified_at,
+            requires_verification=entry.requires_verification,
+        )
+        return True
+
+    repo_url = entry.repo_url or state.task.repo_url
+    if not repo_url:
+        logger.warning(
+            "Skipping project memory persistence without a repo URL.",
+            extra={
+                "task_id": state.task.task_id,
+                "memory_key": entry.memory_key,
+            },
+        )
+        return False
+
+    ProjectMemoryRepository(db_session).upsert(
+        repo_url=repo_url,
+        memory_key=entry.memory_key,
+        value=entry.value,
+        source=entry.source,
+        confidence=entry.confidence,
+        scope=entry.scope,
+        last_verified_at=entry.last_verified_at,
+        requires_verification=entry.requires_verification,
+    )
+    return True
+
+
+def build_persist_memory_node(
+    session_factory: Callable[[], Session],
+) -> Callable[[OrchestratorState], dict[str, Any]]:
+    """Build a DB-backed memory-persistence node."""
+
+    def persist_memory_node(state_input: OrchestratorState) -> dict[str, Any]:
+        state = _ensure_state(state_input)
+        persisted_count = 0
+        db_session: Session | None = None
+        try:
+            db_session = session_factory()
+            for entry in state.memory_to_persist:
+                if _persist_memory_entry(db_session, state, entry):
+                    persisted_count += 1
+            db_session.commit()
+        except Exception:
+            if db_session is not None:
+                db_session.rollback()
+            persisted_count = 0
+            logger.exception(
+                "Failed to persist worker memory; continuing without memory writes.",
+                extra={
+                    "task_id": state.task.task_id,
+                    "requested_count": len(state.memory_to_persist),
+                },
+            )
+        finally:
+            if db_session is not None:
+                db_session.close()
+
+        return {
+            "current_step": "persist_memory",
+            "memory_to_persist": [
+                entry.model_dump(mode="json") for entry in state.memory_to_persist
+            ],
+            "progress_updates": _progress_update(
+                state,
+                f"persisted {persisted_count} memory entries",
+            ),
+            **_timeline_event(
+                state,
+                TimelineEventType.MEMORY_PERSISTED,
+                message=f"Persisted {persisted_count} memory entries.",
+                payload={
+                    "requested_count": len(state.memory_to_persist),
+                    "persisted_count": persisted_count,
+                },
+            ),
+        }
+
+    return persist_memory_node
 
 
 def build_review_result_node(
@@ -3074,6 +3344,7 @@ def _add_orchestrator_nodes(
     profile_names: frozenset[str],
     enable_independent_verifier: bool,
     worker: Worker | None,
+    session_factory: Callable[[], Session] | None,
 ) -> None:
     for name, func in [
         ("ingest_task", ingest_task),
@@ -3081,16 +3352,27 @@ def _add_orchestrator_nodes(
         ("plan_task", plan_task),
         ("load_repo_profile", load_repo_profile_node),
         ("await_clarification", await_clarification),
-        ("load_memory", load_memory),
         ("await_permission", await_permission),
         ("check_approval", check_approval),
         ("await_approval", await_approval),
         ("dispatch_job", dispatch_job),
         ("await_permission_escalation", await_permission_escalation),
         ("summarize_result", summarize_result),
-        ("persist_memory", persist_memory),
     ]:
         builder.add_node(name, RunnableLambda(func))
+
+    builder.add_node(
+        "load_memory",
+        RunnableLambda(build_load_memory_node(session_factory))
+        if session_factory
+        else RunnableLambda(load_memory),
+    )
+    builder.add_node(
+        "persist_memory",
+        RunnableLambda(build_persist_memory_node(session_factory))
+        if session_factory
+        else RunnableLambda(persist_memory),
+    )
 
     _add_orchestrator_complex_nodes(
         builder,
@@ -3260,6 +3542,7 @@ def build_orchestrator_graph(
     enable_worker_profiles: bool = False,
     enable_independent_verifier: bool = False,
     orchestrator_brain: OrchestratorBrain | None = None,
+    session_factory: Callable[[], Session] | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
     interrupt_before: Literal["*"] | list[str] | None = None,
     interrupt_after: Literal["*"] | list[str] | None = None,
@@ -3285,6 +3568,7 @@ def build_orchestrator_graph(
         profile_names,
         enable_independent_verifier,
         worker,
+        session_factory,
     )
     _add_orchestrator_edges(builder)
     return builder.compile(

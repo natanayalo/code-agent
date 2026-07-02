@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable
+from datetime import datetime
 from typing import Any, Final, Literal
 from uuid import uuid4
 
@@ -197,6 +198,20 @@ class MaintenanceRequest(WorkerModel):
     risk: Literal["low", "medium", "high"] = "medium"
 
 
+class WorkerMemoryEntry(WorkerModel):
+    """A memory update produced by a worker for orchestrator persistence."""
+
+    category: Literal["personal", "project"]
+    memory_key: str = Field(min_length=1)
+    value: dict[str, Any] = Field(default_factory=dict)
+    repo_url: str | None = None
+    source: str | None = None
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    scope: str | None = None
+    last_verified_at: datetime | None = None
+    requires_verification: bool = True
+
+
 class WorkerResult(WorkerModel):
     """Structured result returned from a coding worker."""
 
@@ -215,6 +230,7 @@ class WorkerResult(WorkerModel):
     json_payload: dict[str, Any] | None = None
     friction_reports: list[dict[str, Any]] = Field(default_factory=list)
     maintenance_requests: list[MaintenanceRequest] = Field(default_factory=list)
+    memory_to_persist: list[WorkerMemoryEntry] = Field(default_factory=list)
     delivery_metadata: dict[str, Any] | None = None
     next_action_hint: str | None = None
     stdout: Any | None = None

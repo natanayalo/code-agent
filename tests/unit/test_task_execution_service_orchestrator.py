@@ -190,9 +190,11 @@ def test_task_execution_service_reuses_one_compiled_graph(
 
     fake_graph = _FakeGraph()
     build_calls: list[Worker] = []
+    build_kwargs: list[dict] = []
 
     def fake_build_orchestrator_graph(*, worker: Worker, **kwargs) -> _FakeGraph:
         build_calls.append(worker)
+        build_kwargs.append(kwargs)
         return fake_graph
 
     monkeypatch.setattr(
@@ -218,6 +220,7 @@ def test_task_execution_service_reuses_one_compiled_graph(
     asyncio.run(service._run_orchestrator(submission, persisted_two))
 
     assert len(build_calls) == 1
+    assert build_kwargs[0]["session_factory"] is session_factory
     assert len(fake_graph.calls) == 2
 
 

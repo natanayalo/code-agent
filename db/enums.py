@@ -121,6 +121,7 @@ class TimelineEventType(StrEnum):
     TASK_SPEC_GENERATED = "task_spec_generated"
     TASK_SPEC_AND_ROUTE_GENERATED = "task_spec_and_route_generated"
     MEMORY_LOADED = "memory_loaded"
+    MEMORY_PERSISTED = "memory_persisted"
     WORKER_SELECTED = "worker_selected"
     APPROVAL_REQUESTED = "approval_requested"
     APPROVAL_GRANTED = "approval_granted"
