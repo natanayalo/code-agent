@@ -6,7 +6,7 @@ Phase 3: personal reliability before broader autonomy.
 
 Active focus:
 
-- Verify Phase 3 reliability metrics and prepare for Phase 4 selective autonomy
+- Evaluate Phase 4 candidates using the Phase 3 reliability baseline
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
@@ -30,6 +30,7 @@ Active focus:
 - repo registry and validation profiles gate public repo selection, protected paths, and validation defaults
 - PR-native delivery fields with GitHub branch/draft-PR delivery integration
 - full-text personal/project memory search with dashboard search results and memory-retrieval timeline visibility
+- deterministic memory retrieval evaluation to separate full-text regressions from known semantic gaps
 - dashboard visibility for TaskSpec, interactions, timeline events, logs, artifacts, replay controls, traces, memory, and tool inventory
 - CI now measures Python coverage from `tests/unit` only and runs `tests/integration` as a separate pass
 - pre-commit Ruff checks repo Python files for non-top-level imports while preserving a few intentional lazy imports in guarded modules
@@ -45,14 +46,14 @@ Active focus:
 
 ## Next Priorities
 
-1. implement Milestone 23 Slice 3: semantic retrieval evaluation
+1. evaluate Phase 4 candidates: routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
 - Milestone 21: worker facade [x], runtime executor [x], sandbox adapter [x], and tool extraction.
-- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [ ].
+- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [x].
 - Phase 4: evaluate routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy only after Phase 3 proves reliability.
 
 ## Completed Work

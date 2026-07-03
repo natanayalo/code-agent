@@ -1597,6 +1597,8 @@ def _memory_loaded_payload(
 
 def build_load_memory_node(
     session_factory: Callable[[], Session],
+    *,
+    search_limit: int = 20,
 ) -> Callable[[OrchestratorState], dict[str, Any]]:
     """Build a DB-backed memory-loading node."""
 
@@ -1606,7 +1608,6 @@ def build_load_memory_node(
         session_id = state.session.session_id if state.session is not None else None
         repo_url = state.task.repo_url
         search_query = _memory_search_query(state)
-        search_limit = 20
         memory = MemoryContext()
 
         db_session: Session | None = None
