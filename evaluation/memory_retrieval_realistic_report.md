@@ -28,18 +28,27 @@ These entries are intentionally small and reviewable. In production, the same co
 
 ## Deterministic Result
 
-Command:
+Commands:
 
 ```bash
-.venv/bin/python scripts/e2e/run_memory_retrieval_eval.py --suite evaluation/memory_retrieval_realistic_suite.json --output /tmp/memory-realistic-report.json --fail-under-recall 1.0
+.venv/bin/python scripts/e2e/run_memory_retrieval_eval.py --suite evaluation/memory_retrieval_realistic_suite.json --output /tmp/memory-realistic-sqlite-report.json --fail-under-recall 1.0
+.venv/bin/python scripts/e2e/run_memory_retrieval_eval.py --suite evaluation/memory_retrieval_realistic_suite.json --output /tmp/memory-realistic-postgres-report.json --postgres-url-env CODE_AGENT_TEST_POSTGRES_URL --fail-under-recall 1.0
 ```
 
-Observed result:
+Use `--database-url` / `--postgres-url-env` only with a disposable test database; the runner applies migrations and seeds evaluation memories.
 
-- cases: 9
-- non-semantic-gap recall: 1.000
-- regression misses: 0
-- known semantic-gap misses: 3
+Observed backend comparison:
+
+| Backend | Cases | Non-semantic-gap recall | Regression misses | Known semantic-gap misses |
+| --- | ---: | ---: | ---: | ---: |
+| SQLite fallback | 9 | 1.000 | 0 | 3 |
+| Postgres FTS | 9 | 1.000 | 0 | 3 |
+
+Known semantic-gap misses in both runs:
+
+- `known-gap-definition-of-done:project:definition_of_done`
+- `known-gap-migration-validation-synonym:project:db_migration_policy`
+- `known-gap-worker-boundary-synonym:project:worker_boundaries`
 
 ## Conclusion
 

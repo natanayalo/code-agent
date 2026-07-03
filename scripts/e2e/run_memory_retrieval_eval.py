@@ -26,12 +26,18 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     database_group.add_argument(
         "--database-url",
         default=None,
-        help="Database URL to evaluate against after applying Alembic migrations.",
+        help=(
+            "Disposable test database URL to evaluate against. "
+            "The runner applies Alembic migrations and seeds evaluation memories."
+        ),
     )
     database_group.add_argument(
         "--postgres-url-env",
         default=None,
-        help="Environment variable containing a Postgres database URL to evaluate against.",
+        help=(
+            "Environment variable containing a disposable Postgres test database URL. "
+            "The runner applies Alembic migrations and seeds evaluation memories."
+        ),
     )
     parser.add_argument(
         "--suite",
