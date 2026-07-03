@@ -118,6 +118,77 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function renderMemoryLoadedPayload(payload: unknown) {
+  const data = asRecord(payload);
+  if (!data) {
+    return renderJsonBlock(payload);
+  }
+
+  const personalKeys = asStringArray(data.personal_keys);
+  const projectKeys = asStringArray(data.project_keys);
+
+  return (
+    <div className="task-detail-group">
+      <p>
+        <strong>Retrieval Mode:</strong> {formatLabel(String(data.retrieval_mode || 'unknown'))}
+      </p>
+      <p>
+        <strong>Search Query:</strong>{' '}
+        {typeof data.search_query === 'string' && data.search_query.length > 0
+          ? data.search_query
+          : 'n/a'}
+      </p>
+      <p>
+        <strong>Search Limit:</strong>{' '}
+        {typeof data.search_limit === 'number' ? data.search_limit : 'n/a'}
+      </p>
+      <p>
+        <strong>Personal Count:</strong> {typeof data.personal_count === 'number' ? data.personal_count : 0}
+      </p>
+      <p>
+        <strong>Project Count:</strong> {typeof data.project_count === 'number' ? data.project_count : 0}
+      </p>
+      <p>
+        <strong>Session State Loaded:</strong> {data.session_loaded ? 'yes' : 'no'}
+      </p>
+      {personalKeys.length > 0 ? (
+        <details>
+          <summary>Personal Keys ({personalKeys.length})</summary>
+          <ul>
+            {personalKeys.map((key) => (
+              <li key={`personal-${key}`}>{key}</li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      {projectKeys.length > 0 ? (
+        <details>
+          <summary>Project Keys ({projectKeys.length})</summary>
+          <ul>
+            {projectKeys.map((key) => (
+              <li key={`project-${key}`}>{key}</li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function renderTimelinePayload(eventType: string | undefined, payload: unknown) {
+  if (eventType === 'memory_loaded') {
+    return renderMemoryLoadedPayload(payload);
+  }
+  return renderJsonBlock(payload);
+}
+
 function extractVerifierOutcome(value: unknown): VerifierOutcomeSnapshot {
   const payload = asRecord(value);
   if (!payload) {
@@ -719,7 +790,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                       </span>
                     </p>
                     {event.message ? <p>{event.message}</p> : null}
-                    {renderJsonBlock(event.payload)}
+                    {renderTimelinePayload(event.event_type, event.payload)}
                   </li>
                 ))}
               </ol>

@@ -1564,6 +1564,37 @@ def _session_state_payload(row: Any | None) -> dict[str, Any]:
     }
 
 
+def _memory_search_query(state: OrchestratorState) -> str:
+    goal = state.task_spec.goal if state.task_spec is not None else None
+    return (goal or state.task.task_text or "").strip()
+
+
+def _search_memory_entries(
+    *,
+    repo: PersonalMemoryRepository | ProjectMemoryRepository,
+    query_kwargs: dict[str, Any],
+) -> list[MemoryEntry]:
+    return [_memory_entry_from_row(result.memory) for result in repo.search(**query_kwargs)]
+
+
+def _memory_loaded_payload(
+    *,
+    memory: MemoryContext,
+    search_query: str,
+    search_limit: int,
+) -> dict[str, Any]:
+    return {
+        "retrieval_mode": "full_text",
+        "search_query": search_query[:200],
+        "search_limit": search_limit,
+        "personal_count": len(memory.personal),
+        "project_count": len(memory.project),
+        "session_loaded": bool(memory.session),
+        "personal_keys": [entry.memory_key for entry in memory.personal],
+        "project_keys": [entry.memory_key for entry in memory.project],
+    }
+
+
 def build_load_memory_node(
     session_factory: Callable[[], Session],
 ) -> Callable[[OrchestratorState], dict[str, Any]]:
@@ -1574,21 +1605,29 @@ def build_load_memory_node(
         user_id = state.session.user_id if state.session is not None else None
         session_id = state.session.session_id if state.session is not None else None
         repo_url = state.task.repo_url
+        search_query = _memory_search_query(state)
+        search_limit = 20
         memory = MemoryContext()
 
         db_session: Session | None = None
         try:
             db_session = session_factory()
-            if user_id:
-                personal_repo = PersonalMemoryRepository(db_session)
-                memory.personal = [
-                    _memory_entry_from_row(row) for row in personal_repo.list_by_user(user_id)
-                ]
+            memory.personal = _search_memory_entries(
+                repo=PersonalMemoryRepository(db_session),
+                query_kwargs={
+                    "query": search_query,
+                    "limit": search_limit,
+                },
+            )
             if repo_url:
-                project_repo = ProjectMemoryRepository(db_session)
-                memory.project = [
-                    _memory_entry_from_row(row) for row in project_repo.list_by_repo(repo_url)
-                ]
+                memory.project = _search_memory_entries(
+                    repo=ProjectMemoryRepository(db_session),
+                    query_kwargs={
+                        "repo_url": repo_url,
+                        "query": search_query,
+                        "limit": search_limit,
+                    },
+                )
             if session_id:
                 session_state = SessionStateRepository(db_session).get(session_id)
                 memory.session = _session_state_payload(session_state)
@@ -1618,14 +1657,11 @@ def build_load_memory_node(
                     f"Loaded {len(memory.personal)} personal and "
                     f"{len(memory.project)} project memory entries."
                 ),
-                payload={
-                    "retrieval_mode": "load_all",
-                    "personal_count": len(memory.personal),
-                    "project_count": len(memory.project),
-                    "session_loaded": bool(memory.session),
-                    "personal_keys": [entry.memory_key for entry in memory.personal],
-                    "project_keys": [entry.memory_key for entry in memory.project],
-                },
+                payload=_memory_loaded_payload(
+                    memory=memory,
+                    search_query=search_query,
+                    search_limit=search_limit,
+                ),
             ),
         }
 
@@ -3072,19 +3108,9 @@ def _map_worker_memory_to_persist(
 ) -> list[PersistMemoryEntry]:
     """Convert worker-produced memory updates into orchestrator persistence entries."""
     memory_to_persist = list(state.memory_to_persist)
-    user_id = state.session.user_id if state.session is not None else None
     task_id = state.task.task_id
 
     for worker_entry in result.memory_to_persist:
-        if worker_entry.category == "personal" and not user_id:
-            logger.warning(
-                "Skipping worker personal memory without a session user.",
-                extra={
-                    "task_id": task_id,
-                    "memory_key": worker_entry.memory_key,
-                },
-            )
-            continue
         repo_url = worker_entry.repo_url
         if worker_entry.category == "project":
             repo_url = repo_url or state.task.repo_url
@@ -3223,17 +3249,7 @@ def _persist_memory_entry(
 ) -> bool:
     """Persist one scoped memory entry, returning whether a row was written."""
     if entry.category == "personal":
-        if state.session is None:
-            logger.warning(
-                "Skipping personal memory persistence without a session user.",
-                extra={
-                    "task_id": state.task.task_id,
-                    "memory_key": entry.memory_key,
-                },
-            )
-            return False
         PersonalMemoryRepository(db_session).upsert(
-            user_id=state.session.user_id,
             memory_key=entry.memory_key,
             value=entry.value,
             source=entry.source,

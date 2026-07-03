@@ -453,7 +453,7 @@ Goal:
 Progress:
 
 - [x] Slice 1: load skeptical personal/project/session memory from the DB before worker dispatch and persist typed worker-produced memory after runs
-- [ ] Slice 2: add full-text memory search and retrieval visibility before evaluating semantic/vector retrieval
+- [x] Slice 2: add full-text memory search and retrieval visibility before evaluating semantic/vector retrieval
 
 Scope:
 

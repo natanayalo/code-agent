@@ -110,9 +110,8 @@ def _seed_graph_memory(session_factory, repo_url: str) -> tuple[str, str]:
             external_thread_id="thread-1",
         )
         PersonalMemoryRepository(session).upsert(
-            user_id=user.id,
             memory_key="communication_style",
-            value={"style": "concise"},
+            value={"style": "concise", "task_hint": "Update memory-aware task execution"},
             source="operator",
             confidence=0.9,
             scope="global",
@@ -121,7 +120,10 @@ def _seed_graph_memory(session_factory, repo_url: str) -> tuple[str, str]:
         ProjectMemoryRepository(session).upsert(
             repo_url=repo_url,
             memory_key="test_command",
-            value={"command": ".venv/bin/pytest tests/unit"},
+            value={
+                "command": ".venv/bin/pytest tests/unit",
+                "task_hint": "Update memory-aware task execution",
+            },
             source="worker_result",
             confidence=0.8,
             scope="repo",
@@ -199,11 +201,19 @@ def test_orchestrator_graph_loads_and_persists_memory(session_factory) -> None:
         TimelineEventType.MEMORY_LOADED,
         TimelineEventType.MEMORY_PERSISTED,
     }
+    memory_loaded_event = next(
+        event
+        for event in state.timeline_events
+        if event.event_type == TimelineEventType.MEMORY_LOADED
+    )
+    assert memory_loaded_event.payload["retrieval_mode"] == "full_text"
+    assert memory_loaded_event.payload["search_query"] == "Update memory-aware task execution"
+    assert memory_loaded_event.payload["personal_keys"] == ["communication_style"]
+    assert memory_loaded_event.payload["project_keys"] == ["test_command"]
     assert state.progress_updates[-1] == "persisted 2 memory entries"
 
     with session_scope(session_factory) as session:
         personal = PersonalMemoryRepository(session).get(
-            user_id=user_id,
             memory_key="preferred_verification",
         )
         project = ProjectMemoryRepository(session).get(

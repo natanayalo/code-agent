@@ -237,6 +237,118 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     ] == ["task_id", "attempt_number", "sequence_number"]
 
 
+def test_sqlite_upgrade_skips_memory_fulltext_columns(tmp_path: Path) -> None:
+    """The Postgres-only search migration should remain a no-op on SQLite."""
+    database_path = tmp_path / "memory_search_sqlite.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    inspector = inspect(engine)
+
+    assert "search_vector" not in _column_names(inspector, "memory_personal")
+    assert "search_vector" not in _column_names(inspector, "memory_project")
+
+
+def test_personal_memory_scope_migration_deduplicates_and_removes_user_id(
+    tmp_path: Path,
+) -> None:
+    """The operator-global personal memory migration should keep newest duplicate keys."""
+    database_path = tmp_path / "personal_memory_global.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+
+    command.upgrade(config, "20260703_0029")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    with engine.begin() as connection:
+        old_time = "2026-07-02T00:00:00+00:00"
+        new_time = "2026-07-03T00:00:00+00:00"
+        connection.execute(
+            text(
+                "INSERT INTO users (id, external_user_id, display_name, created_at, updated_at) "
+                "VALUES "
+                "('u-old', 'old-user', 'Old User', :old_time, :old_time), "
+                "('u-new', 'new-user', 'New User', :old_time, :old_time)"
+            ),
+            {"old_time": old_time},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO memory_personal "
+                "(id, user_id, memory_key, value, source, confidence, scope, "
+                "last_verified_at, requires_verification, created_at, updated_at) "
+                "VALUES "
+                "('pm-old', 'u-old', 'style', '{}', NULL, 1.0, NULL, NULL, 1, "
+                ":old_time, :old_time), "
+                "('pm-new', 'u-new', 'style', '{}', NULL, 1.0, NULL, NULL, 0, "
+                ":old_time, :new_time)"
+            ),
+            {"old_time": old_time, "new_time": new_time},
+        )
+
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    assert "user_id" not in _column_names(inspector, "memory_personal")
+    unique_constraints = {
+        constraint["name"]: constraint
+        for constraint in inspector.get_unique_constraints("memory_personal")
+    }
+    assert unique_constraints["uq_memory_personal_key"]["column_names"] == ["memory_key"]
+
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text("SELECT id, memory_key, requires_verification FROM memory_personal")
+        ).all()
+
+    assert rows == [("pm-new", "style", 0)]
+
+
+def test_personal_memory_scope_downgrade_assigns_operator_user(tmp_path: Path) -> None:
+    """Downgrade should restore user ownership with a fallback operator user."""
+    database_path = tmp_path / "personal_memory_global_downgrade.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    now = "2026-07-03T00:00:00+00:00"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO memory_personal "
+                "(id, memory_key, value, source, confidence, scope, last_verified_at, "
+                "requires_verification, created_at, updated_at) "
+                "VALUES ('pm-global', 'style', '{}', NULL, 1.0, NULL, NULL, 1, "
+                ":now, :now)"
+            ),
+            {"now": now},
+        )
+
+    command.downgrade(config, "20260703_0029")
+
+    inspector = inspect(engine)
+    assert "user_id" in _column_names(inspector, "memory_personal")
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                "SELECT m.user_id, u.external_user_id "
+                "FROM memory_personal m "
+                "JOIN users u ON u.id = m.user_id "
+                "WHERE m.id = 'pm-global'"
+            )
+        ).one()
+
+    assert row == ("operator-personal-memory-user", "operator:personal-memory")
+
+
 def _seed_downgrade_users_and_sessions(connection, now: str) -> None:
     connection.execute(
         text(

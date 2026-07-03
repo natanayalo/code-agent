@@ -217,6 +217,85 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('No artifacts persisted for the latest run.')).toBeInTheDocument();
   });
 
+  it('renders memory retrieval details for memory_loaded timeline events', () => {
+    const task = buildTask({
+      timeline: [
+        {
+          id: 'timeline-memory-loaded',
+          event_type: 'memory_loaded',
+          attempt_number: 0,
+          sequence_number: 2,
+          message: 'Loaded memory',
+          payload: {
+            retrieval_mode: 'full_text',
+            search_query: 'pytest command',
+            search_limit: 20,
+            personal_count: 1,
+            project_count: 2,
+            session_loaded: true,
+            personal_keys: ['preferred_test'],
+            project_keys: ['build_command', 'lint_command'],
+          },
+          created_at: '2026-04-28T00:02:00.000Z',
+        },
+      ],
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Retrieval Mode:')).toBeInTheDocument();
+    expect(screen.getByText('Full Text')).toBeInTheDocument();
+    expect(screen.getByText('pytest command')).toBeInTheDocument();
+    expect(screen.getByText('Personal Keys (1)')).toBeInTheDocument();
+    expect(screen.getByText('Project Keys (2)')).toBeInTheDocument();
+    expect(screen.getByText('preferred_test')).toBeInTheDocument();
+    expect(screen.getByText('build_command')).toBeInTheDocument();
+    expect(screen.getByText('lint_command')).toBeInTheDocument();
+  });
+
+  it('falls back gracefully for malformed memory_loaded payloads', () => {
+    const task = buildTask({
+      timeline: [
+        {
+          id: 'timeline-memory-loaded-malformed',
+          event_type: 'memory_loaded',
+          attempt_number: 0,
+          sequence_number: 3,
+          message: 'Loaded malformed memory payload',
+          payload: 'not-an-object' as unknown as Record<string, unknown>,
+          created_at: '2026-04-28T00:03:00.000Z',
+        },
+        {
+          id: 'timeline-memory-loaded-empty',
+          event_type: 'memory_loaded',
+          attempt_number: 0,
+          sequence_number: 4,
+          message: 'Loaded sparse memory payload',
+          payload: {
+            retrieval_mode: null,
+            search_query: '',
+            search_limit: 'unknown',
+            personal_count: null,
+            project_count: undefined,
+            session_loaded: false,
+            personal_keys: 'not-a-list',
+            project_keys: [],
+          },
+          created_at: '2026-04-28T00:04:00.000Z',
+        },
+      ],
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('"not-an-object"')).toBeInTheDocument();
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
+    expect(screen.getAllByText('n/a')).toHaveLength(2);
+    expect(screen.getByText('no')).toBeInTheDocument();
+    expect(screen.queryByText(/Personal Keys \(/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Project Keys \(/)).not.toBeInTheDocument();
+  });
+
   it('renders verifier outcome status, summary, and item details when present', () => {
     const task = buildTask({
       latest_run: buildLatestRun({

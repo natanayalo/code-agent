@@ -2,15 +2,105 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from db.models import PersonalMemory, ProjectMemory
 from repositories.sqlalchemy_common import UNSET, apply_memory_metadata
+
+_SEARCH_LIMIT_CAP = 100
+_SEARCH_QUERY_MAX_CHARS = 200
+_HEADLINE_START = "__CA_MARK_START__"
+_HEADLINE_END = "__CA_MARK_END__"
+_HEADLINE_OPTIONS = (
+    f"StartSel={_HEADLINE_START},"
+    f"StopSel={_HEADLINE_END},"
+    "MaxFragments=2,"
+    "MaxWords=18,"
+    "MinWords=6,"
+    "FragmentDelimiter= ... "
+)
+
+
+@dataclass(frozen=True)
+class MemorySearchResult:
+    """A memory row paired with an optional operator-facing search snippet."""
+
+    memory: PersonalMemory | ProjectMemory
+    headline: str | None = None
+
+
+def _normalized_search_limit(limit: int) -> int:
+    return max(1, min(limit, _SEARCH_LIMIT_CAP))
+
+
+def _normalized_search_query(query: str) -> str:
+    return query[:_SEARCH_QUERY_MAX_CHARS].strip()
+
+
+def _dialect_name(session: Session) -> str:
+    try:
+        bind = session.get_bind()
+    except Exception:
+        return ""
+    return bind.dialect.name if bind is not None else ""
+
+
+def _fallback_search_results(
+    memories: Sequence[PersonalMemory | ProjectMemory],
+    *,
+    query: str,
+    limit: int,
+) -> list[MemorySearchResult]:
+    lowered_query = query.casefold()
+    results: list[MemorySearchResult] = []
+    for memory in memories:
+        memory_value = str(memory.value or "").casefold()
+        if lowered_query in memory.memory_key.casefold() or lowered_query in memory_value:
+            results.append(MemorySearchResult(memory=memory))
+            if len(results) >= limit:
+                break
+    return results
+
+
+def _ordered_search_results(
+    session: Session,
+    *,
+    statement: str,
+    params: dict[str, Any],
+    model: type[PersonalMemory] | type[ProjectMemory],
+) -> list[MemorySearchResult]:
+    rows = session.execute(text(statement), params).mappings().all()
+    if not rows:
+        return []
+
+    memory_ids = [row["id"] for row in rows]
+    model_id = cast(Any, model).id
+    memories = cast(
+        list[PersonalMemory | ProjectMemory],
+        session.scalars(select(model).where(model_id.in_(memory_ids))).all(),
+    )
+    memories_by_id = {str(memory.id): memory for memory in memories}
+
+    ordered_results: list[MemorySearchResult] = []
+    for row in rows:
+        memory = memories_by_id.get(str(row["id"]))
+        if memory is None:
+            continue
+        headline = row.get("headline")
+        ordered_results.append(
+            MemorySearchResult(
+                memory=memory,
+                headline=headline if isinstance(headline, str) else None,
+            )
+        )
+    return ordered_results
 
 
 class PersonalMemoryRepository:
@@ -19,42 +109,82 @@ class PersonalMemoryRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def get(self, *, user_id: str, memory_key: str) -> PersonalMemory | None:
-        statement = select(PersonalMemory).where(
-            PersonalMemory.user_id == user_id,
-            PersonalMemory.memory_key == memory_key,
-        )
+    def get(self, *, memory_key: str) -> PersonalMemory | None:
+        statement = select(PersonalMemory).where(PersonalMemory.memory_key == memory_key)
         return self.session.scalar(statement)
-
-    def list_by_user(self, user_id: str) -> list[PersonalMemory]:
-        statement = (
-            select(PersonalMemory)
-            .where(PersonalMemory.user_id == user_id)
-            .order_by(PersonalMemory.created_at.desc(), PersonalMemory.id.desc())
-        )
-        return list(self.session.scalars(statement))
 
     def list_all(
         self,
         *,
-        user_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[PersonalMemory]:
-        statement = select(PersonalMemory)
-        if user_id is not None:
-            statement = statement.where(PersonalMemory.user_id == user_id)
         statement = (
-            statement.order_by(PersonalMemory.created_at.desc(), PersonalMemory.id.desc())
+            select(PersonalMemory)
+            .order_by(PersonalMemory.created_at.desc(), PersonalMemory.id.desc())
             .limit(limit)
             .offset(offset)
         )
         return list(self.session.scalars(statement))
 
+    def count_all(self) -> tuple[int, int]:
+        """Return total and requires-verification counts for personal memory."""
+        total_statement = select(func.count()).select_from(PersonalMemory)
+        verification_statement = total_statement.where(
+            PersonalMemory.requires_verification.is_(True)
+        )
+        total = self.session.scalar(total_statement) or 0
+        requires_verification = self.session.scalar(verification_statement) or 0
+        return int(total), int(requires_verification)
+
+    def search(
+        self,
+        *,
+        query: str,
+        limit: int = 20,
+    ) -> list[MemorySearchResult]:
+        """Search personal memory entries, falling back to substring matching outside Postgres."""
+        normalized_query = _normalized_search_query(query)
+        if not normalized_query:
+            return []
+
+        if _dialect_name(self.session) != "postgresql":
+            return _fallback_search_results(
+                self.list_all(),
+                query=normalized_query,
+                limit=_normalized_search_limit(limit),
+            )
+
+        return _ordered_search_results(
+            self.session,
+            statement="""
+                SELECT
+                    id,
+                    ts_headline(
+                        'english',
+                        coalesce(memory_key, '') || ' ' || coalesce(value::text, ''),
+                        plainto_tsquery('english', :query),
+                        :headline_options
+                    ) AS headline
+                FROM memory_personal
+                WHERE search_vector @@ plainto_tsquery('english', :query)
+                ORDER BY
+                  ts_rank(search_vector, plainto_tsquery('english', :query)) DESC,
+                  created_at DESC,
+                  id DESC
+                LIMIT :limit
+            """,
+            params={
+                "query": normalized_query,
+                "limit": _normalized_search_limit(limit),
+                "headline_options": _HEADLINE_OPTIONS,
+            },
+            model=PersonalMemory,
+        )
+
     def upsert(
         self,
         *,
-        user_id: str,
         memory_key: str,
         value: dict[str, Any],
         source: str | None | object = UNSET,
@@ -63,10 +193,9 @@ class PersonalMemoryRepository:
         last_verified_at: datetime | None | object = UNSET,
         requires_verification: bool | object = UNSET,
     ) -> PersonalMemory:
-        memory_entry = self.get(user_id=user_id, memory_key=memory_key)
+        memory_entry = self.get(memory_key=memory_key)
         if memory_entry is None:
             memory_entry = PersonalMemory(
-                user_id=user_id,
                 memory_key=memory_key,
                 value=value,
             )
@@ -75,7 +204,7 @@ class PersonalMemoryRepository:
                     self.session.add(memory_entry)
                     self.session.flush()
             except IntegrityError:
-                memory_entry = self.get(user_id=user_id, memory_key=memory_key)
+                memory_entry = self.get(memory_key=memory_key)
                 if memory_entry is None:
                     raise
         apply_memory_metadata(
@@ -90,8 +219,8 @@ class PersonalMemoryRepository:
         self.session.flush()
         return memory_entry
 
-    def delete(self, *, user_id: str, memory_key: str) -> bool:
-        memory_entry = self.get(user_id=user_id, memory_key=memory_key)
+    def delete(self, *, memory_key: str) -> bool:
+        memory_entry = self.get(memory_key=memory_key)
         if memory_entry is None:
             return False
         self.session.delete(memory_entry)
@@ -119,6 +248,66 @@ class ProjectMemoryRepository:
             .order_by(ProjectMemory.created_at.desc(), ProjectMemory.id.desc())
         )
         return list(self.session.scalars(statement))
+
+    def count_all(self, repo_url: str | None = None) -> tuple[int, int]:
+        """Return total and requires-verification counts for project memory."""
+        total_statement = select(func.count()).select_from(ProjectMemory)
+        if repo_url is not None:
+            total_statement = total_statement.where(ProjectMemory.repo_url == repo_url)
+        verification_statement = total_statement.where(
+            ProjectMemory.requires_verification.is_(True)
+        )
+        total = self.session.scalar(total_statement) or 0
+        requires_verification = self.session.scalar(verification_statement) or 0
+        return int(total), int(requires_verification)
+
+    def search(
+        self,
+        *,
+        repo_url: str,
+        query: str,
+        limit: int = 20,
+    ) -> list[MemorySearchResult]:
+        """Search project memory entries, falling back to substring matching outside Postgres."""
+        normalized_query = _normalized_search_query(query)
+        if not normalized_query:
+            return []
+
+        if _dialect_name(self.session) != "postgresql":
+            return _fallback_search_results(
+                self.list_by_repo(repo_url),
+                query=normalized_query,
+                limit=_normalized_search_limit(limit),
+            )
+
+        return _ordered_search_results(
+            self.session,
+            statement="""
+                SELECT
+                    id,
+                    ts_headline(
+                        'english',
+                        coalesce(memory_key, '') || ' ' || coalesce(value::text, ''),
+                        plainto_tsquery('english', :query),
+                        :headline_options
+                    ) AS headline
+                FROM memory_project
+                WHERE repo_url = :repo_url
+                  AND search_vector @@ plainto_tsquery('english', :query)
+                ORDER BY
+                  ts_rank(search_vector, plainto_tsquery('english', :query)) DESC,
+                  created_at DESC,
+                  id DESC
+                LIMIT :limit
+            """,
+            params={
+                "repo_url": repo_url,
+                "query": normalized_query,
+                "limit": _normalized_search_limit(limit),
+                "headline_options": _HEADLINE_OPTIONS,
+            },
+            model=ProjectMemory,
+        )
 
     def list_all(
         self,

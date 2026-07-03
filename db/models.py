@@ -169,7 +169,7 @@ class EncryptedJSON(TypeDecorator):
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """A known user who can own sessions and personal memory."""
+    """A known user who can own sessions."""
 
     __tablename__ = "users"
 
@@ -177,7 +177,6 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     sessions: Mapped[list[Session]] = relationship(back_populates="user")
-    personal_memories: Mapped[list[PersonalMemory]] = relationship(back_populates="user")
 
 
 class Session(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -510,18 +509,11 @@ class InboundDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 class PersonalMemory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Structured user-scoped memory entries."""
+    """Structured operator-global personal memory entries."""
 
     __tablename__ = "memory_personal"
-    __table_args__ = (
-        UniqueConstraint("user_id", "memory_key", name="uq_memory_personal_user_key"),
-    )
+    __table_args__ = (UniqueConstraint("memory_key", name="uq_memory_personal_key"),)
 
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
     memory_key: Mapped[str] = mapped_column(String(255), nullable=False)
     value: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
 
@@ -533,8 +525,6 @@ class PersonalMemory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
     requires_verification: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-
-    user: Mapped[User] = relationship(back_populates="personal_memories")
 
 
 class ProjectMemory(UUIDPrimaryKeyMixin, TimestampMixin, Base):

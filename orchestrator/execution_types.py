@@ -187,12 +187,12 @@ class SessionSnapshot(ExecutionModel):
 
 
 class PersonalMemorySnapshot(ExecutionModel):
-    """A persisted user-scoped skeptical memory entry."""
+    """A persisted operator-global skeptical memory entry."""
 
     memory_id: str
-    user_id: str
     memory_key: str
     value: dict[str, Any]
+    headline: str | None = None
     source: str | None = None
     confidence: float = 1.0
     scope: str | None = None
@@ -209,6 +209,7 @@ class ProjectMemorySnapshot(ExecutionModel):
     repo_url: str
     memory_key: str
     value: dict[str, Any]
+    headline: str | None = None
     source: str | None = None
     confidence: float = 1.0
     scope: str | None = None
@@ -218,10 +219,24 @@ class ProjectMemorySnapshot(ExecutionModel):
     updated_at: datetime
 
 
+class MemoryInventoryCountSnapshot(ExecutionModel):
+    """Exact count summary for one memory inventory scope."""
+
+    total: int = 0
+    requires_verification: int = 0
+
+
+class KnowledgeBaseStatsSnapshot(ExecutionModel):
+    """Knowledge-base inventory metrics for dashboard browse surfaces."""
+
+    personal: MemoryInventoryCountSnapshot
+    project: MemoryInventoryCountSnapshot | None = None
+    project_global: MemoryInventoryCountSnapshot
+
+
 class PersonalMemoryUpsertRequest(ExecutionModel):
     """Input payload for creating/updating a personal memory entry."""
 
-    user_id: str = Field(min_length=1)
     memory_key: str = Field(min_length=1)
     value: dict[str, Any] = Field(default_factory=dict)
     source: str | None = None

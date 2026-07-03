@@ -12,6 +12,17 @@ jobs:
   pytest:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: code_agent_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d code_agent_test" --health-interval 10s --health-timeout 5s --health-retries 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -52,6 +63,8 @@ jobs:
             --cov-report=xml \
             --cov-fail-under=80
       - name: Run integration pytest suite
+        env:
+          CODE_AGENT_TEST_POSTGRES_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/code_agent_test
         run: poetry run pytest tests/integration
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7

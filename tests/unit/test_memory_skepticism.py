@@ -31,15 +31,11 @@ def session():
 
 def test_personal_memory_skepticism_metadata(session):
     """Personal memory should store and retrieve skepticism metadata."""
-    user_repo = UserRepository(session)
-    user = user_repo.create(external_user_id="user_1")
-
     memory_repo = PersonalMemoryRepository(session)
     now = datetime.now(UTC)
 
     # Upsert with metadata
     memory = memory_repo.upsert(
-        user_id=user.id,
         memory_key="pref_tabs",
         value={"tabs": 4},
         source="user_instruction",
@@ -57,7 +53,6 @@ def test_personal_memory_skepticism_metadata(session):
 
     # Update value but keep/change metadata
     memory_updated = memory_repo.upsert(
-        user_id=user.id,
         memory_key="pref_tabs",
         value={"tabs": 2},
         confidence=0.5,
@@ -71,14 +66,10 @@ def test_personal_memory_skepticism_metadata(session):
 
 def test_personal_memory_upsert_preserves_metadata_when_omitted(session):
     """Personal memory updates should not reset metadata when args are omitted."""
-    user_repo = UserRepository(session)
-    user = user_repo.create(external_user_id="user_omitted")
-
     memory_repo = PersonalMemoryRepository(session)
     now = datetime.now(UTC)
 
     memory_repo.upsert(
-        user_id=user.id,
         memory_key="editor",
         value={"theme": "dark"},
         source="user_instruction",
@@ -89,7 +80,6 @@ def test_personal_memory_upsert_preserves_metadata_when_omitted(session):
     )
 
     memory_updated = memory_repo.upsert(
-        user_id=user.id,
         memory_key="editor",
         value={"theme": "light"},
     )
@@ -267,8 +257,6 @@ def test_session_state_repository_upsert_raises_when_race_recovery_cannot_reload
 
 def test_personal_memory_upsert_raises_when_duplicate_recovery_still_finds_no_row(session):
     """Personal memory races should re-raise when recovery cannot find the winning row."""
-    user_repo = UserRepository(session)
-    user = user_repo.create(external_user_id="user_personal_raise")
     memory_repo = PersonalMemoryRepository(session)
 
     monkeypatch = pytest.MonkeyPatch()
@@ -282,7 +270,6 @@ def test_personal_memory_upsert_raises_when_duplicate_recovery_still_finds_no_ro
     try:
         with pytest.raises(IntegrityError):
             memory_repo.upsert(
-                user_id=user.id,
                 memory_key="editor",
                 value={"theme": "dark"},
             )
