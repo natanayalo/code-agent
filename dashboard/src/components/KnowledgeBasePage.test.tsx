@@ -493,6 +493,43 @@ describe('KnowledgeBasePage', () => {
     });
   });
 
+  it('loads more personal entries with pagination controls', async () => {
+    vi.mocked(api.listPersonalMemory).mockImplementation(async (_userId, limit, offset) =>
+      Array.from({ length: limit ?? 0 }, (_, index) => ({
+        memory_id: `pm-${offset}-${index}`,
+        user_id: 'user-load-more',
+        memory_key: `entry-${index}`,
+        value: { index },
+        confidence: 1,
+        scope: 'global',
+        source: null,
+        last_verified_at: null,
+        requires_verification: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }))
+    );
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.change(await screen.findByLabelText('Personal User ID'), {
+      target: { value: 'user-load-more' },
+    });
+    await waitFor(() => {
+      expect(api.listPersonalMemory).toHaveBeenCalledWith('user-load-more', 50, 0);
+    });
+    expect(await screen.findByText('entry-0')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load More Personal Entries' }));
+
+    await waitFor(() => {
+      expect(api.listPersonalMemory).toHaveBeenCalledWith('user-load-more', 50, 50);
+    });
+  });
+
   it('caps project pagination at backend limit', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockImplementation(async (_repoUrl, limit, offset) =>
@@ -598,6 +635,157 @@ describe('KnowledgeBasePage', () => {
     expect(screen.getByText('build_memory')).toBeInTheDocument();
     expect(screen.getByText(/Searching for/i)).toHaveTextContent('1 personal');
     expect(screen.getByText(/Searching for/i)).toHaveTextContent('1 project');
+  });
+
+  it('shows the short-query helper without triggering search requests', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.change(screen.getByLabelText('Search Query'), {
+      target: { value: 'p' },
+    });
+    await waitForDebounce();
+
+    expect(screen.getByText('Type at least 2 characters to start searching.')).toBeInTheDocument();
+    expect(api.searchPersonalMemory).not.toHaveBeenCalled();
+    expect(api.searchProjectMemory).not.toHaveBeenCalled();
+  });
+
+  it('retries failed project search requests and renders malformed headlines safely', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory)
+      .mockRejectedValueOnce(new Error('search failed'))
+      .mockResolvedValueOnce([
+        {
+          memory_id: 'pj-malformed',
+          repo_url: 'https://github.com/natanayalo/code-agent',
+          memory_key: 'broken_headline',
+          value: { cmd: 'npm run test:run' },
+          headline: '__CA_MARK_START__broken highlight',
+          confidence: 0.8,
+          scope: 'repo',
+          source: 'operator',
+          last_verified_at: null,
+          requires_verification: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.change(await screen.findByLabelText('Project Repository URL'), {
+      target: { value: 'https://github.com/natanayalo/code-agent' },
+    });
+    fireEvent.change(screen.getByLabelText('Search Query'), {
+      target: { value: 'tests' },
+    });
+    await waitForDebounce();
+
+    expect(await screen.findByText('Error loading project search')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Project Search' }));
+
+    await waitFor(() => {
+      expect(api.searchProjectMemory).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText('__CA_MARK_START__broken highlight')).toBeInTheDocument();
+  });
+
+  it('refreshes personal search results after saving while search mode is active', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.upsertPersonalMemory).mockResolvedValue({
+      memory_id: 'pm-search-save',
+      user_id: 'user-search-save',
+      memory_key: 'editor',
+      value: { theme: 'dark' },
+      confidence: 1,
+      source: null,
+      scope: null,
+      last_verified_at: null,
+      requires_verification: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    renderKnowledgeBasePage();
+
+    fireEvent.change(await screen.findByLabelText('Personal User ID'), {
+      target: { value: 'user-search-save' },
+    });
+    fireEvent.change(screen.getByLabelText('Search Query'), {
+      target: { value: 'ed' },
+    });
+    await waitForDebounce();
+    await waitFor(() => {
+      expect(api.searchPersonalMemory).toHaveBeenCalledWith('user-search-save', 'ed', 20);
+    });
+
+    fireEvent.change(screen.getByLabelText('Personal Memory Key'), {
+      target: { value: 'editor' },
+    });
+    fireEvent.change(screen.getByLabelText('Personal Memory Value (JSON object)'), {
+      target: { value: '{"theme":"dark"}' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Personal Entry' }));
+
+    await waitFor(() => expect(api.upsertPersonalMemory).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(api.searchPersonalMemory).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('deletes project search results and refreshes the search query', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([
+      {
+        memory_id: 'pj-search-delete',
+        repo_url: 'https://github.com/natanayalo/code-agent',
+        memory_key: 'delete_search_result',
+        value: { stale: true },
+        confidence: 0.4,
+        scope: 'repo',
+        source: null,
+        last_verified_at: null,
+        requires_verification: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    vi.mocked(api.deleteProjectMemory).mockResolvedValue();
+
+    renderKnowledgeBasePage();
+
+    fireEvent.change(await screen.findByLabelText('Project Repository URL'), {
+      target: { value: 'https://github.com/natanayalo/code-agent' },
+    });
+    fireEvent.change(screen.getByLabelText('Search Query'), {
+      target: { value: 'de' },
+    });
+    await waitForDebounce();
+
+    await screen.findByText('delete_search_result');
+    fireEvent.click(screen.getByLabelText('Delete project memory delete_search_result'));
+
+    await waitFor(() => {
+      expect(api.deleteProjectMemory).toHaveBeenCalledWith(
+        'https://github.com/natanayalo/code-agent',
+        'delete_search_result'
+      );
+    });
+    await waitFor(() => {
+      expect(api.searchProjectMemory).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('clears search back to browse mode', async () => {
