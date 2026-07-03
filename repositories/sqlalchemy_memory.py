@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
@@ -50,8 +51,8 @@ def _dialect_name(session: Session) -> str:
     return bind.dialect.name if bind is not None else ""
 
 
-def _fallback_search_results(
-    memories: list[PersonalMemory | ProjectMemory],
+def _fallback_search_results[T: PersonalMemory | ProjectMemory](
+    memories: Sequence[T],
     *,
     query: str,
     limit: int,
@@ -67,19 +68,23 @@ def _fallback_search_results(
     return results
 
 
-def _ordered_search_results(
+def _ordered_search_results[T: PersonalMemory | ProjectMemory](
     session: Session,
     *,
     statement: str,
     params: dict[str, Any],
-    model: type[PersonalMemory] | type[ProjectMemory],
+    model: type[T],
 ) -> list[MemorySearchResult]:
     rows = session.execute(text(statement), params).mappings().all()
     if not rows:
         return []
 
     memory_ids = [row["id"] for row in rows]
-    memories = session.scalars(select(model).where(model.id.in_(memory_ids))).all()
+    model_id = cast(Any, model).id
+    memories = cast(
+        list[T],
+        session.scalars(select(model).where(model_id.in_(memory_ids))).all(),
+    )
     memories_by_id = {str(memory.id): memory for memory in memories}
 
     ordered_results: list[MemorySearchResult] = []

@@ -50,7 +50,7 @@ def _seed_memory_context(session_factory: Any) -> tuple[str, str]:
         PersonalMemoryRepository(session).upsert(
             user_id=user.id,
             memory_key="communication_style",
-            value={"style": "concise"},
+            value={"style": "concise", "shared_hint": "memory-match"},
             source="operator",
             confidence=0.9,
             scope="global",
@@ -60,7 +60,10 @@ def _seed_memory_context(session_factory: Any) -> tuple[str, str]:
         ProjectMemoryRepository(session).upsert(
             repo_url=repo_url,
             memory_key="test_command",
-            value={"command": ".venv/bin/pytest tests/unit"},
+            value={
+                "command": ".venv/bin/pytest tests/unit",
+                "shared_hint": "memory-match",
+            },
             source="worker_result",
             confidence=0.8,
             scope="repo",
@@ -197,7 +200,7 @@ def test_load_memory_node_loads_memory_and_skepticism_metadata(session_factory) 
                 "external_thread_id": "thread-1",
             },
             "task": {
-                "task_text": "Use remembered test commands",
+                "task_text": "memory-match",
                 "repo_url": repo_url,
             },
         }
@@ -219,7 +222,7 @@ def test_load_memory_node_loads_memory_and_skepticism_metadata(session_factory) 
     assert event.event_type == TimelineEventType.MEMORY_LOADED
     assert event.payload == {
         "retrieval_mode": "full_text",
-        "search_query": "Use remembered test commands",
+        "search_query": "memory-match",
         "search_limit": 20,
         "personal_count": 1,
         "project_count": 1,
