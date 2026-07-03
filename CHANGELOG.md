@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: wire memory load and persistence ([#293](https://github.com/natanayalo/code-agent/pull/293))
+
 - Feat: implement Milestone 22 dynamic performance-based worker routing ([#292](https://github.com/natanayalo/code-agent/pull/292))
 
 - Feat: integrate WorkerFacade to centralize worker routing ([#290](https://github.com/natanayalo/code-agent/pull/290))
