@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Literal
 
@@ -38,6 +39,7 @@ class MemoryProposalRepository:
         session_id: str | None = None,
     ) -> MemoryProposal:
         normalized_category = MemoryProposalCategory(category)
+        self._validate_category_scope(category=normalized_category, repo_url=repo_url)
         proposal = MemoryProposal(
             category=normalized_category,
             repo_url=repo_url,
@@ -64,7 +66,7 @@ class MemoryProposalRepository:
     def list(
         self,
         *,
-        status: MemoryProposalStatus | str | None = None,
+        status: MemoryProposalStatus | str | Sequence[MemoryProposalStatus | str] | None = None,
         category: MemoryProposalCategory | str | None = None,
         repo_url: str | None = None,
         task_id: str | None = None,
@@ -73,8 +75,11 @@ class MemoryProposalRepository:
         offset: int = 0,
     ) -> list[MemoryProposal]:
         statement = select(MemoryProposal)
-        if status is not None:
-            statement = statement.where(MemoryProposal.status == MemoryProposalStatus(status))
+        statuses = self._normalize_statuses(status)
+        if statuses is not None:
+            if not statuses:
+                return []
+            statement = statement.where(MemoryProposal.status.in_(statuses))
         if category is not None:
             statement = statement.where(MemoryProposal.category == MemoryProposalCategory(category))
         if repo_url is not None:
@@ -84,11 +89,32 @@ class MemoryProposalRepository:
         if session_id is not None:
             statement = statement.where(MemoryProposal.session_id == session_id)
         statement = (
-            statement.order_by(MemoryProposal.created_at.desc(), MemoryProposal.id.desc())
+            statement.order_by(MemoryProposal.updated_at.desc(), MemoryProposal.id.desc())
             .limit(max(0, limit))
             .offset(max(0, offset))
         )
         return list(self.session.scalars(statement))
+
+    @staticmethod
+    def _normalize_statuses(
+        status: MemoryProposalStatus | str | Sequence[MemoryProposalStatus | str] | None,
+    ) -> Sequence[MemoryProposalStatus] | None:
+        if status is None:
+            return None
+        if isinstance(status, MemoryProposalStatus | str):
+            return [MemoryProposalStatus(status)]
+        return [MemoryProposalStatus(item) for item in status]
+
+    @staticmethod
+    def _validate_category_scope(
+        *,
+        category: MemoryProposalCategory,
+        repo_url: str | None,
+    ) -> None:
+        if category == MemoryProposalCategory.PROJECT and not repo_url:
+            raise ValueError("repo_url is required for project memory proposals.")
+        if category == MemoryProposalCategory.PERSONAL and repo_url is not None:
+            raise ValueError("repo_url must be omitted for personal memory proposals.")
 
     def accept(
         self,

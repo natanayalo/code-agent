@@ -232,21 +232,20 @@ export function KnowledgeBasePage() {
   });
 
   const {
-    data: reviewedMemoryProposals = [],
+    data: reviewedMemoryProposalResults = [],
     error: reviewedProposalsError,
     refetch: refetchReviewedProposals,
   } = useQuery({
     queryKey: ['knowledge-base', 'memory-proposals', 'reviewed'],
-    queryFn: async () => {
-      const [accepted, rejected] = await Promise.all([
-        api.listMemoryProposals('accepted'),
-        api.listMemoryProposals('rejected'),
-      ]);
-      return [...accepted, ...rejected].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-    },
+    queryFn: () => api.listMemoryProposals(['accepted', 'rejected'], undefined, undefined, 100),
     retry: false,
     refetchInterval: KNOWLEDGE_BASE_REFETCH_INTERVAL_MS,
   });
+  const reviewedMemoryProposals = React.useMemo(
+    () =>
+      [...reviewedMemoryProposalResults].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
+    [reviewedMemoryProposalResults]
+  );
 
   const {
     data: personalData,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from db.enums import MemoryProposalCategory, MemoryProposalStatus
 from repositories import (
     MemoryProposalRepository,
@@ -112,6 +114,7 @@ def test_memory_proposal_list_filters_and_reject_terminal_status(session_factory
         assert accepted_after_reject is not None
         assert "cannot be accepted" in (accept_detail or "")
         assert repo.list(status="pending_review") == [pending_personal]
+        assert repo.list(status=["accepted", "rejected"]) == [rejected_project]
         assert repo.list(status="rejected", category="project", repo_url=repo_url) == [
             rejected_project
         ]
@@ -132,3 +135,24 @@ def test_memory_proposal_missing_rows_return_not_found(session_factory) -> None:
         assert reject_status == "not_found"
         assert reject_proposal is None
         assert "not found" in (reject_detail or "")
+
+
+def test_memory_proposal_create_fails_fast_for_category_repo_contract(session_factory) -> None:
+    """Repository create should reject invalid category scope before database constraints."""
+    with session_scope(session_factory) as session:
+        repo = MemoryProposalRepository(session)
+
+        with pytest.raises(ValueError, match="repo_url is required"):
+            repo.create(
+                category="project",
+                memory_key="missing_repo",
+                value={},
+            )
+
+        with pytest.raises(ValueError, match="repo_url must be omitted"):
+            repo.create(
+                category="personal",
+                repo_url="https://github.com/natanayalo/code-agent",
+                memory_key="bad_scope",
+                value={},
+            )

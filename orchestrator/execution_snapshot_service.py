@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import timedelta
 from typing import Any, cast
 
@@ -10,7 +11,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from db.base import utc_now
-from db.enums import ArtifactType, HumanInteractionStatus, TaskStatus, WorkerRunStatus
+from db.enums import (
+    ArtifactType,
+    HumanInteractionStatus,
+    MemoryProposalStatus,
+    TaskStatus,
+    WorkerRunStatus,
+)
 from db.models import (
     ExecutionPlan,
     HumanInteraction,
@@ -333,7 +340,7 @@ def create_memory_proposal(
 def list_memory_proposals(
     self: Any,
     *,
-    status: str | None = None,
+    status: str | MemoryProposalStatus | Sequence[str | MemoryProposalStatus] | None = None,
     category: str | None = None,
     repo_url: str | None = None,
     task_id: str | None = None,

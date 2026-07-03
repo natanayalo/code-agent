@@ -37,7 +37,7 @@ def get_knowledge_base_stats(
 
 @router.get("/memory-proposals", response_model=list[MemoryProposalSnapshot])
 def list_memory_proposals(
-    status_filter: MemoryProposalStatus | None = Query(None, alias="status"),
+    status_filter: list[MemoryProposalStatus] | None = Query(None, alias="status"),
     category: MemoryProposalCategory | None = None,
     repo_url: str | None = Query(default=None, min_length=1),
     task_id: str | None = Query(default=None, min_length=1),

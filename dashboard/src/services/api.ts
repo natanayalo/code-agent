@@ -245,7 +245,7 @@ export const api = {
   },
 
   async listMemoryProposals(
-    status?: MemoryProposalStatus,
+    status?: MemoryProposalStatus | MemoryProposalStatus[],
     category?: 'personal' | 'project',
     repoUrl?: string,
     limit?: number,
@@ -254,7 +254,8 @@ export const api = {
     try {
       const query = new URLSearchParams();
       if (status) {
-        query.set('status', status);
+        const statuses = Array.isArray(status) ? status : [status];
+        statuses.forEach((statusValue) => query.append('status', statusValue));
       }
       if (category) {
         query.set('category', category);

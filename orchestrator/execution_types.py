@@ -302,12 +302,6 @@ class MemoryProposalCreateRequest(ExecutionModel):
         normalized = value.strip()
         return normalized or None
 
-    @field_validator("category")
-    @classmethod
-    def validate_category(cls, value: MemoryProposalCategory) -> MemoryProposalCategory:
-        """Keep validation errors pinned to the category enum."""
-        return MemoryProposalCategory(value)
-
     def model_post_init(self, __context: Any) -> None:
         """Validate target memory category and repository scope together."""
         if self.category == MemoryProposalCategory.PROJECT and self.repo_url is None:

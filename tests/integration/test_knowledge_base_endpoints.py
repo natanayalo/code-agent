@@ -209,6 +209,12 @@ def test_memory_proposal_accept_project_and_reject_conflict(client: TestClient) 
     rejected_accept_response = client.post(f"/knowledge-base/memory-proposals/{rejected_id}/accept")
     assert rejected_accept_response.status_code == 409
 
+    reviewed_response = client.get(
+        "/knowledge-base/memory-proposals?status=accepted&status=rejected"
+    )
+    assert reviewed_response.status_code == 200
+    assert {item["status"] for item in reviewed_response.json()} == {"accepted", "rejected"}
+
 
 def test_memory_proposal_create_validates_category_repo_contract(client: TestClient) -> None:
     """Project proposals require repo_url and personal proposals must omit it."""

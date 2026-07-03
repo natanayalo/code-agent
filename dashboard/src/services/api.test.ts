@@ -351,6 +351,23 @@ describe('api service', () => {
       expect(result).toEqual([]);
     });
 
+    it('listMemoryProposals encodes repeated status filters', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => [],
+      });
+
+      await api.listMemoryProposals(['accepted', 'rejected'], undefined, undefined, 100);
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/memory-proposals?');
+      expect(url).toContain('status=accepted');
+      expect(url).toContain('status=rejected');
+      expect(url).toContain('limit=100');
+    });
+
     it('listMemoryProposals returns arrays without filters', async () => {
       const mockProposals = [{ proposal_id: 'mp-1', memory_key: 'style' }];
       mockFetch.mockResolvedValueOnce({
