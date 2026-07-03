@@ -230,6 +230,199 @@ export function KnowledgeBasePage() {
   const personalHasMore = personalQueryEnabled && Boolean(personalHasNextPage);
   const projectHasMore = Boolean(projectHasNextPage);
 
+  function renderPersonalListContent(): React.ReactNode {
+    if (searchMode) {
+      if (personalSearchQueryError) {
+        return <p className="card-error-text">{personalSearchQueryError.message}</p>;
+      }
+      if (!personalSearchEnabled) {
+        return (
+          <p className="session-context-muted">
+            Enter a personal user ID below to search personal memory.
+          </p>
+        );
+      }
+      if (personalSearchEntries.length === 0) {
+        return <p className="session-context-muted">No personal search results found.</p>;
+      }
+      return personalSearchEntries.map((entry) => (
+        <article key={entry.memory_id} className="knowledge-entry">
+          <header className="knowledge-entry-header">
+            <div>
+              <h3>{entry.memory_key}</h3>
+              <p>User: {entry.user_id}</p>
+            </div>
+            <button
+              className="btn-icon-sm"
+              type="button"
+              onClick={() => handleDeletePersonal(entry)}
+              title="Delete entry"
+              aria-label={`Delete personal memory ${entry.memory_key}`}
+              disabled={personalDeletingEntryId === entry.memory_id}
+            >
+              <Trash2 size={14} />
+            </button>
+          </header>
+          {entry.headline ? (
+            <p className="knowledge-entry-headline">{renderHeadline(entry.headline)}</p>
+          ) : null}
+          <div className="knowledge-entry-meta">
+            <span>Confidence: {entry.confidence.toFixed(2)}</span>
+            <span>Needs verification: {entry.requires_verification ? 'yes' : 'no'}</span>
+            <span>Verified at: {formatTimestamp(entry.last_verified_at)}</span>
+          </div>
+          <pre>{JSON.stringify(entry.value, null, 2)}</pre>
+        </article>
+      ));
+    }
+
+    if (personalQueryError) {
+      return <p className="card-error-text">{personalQueryError.message}</p>;
+    }
+    if (!personalQueryEnabled) {
+      return (
+        <p className="session-context-muted">
+          Enter a personal user ID above to load entries.
+        </p>
+      );
+    }
+    if (personalEntries.length === 0) {
+      return <p className="session-context-muted">No personal entries found.</p>;
+    }
+    return personalEntries.map((entry) => (
+      <article key={entry.memory_id} className="knowledge-entry">
+        <header className="knowledge-entry-header">
+          <div>
+            <h3>{entry.memory_key}</h3>
+            <p>User: {entry.user_id}</p>
+          </div>
+          <button
+            className="btn-icon-sm"
+            type="button"
+            onClick={() => handleDeletePersonal(entry)}
+            title="Delete entry"
+            aria-label={`Delete personal memory ${entry.memory_key}`}
+            disabled={personalDeletingEntryId === entry.memory_id}
+          >
+            <Trash2 size={14} />
+          </button>
+        </header>
+        <div className="knowledge-entry-meta">
+          <span>Confidence: {entry.confidence.toFixed(2)}</span>
+          <span>Needs verification: {entry.requires_verification ? 'yes' : 'no'}</span>
+          <span>Verified at: {formatTimestamp(entry.last_verified_at)}</span>
+        </div>
+        {entry.headline ? (
+          <p className="knowledge-entry-headline">{renderHeadline(entry.headline)}</p>
+        ) : null}
+        <pre>{JSON.stringify(entry.value, null, 2)}</pre>
+      </article>
+    ));
+  }
+
+  function renderProjectListContent(): React.ReactNode {
+    if (searchMode) {
+      if (projectSearchQueryError) {
+        return (
+          <div className="error-container">
+            <h3>Error loading project search</h3>
+            <p>{projectSearchQueryError.message}</p>
+            <button
+              onClick={() => refetchProjectSearch()}
+              className="btn-primary"
+              type="button"
+            >
+              Retry Project Search
+            </button>
+          </div>
+        );
+      }
+      if (!projectSearchEnabled) {
+        return (
+          <p className="session-context-muted">
+            Enter a project repository URL below to search project memory.
+          </p>
+        );
+      }
+      if (projectSearchEntries.length === 0) {
+        return <p className="session-context-muted">No project search results found.</p>;
+      }
+      return projectSearchEntries.map((entry) => (
+        <article key={entry.memory_id} className="knowledge-entry">
+          <header className="knowledge-entry-header">
+            <div>
+              <h3>{entry.memory_key}</h3>
+              <p>{entry.repo_url}</p>
+            </div>
+            <button
+              className="btn-icon-sm"
+              type="button"
+              onClick={() => handleDeleteProject(entry)}
+              title="Delete entry"
+              aria-label={`Delete project memory ${entry.memory_key}`}
+              disabled={projectDeletingEntryId === entry.memory_id}
+            >
+              <Trash2 size={14} />
+            </button>
+          </header>
+          {entry.headline ? (
+            <p className="knowledge-entry-headline">{renderHeadline(entry.headline)}</p>
+          ) : null}
+          <div className="knowledge-entry-meta">
+            <span>Confidence: {entry.confidence.toFixed(2)}</span>
+            <span>Needs verification: {entry.requires_verification ? 'yes' : 'no'}</span>
+            <span>Verified at: {formatTimestamp(entry.last_verified_at)}</span>
+          </div>
+          <pre>{JSON.stringify(entry.value, null, 2)}</pre>
+        </article>
+      ));
+    }
+
+    if (projectQueryError) {
+      return (
+        <div className="error-container">
+          <h3>Error loading project memory</h3>
+          <p>{projectQueryError.message}</p>
+          <button onClick={() => refetchProject()} className="btn-primary" type="button">
+            Retry Project Memory
+          </button>
+        </div>
+      );
+    }
+    if (projectEntries.length === 0) {
+      return <p className="session-context-muted">No project entries found.</p>;
+    }
+    return projectEntries.map((entry) => (
+      <article key={entry.memory_id} className="knowledge-entry">
+        <header className="knowledge-entry-header">
+          <div>
+            <h3>{entry.memory_key}</h3>
+            <p>{entry.repo_url}</p>
+          </div>
+          <button
+            className="btn-icon-sm"
+            type="button"
+            onClick={() => handleDeleteProject(entry)}
+            title="Delete entry"
+            aria-label={`Delete project memory ${entry.memory_key}`}
+            disabled={projectDeletingEntryId === entry.memory_id}
+          >
+            <Trash2 size={14} />
+          </button>
+        </header>
+        <div className="knowledge-entry-meta">
+          <span>Confidence: {entry.confidence.toFixed(2)}</span>
+          <span>Needs verification: {entry.requires_verification ? 'yes' : 'no'}</span>
+          <span>Verified at: {formatTimestamp(entry.last_verified_at)}</span>
+        </div>
+        {entry.headline ? (
+          <p className="knowledge-entry-headline">{renderHeadline(entry.headline)}</p>
+        ) : null}
+        <pre>{JSON.stringify(entry.value, null, 2)}</pre>
+      </article>
+    ));
+  }
+
   const handleSavePersonal = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setPersonalError(null);
@@ -453,83 +646,7 @@ export function KnowledgeBasePage() {
             </form>
 
             <div className="knowledge-list">
-              {searchMode ? personalSearchQueryError ? (
-                <p className="card-error-text">{personalSearchQueryError.message}</p>
-              ) : !personalSearchEnabled ? (
-                <p className="session-context-muted">
-                  Enter a personal user ID below to search personal memory.
-                </p>
-              ) : personalSearchEntries.length === 0 ? (
-                <p className="session-context-muted">No personal search results found.</p>
-              ) : (
-                personalSearchEntries.map((entry) => (
-                  <article key={entry.memory_id} className="knowledge-entry">
-                    <header className="knowledge-entry-header">
-                      <div>
-                        <h3>{entry.memory_key}</h3>
-                        <p>User: {entry.user_id}</p>
-                      </div>
-                      <button
-                        className="btn-icon-sm"
-                        type="button"
-                        onClick={() => handleDeletePersonal(entry)}
-                        title="Delete entry"
-                        aria-label={`Delete personal memory ${entry.memory_key}`}
-                        disabled={personalDeletingEntryId === entry.memory_id}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </header>
-                    {entry.headline ? (
-                      <p className="knowledge-entry-headline">{renderHeadline(entry.headline)}</p>
-                    ) : null}
-                    <div className="knowledge-entry-meta">
-                      <span>Confidence: {entry.confidence.toFixed(2)}</span>
-                      <span>Needs verification: {entry.requires_verification ? 'yes' : 'no'}</span>
-                      <span>Verified at: {formatTimestamp(entry.last_verified_at)}</span>
-                    </div>
-                    <pre>{JSON.stringify(entry.value, null, 2)}</pre>
-                  </article>
-                ))
-              ) : personalQueryError ? (
-                <p className="card-error-text">{personalQueryError.message}</p>
-              ) : !personalQueryEnabled ? (
-                <p className="session-context-muted">
-                  Enter a personal user ID above to load entries.
-                </p>
-              ) : personalEntries.length === 0 ? (
-                <p className="session-context-muted">No personal entries found.</p>
-              ) : (
-                personalEntries.map((entry) => (
-                  <article key={entry.memory_id} className="knowledge-entry">
-                    <header className="knowledge-entry-header">
-                      <div>
-                        <h3>{entry.memory_key}</h3>
-                        <p>User: {entry.user_id}</p>
-                      </div>
-                      <button
-                        className="btn-icon-sm"
-                        type="button"
-                        onClick={() => handleDeletePersonal(entry)}
-                        title="Delete entry"
-                        aria-label={`Delete personal memory ${entry.memory_key}`}
-                        disabled={personalDeletingEntryId === entry.memory_id}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </header>
-                    <div className="knowledge-entry-meta">
-                      <span>Confidence: {entry.confidence.toFixed(2)}</span>
-                      <span>Needs verification: {entry.requires_verification ? 'yes' : 'no'}</span>
-                      <span>Verified at: {formatTimestamp(entry.last_verified_at)}</span>
-                    </div>
-                    {entry.headline ? (
-                      <p className="knowledge-entry-headline">{renderHeadline(entry.headline)}</p>
-                    ) : null}
-                    <pre>{JSON.stringify(entry.value, null, 2)}</pre>
-                  </article>
-                ))
-              )}
+              {renderPersonalListContent()}
             </div>
             {!searchMode && personalHasMore ? (
               <button
@@ -618,95 +735,7 @@ export function KnowledgeBasePage() {
             </form>
 
             <div className="knowledge-list">
-              {searchMode ? projectSearchQueryError ? (
-                <div className="error-container">
-                  <h3>Error loading project search</h3>
-                  <p>{projectSearchQueryError.message}</p>
-                  <button
-                    onClick={() => refetchProjectSearch()}
-                    className="btn-primary"
-                    type="button"
-                  >
-                    Retry Project Search
-                  </button>
-                </div>
-              ) : !projectSearchEnabled ? (
-                <p className="session-context-muted">
-                  Enter a project repository URL below to search project memory.
-                </p>
-              ) : projectSearchEntries.length === 0 ? (
-                <p className="session-context-muted">No project search results found.</p>
-              ) : (
-                projectSearchEntries.map((entry) => (
-                  <article key={entry.memory_id} className="knowledge-entry">
-                    <header className="knowledge-entry-header">
-                      <div>
-                        <h3>{entry.memory_key}</h3>
-                        <p>{entry.repo_url}</p>
-                      </div>
-                      <button
-                        className="btn-icon-sm"
-                        type="button"
-                        onClick={() => handleDeleteProject(entry)}
-                        title="Delete entry"
-                        aria-label={`Delete project memory ${entry.memory_key}`}
-                        disabled={projectDeletingEntryId === entry.memory_id}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </header>
-                    {entry.headline ? (
-                      <p className="knowledge-entry-headline">{renderHeadline(entry.headline)}</p>
-                    ) : null}
-                    <div className="knowledge-entry-meta">
-                      <span>Confidence: {entry.confidence.toFixed(2)}</span>
-                      <span>Needs verification: {entry.requires_verification ? 'yes' : 'no'}</span>
-                      <span>Verified at: {formatTimestamp(entry.last_verified_at)}</span>
-                    </div>
-                    <pre>{JSON.stringify(entry.value, null, 2)}</pre>
-                  </article>
-                ))
-              ) : projectQueryError ? (
-                <div className="error-container">
-                  <h3>Error loading project memory</h3>
-                  <p>{projectQueryError.message}</p>
-                  <button onClick={() => refetchProject()} className="btn-primary" type="button">
-                    Retry Project Memory
-                  </button>
-                </div>
-              ) : projectEntries.length === 0 ? (
-                <p className="session-context-muted">No project entries found.</p>
-              ) : (
-                projectEntries.map((entry) => (
-                  <article key={entry.memory_id} className="knowledge-entry">
-                    <header className="knowledge-entry-header">
-                      <div>
-                        <h3>{entry.memory_key}</h3>
-                        <p>{entry.repo_url}</p>
-                      </div>
-                      <button
-                        className="btn-icon-sm"
-                        type="button"
-                        onClick={() => handleDeleteProject(entry)}
-                        title="Delete entry"
-                        aria-label={`Delete project memory ${entry.memory_key}`}
-                        disabled={projectDeletingEntryId === entry.memory_id}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </header>
-                    <div className="knowledge-entry-meta">
-                      <span>Confidence: {entry.confidence.toFixed(2)}</span>
-                      <span>Needs verification: {entry.requires_verification ? 'yes' : 'no'}</span>
-                      <span>Verified at: {formatTimestamp(entry.last_verified_at)}</span>
-                    </div>
-                    {entry.headline ? (
-                      <p className="knowledge-entry-headline">{renderHeadline(entry.headline)}</p>
-                    ) : null}
-                    <pre>{JSON.stringify(entry.value, null, 2)}</pre>
-                  </article>
-                ))
-              )}
+              {renderProjectListContent()}
             </div>
             {searchMode || projectQueryError ? null : projectHasMore ? (
               <button

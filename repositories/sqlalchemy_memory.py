@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, TypeVar
+from typing import Any
 
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
@@ -25,8 +25,6 @@ _HEADLINE_OPTIONS = (
     "FragmentDelimiter= ... "
 )
 
-_MemoryRow = TypeVar("_MemoryRow", PersonalMemory, ProjectMemory)
-
 
 @dataclass(frozen=True)
 class MemorySearchResult:
@@ -45,7 +43,28 @@ def _normalized_search_query(query: str) -> str:
 
 
 def _dialect_name(session: Session) -> str:
-    return session.bind.dialect.name if session.bind is not None else ""
+    try:
+        bind = session.get_bind()
+    except Exception:
+        return ""
+    return bind.dialect.name if bind is not None else ""
+
+
+def _fallback_search_results(
+    memories: list[PersonalMemory | ProjectMemory],
+    *,
+    query: str,
+    limit: int,
+) -> list[MemorySearchResult]:
+    lowered_query = query.casefold()
+    results: list[MemorySearchResult] = []
+    for memory in memories:
+        memory_value = str(memory.value or "").casefold()
+        if lowered_query in memory.memory_key.casefold() or lowered_query in memory_value:
+            results.append(MemorySearchResult(memory=memory))
+            if len(results) >= limit:
+                break
+    return results
 
 
 def _ordered_search_results(
@@ -53,15 +72,15 @@ def _ordered_search_results(
     *,
     statement: str,
     params: dict[str, Any],
-    model: type[_MemoryRow],
+    model: type[PersonalMemory] | type[ProjectMemory],
 ) -> list[MemorySearchResult]:
     rows = session.execute(text(statement), params).mappings().all()
     if not rows:
         return []
 
-    memory_ids = [str(row["id"]) for row in rows]
+    memory_ids = [row["id"] for row in rows]
     memories = session.scalars(select(model).where(model.id.in_(memory_ids))).all()
-    memories_by_id = {memory.id: memory for memory in memories}
+    memories_by_id = {str(memory.id): memory for memory in memories}
 
     ordered_results: list[MemorySearchResult] = []
     for row in rows:
@@ -106,13 +125,17 @@ class PersonalMemoryRepository:
         query: str,
         limit: int = 20,
     ) -> list[MemorySearchResult]:
-        """Search personal memory entries, falling back to load-all outside Postgres."""
+        """Search personal memory entries, falling back to substring matching outside Postgres."""
         normalized_query = _normalized_search_query(query)
         if not normalized_query:
             return []
 
         if _dialect_name(self.session) != "postgresql":
-            return [MemorySearchResult(memory=memory) for memory in self.list_by_user(user_id)]
+            return _fallback_search_results(
+                self.list_by_user(user_id),
+                query=normalized_query,
+                limit=_normalized_search_limit(limit),
+            )
 
         return _ordered_search_results(
             self.session,
@@ -236,13 +259,17 @@ class ProjectMemoryRepository:
         query: str,
         limit: int = 20,
     ) -> list[MemorySearchResult]:
-        """Search project memory entries, falling back to load-all outside Postgres."""
+        """Search project memory entries, falling back to substring matching outside Postgres."""
         normalized_query = _normalized_search_query(query)
         if not normalized_query:
             return []
 
         if _dialect_name(self.session) != "postgresql":
-            return [MemorySearchResult(memory=memory) for memory in self.list_by_repo(repo_url)]
+            return _fallback_search_results(
+                self.list_by_repo(repo_url),
+                query=normalized_query,
+                limit=_normalized_search_limit(limit),
+            )
 
         return _ordered_search_results(
             self.session,
