@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
@@ -19,6 +22,17 @@ from repositories import create_engine_from_url, create_session_factory
 
 def _build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    database_group = parser.add_mutually_exclusive_group()
+    database_group.add_argument(
+        "--database-url",
+        default=None,
+        help="Database URL to evaluate against after applying Alembic migrations.",
+    )
+    database_group.add_argument(
+        "--postgres-url-env",
+        default=None,
+        help="Environment variable containing a Postgres database URL to evaluate against.",
+    )
     parser.add_argument(
         "--suite",
         type=Path,
@@ -46,6 +60,27 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _apply_migrations(database_url: str) -> None:
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", database_url)
+    command.upgrade(config, "head")
+
+
+def _database_url_from_args(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> str | None:
+    if args.database_url:
+        return str(args.database_url)
+    if args.postgres_url_env:
+        database_url = os.getenv(str(args.postgres_url_env))
+        if not database_url:
+            parser.error(f"Environment variable {args.postgres_url_env!r} is not set.")
+        return database_url
+    return None
+
+
 def _sqlite_session_factory():
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
@@ -56,12 +91,25 @@ def _sqlite_session_factory():
     return create_session_factory(engine)
 
 
+def _database_session_factory(database_url: str):
+    _apply_migrations(database_url)
+    engine = create_engine_from_url(database_url)
+    return create_session_factory(engine)
+
+
 def main() -> int:
-    args = _build_argument_parser().parse_args()
+    parser = _build_argument_parser()
+    args = parser.parse_args()
+    database_url = _database_url_from_args(args, parser)
     suite = load_memory_retrieval_suite(path=args.suite)
+    session_factory = (
+        _database_session_factory(database_url)
+        if database_url is not None
+        else _sqlite_session_factory()
+    )
     report = evaluate_memory_retrieval(
         suite=suite,
-        session_factory=_sqlite_session_factory(),
+        session_factory=session_factory,
         search_limit=args.search_limit,
     )
     write_memory_retrieval_report(report, args.output)
