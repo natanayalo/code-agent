@@ -288,7 +288,7 @@ def _seed_postgres_search_data(session) -> tuple[str, str, str, str]:
     )
     personal_memory_repo.upsert(
         user_id=user.id,
-        memory_key="test_command",
+        memory_key="pytest_command",
         value={"cmd": ".venv/bin/pytest"},
     )
     personal_memory_repo.upsert(
@@ -370,7 +370,7 @@ def test_memory_search_executes_real_postgres_fts(postgres_session_factory) -> N
     assert "pytest" in project_search_vector
     assert [result.memory.memory_key for result in personal_results] == [
         "pytest_playbook",
-        "test_command",
+        "pytest_command",
     ]
     assert [result.memory.memory_key for result in project_results] == [
         "pytest_matrix",
