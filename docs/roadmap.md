@@ -450,6 +450,11 @@ Goal:
 
 - improve memory relevance when evals show keyword/recency retrieval is causing misses
 
+Progress:
+
+- [x] Slice 1: load skeptical personal/project/session memory from the DB before worker dispatch and persist typed worker-produced memory after runs
+- [ ] Slice 2: add full-text memory search and retrieval visibility before evaluating semantic/vector retrieval
+
 Scope:
 
 - add semantic retrieval behind the existing skeptical-memory contract
@@ -549,7 +554,7 @@ Phase 3:
 Phase 4:
 
 1. Milestone 22 [x]
-2. Milestone 23
+2. Milestone 23 [in progress: slice 1 done]
 3. Milestone 24
 4. Milestone 25
 5. Milestone 26
