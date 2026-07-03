@@ -14,6 +14,7 @@ from db.enums import ArtifactType, HumanInteractionStatus, TaskStatus, WorkerRun
 from db.models import (
     ExecutionPlan,
     HumanInteraction,
+    MemoryProposal,
     PersonalMemory,
     ProjectMemory,
     Task,
@@ -28,6 +29,8 @@ from orchestrator.execution_types import (
     ExecutionPlanSnapshot,
     KnowledgeBaseStatsSnapshot,
     MemoryInventoryCountSnapshot,
+    MemoryProposalCreateRequest,
+    MemoryProposalSnapshot,
     OperationalMetrics,
     PersonalMemorySnapshot,
     PersonalMemoryUpsertRequest,
@@ -43,6 +46,7 @@ from orchestrator.execution_types import (
 )
 from orchestrator.state import TaskSpec
 from repositories import (
+    MemoryProposalRepository,
     PersonalMemoryRepository,
     ProjectMemoryRepository,
     SessionRepository,
@@ -300,6 +304,79 @@ def delete_project_memory(self: Any, *, repo_url: str, memory_key: str) -> bool:
     with session_scope(self.session_factory) as session:
         memory_repo = ProjectMemoryRepository(session)
         return memory_repo.delete(repo_url=repo_url, memory_key=memory_key)
+
+
+def create_memory_proposal(
+    self: Any,
+    payload: MemoryProposalCreateRequest,
+) -> MemoryProposalSnapshot:
+    """Create one reviewable memory proposal."""
+    with session_scope(self.session_factory) as session:
+        proposal = MemoryProposalRepository(session).create(
+            category=payload.category,
+            repo_url=payload.repo_url,
+            memory_key=payload.memory_key,
+            value=payload.value,
+            source=payload.source,
+            confidence=payload.confidence,
+            scope=payload.scope,
+            requires_verification=payload.requires_verification,
+            title=payload.title,
+            summary=payload.summary,
+            evidence=payload.evidence,
+            task_id=payload.task_id,
+            session_id=payload.session_id,
+        )
+        return self._map_memory_proposal_to_snapshot(proposal)
+
+
+def list_memory_proposals(
+    self: Any,
+    *,
+    status: str | None = None,
+    category: str | None = None,
+    repo_url: str | None = None,
+    task_id: str | None = None,
+    session_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[MemoryProposalSnapshot]:
+    """List reviewable memory proposals with optional filters."""
+    with session_scope(self.session_factory) as session:
+        proposals = MemoryProposalRepository(session).list(
+            status=status,
+            category=category,
+            repo_url=repo_url,
+            task_id=task_id,
+            session_id=session_id,
+            limit=limit,
+            offset=offset,
+        )
+        return [self._map_memory_proposal_to_snapshot(proposal) for proposal in proposals]
+
+
+def accept_memory_proposal(
+    self: Any,
+    proposal_id: str,
+) -> tuple[str, MemoryProposalSnapshot | None, str | None]:
+    """Accept a memory proposal and upsert its target skeptical-memory row."""
+    with session_scope(self.session_factory) as session:
+        status, proposal, _memory, detail = MemoryProposalRepository(session).accept(proposal_id)
+        if proposal is None:
+            return status, None, detail
+        return status, self._map_memory_proposal_to_snapshot(proposal), detail
+
+
+def reject_memory_proposal(
+    self: Any,
+    proposal_id: str,
+) -> tuple[str, MemoryProposalSnapshot | None, str | None]:
+    """Reject a memory proposal without writing durable memory."""
+    with session_scope(self.session_factory) as session:
+        status, proposal, detail = MemoryProposalRepository(session).reject(proposal_id)
+        if proposal is None:
+            return status, None, detail
+        return status, self._map_memory_proposal_to_snapshot(proposal), detail
 
 
 def _map_execution_plan_to_snapshot(execution_plan: Any) -> ExecutionPlanSnapshot | None:
@@ -598,6 +675,30 @@ def _memory_count_snapshot(counts: tuple[int, int]) -> MemoryInventoryCountSnaps
     return MemoryInventoryCountSnapshot(
         total=total,
         requires_verification=requires_verification,
+    )
+
+
+def _map_memory_proposal_to_snapshot(proposal: MemoryProposal) -> MemoryProposalSnapshot:
+    return MemoryProposalSnapshot(
+        proposal_id=proposal.id,
+        category=proposal.category,
+        repo_url=proposal.repo_url,
+        memory_key=proposal.memory_key,
+        value=dict(proposal.value or {}),
+        source=proposal.source,
+        confidence=proposal.confidence,
+        scope=proposal.scope,
+        requires_verification=proposal.requires_verification,
+        status=proposal.status,
+        title=proposal.title,
+        summary=proposal.summary,
+        evidence=dict(proposal.evidence) if proposal.evidence else None,
+        task_id=proposal.task_id,
+        session_id=proposal.session_id,
+        accepted_memory_id=proposal.accepted_memory_id,
+        reviewed_at=proposal.reviewed_at,
+        created_at=proposal.created_at,
+        updated_at=proposal.updated_at,
     )
 
 

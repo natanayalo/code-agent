@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from apps.api.dependencies import get_task_service, require_any_valid_auth
+from db.enums import MemoryProposalCategory, MemoryProposalStatus
 from orchestrator.execution import (
     PersonalMemorySnapshot,
     PersonalMemoryUpsertRequest,
@@ -12,7 +13,11 @@ from orchestrator.execution import (
     ProjectMemoryUpsertRequest,
     TaskExecutionService,
 )
-from orchestrator.execution_types import KnowledgeBaseStatsSnapshot
+from orchestrator.execution_types import (
+    KnowledgeBaseStatsSnapshot,
+    MemoryProposalCreateRequest,
+    MemoryProposalSnapshot,
+)
 
 router = APIRouter(
     prefix="/knowledge-base",
@@ -28,6 +33,92 @@ def get_knowledge_base_stats(
 ) -> KnowledgeBaseStatsSnapshot:
     """Return exact skeptical-memory inventory counts for dashboard browse."""
     return task_service.get_knowledge_base_stats(repo_url=repo_url)
+
+
+@router.get("/memory-proposals", response_model=list[MemoryProposalSnapshot])
+def list_memory_proposals(
+    status_filter: MemoryProposalStatus | None = Query(None, alias="status"),
+    category: MemoryProposalCategory | None = None,
+    repo_url: str | None = Query(default=None, min_length=1),
+    task_id: str | None = Query(default=None, min_length=1),
+    session_id: str | None = Query(default=None, min_length=1),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> list[MemoryProposalSnapshot]:
+    """List reviewable memory proposals with optional dashboard filters."""
+    return task_service.list_memory_proposals(
+        status=status_filter,
+        category=category,
+        repo_url=repo_url,
+        task_id=task_id,
+        session_id=session_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post(
+    "/memory-proposals",
+    response_model=MemoryProposalSnapshot,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_memory_proposal(
+    payload: MemoryProposalCreateRequest,
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> MemoryProposalSnapshot:
+    """Create a manual memory proposal for operator review."""
+    return task_service.create_memory_proposal(payload)
+
+
+@router.post("/memory-proposals/{proposal_id}/accept", response_model=MemoryProposalSnapshot)
+def accept_memory_proposal(
+    proposal_id: str,
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> MemoryProposalSnapshot:
+    """Accept a memory proposal and upsert it into durable skeptical memory."""
+    result_status, proposal, detail = task_service.accept_memory_proposal(proposal_id)
+    if result_status == "not_found":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=detail or f"Memory proposal '{proposal_id}' was not found.",
+        )
+    if result_status == "conflict":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=detail or "Memory proposal cannot be accepted.",
+        )
+    if proposal is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to accept memory proposal.",
+        )
+    return proposal
+
+
+@router.post("/memory-proposals/{proposal_id}/reject", response_model=MemoryProposalSnapshot)
+def reject_memory_proposal(
+    proposal_id: str,
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> MemoryProposalSnapshot:
+    """Reject a memory proposal without creating memory."""
+    result_status, proposal, detail = task_service.reject_memory_proposal(proposal_id)
+    if result_status == "not_found":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=detail or f"Memory proposal '{proposal_id}' was not found.",
+        )
+    if result_status == "conflict":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=detail or "Memory proposal cannot be rejected.",
+        )
+    if proposal is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reject memory proposal.",
+        )
+    return proposal
 
 
 @router.get("/personal", response_model=list[PersonalMemorySnapshot])

@@ -16,6 +16,7 @@ EXPECTED_TABLES = {
     "human_interactions",
     "inbound_deliveries",
     "memory_personal",
+    "memory_proposals",
     "memory_project",
     "proposals",
     "sessions",
@@ -41,6 +42,27 @@ EXPECTED_CHECK_CONSTRAINTS = {
         "ck_proposals_proposal_type": {
             "scout",
             "reflection",
+        },
+    },
+    "memory_proposals": {
+        "ck_memory_proposals_memory_proposal_category": {
+            "personal",
+            "project",
+        },
+        "ck_memory_proposals_memory_proposal_status": {
+            "pending_review",
+            "accepted",
+            "rejected",
+        },
+        "ck_memory_proposals_category_repo_url": {
+            "category = 'project'",
+            "repo_url IS NOT NULL",
+            "category = 'personal'",
+            "repo_url IS NULL",
+        },
+        "ck_memory_proposals_confidence_range": {
+            "confidence >= 0.0",
+            "confidence <= 1.0",
         },
     },
     "execution_plan_nodes": {
@@ -215,6 +237,24 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     assert session_state_columns["decisions_made"]["default"] == "'{}'"
     assert session_state_columns["identified_risks"]["default"] == "'{}'"
     assert session_state_columns["files_touched"]["default"] == "'[]'"
+    assert {
+        "category",
+        "repo_url",
+        "memory_key",
+        "value",
+        "source",
+        "confidence",
+        "scope",
+        "requires_verification",
+        "status",
+        "title",
+        "summary",
+        "evidence",
+        "task_id",
+        "session_id",
+        "accepted_memory_id",
+        "reviewed_at",
+    } <= _column_names(inspector, "memory_proposals")
 
     for table_name, expected_constraints in EXPECTED_CHECK_CONSTRAINTS.items():
         actual_constraints = {

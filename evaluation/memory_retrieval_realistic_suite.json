@@ -1,0 +1,252 @@
+{
+  "cases": [
+    {
+      "case_id": "direct-approval-policy",
+      "expected_personal_keys": [],
+      "expected_project_keys": [
+        "approval_policy"
+      ],
+      "task_text": "destructive approval policy"
+    },
+    {
+      "case_id": "direct-communication-preferences",
+      "expected_personal_keys": [
+        "communication_preferences"
+      ],
+      "expected_project_keys": [],
+      "task_text": "communication preferences"
+    },
+    {
+      "case_id": "direct-dashboard-review-flow",
+      "expected_personal_keys": [],
+      "expected_project_keys": [
+        "dashboard_review_flow"
+      ],
+      "task_text": "dashboard review flow"
+    },
+    {
+      "case_id": "direct-db-migration-policy",
+      "expected_personal_keys": [],
+      "expected_project_keys": [
+        "db_migration_policy"
+      ],
+      "task_text": "db migration policy"
+    },
+    {
+      "case_id": "direct-git-workflow",
+      "expected_personal_keys": [],
+      "expected_project_keys": [
+        "git_workflow"
+      ],
+      "task_text": "branch pull request workflow"
+    },
+    {
+      "case_id": "direct-python-verification",
+      "expected_personal_keys": [],
+      "expected_project_keys": [
+        "verification_commands"
+      ],
+      "task_text": "python verification commands"
+    },
+    {
+      "case_id": "known-gap-definition-of-done",
+      "expected_personal_keys": [],
+      "expected_project_keys": [
+        "definition_of_done"
+      ],
+      "known_semantic_gap_project_keys": [
+        "definition_of_done"
+      ],
+      "task_text": "what does ready to ship require"
+    },
+    {
+      "case_id": "known-gap-migration-validation-synonym",
+      "expected_personal_keys": [],
+      "expected_project_keys": [
+        "db_migration_policy"
+      ],
+      "known_semantic_gap_project_keys": [
+        "db_migration_policy"
+      ],
+      "task_text": "how should I validate schema changes"
+    },
+    {
+      "case_id": "known-gap-worker-boundary-synonym",
+      "expected_personal_keys": [],
+      "expected_project_keys": [
+        "worker_boundaries"
+      ],
+      "known_semantic_gap_project_keys": [
+        "worker_boundaries"
+      ],
+      "task_text": "where should provider-specific adapter code live"
+    }
+  ],
+  "personal_memory": [
+    {
+      "confidence": 0.95,
+      "memory_key": "communication_preferences",
+      "requires_verification": false,
+      "scope": "global",
+      "source": "curated_memory_proposal",
+      "value": {
+        "guidance": "Keep progress updates concise, concrete, and warm. Final summaries should focus on changed files, verification, blockers, and PR link.",
+        "retrieval_phrases": [
+          "communication preferences"
+        ]
+      }
+    },
+    {
+      "confidence": 0.9,
+      "memory_key": "routing_preferences",
+      "requires_verification": false,
+      "scope": "global",
+      "source": "curated_memory_proposal",
+      "value": {
+        "guidance": "Use start-task for new implementation slices, address-review for PR review feedback, db-schema for migrations, and e2e-qa for full-pipeline validation.",
+        "retrieval_phrases": [
+          "routing preferences"
+        ]
+      }
+    }
+  ],
+  "project_memory": [
+    {
+      "confidence": 0.95,
+      "memory_key": "verification_commands",
+      "requires_verification": false,
+      "scope": "repo",
+      "source": "curated_memory_proposal",
+      "value": {
+        "commands": [
+          ".venv/bin/pytest tests/unit",
+          ".venv/bin/pytest tests/integration",
+          "cd dashboard && npm run test:coverage",
+          ".venv/bin/pre-commit run --all-files"
+        ],
+        "retrieval_phrases": [
+          "python verification commands"
+        ]
+      }
+    },
+    {
+      "confidence": 0.95,
+      "memory_key": "dashboard_review_flow",
+      "requires_verification": false,
+      "scope": "repo",
+      "source": "curated_memory_proposal",
+      "value": {
+        "guidance": "Knowledge Base review work should create memory proposals, accept or reject pending proposals, and refresh browse/search inventory after acceptance.",
+        "retrieval_phrases": [
+          "dashboard review flow"
+        ]
+      }
+    },
+    {
+      "confidence": 0.95,
+      "memory_key": "db_migration_policy",
+      "requires_verification": false,
+      "scope": "repo",
+      "source": "curated_memory_proposal",
+      "value": {
+        "guidance": "Add explicit Alembic migrations under db/migrations/versions, keep upgrade and downgrade readable, and test migration upgrade plus write assertions.",
+        "retrieval_phrases": [
+          "db migration policy"
+        ]
+      }
+    },
+    {
+      "confidence": 0.9,
+      "memory_key": "known_pitfalls",
+      "requires_verification": true,
+      "scope": "repo",
+      "source": "curated_memory_proposal",
+      "value": {
+        "guidance": "Use .venv/bin tools for Python checks, avoid host alembic without DATABASE_URL, and do not reuse generic proposal acceptance for memory writes.",
+        "retrieval_phrases": [
+          "known pitfalls"
+        ]
+      }
+    },
+    {
+      "confidence": 0.95,
+      "memory_key": "git_workflow",
+      "requires_verification": false,
+      "scope": "repo",
+      "source": "curated_memory_proposal",
+      "value": {
+        "guidance": "Branch from updated master, keep commits small, push the task branch, and open a pull request instead of committing directly to master.",
+        "retrieval_phrases": [
+          "branch pull request workflow"
+        ]
+      }
+    },
+    {
+      "confidence": 0.95,
+      "memory_key": "approval_policy",
+      "requires_verification": false,
+      "scope": "repo",
+      "source": "curated_memory_proposal",
+      "value": {
+        "guidance": "Destructive git operations, deployment commands, infra/security changes, auth changes, and deleting large file sets require explicit approval.",
+        "retrieval_phrases": [
+          "destructive approval policy"
+        ]
+      }
+    },
+    {
+      "confidence": 0.9,
+      "memory_key": "testing_policy",
+      "requires_verification": false,
+      "scope": "repo",
+      "source": "curated_memory_proposal",
+      "value": {
+        "guidance": "Behavior changes need tests. Critical-path backend changes need targeted unit, integration, and focused smoke coverage; dashboard controls need component and service contract tests.",
+        "retrieval_phrases": [
+          "critical path testing policy"
+        ]
+      }
+    },
+    {
+      "confidence": 0.9,
+      "memory_key": "worker_boundaries",
+      "requires_verification": false,
+      "scope": "repo",
+      "source": "curated_memory_proposal",
+      "value": {
+        "guidance": "Provider-specific logic belongs in provider worker adapters; orchestrator owns workflow, state, routing, and memory policy.",
+        "retrieval_phrases": [
+          "worker boundaries"
+        ]
+      }
+    },
+    {
+      "confidence": 0.9,
+      "memory_key": "status_roadmap_policy",
+      "requires_verification": false,
+      "scope": "repo",
+      "source": "curated_memory_proposal",
+      "value": {
+        "guidance": "docs/status.md owns active priorities and backlog order; completed merged PR history belongs in CHANGELOG.md.",
+        "retrieval_phrases": [
+          "status roadmap policy"
+        ]
+      }
+    },
+    {
+      "confidence": 0.9,
+      "memory_key": "definition_of_done",
+      "requires_verification": false,
+      "scope": "repo",
+      "source": "curated_memory_proposal",
+      "value": {
+        "guidance": "Done means code compiles or runs, tests pass, logs are useful, docs are updated when behavior changes, rollback path is obvious, and unrelated files are untouched.",
+        "retrieval_phrases": [
+          "definition of done"
+        ]
+      }
+    }
+  ],
+  "repo_url": "https://github.com/natanayalo/code-agent",
+  "suite_name": "memory-retrieval-m23-slice-4-realistic"
+}

@@ -325,6 +325,129 @@ describe('api service', () => {
       });
     });
 
+    it('listMemoryProposals encodes review filters and handles non-array fallback', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({ not: 'array' }),
+      });
+
+      const result = await api.listMemoryProposals(
+        'pending_review',
+        'project',
+        'https://repo',
+        10,
+        20
+      );
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/memory-proposals?');
+      expect(url).toContain('status=pending_review');
+      expect(url).toContain('category=project');
+      expect(url).toContain('repo_url=https%3A%2F%2Frepo');
+      expect(url).toContain('limit=10');
+      expect(url).toContain('offset=20');
+      expect(result).toEqual([]);
+    });
+
+    it('listMemoryProposals returns arrays without filters', async () => {
+      const mockProposals = [{ proposal_id: 'mp-1', memory_key: 'style' }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockProposals,
+      });
+
+      const result = await api.listMemoryProposals();
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/memory-proposals');
+      expect(url).not.toContain('?');
+      expect(result).toEqual(mockProposals);
+    });
+
+    it('createMemoryProposal posts manual review payload', async () => {
+      const mockProposal = {
+        proposal_id: 'mp-1',
+        category: 'personal',
+        memory_key: 'style',
+        value: { style: 'concise' },
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockProposal,
+      });
+
+      await api.createMemoryProposal({
+        category: 'personal',
+        memory_key: 'style',
+        value: { style: 'concise' },
+      });
+
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/knowledge-base/memory-proposals');
+      expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual({
+        category: 'personal',
+        memory_key: 'style',
+        value: { style: 'concise' },
+      });
+    });
+
+    it('acceptMemoryProposal and rejectMemoryProposal post review actions', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Map([['content-type', 'application/json']]),
+          json: async () => ({ proposal_id: 'mp-1', status: 'accepted' }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Map([['content-type', 'application/json']]),
+          json: async () => ({ proposal_id: 'mp-2', status: 'rejected' }),
+        });
+
+      await api.acceptMemoryProposal('mp-1');
+      await api.rejectMemoryProposal('mp-2');
+
+      expect(mockFetch.mock.calls[0][0]).toContain(
+        '/knowledge-base/memory-proposals/mp-1/accept'
+      );
+      expect(mockFetch.mock.calls[0][1].method).toBe('POST');
+      expect(mockFetch.mock.calls[1][0]).toContain(
+        '/knowledge-base/memory-proposals/mp-2/reject'
+      );
+      expect(mockFetch.mock.calls[1][1].method).toBe('POST');
+    });
+
+    it('memory proposal API methods rethrow request failures', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch
+        .mockRejectedValueOnce(new Error('list failed'))
+        .mockRejectedValueOnce(new Error('create failed'))
+        .mockRejectedValueOnce(new Error('accept failed'))
+        .mockRejectedValueOnce(new Error('reject failed'));
+
+      await expect(api.listMemoryProposals()).rejects.toThrow('list failed');
+      await expect(
+        api.createMemoryProposal({
+          category: 'personal',
+          memory_key: 'style',
+          value: {},
+        })
+      ).rejects.toThrow('create failed');
+      await expect(api.acceptMemoryProposal('mp-1')).rejects.toThrow('accept failed');
+      await expect(api.rejectMemoryProposal('mp-1')).rejects.toThrow('reject failed');
+      expect(warnSpy).toHaveBeenCalledTimes(4);
+      warnSpy.mockRestore();
+    });
+
     it('searchPersonalMemory encodes the query string and returns array results', async () => {
       const mockEntries = [{ memory_id: 'm-search', memory_key: 'style', value: {} }];
       mockFetch.mockResolvedValueOnce({
@@ -466,6 +589,16 @@ describe('api service', () => {
       expect(url).toContain('q=memory+search');
       expect(url).toContain('limit=12');
       expect(result).toEqual(mockEntries);
+    });
+
+    it('searchProjectMemory catch block rethrows error', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('Network fail'));
+      await expect(api.searchProjectMemory('https://repo', 'memory')).rejects.toThrow(
+        'Network fail'
+      );
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
 
     it('listProjectMemory catch block rethrows error', async () => {

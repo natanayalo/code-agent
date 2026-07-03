@@ -160,6 +160,21 @@ class ProposalType(StrEnum):
     REFLECTION = "reflection"
 
 
+class MemoryProposalCategory(StrEnum):
+    """Allowed target memory stores for reviewable memory proposals."""
+
+    PERSONAL = "personal"
+    PROJECT = "project"
+
+
+class MemoryProposalStatus(StrEnum):
+    """Allowed lifecycle states for reviewable memory proposals."""
+
+    PENDING_REVIEW = "pending_review"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
 def coerce_worker_type(value: object) -> WorkerType:
     """Normalize worker identifiers to the canonical worker enum."""
 
