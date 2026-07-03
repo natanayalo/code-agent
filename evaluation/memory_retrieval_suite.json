@@ -1,0 +1,104 @@
+{
+  "cases": [
+    {
+      "case_id": "direct-personal-communication",
+      "expected_personal_keys": [
+        "communication_style"
+      ],
+      "expected_project_keys": [],
+      "task_text": "concise"
+    },
+    {
+      "case_id": "direct-project-pytest",
+      "expected_personal_keys": [],
+      "expected_project_keys": [
+        "pytest_matrix"
+      ],
+      "task_text": "pytest"
+    },
+    {
+      "case_id": "known-semantic-gap-coverage",
+      "expected_personal_keys": [],
+      "expected_project_keys": [
+        "coverage_gate"
+      ],
+      "known_semantic_gap_project_keys": [
+        "coverage_gate"
+      ],
+      "task_text": "test completeness"
+    },
+    {
+      "case_id": "known-semantic-gap-style",
+      "expected_personal_keys": [
+        "communication_style"
+      ],
+      "expected_project_keys": [],
+      "known_semantic_gap_personal_keys": [
+        "communication_style"
+      ],
+      "task_text": "terse"
+    },
+    {
+      "case_id": "mixed-direct-and-gap",
+      "expected_personal_keys": [],
+      "expected_project_keys": [
+        "coverage_gate",
+        "ruff_command"
+      ],
+      "known_semantic_gap_project_keys": [
+        "coverage_gate"
+      ],
+      "task_text": "ruff"
+    }
+  ],
+  "personal_memory": [
+    {
+      "confidence": 0.95,
+      "memory_key": "communication_style",
+      "requires_verification": false,
+      "scope": "global",
+      "source": "operator",
+      "value": {
+        "style": "concise",
+        "tone": "practical"
+      }
+    }
+  ],
+  "project_memory": [
+    {
+      "confidence": 0.9,
+      "memory_key": "pytest_matrix",
+      "requires_verification": false,
+      "scope": "repo",
+      "source": "operator",
+      "value": {
+        "cmd": ".venv/bin/pytest tests/unit/test_memory_search.py",
+        "purpose": "pytest memory retrieval checks"
+      }
+    },
+    {
+      "confidence": 0.9,
+      "memory_key": "ruff_command",
+      "requires_verification": false,
+      "scope": "repo",
+      "source": "operator",
+      "value": {
+        "cmd": ".venv/bin/ruff check evaluation tests/unit",
+        "purpose": "ruff lint verification"
+      }
+    },
+    {
+      "confidence": 0.85,
+      "memory_key": "coverage_gate",
+      "requires_verification": true,
+      "scope": "repo",
+      "source": "operator",
+      "value": {
+        "cmd": ".venv/bin/pytest tests/unit --cov=evaluation --cov-fail-under=80",
+        "purpose": "coverage threshold for changed Python logic"
+      }
+    }
+  ],
+  "repo_url": "https://github.com/natanayalo/code-agent",
+  "suite_name": "memory-retrieval-m23-slice-3"
+}

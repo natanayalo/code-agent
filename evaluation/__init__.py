@@ -18,6 +18,17 @@ from evaluation.harness import (
     normalize_path_for_scoring,
     write_report,
 )
+from evaluation.memory_retrieval import (
+    MemoryLoadedPayload,
+    MemoryRetrievalCase,
+    MemoryRetrievalCaseResult,
+    MemoryRetrievalReport,
+    MemoryRetrievalSuite,
+    MemorySeedEntry,
+    evaluate_memory_retrieval,
+    load_memory_retrieval_suite,
+    write_memory_retrieval_report,
+)
 from evaluation.models import ReviewOutcome, TaskExpectation
 from evaluation.orchestrator_runner import OrchestratorReplayRunner
 from evaluation.suite import (
@@ -35,6 +46,12 @@ __all__ = [
     "EvaluationRunner",
     "FrozenSuite",
     "FrozenTaskCase",
+    "MemoryLoadedPayload",
+    "MemoryRetrievalCase",
+    "MemoryRetrievalCaseResult",
+    "MemoryRetrievalReport",
+    "MemoryRetrievalSuite",
+    "MemorySeedEntry",
     "OrchestratorReplayRunner",
     "ReliabilityMetrics",
     "ReliabilityReport",
@@ -46,9 +63,12 @@ __all__ = [
     "WorkerOutcome",
     "compare_reports",
     "default_replay_outcomes",
+    "evaluate_memory_retrieval",
     "evaluate_suite",
     "load_frozen_suite",
+    "load_memory_retrieval_suite",
     "load_replay_outcomes",
     "normalize_path_for_scoring",
+    "write_memory_retrieval_report",
     "write_report",
 ]
