@@ -112,7 +112,7 @@ def _seed_graph_memory(session_factory, repo_url: str) -> tuple[str, str]:
         PersonalMemoryRepository(session).upsert(
             user_id=user.id,
             memory_key="communication_style",
-            value={"style": "concise"},
+            value={"style": "concise", "task_hint": "Update memory-aware task execution"},
             source="operator",
             confidence=0.9,
             scope="global",
@@ -121,7 +121,10 @@ def _seed_graph_memory(session_factory, repo_url: str) -> tuple[str, str]:
         ProjectMemoryRepository(session).upsert(
             repo_url=repo_url,
             memory_key="test_command",
-            value={"command": ".venv/bin/pytest tests/unit"},
+            value={
+                "command": ".venv/bin/pytest tests/unit",
+                "task_hint": "Update memory-aware task execution",
+            },
             source="worker_result",
             confidence=0.8,
             scope="repo",

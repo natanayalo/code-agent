@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
@@ -25,6 +25,7 @@ _HEADLINE_OPTIONS = (
     "MinWords=6,"
     "FragmentDelimiter= ... "
 )
+_MemoryRowT = TypeVar("_MemoryRowT", PersonalMemory, ProjectMemory)
 
 
 @dataclass(frozen=True)
@@ -51,8 +52,8 @@ def _dialect_name(session: Session) -> str:
     return bind.dialect.name if bind is not None else ""
 
 
-def _fallback_search_results[T: PersonalMemory | ProjectMemory](
-    memories: Sequence[T],
+def _fallback_search_results(
+    memories: Sequence[_MemoryRowT],
     *,
     query: str,
     limit: int,
@@ -68,12 +69,12 @@ def _fallback_search_results[T: PersonalMemory | ProjectMemory](
     return results
 
 
-def _ordered_search_results[T: PersonalMemory | ProjectMemory](
+def _ordered_search_results(
     session: Session,
     *,
     statement: str,
     params: dict[str, Any],
-    model: type[T],
+    model: type[_MemoryRowT],
 ) -> list[MemorySearchResult]:
     rows = session.execute(text(statement), params).mappings().all()
     if not rows:
@@ -82,7 +83,7 @@ def _ordered_search_results[T: PersonalMemory | ProjectMemory](
     memory_ids = [row["id"] for row in rows]
     model_id = cast(Any, model).id
     memories = cast(
-        list[T],
+        list[_MemoryRowT],
         session.scalars(select(model).where(model_id.in_(memory_ids))).all(),
     )
     memories_by_id = {str(memory.id): memory for memory in memories}
