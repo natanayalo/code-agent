@@ -6,25 +6,47 @@ from typing import Final
 
 import httpx
 
+
+def _clean_env_value(raw_value: str) -> str | None:
+    """Normalize a simple dotenv value without logging secret contents."""
+    value = raw_value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    else:
+        value = value.split("#", 1)[0].strip()
+    return value or None
+
+
+def _read_env_value(name: str) -> str | None:
+    value = os.environ.get(name)
+    if value:
+        return value.strip()
+    if not os.path.exists(".env"):
+        return None
+    with open(".env", encoding="utf-8") as f:
+        for line in f:
+            key, sep, raw_value = line.partition("=")
+            if sep and key.strip() == name:
+                return _clean_env_value(raw_value)
+    return None
+
+
+def _required_env_value(name: str) -> str:
+    value = _read_env_value(name)
+    if not value:
+        raise RuntimeError(f"{name} must be set in the environment or .env.")
+    return value
+
+
 # Configuration
 API_URL: Final[str] = os.environ.get("CODE_AGENT_API_URL", "http://127.0.0.1:8000")
-SHARED_SECRET = os.environ.get("CODE_AGENT_API_SHARED_SECRET", "ayalo123")
+SHARED_SECRET = _required_env_value("CODE_AGENT_API_SHARED_SECRET")
 
 
 # Read workspace root from .env to match the docker compose volume mapping
 DEFAULT_WORKSPACE_ROOT: Final[str] = os.path.expanduser("~/.code-agent/workspaces")
 
-workspace_root = os.environ.get("CODE_AGENT_WORKSPACE_ROOT")
-if not workspace_root:
-    workspace_root = DEFAULT_WORKSPACE_ROOT
-    if os.path.exists(".env"):
-        with open(".env", encoding="utf-8") as f:
-            for line in f:
-                parts = line.split("=", 1)
-                if len(parts) == 2 and parts[0].strip() == "CODE_AGENT_WORKSPACE_ROOT":
-                    raw_val = parts[1].split("#", 1)[0].strip()
-                    workspace_root = raw_val.strip("'").strip('"')
-                    break
+workspace_root = _read_env_value("CODE_AGENT_WORKSPACE_ROOT") or DEFAULT_WORKSPACE_ROOT
 workspace_root = os.path.expandvars(os.path.expanduser(workspace_root))
 
 DUMMY_REPO_DIR = os.path.join(workspace_root, "dummy_repo")

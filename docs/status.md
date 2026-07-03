@@ -24,6 +24,7 @@ Active focus:
 - worker adapters for Codex CLI, Antigravity CLI, and OpenRouter-backed execution
 - sandboxed workspace/container execution with command artifact capture and retention controls
 - skeptical memory + compact session state persistence
+- orchestrator loads skeptical personal/project/session memory before worker dispatch and persists typed worker-produced memory after runs
 - operational controls: task replay, approval decision endpoint, progress callbacks, and metrics
 - generated TaskSpec contract for task goal/risk/type/delivery policy before worker routing
 - repo registry and validation profiles gate public repo selection, protected paths, and validation defaults
@@ -43,13 +44,14 @@ Active focus:
 
 ## Next Priorities
 
-1. plan and implement Milestone 23 semantic memory retrieval
+1. implement Milestone 23 Slice 2: full-text memory search and retrieval visibility
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
 - Milestone 21: worker facade [x], runtime executor [x], sandbox adapter [x], and tool extraction.
+- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [ ], semantic retrieval evaluation [ ].
 - Phase 4: evaluate routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy only after Phase 3 proves reliability.
 
 ## Completed Work

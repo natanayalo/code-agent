@@ -109,6 +109,11 @@ class MemoryEntry(OrchestratorModel):
 
     memory_key: str
     value: dict[str, Any]
+    source: str | None = None
+    confidence: float = 1.0
+    scope: str | None = None
+    last_verified_at: datetime | None = None
+    requires_verification: bool = True
 
 
 class MemoryContext(OrchestratorModel):

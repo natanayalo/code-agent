@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import asyncio
 
+from db.enums import TimelineEventType
 from orchestrator import OrchestratorState, WorkerResult, build_orchestrator_graph
+from repositories import (
+    PersonalMemoryRepository,
+    ProjectMemoryRepository,
+    SessionRepository,
+    SessionStateRepository,
+    UserRepository,
+    session_scope,
+)
 from tests.integration.orchestrator_graph_support import SequencedWorker, StaticWorker
 
 
@@ -90,6 +99,123 @@ def test_orchestrator_graph_runs_happy_path_with_fake_worker() -> None:
         "result summarized and session state updated",
         "memory persistence queued",
     ]
+
+
+def _seed_graph_memory(session_factory, repo_url: str) -> tuple[str, str]:
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(external_user_id="graph-memory-user")
+        conversation = SessionRepository(session).create(
+            user_id=user.id,
+            channel="http",
+            external_thread_id="thread-1",
+        )
+        PersonalMemoryRepository(session).upsert(
+            user_id=user.id,
+            memory_key="communication_style",
+            value={"style": "concise"},
+            source="operator",
+            confidence=0.9,
+            scope="global",
+            requires_verification=False,
+        )
+        ProjectMemoryRepository(session).upsert(
+            repo_url=repo_url,
+            memory_key="test_command",
+            value={"command": ".venv/bin/pytest tests/unit"},
+            source="worker_result",
+            confidence=0.8,
+            scope="repo",
+        )
+        SessionStateRepository(session).upsert(
+            session_id=conversation.id,
+            active_goal="wire graph memory",
+            decisions_made={"strategy": "load_all"},
+            files_touched=["orchestrator/graph.py"],
+        )
+        user_id = user.id
+        session_id = conversation.id
+    return user_id, session_id
+
+
+def _memory_persisting_worker() -> StaticWorker:
+    result = WorkerResult(
+        status="success",
+        summary="Memory-aware task completed.",
+        files_changed=["orchestrator/graph.py"],
+        test_results=[{"name": "memory", "status": "passed"}],
+        memory_to_persist=[
+            {
+                "category": "personal",
+                "memory_key": "preferred_verification",
+                "value": {"command": ".venv/bin/pytest tests/unit"},
+                "source": "worker_result",
+                "confidence": 0.7,
+                "requires_verification": False,
+            },
+            {
+                "category": "project",
+                "memory_key": "graph_memory_path",
+                "value": {"file": "orchestrator/graph.py"},
+                "source": "worker_result",
+                "confidence": 0.8,
+            },
+        ],
+    )
+    return StaticWorker(result)
+
+
+def test_orchestrator_graph_loads_and_persists_memory(session_factory) -> None:
+    """A DB-backed graph should pass loaded memory to workers and persist worker memory."""
+    repo_url = "https://github.com/natanayalo/code-agent"
+    user_id, session_id = _seed_graph_memory(session_factory, repo_url)
+    worker = _memory_persisting_worker()
+    graph = build_orchestrator_graph(worker=worker, session_factory=session_factory)
+
+    raw_output = asyncio.run(
+        graph.ainvoke(
+            {
+                "session": {
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "channel": "http",
+                    "external_thread_id": "thread-1",
+                },
+                "task": {
+                    "task_text": "Update memory-aware task execution",
+                    "repo_url": repo_url,
+                    "branch": "master",
+                },
+            }
+        )
+    )
+    state = OrchestratorState.model_validate(raw_output)
+
+    assert len(worker.requests) == 1
+    memory_context = worker.requests[0].memory_context
+    assert memory_context["personal"][0]["memory_key"] == "communication_style"
+    assert memory_context["project"][0]["memory_key"] == "test_command"
+    assert memory_context["session"]["active_goal"] == "wire graph memory"
+    assert {event.event_type for event in state.timeline_events} >= {
+        TimelineEventType.MEMORY_LOADED,
+        TimelineEventType.MEMORY_PERSISTED,
+    }
+    assert state.progress_updates[-1] == "persisted 2 memory entries"
+
+    with session_scope(session_factory) as session:
+        personal = PersonalMemoryRepository(session).get(
+            user_id=user_id,
+            memory_key="preferred_verification",
+        )
+        project = ProjectMemoryRepository(session).get(
+            repo_url=repo_url,
+            memory_key="graph_memory_path",
+        )
+
+    assert personal is not None
+    assert personal.value == {"command": ".venv/bin/pytest tests/unit"}
+    assert personal.requires_verification is False
+    assert project is not None
+    assert project.value == {"file": "orchestrator/graph.py"}
 
 
 def test_orchestrator_graph_runs_one_verifier_repair_handoff_then_stops() -> None:

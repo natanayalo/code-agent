@@ -178,6 +178,7 @@ class TaskExecutionService:
                 enable_worker_profiles=self.enable_worker_profiles,
                 enable_independent_verifier=self.enable_independent_verifier,
                 orchestrator_brain=self.orchestrator_brain,
+                session_factory=self.session_factory,
                 checkpointer=self._checkpointer,
             )
         return self._graph
