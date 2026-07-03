@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -9,7 +9,9 @@ import { api } from '../services/api';
 vi.mock('../services/api', () => ({
   api: {
     listPersonalMemory: vi.fn(),
+    searchPersonalMemory: vi.fn(),
     listProjectMemory: vi.fn(),
+    searchProjectMemory: vi.fn(),
     upsertPersonalMemory: vi.fn(),
     upsertProjectMemory: vi.fn(),
     deletePersonalMemory: vi.fn(),
@@ -35,10 +37,17 @@ function renderKnowledgeBasePage() {
   );
 }
 
+async function waitForDebounce() {
+  await act(async () => {
+    await new Promise((resolve) => window.setTimeout(resolve, 350));
+  });
+}
+
 describe('KnowledgeBasePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal('confirm', vi.fn(() => true));
+    vi.useRealTimers();
   });
 
   afterEach(() => {
@@ -88,6 +97,8 @@ describe('KnowledgeBasePage', () => {
         updated_at: new Date().toISOString(),
       },
     ]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
 
     renderKnowledgeBasePage();
 
@@ -101,6 +112,8 @@ describe('KnowledgeBasePage', () => {
   it('submits personal memory upsert payload', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
     vi.mocked(api.upsertPersonalMemory).mockResolvedValue({
       memory_id: 'pm-2',
       user_id: 'user-2',
@@ -157,6 +170,8 @@ describe('KnowledgeBasePage', () => {
   it('shows validation error for non-object JSON values', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
 
     renderKnowledgeBasePage();
 
@@ -192,6 +207,8 @@ describe('KnowledgeBasePage', () => {
         updated_at: new Date().toISOString(),
       },
     ]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
     vi.mocked(api.deleteProjectMemory).mockResolvedValue();
 
     renderKnowledgeBasePage();
@@ -211,6 +228,8 @@ describe('KnowledgeBasePage', () => {
     const longError = `project failed ${'x'.repeat(96)}`;
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockRejectedValue(new Error(longError));
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
 
     renderKnowledgeBasePage();
 
@@ -227,6 +246,8 @@ describe('KnowledgeBasePage', () => {
   it('submits project memory payload and handles empty optional values', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
     vi.mocked(api.upsertProjectMemory).mockResolvedValue({
       memory_id: 'pj-upsert',
       repo_url: 'https://example.com/repo',
@@ -287,6 +308,8 @@ describe('KnowledgeBasePage', () => {
   it('validates project confidence range', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
 
     renderKnowledgeBasePage();
 
@@ -316,6 +339,8 @@ describe('KnowledgeBasePage', () => {
   it('uses numeric inputs for confidence fields', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
 
     renderKnowledgeBasePage();
 
@@ -341,6 +366,8 @@ describe('KnowledgeBasePage', () => {
       },
     ]);
     vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
     vi.mocked(api.deletePersonalMemory).mockResolvedValue();
 
     renderKnowledgeBasePage();
@@ -373,6 +400,8 @@ describe('KnowledgeBasePage', () => {
         updated_at: new Date().toISOString(),
       },
     ]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
     vi.mocked(api.deleteProjectMemory).mockRejectedValue(new Error('delete failed'));
 
     renderKnowledgeBasePage();
@@ -400,6 +429,8 @@ describe('KnowledgeBasePage', () => {
         updated_at: new Date().toISOString(),
       },
     ]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
     vi.mocked(api.deleteProjectMemory).mockResolvedValue();
     vi.stubGlobal('confirm', vi.fn(() => false));
 
@@ -414,6 +445,8 @@ describe('KnowledgeBasePage', () => {
   it('requires a personal user id before loading personal entries', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
 
     renderKnowledgeBasePage();
 
@@ -447,6 +480,8 @@ describe('KnowledgeBasePage', () => {
         updated_at: new Date().toISOString(),
       }))
     );
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
 
     renderKnowledgeBasePage();
 
@@ -475,6 +510,8 @@ describe('KnowledgeBasePage', () => {
         updated_at: new Date().toISOString(),
       }))
     );
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
 
     renderKnowledgeBasePage();
 
@@ -492,5 +529,107 @@ describe('KnowledgeBasePage', () => {
         screen.queryByRole('button', { name: 'Load More Project Entries' })
       ).not.toBeInTheDocument();
     });
+  });
+
+  it('searches memory with debounce and safely renders highlighted snippets', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([
+      {
+        memory_id: 'pm-search',
+        user_id: 'user-search',
+        memory_key: 'preferred_test',
+        value: { cmd: '.venv/bin/pytest' },
+        headline: 'Run __CA_MARK_START__pytest__CA_MARK_END__ first <script>alert(1)</script>',
+        confidence: 1,
+        scope: 'global',
+        source: 'operator',
+        last_verified_at: null,
+        requires_verification: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([
+      {
+        memory_id: 'pj-search',
+        repo_url: 'https://github.com/natanayalo/code-agent',
+        memory_key: 'build_memory',
+        value: { cmd: 'npm run test:run' },
+        headline: 'Check __CA_MARK_START__test__CA_MARK_END__ coverage',
+        confidence: 0.8,
+        scope: 'repo',
+        source: 'operator',
+        last_verified_at: null,
+        requires_verification: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.change(await screen.findByLabelText('Personal User ID'), {
+      target: { value: 'user-search' },
+    });
+    fireEvent.change(screen.getByLabelText('Project Repository URL'), {
+      target: { value: 'https://github.com/natanayalo/code-agent' },
+    });
+    fireEvent.change(screen.getByLabelText('Search Query'), {
+      target: { value: 'pytest' },
+    });
+
+    await waitForDebounce();
+    await waitFor(() => {
+      expect(api.searchPersonalMemory).toHaveBeenCalledWith('user-search', 'pytest', 20);
+    });
+    await waitFor(() => {
+      expect(api.searchProjectMemory).toHaveBeenCalledWith(
+        'https://github.com/natanayalo/code-agent',
+        'pytest',
+        20
+      );
+    });
+
+    const mark = await screen.findByText('pytest', { selector: 'mark' });
+    expect(mark.tagName).toBe('MARK');
+    expect(screen.getByText((content) => content.includes('<script>alert(1)</script>'))).toBeInTheDocument();
+    expect(screen.getByText('preferred_test')).toBeInTheDocument();
+    expect(screen.getByText('build_memory')).toBeInTheDocument();
+    expect(screen.getByText(/Searching for/i)).toHaveTextContent('1 personal');
+    expect(screen.getByText(/Searching for/i)).toHaveTextContent('1 project');
+  });
+
+  it('clears search back to browse mode', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.change(await screen.findByLabelText('Personal User ID'), {
+      target: { value: 'user-browse' },
+    });
+    await waitForDebounce();
+    await waitFor(() => {
+      expect(api.listPersonalMemory).toHaveBeenCalledWith('user-browse', 50, 0);
+    });
+
+    fireEvent.change(screen.getByLabelText('Search Query'), {
+      target: { value: 'py' },
+    });
+    await waitForDebounce();
+    await waitFor(() => {
+      expect(api.searchPersonalMemory).toHaveBeenCalledWith('user-browse', 'py', 20);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Search' }));
+    await waitForDebounce();
+
+    expect(
+      screen.getByText('Clear the query at any time to return to paginated browse mode.')
+    ).toBeInTheDocument();
+    expect(screen.getByText('No personal entries found.')).toBeInTheDocument();
   });
 });

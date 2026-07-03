@@ -126,6 +126,30 @@ def test_personal_memory_list_requires_user_id_filter(client: TestClient) -> Non
     assert response.status_code == 422
 
 
+def test_personal_memory_search_supports_filtered_lookup(client: TestClient) -> None:
+    """Personal memory search should return scoped entries and ignore blank queries."""
+    user_id = _create_session_and_get_user_id(client)
+    client.put(
+        "/knowledge-base/personal",
+        json={
+            "user_id": user_id,
+            "memory_key": "communication_style",
+            "value": {"style": "concise"},
+        },
+    )
+
+    search_response = client.get(
+        f"/knowledge-base/personal/search?user_id={user_id}&q=concise&limit=10"
+    )
+    assert search_response.status_code == 200
+    assert [entry["memory_key"] for entry in search_response.json()] == ["communication_style"]
+    assert search_response.json()[0]["headline"] is None
+
+    empty_response = client.get(f"/knowledge-base/personal/search?user_id={user_id}&q=   ")
+    assert empty_response.status_code == 200
+    assert empty_response.json() == []
+
+
 def test_project_memory_endpoints_support_crud(client: TestClient) -> None:
     """Project memory should support list, upsert, and delete over API."""
     repo_url = "https://github.com/natanayalo/code-agent"
@@ -190,3 +214,29 @@ def test_knowledge_base_upsert_validates_confidence_bounds(client: TestClient) -
         },
     )
     assert response.status_code == 422
+
+
+def test_project_memory_search_requires_repo_and_validates_limit(client: TestClient) -> None:
+    """Project memory search should validate inputs and scope lookups by repo."""
+    repo_url = "https://github.com/natanayalo/code-agent"
+    client.put(
+        "/knowledge-base/project",
+        json={
+            "repo_url": repo_url,
+            "memory_key": "build_command",
+            "value": {"cmd": ".venv/bin/pytest"},
+        },
+    )
+
+    response = client.get(f"/knowledge-base/project/search?repo_url={repo_url}&q=pytest")
+    assert response.status_code == 200
+    assert [entry["memory_key"] for entry in response.json()] == ["build_command"]
+    assert response.json()[0]["headline"] is None
+
+    missing_repo = client.get("/knowledge-base/project/search?q=pytest")
+    assert missing_repo.status_code == 422
+
+    invalid_limit = client.get(
+        f"/knowledge-base/project/search?repo_url={repo_url}&q=pytest&limit=101"
+    )
+    assert invalid_limit.status_code == 422

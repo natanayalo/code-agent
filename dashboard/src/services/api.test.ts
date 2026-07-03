@@ -285,6 +285,24 @@ describe('api service', () => {
       expect(result).toEqual([]);
     });
 
+    it('searchPersonalMemory encodes the query string and returns array results', async () => {
+      const mockEntries = [{ memory_id: 'm-search', user_id: 'u1', memory_key: 'style', value: {} }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockEntries,
+      });
+
+      const result = await api.searchPersonalMemory('user 1', 'pytest command', 15);
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('/knowledge-base/personal/search?');
+      expect(url).toContain('user_id=user+1');
+      expect(url).toContain('q=pytest+command');
+      expect(url).toContain('limit=15');
+      expect(result).toEqual(mockEntries);
+    });
+
     it('upsertPersonalMemory sends PUT payload', async () => {
       const mockEntry = {
         memory_id: 'm1',
@@ -388,6 +406,29 @@ describe('api service', () => {
       expect(url).toContain('repo_url=https%3A%2F%2Frepo');
       expect(url).toContain('limit=10');
       expect(url).toContain('offset=20');
+    });
+
+    it('searchProjectMemory encodes repo and query parameters', async () => {
+      const mockEntries = [{ memory_id: 'p-search', repo_url: 'https://repo', memory_key: 'k1', value: {} }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockEntries,
+      });
+
+      const result = await api.searchProjectMemory(
+        'https://github.com/natanayalo/code-agent',
+        'memory search',
+        12
+      );
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/project/search?');
+      expect(url).toContain('repo_url=https%3A%2F%2Fgithub.com%2Fnatanayalo%2Fcode-agent');
+      expect(url).toContain('q=memory+search');
+      expect(url).toContain('limit=12');
+      expect(result).toEqual(mockEntries);
     });
 
     it('listProjectMemory catch block rethrows error', async () => {

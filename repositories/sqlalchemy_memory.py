@@ -2,15 +2,80 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeVar
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from db.models import PersonalMemory, ProjectMemory
 from repositories.sqlalchemy_common import UNSET, apply_memory_metadata
+
+_SEARCH_LIMIT_CAP = 100
+_HEADLINE_START = "__CA_MARK_START__"
+_HEADLINE_END = "__CA_MARK_END__"
+_HEADLINE_OPTIONS = (
+    f"StartSel={_HEADLINE_START},"
+    f"StopSel={_HEADLINE_END},"
+    "MaxFragments=2,"
+    "MaxWords=18,"
+    "MinWords=6,"
+    "FragmentDelimiter= ... "
+)
+
+_MemoryRow = TypeVar("_MemoryRow", PersonalMemory, ProjectMemory)
+
+
+@dataclass(frozen=True)
+class MemorySearchResult:
+    """A memory row paired with an optional operator-facing search snippet."""
+
+    memory: PersonalMemory | ProjectMemory
+    headline: str | None = None
+
+
+def _normalized_search_limit(limit: int) -> int:
+    return max(1, min(limit, _SEARCH_LIMIT_CAP))
+
+
+def _normalized_search_query(query: str) -> str:
+    return query.strip()
+
+
+def _dialect_name(session: Session) -> str:
+    return session.bind.dialect.name if session.bind is not None else ""
+
+
+def _ordered_search_results(
+    session: Session,
+    *,
+    statement: str,
+    params: dict[str, Any],
+    model: type[_MemoryRow],
+) -> list[MemorySearchResult]:
+    rows = session.execute(text(statement), params).mappings().all()
+    if not rows:
+        return []
+
+    memory_ids = [str(row["id"]) for row in rows]
+    memories = session.scalars(select(model).where(model.id.in_(memory_ids))).all()
+    memories_by_id = {memory.id: memory for memory in memories}
+
+    ordered_results: list[MemorySearchResult] = []
+    for row in rows:
+        memory = memories_by_id.get(str(row["id"]))
+        if memory is None:
+            continue
+        headline = row.get("headline")
+        ordered_results.append(
+            MemorySearchResult(
+                memory=memory,
+                headline=headline if isinstance(headline, str) else None,
+            )
+        )
+    return ordered_results
 
 
 class PersonalMemoryRepository:
@@ -33,6 +98,50 @@ class PersonalMemoryRepository:
             .order_by(PersonalMemory.created_at.desc(), PersonalMemory.id.desc())
         )
         return list(self.session.scalars(statement))
+
+    def search(
+        self,
+        *,
+        user_id: str,
+        query: str,
+        limit: int = 20,
+    ) -> list[MemorySearchResult]:
+        """Search personal memory entries, falling back to load-all outside Postgres."""
+        normalized_query = _normalized_search_query(query)
+        if not normalized_query:
+            return []
+
+        if _dialect_name(self.session) != "postgresql":
+            return [MemorySearchResult(memory=memory) for memory in self.list_by_user(user_id)]
+
+        return _ordered_search_results(
+            self.session,
+            statement="""
+                SELECT
+                    id,
+                    ts_headline(
+                        'english',
+                        coalesce(memory_key, '') || ' ' || coalesce(value::text, ''),
+                        plainto_tsquery('english', :query),
+                        :headline_options
+                    ) AS headline
+                FROM memory_personal
+                WHERE user_id = :user_id
+                  AND search_vector @@ plainto_tsquery('english', :query)
+                ORDER BY
+                  ts_rank(search_vector, plainto_tsquery('english', :query)) DESC,
+                  created_at DESC,
+                  id DESC
+                LIMIT :limit
+            """,
+            params={
+                "user_id": user_id,
+                "query": normalized_query,
+                "limit": _normalized_search_limit(limit),
+                "headline_options": _HEADLINE_OPTIONS,
+            },
+            model=PersonalMemory,
+        )
 
     def list_all(
         self,
@@ -119,6 +228,50 @@ class ProjectMemoryRepository:
             .order_by(ProjectMemory.created_at.desc(), ProjectMemory.id.desc())
         )
         return list(self.session.scalars(statement))
+
+    def search(
+        self,
+        *,
+        repo_url: str,
+        query: str,
+        limit: int = 20,
+    ) -> list[MemorySearchResult]:
+        """Search project memory entries, falling back to load-all outside Postgres."""
+        normalized_query = _normalized_search_query(query)
+        if not normalized_query:
+            return []
+
+        if _dialect_name(self.session) != "postgresql":
+            return [MemorySearchResult(memory=memory) for memory in self.list_by_repo(repo_url)]
+
+        return _ordered_search_results(
+            self.session,
+            statement="""
+                SELECT
+                    id,
+                    ts_headline(
+                        'english',
+                        coalesce(memory_key, '') || ' ' || coalesce(value::text, ''),
+                        plainto_tsquery('english', :query),
+                        :headline_options
+                    ) AS headline
+                FROM memory_project
+                WHERE repo_url = :repo_url
+                  AND search_vector @@ plainto_tsquery('english', :query)
+                ORDER BY
+                  ts_rank(search_vector, plainto_tsquery('english', :query)) DESC,
+                  created_at DESC,
+                  id DESC
+                LIMIT :limit
+            """,
+            params={
+                "repo_url": repo_url,
+                "query": normalized_query,
+                "limit": _normalized_search_limit(limit),
+                "headline_options": _HEADLINE_OPTIONS,
+            },
+            model=ProjectMemory,
+        )
 
     def list_all(
         self,

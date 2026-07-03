@@ -199,6 +199,15 @@ def test_orchestrator_graph_loads_and_persists_memory(session_factory) -> None:
         TimelineEventType.MEMORY_LOADED,
         TimelineEventType.MEMORY_PERSISTED,
     }
+    memory_loaded_event = next(
+        event
+        for event in state.timeline_events
+        if event.event_type == TimelineEventType.MEMORY_LOADED
+    )
+    assert memory_loaded_event.payload["retrieval_mode"] == "full_text"
+    assert memory_loaded_event.payload["search_query"] == "Update memory-aware task execution"
+    assert memory_loaded_event.payload["personal_keys"] == ["communication_style"]
+    assert memory_loaded_event.payload["project_keys"] == ["test_command"]
     assert state.progress_updates[-1] == "persisted 2 memory entries"
 
     with session_scope(session_factory) as session:

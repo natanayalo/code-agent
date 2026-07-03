@@ -155,6 +155,23 @@ def list_personal_memory(
         return [self._map_personal_memory_to_snapshot(memory) for memory in memories]
 
 
+def search_personal_memory(
+    self: Any,
+    *,
+    user_id: str,
+    query: str,
+    limit: int = 20,
+) -> list[PersonalMemorySnapshot]:
+    """Search persisted personal memory entries for one user."""
+    with session_scope(self.session_factory) as session:
+        memory_repo = PersonalMemoryRepository(session)
+        results = memory_repo.search(user_id=user_id, query=query, limit=limit)
+        return [
+            self._map_personal_memory_to_snapshot(result.memory, headline=result.headline)
+            for result in results
+        ]
+
+
 def upsert_personal_memory(
     self: Any,
     payload: PersonalMemoryUpsertRequest,
@@ -200,6 +217,23 @@ def list_project_memory(
         memory_repo = ProjectMemoryRepository(session)
         memories = memory_repo.list_all(repo_url=repo_url, limit=limit, offset=offset)
         return [self._map_project_memory_to_snapshot(memory) for memory in memories]
+
+
+def search_project_memory(
+    self: Any,
+    *,
+    repo_url: str,
+    query: str,
+    limit: int = 20,
+) -> list[ProjectMemorySnapshot]:
+    """Search persisted repository memory entries."""
+    with session_scope(self.session_factory) as session:
+        memory_repo = ProjectMemoryRepository(session)
+        results = memory_repo.search(repo_url=repo_url, query=query, limit=limit)
+        return [
+            self._map_project_memory_to_snapshot(result.memory, headline=result.headline)
+            for result in results
+        ]
 
 
 def upsert_project_memory(
@@ -506,12 +540,17 @@ def _map_session_to_snapshot(
     )
 
 
-def _map_personal_memory_to_snapshot(memory: PersonalMemory) -> PersonalMemorySnapshot:
+def _map_personal_memory_to_snapshot(
+    memory: PersonalMemory,
+    *,
+    headline: str | None = None,
+) -> PersonalMemorySnapshot:
     return PersonalMemorySnapshot(
         memory_id=memory.id,
         user_id=memory.user_id,
         memory_key=memory.memory_key,
         value=dict(memory.value or {}),
+        headline=headline,
         source=memory.source,
         confidence=memory.confidence,
         scope=memory.scope,
@@ -522,12 +561,17 @@ def _map_personal_memory_to_snapshot(memory: PersonalMemory) -> PersonalMemorySn
     )
 
 
-def _map_project_memory_to_snapshot(memory: ProjectMemory) -> ProjectMemorySnapshot:
+def _map_project_memory_to_snapshot(
+    memory: ProjectMemory,
+    *,
+    headline: str | None = None,
+) -> ProjectMemorySnapshot:
     return ProjectMemorySnapshot(
         memory_id=memory.id,
         repo_url=memory.repo_url,
         memory_key=memory.memory_key,
         value=dict(memory.value or {}),
+        headline=headline,
         source=memory.source,
         confidence=memory.confidence,
         scope=memory.scope,

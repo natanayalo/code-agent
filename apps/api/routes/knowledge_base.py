@@ -31,6 +31,17 @@ def list_personal_memory(
     return task_service.list_personal_memory(user_id=user_id, limit=limit, offset=offset)
 
 
+@router.get("/personal/search", response_model=list[PersonalMemorySnapshot])
+def search_personal_memory(
+    user_id: str = Query(min_length=1),
+    q: str = Query(default=""),
+    limit: int = Query(20, ge=1, le=100),
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> list[PersonalMemorySnapshot]:
+    """Search personal skeptical-memory entries for one user."""
+    return task_service.search_personal_memory(user_id=user_id, query=q, limit=limit)
+
+
 @router.put("/personal", response_model=PersonalMemorySnapshot)
 def upsert_personal_memory(
     payload: PersonalMemoryUpsertRequest,
@@ -64,6 +75,17 @@ def list_project_memory(
 ) -> list[ProjectMemorySnapshot]:
     """List project skeptical-memory entries."""
     return task_service.list_project_memory(repo_url=repo_url, limit=limit, offset=offset)
+
+
+@router.get("/project/search", response_model=list[ProjectMemorySnapshot])
+def search_project_memory(
+    repo_url: str = Query(min_length=1),
+    q: str = Query(default=""),
+    limit: int = Query(20, ge=1, le=100),
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> list[ProjectMemorySnapshot]:
+    """Search project skeptical-memory entries for one repository."""
+    return task_service.search_project_memory(repo_url=repo_url, query=q, limit=limit)
 
 
 @router.put("/project", response_model=ProjectMemorySnapshot)

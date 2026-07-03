@@ -1,5 +1,5 @@
 import React from 'react';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { BookOpen, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import { DashboardLayout } from './layout/DashboardLayout';
@@ -9,7 +9,11 @@ const KNOWLEDGE_BASE_REFETCH_INTERVAL_MS = 30000;
 const KNOWLEDGE_BASE_PAGE_SIZE = 50;
 const KNOWLEDGE_BASE_MAX_LIMIT = 200;
 const PERSONAL_FILTER_DEBOUNCE_MS = 300;
+const KNOWLEDGE_SEARCH_MIN_LENGTH = 2;
+const KNOWLEDGE_SEARCH_LIMIT = 20;
 const DEFAULT_MEMORY_VALUE_JSON = '{\n  \n}';
+const HEADLINE_START = '__CA_MARK_START__';
+const HEADLINE_END = '__CA_MARK_END__';
 
 function parseMemoryValue(raw: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(raw);
@@ -43,6 +47,37 @@ function formatTimestamp(value: string | null | undefined): string {
   return new Date(value).toLocaleString();
 }
 
+function renderHeadline(headline: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  let partIndex = 0;
+
+  while (cursor < headline.length) {
+    const start = headline.indexOf(HEADLINE_START, cursor);
+    if (start === -1) {
+      parts.push(headline.slice(cursor));
+      break;
+    }
+
+    if (start > cursor) {
+      parts.push(headline.slice(cursor, start));
+    }
+
+    const end = headline.indexOf(HEADLINE_END, start + HEADLINE_START.length);
+    if (end === -1) {
+      parts.push(headline.slice(start));
+      break;
+    }
+
+    const highlighted = headline.slice(start + HEADLINE_START.length, end);
+    parts.push(<mark key={`headline-${partIndex}`}>{highlighted}</mark>);
+    partIndex += 1;
+    cursor = end + HEADLINE_END.length;
+  }
+
+  return parts;
+}
+
 export function KnowledgeBasePage() {
   const [personalUserId, setPersonalUserId] = React.useState('');
   const [personalMemoryKey, setPersonalMemoryKey] = React.useState('');
@@ -55,6 +90,8 @@ export function KnowledgeBasePage() {
   const [personalSaving, setPersonalSaving] = React.useState(false);
   const [personalDeletingEntryId, setPersonalDeletingEntryId] = React.useState<string | null>(null);
   const [personalUserFilter, setPersonalUserFilter] = React.useState('');
+  const [searchInput, setSearchInput] = React.useState('');
+  const [searchQuery, setSearchQuery] = React.useState('');
 
   const [projectRepoUrl, setProjectRepoUrl] = React.useState('');
   const [projectMemoryKey, setProjectMemoryKey] = React.useState('');
@@ -74,7 +111,19 @@ export function KnowledgeBasePage() {
     return () => window.clearTimeout(timer);
   }, [personalUserId]);
 
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearchQuery(searchInput.trim());
+    }, PERSONAL_FILTER_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
   const personalQueryEnabled = personalUserFilter.length > 0;
+  const projectSearchScope = projectRepoUrl.trim();
+  const searchMode = searchQuery.length >= KNOWLEDGE_SEARCH_MIN_LENGTH;
+  const searchNeedsMoreCharacters = searchQuery.length > 0 && !searchMode;
+  const personalSearchEnabled = searchMode && personalUserFilter.length > 0;
+  const projectSearchEnabled = searchMode && projectSearchScope.length > 0;
 
   const resetPersonalForm = React.useCallback(() => {
     setPersonalMemoryKey('');
@@ -121,6 +170,17 @@ export function KnowledgeBasePage() {
     () => personalData?.pages.flatMap((page) => page) ?? [],
     [personalData]
   );
+  const {
+    data: personalSearchEntries = [],
+    isLoading: personalSearchLoading,
+    error: personalSearchError,
+    refetch: refetchPersonalSearch,
+  } = useQuery({
+    queryKey: ['knowledge-base', 'personal-search', personalUserFilter, searchQuery],
+    queryFn: () => api.searchPersonalMemory(personalUserFilter, searchQuery, KNOWLEDGE_SEARCH_LIMIT),
+    enabled: personalSearchEnabled,
+    retry: false,
+  });
 
   const {
     data: projectData,
@@ -148,10 +208,25 @@ export function KnowledgeBasePage() {
     () => projectData?.pages.flatMap((page) => page) ?? [],
     [projectData]
   );
+  const {
+    data: projectSearchEntries = [],
+    isLoading: projectSearchLoading,
+    error: projectSearchError,
+    refetch: refetchProjectSearch,
+  } = useQuery({
+    queryKey: ['knowledge-base', 'project-search', projectSearchScope, searchQuery],
+    queryFn: () => api.searchProjectMemory(projectSearchScope, searchQuery, KNOWLEDGE_SEARCH_LIMIT),
+    enabled: projectSearchEnabled,
+    retry: false,
+  });
 
-  const isLoading = projectLoading || (personalQueryEnabled && personalLoading);
+  const isLoading = searchMode
+    ? (personalSearchEnabled && personalSearchLoading) || (projectSearchEnabled && projectSearchLoading)
+    : projectLoading || (personalQueryEnabled && personalLoading);
   const personalQueryError = personalQueryEnabled ? (personalLoadError as Error | null) : null;
   const projectQueryError = projectLoadError as Error | null;
+  const personalSearchQueryError = personalSearchEnabled ? (personalSearchError as Error | null) : null;
+  const projectSearchQueryError = projectSearchEnabled ? (projectSearchError as Error | null) : null;
   const personalHasMore = personalQueryEnabled && Boolean(personalHasNextPage);
   const projectHasMore = Boolean(projectHasNextPage);
 
@@ -171,6 +246,9 @@ export function KnowledgeBasePage() {
       });
       resetPersonalForm();
       await refetchPersonal();
+      if (personalSearchEnabled) {
+        await refetchPersonalSearch();
+      }
     } catch (error) {
       setPersonalError((error as Error).message);
     } finally {
@@ -194,6 +272,9 @@ export function KnowledgeBasePage() {
       });
       resetProjectForm();
       await refetchProject();
+      if (projectSearchEnabled) {
+        await refetchProjectSearch();
+      }
     } catch (error) {
       setProjectError((error as Error).message);
     } finally {
@@ -210,6 +291,9 @@ export function KnowledgeBasePage() {
     try {
       await api.deletePersonalMemory(entry.user_id, entry.memory_key);
       await refetchPersonal();
+      if (personalSearchEnabled) {
+        await refetchPersonalSearch();
+      }
     } catch (error) {
       setPersonalError((error as Error).message);
     } finally {
@@ -226,6 +310,9 @@ export function KnowledgeBasePage() {
     try {
       await api.deleteProjectMemory(entry.repo_url, entry.memory_key);
       await refetchProject();
+      if (projectSearchEnabled) {
+        await refetchProjectSearch();
+      }
     } catch (error) {
       setProjectError((error as Error).message);
     } finally {
@@ -242,6 +329,48 @@ export function KnowledgeBasePage() {
         </p>
       </div>
 
+      <section className="card knowledge-search-panel">
+        <div className="knowledge-search-header">
+          <div>
+            <h2>Search Memory</h2>
+            <p className="knowledge-section-subtitle">
+              Search uses the personal user ID and project repository URL entered in the forms below.
+            </p>
+          </div>
+          {searchInput.length > 0 ? (
+            <button
+              className="knowledge-load-more"
+              type="button"
+              onClick={() => setSearchInput('')}
+            >
+              Clear Search
+            </button>
+          ) : null}
+        </div>
+        <div className="knowledge-search-controls">
+          <label htmlFor="knowledge-search-query">Search Query</label>
+          <input
+            id="knowledge-search-query"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Search memory keys and values..."
+          />
+        </div>
+        <div className="knowledge-search-summary">
+          {searchMode ? (
+            <p>
+              Searching for <strong>{searchQuery}</strong> with{' '}
+              {personalSearchEnabled ? `${personalSearchEntries.length} personal` : '0 personal'} and{' '}
+              {projectSearchEnabled ? `${projectSearchEntries.length} project` : '0 project'} matches.
+            </p>
+          ) : searchNeedsMoreCharacters ? (
+            <p>Type at least 2 characters to start searching.</p>
+          ) : (
+            <p>Clear the query at any time to return to paginated browse mode.</p>
+          )}
+        </div>
+      </section>
+
       {isLoading ? (
         <div className="loading-container">
           <div className="spinner"></div>
@@ -251,7 +380,9 @@ export function KnowledgeBasePage() {
         <div className="knowledge-grid">
           <section className="card knowledge-section">
             <h2>Personal Memory</h2>
-            <p className="knowledge-section-subtitle">User-scoped memory entries</p>
+            <p className="knowledge-section-subtitle">
+              {searchMode ? 'User-scoped search results' : 'User-scoped memory entries'}
+            </p>
             <form className="knowledge-form" onSubmit={handleSavePersonal}>
               <label htmlFor="personal-user-id">Personal User ID</label>
               <input
@@ -322,7 +453,45 @@ export function KnowledgeBasePage() {
             </form>
 
             <div className="knowledge-list">
-              {personalQueryError ? (
+              {searchMode ? personalSearchQueryError ? (
+                <p className="card-error-text">{personalSearchQueryError.message}</p>
+              ) : !personalSearchEnabled ? (
+                <p className="session-context-muted">
+                  Enter a personal user ID below to search personal memory.
+                </p>
+              ) : personalSearchEntries.length === 0 ? (
+                <p className="session-context-muted">No personal search results found.</p>
+              ) : (
+                personalSearchEntries.map((entry) => (
+                  <article key={entry.memory_id} className="knowledge-entry">
+                    <header className="knowledge-entry-header">
+                      <div>
+                        <h3>{entry.memory_key}</h3>
+                        <p>User: {entry.user_id}</p>
+                      </div>
+                      <button
+                        className="btn-icon-sm"
+                        type="button"
+                        onClick={() => handleDeletePersonal(entry)}
+                        title="Delete entry"
+                        aria-label={`Delete personal memory ${entry.memory_key}`}
+                        disabled={personalDeletingEntryId === entry.memory_id}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </header>
+                    {entry.headline ? (
+                      <p className="knowledge-entry-headline">{renderHeadline(entry.headline)}</p>
+                    ) : null}
+                    <div className="knowledge-entry-meta">
+                      <span>Confidence: {entry.confidence.toFixed(2)}</span>
+                      <span>Needs verification: {entry.requires_verification ? 'yes' : 'no'}</span>
+                      <span>Verified at: {formatTimestamp(entry.last_verified_at)}</span>
+                    </div>
+                    <pre>{JSON.stringify(entry.value, null, 2)}</pre>
+                  </article>
+                ))
+              ) : personalQueryError ? (
                 <p className="card-error-text">{personalQueryError.message}</p>
               ) : !personalQueryEnabled ? (
                 <p className="session-context-muted">
@@ -354,12 +523,15 @@ export function KnowledgeBasePage() {
                       <span>Needs verification: {entry.requires_verification ? 'yes' : 'no'}</span>
                       <span>Verified at: {formatTimestamp(entry.last_verified_at)}</span>
                     </div>
+                    {entry.headline ? (
+                      <p className="knowledge-entry-headline">{renderHeadline(entry.headline)}</p>
+                    ) : null}
                     <pre>{JSON.stringify(entry.value, null, 2)}</pre>
                   </article>
                 ))
               )}
             </div>
-            {personalHasMore ? (
+            {!searchMode && personalHasMore ? (
               <button
                 type="button"
                 className="knowledge-load-more"
@@ -373,7 +545,9 @@ export function KnowledgeBasePage() {
 
           <section className="card knowledge-section">
             <h2>Project Memory</h2>
-            <p className="knowledge-section-subtitle">Repository-scoped memory entries</p>
+            <p className="knowledge-section-subtitle">
+              {searchMode ? 'Repository-scoped search results' : 'Repository-scoped memory entries'}
+            </p>
             <form className="knowledge-form" onSubmit={handleSaveProject}>
               <label htmlFor="project-repo-url">Project Repository URL</label>
               <input
@@ -444,7 +618,55 @@ export function KnowledgeBasePage() {
             </form>
 
             <div className="knowledge-list">
-              {projectQueryError ? (
+              {searchMode ? projectSearchQueryError ? (
+                <div className="error-container">
+                  <h3>Error loading project search</h3>
+                  <p>{projectSearchQueryError.message}</p>
+                  <button
+                    onClick={() => refetchProjectSearch()}
+                    className="btn-primary"
+                    type="button"
+                  >
+                    Retry Project Search
+                  </button>
+                </div>
+              ) : !projectSearchEnabled ? (
+                <p className="session-context-muted">
+                  Enter a project repository URL below to search project memory.
+                </p>
+              ) : projectSearchEntries.length === 0 ? (
+                <p className="session-context-muted">No project search results found.</p>
+              ) : (
+                projectSearchEntries.map((entry) => (
+                  <article key={entry.memory_id} className="knowledge-entry">
+                    <header className="knowledge-entry-header">
+                      <div>
+                        <h3>{entry.memory_key}</h3>
+                        <p>{entry.repo_url}</p>
+                      </div>
+                      <button
+                        className="btn-icon-sm"
+                        type="button"
+                        onClick={() => handleDeleteProject(entry)}
+                        title="Delete entry"
+                        aria-label={`Delete project memory ${entry.memory_key}`}
+                        disabled={projectDeletingEntryId === entry.memory_id}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </header>
+                    {entry.headline ? (
+                      <p className="knowledge-entry-headline">{renderHeadline(entry.headline)}</p>
+                    ) : null}
+                    <div className="knowledge-entry-meta">
+                      <span>Confidence: {entry.confidence.toFixed(2)}</span>
+                      <span>Needs verification: {entry.requires_verification ? 'yes' : 'no'}</span>
+                      <span>Verified at: {formatTimestamp(entry.last_verified_at)}</span>
+                    </div>
+                    <pre>{JSON.stringify(entry.value, null, 2)}</pre>
+                  </article>
+                ))
+              ) : projectQueryError ? (
                 <div className="error-container">
                   <h3>Error loading project memory</h3>
                   <p>{projectQueryError.message}</p>
@@ -478,12 +700,15 @@ export function KnowledgeBasePage() {
                       <span>Needs verification: {entry.requires_verification ? 'yes' : 'no'}</span>
                       <span>Verified at: {formatTimestamp(entry.last_verified_at)}</span>
                     </div>
+                    {entry.headline ? (
+                      <p className="knowledge-entry-headline">{renderHeadline(entry.headline)}</p>
+                    ) : null}
                     <pre>{JSON.stringify(entry.value, null, 2)}</pre>
                   </article>
                 ))
               )}
             </div>
-            {projectQueryError ? null : projectHasMore ? (
+            {searchMode || projectQueryError ? null : projectHasMore ? (
               <button
                 type="button"
                 className="knowledge-load-more"

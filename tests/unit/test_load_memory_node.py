@@ -77,6 +77,113 @@ def _seed_memory_context(session_factory: Any) -> tuple[str, str]:
         return user.id, conversation.id
 
 
+class _FakeSession:
+    def close(self) -> None:
+        return None
+
+
+class _FakeSessionStateRepository:
+    def __init__(self, _session: object) -> None:
+        pass
+
+    def get(self, _session_id: str):
+        return None
+
+
+def _make_fake_search_result(memory_key: str):
+    return type(
+        "FakeSearchResult",
+        (),
+        {
+            "memory": type(
+                "MemoryRow",
+                (),
+                {
+                    "memory_key": memory_key,
+                    "value": {},
+                    "source": None,
+                    "confidence": 1.0,
+                    "scope": None,
+                    "last_verified_at": None,
+                    "requires_verification": True,
+                },
+            )()
+        },
+    )()
+
+
+def _patch_memory_repositories(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    captured_queries: list[tuple[str, str]],
+    personal_key: str | None = None,
+    project_key: str | None = None,
+) -> None:
+    class FakePersonalRepository:
+        def __init__(self, _session: object) -> None:
+            pass
+
+        def search(self, *, user_id: str, query: str, limit: int):
+            captured_queries.append(("personal", query))
+            assert user_id == "user-1"
+            assert limit == 20
+            return [_make_fake_search_result(personal_key)] if personal_key else []
+
+    class FakeProjectRepository:
+        def __init__(self, _session: object) -> None:
+            pass
+
+        def search(self, *, repo_url: str, query: str, limit: int):
+            captured_queries.append(("project", query))
+            assert repo_url == "https://github.com/natanayalo/code-agent"
+            assert limit == 20
+            return [_make_fake_search_result(project_key)] if project_key else []
+
+    monkeypatch.setattr("orchestrator.graph.PersonalMemoryRepository", FakePersonalRepository)
+    monkeypatch.setattr("orchestrator.graph.ProjectMemoryRepository", FakeProjectRepository)
+    monkeypatch.setattr(
+        "orchestrator.graph.SessionStateRepository",
+        _FakeSessionStateRepository,
+    )
+
+
+def _state_with_task(
+    *,
+    task_text: str,
+    goal: str | None = None,
+) -> OrchestratorState:
+    payload: dict[str, Any] = {
+        "session": {
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "channel": "http",
+            "external_thread_id": "thread-1",
+        },
+        "task": {
+            "task_text": task_text,
+            "repo_url": "https://github.com/natanayalo/code-agent",
+        },
+    }
+    if goal is not None:
+        payload["task_spec"] = {
+            "goal": goal,
+            "assumptions": [],
+            "acceptance_criteria": [],
+            "non_goals": [],
+            "risk_level": "low",
+            "task_type": "feature",
+            "allowed_actions": [],
+            "forbidden_actions": [],
+            "verification_commands": [],
+            "expected_artifacts": [],
+            "requires_clarification": False,
+            "clarification_questions": [],
+            "requires_permission": False,
+            "delivery_mode": "summary",
+        }
+    return OrchestratorState.model_validate(payload)
+
+
 def test_load_memory_node_loads_memory_and_skepticism_metadata(session_factory) -> None:
     """DB-backed load_memory should populate personal, project, and session memory."""
     user_id, session_id = _seed_memory_context(session_factory)
@@ -111,7 +218,9 @@ def test_load_memory_node_loads_memory_and_skepticism_metadata(session_factory) 
     event = result["timeline_events"][0]
     assert event.event_type == TimelineEventType.MEMORY_LOADED
     assert event.payload == {
-        "retrieval_mode": "load_all",
+        "retrieval_mode": "full_text",
+        "search_query": "Use remembered test commands",
+        "search_limit": 20,
         "personal_count": 1,
         "project_count": 1,
         "session_loaded": True,
@@ -129,6 +238,45 @@ def test_load_memory_node_skips_missing_scopes(session_factory) -> None:
     assert result["memory"] == {"personal": [], "project": [], "session": {}}
     assert result["timeline_events"][0].payload["personal_count"] == 0
     assert result["timeline_events"][0].payload["project_count"] == 0
+
+
+def test_load_memory_node_prefers_task_spec_goal_for_search_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_queries: list[tuple[str, str]] = []
+    _patch_memory_repositories(
+        monkeypatch,
+        captured_queries=captured_queries,
+        personal_key="personal-memory",
+        project_key="project-memory",
+    )
+    result = build_load_memory_node(lambda: _FakeSession())(
+        _state_with_task(task_text="fallback task text", goal="preferred task goal")
+    )
+
+    assert captured_queries == [
+        ("personal", "preferred task goal"),
+        ("project", "preferred task goal"),
+    ]
+    assert result["timeline_events"][0].payload["search_query"] == "preferred task goal"
+    assert result["memory"]["personal"][0]["memory_key"] == "personal-memory"
+    assert result["memory"]["project"][0]["memory_key"] == "project-memory"
+
+
+def test_load_memory_node_uses_task_text_when_task_spec_goal_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_queries: list[tuple[str, str]] = []
+    _patch_memory_repositories(monkeypatch, captured_queries=captured_queries)
+    result = build_load_memory_node(lambda: _FakeSession())(
+        _state_with_task(task_text="use task text instead")
+    )
+
+    assert captured_queries == [
+        ("personal", "use task text instead"),
+        ("project", "use task text instead"),
+    ]
+    assert result["timeline_events"][0].payload["search_query"] == "use task text instead"
 
 
 def test_load_memory_node_db_error_returns_empty_memory() -> None:

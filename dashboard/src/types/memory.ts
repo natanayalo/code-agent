@@ -11,6 +11,7 @@ export interface PersonalMemorySnapshot extends MemoryMetadata {
   user_id: string;
   memory_key: string;
   value: Record<string, unknown>;
+  headline?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -20,6 +21,7 @@ export interface ProjectMemorySnapshot extends MemoryMetadata {
   repo_url: string;
   memory_key: string;
   value: Record<string, unknown>;
+  headline?: string | null;
   created_at: string;
   updated_at: string;
 }

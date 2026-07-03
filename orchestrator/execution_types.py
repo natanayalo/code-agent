@@ -193,6 +193,7 @@ class PersonalMemorySnapshot(ExecutionModel):
     user_id: str
     memory_key: str
     value: dict[str, Any]
+    headline: str | None = None
     source: str | None = None
     confidence: float = 1.0
     scope: str | None = None
@@ -209,6 +210,7 @@ class ProjectMemorySnapshot(ExecutionModel):
     repo_url: str
     memory_key: str
     value: dict[str, Any]
+    headline: str | None = None
     source: str | None = None
     confidence: float = 1.0
     scope: str | None = None

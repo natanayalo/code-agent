@@ -184,6 +184,27 @@ export const api = {
     }
   },
 
+  async searchPersonalMemory(
+    userId: string,
+    queryText: string,
+    limit?: number,
+  ): Promise<PersonalMemorySnapshot[]> {
+    try {
+      const query = new URLSearchParams({
+        user_id: userId,
+        q: queryText,
+      });
+      if (typeof limit === 'number') {
+        query.set('limit', String(limit));
+      }
+      const data = await fetchWithAuth(`/knowledge-base/personal/search?${query.toString()}`);
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to search personal memory from API', error);
+      throw error;
+    }
+  },
+
   async upsertPersonalMemory(
     payload: PersonalMemoryUpsertRequest,
   ): Promise<PersonalMemorySnapshot> {
@@ -236,6 +257,27 @@ export const api = {
       return Array.isArray(data) ? data : [];
     } catch (error) {
       console.warn('Failed to fetch project memory from API', error);
+      throw error;
+    }
+  },
+
+  async searchProjectMemory(
+    repoUrl: string,
+    queryText: string,
+    limit?: number,
+  ): Promise<ProjectMemorySnapshot[]> {
+    try {
+      const query = new URLSearchParams({
+        repo_url: repoUrl,
+        q: queryText,
+      });
+      if (typeof limit === 'number') {
+        query.set('limit', String(limit));
+      }
+      const data = await fetchWithAuth(`/knowledge-base/project/search?${query.toString()}`);
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to search project memory from API', error);
       throw error;
     }
   },

@@ -237,6 +237,22 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     ] == ["task_id", "attempt_number", "sequence_number"]
 
 
+def test_sqlite_upgrade_skips_memory_fulltext_columns(tmp_path: Path) -> None:
+    """The Postgres-only search migration should remain a no-op on SQLite."""
+    database_path = tmp_path / "memory_search_sqlite.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    inspector = inspect(engine)
+
+    assert "search_vector" not in _column_names(inspector, "memory_personal")
+    assert "search_vector" not in _column_names(inspector, "memory_project")
+
+
 def _seed_downgrade_users_and_sessions(connection, now: str) -> None:
     connection.execute(
         text(
