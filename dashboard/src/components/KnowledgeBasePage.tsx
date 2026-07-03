@@ -534,7 +534,10 @@ export function KnowledgeBasePage() {
             <button
               className="knowledge-load-more"
               type="button"
-              onClick={() => setSearchInput('')}
+              onClick={() => {
+                setSearchInput('');
+                setSearchQuery('');
+              }}
             >
               Clear Search
             </button>

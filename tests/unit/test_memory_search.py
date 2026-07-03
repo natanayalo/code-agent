@@ -157,6 +157,18 @@ def test_search_respects_limit_cap() -> None:
     assert session.last_execute_params["limit"] == 100
 
 
+def test_search_truncates_query_before_normalizing() -> None:
+    session = _FakeSession(dialect_name="postgresql", execute_rows=[], scalar_rows=[])
+
+    PersonalMemoryRepository(session).search(
+        user_id="user-1",
+        query=f"{'x' * 200}{' y' * 50}",
+        limit=20,
+    )
+
+    assert session.last_execute_params["query"] == "x" * 200
+
+
 def test_search_filters_by_user_id() -> None:
     memory = PersonalMemory(
         id="pm-1",

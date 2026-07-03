@@ -15,6 +15,7 @@ from db.models import PersonalMemory, ProjectMemory
 from repositories.sqlalchemy_common import UNSET, apply_memory_metadata
 
 _SEARCH_LIMIT_CAP = 100
+_SEARCH_QUERY_MAX_CHARS = 200
 _HEADLINE_START = "__CA_MARK_START__"
 _HEADLINE_END = "__CA_MARK_END__"
 _HEADLINE_OPTIONS = (
@@ -41,7 +42,7 @@ def _normalized_search_limit(limit: int) -> int:
 
 
 def _normalized_search_query(query: str) -> str:
-    return query.strip()
+    return query[:_SEARCH_QUERY_MAX_CHARS].strip()
 
 
 def _dialect_name(session: Session) -> str:

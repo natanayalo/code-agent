@@ -788,7 +788,7 @@ describe('KnowledgeBasePage', () => {
     });
   });
 
-  it('clears search back to browse mode', async () => {
+  it('clears search back to browse mode immediately', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockResolvedValue([]);
     vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
@@ -811,9 +811,9 @@ describe('KnowledgeBasePage', () => {
     await waitFor(() => {
       expect(api.searchPersonalMemory).toHaveBeenCalledWith('user-browse', 'py', 20);
     });
+    expect(screen.getByText(/Searching for/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear Search' }));
-    await waitForDebounce();
 
     expect(
       screen.getByText('Clear the query at any time to return to paginated browse mode.')
