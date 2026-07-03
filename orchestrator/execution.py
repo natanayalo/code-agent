@@ -273,6 +273,7 @@ class TaskExecutionService:
     list_tasks = execution_snapshot_service.list_tasks
     list_sessions = execution_snapshot_service.list_sessions
     get_session = execution_snapshot_service.get_session
+    get_knowledge_base_stats = execution_snapshot_service.get_knowledge_base_stats
     list_personal_memory = execution_snapshot_service.list_personal_memory
     search_personal_memory = execution_snapshot_service.search_personal_memory
     upsert_personal_memory = execution_snapshot_service.upsert_personal_memory

@@ -9,6 +9,7 @@ import {
 import { SessionSnapshot } from '../types/session';
 import { OperationalMetrics } from '../types/metrics';
 import {
+  KnowledgeBaseStatsSnapshot,
   PersonalMemorySnapshot,
   PersonalMemoryUpsertRequest,
   ProjectMemorySnapshot,
@@ -23,6 +24,23 @@ type InteractionResponseStatus = 'resolved' | 'rejected' | 'cancelled' | 'pendin
 interface TaskInteractionResponsePayload {
   response_data: Record<string, unknown>;
   status?: InteractionResponseStatus;
+}
+
+function coerceMemoryCount(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const candidate = value as Partial<{ total: unknown; requires_verification: unknown }>;
+  if (
+    typeof candidate.total !== 'number' ||
+    typeof candidate.requires_verification !== 'number'
+  ) {
+    return null;
+  }
+  return {
+    total: candidate.total,
+    requires_verification: candidate.requires_verification,
+  };
 }
 
 export class ApiError extends Error {
@@ -164,19 +182,21 @@ export const api = {
   },
 
   async listPersonalMemory(
-    userId: string,
     limit?: number,
     offset?: number,
   ): Promise<PersonalMemorySnapshot[]> {
     try {
-      const query = new URLSearchParams({ user_id: userId });
+      const query = new URLSearchParams();
       if (typeof limit === 'number') {
         query.set('limit', String(limit));
       }
       if (typeof offset === 'number') {
         query.set('offset', String(offset));
       }
-      const data = await fetchWithAuth(`/knowledge-base/personal?${query.toString()}`);
+      const queryString = query.toString();
+      const data = await fetchWithAuth(
+        `/knowledge-base/personal${queryString.length > 0 ? `?${queryString}` : ''}`
+      );
       return Array.isArray(data) ? data : [];
     } catch (error) {
       console.warn('Failed to fetch personal memory from API', error);
@@ -184,14 +204,49 @@ export const api = {
     }
   },
 
+  async getKnowledgeBaseStats(
+    repoUrl?: string,
+  ): Promise<KnowledgeBaseStatsSnapshot> {
+    const emptyStats: KnowledgeBaseStatsSnapshot = {
+      personal: { total: 0, requires_verification: 0 },
+      project: null,
+      project_global: { total: 0, requires_verification: 0 },
+    };
+    try {
+      const query = new URLSearchParams();
+      if (repoUrl) {
+        query.set('repo_url', repoUrl);
+      }
+      const queryString = query.toString();
+      const data = await fetchWithAuth(
+        `/knowledge-base/stats${queryString.length > 0 ? `?${queryString}` : ''}`
+      );
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        return emptyStats;
+      }
+      const payload = data as Partial<KnowledgeBaseStatsSnapshot>;
+      const personal = coerceMemoryCount(payload.personal);
+      const projectGlobal = coerceMemoryCount(payload.project_global);
+      if (!personal || !projectGlobal) {
+        return emptyStats;
+      }
+      return {
+        personal,
+        project: coerceMemoryCount(payload.project),
+        project_global: projectGlobal,
+      };
+    } catch (error) {
+      console.warn('Failed to fetch knowledge-base stats from API', error);
+      throw error;
+    }
+  },
+
   async searchPersonalMemory(
-    userId: string,
     queryText: string,
     limit?: number,
   ): Promise<PersonalMemorySnapshot[]> {
     try {
       const query = new URLSearchParams({
-        user_id: userId,
         q: queryText,
       });
       if (typeof limit === 'number') {
@@ -219,10 +274,9 @@ export const api = {
     }
   },
 
-  async deletePersonalMemory(userId: string, memoryKey: string): Promise<void> {
+  async deletePersonalMemory(memoryKey: string): Promise<void> {
     try {
       const query = new URLSearchParams({
-        user_id: userId,
         memory_key: memoryKey,
       });
       await fetchWithAuth(`/knowledge-base/personal?${query.toString()}`, {

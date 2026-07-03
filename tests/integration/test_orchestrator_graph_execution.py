@@ -110,7 +110,6 @@ def _seed_graph_memory(session_factory, repo_url: str) -> tuple[str, str]:
             external_thread_id="thread-1",
         )
         PersonalMemoryRepository(session).upsert(
-            user_id=user.id,
             memory_key="communication_style",
             value={"style": "concise", "task_hint": "Update memory-aware task execution"},
             source="operator",
@@ -215,7 +214,6 @@ def test_orchestrator_graph_loads_and_persists_memory(session_factory) -> None:
 
     with session_scope(session_factory) as session:
         personal = PersonalMemoryRepository(session).get(
-            user_id=user_id,
             memory_key="preferred_verification",
         )
         project = ProjectMemoryRepository(session).get(

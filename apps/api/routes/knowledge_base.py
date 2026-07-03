@@ -12,6 +12,7 @@ from orchestrator.execution import (
     ProjectMemoryUpsertRequest,
     TaskExecutionService,
 )
+from orchestrator.execution_types import KnowledgeBaseStatsSnapshot
 
 router = APIRouter(
     prefix="/knowledge-base",
@@ -20,26 +21,33 @@ router = APIRouter(
 )
 
 
+@router.get("/stats", response_model=KnowledgeBaseStatsSnapshot)
+def get_knowledge_base_stats(
+    repo_url: str | None = Query(default=None),
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> KnowledgeBaseStatsSnapshot:
+    """Return exact skeptical-memory inventory counts for dashboard browse."""
+    return task_service.get_knowledge_base_stats(repo_url=repo_url)
+
+
 @router.get("/personal", response_model=list[PersonalMemorySnapshot])
 def list_personal_memory(
-    user_id: str = Query(min_length=1),
     limit: int = Query(100, ge=1, le=200),
     offset: int = Query(0, ge=0),
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> list[PersonalMemorySnapshot]:
-    """List personal skeptical-memory entries for one user."""
-    return task_service.list_personal_memory(user_id=user_id, limit=limit, offset=offset)
+    """List operator-global personal skeptical-memory entries."""
+    return task_service.list_personal_memory(limit=limit, offset=offset)
 
 
 @router.get("/personal/search", response_model=list[PersonalMemorySnapshot])
 def search_personal_memory(
-    user_id: str = Query(min_length=1),
     q: str = Query(default=""),
     limit: int = Query(20, ge=1, le=100),
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> list[PersonalMemorySnapshot]:
-    """Search personal skeptical-memory entries for one user."""
-    return task_service.search_personal_memory(user_id=user_id, query=q, limit=limit)
+    """Search operator-global personal skeptical-memory entries."""
+    return task_service.search_personal_memory(query=q, limit=limit)
 
 
 @router.put("/personal", response_model=PersonalMemorySnapshot)
@@ -53,16 +61,15 @@ def upsert_personal_memory(
 
 @router.delete("/personal", status_code=status.HTTP_204_NO_CONTENT)
 def delete_personal_memory(
-    user_id: str = Query(min_length=1),
     memory_key: str = Query(min_length=1),
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> None:
     """Delete one personal skeptical-memory entry."""
-    deleted = task_service.delete_personal_memory(user_id=user_id, memory_key=memory_key)
+    deleted = task_service.delete_personal_memory(memory_key=memory_key)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=("Personal memory entry was not found for the supplied user_id and memory_key."),
+            detail=("Personal memory entry was not found for the supplied memory_key."),
         )
 
 

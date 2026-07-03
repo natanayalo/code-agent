@@ -14,7 +14,6 @@ from orchestrator.state import OrchestratorState
 from repositories import (
     PersonalMemoryRepository,
     ProjectMemoryRepository,
-    UserRepository,
     create_engine_from_url,
     create_session_factory,
     session_scope,
@@ -37,15 +36,12 @@ def test_persist_memory_node_persists_personal_and_project_memory(session_factor
     """DB-backed persist_memory should route personal and project entries correctly."""
     repo_url = "https://github.com/natanayalo/code-agent"
     verified_at = datetime(2026, 7, 2, 10, 15, tzinfo=UTC)
-    with session_scope(session_factory) as session:
-        user = UserRepository(session).create(external_user_id="persist-node-user")
-        user_id = user.id
 
     state = OrchestratorState.model_validate(
         {
             "session": {
                 "session_id": "session-1",
-                "user_id": user_id,
+                "user_id": "session-user",
                 "channel": "http",
                 "external_thread_id": "thread-1",
             },
@@ -89,7 +85,6 @@ def test_persist_memory_node_persists_personal_and_project_memory(session_factor
 
     with session_scope(session_factory) as session:
         personal = PersonalMemoryRepository(session).get(
-            user_id=user_id,
             memory_key="communication_style",
         )
         project = ProjectMemoryRepository(session).get(
@@ -105,8 +100,8 @@ def test_persist_memory_node_persists_personal_and_project_memory(session_factor
     assert project.value == {"command": ".venv/bin/pytest tests/unit"}
 
 
-def test_persist_memory_node_skips_entries_without_safe_scope(session_factory) -> None:
-    """Entries that cannot be scoped should not crash or write rows."""
+def test_persist_memory_node_persists_personal_without_session_scope(session_factory) -> None:
+    """Personal memory is operator-global, while project memory still needs a repo URL."""
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "Persist memory without scopes"},
@@ -129,8 +124,13 @@ def test_persist_memory_node_skips_entries_without_safe_scope(session_factory) -
 
     assert result["timeline_events"][0].payload == {
         "requested_count": 2,
-        "persisted_count": 0,
+        "persisted_count": 1,
     }
+
+    with session_scope(session_factory) as session:
+        personal = PersonalMemoryRepository(session).get(memory_key="communication_style")
+        assert personal is not None
+        assert personal.value == {"style": "concise"}
 
 
 def test_persist_memory_node_db_error_does_not_crash() -> None:

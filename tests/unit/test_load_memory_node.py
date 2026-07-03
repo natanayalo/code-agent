@@ -48,7 +48,6 @@ def _seed_memory_context(session_factory: Any) -> tuple[str, str]:
             external_thread_id="thread-1",
         )
         PersonalMemoryRepository(session).upsert(
-            user_id=user.id,
             memory_key="communication_style",
             value={"style": "concise", "shared_hint": "memory-match"},
             source="operator",
@@ -126,9 +125,8 @@ def _patch_memory_repositories(
         def __init__(self, _session: object) -> None:
             pass
 
-        def search(self, *, user_id: str, query: str, limit: int):
+        def search(self, *, query: str, limit: int):
             captured_queries.append(("personal", query))
-            assert user_id == "user-1"
             assert limit == 20
             return [_make_fake_search_result(personal_key)] if personal_key else []
 
@@ -232,14 +230,21 @@ def test_load_memory_node_loads_memory_and_skepticism_metadata(session_factory) 
     }
 
 
-def test_load_memory_node_skips_missing_scopes(session_factory) -> None:
-    """Missing user/session and repo scope should simply produce empty memory."""
+def test_load_memory_node_loads_personal_memory_without_session_scope(session_factory) -> None:
+    """Missing session user should not prevent operator-global personal memory retrieval."""
+    with session_scope(session_factory) as session:
+        PersonalMemoryRepository(session).upsert(
+            memory_key="operator_note",
+            value={"hint": "hello"},
+        )
     state = OrchestratorState.model_validate({"task": {"task_text": "hello"}})
 
     result = build_load_memory_node(session_factory)(state)
 
-    assert result["memory"] == {"personal": [], "project": [], "session": {}}
-    assert result["timeline_events"][0].payload["personal_count"] == 0
+    assert result["memory"]["personal"][0]["memory_key"] == "operator_note"
+    assert result["memory"]["project"] == []
+    assert result["memory"]["session"] == {}
+    assert result["timeline_events"][0].payload["personal_count"] == 1
     assert result["timeline_events"][0].payload["project_count"] == 0
 
 

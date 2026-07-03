@@ -80,14 +80,9 @@ def test_personal_memory_repository_preserves_unspecified_metadata_and_supports_
     verified_at = datetime(2026, 4, 1, tzinfo=UTC)
 
     with session_scope(session_factory) as session:
-        user = UserRepository(session).create(
-            external_user_id="memory-user",
-            display_name="Memory User",
-        )
         repo = PersonalMemoryRepository(session)
 
         created = repo.upsert(
-            user_id=user.id,
             memory_key="communication_preferences",
             value={"style": "concise"},
             source="operator-note",
@@ -97,7 +92,6 @@ def test_personal_memory_repository_preserves_unspecified_metadata_and_supports_
             requires_verification=True,
         )
         updated = repo.upsert(
-            user_id=user.id,
             memory_key="communication_preferences",
             value={"style": "direct"},
         )
@@ -109,10 +103,9 @@ def test_personal_memory_repository_preserves_unspecified_metadata_and_supports_
         assert updated.scope == "repo"
         assert updated.last_verified_at == verified_at
         assert updated.requires_verification is True
-        assert [row.id for row in repo.list_by_user(user.id)] == [updated.id]
-        assert [row.id for row in repo.list_all(user_id=user.id, limit=5, offset=0)] == [updated.id]
-        assert repo.delete(user_id=user.id, memory_key="communication_preferences") is True
-        assert repo.delete(user_id=user.id, memory_key="communication_preferences") is False
+        assert [row.id for row in repo.list_all(limit=5, offset=0)] == [updated.id]
+        assert repo.delete(memory_key="communication_preferences") is True
+        assert repo.delete(memory_key="communication_preferences") is False
 
 
 def test_project_memory_repository_allows_explicit_metadata_clears_and_pagination(
@@ -251,11 +244,10 @@ def test_memory_repositories_recover_from_integrity_error_race(monkeypatch) -> N
     monkeypatch.setattr(
         personal_repo,
         "get",
-        lambda *, user_id, memory_key: next(personal_get_results),
+        lambda *, memory_key: next(personal_get_results),
     )
 
     recovered_personal = personal_repo.upsert(
-        user_id="user-1",
         memory_key="communication",
         value={"style": "new"},
         source="operator",

@@ -1612,15 +1612,13 @@ def build_load_memory_node(
         db_session: Session | None = None
         try:
             db_session = session_factory()
-            if user_id:
-                memory.personal = _search_memory_entries(
-                    repo=PersonalMemoryRepository(db_session),
-                    query_kwargs={
-                        "user_id": user_id,
-                        "query": search_query,
-                        "limit": search_limit,
-                    },
-                )
+            memory.personal = _search_memory_entries(
+                repo=PersonalMemoryRepository(db_session),
+                query_kwargs={
+                    "query": search_query,
+                    "limit": search_limit,
+                },
+            )
             if repo_url:
                 memory.project = _search_memory_entries(
                     repo=ProjectMemoryRepository(db_session),
@@ -3110,19 +3108,9 @@ def _map_worker_memory_to_persist(
 ) -> list[PersistMemoryEntry]:
     """Convert worker-produced memory updates into orchestrator persistence entries."""
     memory_to_persist = list(state.memory_to_persist)
-    user_id = state.session.user_id if state.session is not None else None
     task_id = state.task.task_id
 
     for worker_entry in result.memory_to_persist:
-        if worker_entry.category == "personal" and not user_id:
-            logger.warning(
-                "Skipping worker personal memory without a session user.",
-                extra={
-                    "task_id": task_id,
-                    "memory_key": worker_entry.memory_key,
-                },
-            )
-            continue
         repo_url = worker_entry.repo_url
         if worker_entry.category == "project":
             repo_url = repo_url or state.task.repo_url
@@ -3261,17 +3249,7 @@ def _persist_memory_entry(
 ) -> bool:
     """Persist one scoped memory entry, returning whether a row was written."""
     if entry.category == "personal":
-        if state.session is None:
-            logger.warning(
-                "Skipping personal memory persistence without a session user.",
-                extra={
-                    "task_id": state.task.task_id,
-                    "memory_key": entry.memory_key,
-                },
-            )
-            return False
         PersonalMemoryRepository(db_session).upsert(
-            user_id=state.session.user_id,
             memory_key=entry.memory_key,
             value=entry.value,
             source=entry.source,

@@ -8,7 +8,6 @@ export interface MemoryMetadata {
 
 export interface PersonalMemorySnapshot extends MemoryMetadata {
   memory_id: string;
-  user_id: string;
   memory_key: string;
   value: Record<string, unknown>;
   headline?: string | null;
@@ -26,8 +25,18 @@ export interface ProjectMemorySnapshot extends MemoryMetadata {
   updated_at: string;
 }
 
+export interface MemoryInventoryCountSnapshot {
+  total: number;
+  requires_verification: number;
+}
+
+export interface KnowledgeBaseStatsSnapshot {
+  personal: MemoryInventoryCountSnapshot;
+  project: MemoryInventoryCountSnapshot | null;
+  project_global: MemoryInventoryCountSnapshot;
+}
+
 export interface PersonalMemoryUpsertRequest {
-  user_id: string;
   memory_key: string;
   value: Record<string, unknown>;
   source?: string | null;

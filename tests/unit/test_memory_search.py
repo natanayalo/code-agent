@@ -13,7 +13,6 @@ from db.models import PersonalMemory, ProjectMemory
 from repositories import (
     PersonalMemoryRepository,
     ProjectMemoryRepository,
-    UserRepository,
     create_engine_from_url,
     create_session_factory,
     session_scope,
@@ -75,22 +74,19 @@ def test_search_empty_query_returns_empty() -> None:
         _FakeSession(dialect_name="postgresql", execute_rows=[], scalar_rows=[])
     )
 
-    assert repo.search(user_id="user-1", query="   ") == []
+    assert repo.search(query="   ") == []
 
 
 def test_search_sqlite_fallback() -> None:
     session_factory = _sqlite_session_factory()
     with session_scope(session_factory) as session:
-        user = UserRepository(session).create(external_user_id="search-user")
         PersonalMemoryRepository(session).upsert(
-            user_id=user.id,
             memory_key="communication_style",
             value={"style": "concise"},
         )
 
     with session_scope(session_factory) as session:
         results = PersonalMemoryRepository(session).search(
-            user_id=user.id,
             query="concise",
             limit=20,
         )
@@ -102,23 +98,16 @@ def test_search_sqlite_fallback() -> None:
 def test_search_sqlite_fallback_filters_and_respects_limit() -> None:
     session_factory = _sqlite_session_factory()
     with session_scope(session_factory) as session:
-        user = UserRepository(session).create(
-            external_user_id="search-user-filtered",
-            display_name="Search User",
-        )
         repo_url = "https://github.com/natanayalo/code-agent"
         PersonalMemoryRepository(session).upsert(
-            user_id=user.id,
             memory_key="pytest_playbook",
             value={"cmd": ".venv/bin/pytest tests/unit/test_memory_search.py"},
         )
         PersonalMemoryRepository(session).upsert(
-            user_id=user.id,
             memory_key="shell",
             value={"name": "zsh"},
         )
         PersonalMemoryRepository(session).upsert(
-            user_id=user.id,
             memory_key="test_command",
             value={"cmd": ".venv/bin/pytest"},
         )
@@ -135,7 +124,6 @@ def test_search_sqlite_fallback_filters_and_respects_limit() -> None:
 
     with session_scope(session_factory) as session:
         personal_results = PersonalMemoryRepository(session).search(
-            user_id=user.id,
             query="playbook",
             limit=1,
         )
@@ -152,7 +140,7 @@ def test_search_sqlite_fallback_filters_and_respects_limit() -> None:
 def test_search_respects_limit_cap() -> None:
     session = _FakeSession(dialect_name="postgresql", execute_rows=[], scalar_rows=[])
 
-    PersonalMemoryRepository(session).search(user_id="user-1", query="memory", limit=999)
+    PersonalMemoryRepository(session).search(query="memory", limit=999)
 
     assert session.last_execute_params["limit"] == 100
 
@@ -161,7 +149,6 @@ def test_search_truncates_query_before_normalizing() -> None:
     session = _FakeSession(dialect_name="postgresql", execute_rows=[], scalar_rows=[])
 
     PersonalMemoryRepository(session).search(
-        user_id="user-1",
         query=f"{'x' * 200}{' y' * 50}",
         limit=20,
     )
@@ -169,10 +156,9 @@ def test_search_truncates_query_before_normalizing() -> None:
     assert session.last_execute_params["query"] == "x" * 200
 
 
-def test_search_filters_by_user_id() -> None:
+def test_search_queries_operator_global_personal_memory() -> None:
     memory = PersonalMemory(
         id="pm-1",
-        user_id="user-123",
         memory_key="test_command",
         value={"cmd": ".venv/bin/pytest"},
         source="operator",
@@ -188,14 +174,14 @@ def test_search_filters_by_user_id() -> None:
     )
 
     results = PersonalMemoryRepository(session).search(
-        user_id="user-123",
         query="pytest",
         limit=10,
     )
 
-    assert session.last_execute_params["user_id"] == "user-123"
+    assert "user_id" not in session.last_execute_params
     assert session.last_execute_params["query"] == "pytest"
     assert "memory_personal" in session.last_execute_sql
+    assert "user_id" not in session.last_execute_sql
     assert results[0].memory.memory_key == "test_command"
     assert results[0].headline == "Use __CA_MARK_START__pytest__CA_MARK_END__"
 
@@ -207,7 +193,6 @@ def test_search_uses_session_get_bind_when_bind_is_missing() -> None:
         scalar_rows=[
             PersonalMemory(
                 id="pm-1",
-                user_id="user-123",
                 memory_key="build_command",
                 value={"cmd": ".venv/bin/pytest"},
             )
@@ -216,7 +201,6 @@ def test_search_uses_session_get_bind_when_bind_is_missing() -> None:
     session.bind = None
 
     results = PersonalMemoryRepository(session).search(
-        user_id="user-123",
         query="pytest",
         limit=10,
     )
@@ -229,7 +213,6 @@ def test_search_matches_uuid_ids_from_postgres_rows() -> None:
     memory_id = uuid4()
     memory = PersonalMemory(
         id=memory_id,
-        user_id="user-123",
         memory_key="test_command",
         value={"cmd": ".venv/bin/pytest"},
         source="operator",
@@ -245,7 +228,6 @@ def test_search_matches_uuid_ids_from_postgres_rows() -> None:
     )
 
     results = PersonalMemoryRepository(session).search(
-        user_id="user-123",
         query="pytest",
         limit=10,
     )

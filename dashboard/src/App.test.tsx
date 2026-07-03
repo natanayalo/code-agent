@@ -19,6 +19,7 @@ vi.mock('./services/api', () => ({
     listPendingInteractions: vi.fn(),
     getTask: vi.fn(),
     listSessions: vi.fn(),
+    getKnowledgeBaseStats: vi.fn(),
     listPersonalMemory: vi.fn(),
     listProjectMemory: vi.fn(),
     getMetrics: vi.fn(),
@@ -187,6 +188,11 @@ describe('App', () => {
   it('renders knowledge base page when visiting /knowledge-base', async () => {
     window.history.pushState({}, '', '/knowledge-base');
     vi.mocked(api.auth.status).mockResolvedValue({ authenticated: true });
+    vi.mocked(api.getKnowledgeBaseStats).mockResolvedValue({
+      personal: { total: 0, requires_verification: 0 },
+      project: null,
+      project_global: { total: 0, requires_verification: 0 },
+    });
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockResolvedValue([]);
 
@@ -198,7 +204,7 @@ describe('App', () => {
 
     expect(await screen.findByRole('heading', { name: /Knowledge Base/i })).toBeInTheDocument();
     expect(
-      screen.getByText(/Manage skeptical memory entries with confidence and verification metadata/i)
+      screen.getByText(/Browse, search, and maintain skeptical memory/i)
     ).toBeInTheDocument();
   });
 

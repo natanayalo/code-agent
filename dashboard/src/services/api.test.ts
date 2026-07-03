@@ -253,7 +253,7 @@ describe('api service', () => {
     });
 
     it('listPersonalMemory returns array of entries', async () => {
-      const mockEntries = [{ memory_id: 'm1', user_id: 'u1', memory_key: 'style', value: {} }];
+      const mockEntries = [{ memory_id: 'm1', memory_key: 'style', value: {} }];
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -261,10 +261,11 @@ describe('api service', () => {
         json: async () => mockEntries,
       });
 
-      const result = await api.listPersonalMemory('u1');
+      const result = await api.listPersonalMemory();
       const [url] = mockFetch.mock.calls[0];
 
-      expect(url).toContain('/knowledge-base/personal?user_id=u1');
+      expect(url).toContain('/knowledge-base/personal');
+      expect(url).not.toContain('user_id=');
       expect(result).toEqual(mockEntries);
     });
 
@@ -276,17 +277,56 @@ describe('api service', () => {
         json: async () => ({ not: 'array' }),
       });
 
-      const result = await api.listPersonalMemory('u-2', 25, 50);
+      const result = await api.listPersonalMemory(25, 50);
       const [url] = mockFetch.mock.calls[0];
       expect(url).toContain('/knowledge-base/personal?');
-      expect(url).toContain('user_id=u-2');
+      expect(url).not.toContain('user_id=');
       expect(url).toContain('limit=25');
       expect(url).toContain('offset=50');
       expect(result).toEqual([]);
     });
 
+    it('getKnowledgeBaseStats encodes optional scope params', async () => {
+      const mockStats = {
+        personal: { total: 2, requires_verification: 1 },
+        project: { total: 3, requires_verification: 2 },
+        project_global: { total: 5, requires_verification: 2 },
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockStats,
+      });
+
+      const result = await api.getKnowledgeBaseStats('https://repo');
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/stats?');
+      expect(url).not.toContain('user_id=');
+      expect(url).toContain('repo_url=https%3A%2F%2Frepo');
+      expect(result).toEqual(mockStats);
+    });
+
+    it('getKnowledgeBaseStats falls back for malformed payloads', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({}),
+      });
+
+      const result = await api.getKnowledgeBaseStats();
+
+      expect(result).toEqual({
+        personal: { total: 0, requires_verification: 0 },
+        project: null,
+        project_global: { total: 0, requires_verification: 0 },
+      });
+    });
+
     it('searchPersonalMemory encodes the query string and returns array results', async () => {
-      const mockEntries = [{ memory_id: 'm-search', user_id: 'u1', memory_key: 'style', value: {} }];
+      const mockEntries = [{ memory_id: 'm-search', memory_key: 'style', value: {} }];
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -294,10 +334,10 @@ describe('api service', () => {
         json: async () => mockEntries,
       });
 
-      const result = await api.searchPersonalMemory('user 1', 'pytest command', 15);
+      const result = await api.searchPersonalMemory('pytest command', 15);
       const [url] = mockFetch.mock.calls[0];
       expect(url).toContain('/knowledge-base/personal/search?');
-      expect(url).toContain('user_id=user+1');
+      expect(url).not.toContain('user_id=');
       expect(url).toContain('q=pytest+command');
       expect(url).toContain('limit=15');
       expect(result).toEqual(mockEntries);
@@ -306,7 +346,6 @@ describe('api service', () => {
     it('upsertPersonalMemory sends PUT payload', async () => {
       const mockEntry = {
         memory_id: 'm1',
-        user_id: 'u1',
         memory_key: 'style',
         value: { style: 'concise' },
       };
@@ -318,7 +357,6 @@ describe('api service', () => {
       });
 
       await api.upsertPersonalMemory({
-        user_id: 'u1',
         memory_key: 'style',
         value: { style: 'concise' },
       });
@@ -327,7 +365,6 @@ describe('api service', () => {
       expect(url).toContain('/knowledge-base/personal');
       expect(options.method).toBe('PUT');
       expect(JSON.parse(options.body)).toEqual({
-        user_id: 'u1',
         memory_key: 'style',
         value: { style: 'concise' },
       });
@@ -336,7 +373,7 @@ describe('api service', () => {
     it('listPersonalMemory catch block rethrows error', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       mockFetch.mockRejectedValueOnce(new Error('Network fail'));
-      await expect(api.listPersonalMemory('u1')).rejects.toThrow('Network fail');
+      await expect(api.listPersonalMemory()).rejects.toThrow('Network fail');
       expect(warnSpy).toHaveBeenCalled();
       warnSpy.mockRestore();
     });
@@ -345,7 +382,7 @@ describe('api service', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       mockFetch.mockRejectedValueOnce(new Error('Network fail'));
       await expect(
-        api.upsertPersonalMemory({ user_id: 'u1', memory_key: 'k1', value: {} })
+        api.upsertPersonalMemory({ memory_key: 'k1', value: {} })
       ).rejects.toThrow('Network fail');
       expect(warnSpy).toHaveBeenCalled();
       warnSpy.mockRestore();
@@ -358,11 +395,11 @@ describe('api service', () => {
         headers: new Map(),
       });
 
-      await api.deletePersonalMemory('u 1', 'key/one');
+      await api.deletePersonalMemory('key/one');
 
       const [url, options] = mockFetch.mock.calls[0];
       expect(url).toContain('/knowledge-base/personal?');
-      expect(url).toContain('user_id=u+1');
+      expect(url).not.toContain('user_id=');
       expect(url).toContain('memory_key=key%2Fone');
       expect(options.method).toBe('DELETE');
     });
@@ -370,7 +407,7 @@ describe('api service', () => {
     it('deletePersonalMemory catch block rethrows error', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       mockFetch.mockRejectedValueOnce(new Error('Network fail'));
-      await expect(api.deletePersonalMemory('u1', 'k1')).rejects.toThrow('Network fail');
+      await expect(api.deletePersonalMemory('k1')).rejects.toThrow('Network fail');
       expect(warnSpy).toHaveBeenCalled();
       warnSpy.mockRestore();
     });

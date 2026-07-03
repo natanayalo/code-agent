@@ -8,6 +8,7 @@ import { api } from '../services/api';
 
 vi.mock('../services/api', () => ({
   api: {
+    getKnowledgeBaseStats: vi.fn(),
     listPersonalMemory: vi.fn(),
     searchPersonalMemory: vi.fn(),
     listProjectMemory: vi.fn(),
@@ -43,11 +44,20 @@ async function waitForDebounce() {
   });
 }
 
+function openAddMemoryTab() {
+  fireEvent.click(screen.getByRole('tab', { name: /Add Memory/i }));
+}
+
 describe('KnowledgeBasePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal('confirm', vi.fn(() => true));
     vi.useRealTimers();
+    vi.mocked(api.getKnowledgeBaseStats).mockResolvedValue({
+      personal: { total: 0, requires_verification: 0 },
+      project: null,
+      project_global: { total: 0, requires_verification: 0 },
+    });
   });
 
   afterEach(() => {
@@ -55,12 +65,59 @@ describe('KnowledgeBasePage', () => {
   });
 
   it('renders loading state', () => {
+    vi.mocked(api.getKnowledgeBaseStats).mockResolvedValue({
+      personal: { total: 0, requires_verification: 0 },
+      project: null,
+      project_global: { total: 0, requires_verification: 0 },
+    });
     vi.mocked(api.listPersonalMemory).mockReturnValue(new Promise(() => {}));
     vi.mocked(api.listProjectMemory).mockReturnValue(new Promise(() => {}));
 
     renderKnowledgeBasePage();
 
     expect(screen.getByText('Loading knowledge base...')).toBeInTheDocument();
+  });
+
+  it('defaults to browse mode and shows inventory metrics', async () => {
+    vi.mocked(api.getKnowledgeBaseStats).mockResolvedValue({
+      personal: { total: 2, requires_verification: 1 },
+      project: { total: 3, requires_verification: 2 },
+      project_global: { total: 5, requires_verification: 2 },
+    });
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    expect(await screen.findByRole('tab', { name: /Browse/i })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    fireEvent.change(screen.getByLabelText('Project Repository URL'), {
+      target: { value: 'https://github.com/natanayalo/code-agent' },
+    });
+
+    await waitForDebounce();
+    await waitFor(() => {
+      expect(api.getKnowledgeBaseStats).toHaveBeenCalledWith(
+        'https://github.com/natanayalo/code-agent'
+      );
+    });
+    await waitFor(() => {
+      expect(api.listProjectMemory).toHaveBeenCalledWith(
+        'https://github.com/natanayalo/code-agent',
+        50,
+        0
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText('Personal Memory').length).toBeGreaterThanOrEqual(1);
+    });
+    expect(screen.getByText('2 memories')).toBeInTheDocument();
+    expect(screen.getByText('All project memory')).toBeInTheDocument();
+    expect(screen.getByText('5 memories')).toBeInTheDocument();
   });
 
   it('renders personal and project memory entries', async () => {
@@ -70,7 +127,6 @@ describe('KnowledgeBasePage', () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([
       {
         memory_id: 'pm-1',
-        user_id: 'user-1',
         memory_key: personalKey,
         value: { style: 'concise' },
         confidence: 0.8,
@@ -103,7 +159,6 @@ describe('KnowledgeBasePage', () => {
     renderKnowledgeBasePage();
 
     expect(await screen.findByRole('heading', { name: /Knowledge Base/i })).toBeInTheDocument();
-    fireEvent.change(await screen.findByLabelText('Personal User ID'), { target: { value: 'user-1' } });
     expect(await screen.findByText(personalKey)).toBeInTheDocument();
     expect(await screen.findByText(projectKey)).toBeInTheDocument();
     expect(screen.getByText(projectKey).closest('.knowledge-entry-header')).toBeInTheDocument();
@@ -116,7 +171,6 @@ describe('KnowledgeBasePage', () => {
     vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
     vi.mocked(api.upsertPersonalMemory).mockResolvedValue({
       memory_id: 'pm-2',
-      user_id: 'user-2',
       memory_key: 'editor',
       value: { theme: 'light' },
       confidence: 1.0,
@@ -130,9 +184,8 @@ describe('KnowledgeBasePage', () => {
 
     renderKnowledgeBasePage();
 
-    await screen.findByLabelText('Personal User ID');
-
-    fireEvent.change(screen.getByLabelText('Personal User ID'), { target: { value: 'user-2' } });
+    await screen.findByLabelText('Project Repository URL');
+    openAddMemoryTab();
     fireEvent.change(screen.getByLabelText('Personal Memory Key'), { target: { value: 'editor' } });
     fireEvent.change(screen.getByLabelText('Personal Memory Value (JSON object)'), {
       target: { value: '{"theme":"light"}' },
@@ -147,8 +200,8 @@ describe('KnowledgeBasePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save Personal Entry' }));
 
     await waitFor(() => expect(api.upsertPersonalMemory).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.getKnowledgeBaseStats).toHaveBeenCalled());
     expect(api.upsertPersonalMemory).toHaveBeenCalledWith({
-      user_id: 'user-2',
       memory_key: 'editor',
       value: { theme: 'light' },
       source: 'operator',
@@ -156,7 +209,6 @@ describe('KnowledgeBasePage', () => {
       confidence: 0.25,
       requires_verification: false,
     });
-    expect(screen.getByLabelText('Personal User ID')).toHaveValue('user-2');
     expect(screen.getByLabelText('Personal Memory Key')).toHaveValue('');
     expect(screen.getByLabelText('Personal Memory Value (JSON object)')).toHaveValue('{\n  \n}');
     expect(screen.getByLabelText('Personal Source')).toHaveValue('');
@@ -175,8 +227,8 @@ describe('KnowledgeBasePage', () => {
 
     renderKnowledgeBasePage();
 
-    await screen.findByLabelText('Personal User ID');
-    fireEvent.change(screen.getByLabelText('Personal User ID'), { target: { value: 'user-3' } });
+    await screen.findByLabelText('Project Repository URL');
+    openAddMemoryTab();
     fireEvent.change(screen.getByLabelText('Personal Memory Key'), { target: { value: 'bad-json' } });
     fireEvent.change(screen.getByLabelText('Personal Memory Value (JSON object)'), {
       target: { value: '"not an object"' },
@@ -240,7 +292,7 @@ describe('KnowledgeBasePage', () => {
     await waitFor(() => {
       expect(api.listProjectMemory).toHaveBeenCalledTimes(2);
     });
-    expect(api.listPersonalMemory).not.toHaveBeenCalled();
+    expect(api.listPersonalMemory).toHaveBeenCalled();
   });
 
   it('submits project memory payload and handles empty optional values', async () => {
@@ -268,6 +320,7 @@ describe('KnowledgeBasePage', () => {
     fireEvent.change(screen.getByLabelText('Project Repository URL'), {
       target: { value: '  https://example.com/repo  ' },
     });
+    openAddMemoryTab();
     fireEvent.change(screen.getByLabelText('Project Memory Key'), {
       target: { value: '  build  ' },
     });
@@ -285,6 +338,7 @@ describe('KnowledgeBasePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save Project Entry' }));
 
     await waitFor(() => expect(api.upsertProjectMemory).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.getKnowledgeBaseStats).toHaveBeenCalled());
     expect(api.upsertProjectMemory).toHaveBeenCalledWith({
       repo_url: 'https://example.com/repo',
       memory_key: 'build',
@@ -317,6 +371,7 @@ describe('KnowledgeBasePage', () => {
     fireEvent.change(screen.getByLabelText('Project Repository URL'), {
       target: { value: 'https://example.com/repo' },
     });
+    openAddMemoryTab();
     fireEvent.change(screen.getByLabelText('Project Memory Key'), {
       target: { value: 'build' },
     });
@@ -344,6 +399,7 @@ describe('KnowledgeBasePage', () => {
 
     renderKnowledgeBasePage();
 
+    openAddMemoryTab();
     await screen.findByLabelText('Personal Confidence (0.0-1.0)');
     expect(screen.getByLabelText('Personal Confidence (0.0-1.0)')).toHaveAttribute('type', 'number');
     expect(screen.getByLabelText('Project Confidence (0.0-1.0)')).toHaveAttribute('type', 'number');
@@ -353,7 +409,6 @@ describe('KnowledgeBasePage', () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([
       {
         memory_id: 'pm-delete',
-        user_id: 'user-delete',
         memory_key: 'remove_personal',
         value: { stale: true },
         confidence: 0.4,
@@ -372,14 +427,11 @@ describe('KnowledgeBasePage', () => {
 
     renderKnowledgeBasePage();
 
-    fireEvent.change(await screen.findByLabelText('Personal User ID'), {
-      target: { value: 'user-delete' },
-    });
     await screen.findByText('remove_personal');
     fireEvent.click(screen.getByLabelText('Delete personal memory remove_personal'));
 
     await waitFor(() => {
-      expect(api.deletePersonalMemory).toHaveBeenCalledWith('user-delete', 'remove_personal');
+      expect(api.deletePersonalMemory).toHaveBeenCalledWith('remove_personal');
     });
   });
 
@@ -442,7 +494,7 @@ describe('KnowledgeBasePage', () => {
     expect(api.deleteProjectMemory).not.toHaveBeenCalled();
   });
 
-  it('requires a personal user id before loading personal entries', async () => {
+  it('loads personal entries by default without a user filter', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockResolvedValue([]);
     vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
@@ -450,17 +502,10 @@ describe('KnowledgeBasePage', () => {
 
     renderKnowledgeBasePage();
 
-    expect(
-      await screen.findByText('Enter a personal user ID above to load entries.')
-    ).toBeInTheDocument();
-    expect(api.listPersonalMemory).not.toHaveBeenCalled();
-
-    fireEvent.change(screen.getByLabelText('Personal User ID'), { target: { value: 'user-filter' } });
-    expect(api.listPersonalMemory).not.toHaveBeenCalled();
-
     await waitFor(() => {
-      expect(api.listPersonalMemory).toHaveBeenCalledWith('user-filter', 50, 0);
+      expect(api.listPersonalMemory).toHaveBeenCalledWith(50, 0);
     });
+    expect(screen.queryByLabelText('Personal User ID')).not.toBeInTheDocument();
   });
 
   it('loads more project entries with pagination controls', async () => {
@@ -494,10 +539,9 @@ describe('KnowledgeBasePage', () => {
   });
 
   it('loads more personal entries with pagination controls', async () => {
-    vi.mocked(api.listPersonalMemory).mockImplementation(async (_userId, limit, offset) =>
+    vi.mocked(api.listPersonalMemory).mockImplementation(async (limit, offset) =>
       Array.from({ length: limit ?? 0 }, (_, index) => ({
         memory_id: `pm-${offset}-${index}`,
-        user_id: 'user-load-more',
         memory_key: `entry-${index}`,
         value: { index },
         confidence: 1,
@@ -515,19 +559,74 @@ describe('KnowledgeBasePage', () => {
 
     renderKnowledgeBasePage();
 
-    fireEvent.change(await screen.findByLabelText('Personal User ID'), {
-      target: { value: 'user-load-more' },
-    });
     await waitFor(() => {
-      expect(api.listPersonalMemory).toHaveBeenCalledWith('user-load-more', 50, 0);
+      expect(api.listPersonalMemory).toHaveBeenCalledWith(50, 0);
     });
     expect(await screen.findByText('entry-0')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Load More Personal Entries' }));
 
     await waitFor(() => {
-      expect(api.listPersonalMemory).toHaveBeenCalledWith('user-load-more', 50, 50);
+      expect(api.listPersonalMemory).toHaveBeenCalledWith(50, 50);
     });
+  });
+
+  it('shows loaded totals and the max-loaded browse summary', async () => {
+    vi.mocked(api.getKnowledgeBaseStats).mockResolvedValue({
+      personal: { total: 4, requires_verification: 1 },
+      project: null,
+      project_global: { total: 250, requires_verification: 8 },
+    });
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([
+      {
+        memory_id: 'pm-loaded-1',
+        memory_key: 'loaded-one',
+        value: { index: 1 },
+        confidence: 1,
+        scope: 'global',
+        source: null,
+        last_verified_at: null,
+        requires_verification: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      {
+        memory_id: 'pm-loaded-2',
+        memory_key: 'loaded-two',
+        value: { index: 2 },
+        confidence: 1,
+        scope: 'global',
+        source: null,
+        last_verified_at: null,
+        requires_verification: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue(
+      Array.from({ length: 200 }, (_, index) => ({
+        memory_id: `pj-max-${index}`,
+        repo_url: 'https://github.com/natanayalo/code-agent',
+        memory_key: `project-${index}`,
+        value: { index },
+        confidence: 1,
+        scope: 'repo',
+        source: null,
+        last_verified_at: null,
+        requires_verification: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }))
+    );
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    expect(await screen.findByText('Loaded 2 of 4 personal memories.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Showing first 200 of 250 project memories.')
+    ).toBeInTheDocument();
   });
 
   it('caps project pagination at backend limit', async () => {
@@ -574,7 +673,6 @@ describe('KnowledgeBasePage', () => {
     vi.mocked(api.searchPersonalMemory).mockResolvedValue([
       {
         memory_id: 'pm-search',
-        user_id: 'user-search',
         memory_key: 'preferred_test',
         value: { cmd: '.venv/bin/pytest' },
         headline: 'Run __CA_MARK_START__pytest__CA_MARK_END__ first <script>alert(1)</script>',
@@ -606,9 +704,7 @@ describe('KnowledgeBasePage', () => {
 
     renderKnowledgeBasePage();
 
-    fireEvent.change(await screen.findByLabelText('Personal User ID'), {
-      target: { value: 'user-search' },
-    });
+    await screen.findByLabelText('Project Repository URL');
     fireEvent.change(screen.getByLabelText('Project Repository URL'), {
       target: { value: 'https://github.com/natanayalo/code-agent' },
     });
@@ -618,7 +714,7 @@ describe('KnowledgeBasePage', () => {
 
     await waitForDebounce();
     await waitFor(() => {
-      expect(api.searchPersonalMemory).toHaveBeenCalledWith('user-search', 'pytest', 20);
+      expect(api.searchPersonalMemory).toHaveBeenCalledWith('pytest', 20);
     });
     await waitFor(() => {
       expect(api.searchProjectMemory).toHaveBeenCalledWith(
@@ -704,7 +800,6 @@ describe('KnowledgeBasePage', () => {
     vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
     vi.mocked(api.upsertPersonalMemory).mockResolvedValue({
       memory_id: 'pm-search-save',
-      user_id: 'user-search-save',
       memory_key: 'editor',
       value: { theme: 'dark' },
       confidence: 1,
@@ -718,17 +813,16 @@ describe('KnowledgeBasePage', () => {
 
     renderKnowledgeBasePage();
 
-    fireEvent.change(await screen.findByLabelText('Personal User ID'), {
-      target: { value: 'user-search-save' },
-    });
+    await screen.findByLabelText('Project Repository URL');
     fireEvent.change(screen.getByLabelText('Search Query'), {
       target: { value: 'ed' },
     });
     await waitForDebounce();
     await waitFor(() => {
-      expect(api.searchPersonalMemory).toHaveBeenCalledWith('user-search-save', 'ed', 20);
+      expect(api.searchPersonalMemory).toHaveBeenCalledWith('ed', 20);
     });
 
+    openAddMemoryTab();
     fireEvent.change(screen.getByLabelText('Personal Memory Key'), {
       target: { value: 'editor' },
     });
@@ -796,12 +890,9 @@ describe('KnowledgeBasePage', () => {
 
     renderKnowledgeBasePage();
 
-    fireEvent.change(await screen.findByLabelText('Personal User ID'), {
-      target: { value: 'user-browse' },
-    });
-    await waitForDebounce();
+    await screen.findByLabelText('Project Repository URL');
     await waitFor(() => {
-      expect(api.listPersonalMemory).toHaveBeenCalledWith('user-browse', 50, 0);
+      expect(api.listPersonalMemory).toHaveBeenCalledWith(50, 0);
     });
 
     fireEvent.change(screen.getByLabelText('Search Query'), {
@@ -809,7 +900,7 @@ describe('KnowledgeBasePage', () => {
     });
     await waitForDebounce();
     await waitFor(() => {
-      expect(api.searchPersonalMemory).toHaveBeenCalledWith('user-browse', 'py', 20);
+      expect(api.searchPersonalMemory).toHaveBeenCalledWith('py', 20);
     });
     expect(screen.getByText(/Searching for/)).toBeInTheDocument();
 

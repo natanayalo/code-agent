@@ -17,7 +17,6 @@ from db.models import PersonalMemory, ProjectMemory
 from repositories import (
     PersonalMemoryRepository,
     ProjectMemoryRepository,
-    UserRepository,
     create_engine_from_url,
     create_session_factory,
     session_scope,
@@ -84,18 +83,14 @@ def postgres_session_factory():
 def test_memory_repositories_support_upsert_and_delete(session_factory) -> None:
     """Personal and project memory entries support CRUD operations."""
     with session_scope(session_factory) as session:
-        user_repo = UserRepository(session)
         personal_memory_repo = PersonalMemoryRepository(session)
         project_memory_repo = ProjectMemoryRepository(session)
 
-        user = user_repo.create(external_user_id="telegram:mem", display_name="Memory User")
         personal_memory_repo.upsert(
-            user_id=user.id,
             memory_key="communication_preferences",
             value={"style": "concise"},
         )
         personal_memory_repo.upsert(
-            user_id=user.id,
             memory_key="communication_preferences",
             value={"style": "direct"},
         )
@@ -106,7 +101,6 @@ def test_memory_repositories_support_upsert_and_delete(session_factory) -> None:
         )
 
         personal_memory = personal_memory_repo.get(
-            user_id=user.id,
             memory_key="communication_preferences",
         )
         project_memory = project_memory_repo.get(
@@ -118,12 +112,11 @@ def test_memory_repositories_support_upsert_and_delete(session_factory) -> None:
         assert personal_memory.value == {"style": "direct"}
         assert project_memory is not None
         assert project_memory.value == {"docker": "use cert.pem when needed"}
-        assert len(personal_memory_repo.list_by_user(user.id)) == 1
+        assert len(personal_memory_repo.list_all()) == 1
         assert (
             len(project_memory_repo.list_by_repo("https://github.com/natanayalo/code-agent")) == 1
         )
         assert personal_memory_repo.delete(
-            user_id=user.id,
             memory_key="communication_preferences",
         )
         assert project_memory_repo.delete(
@@ -135,18 +128,14 @@ def test_memory_repositories_support_upsert_and_delete(session_factory) -> None:
 def test_memory_repositories_list_all_and_delete_missing_rows(session_factory) -> None:
     """Memory listing filters and delete-miss paths should be stable for operator UIs."""
     with session_scope(session_factory) as session:
-        user_repo = UserRepository(session)
         personal_memory_repo = PersonalMemoryRepository(session)
         project_memory_repo = ProjectMemoryRepository(session)
 
-        user = user_repo.create(external_user_id="telegram:mem-list", display_name="Memory List")
         personal_memory_repo.upsert(
-            user_id=user.id,
             memory_key="editor",
             value={"theme": "light"},
         )
         personal_memory_repo.upsert(
-            user_id=user.id,
             memory_key="shell",
             value={"name": "zsh"},
         )
@@ -161,7 +150,7 @@ def test_memory_repositories_list_all_and_delete_missing_rows(session_factory) -
             value={"cmd": "npm test"},
         )
 
-        assert len(personal_memory_repo.list_all(user_id=user.id, limit=10, offset=0)) == 2
+        assert len(personal_memory_repo.list_all(limit=10, offset=0)) == 2
         assert len(personal_memory_repo.list_all(limit=1, offset=1)) == 1
         assert (
             len(
@@ -180,7 +169,7 @@ def test_memory_repositories_list_all_and_delete_missing_rows(session_factory) -
             )
             is False
         )
-        assert personal_memory_repo.delete(user_id=user.id, memory_key="missing") is False
+        assert personal_memory_repo.delete(memory_key="missing") is False
 
 
 def test_personal_memory_upsert_recovers_from_duplicate_insert_race(
@@ -189,12 +178,9 @@ def test_personal_memory_upsert_recovers_from_duplicate_insert_race(
 ) -> None:
     """A duplicate insert race updates the existing personal memory entry."""
     with session_scope(session_factory) as session:
-        user_repo = UserRepository(session)
         personal_memory_repo = PersonalMemoryRepository(session)
 
-        user = user_repo.create(external_user_id="telegram:race", display_name="Race User")
         existing_entry = PersonalMemory(
-            user_id=user.id,
             memory_key="communication_preferences",
             value={"style": "concise"},
         )
@@ -204,23 +190,21 @@ def test_personal_memory_upsert_recovers_from_duplicate_insert_race(
         original_get = personal_memory_repo.get
         get_calls = 0
 
-        def stale_get(*, user_id: str, memory_key: str) -> PersonalMemory | None:
+        def stale_get(*, memory_key: str) -> PersonalMemory | None:
             nonlocal get_calls
             get_calls += 1
             if get_calls == 1:
                 return None
-            return original_get(user_id=user_id, memory_key=memory_key)
+            return original_get(memory_key=memory_key)
 
         monkeypatch.setattr(personal_memory_repo, "get", stale_get)
 
         updated_entry = personal_memory_repo.upsert(
-            user_id=user.id,
             memory_key="communication_preferences",
             value={"style": "direct"},
         )
 
         stored_entry = original_get(
-            user_id=user.id,
             memory_key="communication_preferences",
         )
         assert updated_entry.id == existing_entry.id
@@ -272,27 +256,20 @@ def test_project_memory_upsert_recovers_from_duplicate_insert_race(
         assert stored_entry.value == {"docker": "updated after retry"}
 
 
-def _seed_postgres_search_data(session) -> tuple[str, str, str, str]:
+def _seed_postgres_search_data(session) -> tuple[str, str, str]:
     repo_url = "https://github.com/natanayalo/code-agent"
-    user = UserRepository(session).create(
-        external_user_id="telegram:postgres-search",
-        display_name="Postgres Search User",
-    )
     personal_memory_repo = PersonalMemoryRepository(session)
     project_memory_repo = ProjectMemoryRepository(session)
 
     personal_memory_repo.upsert(
-        user_id=user.id,
         memory_key="pytest_playbook",
         value={"cmd": "pytest pytest tests/unit/test_memory_search.py"},
     )
     personal_memory_repo.upsert(
-        user_id=user.id,
         memory_key="pytest_command",
         value={"cmd": ".venv/bin/pytest"},
     )
     personal_memory_repo.upsert(
-        user_id=user.id,
         memory_key="shell",
         value={"name": "zsh"},
     )
@@ -312,38 +289,40 @@ def _seed_postgres_search_data(session) -> tuple[str, str, str, str]:
         value={"cmd": ".venv/bin/ruff check ."},
     )
     session.flush()
-    return user.id, repo_url, "pytest_playbook", "pytest_matrix"
+    return repo_url, "pytest_playbook", "pytest_matrix"
 
 
 def _search_vector_text(
     session,
     *,
     table_name: str,
-    filter_key: str,
-    filter_value: str,
     memory_key: str,
+    filter_key: str | None = None,
+    filter_value: str | None = None,
 ) -> str:
+    filter_sql = f"{filter_key} = :filter_value AND " if filter_key else ""
+    params = {"memory_key": memory_key}
+    if filter_key:
+        params["filter_value"] = filter_value or ""
     return session.execute(
         text(
             f"""
             SELECT search_vector::text
             FROM {table_name}
-            WHERE {filter_key} = :filter_value AND memory_key = :memory_key
+            WHERE {filter_sql}memory_key = :memory_key
             """
         ),
-        {"filter_value": filter_value, "memory_key": memory_key},
+        params,
     ).scalar_one()
 
 
 def test_memory_search_executes_real_postgres_fts(postgres_session_factory) -> None:
     """Full-text search should execute against Postgres with ranked results and headlines."""
     with session_scope(postgres_session_factory) as session:
-        user_id, repo_url, personal_key, project_key = _seed_postgres_search_data(session)
+        repo_url, personal_key, project_key = _seed_postgres_search_data(session)
         personal_search_vector = _search_vector_text(
             session,
             table_name="memory_personal",
-            filter_key="user_id",
-            filter_value=user_id,
             memory_key=personal_key,
         )
         project_search_vector = _search_vector_text(
@@ -356,7 +335,6 @@ def test_memory_search_executes_real_postgres_fts(postgres_session_factory) -> N
 
     with session_scope(postgres_session_factory) as session:
         personal_results = PersonalMemoryRepository(session).search(
-            user_id=user_id,
             query="pytest",
             limit=5,
         )

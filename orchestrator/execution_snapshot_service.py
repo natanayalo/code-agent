@@ -26,6 +26,8 @@ from orchestrator.execution_types import (
     ArtifactSnapshot,
     ExecutionPlanNodeSnapshot,
     ExecutionPlanSnapshot,
+    KnowledgeBaseStatsSnapshot,
+    MemoryInventoryCountSnapshot,
     OperationalMetrics,
     PersonalMemorySnapshot,
     PersonalMemoryUpsertRequest,
@@ -144,28 +146,60 @@ def get_session(self: Any, session_id: str) -> SessionSnapshot | None:
 def list_personal_memory(
     self: Any,
     *,
-    user_id: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[PersonalMemorySnapshot]:
-    """List persisted personal memory entries with optional user filtering."""
+    """List persisted operator-global personal memory entries."""
     with session_scope(self.session_factory) as session:
         memory_repo = PersonalMemoryRepository(session)
-        memories = memory_repo.list_all(user_id=user_id, limit=limit, offset=offset)
+        memories = memory_repo.list_all(limit=limit, offset=offset)
         return [self._map_personal_memory_to_snapshot(memory) for memory in memories]
+
+
+def get_knowledge_base_stats(
+    self: Any,
+    *,
+    repo_url: str | None = None,
+) -> KnowledgeBaseStatsSnapshot:
+    """Return exact skeptical-memory inventory counts for dashboard browse surfaces."""
+    normalized_repo_url = _optional_scope(repo_url)
+    with session_scope(self.session_factory) as session:
+        personal_repo = PersonalMemoryRepository(session)
+        personal_stats = _memory_count_snapshot(personal_repo.count_all())
+
+        project_repo = ProjectMemoryRepository(session)
+        project_stats = (
+            _memory_count_snapshot(project_repo.count_all(repo_url=normalized_repo_url))
+            if normalized_repo_url
+            else None
+        )
+        project_global_stats = _memory_count_snapshot(project_repo.count_all())
+
+        return KnowledgeBaseStatsSnapshot(
+            personal=personal_stats,
+            project=project_stats,
+            project_global=project_global_stats,
+        )
+
+
+def _optional_scope(value: str | None) -> str | None:
+    """Normalize blank dashboard scope parameters to omitted scopes."""
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def search_personal_memory(
     self: Any,
     *,
-    user_id: str,
     query: str,
     limit: int = 20,
 ) -> list[PersonalMemorySnapshot]:
-    """Search persisted personal memory entries for one user."""
+    """Search persisted operator-global personal memory entries."""
     with session_scope(self.session_factory) as session:
         memory_repo = PersonalMemoryRepository(session)
-        results = memory_repo.search(user_id=user_id, query=query, limit=limit)
+        results = memory_repo.search(query=query, limit=limit)
         return [
             self._map_personal_memory_to_snapshot(result.memory, headline=result.headline)
             for result in results
@@ -180,7 +214,6 @@ def upsert_personal_memory(
     with session_scope(self.session_factory) as session:
         memory_repo = PersonalMemoryRepository(session)
         upsert_kwargs: dict[str, Any] = {
-            "user_id": payload.user_id,
             "memory_key": payload.memory_key,
             "value": payload.value,
         }
@@ -198,11 +231,11 @@ def upsert_personal_memory(
         return self._map_personal_memory_to_snapshot(memory)
 
 
-def delete_personal_memory(self: Any, *, user_id: str, memory_key: str) -> bool:
+def delete_personal_memory(self: Any, *, memory_key: str) -> bool:
     """Delete one personal memory entry by key."""
     with session_scope(self.session_factory) as session:
         memory_repo = PersonalMemoryRepository(session)
-        return memory_repo.delete(user_id=user_id, memory_key=memory_key)
+        return memory_repo.delete(memory_key=memory_key)
 
 
 def list_project_memory(
@@ -547,7 +580,6 @@ def _map_personal_memory_to_snapshot(
 ) -> PersonalMemorySnapshot:
     return PersonalMemorySnapshot(
         memory_id=memory.id,
-        user_id=memory.user_id,
         memory_key=memory.memory_key,
         value=dict(memory.value or {}),
         headline=headline,
@@ -558,6 +590,14 @@ def _map_personal_memory_to_snapshot(
         requires_verification=memory.requires_verification,
         created_at=memory.created_at,
         updated_at=memory.updated_at,
+    )
+
+
+def _memory_count_snapshot(counts: tuple[int, int]) -> MemoryInventoryCountSnapshot:
+    total, requires_verification = counts
+    return MemoryInventoryCountSnapshot(
+        total=total,
+        requires_verification=requires_verification,
     )
 
 

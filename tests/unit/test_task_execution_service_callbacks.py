@@ -477,7 +477,6 @@ def test_snapshot_mapping_helpers_include_working_context_and_memory_metadata() 
             files_touched=["orchestrator/execution.py"],
         )
         personal_memory = PersonalMemoryRepository(session).upsert(
-            user_id=user.id,
             memory_key="style",
             value={"tone": "concise"},
             source="user_instruction",

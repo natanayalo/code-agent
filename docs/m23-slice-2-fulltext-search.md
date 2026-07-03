@@ -133,32 +133,30 @@ guarded. The repository search methods should use raw SQL for the Postgres
 def search(
     self,
     *,
-    user_id: str,
     query: str,
     limit: int = 20,
 ) -> list[PersonalMemory]:
-    """Full-text search on personal memories for a user."""
+    """Full-text search on operator-global personal memories."""
     if not query or not query.strip():
         return []
 
     dialect = self.session.bind.dialect.name if self.session.bind else ""
     if dialect != "postgresql":
-        return self.list_by_user(user_id)
+        return self.list_all(limit=limit, offset=0)
 
     normalized_limit = max(1, min(limit, 100))
     id_rows = self.session.execute(
         text("""
             SELECT id
             FROM memory_personal
-            WHERE user_id = :user_id
-              AND search_vector @@ plainto_tsquery('english', :query)
+            WHERE search_vector @@ plainto_tsquery('english', :query)
             ORDER BY
               ts_rank(search_vector, plainto_tsquery('english', :query)) DESC,
               created_at DESC,
               id DESC
             LIMIT :limit
         """),
-        {"user_id": user_id, "query": query, "limit": normalized_limit},
+        {"query": query, "limit": normalized_limit},
     ).scalars().all()
 
     if not id_rows:
@@ -181,7 +179,7 @@ Key details:
 - Do not reference `PersonalMemory.search_vector` or
   `ProjectMemory.search_vector`; those ORM attributes do not exist.
 - Empty/whitespace-only query returns `[]`.
-- Non-Postgres dialects fall back to `list_by_user` / `list_by_repo` only for
+- Non-Postgres dialects fall back to `list_all` / `list_by_repo` only for
   non-empty queries.
 - `plainto_tsquery` safely parses user input without special query syntax.
 - The API caps `limit` at 100; the repository should defensively cap it too.
@@ -191,7 +189,7 @@ Key details:
 **File**: `orchestrator/graph.py`
 
 Modify `build_load_memory_node` from Slice 1 to call `repo.search(...)` instead
-of `repo.list_by_user(...)` / `repo.list_by_repo(...)`:
+of `repo.list_all(...)` / `repo.list_by_repo(...)`:
 
 ```python
 search_query = (
@@ -200,10 +198,9 @@ search_query = (
 )
 search_limit = 20
 
-if user_id:
-    repo = PersonalMemoryRepository(db_session)
-    for row in repo.search(user_id=user_id, query=search_query, limit=search_limit):
-        personal_entries.append(MemoryEntry(...))
+repo = PersonalMemoryRepository(db_session)
+for row in repo.search(query=search_query, limit=search_limit):
+    personal_entries.append(MemoryEntry(...))
 
 if repo_url:
     repo = ProjectMemoryRepository(db_session)
@@ -234,7 +231,6 @@ payload={
 ```python
 @router.get("/personal/search", response_model=list[PersonalMemorySnapshot])
 def search_personal_memory(
-    user_id: str = Query(min_length=1),
     q: str = Query(default=""),
     limit: int = Query(default=20, ge=1, le=100),
     task_service: TaskExecutionService = Depends(get_task_service),
@@ -260,7 +256,7 @@ methods. Empty `q` returns `[]`.
 **File**: `dashboard/src/services/api.ts`
 
 ```typescript
-searchPersonalMemory(userId: string, query: string, limit?: number): Promise<PersonalMemorySnapshot[]>
+searchPersonalMemory(query: string, limit?: number): Promise<PersonalMemorySnapshot[]>
 searchProjectMemory(repoUrl: string, query: string, limit?: number): Promise<ProjectMemorySnapshot[]>
 ```
 
@@ -297,7 +293,7 @@ searchProjectMemory(repoUrl: string, query: string, limit?: number): Promise<Pro
 | `test_search_empty_query_returns_empty` | Empty/whitespace query -> empty list |
 | `test_search_sqlite_fallback_for_non_empty_query` | SQLite dialect + non-empty query -> load-all fallback |
 | `test_search_respects_limit_cap` | Repository defensively caps large limits |
-| `test_search_filters_by_user_id` | Personal search scopes by user |
+| `test_search_queries_operator_global_personal_memory` | Personal search is operator-global |
 | `test_search_filters_by_repo_url` | Project search scopes by repo |
 | `test_models_create_all_on_sqlite_without_tsvector_mapping` | `Base.metadata.create_all()` works on SQLite |
 
@@ -322,7 +318,7 @@ not support `tsvector`.
 
 #### [MODIFY] `tests/integration/test_knowledge_base_endpoints.py`
 
-- Test `GET /knowledge-base/personal/search?user_id=&q=`.
+- Test `GET /knowledge-base/personal/search?q=`.
 - Test `GET /knowledge-base/project/search?repo_url=&q=`.
 - Test empty query handling.
 - Test `limit` validation and result limiting.

@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, TypeVar, cast
+from typing import Any, cast
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -26,7 +26,6 @@ _HEADLINE_OPTIONS = (
     "MinWords=6,"
     "FragmentDelimiter= ... "
 )
-_MemoryRowT = TypeVar("_MemoryRowT", PersonalMemory, ProjectMemory)
 
 
 @dataclass(frozen=True)
@@ -54,7 +53,7 @@ def _dialect_name(session: Session) -> str:
 
 
 def _fallback_search_results(
-    memories: Sequence[_MemoryRowT],
+    memories: Sequence[PersonalMemory | ProjectMemory],
     *,
     query: str,
     limit: int,
@@ -75,7 +74,7 @@ def _ordered_search_results(
     *,
     statement: str,
     params: dict[str, Any],
-    model: type[_MemoryRowT],
+    model: type[PersonalMemory] | type[ProjectMemory],
 ) -> list[MemorySearchResult]:
     rows = session.execute(text(statement), params).mappings().all()
     if not rows:
@@ -84,7 +83,7 @@ def _ordered_search_results(
     memory_ids = [row["id"] for row in rows]
     model_id = cast(Any, model).id
     memories = cast(
-        list[_MemoryRowT],
+        list[PersonalMemory | ProjectMemory],
         session.scalars(select(model).where(model_id.in_(memory_ids))).all(),
     )
     memories_by_id = {str(memory.id): memory for memory in memories}
@@ -110,25 +109,37 @@ class PersonalMemoryRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def get(self, *, user_id: str, memory_key: str) -> PersonalMemory | None:
-        statement = select(PersonalMemory).where(
-            PersonalMemory.user_id == user_id,
-            PersonalMemory.memory_key == memory_key,
-        )
+    def get(self, *, memory_key: str) -> PersonalMemory | None:
+        statement = select(PersonalMemory).where(PersonalMemory.memory_key == memory_key)
         return self.session.scalar(statement)
 
-    def list_by_user(self, user_id: str) -> list[PersonalMemory]:
+    def list_all(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[PersonalMemory]:
         statement = (
             select(PersonalMemory)
-            .where(PersonalMemory.user_id == user_id)
             .order_by(PersonalMemory.created_at.desc(), PersonalMemory.id.desc())
+            .limit(limit)
+            .offset(offset)
         )
         return list(self.session.scalars(statement))
+
+    def count_all(self) -> tuple[int, int]:
+        """Return total and requires-verification counts for personal memory."""
+        total_statement = select(func.count()).select_from(PersonalMemory)
+        verification_statement = total_statement.where(
+            PersonalMemory.requires_verification.is_(True)
+        )
+        total = self.session.scalar(total_statement) or 0
+        requires_verification = self.session.scalar(verification_statement) or 0
+        return int(total), int(requires_verification)
 
     def search(
         self,
         *,
-        user_id: str,
         query: str,
         limit: int = 20,
     ) -> list[MemorySearchResult]:
@@ -139,7 +150,7 @@ class PersonalMemoryRepository:
 
         if _dialect_name(self.session) != "postgresql":
             return _fallback_search_results(
-                self.list_by_user(user_id),
+                self.list_all(),
                 query=normalized_query,
                 limit=_normalized_search_limit(limit),
             )
@@ -156,8 +167,7 @@ class PersonalMemoryRepository:
                         :headline_options
                     ) AS headline
                 FROM memory_personal
-                WHERE user_id = :user_id
-                  AND search_vector @@ plainto_tsquery('english', :query)
+                WHERE search_vector @@ plainto_tsquery('english', :query)
                 ORDER BY
                   ts_rank(search_vector, plainto_tsquery('english', :query)) DESC,
                   created_at DESC,
@@ -165,7 +175,6 @@ class PersonalMemoryRepository:
                 LIMIT :limit
             """,
             params={
-                "user_id": user_id,
                 "query": normalized_query,
                 "limit": _normalized_search_limit(limit),
                 "headline_options": _HEADLINE_OPTIONS,
@@ -173,27 +182,9 @@ class PersonalMemoryRepository:
             model=PersonalMemory,
         )
 
-    def list_all(
-        self,
-        *,
-        user_id: str | None = None,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> list[PersonalMemory]:
-        statement = select(PersonalMemory)
-        if user_id is not None:
-            statement = statement.where(PersonalMemory.user_id == user_id)
-        statement = (
-            statement.order_by(PersonalMemory.created_at.desc(), PersonalMemory.id.desc())
-            .limit(limit)
-            .offset(offset)
-        )
-        return list(self.session.scalars(statement))
-
     def upsert(
         self,
         *,
-        user_id: str,
         memory_key: str,
         value: dict[str, Any],
         source: str | None | object = UNSET,
@@ -202,10 +193,9 @@ class PersonalMemoryRepository:
         last_verified_at: datetime | None | object = UNSET,
         requires_verification: bool | object = UNSET,
     ) -> PersonalMemory:
-        memory_entry = self.get(user_id=user_id, memory_key=memory_key)
+        memory_entry = self.get(memory_key=memory_key)
         if memory_entry is None:
             memory_entry = PersonalMemory(
-                user_id=user_id,
                 memory_key=memory_key,
                 value=value,
             )
@@ -214,7 +204,7 @@ class PersonalMemoryRepository:
                     self.session.add(memory_entry)
                     self.session.flush()
             except IntegrityError:
-                memory_entry = self.get(user_id=user_id, memory_key=memory_key)
+                memory_entry = self.get(memory_key=memory_key)
                 if memory_entry is None:
                     raise
         apply_memory_metadata(
@@ -229,8 +219,8 @@ class PersonalMemoryRepository:
         self.session.flush()
         return memory_entry
 
-    def delete(self, *, user_id: str, memory_key: str) -> bool:
-        memory_entry = self.get(user_id=user_id, memory_key=memory_key)
+    def delete(self, *, memory_key: str) -> bool:
+        memory_entry = self.get(memory_key=memory_key)
         if memory_entry is None:
             return False
         self.session.delete(memory_entry)
@@ -258,6 +248,18 @@ class ProjectMemoryRepository:
             .order_by(ProjectMemory.created_at.desc(), ProjectMemory.id.desc())
         )
         return list(self.session.scalars(statement))
+
+    def count_all(self, repo_url: str | None = None) -> tuple[int, int]:
+        """Return total and requires-verification counts for project memory."""
+        total_statement = select(func.count()).select_from(ProjectMemory)
+        if repo_url is not None:
+            total_statement = total_statement.where(ProjectMemory.repo_url == repo_url)
+        verification_statement = total_statement.where(
+            ProjectMemory.requires_verification.is_(True)
+        )
+        total = self.session.scalar(total_statement) or 0
+        requires_verification = self.session.scalar(verification_statement) or 0
+        return int(total), int(requires_verification)
 
     def search(
         self,

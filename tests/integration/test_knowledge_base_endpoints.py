@@ -60,32 +60,11 @@ def client(session_factory) -> Iterator[TestClient]:
         yield test_client
 
 
-def _create_session_and_get_user_id(client: TestClient) -> str:
-    task_response = client.post(
-        "/tasks",
-        json={
-            "task_text": "seed user for memory management",
-            "session": {
-                "channel": "http",
-                "external_user_id": "test-user",
-                "external_thread_id": "thread-memory",
-            },
-        },
-    )
-    assert task_response.status_code == 202
-    sessions_response = client.get("/sessions")
-    assert sessions_response.status_code == 200
-    return sessions_response.json()[0]["user_id"]
-
-
 def test_personal_memory_endpoints_support_crud(client: TestClient) -> None:
     """Personal memory should support list, upsert, and delete over API."""
-    user_id = _create_session_and_get_user_id(client)
-
     upsert_response = client.put(
         "/knowledge-base/personal",
         json={
-            "user_id": user_id,
             "memory_key": "communication_style",
             "value": {"style": "concise"},
             "source": "operator",
@@ -96,7 +75,7 @@ def test_personal_memory_endpoints_support_crud(client: TestClient) -> None:
     )
     assert upsert_response.status_code == 200
     upsert_payload = upsert_response.json()
-    assert upsert_payload["user_id"] == user_id
+    assert "user_id" not in upsert_payload
     assert upsert_payload["memory_key"] == "communication_style"
     assert upsert_payload["value"] == {"style": "concise"}
     assert upsert_payload["source"] == "operator"
@@ -104,50 +83,130 @@ def test_personal_memory_endpoints_support_crud(client: TestClient) -> None:
     assert upsert_payload["scope"] == "global"
     assert upsert_payload["requires_verification"] is False
 
-    list_response = client.get(f"/knowledge-base/personal?user_id={user_id}")
+    list_response = client.get("/knowledge-base/personal")
     assert list_response.status_code == 200
     list_payload = list_response.json()
     assert len(list_payload) == 1
     assert list_payload[0]["memory_key"] == "communication_style"
 
-    delete_response = client.delete(
-        f"/knowledge-base/personal?user_id={user_id}&memory_key=communication_style"
-    )
+    delete_response = client.delete("/knowledge-base/personal?memory_key=communication_style")
     assert delete_response.status_code == 204
 
-    list_after_delete = client.get(f"/knowledge-base/personal?user_id={user_id}")
+    list_after_delete = client.get("/knowledge-base/personal")
     assert list_after_delete.status_code == 200
     assert list_after_delete.json() == []
 
 
-def test_personal_memory_list_requires_user_id_filter(client: TestClient) -> None:
-    """Personal memory listing should require an explicit user_id."""
+def test_personal_memory_list_supports_global_inventory(client: TestClient) -> None:
+    """Personal memory listing should not require a user scope."""
     response = client.get("/knowledge-base/personal")
-    assert response.status_code == 422
+    assert response.status_code == 200
+    assert response.json() == []
 
 
-def test_personal_memory_search_supports_filtered_lookup(client: TestClient) -> None:
-    """Personal memory search should return scoped entries and ignore blank queries."""
-    user_id = _create_session_and_get_user_id(client)
+def test_personal_memory_search_supports_global_lookup(client: TestClient) -> None:
+    """Personal memory search should return global entries and ignore blank queries."""
     client.put(
         "/knowledge-base/personal",
         json={
-            "user_id": user_id,
             "memory_key": "communication_style",
             "value": {"style": "concise"},
         },
     )
 
-    search_response = client.get(
-        f"/knowledge-base/personal/search?user_id={user_id}&q=concise&limit=10"
-    )
+    search_response = client.get("/knowledge-base/personal/search?q=concise&limit=10")
     assert search_response.status_code == 200
     assert [entry["memory_key"] for entry in search_response.json()] == ["communication_style"]
     assert search_response.json()[0]["headline"] is None
 
-    empty_response = client.get(f"/knowledge-base/personal/search?user_id={user_id}&q=   ")
+    empty_response = client.get("/knowledge-base/personal/search?q=   ")
     assert empty_response.status_code == 200
     assert empty_response.json() == []
+
+
+def test_knowledge_base_stats_returns_exact_counts_and_updates_after_delete(
+    client: TestClient,
+) -> None:
+    """Knowledge-base stats should report scoped and global memory inventory counts."""
+    repo_url = "https://github.com/natanayalo/code-agent"
+    other_repo_url = "https://github.com/natanayalo/other"
+
+    client.put(
+        "/knowledge-base/personal",
+        json={
+            "memory_key": "style",
+            "value": {"style": "concise"},
+            "requires_verification": True,
+        },
+    )
+    client.put(
+        "/knowledge-base/personal",
+        json={
+            "memory_key": "editor",
+            "value": {"theme": "dark"},
+            "requires_verification": False,
+        },
+    )
+    client.put(
+        "/knowledge-base/project",
+        json={
+            "repo_url": repo_url,
+            "memory_key": "build_command",
+            "value": {"cmd": ".venv/bin/pytest"},
+            "requires_verification": True,
+        },
+    )
+    client.put(
+        "/knowledge-base/project",
+        json={
+            "repo_url": other_repo_url,
+            "memory_key": "lint_command",
+            "value": {"cmd": "npm run lint"},
+            "requires_verification": False,
+        },
+    )
+
+    response = client.get(f"/knowledge-base/stats?repo_url={repo_url}")
+    assert response.status_code == 200
+    assert response.json() == {
+        "personal": {"total": 2, "requires_verification": 1},
+        "project": {"total": 1, "requires_verification": 1},
+        "project_global": {"total": 2, "requires_verification": 1},
+    }
+
+    delete_response = client.delete(
+        f"/knowledge-base/project?repo_url={repo_url}&memory_key=build_command"
+    )
+    assert delete_response.status_code == 204
+
+    updated_response = client.get(f"/knowledge-base/stats?repo_url={repo_url}")
+    assert updated_response.status_code == 200
+    assert updated_response.json() == {
+        "personal": {"total": 2, "requires_verification": 1},
+        "project": {"total": 0, "requires_verification": 0},
+        "project_global": {"total": 1, "requires_verification": 0},
+    }
+
+
+def test_knowledge_base_stats_allows_blank_scopes(client: TestClient) -> None:
+    """Blank project scopes should return null project counts and exact personal counts."""
+    response = client.get("/knowledge-base/stats")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "personal": {"total": 0, "requires_verification": 0},
+        "project": None,
+        "project_global": {"total": 0, "requires_verification": 0},
+    }
+
+    blank_response = client.get("/knowledge-base/stats?repo_url=")
+
+    assert blank_response.status_code == 200
+    assert blank_response.json() == {
+        "personal": {"total": 0, "requires_verification": 0},
+        "project": None,
+        "project_global": {"total": 0, "requires_verification": 0},
+    }
 
 
 def test_project_memory_endpoints_support_crud(client: TestClient) -> None:
@@ -190,9 +249,7 @@ def test_project_memory_endpoints_support_crud(client: TestClient) -> None:
 
 def test_knowledge_base_delete_returns_not_found_when_entry_missing(client: TestClient) -> None:
     """Deleting a missing knowledge-base row should return 404."""
-    personal_response = client.delete(
-        "/knowledge-base/personal?user_id=user-missing&memory_key=missing"
-    )
+    personal_response = client.delete("/knowledge-base/personal?memory_key=missing")
     assert personal_response.status_code == 404
 
     project_response = client.delete(
@@ -203,11 +260,9 @@ def test_knowledge_base_delete_returns_not_found_when_entry_missing(client: Test
 
 def test_knowledge_base_upsert_validates_confidence_bounds(client: TestClient) -> None:
     """Confidence must remain in [0.0, 1.0] per skeptical-memory policy."""
-    user_id = _create_session_and_get_user_id(client)
     response = client.put(
         "/knowledge-base/personal",
         json={
-            "user_id": user_id,
             "memory_key": "invalid-confidence",
             "value": {"foo": "bar"},
             "confidence": 1.1,
