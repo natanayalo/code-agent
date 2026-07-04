@@ -457,6 +457,7 @@ Progress:
 - [x] Slice 2: add full-text memory search and retrieval visibility before evaluating semantic/vector retrieval
 - [x] Slice 3/4: add deterministic retrieval evaluation, curated reviewable memory corpus, memory proposals, dashboard review flow, and SQLite-vs-Postgres FTS evidence
 - [ ] Slice 5: unify worker memory candidates and reviewable proposals behind a `MemoryAdmissionService`, including a required LangMem and Mem0/OpenMemory adoption spike; see [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md)
+- [ ] Slice 6: add an episodic observation layer for raw task/session observations, compact search, timeline/full-observation fetch, recent-session context, private-tag stripping, and an observation-to-admission bridge; see [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md)
 
 Scope:
 
@@ -464,6 +465,8 @@ Scope:
 - use risk/decision classification to reject, create, update, merge, or route candidates to human review
 - use `memory_proposals` only for candidates that require human approval
 - keep durable personal/project memory in the existing Postgres store
+- store task/session observations separately from durable memory
+- bridge useful observations into `MemoryCandidate` objects that still pass through `MemoryAdmissionService`
 - add semantic retrieval behind the existing skeptical-memory contract
 - preserve source, confidence, scope, verification, and editability metadata
 - consider pgvector only if metrics justify the new infrastructure dependency
@@ -473,6 +476,8 @@ Boundary:
 - do not add vector storage just because it is available; add it only when measured retrieval quality needs it
 - do not let workers write durable memory directly; all candidates pass through admission
 - do not add LangMem, Mem0/OpenMemory, Graphiti, Cognee, or another memory platform as a production dependency until the Slice 5 adoption spike proves a clear net simplification
+- copy useful memory-system ideas into local, inspectable Postgres-backed components before adopting a full external memory platform
+- do not promote raw observations into durable memory without admission
 
 ### M24 Decomposed Task DAG
 
@@ -563,7 +568,7 @@ Phase 3:
 Phase 4:
 
 1. Milestone 22 [x]
-2. Milestone 23 [in progress: Slice 5 memory admission planned]
+2. Milestone 23 [in progress: Slice 5 memory admission in review; Slice 6 episodic observations planned]
 3. Milestone 24
 4. Milestone 25
 5. Milestone 26

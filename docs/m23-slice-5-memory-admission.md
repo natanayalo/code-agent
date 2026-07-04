@@ -155,12 +155,15 @@ Slice 5. Replacing current memory wholesale would regress:
 - Synchronous admission guarantees for worker-emitted candidates.
 - Safety controls beyond explicit private tags and model prompt behavior.
 
-Follow-up recommendation: create a separate replacement spike for episodic
-memory. Evaluate running claude-mem as a sidecar retrieval source while keeping
-`MemoryAdmissionService`, Postgres personal/project tables, and
-`memory_proposals` as the curated durable memory path. Do not replace the
-curated admission layer with claude-mem observations without adding a
-deterministic admission gate over its generated observations.
+Follow-up recommendation: implement
+[`M23 Slice 6: Episodic Observation Layer`](m23-slice-6-episodic-observation-layer.md).
+Copy the useful library patterns into this repo's local architecture: raw
+task/session observation capture, compact search, timeline/full-observation
+fetches, recent-session context blocks, private-tag stripping, and an
+observation-to-`MemoryCandidate` bridge. Keep `MemoryAdmissionService`, Postgres
+personal/project tables, and `memory_proposals` as the curated durable memory
+path. Do not replace the curated admission layer with observations without a
+deterministic admission gate.
 
 | Criterion | Custom baseline | LangMem experiment | Mem0/OpenMemory experiment |
 |---|---|---|---|
