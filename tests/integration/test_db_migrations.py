@@ -15,6 +15,7 @@ EXPECTED_TABLES = {
     "execution_plan_nodes",
     "human_interactions",
     "inbound_deliveries",
+    "memory_admission_decisions",
     "memory_personal",
     "memory_proposals",
     "memory_project",
@@ -63,6 +64,25 @@ EXPECTED_CHECK_CONSTRAINTS = {
         "ck_memory_proposals_confidence_range": {
             "confidence >= 0.0",
             "confidence <= 1.0",
+        },
+    },
+    "memory_admission_decisions": {
+        "ck_memory_admission_decisions_memory_admission_category": {
+            "personal",
+            "project",
+        },
+        "ck_memory_admission_decisions_memory_admission_decision": {
+            "reject",
+            "create",
+            "update",
+            "merge",
+            "needs_human_review",
+        },
+        "ck_memory_admission_decisions_memory_admission_risk_level": {
+            "low",
+            "medium",
+            "high",
+            "blocked",
         },
     },
     "execution_plan_nodes": {
@@ -237,6 +257,18 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     assert session_state_columns["decisions_made"]["default"] == "'{}'"
     assert session_state_columns["identified_risks"]["default"] == "'{}'"
     assert session_state_columns["files_touched"]["default"] == "'[]'"
+    assert {
+        "category",
+        "memory_key",
+        "candidate_payload",
+        "decision",
+        "risk_level",
+        "reason",
+        "task_id",
+        "session_id",
+        "durable_memory_id",
+        "proposal_id",
+    } <= _column_names(inspector, "memory_admission_decisions")
     assert {
         "category",
         "repo_url",

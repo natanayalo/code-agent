@@ -233,7 +233,7 @@ class WorkerDispatch(OrchestratorModel):
 
 
 class PersistMemoryEntry(OrchestratorModel):
-    """A memory update the orchestrator intends to persist after a run."""
+    """A candidate memory the orchestrator will submit to admission after a run."""
 
     category: MemoryCategory
     memory_key: str

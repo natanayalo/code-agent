@@ -786,6 +786,50 @@ class MemoryProposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         return MemoryProposalStatus(value)
 
 
+class MemoryAdmissionDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Inspectable decision made while admitting a candidate memory."""
+
+    __tablename__ = "memory_admission_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('personal', 'project')",
+            name="memory_admission_category",
+        ),
+        CheckConstraint(
+            "decision IN ('reject', 'create', 'update', 'merge', 'needs_human_review')",
+            name="memory_admission_decision",
+        ),
+        CheckConstraint(
+            "risk_level IN ('low', 'medium', 'high', 'blocked')",
+            name="memory_admission_risk_level",
+        ),
+        Index("ix_memory_admission_decisions_decision_created_at", "decision", "created_at"),
+    )
+
+    category: Mapped[str] = mapped_column(String(8), nullable=False)
+    memory_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    candidate_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    decision: Mapped[str] = mapped_column(String(18), nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(7), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    durable_memory_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    proposal_id: Mapped[str | None] = mapped_column(
+        ForeignKey("memory_proposals.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+
 class ExecutionPlan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """An observable spine of planned work for a complex task."""
 

@@ -1,0 +1,117 @@
+[
+  {
+    "name": "verified_project_fact",
+    "candidate": {
+      "category": "project",
+      "repo_url": "https://github.com/natanayalo/code-agent",
+      "memory_key": "test_command",
+      "value": {"command": ".venv/bin/pytest tests/unit"},
+      "source": "worker_result",
+      "confidence": 0.95,
+      "scope": "repo",
+      "requires_verification": false,
+      "evidence": ["test: unit passed"]
+    },
+    "expected_decision": "create"
+  },
+  {
+    "name": "personal_preference",
+    "candidate": {
+      "category": "personal",
+      "memory_key": "communication_preference",
+      "value": {"style": "concise"},
+      "source": "worker_result",
+      "confidence": 0.95,
+      "scope": "global",
+      "evidence": ["explicit user instruction"]
+    },
+    "expected_decision": "needs_human_review"
+  },
+  {
+    "name": "repo_convention",
+    "candidate": {
+      "category": "project",
+      "repo_url": "https://github.com/natanayalo/code-agent",
+      "memory_key": "repo_convention",
+      "value": {"note": "prefer .venv/bin pytest"},
+      "source": "worker_result",
+      "confidence": 0.9,
+      "scope": "repo",
+      "evidence": ["file: AGENTS.md"]
+    },
+    "expected_decision": "needs_human_review"
+  },
+  {
+    "name": "known_pitfall",
+    "candidate": {
+      "category": "project",
+      "repo_url": "https://github.com/natanayalo/code-agent",
+      "memory_key": "known_pitfall",
+      "value": {"note": "host alembic can create accidental sqlite files"},
+      "source": "worker_result",
+      "confidence": 0.9,
+      "scope": "repo",
+      "evidence": ["file: README.md"]
+    },
+    "expected_decision": "needs_human_review"
+  },
+  {
+    "name": "conflicting_update",
+    "preexisting": {
+      "repo_url": "https://github.com/natanayalo/code-agent",
+      "memory_key": "verification_command",
+      "value": {"command": ".venv/bin/pytest tests/unit"}
+    },
+    "candidate": {
+      "category": "project",
+      "repo_url": "https://github.com/natanayalo/code-agent",
+      "memory_key": "verification_command",
+      "value": {"command": ".venv/bin/pytest tests/integration"},
+      "source": "worker_result",
+      "confidence": 0.95,
+      "scope": "repo",
+      "evidence": ["test: integration passed"]
+    },
+    "expected_decision": "needs_human_review"
+  },
+  {
+    "name": "secret_like_candidate",
+    "candidate": {
+      "category": "project",
+      "repo_url": "https://github.com/natanayalo/code-agent",
+      "memory_key": "api_token",
+      "value": {"redacted": true},
+      "source": "worker_result",
+      "confidence": 0.99,
+      "scope": "repo",
+      "evidence": ["file: .env"]
+    },
+    "expected_decision": "reject"
+  },
+  {
+    "name": "invalid_scope",
+    "candidate": {
+      "category": "project",
+      "memory_key": "missing_repo",
+      "value": {"note": "needs repo scope"},
+      "source": "worker_result",
+      "confidence": 0.95,
+      "scope": "repo",
+      "evidence": ["test: unit passed"]
+    },
+    "expected_decision": "reject"
+  },
+  {
+    "name": "evidence_free_plausible",
+    "candidate": {
+      "category": "project",
+      "repo_url": "https://github.com/natanayalo/code-agent",
+      "memory_key": "pytest_entrypoint",
+      "value": {"command": ".venv/bin/pytest tests/unit"},
+      "source": "worker_result",
+      "confidence": 0.95,
+      "scope": "repo"
+    },
+    "expected_decision": "needs_human_review"
+  }
+]

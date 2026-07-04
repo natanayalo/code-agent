@@ -31,7 +31,7 @@ Active focus:
 - PR-native delivery fields with GitHub branch/draft-PR delivery integration
 - full-text personal/project memory search with dashboard search results and memory-retrieval timeline visibility
 - deterministic memory retrieval evaluation to separate full-text regressions from known semantic gaps
-- reviewable memory proposal flow for curated corpus seeding, with Slice 5 planned to unify worker memory candidates and proposals through a memory-admission service plus LangMem/Mem0 adoption spike
+- reviewable memory proposal flow for curated corpus seeding, with Slice 5 unifying worker memory candidates and proposals through a memory-admission service plus a local library adoption spike
 - dashboard visibility for TaskSpec, interactions, timeline events, logs, artifacts, replay controls, traces, memory, and tool inventory
 - CI now measures Python coverage from `tests/unit` only and runs `tests/integration` as a separate pass
 - pre-commit Ruff checks repo Python files for non-top-level imports while preserving a few intentional lazy imports in guarded modules
@@ -47,7 +47,7 @@ Active focus:
 
 ## Next Priorities
 
-1. implement M23 Slice 5 unified memory admission and decide whether LangMem or Mem0/OpenMemory should power extraction/admission assistance before revisiting semantic/vector retrieval
+1. finish M23 Slice 5 review and then implement M23 Slice 6 episodic observations: raw task/session observations, compact search, timeline/full-observation fetch, recent-session context, private-tag stripping, and observation-to-admission bridge
 2. evaluate Phase 4 candidates: routing, DAG decomposition, selective fan-out, review repair, and autonomy policy
 
 ## Current Backlog
@@ -55,7 +55,7 @@ Active focus:
 Granular tasks for the active and upcoming milestones:
 
 - Milestone 21: worker facade [x], runtime executor [x], sandbox adapter [x], and tool extraction.
-- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [x], reviewable corpus/proposals [x], unified memory admission plus library adoption spike planned in [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md).
+- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [x], reviewable corpus/proposals [x], unified memory admission plus library adoption spike in [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md), and episodic observation layer planned in [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md).
 - Phase 4: evaluate routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy only after Phase 3 proves reliability.
 
 ## Completed Work

@@ -31,6 +31,7 @@ EXPECTED_TABLES = {
     "execution_plan_nodes",
     "human_interactions",
     "inbound_deliveries",
+    "memory_admission_decisions",
     "memory_personal",
     "memory_proposals",
     "memory_project",
