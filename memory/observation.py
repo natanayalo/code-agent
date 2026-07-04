@@ -271,7 +271,8 @@ def _attach_observation_lineage(candidate: MemoryCandidate, obs: MemoryObservati
         candidate.task_id = obs.task_id
     if not candidate.session_id:
         candidate.session_id = obs.session_id
-    if candidate.category == "project" and not candidate.repo_url:
+    category_str = getattr(candidate.category, "value", candidate.category)
+    if category_str == "project" and not candidate.repo_url:
         candidate.repo_url = obs.repo_url
 
 
