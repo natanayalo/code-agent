@@ -8,10 +8,12 @@ import subprocess
 from pathlib import Path
 
 from sandbox import DockerShellSessionError
+from workers.adapter_utils import truncate_detail_keep_tail
 from workers.cli_runtime_types import ShellSessionProtocol
 from workers.constants import DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
+_GIT_ERROR_OUTPUT_MAX_CHARACTERS = 2048
 
 
 def _decode_safely(data: bytes | str | None) -> str:
@@ -190,8 +192,12 @@ def collect_changed_files_from_repo_path(
         return []
 
     if completed.returncode != 0:
-        output = _decode_safely(completed.stdout or completed.stderr)
-        if _git_status_unavailable(output):
+        raw_output = _decode_safely(completed.stdout) + _decode_safely(completed.stderr)
+        output_preview = truncate_detail_keep_tail(
+            raw_output,
+            max_characters=_GIT_ERROR_OUTPUT_MAX_CHARACTERS,
+        )
+        if _git_status_unavailable(raw_output):
             logger.info(
                 "Worker skipped host-side changed-file collection because workspace is not a "
                 "usable git repository.",
@@ -200,7 +206,7 @@ def collect_changed_files_from_repo_path(
             return []
         logger.warning(
             "Worker could not collect changed files via host git status.",
-            extra={"exit_code": completed.returncode},
+            extra={"exit_code": completed.returncode, "output": output_preview},
         )
         return []
 
@@ -267,24 +273,12 @@ def collect_changed_files_since_ref_from_repo_path(
         return working_tree_files
 
     if completed.returncode != 0:
-        stdout_raw = completed.stdout or b""
-        stderr_raw = completed.stderr or b""
-        # Merge stdout/stderr correctly regardless of type
-        if isinstance(stdout_raw, str) or isinstance(stderr_raw, str):
-            stdout_str = (
-                stdout_raw
-                if isinstance(stdout_raw, str)
-                else stdout_raw.decode("utf-8", errors="replace")
-            )
-            stderr_str = (
-                stderr_raw
-                if isinstance(stderr_raw, str)
-                else stderr_raw.decode("utf-8", errors="replace")
-            )
-            output = stdout_str + stderr_str
-        else:
-            output = (stdout_raw + stderr_raw).decode("utf-8", errors="replace")
-        if _git_status_unavailable(output):
+        raw_output = _decode_safely(completed.stdout) + _decode_safely(completed.stderr)
+        output_preview = truncate_detail_keep_tail(
+            raw_output,
+            max_characters=_GIT_ERROR_OUTPUT_MAX_CHARACTERS,
+        )
+        if _git_status_unavailable(raw_output):
             logger.info(
                 "Worker skipped baseline changed-file collection because workspace is not a "
                 "usable git repository.",
@@ -293,7 +287,7 @@ def collect_changed_files_since_ref_from_repo_path(
             return working_tree_files
         logger.warning(
             "Worker could not collect changed files from baseline via host git diff.",
-            extra={"exit_code": completed.returncode},
+            extra={"exit_code": completed.returncode, "output": output_preview},
         )
         return working_tree_files
 

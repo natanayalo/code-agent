@@ -132,8 +132,6 @@ def _collect_diff_text_since_ref(
     ]
     if base_ref:
         command.append(base_ref)
-    else:
-        command.append("HEAD")
     command.extend(["--", "."])
 
     try:

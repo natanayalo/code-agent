@@ -78,3 +78,29 @@ print("committed change")
     assert "diff --git a/committed.txt b/committed.txt" in result.diff_text
     assert "committed by native agent" in result.diff_text
     assert "native-agent-diff" in {artifact.name for artifact in result.artifacts}
+
+
+def test_collect_diff_text_since_ref_omits_head_without_base_ref(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Unborn repositories should not receive HEAD when no baseline ref exists."""
+    calls: list[list[str]] = []
+
+    def _fake_run(args, **_kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    from workers.native_agent_artifacts import _collect_diff_text_since_ref
+
+    assert (
+        _collect_diff_text_since_ref(
+            repo_path=tmp_path,
+            base_ref=None,
+            timeout_seconds=10,
+        )
+        is None
+    )
+    assert calls == [["git", "-C", str(tmp_path), "diff", "--no-color", "--", "."]]

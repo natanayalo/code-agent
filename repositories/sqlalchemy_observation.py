@@ -125,6 +125,11 @@ class ObservationRepository:
         limit: int,
     ) -> list[MemoryObservation]:
         """Fallback substring search for SQLite."""
+        limit_val = _normalized_search_limit(limit)
+        query_val = _normalized_search_query(query)
+        if not query_val:
+            return []
+
         statement = select(MemoryObservation)
         if repo_url is not None:
             statement = statement.where(MemoryObservation.repo_url == repo_url)
@@ -135,10 +140,10 @@ class ObservationRepository:
 
         statement = statement.where(
             or_(
-                MemoryObservation.summary.ilike(f"%{query}%"),
-                MemoryObservation.content.ilike(f"%{query}%"),
+                MemoryObservation.summary.ilike(f"%{query_val}%"),
+                MemoryObservation.content.ilike(f"%{query_val}%"),
             )
-        ).limit(limit)
+        ).limit(limit_val)
         return list(self.session.scalars(statement))
 
     def _search_postgresql(

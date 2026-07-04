@@ -178,3 +178,46 @@ def test_collect_changed_files_from_repo_path_logs_timeout_details(monkeypatch) 
     assert "timed out" in warning_calls[0][0].lower()
     assert warning_calls[0][1]["extra"] == {"timeout_seconds": 7}
     assert warning_calls[0][1]["exc_info"] is not None
+
+
+def test_collect_changed_files_since_ref_truncates_git_failure_output(monkeypatch) -> None:
+    """Baseline git diff failures should log bounded decoded output."""
+
+    calls: list[list[str]] = []
+
+    def _fake_run(args, **_kwargs):
+        calls.append(args)
+        if "status" in args:
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout=b" M working.txt\0",
+                stderr=b"",
+            )
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=128,
+            stdout=b"stdout-prefix",
+            stderr=("x" * 3000 + "stderr-tail").encode(),
+        )
+
+    warning_calls: list[tuple[str, dict[str, object]]] = []
+
+    monkeypatch.setattr("workers.cli_runtime_files.subprocess.run", _fake_run)
+    monkeypatch.setattr(
+        "workers.cli_runtime_files.logger.warning",
+        lambda message, **kwargs: warning_calls.append((message, kwargs)),
+    )
+
+    changed_files = collect_changed_files_since_ref_from_repo_path(
+        Path("/tmp/repo"),
+        base_ref="base-ref",
+    )
+
+    assert changed_files == ["working.txt"]
+    assert calls[1][:6] == ["git", "-C", "/tmp/repo", "diff", "--name-only", "-z"]
+    assert warning_calls
+    output = warning_calls[0][1]["extra"]["output"]
+    assert isinstance(output, str)
+    assert output.startswith("[truncated]...")
+    assert output.endswith("stderr-tail")

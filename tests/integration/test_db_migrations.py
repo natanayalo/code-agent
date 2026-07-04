@@ -841,6 +841,17 @@ def test_source_observation_id_and_partial_unique_index(tmp_path: Path) -> None:
         _seed_downgrade_users_and_sessions(connection, now)
         _seed_downgrade_tasks(connection, now)
 
+        connection.execute(
+            text(
+                "INSERT INTO memory_observations "
+                "(id, source, event_type, observed_at, summary, content, "
+                "metadata_payload, privacy_stripped, created_at, updated_at) "
+                "VALUES ('obs-1', 'worker', 'test', :now, 'summary', 'content', "
+                "'{}', 0, :now, :now)"
+            ),
+            {"now": now},
+        )
+
         # Insert first decision
         _insert_decision(connection, "dec-1", "k1", "obs-1", now)
 

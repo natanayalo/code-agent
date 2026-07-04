@@ -188,6 +188,29 @@ def test_search_scope_validation_and_sqlite_fallback(session_factory) -> None:
         assert {m.summary for m in matches} == {"Target word here", "s2"}
 
 
+def test_search_sqlite_fallback_normalizes_limit(session_factory) -> None:
+    """SQLite search should apply the same lower and upper limit bounds as Postgres."""
+    with session_scope(session_factory) as session:
+        repo = ObservationRepository(session)
+        for index in range(105):
+            repo.create(
+                source="worker",
+                event_type="test",
+                summary=f"Target word {index}",
+                content="matching content",
+                repo_url="repo1",
+            )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        repo = ObservationRepository(session)
+        capped_matches = repo.search(query="target", repo_url="repo1", limit=500)
+        minimum_matches = repo.search(query="target", repo_url="repo1", limit=-5)
+
+        assert len(capped_matches) == 100
+        assert len(minimum_matches) == 1
+
+
 def test_update_admission_outcome(session_factory) -> None:
     """update_admission_outcome updates status, processed_at, and error."""
     with session_scope(session_factory) as session:

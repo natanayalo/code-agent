@@ -94,6 +94,12 @@ def test_strip_private_tags_recursive() -> None:
             "Normal item",
             "<private>Secret item</private>",
         ],
+        "sets": {
+            "Normal set item",
+            "<private>Secret set item</private>",
+        },
+        "frozen": frozenset({"<private>Secret frozen item</private>"}),
+        "<private>secret key</private>": "key value",
     }
     redacted, stripped = strip_private_tags_recursive(payload)
     assert stripped is True
@@ -101,6 +107,9 @@ def test_strip_private_tags_recursive() -> None:
     assert redacted["nested"]["key"] == "value [redacted-private]"
     assert redacted["nested"]["number"] == 123
     assert redacted["items"] == ["Normal item", "[redacted-private]"]
+    assert redacted["sets"] == {"Normal set item", "[redacted-private]"}
+    assert redacted["frozen"] == frozenset({"[redacted-private]"})
+    assert redacted["[redacted-private]"] == "key value"
 
 
 def test_capture_worker_run(session_factory) -> None:
