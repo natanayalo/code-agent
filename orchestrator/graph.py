@@ -26,6 +26,7 @@ from apps.observability import (
 )
 from db.enums import TimelineEventType
 from db.utils import compute_interaction_content_hash
+from memory.admission import CustomMemoryAdmissionService, MemoryAdmissionCandidate
 from orchestrator.brain import (
     OrchestratorBrain,
     RouteBrainMergeReport,
@@ -3107,23 +3108,13 @@ def _map_worker_memory_to_persist(
     state: OrchestratorState,
     result: WorkerResult,
 ) -> list[PersistMemoryEntry]:
-    """Convert worker-produced memory updates into orchestrator persistence entries."""
+    """Convert worker-produced memory updates into orchestrator admission candidates."""
     memory_to_persist = list(state.memory_to_persist)
-    task_id = state.task.task_id
 
     for worker_entry in result.memory_to_persist:
         repo_url = worker_entry.repo_url
         if worker_entry.category == "project":
             repo_url = repo_url or state.task.repo_url
-            if not repo_url:
-                logger.warning(
-                    "Skipping worker project memory without a repo URL.",
-                    extra={
-                        "task_id": task_id,
-                        "memory_key": worker_entry.memory_key,
-                    },
-                )
-                continue
 
         memory_to_persist.append(
             PersistMemoryEntry(
@@ -3285,6 +3276,52 @@ def _persist_memory_entry(
     return True
 
 
+def _memory_admission_evidence(state: OrchestratorState) -> list[str]:
+    """Collect concrete run evidence available to the memory admission policy."""
+    if state.result is None:
+        return []
+
+    evidence: list[str] = []
+    for command in state.result.commands_run:
+        suffix = f" exit_code={command.exit_code}" if command.exit_code is not None else ""
+        evidence.append(f"command: {command.command}{suffix}")
+    for test_result in state.result.test_results:
+        evidence.append(f"test: {test_result.name} {test_result.status}")
+    for file_path in state.result.files_changed:
+        evidence.append(f"file: {file_path}")
+    for artifact in state.result.artifacts:
+        evidence.append(f"artifact: {artifact.name} {artifact.uri}")
+    if state.verification is not None:
+        evidence.append(f"verification: {state.verification.status}")
+    return evidence
+
+
+def _memory_candidate_from_entry(
+    state: OrchestratorState,
+    entry: PersistMemoryEntry,
+    evidence: list[str],
+) -> MemoryAdmissionCandidate:
+    """Map orchestrator memory candidates into the admission service DTO."""
+    repo_url = entry.repo_url
+    if entry.category == "project":
+        repo_url = repo_url or state.task.repo_url
+    return MemoryAdmissionCandidate(
+        category=entry.category,
+        repo_url=repo_url,
+        memory_key=entry.memory_key,
+        value=entry.value,
+        source=entry.source,
+        confidence=entry.confidence,
+        scope=entry.scope,
+        last_verified_at=entry.last_verified_at,
+        requires_verification=entry.requires_verification,
+        evidence=evidence,
+        task_id=state.task.task_id,
+        session_id=state.session.session_id if state.session is not None else None,
+        producer="worker",
+    )
+
+
 def build_persist_memory_node(
     session_factory: Callable[[], Session],
 ) -> Callable[[OrchestratorState], dict[str, Any]]:
@@ -3292,20 +3329,25 @@ def build_persist_memory_node(
 
     def persist_memory_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
-        persisted_count = 0
+        admission_result = None
         db_session: Session | None = None
         try:
             db_session = session_factory()
-            for entry in state.memory_to_persist:
-                if _persist_memory_entry(db_session, state, entry):
-                    persisted_count += 1
+            evidence = _memory_admission_evidence(state)
+            candidates = [
+                _memory_candidate_from_entry(state, entry, evidence)
+                for entry in state.memory_to_persist
+            ]
+            admission_result = CustomMemoryAdmissionService(db_session).admit_candidates(
+                candidates=candidates
+            )
             db_session.commit()
         except Exception:
             if db_session is not None:
                 db_session.rollback()
-            persisted_count = 0
+            admission_result = None
             logger.exception(
-                "Failed to persist worker memory; continuing without memory writes.",
+                "Failed to admit worker memory; continuing without memory writes.",
                 extra={
                     "task_id": state.task.task_id,
                     "requested_count": len(state.memory_to_persist),
@@ -3315,6 +3357,14 @@ def build_persist_memory_node(
             if db_session is not None:
                 db_session.close()
 
+        decision_counts = admission_result.decision_counts if admission_result is not None else {}
+        risk_counts = admission_result.risk_counts if admission_result is not None else {}
+        persisted_count = (
+            admission_result.durable_write_count if admission_result is not None else 0
+        )
+        proposal_count = admission_result.proposal_count if admission_result is not None else 0
+        rejected_count = admission_result.rejected_count if admission_result is not None else 0
+
         return {
             "current_step": "persist_memory",
             "memory_to_persist": [
@@ -3322,15 +3372,23 @@ def build_persist_memory_node(
             ],
             "progress_updates": _progress_update(
                 state,
-                f"persisted {persisted_count} memory entries",
+                (
+                    f"admitted {len(state.memory_to_persist)} memory candidates: "
+                    f"{persisted_count} direct writes, {proposal_count} proposals, "
+                    f"{rejected_count} rejected"
+                ),
             ),
             **_timeline_event(
                 state,
                 TimelineEventType.MEMORY_PERSISTED,
-                message=f"Persisted {persisted_count} memory entries.",
+                message=f"Admitted {len(state.memory_to_persist)} memory candidates.",
                 payload={
                     "requested_count": len(state.memory_to_persist),
                     "persisted_count": persisted_count,
+                    "proposal_count": proposal_count,
+                    "rejected_count": rejected_count,
+                    "decision_counts": decision_counts,
+                    "risk_counts": risk_counts,
                 },
             ),
         }

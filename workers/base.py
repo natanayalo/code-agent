@@ -199,7 +199,7 @@ class MaintenanceRequest(WorkerModel):
 
 
 class WorkerMemoryEntry(WorkerModel):
-    """A memory update produced by a worker for orchestrator persistence."""
+    """A candidate memory produced by a worker for orchestrator admission."""
 
     category: Literal["personal", "project"]
     memory_key: str = Field(min_length=1)

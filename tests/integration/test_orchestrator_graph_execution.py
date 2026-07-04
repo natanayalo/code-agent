@@ -7,6 +7,7 @@ import asyncio
 from db.enums import TimelineEventType
 from orchestrator import OrchestratorState, WorkerResult, build_orchestrator_graph
 from repositories import (
+    MemoryProposalRepository,
     PersonalMemoryRepository,
     ProjectMemoryRepository,
     SessionRepository,
@@ -159,7 +160,7 @@ def _memory_persisting_worker() -> StaticWorker:
                 "memory_key": "graph_memory_path",
                 "value": {"file": "orchestrator/graph.py"},
                 "source": "worker_result",
-                "confidence": 0.8,
+                "confidence": 0.95,
             },
         ],
     )
@@ -210,7 +211,9 @@ def test_orchestrator_graph_loads_and_persists_memory(session_factory) -> None:
     assert memory_loaded_event.payload["search_query"] == "Update memory-aware task execution"
     assert memory_loaded_event.payload["personal_keys"] == ["communication_style"]
     assert memory_loaded_event.payload["project_keys"] == ["test_command"]
-    assert state.progress_updates[-1] == "persisted 2 memory entries"
+    assert state.progress_updates[-1] == (
+        "admitted 2 memory candidates: 1 direct writes, 1 proposals, 0 rejected"
+    )
 
     with session_scope(session_factory) as session:
         personal = PersonalMemoryRepository(session).get(
@@ -220,10 +223,10 @@ def test_orchestrator_graph_loads_and_persists_memory(session_factory) -> None:
             repo_url=repo_url,
             memory_key="graph_memory_path",
         )
+        proposals = MemoryProposalRepository(session).list()
 
-    assert personal is not None
-    assert personal.value == {"command": ".venv/bin/pytest tests/unit"}
-    assert personal.requires_verification is False
+    assert personal is None
+    assert proposals[0].memory_key == "preferred_verification"
     assert project is not None
     assert project.value == {"file": "orchestrator/graph.py"}
 
