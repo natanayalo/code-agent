@@ -13,6 +13,10 @@ vi.mock('../services/api', () => ({
     searchPersonalMemory: vi.fn(),
     listProjectMemory: vi.fn(),
     searchProjectMemory: vi.fn(),
+    listMemoryProposals: vi.fn(),
+    createMemoryProposal: vi.fn(),
+    acceptMemoryProposal: vi.fn(),
+    rejectMemoryProposal: vi.fn(),
     upsertPersonalMemory: vi.fn(),
     upsertProjectMemory: vi.fn(),
     deletePersonalMemory: vi.fn(),
@@ -57,6 +61,43 @@ describe('KnowledgeBasePage', () => {
       personal: { total: 0, requires_verification: 0 },
       project: null,
       project_global: { total: 0, requires_verification: 0 },
+    });
+    vi.mocked(api.listMemoryProposals).mockResolvedValue([]);
+    vi.mocked(api.createMemoryProposal).mockResolvedValue({
+      proposal_id: 'mp-created',
+      category: 'project',
+      repo_url: 'https://github.com/natanayalo/code-agent',
+      memory_key: 'created',
+      value: {},
+      status: 'pending_review',
+      confidence: 0.9,
+      requires_verification: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    vi.mocked(api.acceptMemoryProposal).mockResolvedValue({
+      proposal_id: 'mp-accepted',
+      category: 'project',
+      repo_url: 'https://github.com/natanayalo/code-agent',
+      memory_key: 'accepted',
+      value: {},
+      status: 'accepted',
+      confidence: 0.9,
+      requires_verification: false,
+      accepted_memory_id: 'memory-1',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    vi.mocked(api.rejectMemoryProposal).mockResolvedValue({
+      proposal_id: 'mp-rejected',
+      category: 'personal',
+      memory_key: 'rejected',
+      value: {},
+      status: 'rejected',
+      confidence: 0.9,
+      requires_verification: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     });
   });
 
@@ -217,6 +258,209 @@ describe('KnowledgeBasePage', () => {
       1
     );
     expect(screen.getAllByLabelText('Requires verification')[0]).toBeChecked();
+  });
+
+  it('renders review tab with pending memory proposals', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.listMemoryProposals).mockImplementation(async (status) => {
+      if (status === 'pending_review') {
+        return [
+          {
+            proposal_id: 'mp-pending',
+            category: 'project',
+            repo_url: 'https://github.com/natanayalo/code-agent',
+            memory_key: 'verification_commands',
+            value: { python: '.venv/bin/pytest tests/unit' },
+            status: 'pending_review',
+            confidence: 0.9,
+            source: 'curated_corpus',
+            scope: 'repo',
+            requires_verification: false,
+            title: 'Verification commands',
+            summary: 'Use repo-local Python test commands.',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        ];
+      }
+      return [];
+    });
+
+    renderKnowledgeBasePage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Review/i }));
+
+    expect(await screen.findByText('Verification commands')).toBeInTheDocument();
+    expect(screen.getByText('Key: verification_commands')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Accept/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Reject/i })).toBeInTheDocument();
+  });
+
+  it('creates manual memory proposals instead of direct memory rows', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.change(await screen.findByLabelText('Project Repository URL'), {
+      target: { value: 'https://github.com/natanayalo/code-agent' },
+    });
+    fireEvent.click(screen.getByRole('tab', { name: /Review/i }));
+    fireEvent.change(screen.getByLabelText('Memory Key'), {
+      target: { value: 'verification_commands' },
+    });
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Verification commands' },
+    });
+    fireEvent.change(screen.getByLabelText('Summary'), {
+      target: { value: 'Use repo-local commands.' },
+    });
+    fireEvent.change(screen.getByLabelText('Memory Value (JSON object)'), {
+      target: { value: '{"python":".venv/bin/pytest tests/unit"}' },
+    });
+    fireEvent.change(screen.getByLabelText('Evidence (optional JSON object)'), {
+      target: { value: '{"source":"AGENTS.md"}' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Memory Proposal' }));
+
+    await waitFor(() => expect(api.createMemoryProposal).toHaveBeenCalledTimes(1));
+    expect(api.createMemoryProposal).toHaveBeenCalledWith({
+      category: 'project',
+      repo_url: 'https://github.com/natanayalo/code-agent',
+      memory_key: 'verification_commands',
+      value: { python: '.venv/bin/pytest tests/unit' },
+      title: 'Verification commands',
+      summary: 'Use repo-local commands.',
+      evidence: { source: 'AGENTS.md' },
+      source: 'curated_corpus',
+      scope: 'repo',
+      confidence: 0.9,
+      requires_verification: false,
+    });
+    expect(api.upsertProjectMemory).not.toHaveBeenCalled();
+  });
+
+  it('creates personal manual memory proposals without repo scope', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Review/i }));
+    fireEvent.change(screen.getByLabelText('Proposal Category'), {
+      target: { value: 'personal' },
+    });
+    fireEvent.change(screen.getByLabelText('Memory Key'), {
+      target: { value: 'communication_preferences' },
+    });
+    fireEvent.change(screen.getByLabelText('Memory Value (JSON object)'), {
+      target: { value: '{"style":"concise"}' },
+    });
+    fireEvent.change(screen.getByLabelText('Source'), {
+      target: { value: 'operator' },
+    });
+    fireEvent.change(screen.getByLabelText('Scope'), {
+      target: { value: 'global' },
+    });
+    fireEvent.change(screen.getByLabelText('Confidence (0.0-1.0)'), {
+      target: { value: '0.75' },
+    });
+    fireEvent.click(screen.getAllByLabelText('Requires verification')[0]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Memory Proposal' }));
+
+    await waitFor(() => expect(api.createMemoryProposal).toHaveBeenCalledTimes(1));
+    expect(api.createMemoryProposal).toHaveBeenCalledWith({
+      category: 'personal',
+      repo_url: undefined,
+      memory_key: 'communication_preferences',
+      value: { style: 'concise' },
+      title: undefined,
+      summary: undefined,
+      evidence: undefined,
+      source: 'operator',
+      scope: 'global',
+      confidence: 0.75,
+      requires_verification: true,
+    });
+  });
+
+  it('accepts memory proposals and refreshes inventory', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.listMemoryProposals).mockImplementation(async (status) => {
+      if (status === 'pending_review') {
+        return [
+          {
+            proposal_id: 'mp-accept',
+            category: 'personal',
+            memory_key: 'communication_style',
+            value: { style: 'concise' },
+            status: 'pending_review',
+            confidence: 0.95,
+            requires_verification: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        ];
+      }
+      return [];
+    });
+
+    renderKnowledgeBasePage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Review/i }));
+    await screen.findByText('communication_style');
+    fireEvent.click(screen.getByRole('button', { name: /Accept/i }));
+
+    await waitFor(() => expect(api.acceptMemoryProposal).toHaveBeenCalledWith('mp-accept'));
+    await waitFor(() => expect(api.getKnowledgeBaseStats).toHaveBeenCalled());
+    expect(api.listPersonalMemory).toHaveBeenCalled();
+    expect(api.listProjectMemory).toHaveBeenCalled();
+  });
+
+  it('rejects memory proposals without refreshing inventory', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.listMemoryProposals).mockImplementation(async (status) => {
+      if (status === 'pending_review') {
+        return [
+          {
+            proposal_id: 'mp-reject',
+            category: 'personal',
+            memory_key: 'obsolete_memory',
+            value: { note: 'skip' },
+            status: 'pending_review',
+            confidence: 0.5,
+            requires_verification: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        ];
+      }
+      return [];
+    });
+
+    renderKnowledgeBasePage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Review/i }));
+    await screen.findByText('obsolete_memory');
+    fireEvent.click(screen.getByRole('button', { name: /Reject/i }));
+
+    await waitFor(() => expect(api.rejectMemoryProposal).toHaveBeenCalledWith('mp-reject'));
+    expect(api.acceptMemoryProposal).not.toHaveBeenCalled();
   });
 
   it('shows validation error for non-object JSON values', async () => {

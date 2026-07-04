@@ -282,6 +282,10 @@ class TaskExecutionService:
     search_project_memory = execution_snapshot_service.search_project_memory
     upsert_project_memory = execution_snapshot_service.upsert_project_memory
     delete_project_memory = execution_snapshot_service.delete_project_memory
+    create_memory_proposal = execution_snapshot_service.create_memory_proposal
+    list_memory_proposals = execution_snapshot_service.list_memory_proposals
+    accept_memory_proposal = execution_snapshot_service.accept_memory_proposal
+    reject_memory_proposal = execution_snapshot_service.reject_memory_proposal
     _map_task_to_snapshot = execution_snapshot_service._map_task_to_snapshot
     _map_task_to_summary = execution_snapshot_service._map_task_to_summary
     _map_to_snapshot = execution_proposal_service._map_to_snapshot
@@ -301,6 +305,9 @@ class TaskExecutionService:
     )
     _map_project_memory_to_snapshot = staticmethod(
         execution_snapshot_service._map_project_memory_to_snapshot
+    )
+    _map_memory_proposal_to_snapshot = staticmethod(
+        execution_snapshot_service._map_memory_proposal_to_snapshot
     )
     list_pending_interactions = execution_interaction_service.list_pending_interactions
     record_interaction_response = execution_interaction_service.record_interaction_response

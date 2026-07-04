@@ -1624,6 +1624,7 @@ button {
 }
 
 .knowledge-form input,
+.knowledge-form select,
 .knowledge-form textarea {
   width: 100%;
   border-radius: 8px;
@@ -1640,6 +1641,7 @@ button {
 }
 
 .knowledge-form input:focus,
+.knowledge-form select:focus,
 .knowledge-form textarea:focus {
   outline: none;
   border-color: rgba(56, 189, 248, 0.6);
@@ -1750,6 +1752,45 @@ button {
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.knowledge-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.knowledge-review-actions .btn-primary,
+.knowledge-review-actions .knowledge-load-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.knowledge-section-wide {
+  grid-column: 1 / -1;
+}
+
+.proposal-status-badge {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  color: rgba(226, 232, 240, 0.86);
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.35rem 0.55rem;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.proposal-status-badge.status-accepted {
+  border-color: rgba(34, 197, 94, 0.36);
+  color: #86efac;
+}
+
+.proposal-status-badge.status-rejected {
+  border-color: rgba(248, 113, 113, 0.36);
+  color: #fca5a5;
 }
 
 .knowledge-page-footer {

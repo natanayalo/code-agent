@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from db.enums import (
     HumanInteractionStatus,
+    MemoryProposalCategory,
+    MemoryProposalStatus,
     ProposalType,
     TaskStatus,
     WorkerType,
@@ -257,6 +259,79 @@ class ProjectMemoryUpsertRequest(ExecutionModel):
     scope: str | None = None
     last_verified_at: datetime | None = None
     requires_verification: bool = True
+
+
+class MemoryProposalCreateRequest(ExecutionModel):
+    """Input payload for creating a reviewable memory candidate."""
+
+    category: MemoryProposalCategory
+    repo_url: str | None = Field(default=None, min_length=1)
+    memory_key: str = Field(min_length=1)
+    value: dict[str, Any] = Field(default_factory=dict)
+    source: str | None = None
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    scope: str | None = None
+    requires_verification: bool = True
+    title: str | None = None
+    summary: str | None = None
+    evidence: dict[str, Any] | None = None
+    task_id: str | None = None
+    session_id: str | None = None
+
+    @field_validator("repo_url")
+    @classmethod
+    def normalize_repo_url(cls, value: str | None) -> str | None:
+        """Normalize blank optional repository scopes."""
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("memory_key")
+    @classmethod
+    def normalize_memory_key(cls, value: str) -> str:
+        """Normalize memory keys before persistence."""
+        return value.strip()
+
+    @field_validator("title", "summary", "source", "scope")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        """Normalize optional text fields."""
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    def model_post_init(self, __context: Any) -> None:
+        """Validate target memory category and repository scope together."""
+        if self.category == MemoryProposalCategory.PROJECT and self.repo_url is None:
+            raise ValueError("repo_url is required for project memory proposals.")
+        if self.category == MemoryProposalCategory.PERSONAL and self.repo_url is not None:
+            raise ValueError("repo_url must be omitted for personal memory proposals.")
+
+
+class MemoryProposalSnapshot(ExecutionModel):
+    """A reviewable memory candidate and its review outcome."""
+
+    proposal_id: str
+    category: MemoryProposalCategory
+    repo_url: str | None = None
+    memory_key: str
+    value: dict[str, Any]
+    source: str | None = None
+    confidence: float = 1.0
+    scope: str | None = None
+    requires_verification: bool = True
+    status: MemoryProposalStatus
+    title: str | None = None
+    summary: str | None = None
+    evidence: dict[str, Any] | None = None
+    task_id: str | None = None
+    session_id: str | None = None
+    accepted_memory_id: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class TaskSummarySnapshot(ExecutionModel):

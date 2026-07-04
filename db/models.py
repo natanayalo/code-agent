@@ -31,6 +31,8 @@ from db.enums import (
     HumanInteractionHitlMode,
     HumanInteractionStatus,
     HumanInteractionType,
+    MemoryProposalCategory,
+    MemoryProposalStatus,
     ProposalStatus,
     ProposalType,
     SessionStatus,
@@ -63,6 +65,10 @@ HUMAN_INTERACTION_HITL_MODE_ENUM = build_sql_enum(
 WORKER_RUNTIME_MODE_ENUM = build_sql_enum(WorkerRuntimeMode, name="worker_runtime_mode")
 PROPOSAL_STATUS_ENUM = build_sql_enum(ProposalStatus, name="proposal_status")
 PROPOSAL_TYPE_ENUM = build_sql_enum(ProposalType, name="proposal_type")
+MEMORY_PROPOSAL_CATEGORY_ENUM = build_sql_enum(
+    MemoryProposalCategory, name="memory_proposal_category"
+)
+MEMORY_PROPOSAL_STATUS_ENUM = build_sql_enum(MemoryProposalStatus, name="memory_proposal_status")
 EXECUTION_PLAN_NODE_STATUS_ENUM = build_sql_enum(
     ExecutionPlanNodeStatus, name="execution_plan_node_status"
 )
@@ -707,6 +713,77 @@ class Proposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     def _coerce_proposal_type(self, _key: str, value: ProposalType | str) -> ProposalType:
         """Normalize assigned proposal_type to the canonical enum."""
         return ProposalType(value)
+
+
+class MemoryProposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A reviewable candidate memory entry accepted directly into skeptical memory."""
+
+    __tablename__ = "memory_proposals"
+    __table_args__ = (
+        CheckConstraint(
+            "((category = 'project' AND repo_url IS NOT NULL) OR "
+            "(category = 'personal' AND repo_url IS NULL))",
+            name="category_repo_url",
+        ),
+        CheckConstraint(
+            "confidence >= 0.0 AND confidence <= 1.0",
+            name="confidence_range",
+        ),
+        Index("ix_memory_proposals_status_created_at", "status", "created_at"),
+        Index("ix_memory_proposals_category_status", "category", "status"),
+    )
+
+    category: Mapped[MemoryProposalCategory] = mapped_column(
+        MEMORY_PROPOSAL_CATEGORY_ENUM,
+        nullable=False,
+        index=True,
+    )
+    repo_url: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    memory_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    value: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    scope: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    requires_verification: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    status: Mapped[MemoryProposalStatus] = mapped_column(
+        MEMORY_PROPOSAL_STATUS_ENUM,
+        nullable=False,
+        default=MemoryProposalStatus.PENDING_REVIEW,
+        index=True,
+    )
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    accepted_memory_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @validates("category")
+    def _coerce_category(
+        self,
+        _key: str,
+        value: MemoryProposalCategory | str,
+    ) -> MemoryProposalCategory:
+        """Normalize assigned memory proposal categories."""
+        return MemoryProposalCategory(value)
+
+    @validates("status")
+    def _coerce_status(
+        self,
+        _key: str,
+        value: MemoryProposalStatus | str,
+    ) -> MemoryProposalStatus:
+        """Normalize assigned memory proposal statuses."""
+        return MemoryProposalStatus(value)
 
 
 class ExecutionPlan(UUIDPrimaryKeyMixin, TimestampMixin, Base):

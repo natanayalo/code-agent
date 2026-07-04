@@ -10,6 +10,9 @@ import { SessionSnapshot } from '../types/session';
 import { OperationalMetrics } from '../types/metrics';
 import {
   KnowledgeBaseStatsSnapshot,
+  MemoryProposalCreateRequest,
+  MemoryProposalSnapshot,
+  MemoryProposalStatus,
   PersonalMemorySnapshot,
   PersonalMemoryUpsertRequest,
   ProjectMemorySnapshot,
@@ -237,6 +240,78 @@ export const api = {
       };
     } catch (error) {
       console.warn('Failed to fetch knowledge-base stats from API', error);
+      throw error;
+    }
+  },
+
+  async listMemoryProposals(
+    status?: MemoryProposalStatus | MemoryProposalStatus[],
+    category?: 'personal' | 'project',
+    repoUrl?: string,
+    limit?: number,
+    offset?: number,
+  ): Promise<MemoryProposalSnapshot[]> {
+    try {
+      const query = new URLSearchParams();
+      if (status) {
+        const statuses = Array.isArray(status) ? status : [status];
+        statuses.forEach((statusValue) => query.append('status', statusValue));
+      }
+      if (category) {
+        query.set('category', category);
+      }
+      if (repoUrl) {
+        query.set('repo_url', repoUrl);
+      }
+      if (typeof limit === 'number') {
+        query.set('limit', String(limit));
+      }
+      if (typeof offset === 'number') {
+        query.set('offset', String(offset));
+      }
+      const queryString = query.toString();
+      const data = await fetchWithAuth(
+        `/knowledge-base/memory-proposals${queryString ? `?${queryString}` : ''}`
+      );
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to fetch memory proposals from API', error);
+      throw error;
+    }
+  },
+
+  async createMemoryProposal(
+    payload: MemoryProposalCreateRequest,
+  ): Promise<MemoryProposalSnapshot> {
+    try {
+      return await fetchWithAuth('/knowledge-base/memory-proposals', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    } catch (error) {
+      console.warn('Failed to create memory proposal', error);
+      throw error;
+    }
+  },
+
+  async acceptMemoryProposal(proposalId: string): Promise<MemoryProposalSnapshot> {
+    try {
+      return await fetchWithAuth(`/knowledge-base/memory-proposals/${proposalId}/accept`, {
+        method: 'POST',
+      });
+    } catch (error) {
+      console.warn(`Failed to accept memory proposal ${proposalId}`, error);
+      throw error;
+    }
+  },
+
+  async rejectMemoryProposal(proposalId: string): Promise<MemoryProposalSnapshot> {
+    try {
+      return await fetchWithAuth(`/knowledge-base/memory-proposals/${proposalId}/reject`, {
+        method: 'POST',
+      });
+    } catch (error) {
+      console.warn(`Failed to reject memory proposal ${proposalId}`, error);
       throw error;
     }
   },

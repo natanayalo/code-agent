@@ -104,6 +104,142 @@ def test_personal_memory_list_supports_global_inventory(client: TestClient) -> N
     assert response.json() == []
 
 
+def test_memory_proposal_endpoints_create_list_and_accept_personal(
+    client: TestClient,
+) -> None:
+    """Manual memory proposals should be accepted directly into personal memory."""
+    create_response = client.post(
+        "/knowledge-base/memory-proposals",
+        json={
+            "category": "personal",
+            "memory_key": "communication_style",
+            "value": {"style": "concise"},
+            "source": "operator",
+            "confidence": 0.9,
+            "scope": "global",
+            "requires_verification": False,
+            "title": "Communication style",
+            "summary": "Prefer concise status updates.",
+            "evidence": {"source": "AGENTS.md"},
+        },
+    )
+    assert create_response.status_code == 201
+    proposal = create_response.json()
+    assert proposal["status"] == "pending_review"
+    assert proposal["category"] == "personal"
+    assert proposal["repo_url"] is None
+
+    pending_response = client.get("/knowledge-base/memory-proposals?status=pending_review")
+    assert pending_response.status_code == 200
+    assert [item["proposal_id"] for item in pending_response.json()] == [proposal["proposal_id"]]
+
+    accept_response = client.post(
+        f"/knowledge-base/memory-proposals/{proposal['proposal_id']}/accept"
+    )
+    assert accept_response.status_code == 200
+    accepted = accept_response.json()
+    assert accepted["status"] == "accepted"
+    assert accepted["accepted_memory_id"]
+    assert accepted["reviewed_at"] is not None
+
+    second_accept_response = client.post(
+        f"/knowledge-base/memory-proposals/{proposal['proposal_id']}/accept"
+    )
+    assert second_accept_response.status_code == 200
+    assert second_accept_response.json()["accepted_memory_id"] == accepted["accepted_memory_id"]
+
+    memory_response = client.get("/knowledge-base/personal")
+    assert memory_response.status_code == 200
+    assert memory_response.json()[0]["memory_key"] == "communication_style"
+    assert memory_response.json()[0]["value"] == {"style": "concise"}
+
+
+def test_memory_proposal_accept_project_and_reject_conflict(client: TestClient) -> None:
+    """Project proposals require repo scope and rejected proposals cannot be accepted."""
+    repo_url = "https://github.com/natanayalo/code-agent"
+    project_response = client.post(
+        "/knowledge-base/memory-proposals",
+        json={
+            "category": "project",
+            "repo_url": repo_url,
+            "memory_key": "verification_commands",
+            "value": {"python": ".venv/bin/pytest tests/unit"},
+            "source": "curated_corpus",
+            "scope": "repo",
+        },
+    )
+    rejected_response = client.post(
+        "/knowledge-base/memory-proposals",
+        json={
+            "category": "project",
+            "repo_url": repo_url,
+            "memory_key": "known_pitfalls",
+            "value": {"note": "use .venv tools"},
+        },
+    )
+    assert project_response.status_code == 201
+    assert rejected_response.status_code == 201
+
+    filtered_response = client.get(
+        f"/knowledge-base/memory-proposals?category=project&repo_url={repo_url}"
+    )
+    assert filtered_response.status_code == 200
+    assert {item["memory_key"] for item in filtered_response.json()} == {
+        "verification_commands",
+        "known_pitfalls",
+    }
+
+    accepted_response = client.post(
+        f"/knowledge-base/memory-proposals/{project_response.json()['proposal_id']}/accept"
+    )
+    assert accepted_response.status_code == 200
+    assert accepted_response.json()["status"] == "accepted"
+
+    project_memory_response = client.get(f"/knowledge-base/project?repo_url={repo_url}")
+    assert project_memory_response.status_code == 200
+    assert [item["memory_key"] for item in project_memory_response.json()] == [
+        "verification_commands"
+    ]
+
+    rejected_id = rejected_response.json()["proposal_id"]
+    reject_response = client.post(f"/knowledge-base/memory-proposals/{rejected_id}/reject")
+    assert reject_response.status_code == 200
+    assert reject_response.json()["status"] == "rejected"
+
+    rejected_accept_response = client.post(f"/knowledge-base/memory-proposals/{rejected_id}/accept")
+    assert rejected_accept_response.status_code == 409
+
+    reviewed_response = client.get(
+        "/knowledge-base/memory-proposals?status=accepted&status=rejected"
+    )
+    assert reviewed_response.status_code == 200
+    assert {item["status"] for item in reviewed_response.json()} == {"accepted", "rejected"}
+
+
+def test_memory_proposal_create_validates_category_repo_contract(client: TestClient) -> None:
+    """Project proposals require repo_url and personal proposals must omit it."""
+    project_response = client.post(
+        "/knowledge-base/memory-proposals",
+        json={
+            "category": "project",
+            "memory_key": "missing_repo",
+            "value": {},
+        },
+    )
+    personal_response = client.post(
+        "/knowledge-base/memory-proposals",
+        json={
+            "category": "personal",
+            "repo_url": "https://github.com/natanayalo/code-agent",
+            "memory_key": "bad_scope",
+            "value": {},
+        },
+    )
+
+    assert project_response.status_code == 422
+    assert personal_response.status_code == 422
+
+
 def test_personal_memory_search_supports_global_lookup(client: TestClient) -> None:
     """Personal memory search should return global entries and ignore blank queries."""
     client.put(

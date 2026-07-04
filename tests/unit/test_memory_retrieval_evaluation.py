@@ -183,3 +183,22 @@ def test_write_memory_retrieval_report_is_sorted_and_newline_terminated(
         result["case_id"] for result in payload["results"]
     )
     assert payload["known_semantic_gap_misses"] == sorted(payload["known_semantic_gap_misses"])
+
+
+def test_realistic_memory_retrieval_suite_has_deterministic_result() -> None:
+    suite = load_memory_retrieval_suite(Path("evaluation/memory_retrieval_realistic_suite.json"))
+
+    report = evaluate_memory_retrieval(
+        suite=suite,
+        session_factory=_sqlite_session_factory(),
+    )
+
+    assert suite.suite_name == "memory-retrieval-m23-slice-4-realistic"
+    assert len(suite.personal_memory) + len(suite.project_memory) == 12
+    assert report.recall == 1.0
+    assert report.regression_misses == ()
+    assert report.known_semantic_gap_misses == (
+        "known-gap-definition-of-done:project:definition_of_done",
+        "known-gap-migration-validation-synonym:project:db_migration_policy",
+        "known-gap-worker-boundary-synonym:project:worker_boundaries",
+    )

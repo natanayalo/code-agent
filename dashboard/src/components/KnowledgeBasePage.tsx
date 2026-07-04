@@ -1,11 +1,13 @@
 import React from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { BarChart3, BookOpen, Plus, Search, Trash2 } from 'lucide-react';
+import { BarChart3, BookOpen, Check, ClipboardList, Plus, Search, Trash2, X } from 'lucide-react';
 import { api } from '../services/api';
 import { DashboardLayout } from './layout/DashboardLayout';
 import {
   KnowledgeBaseStatsSnapshot,
   MemoryInventoryCountSnapshot,
+  MemoryProposalCategory,
+  MemoryProposalSnapshot,
   PersonalMemorySnapshot,
   ProjectMemorySnapshot,
 } from '../types/memory';
@@ -25,7 +27,7 @@ const EMPTY_STATS: KnowledgeBaseStatsSnapshot = {
   project_global: { total: 0, requires_verification: 0 },
 };
 
-type KnowledgeBaseTab = 'browse' | 'add';
+type KnowledgeBaseTab = 'browse' | 'review' | 'add';
 type MemoryEntry = PersonalMemorySnapshot | ProjectMemorySnapshot;
 
 function parseMemoryValue(raw: string): Record<string, unknown> {
@@ -51,6 +53,13 @@ function parseConfidence(raw: string): number {
 function normalizeOptional(value: string): string | undefined {
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : undefined;
+}
+
+function parseOptionalJsonObject(raw: string): Record<string, unknown> | undefined {
+  if (raw.trim().length === 0) {
+    return undefined;
+  }
+  return parseMemoryValue(raw);
 }
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -133,6 +142,21 @@ export function KnowledgeBasePage() {
   const [searchInput, setSearchInput] = React.useState('');
   const [searchQuery, setSearchQuery] = React.useState('');
 
+  const [proposalCategory, setProposalCategory] =
+    React.useState<MemoryProposalCategory>('project');
+  const [proposalMemoryKey, setProposalMemoryKey] = React.useState('');
+  const [proposalValueJson, setProposalValueJson] = React.useState(DEFAULT_MEMORY_VALUE_JSON);
+  const [proposalTitle, setProposalTitle] = React.useState('');
+  const [proposalSummary, setProposalSummary] = React.useState('');
+  const [proposalEvidenceJson, setProposalEvidenceJson] = React.useState('');
+  const [proposalSource, setProposalSource] = React.useState('curated_corpus');
+  const [proposalScope, setProposalScope] = React.useState('repo');
+  const [proposalConfidence, setProposalConfidence] = React.useState('0.9');
+  const [proposalRequiresVerification, setProposalRequiresVerification] = React.useState(false);
+  const [proposalError, setProposalError] = React.useState<string | null>(null);
+  const [proposalSaving, setProposalSaving] = React.useState(false);
+  const [reviewingProposalId, setReviewingProposalId] = React.useState<string | null>(null);
+
   const [projectRepoUrl, setProjectRepoUrl] = React.useState('');
   const [projectMemoryKey, setProjectMemoryKey] = React.useState('');
   const [projectValueJson, setProjectValueJson] = React.useState(DEFAULT_MEMORY_VALUE_JSON);
@@ -175,6 +199,14 @@ export function KnowledgeBasePage() {
     setProjectRequiresVerification(true);
   }, []);
 
+  const resetProposalForm = React.useCallback(() => {
+    setProposalMemoryKey('');
+    setProposalValueJson(DEFAULT_MEMORY_VALUE_JSON);
+    setProposalTitle('');
+    setProposalSummary('');
+    setProposalEvidenceJson('');
+  }, []);
+
   const {
     data: stats = EMPTY_STATS,
     isLoading: statsLoading,
@@ -186,6 +218,34 @@ export function KnowledgeBasePage() {
     retry: false,
     refetchInterval: KNOWLEDGE_BASE_REFETCH_INTERVAL_MS,
   });
+
+  const {
+    data: pendingMemoryProposals = [],
+    isLoading: pendingProposalsLoading,
+    error: pendingProposalsError,
+    refetch: refetchPendingProposals,
+  } = useQuery({
+    queryKey: ['knowledge-base', 'memory-proposals', 'pending'],
+    queryFn: () => api.listMemoryProposals('pending_review'),
+    retry: false,
+    refetchInterval: KNOWLEDGE_BASE_REFETCH_INTERVAL_MS,
+  });
+
+  const {
+    data: reviewedMemoryProposalResults = [],
+    error: reviewedProposalsError,
+    refetch: refetchReviewedProposals,
+  } = useQuery({
+    queryKey: ['knowledge-base', 'memory-proposals', 'reviewed'],
+    queryFn: () => api.listMemoryProposals(['accepted', 'rejected'], undefined, undefined, 100),
+    retry: false,
+    refetchInterval: KNOWLEDGE_BASE_REFETCH_INTERVAL_MS,
+  });
+  const reviewedMemoryProposals = React.useMemo(
+    () =>
+      [...reviewedMemoryProposalResults].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
+    [reviewedMemoryProposalResults]
+  );
 
   const {
     data: personalData,
@@ -295,6 +355,63 @@ export function KnowledgeBasePage() {
     refetchProjectSearch,
     refetchStats,
   ]);
+
+  const refreshMemoryProposals = React.useCallback(async () => {
+    await refetchPendingProposals();
+    await refetchReviewedProposals();
+  }, [refetchPendingProposals, refetchReviewedProposals]);
+
+  function renderMemoryProposal(proposal: MemoryProposalSnapshot): React.ReactNode {
+    const isPending = proposal.status === 'pending_review';
+    return (
+      <article key={proposal.proposal_id} className="knowledge-entry">
+        <header className="knowledge-entry-header">
+          <div>
+            <h3>{proposal.title || proposal.memory_key}</h3>
+            <p>
+              {proposal.category === 'project'
+                ? proposal.repo_url || 'Project memory'
+                : 'Personal memory'}
+            </p>
+          </div>
+          <span className={`proposal-status-badge status-${proposal.status}`}>
+            {proposal.status.replace('_', ' ')}
+          </span>
+        </header>
+        {proposal.summary ? (
+          <p className="knowledge-section-subtitle">{proposal.summary}</p>
+        ) : null}
+        <div className="knowledge-entry-meta">
+          <span>Key: {proposal.memory_key}</span>
+          <span>Confidence: {proposal.confidence.toFixed(2)}</span>
+          <span>Needs verification: {proposal.requires_verification ? 'yes' : 'no'}</span>
+        </div>
+        <pre>{JSON.stringify(proposal.value, null, 2)}</pre>
+        {isPending ? (
+          <div className="knowledge-review-actions">
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => handleAcceptMemoryProposal(proposal.proposal_id)}
+              disabled={reviewingProposalId === proposal.proposal_id}
+            >
+              <Check size={15} />
+              Accept
+            </button>
+            <button
+              type="button"
+              className="knowledge-load-more"
+              onClick={() => handleRejectMemoryProposal(proposal.proposal_id)}
+              disabled={reviewingProposalId === proposal.proposal_id}
+            >
+              <X size={15} />
+              Reject
+            </button>
+          </div>
+        ) : null}
+      </article>
+    );
+  }
 
   function renderMemoryEntry(entry: MemoryEntry): React.ReactNode {
     const projectEntry = isProjectMemory(entry);
@@ -445,6 +562,60 @@ export function KnowledgeBasePage() {
     }
   };
 
+  const handleCreateMemoryProposal = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setProposalError(null);
+    setProposalSaving(true);
+    try {
+      await api.createMemoryProposal({
+        category: proposalCategory,
+        repo_url: proposalCategory === 'project' ? projectRepoUrl.trim() : undefined,
+        memory_key: proposalMemoryKey.trim(),
+        value: parseMemoryValue(proposalValueJson),
+        title: normalizeOptional(proposalTitle),
+        summary: normalizeOptional(proposalSummary),
+        evidence: parseOptionalJsonObject(proposalEvidenceJson),
+        source: normalizeOptional(proposalSource),
+        scope: normalizeOptional(proposalScope),
+        confidence: parseConfidence(proposalConfidence),
+        requires_verification: proposalRequiresVerification,
+      });
+      resetProposalForm();
+      await refreshMemoryProposals();
+    } catch (error) {
+      setProposalError((error as Error).message);
+    } finally {
+      setProposalSaving(false);
+    }
+  };
+
+  const handleAcceptMemoryProposal = async (proposalId: string) => {
+    setProposalError(null);
+    setReviewingProposalId(proposalId);
+    try {
+      await api.acceptMemoryProposal(proposalId);
+      await refreshMemoryProposals();
+      await refreshInventory();
+    } catch (error) {
+      setProposalError((error as Error).message);
+    } finally {
+      setReviewingProposalId(null);
+    }
+  };
+
+  const handleRejectMemoryProposal = async (proposalId: string) => {
+    setProposalError(null);
+    setReviewingProposalId(proposalId);
+    try {
+      await api.rejectMemoryProposal(proposalId);
+      await refreshMemoryProposals();
+    } catch (error) {
+      setProposalError((error as Error).message);
+    } finally {
+      setReviewingProposalId(null);
+    }
+  };
+
   const handleDeletePersonal = async (entry: PersonalMemorySnapshot) => {
     if (!window.confirm(`Delete personal memory "${entry.memory_key}"?`)) {
       return;
@@ -496,6 +667,16 @@ export function KnowledgeBasePage() {
         >
           <BookOpen size={16} />
           Browse
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'review'}
+          className={`knowledge-tab-button ${activeTab === 'review' ? 'active' : ''}`}
+          onClick={() => setActiveTab('review')}
+        >
+          <ClipboardList size={16} />
+          Review
         </button>
         <button
           type="button"
@@ -668,6 +849,150 @@ export function KnowledgeBasePage() {
             </div>
           )}
         </>
+      ) : activeTab === 'review' ? (
+        <div className="knowledge-grid">
+          <section className="card knowledge-section">
+            <h2>Pending Review</h2>
+            <p className="knowledge-section-subtitle">
+              Accept proposals to upsert durable memory, or reject them without writing memory.
+            </p>
+            {proposalError ? <p className="card-error-text">{proposalError}</p> : null}
+            {pendingProposalsError ? (
+              <p className="card-error-text">{(pendingProposalsError as Error).message}</p>
+            ) : null}
+            <div className="knowledge-list">
+              {pendingProposalsLoading ? (
+                <p className="session-context-muted">Loading memory proposals...</p>
+              ) : pendingMemoryProposals.length === 0 ? (
+                <p className="session-context-muted">No memory proposals pending review.</p>
+              ) : (
+                pendingMemoryProposals.map(renderMemoryProposal)
+              )}
+            </div>
+          </section>
+
+          <section className="card knowledge-section">
+            <h2>Manual Proposal</h2>
+            <p className="knowledge-section-subtitle">
+              Seed curated memories as proposals first, then accept them after review.
+            </p>
+            <form className="knowledge-form" onSubmit={handleCreateMemoryProposal}>
+              <label htmlFor="memory-proposal-category">Proposal Category</label>
+              <select
+                id="memory-proposal-category"
+                value={proposalCategory}
+                onChange={(event) => {
+                  const category = event.target.value as MemoryProposalCategory;
+                  setProposalCategory(category);
+                  setProposalScope(category === 'project' ? 'repo' : 'global');
+                }}
+              >
+                <option value="project">Project</option>
+                <option value="personal">Personal</option>
+              </select>
+
+              <label htmlFor="memory-proposal-key">Memory Key</label>
+              <input
+                id="memory-proposal-key"
+                value={proposalMemoryKey}
+                onChange={(event) => setProposalMemoryKey(event.target.value)}
+                required
+              />
+
+              <label htmlFor="memory-proposal-title">Title</label>
+              <input
+                id="memory-proposal-title"
+                value={proposalTitle}
+                onChange={(event) => setProposalTitle(event.target.value)}
+              />
+
+              <label htmlFor="memory-proposal-summary">Summary</label>
+              <textarea
+                id="memory-proposal-summary"
+                value={proposalSummary}
+                onChange={(event) => setProposalSummary(event.target.value)}
+                rows={3}
+              />
+
+              <label htmlFor="memory-proposal-value">Memory Value (JSON object)</label>
+              <textarea
+                id="memory-proposal-value"
+                value={proposalValueJson}
+                onChange={(event) => setProposalValueJson(event.target.value)}
+                rows={5}
+                required
+              />
+
+              <label htmlFor="memory-proposal-evidence">Evidence (optional JSON object)</label>
+              <textarea
+                id="memory-proposal-evidence"
+                value={proposalEvidenceJson}
+                onChange={(event) => setProposalEvidenceJson(event.target.value)}
+                rows={3}
+              />
+
+              <label htmlFor="memory-proposal-source">Source</label>
+              <input
+                id="memory-proposal-source"
+                value={proposalSource}
+                onChange={(event) => setProposalSource(event.target.value)}
+              />
+
+              <label htmlFor="memory-proposal-scope">Scope</label>
+              <input
+                id="memory-proposal-scope"
+                value={proposalScope}
+                onChange={(event) => setProposalScope(event.target.value)}
+              />
+
+              <label htmlFor="memory-proposal-confidence">Confidence (0.0-1.0)</label>
+              <input
+                id="memory-proposal-confidence"
+                type="number"
+                step="0.01"
+                min="0"
+                max="1"
+                value={proposalConfidence}
+                onChange={(event) => setProposalConfidence(event.target.value)}
+                required
+              />
+
+              <label className="knowledge-checkbox">
+                <input
+                  type="checkbox"
+                  checked={proposalRequiresVerification}
+                  onChange={(event) => setProposalRequiresVerification(event.target.checked)}
+                />
+                <span>Requires verification</span>
+              </label>
+
+              <button
+                className="btn-primary"
+                type="submit"
+                disabled={
+                  proposalSaving ||
+                  (proposalCategory === 'project' && projectRepoUrl.trim().length === 0)
+                }
+              >
+                {proposalSaving ? 'Creating...' : 'Create Memory Proposal'}
+              </button>
+            </form>
+          </section>
+
+          <section className="card knowledge-section knowledge-section-wide">
+            <h2>Reviewed</h2>
+            {reviewedProposalsError ? (
+              <p className="card-error-text">{(reviewedProposalsError as Error).message}</p>
+            ) : null}
+            <div className="knowledge-list">
+              {reviewedMemoryProposals.length === 0 ? (
+                <p className="session-context-muted">No reviewed memory proposals yet.</p>
+              ) : (
+                reviewedMemoryProposals.map(renderMemoryProposal)
+              )}
+            </div>
+          </section>
+        </div>
       ) : (
         <div className="knowledge-grid">
           <section className="card knowledge-section">

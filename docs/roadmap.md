@@ -444,19 +444,26 @@ Boundary:
 
 - routing changes stay policy-driven and inspectable; no opaque auto-training loop
 
-### M23 Semantic Memory Retrieval
+### M23 Memory Admission And Retrieval
 
 Goal:
 
+- make durable memory useful, reviewable, and measurable before adding heavier retrieval infrastructure
 - improve memory relevance when evals show keyword/recency retrieval is causing misses
 
 Progress:
 
 - [x] Slice 1: load skeptical personal/project/session memory from the DB before worker dispatch and persist typed worker-produced memory after runs
 - [x] Slice 2: add full-text memory search and retrieval visibility before evaluating semantic/vector retrieval
+- [x] Slice 3/4: add deterministic retrieval evaluation, curated reviewable memory corpus, memory proposals, dashboard review flow, and SQLite-vs-Postgres FTS evidence
+- [ ] Slice 5: unify worker memory candidates and reviewable proposals behind a `MemoryAdmissionService`, including a required LangMem and Mem0/OpenMemory adoption spike; see [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md)
 
 Scope:
 
+- treat `WorkerResult.memory_to_persist` as candidate memory rather than a direct durable-write command
+- use risk/decision classification to reject, create, update, merge, or route candidates to human review
+- use `memory_proposals` only for candidates that require human approval
+- keep durable personal/project memory in the existing Postgres store
 - add semantic retrieval behind the existing skeptical-memory contract
 - preserve source, confidence, scope, verification, and editability metadata
 - consider pgvector only if metrics justify the new infrastructure dependency
@@ -464,6 +471,8 @@ Scope:
 Boundary:
 
 - do not add vector storage just because it is available; add it only when measured retrieval quality needs it
+- do not let workers write durable memory directly; all candidates pass through admission
+- do not add LangMem, Mem0/OpenMemory, Graphiti, Cognee, or another memory platform as a production dependency until the Slice 5 adoption spike proves a clear net simplification
 
 ### M24 Decomposed Task DAG
 
@@ -554,7 +563,7 @@ Phase 3:
 Phase 4:
 
 1. Milestone 22 [x]
-2. Milestone 23 [in progress: slice 1 done]
+2. Milestone 23 [in progress: Slice 5 memory admission planned]
 3. Milestone 24
 4. Milestone 25
 5. Milestone 26
