@@ -399,3 +399,38 @@ def test_persist_execution_outcome_isolates_bridge_db_errors(session_factory, mo
         assert len(proposals) == 0
         decisions = list(session.scalars(select(MemoryAdmissionDecision)).all())
         assert len(decisions) == 0
+
+
+def test_persist_execution_outcome_isolates_capture_failures(session_factory, monkeypatch) -> None:
+    """_persist_execution_outcome isolates failures during observation capture.
+
+    Failing the observation capture/bridge must not fail outcome persistence.
+    """
+    with session_scope(session_factory) as session:
+        task = _seed_user_session_task(session)
+        task_id = task.id
+
+    from memory.observation import ObservationCaptureService
+
+    def mock_capture_worker_run(*args, **kwargs):
+        raise ValueError("Simulated unhandled capture exception")
+
+    monkeypatch.setattr(ObservationCaptureService, "capture_worker_run", mock_capture_worker_run)
+
+    service = MockExecutionService(session_factory)
+    state = _build_mock_state(task_id)
+
+    now = utc_now()
+    # This should log a warning but complete successfully
+    _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+        force_task_status=TaskStatus.COMPLETED,
+    )
+
+    with session_scope(session_factory) as session:
+        db_task = session.get(Task, task_id)
+        assert db_task.status == TaskStatus.COMPLETED

@@ -615,25 +615,32 @@ def _persist_execution_outcome(
         # Episodic Observation Capture and Bridge (M23 Slice 6)
         from memory.observation import ObservationCaptureService, ObservationMemoryBridge
 
-        if state.result is not None:
-            ObservationCaptureService.capture_worker_run(
-                session=session,
-                task=task,
-                worker_run=worker_run,
-                result=state.result,
-            )
+        try:
+            with session.begin_nested():
+                if state.result is not None:
+                    ObservationCaptureService.capture_worker_run(
+                        session=session,
+                        task=task,
+                        worker_run=worker_run,
+                        result=state.result,
+                    )
 
-        if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
-            ObservationCaptureService.capture_task_finalization(
-                session=session,
-                task=task,
-                state=state,
-            )
+                if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+                    ObservationCaptureService.capture_task_finalization(
+                        session=session,
+                        task=task,
+                        state=state,
+                    )
 
-        ObservationMemoryBridge.bridge_observations(
-            session=session,
-            task_id=task_id,
-        )
+                ObservationMemoryBridge.bridge_observations(
+                    session=session,
+                    task_id=task_id,
+                )
+        except Exception:
+            logger.warning(
+                "Failed to capture/bridge episodic observations; continuing outcome persistence.",
+                exc_info=True,
+            )
 
         task_id_val = task.id
         session_id_val = task.session_id

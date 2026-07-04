@@ -191,8 +191,8 @@ def test_capture_interaction_resolution(session_factory) -> None:
         assert retrieved.metadata_payload["response_data"] == {"approved": True}
 
 
-def test_build_recent_context_block(session_factory) -> None:
-    """build_recent_context_block returns DTOs for recent observations."""
+def test_load_recent_context_entries(session_factory) -> None:
+    """load_recent_context_entries returns DTOs for recent observations."""
     with session_scope(session_factory) as session:
         repo = ObservationRepository(session)
         repo.create(
@@ -212,7 +212,7 @@ def test_build_recent_context_block(session_factory) -> None:
         session.flush()
 
     with session_scope(session_factory) as session:
-        entries = ObservationContextService.build_recent_context_block(session, repo_url="repo1")
+        entries = ObservationContextService.load_recent_context_entries(session, repo_url="repo1")
         assert len(entries) == 2
         assert {e.summary for e in entries} == {"obs 1", "obs 2"}
 

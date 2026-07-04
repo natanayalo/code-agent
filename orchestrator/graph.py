@@ -1661,7 +1661,7 @@ def _fetch_memory_context(
         try:
             from memory.observation import ObservationContextService
 
-            memory.observations = ObservationContextService.build_recent_context_block(
+            memory.observations = ObservationContextService.load_recent_context_entries(
                 session=db_session,
                 repo_url=repo_url,
                 session_id=session_id,

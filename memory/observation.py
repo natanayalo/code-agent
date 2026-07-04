@@ -178,7 +178,7 @@ class ObservationContextService:
     """Build compact recent-context blocks from memory observations."""
 
     @staticmethod
-    def build_recent_context_block(
+    def load_recent_context_entries(
         session: Session,
         repo_url: str | None = None,
         session_id: str | None = None,
