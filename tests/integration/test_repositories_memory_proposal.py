@@ -156,3 +156,25 @@ def test_memory_proposal_create_fails_fast_for_category_repo_contract(session_fa
                 memory_key="bad_scope",
                 value={},
             )
+
+        with pytest.raises(ValueError, match="repo_url is required"):
+            repo.create(
+                category="project",
+                repo_url="   ",
+                memory_key="missing_repo",
+                value={},
+            )
+
+
+def test_memory_proposal_create_normalizes_repo_url_and_memory_key(session_factory) -> None:
+    """Repository create should normalize direct-call string inputs before persistence."""
+    with session_scope(session_factory) as session:
+        proposal = MemoryProposalRepository(session).create(
+            category="project",
+            repo_url="  https://github.com/natanayalo/code-agent  ",
+            memory_key="  verification_commands  ",
+            value={"python": ".venv/bin/pytest tests/unit"},
+        )
+
+        assert proposal.repo_url == "https://github.com/natanayalo/code-agent"
+        assert proposal.memory_key == "verification_commands"

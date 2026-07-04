@@ -39,11 +39,13 @@ class MemoryProposalRepository:
         session_id: str | None = None,
     ) -> MemoryProposal:
         normalized_category = MemoryProposalCategory(category)
-        self._validate_category_scope(category=normalized_category, repo_url=repo_url)
+        normalized_repo_url = (repo_url or "").strip() or None
+        normalized_memory_key = memory_key.strip()
+        self._validate_category_scope(category=normalized_category, repo_url=normalized_repo_url)
         proposal = MemoryProposal(
             category=normalized_category,
-            repo_url=repo_url,
-            memory_key=memory_key,
+            repo_url=normalized_repo_url,
+            memory_key=normalized_memory_key,
             value=value,
             source=source,
             confidence=confidence,
