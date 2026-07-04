@@ -4,6 +4,7 @@ from db.base import Base
 from db.models import (
     Artifact,
     MemoryAdmissionDecision,
+    MemoryObservation,
     PersonalMemory,
     ProjectMemory,
     Session,
@@ -16,6 +17,7 @@ __all__ = [
     "Artifact",
     "Base",
     "MemoryAdmissionDecision",
+    "MemoryObservation",
     "PersonalMemory",
     "ProjectMemory",
     "Session",

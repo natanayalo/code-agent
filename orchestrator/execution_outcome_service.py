@@ -612,6 +612,29 @@ def _persist_execution_outcome(
             worker_run_id=worker_run.id,
         )
 
+        # Episodic Observation Capture and Bridge (M23 Slice 6)
+        from memory.observation import ObservationCaptureService, ObservationMemoryBridge
+
+        if state.result is not None:
+            ObservationCaptureService.capture_worker_run(
+                session=session,
+                task=task,
+                worker_run=worker_run,
+                result=state.result,
+            )
+
+        if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+            ObservationCaptureService.capture_task_finalization(
+                session=session,
+                task=task,
+                state=state,
+            )
+
+        ObservationMemoryBridge.bridge_observations(
+            session=session,
+            task_id=task_id,
+        )
+
         task_id_val = task.id
         session_id_val = task.session_id
         task_constraints_val = (

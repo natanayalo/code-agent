@@ -16,6 +16,7 @@ EXPECTED_TABLES = {
     "human_interactions",
     "inbound_deliveries",
     "memory_admission_decisions",
+    "memory_observations",
     "memory_personal",
     "memory_proposals",
     "memory_project",
@@ -30,6 +31,15 @@ EXPECTED_TABLES = {
 }
 
 EXPECTED_CHECK_CONSTRAINTS = {
+    "memory_observations": {
+        "ck_memory_observations_memory_observation_admission_status": {
+            "not_required",
+            "pending",
+            "processed",
+            "invalid",
+            "failed",
+        },
+    },
     "sessions": {
         "ck_sessions_session_status": {"active", "closed"},
     },
@@ -230,6 +240,66 @@ def _assert_upgrade_columns(inspector) -> None:
     } <= _column_names(inspector, "worker_nodes")
 
 
+def _assert_session_and_admission_columns(inspector) -> None:
+    session_state_columns = {
+        column["name"]: column for column in inspector.get_columns("session_states")
+    }
+    assert session_state_columns["decisions_made"]["default"] == "'{}'"
+    assert session_state_columns["identified_risks"]["default"] == "'{}'"
+    assert session_state_columns["files_touched"]["default"] == "'[]'"
+    assert {
+        "category",
+        "memory_key",
+        "candidate_payload",
+        "decision",
+        "risk_level",
+        "reason",
+        "task_id",
+        "session_id",
+        "durable_memory_id",
+        "proposal_id",
+        "source_observation_id",
+    } <= _column_names(inspector, "memory_admission_decisions")
+    assert {
+        "category",
+        "repo_url",
+        "memory_key",
+        "value",
+        "source",
+        "confidence",
+        "scope",
+        "requires_verification",
+        "status",
+        "title",
+        "summary",
+        "evidence",
+        "task_id",
+        "session_id",
+        "accepted_memory_id",
+        "reviewed_at",
+        "source_observation_id",
+    } <= _column_names(inspector, "memory_proposals")
+    assert {
+        "id",
+        "task_id",
+        "session_id",
+        "repo_url",
+        "worker_type",
+        "source",
+        "event_type",
+        "observed_at",
+        "summary",
+        "content",
+        "metadata_payload",
+        "privacy_stripped",
+        "admission_status",
+        "admission_processed_at",
+        "admission_error",
+        "created_at",
+        "updated_at",
+    } <= _column_names(inspector, "memory_observations")
+
+
 def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     """Upgrading to head creates the initial persistence schema."""
     database_path = tmp_path / "schema.db"
@@ -251,42 +321,7 @@ def test_alembic_upgrade_creates_expected_tables(tmp_path: Path) -> None:
     assert worker_run_foreign_keys["fk_worker_runs_session_id_sessions"]["options"] == {
         "ondelete": "CASCADE"
     }
-    session_state_columns = {
-        column["name"]: column for column in inspector.get_columns("session_states")
-    }
-    assert session_state_columns["decisions_made"]["default"] == "'{}'"
-    assert session_state_columns["identified_risks"]["default"] == "'{}'"
-    assert session_state_columns["files_touched"]["default"] == "'[]'"
-    assert {
-        "category",
-        "memory_key",
-        "candidate_payload",
-        "decision",
-        "risk_level",
-        "reason",
-        "task_id",
-        "session_id",
-        "durable_memory_id",
-        "proposal_id",
-    } <= _column_names(inspector, "memory_admission_decisions")
-    assert {
-        "category",
-        "repo_url",
-        "memory_key",
-        "value",
-        "source",
-        "confidence",
-        "scope",
-        "requires_verification",
-        "status",
-        "title",
-        "summary",
-        "evidence",
-        "task_id",
-        "session_id",
-        "accepted_memory_id",
-        "reviewed_at",
-    } <= _column_names(inspector, "memory_proposals")
+    _assert_session_and_admission_columns(inspector)
 
     for table_name, expected_constraints in EXPECTED_CHECK_CONSTRAINTS.items():
         actual_constraints = {
@@ -755,3 +790,73 @@ def test_alembic_downgrade_cleans_review_result_artifacts(tmp_path: Path) -> Non
             text("SELECT COUNT(*) FROM artifacts WHERE artifact_type = 'review_result'")
         ).scalar_one()
     assert remaining == 0
+
+
+def _insert_decision(
+    connection,
+    dec_id: str,
+    memory_key: str,
+    source_obs_id: str | None,
+    now: str,
+) -> None:
+    connection.execute(
+        text(
+            "INSERT INTO memory_admission_decisions "
+            "(id, category, memory_key, candidate_payload, decision, risk_level, "
+            "reason, created_at, updated_at, source_observation_id) "
+            "VALUES (:id, :category, :memory_key, :candidate_payload, :decision, "
+            ":risk_level, :reason, :created_at, :updated_at, :source_observation_id)"
+        ),
+        {
+            "id": dec_id,
+            "category": "personal",
+            "memory_key": memory_key,
+            "candidate_payload": "{}",
+            "decision": "create",
+            "risk_level": "low",
+            "reason": "r",
+            "created_at": now,
+            "updated_at": now,
+            "source_observation_id": source_obs_id,
+        },
+    )
+
+
+def test_source_observation_id_and_partial_unique_index(tmp_path: Path) -> None:
+    """Verify that source_observation_id enforces partial unique index constraints.
+
+    Also tests that downgrade succeeds.
+    """
+    database_path = tmp_path / "obs_schema.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+
+    with engine.begin() as connection:
+        now = "2026-07-04T00:00:00+00:00"
+        _seed_downgrade_users_and_sessions(connection, now)
+        _seed_downgrade_tasks(connection, now)
+
+        # Insert first decision
+        _insert_decision(connection, "dec-1", "k1", "obs-1", now)
+
+        # Insert second & third decisions with NULL source_observation_id
+        _insert_decision(connection, "dec-2", "k2", None, now)
+        _insert_decision(connection, "dec-3", "k3", None, now)
+
+        import pytest
+        from sqlalchemy.exc import IntegrityError
+
+        with pytest.raises(IntegrityError):
+            _insert_decision(connection, "dec-4", "k4", "obs-1", now)
+
+    command.downgrade(config, "20260704_0032")
+
+    inspector = inspect(engine)
+    assert "memory_observations" not in inspector.get_table_names()
+    assert "source_observation_id" not in _column_names(inspector, "memory_admission_decisions")
+    assert "source_observation_id" not in _column_names(inspector, "memory_proposals")

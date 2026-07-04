@@ -1600,6 +1600,73 @@ def _memory_loaded_payload(
     }
 
 
+def _fetch_memory_context(
+    session_factory: Callable[[], Session],
+    user_id: str | None,
+    session_id: str | None,
+    repo_url: str | None,
+    search_query: str,
+    search_limit: int,
+) -> MemoryContext:
+    db_session: Session | None = None
+    try:
+        db_session = session_factory()
+        memory = MemoryContext()
+        memory.personal = _search_memory_entries(
+            repo=PersonalMemoryRepository(db_session),
+            query_kwargs={
+                "query": search_query,
+                "limit": search_limit,
+            },
+        )
+        if repo_url:
+            memory.project = _search_memory_entries(
+                repo=ProjectMemoryRepository(db_session),
+                query_kwargs={
+                    "repo_url": repo_url,
+                    "query": search_query,
+                    "limit": search_limit,
+                },
+            )
+        if session_id:
+            session_state = SessionStateRepository(db_session).get(session_id)
+            memory.session = _session_state_payload(session_state)
+
+        try:
+            from memory.observation import ObservationContextService
+
+            memory.observations = ObservationContextService.build_recent_context_block(
+                session=db_session,
+                repo_url=repo_url,
+                session_id=session_id,
+                task_id=None,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to load recent observations context; continuing without observations.",
+                exc_info=True,
+                extra={
+                    "session_id": session_id,
+                    "repo_url": repo_url,
+                },
+            )
+        return memory
+    except Exception:
+        logger.warning(
+            "Failed to load memory context; continuing with empty memory.",
+            exc_info=True,
+            extra={
+                "session_id": session_id,
+                "user_id": user_id,
+                "repo_url": repo_url,
+            },
+        )
+        return MemoryContext()
+    finally:
+        if db_session is not None:
+            db_session.close()
+
+
 def build_load_memory_node(
     session_factory: Callable[[], Session],
     *,
@@ -1613,44 +1680,14 @@ def build_load_memory_node(
         session_id = state.session.session_id if state.session is not None else None
         repo_url = state.task.repo_url
         search_query = _memory_search_query(state)
-        memory = MemoryContext()
-
-        db_session: Session | None = None
-        try:
-            db_session = session_factory()
-            memory.personal = _search_memory_entries(
-                repo=PersonalMemoryRepository(db_session),
-                query_kwargs={
-                    "query": search_query,
-                    "limit": search_limit,
-                },
-            )
-            if repo_url:
-                memory.project = _search_memory_entries(
-                    repo=ProjectMemoryRepository(db_session),
-                    query_kwargs={
-                        "repo_url": repo_url,
-                        "query": search_query,
-                        "limit": search_limit,
-                    },
-                )
-            if session_id:
-                session_state = SessionStateRepository(db_session).get(session_id)
-                memory.session = _session_state_payload(session_state)
-        except Exception:
-            logger.warning(
-                "Failed to load memory context; continuing with empty memory.",
-                exc_info=True,
-                extra={
-                    "session_id": session_id,
-                    "user_id": user_id,
-                    "repo_url": repo_url,
-                },
-            )
-            memory = MemoryContext()
-        finally:
-            if db_session is not None:
-                db_session.close()
+        memory = _fetch_memory_context(
+            session_factory=session_factory,
+            user_id=user_id,
+            session_id=session_id,
+            repo_url=repo_url,
+            search_query=search_query,
+            search_limit=search_limit,
+        )
 
         return {
             "current_step": "load_memory",

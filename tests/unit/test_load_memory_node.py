@@ -297,5 +297,5 @@ def test_load_memory_node_db_error_returns_empty_memory() -> None:
 
     result = build_load_memory_node(broken_factory)(state)
 
-    assert result["memory"] == {"personal": [], "project": [], "session": {}}
+    assert result["memory"] == {"personal": [], "project": [], "session": {}, "observations": []}
     assert result["timeline_events"][0].event_type == TimelineEventType.MEMORY_LOADED

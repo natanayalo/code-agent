@@ -126,6 +126,13 @@ def record_interaction_response(
                     "response_data": response.response_data,
                 },
             )
+            from memory.observation import ObservationCaptureService
+
+            ObservationCaptureService.capture_interaction_resolution(
+                session=session,
+                task=task,
+                interaction=interaction,
+            )
 
         session.flush()
         return self.get_task(task_id)

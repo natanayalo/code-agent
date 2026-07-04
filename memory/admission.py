@@ -75,6 +75,7 @@ class MemoryCandidate(MemoryAdmissionModel):
     task_id: str | None = None
     session_id: str | None = None
     producer: MemoryProducer = "worker"
+    source_observation_id: str | None = None
 
 
 class MemoryAdmissionResult(MemoryAdmissionModel):
@@ -266,6 +267,7 @@ class CustomMemoryAdmissionService(MemoryAdmissionService):
             },
             task_id=candidate.task_id,
             session_id=candidate.session_id,
+            source_observation_id=candidate.source_observation_id,
         )
         return proposal.id
 
@@ -281,6 +283,7 @@ class CustomMemoryAdmissionService(MemoryAdmissionService):
             session_id=result.candidate.session_id,
             durable_memory_id=result.durable_memory_id,
             proposal_id=result.proposal_id,
+            source_observation_id=result.candidate.source_observation_id,
         )
 
     def _get_existing_project_memory(self, candidate: MemoryCandidate) -> ProjectMemory | None:

@@ -29,6 +29,7 @@ class MemoryAdmissionDecisionRepository:
         session_id: str | None = None,
         durable_memory_id: str | None = None,
         proposal_id: str | None = None,
+        source_observation_id: str | None = None,
     ) -> MemoryAdmissionDecision:
         row = MemoryAdmissionDecision(
             category=category,
@@ -41,6 +42,7 @@ class MemoryAdmissionDecisionRepository:
             session_id=session_id,
             durable_memory_id=durable_memory_id,
             proposal_id=proposal_id,
+            source_observation_id=source_observation_id,
         )
         self.session.add(row)
         self.session.flush()

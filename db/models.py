@@ -21,6 +21,7 @@ from sqlalchemy import (
     Text,
     TypeDecorator,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
@@ -555,6 +556,53 @@ class ProjectMemory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     requires_verification: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
+class MemoryObservation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Raw episodic task/session observations."""
+
+    __tablename__ = "memory_observations"
+    __table_args__ = (
+        CheckConstraint(
+            "admission_status IN ('not_required', 'pending', 'processed', 'invalid', 'failed')",
+            name="memory_observation_admission_status",
+        ),
+    )
+
+    task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    repo_url: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    worker_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    privacy_stripped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    admission_status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="not_required",
+        index=True,
+    )
+    admission_processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    admission_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    task: Mapped[Task | None] = relationship()
+    session: Mapped[Session | None] = relationship()
+
+
 class SessionState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Compact session working state (T-061)."""
 
@@ -731,6 +779,13 @@ class MemoryProposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index("ix_memory_proposals_status_created_at", "status", "created_at"),
         Index("ix_memory_proposals_category_status", "category", "status"),
+        Index(
+            "uq_idx_proposal_source_observation_id",
+            "source_observation_id",
+            unique=True,
+            postgresql_where=text("source_observation_id IS NOT NULL"),
+            sqlite_where=text("source_observation_id IS NOT NULL"),
+        ),
     )
 
     category: Mapped[MemoryProposalCategory] = mapped_column(
@@ -764,6 +819,7 @@ class MemoryProposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=True,
         index=True,
     )
+    source_observation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     accepted_memory_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -804,6 +860,13 @@ class MemoryAdmissionDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="memory_admission_risk_level",
         ),
         Index("ix_memory_admission_decisions_decision_created_at", "decision", "created_at"),
+        Index(
+            "uq_idx_decision_source_observation_id",
+            "source_observation_id",
+            unique=True,
+            postgresql_where=text("source_observation_id IS NOT NULL"),
+            sqlite_where=text("source_observation_id IS NOT NULL"),
+        ),
     )
 
     category: Mapped[str] = mapped_column(String(8), nullable=False)
@@ -828,6 +891,7 @@ class MemoryAdmissionDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=True,
         index=True,
     )
+    source_observation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
 
 class ExecutionPlan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
