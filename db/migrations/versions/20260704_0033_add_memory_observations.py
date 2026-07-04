@@ -105,14 +105,24 @@ def _setup_postgres_search(bind: Connection) -> None:
 
 
 def _add_source_observation_columns() -> None:
-    op.add_column(
-        "memory_admission_decisions",
-        sa.Column("source_observation_id", sa.String(length=36), nullable=True),
-    )
-    op.add_column(
-        "memory_proposals",
-        sa.Column("source_observation_id", sa.String(length=36), nullable=True),
-    )
+    with op.batch_alter_table("memory_admission_decisions", schema=None) as batch_op:
+        batch_op.add_column(
+            sa.Column(
+                "source_observation_id",
+                sa.String(length=36),
+                sa.ForeignKey("memory_observations.id", ondelete="SET NULL"),
+                nullable=True,
+            )
+        )
+    with op.batch_alter_table("memory_proposals", schema=None) as batch_op:
+        batch_op.add_column(
+            sa.Column(
+                "source_observation_id",
+                sa.String(length=36),
+                sa.ForeignKey("memory_observations.id", ondelete="SET NULL"),
+                nullable=True,
+            )
+        )
 
 
 def _create_partial_unique_indexes() -> None:
@@ -145,22 +155,16 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Drop indexes, columns, and memory_observations table."""
     # 1. Drop partial unique indexes first before dropping columns
-    op.drop_index(
-        "uq_idx_proposal_source_observation_id",
-        table_name="memory_proposals",
-        postgresql_where=sa.text("source_observation_id IS NOT NULL"),
-        sqlite_where=sa.text("source_observation_id IS NOT NULL"),
-    )
-    op.drop_index(
-        "uq_idx_decision_source_observation_id",
-        table_name="memory_admission_decisions",
-        postgresql_where=sa.text("source_observation_id IS NOT NULL"),
-        sqlite_where=sa.text("source_observation_id IS NOT NULL"),
-    )
+    with op.batch_alter_table("memory_proposals", schema=None) as batch_op:
+        batch_op.drop_index("uq_idx_proposal_source_observation_id")
+    with op.batch_alter_table("memory_admission_decisions", schema=None) as batch_op:
+        batch_op.drop_index("uq_idx_decision_source_observation_id")
 
     # 2. Drop added columns
-    op.drop_column("memory_proposals", "source_observation_id")
-    op.drop_column("memory_admission_decisions", "source_observation_id")
+    with op.batch_alter_table("memory_proposals", schema=None) as batch_op:
+        batch_op.drop_column("source_observation_id")
+    with op.batch_alter_table("memory_admission_decisions", schema=None) as batch_op:
+        batch_op.drop_column("source_observation_id")
 
     # 3. If Postgres, drop search_vector and its GIN index
     bind = op.get_bind()

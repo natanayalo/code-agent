@@ -819,7 +819,10 @@ class MemoryProposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=True,
         index=True,
     )
-    source_observation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    source_observation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("memory_observations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     accepted_memory_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -891,7 +894,10 @@ class MemoryAdmissionDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=True,
         index=True,
     )
-    source_observation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    source_observation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("memory_observations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
 
 class ExecutionPlan(UUIDPrimaryKeyMixin, TimestampMixin, Base):

@@ -41,9 +41,11 @@ class ObservationCaptureService:
         """Capture worker execution details upon completion (does not require admission)."""
         summary_text = result.summary or f"Worker finished with status {result.status}."
         files_str = ", ".join(result.files_changed) if result.files_changed else "(none)"
+        run_id = worker_run.id if worker_run else "unknown"
+        worker_type = (worker_run.worker_type or "unknown") if worker_run else "unknown"
         content_lines = [
-            f"Worker Run ID: {worker_run.id}",
-            f"Worker Type: {worker_run.worker_type or 'unknown' if worker_run else 'unknown'}",
+            f"Worker Run ID: {run_id}",
+            f"Worker Type: {worker_type}",
             f"Status: {result.status}",
             f"Files Changed: {files_str}",
         ]
@@ -63,7 +65,7 @@ class ObservationCaptureService:
             mems_payload = [m.model_dump() for m in result.memory_to_persist]
 
         metadata = {
-            "worker_run_id": worker_run.id,
+            "worker_run_id": worker_run.id if worker_run else None,
             "commands_run": cmds_payload,
             "files_changed": result.files_changed or [],
             "worker_memory_requests": mems_payload,
@@ -99,9 +101,10 @@ class ObservationCaptureService:
         state: Any,
     ) -> MemoryObservation:
         """Capture task finalization details (completion/failure)."""
-        status_val = task.status.value if task.status else "unknown"
+        status_val = task.status.value if task and task.status else "unknown"
+        task_text = task.task_text if task else "unknown"
         summary_text = f"Task finalized with status {status_val}."
-        content_text = f"Task objective: {task.task_text}\nFinal status in DB: {status_val}"
+        content_text = f"Task objective: {task_text}\nFinal status in DB: {status_val}"
 
         metadata = {"final_status": status_val}
 

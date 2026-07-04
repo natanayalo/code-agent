@@ -6,9 +6,10 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
+from db.base import utc_now
 from db.models import MemoryObservation
 
 _SEARCH_LIMIT_CAP = 100
@@ -74,7 +75,7 @@ class ObservationRepository:
             worker_type=worker_type,
             source=source,
             event_type=event_type,
-            observed_at=observed_at or datetime.now(),
+            observed_at=observed_at or utc_now(),
             summary=summary,
             content=content,
             metadata_payload=metadata_payload or {},
@@ -132,15 +133,13 @@ class ObservationRepository:
         if task_id is not None:
             statement = statement.where(MemoryObservation.task_id == task_id)
 
-        observations = list(self.session.scalars(statement))
-        lowered_query = query.casefold()
-        results: list[MemoryObservation] = []
-        for obs in observations:
-            if lowered_query in obs.summary.casefold() or lowered_query in obs.content.casefold():
-                results.append(obs)
-                if len(results) >= limit:
-                    break
-        return results
+        statement = statement.where(
+            or_(
+                MemoryObservation.summary.ilike(f"%{query}%"),
+                MemoryObservation.content.ilike(f"%{query}%"),
+            )
+        ).limit(limit)
+        return list(self.session.scalars(statement))
 
     def _search_postgresql(
         self,
