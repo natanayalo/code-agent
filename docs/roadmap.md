@@ -456,7 +456,7 @@ Progress:
 - [x] Slice 1: load skeptical personal/project/session memory from the DB before worker dispatch and persist typed worker-produced memory after runs
 - [x] Slice 2: add full-text memory search and retrieval visibility before evaluating semantic/vector retrieval
 - [x] Slice 3/4: add deterministic retrieval evaluation, curated reviewable memory corpus, memory proposals, dashboard review flow, and SQLite-vs-Postgres FTS evidence
-- [ ] Slice 5: unify worker memory candidates and reviewable proposals behind a `MemoryAdmissionService`; see [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md)
+- [ ] Slice 5: unify worker memory candidates and reviewable proposals behind a `MemoryAdmissionService`, including a required LangMem and Mem0/OpenMemory adoption spike; see [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md)
 
 Scope:
 
@@ -472,7 +472,7 @@ Boundary:
 
 - do not add vector storage just because it is available; add it only when measured retrieval quality needs it
 - do not let workers write durable memory directly; all candidates pass through admission
-- do not add LangMem, Mem0, Graphiti, Cognee, or another memory platform as a dependency in Slice 5
+- do not add LangMem, Mem0/OpenMemory, Graphiti, Cognee, or another memory platform as a production dependency until the Slice 5 adoption spike proves a clear net simplification
 
 ### M24 Decomposed Task DAG
 

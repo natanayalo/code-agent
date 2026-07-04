@@ -31,15 +31,22 @@ the existing Postgres personal/project tables.
 
 | System | Useful pattern | Decision for this repo |
 |---|---|---|
-| LangMem | Semantic/episodic/procedural taxonomy; conscious vs background memory formation; memory manager primitives. | Copy the taxonomy and admission-manager pattern. Do not adopt the storage/tooling dependency in this slice. |
-| Mem0 / OpenMemory | `add` after useful interaction, `search` before model call; ingestion controls, confidence thresholds, sensitive-data filtering, update-vs-delete guidance. | Copy the controlled-ingestion pattern. Do not adopt Mem0 storage, hosted platform, MCP server, vector store, or graph store now. |
+| LangMem | Semantic/episodic/procedural taxonomy; conscious vs background memory formation; memory manager primitives. | Required Slice 5 adoption spike for extraction/admission assistance behind our interface. Adopt if it reduces custom policy/extraction code without weakening reviewability. |
+| Mem0 / OpenMemory | `add` after useful interaction, `search` before model call; ingestion controls, confidence thresholds, sensitive-data filtering, update-vs-delete guidance. | Required Slice 5 adoption spike for extraction/admission assistance behind our interface. Do not move durable storage/retrieval to Mem0 unless the spike proves a clear net simplification. |
 | claude-mem | No canonical active project named exactly `claude-mem` was verified during research. Relevant pattern is local-first, auditable, editor/MCP-style memory. | Do not adopt. Keep the local Postgres store and explicit orchestrator admission boundary. |
 | Graphiti | Temporal context graph, provenance episodes, fact invalidation, hybrid semantic/keyword/graph retrieval. | Too heavy for M23. Reconsider only if temporal contradictions or relationship-heavy retrieval become proven bottlenecks. |
 | Cognee | Relational + vector + graph memory platform with remember/recall/improve/forget lifecycle. | Too broad for this code-agent slice. Reconsider only after simpler Postgres admission/retrieval is exhausted. |
 
-Resolved direction: keep custom storage and admission for now. Copy patterns
-from LangMem and Mem0, especially typed memory categories, confidence gates,
-sensitive-data filtering, and explicit update/merge decisions.
+Resolved direction: keep a custom product boundary, not necessarily a fully
+custom implementation. Slice 5 should define `MemoryAdmissionService` first,
+then run a small LangMem and Mem0/OpenMemory spike behind that interface before
+committing to custom extraction/admission logic. The spike should compare code
+removed, infrastructure added, reviewability, deterministic tests, local
+Postgres compatibility, no-pgvector operation, and safety controls.
+
+Storage remains custom/Postgres in Slice 5 unless the spike proves that moving
+storage is a clear net simplification. Retrieval remains FTS-backed unless
+measured retrieval misses justify embeddings/vector/graph infrastructure.
 
 Do not add pgvector in this slice. Slice 4 showed Postgres FTS achieved
 `1.000` recall on the realistic non-semantic-gap cases for both SQLite fallback
@@ -55,7 +62,7 @@ memories and real retrieval misses.
 | Human review queue | Use `memory_proposals` only for candidates that require human approval. |
 | Write owner | Orchestrator owns all memory writes; workers never write memory directly. |
 | Retrieval | Keep full-text search. No pgvector/embeddings unless later evals justify it. |
-| Admission boundary | Add a `MemoryAdmissionService` between worker results and durable writes/proposals. |
+| Admission boundary | Add a `MemoryAdmissionService` between worker results and durable writes/proposals, with library-backed implementations allowed if the spike earns it. |
 
 ## Questions To Investigate And Decide In Slice 5
 
@@ -69,7 +76,30 @@ These should be answered during the slice before finalizing implementation:
    so rejected/direct-write decisions are inspectable without overloading the
    proposal table.
 
-2. **Direct-write allowlist**
+2. **Library adoption vs custom implementation**
+   Decide whether LangMem, Mem0/OpenMemory, or custom code should implement the
+   first production admission/extraction path behind `MemoryAdmissionService`.
+
+   Required spike:
+
+   - Prototype a LangMem-backed extractor/admission helper against 10 to 20
+     realistic task-result candidate cases.
+   - Prototype a Mem0/OpenMemory-backed extractor/admission helper against the
+     same cases, using local/self-hosted or no-storage mode where possible.
+   - Score both against a custom baseline on:
+     - amount of code and policy logic removed
+     - infrastructure and provider requirements added
+     - compatibility with existing Postgres durable memory
+     - ability to keep `memory_proposals` as the human-review queue
+     - deterministic testability without network calls in CI
+     - secret/sensitive-data filtering
+     - no-pgvector operation
+
+   Adoption rule: adopt a library for extraction/admission assistance only if it
+   is clearly simpler and keeps our safety/review boundaries explicit. Do not
+   adopt a library just to get vector or graph retrieval.
+
+3. **Direct-write allowlist**
    Decide which candidate classes may bypass human review.
 
    Starting recommendation:
@@ -79,7 +109,7 @@ These should be answered during the slice before finalizing implementation:
      pitfalls, and broad behavioral guidance to human review.
    - Reject secrets, credentials, speculative claims, and unsafe instructions.
 
-3. **Update vs merge semantics**
+4. **Update vs merge semantics**
    Decide how to detect whether a candidate updates an existing memory or
    should merge into its structured `value`.
 
@@ -87,7 +117,7 @@ These should be answered during the slice before finalizing implementation:
    Implement conservative shallow merge only for non-conflicting object keys.
    Conflicts require human review.
 
-4. **Evidence requirements**
+5. **Evidence requirements**
    Decide what evidence is required for direct create/update/merge.
 
    Starting recommendation: direct writes need at least one concrete evidence
@@ -95,7 +125,7 @@ These should be answered during the slice before finalizing implementation:
    explicit user instruction. Low-confidence or evidence-free candidates go to
    human review or rejection.
 
-5. **Worker field naming**
+6. **Worker field naming**
    Decide whether to rename `WorkerResult.memory_to_persist` now or keep it
    temporarily.
 
@@ -103,7 +133,7 @@ These should be answered during the slice before finalizing implementation:
    and downstream semantics, and add a future deprecation note for
    `memory_candidates`.
 
-6. **Dashboard visibility**
+7. **Dashboard visibility**
    Decide whether Slice 5 needs a new admission-decision surface or whether the
    existing Knowledge Base Review tab is enough.
 
@@ -238,11 +268,11 @@ Create `memory_proposals` for:
   say it is not a durable-write guarantee.
 - Keep serialized field name for compatibility.
 
-### 2. Add admission DTOs and service
+### 2. Add admission DTOs and service interface
 
 **New file**: `memory/admission.py` or `orchestrator/memory_admission.py`
 
-Implement:
+Implement the interface and a deterministic custom baseline implementation:
 
 - candidate normalization from `WorkerMemoryEntry`
 - risk classification
@@ -251,7 +281,37 @@ Implement:
 - proposal creation through `MemoryProposalRepository`
 - structured result objects for timeline/logging/tests
 
-### 3. Add admission decision persistence
+### 3. Run library adoption spike before expanding custom logic
+
+**Files**: `docs/m23-slice-5-memory-admission.md`,
+`evaluation/` or `tests/unit/test_memory_admission_spike.py`
+
+Before building complex custom extraction/admission code, compare LangMem and
+Mem0/OpenMemory behind the `MemoryAdmissionService` boundary.
+
+The spike should use a small checked-in fixture of candidate-producing task
+summaries and expected admission outcomes, including:
+
+- low-risk verified project fact
+- personal communication preference
+- repo convention
+- known pitfall
+- conflicting update
+- secret-like candidate
+- whitespace/invalid scope
+- evidence-free but plausible candidate
+
+Record a short decision note in this doc or a follow-up report:
+
+- adopt LangMem for extraction/admission assistance
+- adopt Mem0/OpenMemory for extraction/admission assistance
+- keep custom for Slice 5 and revisit after more corpus/eval evidence
+
+Do not wire any network-dependent library behavior into CI tests. If a library
+is adopted, wrap it behind an adapter and keep deterministic unit tests around
+the admission policy.
+
+### 4. Add admission decision persistence
 
 **Files**: `db/models.py`, `db/enums.py`, `db/migrations/versions/<new_revision>.py`
 
@@ -269,7 +329,7 @@ Investigate first whether a new table is worthwhile. If yes, add:
 If the slice decides not to add a table, at minimum emit timeline payloads and
 logs for all decisions.
 
-### 4. Replace direct persist mapping
+### 5. Replace direct persist mapping
 
 **File**: `orchestrator/graph.py`
 
@@ -283,7 +343,7 @@ Replace `_map_worker_memory_to_persist(...)` direct mapping with admission:
 The plain fallback graph can keep no-op behavior when no session factory is
 available, but the DB-backed graph should use admission.
 
-### 5. Keep proposal accept/reject as the human gate
+### 6. Keep proposal accept/reject as the human gate
 
 **Files**: `repositories/sqlalchemy_memory_proposal.py`,
 `orchestrator/execution_snapshot_service.py`, API/dashboard tests
@@ -293,7 +353,7 @@ available, but the DB-backed graph should use admission.
 - Admission-created proposals should include task/session/source/evidence.
 - Dashboard Review tab should continue to show pending proposals only.
 
-### 6. Tests
+### 7. Tests
 
 Add targeted tests for:
 
@@ -338,7 +398,9 @@ cd dashboard && npm run test:run -- KnowledgeBasePage api
 ## Non-Goals
 
 - Do not add pgvector, embeddings, or semantic retrieval.
-- Do not add Graphiti, Cognee, Mem0, or LangMem as dependencies.
+- Do not move durable memory storage out of the existing Postgres personal/project tables unless the Slice 5 spike explicitly proves that a library-backed store is a clear net simplification.
+- Do not add Graphiti or Cognee as dependencies in Slice 5.
+- Do not add LangMem or Mem0/OpenMemory as production dependencies before the required adoption spike and decision note.
 - Do not make workers write directly to the database.
 - Do not auto-store every task summary or transcript.
 - Do not expand memory categories beyond personal/project/session state.
