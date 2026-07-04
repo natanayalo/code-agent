@@ -21,14 +21,24 @@ MemoryAdmissionDecision = Literal["reject", "create", "update", "merge", "needs_
 MemoryRiskLevel = Literal["low", "medium", "high", "blocked"]
 MemoryProducer = Literal["worker", "operator", "system", "import"]
 
-_SECRET_PATTERNS = (
+_SECRET_VALUE_PATTERNS = (
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", re.IGNORECASE),
-    re.compile(
-        r"\b(?:api[_-]?(?:key|token)|secret|token|password|credential)s?\b",
-        re.IGNORECASE,
-    ),
     re.compile(r"\b(?:sk|ghp|github_pat)_[A-Za-z0-9_]{12,}\b"),
 )
+_SECRET_KEY_PATTERN = re.compile(
+    r"\b(?:api[_-]?(?:key|token)|secret|token|password|credential)s?\b",
+    re.IGNORECASE,
+)
+_PLACEHOLDER_SECRET_VALUES = {
+    "",
+    "***",
+    "****",
+    "<redacted>",
+    "redacted",
+    "[redacted]",
+    "removed",
+    "unset",
+}
 _SPECULATIVE_PATTERNS = (
     re.compile(r"\b(?:maybe|might|probably|possibly|I think|not sure|seems like)\b", re.I),
 )
@@ -186,9 +196,10 @@ class CustomMemoryAdmissionService(MemoryAdmissionService):
             return "needs_human_review", "medium", "direct write requires high confidence."
         if existing is None:
             return "create", "low", "low-risk evidenced project memory can be created."
-        if _has_conflicting_values(existing.value, candidate.value):
+        existing_value = existing.value or {}
+        if _has_conflicting_values(existing_value, candidate.value):
             return "needs_human_review", "medium", "candidate conflicts with existing memory."
-        if _can_merge(existing.value, candidate.value):
+        if _can_merge(existing_value, candidate.value):
             return "merge", "low", "non-conflicting object values can be merged."
         return "update", "low", "candidate supersedes existing memory without conflict."
 
@@ -286,8 +297,45 @@ def _candidate_text(candidate: MemoryCandidate) -> str:
 
 
 def _contains_secret(candidate: MemoryCandidate) -> bool:
-    text = _candidate_text(candidate)
-    return any(pattern.search(text) for pattern in _SECRET_PATTERNS)
+    if _SECRET_KEY_PATTERN.fullmatch(candidate.memory_key.strip()):
+        return True
+    if _contains_secret_value(candidate.value):
+        return True
+    return _contains_secret_key_with_value(candidate.value)
+
+
+def _contains_secret_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return any(pattern.search(value) for pattern in _SECRET_VALUE_PATTERNS)
+    if isinstance(value, dict):
+        return any(_contains_secret_value(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_secret_value(item) for item in value)
+    return False
+
+
+def _contains_secret_key_with_value(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(
+            (_SECRET_KEY_PATTERN.fullmatch(str(key).strip()) and _has_non_placeholder_value(item))
+            or _contains_secret_key_with_value(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(_contains_secret_key_with_value(item) for item in value)
+    return False
+
+
+def _has_non_placeholder_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().casefold() not in _PLACEHOLDER_SECRET_VALUES
+    if isinstance(value, bool | int | float):
+        return False
+    if isinstance(value, dict):
+        return any(_has_non_placeholder_value(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_non_placeholder_value(item) for item in value)
+    return value is not None
 
 
 def _is_speculative(candidate: MemoryCandidate) -> bool:

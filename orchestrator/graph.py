@@ -26,7 +26,11 @@ from apps.observability import (
 )
 from db.enums import TimelineEventType
 from db.utils import compute_interaction_content_hash
-from memory.admission import CustomMemoryAdmissionService, MemoryAdmissionCandidate
+from memory.admission import (
+    CustomMemoryAdmissionService,
+    MemoryAdmissionBatchResult,
+    MemoryAdmissionCandidate,
+)
 from orchestrator.brain import (
     OrchestratorBrain,
     RouteBrainMergeReport,
@@ -3322,6 +3326,43 @@ def _memory_candidate_from_entry(
     )
 
 
+def _memory_admission_outcome(
+    state: OrchestratorState,
+    admission_result: MemoryAdmissionBatchResult | None,
+) -> tuple[dict[str, int], dict[str, int], int, int, int, str, str]:
+    if admission_result is None:
+        logger.warning(
+            "Admission result is None; falling back to no memory writes.",
+            extra={
+                "task_id": state.task.task_id,
+                "requested_count": len(state.memory_to_persist),
+            },
+        )
+        return (
+            {},
+            {},
+            0,
+            0,
+            0,
+            f"failed to admit {len(state.memory_to_persist)} memory candidates",
+            "Failed to admit memory candidates.",
+        )
+    return (
+        admission_result.decision_counts,
+        admission_result.risk_counts,
+        admission_result.durable_write_count,
+        admission_result.proposal_count,
+        admission_result.rejected_count,
+        (
+            f"admitted {len(state.memory_to_persist)} memory candidates: "
+            f"{admission_result.durable_write_count} direct writes, "
+            f"{admission_result.proposal_count} proposals, "
+            f"{admission_result.rejected_count} rejected"
+        ),
+        f"Admitted {len(state.memory_to_persist)} memory candidates.",
+    )
+
+
 def build_persist_memory_node(
     session_factory: Callable[[], Session],
 ) -> Callable[[OrchestratorState], dict[str, Any]]:
@@ -3357,31 +3398,26 @@ def build_persist_memory_node(
             if db_session is not None:
                 db_session.close()
 
-        decision_counts = admission_result.decision_counts if admission_result is not None else {}
-        risk_counts = admission_result.risk_counts if admission_result is not None else {}
-        persisted_count = (
-            admission_result.durable_write_count if admission_result is not None else 0
-        )
-        proposal_count = admission_result.proposal_count if admission_result is not None else 0
-        rejected_count = admission_result.rejected_count if admission_result is not None else 0
+        (
+            decision_counts,
+            risk_counts,
+            persisted_count,
+            proposal_count,
+            rejected_count,
+            progress_msg,
+            timeline_msg,
+        ) = _memory_admission_outcome(state, admission_result)
 
         return {
             "current_step": "persist_memory",
             "memory_to_persist": [
                 entry.model_dump(mode="json") for entry in state.memory_to_persist
             ],
-            "progress_updates": _progress_update(
-                state,
-                (
-                    f"admitted {len(state.memory_to_persist)} memory candidates: "
-                    f"{persisted_count} direct writes, {proposal_count} proposals, "
-                    f"{rejected_count} rejected"
-                ),
-            ),
+            "progress_updates": _progress_update(state, progress_msg),
             **_timeline_event(
                 state,
                 TimelineEventType.MEMORY_PERSISTED,
-                message=f"Admitted {len(state.memory_to_persist)} memory candidates.",
+                message=timeline_msg,
                 payload={
                     "requested_count": len(state.memory_to_persist),
                     "persisted_count": persisted_count,

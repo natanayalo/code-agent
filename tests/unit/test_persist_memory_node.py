@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 import pytest
@@ -161,8 +162,9 @@ def test_persist_memory_node_persists_personal_without_session_scope(session_fac
     assert {decision.decision for decision in decisions} == {"needs_human_review", "reject"}
 
 
-def test_persist_memory_node_db_error_does_not_crash() -> None:
+def test_persist_memory_node_db_error_does_not_crash(caplog) -> None:
     """Memory persistence should degrade gracefully if database access fails."""
+    caplog.set_level(logging.WARNING)
 
     def broken_factory():
         raise RuntimeError("database unavailable")
@@ -184,6 +186,7 @@ def test_persist_memory_node_db_error_does_not_crash() -> None:
     result = build_persist_memory_node(broken_factory)(state)
 
     assert result["timeline_events"][0].event_type == TimelineEventType.MEMORY_PERSISTED
+    assert result["timeline_events"][0].message == "Failed to admit memory candidates."
     assert result["timeline_events"][0].payload == {
         "requested_count": 1,
         "persisted_count": 0,
@@ -192,3 +195,5 @@ def test_persist_memory_node_db_error_does_not_crash() -> None:
         "decision_counts": {},
         "risk_counts": {},
     }
+    assert result["progress_updates"] == ["failed to admit 1 memory candidates"]
+    assert "Admission result is None; falling back to no memory writes." in caplog.text

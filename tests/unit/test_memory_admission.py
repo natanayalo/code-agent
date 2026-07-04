@@ -141,6 +141,63 @@ def test_custom_admission_rejects_secret_like_candidate(session_factory) -> None
     assert decisions[0].risk_level == "blocked"
 
 
+def test_custom_admission_allows_safe_auth_policy_language(session_factory) -> None:
+    """Policy memories mentioning auth words should not be treated as secrets."""
+    candidate = MemoryCandidate(
+        category="project",
+        repo_url="https://github.com/natanayalo/code-agent",
+        memory_key="auth_policy",
+        value={
+            "guidance": (
+                "Use token-based authentication in CLI docs and do not store "
+                "passwords in plaintext."
+            )
+        },
+        confidence=0.95,
+        evidence=["docs/security.md"],
+    )
+
+    with session_scope(session_factory) as session:
+        result = CustomMemoryAdmissionService(session).admit_candidates(candidates=[candidate])
+        stored = ProjectMemoryRepository(session).get(
+            repo_url="https://github.com/natanayalo/code-agent",
+            memory_key="auth_policy",
+        )
+
+    assert result.decision_counts == {"create": 1}
+    assert stored is not None
+
+
+def test_custom_admission_handles_existing_memory_with_null_value(session_factory) -> None:
+    """Admission should tolerate legacy or partially migrated rows with null values."""
+    repo_url = "https://github.com/natanayalo/code-agent"
+    with session_scope(session_factory) as session:
+        stored = ProjectMemoryRepository(session).upsert(
+            repo_url=repo_url,
+            memory_key="verification",
+            value={"unit": ".venv/bin/pytest tests/unit"},
+        )
+        stored.value = None
+        candidate = MemoryCandidate(
+            category="project",
+            repo_url=repo_url,
+            memory_key="verification",
+            value={"integration": ".venv/bin/pytest tests/integration"},
+            confidence=0.95,
+            evidence=["test: integration passed"],
+        )
+
+        result = CustomMemoryAdmissionService(session).admit_candidates(candidates=[candidate])
+        updated = ProjectMemoryRepository(session).get(
+            repo_url=repo_url,
+            memory_key="verification",
+        )
+
+    assert result.decision_counts == {"update": 1}
+    assert updated is not None
+    assert updated.value == {"integration": ".venv/bin/pytest tests/integration"}
+
+
 def test_custom_admission_merges_non_conflicting_project_objects(session_factory) -> None:
     """Non-conflicting object updates can merge directly."""
     repo_url = "https://github.com/natanayalo/code-agent"
