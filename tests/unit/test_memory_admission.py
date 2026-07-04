@@ -228,3 +228,62 @@ def test_custom_admission_merges_non_conflicting_project_objects(session_factory
         "unit": ".venv/bin/pytest tests/unit",
         "integration": ".venv/bin/pytest tests/integration",
     }
+
+
+def test_custom_admission_rejects_embedded_snake_case_secret_keys(session_factory) -> None:
+    """Embedded secret keys like openai_api_key or github_token should be rejected."""
+    candidate = MemoryCandidate(
+        category="project",
+        repo_url="https://github.com/natanayalo/code-agent",
+        memory_key="openai_api_key",
+        value={"key": "some-value"},
+        confidence=0.99,
+        evidence=["config file"],
+    )
+    with session_scope(session_factory) as session:
+        result = CustomMemoryAdmissionService(session).admit_candidates(candidates=[candidate])
+    assert result.rejected_count == 1
+
+
+def test_custom_admission_rejects_numeric_secrets(session_factory) -> None:
+    """Numeric credentials like password=123456 should be rejected."""
+    candidate = MemoryCandidate(
+        category="project",
+        repo_url="https://github.com/natanayalo/code-agent",
+        memory_key="db_config",
+        value={"password": 123456},
+        confidence=0.99,
+        evidence=["setup logs"],
+    )
+    with session_scope(session_factory) as session:
+        result = CustomMemoryAdmissionService(session).admit_candidates(candidates=[candidate])
+    assert result.rejected_count == 1
+
+
+def test_custom_admission_defensive_against_legacy_non_dict_existing(session_factory) -> None:
+    """If existing memory value is not a dict, merge/conflict handles it gracefully."""
+    repo_url = "https://github.com/natanayalo/code-agent"
+    with session_scope(session_factory) as session:
+        # We need to manually set value to a list on a stored row
+        stored = ProjectMemoryRepository(session).upsert(
+            repo_url=repo_url,
+            memory_key="some_key",
+            value={"mock": "dict"},
+        )
+        stored.value = ["legacy", "list", "value"]
+        session.flush()
+
+        candidate = MemoryCandidate(
+            category="project",
+            repo_url=repo_url,
+            memory_key="some_key",
+            value={"new_dict_key": "val"},
+            confidence=0.95,
+            evidence=["new evidence"],
+        )
+        result = CustomMemoryAdmissionService(session).admit_candidates(candidates=[candidate])
+        updated = ProjectMemoryRepository(session).get(repo_url=repo_url, memory_key="some_key")
+
+    assert result.decision_counts == {"update": 1}
+    assert updated is not None
+    assert updated.value == {"new_dict_key": "val"}
