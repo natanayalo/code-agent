@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add reviewable memory retrieval corpus ([#296](https://github.com/natanayalo/code-agent/pull/296))
+
 - Feat: add memory retrieval evaluation ([#295](https://github.com/natanayalo/code-agent/pull/295))
 
 - Feat: add memory full-text search visibility ([#294](https://github.com/natanayalo/code-agent/pull/294))
