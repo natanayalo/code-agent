@@ -342,6 +342,76 @@ def test_persist_execution_outcome_integration_happy_path(
         assert decision.source_observation_id == suggestion_obs.id
 
 
+def test_persist_execution_outcome_bridges_after_outcome_transaction(
+    session_factory,
+    monkeypatch,
+) -> None:
+    """Observation bridge runs in a fresh transaction after capture commits."""
+    with session_scope(session_factory) as session:
+        task = _seed_user_session_task(session)
+        task_id = task.id
+        _seed_pending_suggestion_observation(session, task_id)
+
+    from memory.observation import ObservationCaptureService, ObservationMemoryBridge
+
+    capture_session_ids: list[int] = []
+    bridge_session_ids: list[int] = []
+    original_capture_worker_run = ObservationCaptureService.capture_worker_run
+    original_bridge_observations = ObservationMemoryBridge.bridge_observations
+
+    def mock_capture_worker_run(*, session, task, worker_run, result):
+        capture_session_ids.append(id(session))
+        return original_capture_worker_run(
+            session=session,
+            task=task,
+            worker_run=worker_run,
+            result=result,
+        )
+
+    def mock_bridge_observations(*, session, task_id):
+        bridge_session_ids.append(id(session))
+        db_task = session.get(Task, task_id)
+        assert db_task.status == TaskStatus.COMPLETED
+        worker_obs = list(
+            session.scalars(
+                select(MemoryObservation).where(
+                    MemoryObservation.task_id == task_id,
+                    MemoryObservation.event_type == "worker_completed",
+                )
+            )
+        )
+        assert worker_obs
+        return original_bridge_observations(session=session, task_id=task_id)
+
+    monkeypatch.setattr(
+        ObservationCaptureService,
+        "capture_worker_run",
+        mock_capture_worker_run,
+    )
+    monkeypatch.setattr(
+        ObservationMemoryBridge,
+        "bridge_observations",
+        mock_bridge_observations,
+    )
+
+    service = MockExecutionService(session_factory)
+    state = _build_mock_state(task_id)
+
+    now = utc_now()
+    _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+        force_task_status=TaskStatus.COMPLETED,
+    )
+
+    assert capture_session_ids
+    assert bridge_session_ids
+    assert set(capture_session_ids).isdisjoint(bridge_session_ids)
+
+
 def test_persist_execution_outcome_isolates_bridge_db_errors(session_factory, monkeypatch) -> None:
     """_persist_execution_outcome isolates failures in the memory bridge.
 

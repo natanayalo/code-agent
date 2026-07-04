@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -173,6 +174,30 @@ def test_capture_task_finalization(session_factory) -> None:
         assert retrieved.admission_status == "not_required"
 
 
+def test_capture_task_finalization_accepts_raw_string_status(session_factory) -> None:
+    """Task finalization serialization accepts raw string status values."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(session)
+        task_like = SimpleNamespace(
+            id=task.id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            status="completed",
+            task_text=task.task_text,
+        )
+
+        obs = ObservationCaptureService.capture_task_finalization(session, task_like, None)
+        session.flush()
+        obs_id = obs.id
+
+    with session_scope(session_factory) as session:
+        retrieved = ObservationRepository(session).get(obs_id)
+        assert retrieved is not None
+        assert retrieved.summary == "Task finalized with status completed."
+        assert "Final status in DB: completed" in retrieved.content
+        assert retrieved.metadata_payload["final_status"] == "completed"
+
+
 def test_capture_interaction_resolution(session_factory) -> None:
     """capture_interaction_resolution records resolved human interactions."""
     with session_scope(session_factory) as session:
@@ -198,6 +223,29 @@ def test_capture_interaction_resolution(session_factory) -> None:
         assert retrieved.source == "operator"
         assert retrieved.event_type == "interaction_resolved"
         assert retrieved.metadata_payload["response_data"] == {"approved": True}
+
+
+def test_capture_interaction_resolution_accepts_raw_string_status(session_factory) -> None:
+    """Interaction resolution serialization accepts raw string status values."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(session)
+        interaction = SimpleNamespace(
+            id="int-raw",
+            interaction_type="permission",
+            status="resolved",
+            summary="Approved tool usage",
+            response_data={"approved": True},
+        )
+
+        obs = ObservationCaptureService.capture_interaction_resolution(session, task, interaction)
+        session.flush()
+        obs_id = obs.id
+
+    with session_scope(session_factory) as session:
+        retrieved = ObservationRepository(session).get(obs_id)
+        assert retrieved is not None
+        assert "Resolution Status: resolved" in retrieved.content
+        assert retrieved.metadata_payload["interaction_type"] == "permission"
 
 
 def test_load_recent_context_entries(session_factory) -> None:

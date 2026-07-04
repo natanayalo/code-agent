@@ -28,6 +28,11 @@ def strip_private_tags_recursive(data: Any) -> tuple[Any, bool]:
     return redact_private_tags_recursive(data)
 
 
+def _string_value(value: Any) -> str:
+    """Return a stable string for raw strings and enum-like values."""
+    return str(getattr(value, "value", value))
+
+
 class ObservationCaptureService:
     """Capture raw orchestrator, worker, and interaction events as episodic observations."""
 
@@ -101,7 +106,7 @@ class ObservationCaptureService:
         state: Any,
     ) -> MemoryObservation:
         """Capture task finalization details (completion/failure)."""
-        status_val = task.status.value if task and task.status else "unknown"
+        status_val = _string_value(task.status) if task and task.status else "unknown"
         task_text = task.task_text if task else "unknown"
         summary_text = f"Task finalized with status {status_val}."
         content_text = f"Task objective: {task_text}\nFinal status in DB: {status_val}"
@@ -141,9 +146,9 @@ class ObservationCaptureService:
         else:
             interaction_type = str(interaction.interaction_type)
         summary_text = f"Interaction '{interaction_type}' resolved: {interaction.summary or ''}"
+        status_val = _string_value(interaction.status)
         content_text = (
-            f"Resolution Status: {interaction.status}\n"
-            f"Response data: {interaction.response_data}"
+            f"Resolution Status: {status_val}\nResponse data: {interaction.response_data}"
         )
 
         metadata = {
