@@ -36,7 +36,7 @@ def _create_observations_table() -> None:
             "admission_status",
             sa.String(length=50),
             nullable=False,
-            server_default="not_required",
+            server_default=sa.text("'not_required'"),
         ),
         sa.Column("admission_processed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("admission_error", sa.Text(), nullable=True),
