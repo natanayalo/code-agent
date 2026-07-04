@@ -47,15 +47,16 @@ Active focus:
 
 ## Next Priorities
 
-1. finish M23 Slice 5 review and then implement M23 Slice 6 episodic observations: raw task/session observations, compact search, timeline/full-observation fetch, recent-session context, private-tag stripping, and observation-to-admission bridge
-2. evaluate Phase 4 candidates: routing, DAG decomposition, selective fan-out, review repair, and autonomy policy
+1. implement M23 Slice 7 observation/admission visibility: operator-facing API and dashboard surfaces for `memory_observations`, `memory_admission_decisions`, and `source_observation_id` lineage
+2. follow with deterministic observation extraction and then a read-side memory gate before broader repo-profile shaping
+3. evaluate Phase 4 candidates: routing, DAG decomposition, selective fan-out, review repair, and autonomy policy
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
 - Milestone 21: worker facade [x], runtime executor [x], sandbox adapter [x], and tool extraction.
-- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [x], reviewable corpus/proposals [x], unified memory admission plus library adoption spike in [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md), and episodic observation layer planned in [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md).
+- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [x], reviewable corpus/proposals [x], unified memory admission plus library adoption spike in [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md), episodic observation layer [x] in [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md), and next operator visibility slice in [`docs/m23-slice-7-observation-admission-visibility.md`](m23-slice-7-observation-admission-visibility.md).
 - Phase 4: evaluate routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy only after Phase 3 proves reliability.
 
 ## Completed Work
