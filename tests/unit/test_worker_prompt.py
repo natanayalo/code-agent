@@ -78,6 +78,43 @@ def test_build_system_prompt_omits_verbose_json_bloats(tmp_path) -> None:
     assert '"risk_level": "low"' in prompt
 
 
+def test_build_system_prompt_redacts_private_tagged_sections(tmp_path) -> None:
+    """Worker prompts should never include user-marked private blocks."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Fix <private>secret task detail</private>",
+        repo_url="https://example.com/repo.git",
+        task_spec={
+            "acceptance_criteria": ["Do not reveal <private>secret criterion</private>"],
+        },
+        memory_context={
+            "personal": [
+                {
+                    "memory_key": "style",
+                    "value": {"note": "<private>secret memory</private>"},
+                }
+            ],
+            "observations": [
+                {
+                    "id": "obs-1",
+                    "observed_at": "2026-07-04T12:00:00Z",
+                    "source": "worker",
+                    "event_type": "worker_completed",
+                    "summary": "Saw <private>secret observation</private>",
+                }
+            ],
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "secret task detail" not in prompt
+    assert "secret criterion" not in prompt
+    assert "secret memory" not in prompt
+    assert "secret observation" not in prompt
+    assert prompt.count("[redacted-private]") == 4
+
+
 def test_build_system_prompt_filters_tools_by_permission(tmp_path) -> None:
     """System prompt should only list tools permitted by the current constraints."""
     from tools import DEFAULT_TOOL_REGISTRY, EXECUTE_BASH_TOOL_NAME, VIEW_FILE_TOOL_NAME

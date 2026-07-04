@@ -36,6 +36,7 @@ from orchestrator.execution_types import (
     _PersistedTaskContext,
 )
 from orchestrator.task_spec import build_task_spec
+from privacy.redaction import redact_private_tags, redact_private_tags_recursive
 from repositories import (
     HumanInteractionRepository,
     InboundDeliveryRepository,
@@ -194,9 +195,11 @@ def _persist_submission(
         task_repo = TaskRepository(session)
         interaction_repo = HumanInteractionRepository(session)
         queue_lane = "scout" if submission.constraints.get("task_type") == "scout" else "primary"
+        persisted_task_text, _ = redact_private_tags(submission.task_text)
+        redacted_constraints, _ = redact_private_tags_recursive(submission.constraints)
 
         sanitized_constraints = _sanitize_submission_constraints(
-            submission.constraints,
+            redacted_constraints,
             reserved_keys=_RESERVED_INTERNAL_CONSTRAINT_KEYS,
         )
         persisted_constraints = dict(sanitized_constraints)
@@ -208,7 +211,7 @@ def _persist_submission(
         if submission.tools is not None:
             persisted_constraints["tools"] = submission.tools
         task_spec = build_task_spec(
-            task_text=submission.task_text,
+            task_text=persisted_task_text,
             repo_url=submission.repo_url,
             target_branch=submission.branch,
             constraints=sanitized_constraints,
@@ -241,7 +244,7 @@ def _persist_submission(
         trace_context = capture_trace_context()
         task = task_repo.create(
             session_id=conversation_session.id,
-            task_text=submission.task_text,
+            task_text=persisted_task_text,
             repo_url=submission.repo_url,
             branch=submission.branch,
             callback_url=submission.callback_url,

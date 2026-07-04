@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.pool import StaticPool
 
+import orchestrator.graph as graph_module
 from db.base import Base
 from db.enums import TimelineEventType
 from orchestrator.graph import build_persist_memory_node
@@ -197,3 +199,37 @@ def test_persist_memory_node_db_error_does_not_crash(caplog) -> None:
     }
     assert result["progress_updates"] == ["failed to admit 1 memory candidates"]
     assert "Admission result is None; falling back to no memory writes." in caplog.text
+
+
+def test_persist_memory_node_records_span_input_output(
+    session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The DB-backed persist node should expose admission counts to tracing."""
+    captured: list[tuple[dict[str, object], dict[str, object]]] = []
+    statuses: list[str] = []
+    monkeypatch.setattr(graph_module, "start_optional_span", lambda **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        graph_module,
+        "set_span_input_output",
+        lambda input_data, output_data=None: captured.append((input_data, output_data)),
+    )
+    monkeypatch.setattr(
+        graph_module,
+        "set_span_status_from_outcome",
+        lambda status, *_args, **_kwargs: statuses.append(status),
+    )
+    state = _admission_state(
+        "https://github.com/natanayalo/code-agent",
+        datetime(2026, 7, 2, 10, 15, tzinfo=UTC),
+    )
+
+    build_persist_memory_node(session_factory)(state)
+
+    assert captured[0][0]["source"] == "database"
+    assert captured[0][0]["requested_count"] == 2
+    assert captured[0][0]["memory_keys"] == ["communication_style", "test_command"]
+    assert captured[0][1]["requested_count"] == 2
+    assert captured[0][1]["persisted_count"] == 1
+    assert captured[0][1]["proposal_count"] == 1
+    assert statuses == ["success"]

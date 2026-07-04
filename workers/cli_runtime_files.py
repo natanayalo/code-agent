@@ -8,10 +8,20 @@ import subprocess
 from pathlib import Path
 
 from sandbox import DockerShellSessionError
+from workers.adapter_utils import truncate_detail_keep_tail
 from workers.cli_runtime_types import ShellSessionProtocol
 from workers.constants import DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
+_GIT_ERROR_OUTPUT_MAX_CHARACTERS = 2048
+
+
+def _decode_safely(data: bytes | str | None) -> str:
+    if data is None:
+        return ""
+    if isinstance(data, str):
+        return data
+    return data.decode("utf-8", errors="replace")
 
 
 def _git_status_unavailable(output: str) -> bool:
@@ -182,8 +192,12 @@ def collect_changed_files_from_repo_path(
         return []
 
     if completed.returncode != 0:
-        output = (completed.stdout or b"").decode("utf-8", errors="replace")
-        if _git_status_unavailable(output):
+        raw_output = _decode_safely(completed.stdout) + _decode_safely(completed.stderr)
+        output_preview = truncate_detail_keep_tail(
+            raw_output,
+            max_characters=_GIT_ERROR_OUTPUT_MAX_CHARACTERS,
+        )
+        if _git_status_unavailable(raw_output):
             logger.info(
                 "Worker skipped host-side changed-file collection because workspace is not a "
                 "usable git repository.",
@@ -192,12 +206,12 @@ def collect_changed_files_from_repo_path(
             return []
         logger.warning(
             "Worker could not collect changed files via host git status.",
-            extra={"exit_code": completed.returncode},
+            extra={"exit_code": completed.returncode, "output": output_preview},
         )
         return []
 
     changed_files: list[str] = []
-    items = iter(completed.stdout.decode("utf-8", errors="replace").split("\0"))
+    items = iter(_decode_safely(completed.stdout).split("\0"))
     for item in items:
         if len(item) < 4:
             continue
@@ -209,3 +223,73 @@ def collect_changed_files_from_repo_path(
             changed_files.append(path)
 
     return list(dict.fromkeys(changed_files))
+
+
+def collect_changed_files_since_ref_from_repo_path(
+    repo_path: Path,
+    *,
+    base_ref: str | None,
+    timeout_seconds: int = DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS,
+) -> list[str]:
+    """Collect paths changed between a starting git ref and the current workspace."""
+    working_tree_files = collect_changed_files_from_repo_path(
+        repo_path,
+        timeout_seconds=timeout_seconds,
+    )
+    if not base_ref:
+        return working_tree_files
+
+    command = [
+        "git",
+        "-C",
+        str(repo_path),
+        "diff",
+        "--name-only",
+        "-z",
+        base_ref,
+        "HEAD",
+        "--",
+        ".",
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        logger.warning(
+            "Worker git diff timed out while collecting changed files from baseline.",
+            extra={"timeout_seconds": timeout_seconds},
+            exc_info=exc,
+        )
+        return working_tree_files
+    except OSError as exc:
+        logger.warning(
+            "Worker failed to collect baseline changed files via host git diff.",
+            exc_info=exc,
+        )
+        return working_tree_files
+
+    if completed.returncode != 0:
+        raw_output = _decode_safely(completed.stdout) + _decode_safely(completed.stderr)
+        output_preview = truncate_detail_keep_tail(
+            raw_output,
+            max_characters=_GIT_ERROR_OUTPUT_MAX_CHARACTERS,
+        )
+        if _git_status_unavailable(raw_output):
+            logger.info(
+                "Worker skipped baseline changed-file collection because workspace is not a "
+                "usable git repository.",
+                extra={"exit_code": completed.returncode},
+            )
+            return working_tree_files
+        logger.warning(
+            "Worker could not collect changed files from baseline via host git diff.",
+            extra={"exit_code": completed.returncode, "output": output_preview},
+        )
+        return working_tree_files
+
+    baseline_files = [path for path in _decode_safely(completed.stdout).split("\0") if path]
+    return list(dict.fromkeys([*baseline_files, *working_tree_files]))

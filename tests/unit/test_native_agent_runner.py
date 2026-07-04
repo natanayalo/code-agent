@@ -701,7 +701,7 @@ def test_native_agent_runner_git_diff_failure(tmp_path: Path, monkeypatch) -> No
 
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: _FakeCompleted())
 
-    from workers.native_agent_runner import _collect_diff_text
+    from workers.native_agent_artifacts import _collect_diff_text
 
     assert _collect_diff_text(repo_path=repo_path, timeout_seconds=10) is None
 
@@ -717,7 +717,7 @@ def test_native_agent_runner_git_diff_exception(tmp_path: Path, monkeypatch) -> 
 
     monkeypatch.setattr(subprocess, "run", _exploding_run)
 
-    from workers.native_agent_runner import _collect_diff_text
+    from workers.native_agent_artifacts import _collect_diff_text
 
     assert _collect_diff_text(repo_path=repo_path, timeout_seconds=10) is None
 

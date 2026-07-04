@@ -116,12 +116,24 @@ class MemoryEntry(OrchestratorModel):
     requires_verification: bool = True
 
 
+class ObservationContextEntry(OrchestratorModel):
+    """An episodic observation record loaded for a task context."""
+
+    id: str
+    observed_at: datetime
+    source: str
+    event_type: str
+    summary: str
+    privacy_stripped: bool = False
+
+
 class MemoryContext(OrchestratorModel):
     """Structured memory available to the orchestrator."""
 
     personal: list[MemoryEntry] = Field(default_factory=list)
     project: list[MemoryEntry] = Field(default_factory=list)
     session: dict[str, Any] = Field(default_factory=dict)
+    observations: list[ObservationContextEntry] = Field(default_factory=list)
 
 
 class RouteDecision(OrchestratorModel):

@@ -60,6 +60,23 @@ class _PersistedExecutionOutcome:
     worker_run_id: str
 
 
+def _bridge_observations_after_outcome_commit(session_factory: Any, task_id: str) -> None:
+    """Run memory admission in a short-lived transaction after outcome persistence commits."""
+    from memory.observation import ObservationMemoryBridge
+
+    try:
+        with session_scope(session_factory) as session:
+            ObservationMemoryBridge.bridge_observations(
+                session=session,
+                task_id=task_id,
+            )
+    except Exception:
+        logger.warning(
+            "Failed to bridge episodic observations after outcome persistence; continuing.",
+            exc_info=True,
+        )
+
+
 def _apply_approval_constraints(task: Any, state: OrchestratorState, finished_at: datetime) -> None:
     approval = state.approval
     if not approval.required:
@@ -612,12 +629,39 @@ def _persist_execution_outcome(
             worker_run_id=worker_run.id,
         )
 
+        # Episodic Observation Capture (M23 Slice 6)
+        from memory.observation import ObservationCaptureService
+
+        try:
+            with session.begin_nested():
+                if state.result is not None:
+                    ObservationCaptureService.capture_worker_run(
+                        session=session,
+                        task=task,
+                        worker_run=worker_run,
+                        result=state.result,
+                    )
+
+                if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+                    ObservationCaptureService.capture_task_finalization(
+                        session=session,
+                        task=task,
+                        state=state,
+                    )
+        except Exception:
+            logger.warning(
+                "Failed to capture episodic observations; continuing outcome persistence.",
+                exc_info=True,
+            )
+
         task_id_val = task.id
         session_id_val = task.session_id
         task_constraints_val = (
             dict(task.constraints) if isinstance(task.constraints, dict) else None
         )
         worker_run_id_val = worker_run.id
+
+    _bridge_observations_after_outcome_commit(self.session_factory, task_id_val)
 
     persisted_outcome = _PersistedExecutionOutcome(
         task_id=task_id_val,

@@ -32,6 +32,7 @@ from workers.cli_runtime import (
     _normalize_requested_tool_name,
     collect_changed_files,
     collect_changed_files_from_repo_path,
+    collect_changed_files_since_ref_from_repo_path,
     format_bash_observation,
     run_cli_runtime_loop,
     settings_from_budget,

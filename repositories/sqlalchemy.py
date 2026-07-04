@@ -10,6 +10,7 @@ from repositories.sqlalchemy_memory import (
 )
 from repositories.sqlalchemy_memory_admission import MemoryAdmissionDecisionRepository
 from repositories.sqlalchemy_memory_proposal import MemoryProposalRepository
+from repositories.sqlalchemy_observation import ObservationRepository
 from repositories.sqlalchemy_plan import ExecutionPlanRepository
 from repositories.sqlalchemy_proposal import ProposalRepository
 from repositories.sqlalchemy_run import ArtifactRepository, WorkerRunRepository
@@ -29,6 +30,7 @@ __all__ = [
     "InboundDeliveryRepository",
     "MemoryAdmissionDecisionRepository",
     "MemoryProposalRepository",
+    "ObservationRepository",
     "PersonalMemoryRepository",
     "ProjectMemoryRepository",
     "ProposalRepository",

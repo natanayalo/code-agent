@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -29,6 +30,32 @@ from repositories import (
     WorkerRunRepository,
     session_scope,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _capture_interaction_resolution_observation(
+    *,
+    session: Any,
+    task: Any,
+    interaction: Any,
+) -> None:
+    """Best-effort interaction observation capture."""
+    try:
+        from memory.observation import ObservationCaptureService
+
+        ObservationCaptureService.capture_interaction_resolution(
+            session=session,
+            task=task,
+            interaction=interaction,
+        )
+    except ImportError:
+        pass
+    except Exception:
+        logger.warning(
+            "Failed to capture interaction resolution observation; continuing.",
+            exc_info=True,
+        )
 
 
 def list_pending_interactions(self: Any) -> list[InteractionInboxCard]:
@@ -125,6 +152,11 @@ def record_interaction_response(
                     "interaction_id": interaction.id,
                     "response_data": response.response_data,
                 },
+            )
+            _capture_interaction_resolution_observation(
+                session=session,
+                task=task,
+                interaction=interaction,
             )
 
         session.flush()

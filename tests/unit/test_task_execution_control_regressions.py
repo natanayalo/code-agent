@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import logging
 
 from sqlalchemy.pool import StaticPool
@@ -84,6 +85,79 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
             "symptom": "failing retry path",
         }
         assert timeline[-1].event_type.value == "task_spec_and_route_generated"
+
+
+def test_record_interaction_response_ignores_missing_observation_dependency(
+    monkeypatch,
+) -> None:
+    """Missing observation helpers should not block interaction resolution."""
+    service, session_factory = _make_task_service()
+    snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="debug this"))
+
+    clarification = next(
+        interaction
+        for interaction in snapshot.pending_interactions
+        if interaction.interaction_type == "clarification"
+    )
+    original_import = builtins.__import__
+
+    def _raise_for_observation(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "memory.observation":
+            raise ImportError("memory observation unavailable")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _raise_for_observation)
+
+    refreshed = service.record_interaction_response(
+        snapshot.task_id,
+        clarification.interaction_id,
+        execution_module.InteractionResponse(response_data={"answer": "continue"}),
+    )
+
+    assert refreshed is not None
+    assert refreshed.status == TaskStatus.PENDING.value
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(snapshot.task_id)
+        assert task is not None
+        assert task.status is TaskStatus.PENDING
+
+
+def test_record_interaction_response_logs_observation_capture_failures(
+    monkeypatch,
+    caplog,
+) -> None:
+    """Unexpected observation capture failures should warn without blocking."""
+    service, session_factory = _make_task_service()
+    snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="debug this"))
+
+    clarification = next(
+        interaction
+        for interaction in snapshot.pending_interactions
+        if interaction.interaction_type == "clarification"
+    )
+
+    from memory.observation import ObservationCaptureService
+
+    def _raise_capture(*, session, task, interaction):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        ObservationCaptureService,
+        "capture_interaction_resolution",
+        _raise_capture,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="orchestrator.execution_interaction_service"):
+        refreshed = service.record_interaction_response(
+            snapshot.task_id,
+            clarification.interaction_id,
+            execution_module.InteractionResponse(response_data={"answer": "continue"}),
+        )
+
+    assert refreshed is not None
+    assert refreshed.status == TaskStatus.PENDING.value
+    assert "Failed to capture interaction resolution observation; continuing." in caplog.text
 
 
 def test_replay_task_normalizes_malformed_provenance_chain(caplog) -> None:

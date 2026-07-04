@@ -1524,6 +1524,34 @@ def await_clarification(state_input: OrchestratorState) -> dict[str, Any]:
 def load_memory(state_input: OrchestratorState) -> dict[str, Any]:
     """Preserve the current memory context for the skeleton graph."""
     state = _ensure_state(state_input)
+    search_query = _memory_search_query(state)
+    payload = _memory_loaded_payload(
+        memory=state.memory,
+        search_query=search_query,
+        search_limit=0,
+    )
+    with start_optional_span(
+        tracer_name="orchestrator.graph",
+        span_name="orchestrator.node.load_memory",
+        attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+        task_id=state.task.task_id,
+        session_id=state.session.session_id if state.session else None,
+        attempt=state.attempt_count,
+        task_kind=state.task_kind,
+        route_reason=state.route.route_reason if state.route else None,
+        verification_summary=state.verification.summary if state.verification else None,
+    ):
+        set_span_input_output(
+            input_data={
+                "source": "state",
+                "search_query": search_query,
+                "search_limit": 0,
+                "repo_url": state.task.repo_url,
+                "session_id": state.session.session_id if state.session else None,
+            },
+            output_data=payload,
+        )
+        set_span_status_from_outcome("success")
     return {
         "current_step": "load_memory",
         "memory": state.memory.model_dump(mode="json"),
@@ -1535,11 +1563,7 @@ def load_memory(state_input: OrchestratorState) -> dict[str, Any]:
                 f"Loaded {len(state.memory.personal)} personal and "
                 f"{len(state.memory.project)} project memory entries."
             ),
-            payload={
-                "personal_count": len(state.memory.personal),
-                "project_count": len(state.memory.project),
-                "session_loaded": bool(state.memory.session),
-            },
+            payload=payload,
         ),
     }
 
@@ -1594,10 +1618,79 @@ def _memory_loaded_payload(
         "search_limit": search_limit,
         "personal_count": len(memory.personal),
         "project_count": len(memory.project),
+        "observations_count": len(memory.observations),
         "session_loaded": bool(memory.session),
         "personal_keys": [entry.memory_key for entry in memory.personal],
         "project_keys": [entry.memory_key for entry in memory.project],
+        "observation_ids": [entry.id for entry in memory.observations],
     }
+
+
+def _fetch_memory_context(
+    session_factory: Callable[[], Session],
+    user_id: str | None,
+    session_id: str | None,
+    repo_url: str | None,
+    search_query: str,
+    search_limit: int,
+) -> MemoryContext:
+    db_session: Session | None = None
+    try:
+        db_session = session_factory()
+        memory = MemoryContext()
+        memory.personal = _search_memory_entries(
+            repo=PersonalMemoryRepository(db_session),
+            query_kwargs={
+                "query": search_query,
+                "limit": search_limit,
+            },
+        )
+        if repo_url:
+            memory.project = _search_memory_entries(
+                repo=ProjectMemoryRepository(db_session),
+                query_kwargs={
+                    "repo_url": repo_url,
+                    "query": search_query,
+                    "limit": search_limit,
+                },
+            )
+        if session_id:
+            session_state = SessionStateRepository(db_session).get(session_id)
+            memory.session = _session_state_payload(session_state)
+
+        try:
+            from memory.observation import ObservationContextService
+
+            memory.observations = ObservationContextService.load_recent_context_entries(
+                session=db_session,
+                repo_url=repo_url,
+                session_id=session_id,
+                task_id=None,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to load recent observations context; continuing without observations.",
+                exc_info=True,
+                extra={
+                    "session_id": session_id,
+                    "repo_url": repo_url,
+                },
+            )
+        return memory
+    except Exception:
+        logger.warning(
+            "Failed to load memory context; continuing with empty memory.",
+            exc_info=True,
+            extra={
+                "session_id": session_id,
+                "user_id": user_id,
+                "repo_url": repo_url,
+            },
+        )
+        return MemoryContext()
+    finally:
+        if db_session is not None:
+            db_session.close()
 
 
 def build_load_memory_node(
@@ -1613,44 +1706,42 @@ def build_load_memory_node(
         session_id = state.session.session_id if state.session is not None else None
         repo_url = state.task.repo_url
         search_query = _memory_search_query(state)
-        memory = MemoryContext()
-
-        db_session: Session | None = None
-        try:
-            db_session = session_factory()
-            memory.personal = _search_memory_entries(
-                repo=PersonalMemoryRepository(db_session),
-                query_kwargs={
-                    "query": search_query,
-                    "limit": search_limit,
-                },
+        with start_optional_span(
+            tracer_name="orchestrator.graph",
+            span_name="orchestrator.node.load_memory",
+            attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+            task_id=state.task.task_id,
+            session_id=session_id,
+            attempt=state.attempt_count,
+            task_kind=state.task_kind,
+            route_reason=state.route.route_reason if state.route else None,
+            verification_summary=state.verification.summary if state.verification else None,
+        ):
+            memory = _fetch_memory_context(
+                session_factory=session_factory,
+                user_id=user_id,
+                session_id=session_id,
+                repo_url=repo_url,
+                search_query=search_query,
+                search_limit=search_limit,
             )
-            if repo_url:
-                memory.project = _search_memory_entries(
-                    repo=ProjectMemoryRepository(db_session),
-                    query_kwargs={
-                        "repo_url": repo_url,
-                        "query": search_query,
-                        "limit": search_limit,
-                    },
-                )
-            if session_id:
-                session_state = SessionStateRepository(db_session).get(session_id)
-                memory.session = _session_state_payload(session_state)
-        except Exception:
-            logger.warning(
-                "Failed to load memory context; continuing with empty memory.",
-                exc_info=True,
-                extra={
+            payload = _memory_loaded_payload(
+                memory=memory,
+                search_query=search_query,
+                search_limit=search_limit,
+            )
+            set_span_input_output(
+                input_data={
+                    "source": "database",
+                    "search_query": search_query,
+                    "search_limit": search_limit,
+                    "repo_url": repo_url,
                     "session_id": session_id,
                     "user_id": user_id,
-                    "repo_url": repo_url,
                 },
+                output_data=payload,
             )
-            memory = MemoryContext()
-        finally:
-            if db_session is not None:
-                db_session.close()
+            set_span_status_from_outcome("success")
 
         return {
             "current_step": "load_memory",
@@ -1663,11 +1754,7 @@ def build_load_memory_node(
                     f"Loaded {len(memory.personal)} personal and "
                     f"{len(memory.project)} project memory entries."
                 ),
-                payload=_memory_loaded_payload(
-                    memory=memory,
-                    search_query=search_query,
-                    search_limit=search_limit,
-                ),
+                payload=payload,
             ),
         }
 
@@ -3230,6 +3317,34 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
 def persist_memory(state_input: OrchestratorState) -> dict[str, Any]:
     """Terminate the happy path without yet writing memory anywhere."""
     state = _ensure_state(state_input)
+    payload = {
+        "requested_count": len(state.memory_to_persist),
+        "persisted_count": 0,
+        "proposal_count": 0,
+        "rejected_count": 0,
+        "decision_counts": {},
+        "risk_counts": {},
+    }
+    with start_optional_span(
+        tracer_name="orchestrator.graph",
+        span_name="orchestrator.node.persist_memory",
+        attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+        task_id=state.task.task_id,
+        session_id=state.session.session_id if state.session else None,
+        attempt=state.attempt_count,
+        task_kind=state.task_kind,
+        route_reason=state.route.route_reason if state.route else None,
+        verification_summary=state.verification.summary if state.verification else None,
+    ):
+        set_span_input_output(
+            input_data={
+                "source": "state",
+                "requested_count": len(state.memory_to_persist),
+                "memory_keys": [entry.memory_key for entry in state.memory_to_persist],
+            },
+            output_data=payload,
+        )
+        set_span_status_from_outcome("success")
     # Placeholder for skeptical memory update
     return {
         "current_step": "persist_memory",
@@ -3363,6 +3478,94 @@ def _memory_admission_outcome(
     )
 
 
+def _admit_memory_candidates(
+    session_factory: Callable[[], Session],
+    state: OrchestratorState,
+) -> MemoryAdmissionBatchResult | None:
+    """Run memory admission and keep persistence failures isolated to this node."""
+    db_session: Session | None = None
+    try:
+        db_session = session_factory()
+        evidence = _memory_admission_evidence(state)
+        candidates = [
+            _memory_candidate_from_entry(state, entry, evidence)
+            for entry in state.memory_to_persist
+        ]
+        admission_result = CustomMemoryAdmissionService(db_session).admit_candidates(
+            candidates=candidates
+        )
+        db_session.commit()
+        return admission_result
+    except Exception:
+        if db_session is not None:
+            db_session.rollback()
+        logger.exception(
+            "Failed to admit worker memory; continuing without memory writes.",
+            extra={
+                "task_id": state.task.task_id,
+                "requested_count": len(state.memory_to_persist),
+            },
+        )
+        return None
+    finally:
+        if db_session is not None:
+            db_session.close()
+
+
+def _memory_persistence_span_input(
+    state: OrchestratorState,
+    *,
+    source: str,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "source": source,
+        "requested_count": len(state.memory_to_persist),
+        "memory_keys": [entry.memory_key for entry in state.memory_to_persist],
+    }
+    if source == "database":
+        payload["categories"] = [entry.category for entry in state.memory_to_persist]
+    return payload
+
+
+def _memory_persisted_payload(
+    *,
+    state: OrchestratorState,
+    persisted_count: int,
+    proposal_count: int,
+    rejected_count: int,
+    decision_counts: dict[str, int],
+    risk_counts: dict[str, int],
+) -> dict[str, Any]:
+    return {
+        "requested_count": len(state.memory_to_persist),
+        "persisted_count": persisted_count,
+        "proposal_count": proposal_count,
+        "rejected_count": rejected_count,
+        "decision_counts": decision_counts,
+        "risk_counts": risk_counts,
+    }
+
+
+def _build_persist_memory_response(
+    state: OrchestratorState,
+    *,
+    progress_msg: str,
+    timeline_msg: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "current_step": "persist_memory",
+        "memory_to_persist": [entry.model_dump(mode="json") for entry in state.memory_to_persist],
+        "progress_updates": _progress_update(state, progress_msg),
+        **_timeline_event(
+            state,
+            TimelineEventType.MEMORY_PERSISTED,
+            message=timeline_msg,
+            payload=payload,
+        ),
+    }
+
+
 def build_persist_memory_node(
     session_factory: Callable[[], Session],
 ) -> Callable[[OrchestratorState], dict[str, Any]]:
@@ -3370,64 +3573,47 @@ def build_persist_memory_node(
 
     def persist_memory_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
-        admission_result = None
-        db_session: Session | None = None
-        try:
-            db_session = session_factory()
-            evidence = _memory_admission_evidence(state)
-            candidates = [
-                _memory_candidate_from_entry(state, entry, evidence)
-                for entry in state.memory_to_persist
-            ]
-            admission_result = CustomMemoryAdmissionService(db_session).admit_candidates(
-                candidates=candidates
+        with start_optional_span(
+            tracer_name="orchestrator.graph",
+            span_name="orchestrator.node.persist_memory",
+            attributes={"openinference.span.kind": SPAN_KIND_CHAIN},
+            task_id=state.task.task_id,
+            session_id=state.session.session_id if state.session else None,
+            attempt=state.attempt_count,
+            task_kind=state.task_kind,
+            route_reason=state.route.route_reason if state.route else None,
+            verification_summary=state.verification.summary if state.verification else None,
+        ):
+            admission_result = _admit_memory_candidates(session_factory, state)
+            (
+                decision_counts,
+                risk_counts,
+                persisted_count,
+                proposal_count,
+                rejected_count,
+                progress_msg,
+                timeline_msg,
+            ) = _memory_admission_outcome(state, admission_result)
+            payload = _memory_persisted_payload(
+                state=state,
+                persisted_count=persisted_count,
+                proposal_count=proposal_count,
+                rejected_count=rejected_count,
+                decision_counts=decision_counts,
+                risk_counts=risk_counts,
             )
-            db_session.commit()
-        except Exception:
-            if db_session is not None:
-                db_session.rollback()
-            admission_result = None
-            logger.exception(
-                "Failed to admit worker memory; continuing without memory writes.",
-                extra={
-                    "task_id": state.task.task_id,
-                    "requested_count": len(state.memory_to_persist),
-                },
+            set_span_input_output(
+                input_data=_memory_persistence_span_input(state, source="database"),
+                output_data=payload,
             )
-        finally:
-            if db_session is not None:
-                db_session.close()
+            set_span_status_from_outcome("success" if admission_result is not None else "failure")
 
-        (
-            decision_counts,
-            risk_counts,
-            persisted_count,
-            proposal_count,
-            rejected_count,
-            progress_msg,
-            timeline_msg,
-        ) = _memory_admission_outcome(state, admission_result)
-
-        return {
-            "current_step": "persist_memory",
-            "memory_to_persist": [
-                entry.model_dump(mode="json") for entry in state.memory_to_persist
-            ],
-            "progress_updates": _progress_update(state, progress_msg),
-            **_timeline_event(
-                state,
-                TimelineEventType.MEMORY_PERSISTED,
-                message=timeline_msg,
-                payload={
-                    "requested_count": len(state.memory_to_persist),
-                    "persisted_count": persisted_count,
-                    "proposal_count": proposal_count,
-                    "rejected_count": rejected_count,
-                    "decision_counts": decision_counts,
-                    "risk_counts": risk_counts,
-                },
-            ),
-        }
+        return _build_persist_memory_response(
+            state,
+            progress_msg=progress_msg,
+            timeline_msg=timeline_msg,
+            payload=payload,
+        )
 
     return persist_memory_node
 

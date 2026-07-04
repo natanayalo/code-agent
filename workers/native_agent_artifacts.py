@@ -114,3 +114,47 @@ def _collect_diff_text(*, repo_path: Path, timeout_seconds: int) -> str | None:
         return None
     payload = completed.stdout.strip()
     return payload or None
+
+
+def _collect_diff_text_since_ref(
+    *,
+    repo_path: Path,
+    base_ref: str | None,
+    timeout_seconds: int,
+) -> str | None:
+    """Collect a patch from the starting git ref plus any working-tree edits."""
+    command = [
+        "git",
+        "-C",
+        str(repo_path),
+        "diff",
+        "--no-color",
+    ]
+    if base_ref:
+        command.append(base_ref)
+    command.extend(["--", "."])
+
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        logger.warning(
+            "Native agent runner failed to collect git diff.",
+            exc_info=True,
+        )
+        return None
+
+    if completed.returncode != 0:
+        stderr_preview = (completed.stderr or "").strip()
+        logger.warning(
+            "Native agent runner git diff failed.",
+            extra={"exit_code": completed.returncode, "stderr": stderr_preview},
+        )
+        return None
+
+    return completed.stdout.strip() or None

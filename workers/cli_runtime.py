@@ -26,6 +26,7 @@ from workers.cli_runtime_context import (
 from workers.cli_runtime_files import (
     collect_changed_files,
     collect_changed_files_from_repo_path,
+    collect_changed_files_since_ref_from_repo_path,
 )
 from workers.cli_runtime_loop import run_cli_runtime_loop_impl
 from workers.cli_runtime_tools import (
@@ -107,6 +108,7 @@ __all__ = [
     "_normalize_requested_tool_name",
     "collect_changed_files",
     "collect_changed_files_from_repo_path",
+    "collect_changed_files_since_ref_from_repo_path",
     "format_bash_observation",
     "format_tool_observation",
     "run_cli_runtime_loop",

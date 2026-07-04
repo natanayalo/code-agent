@@ -37,6 +37,7 @@ class MemoryProposalRepository:
         evidence: dict[str, Any] | None = None,
         task_id: str | None = None,
         session_id: str | None = None,
+        source_observation_id: str | None = None,
     ) -> MemoryProposal:
         normalized_category = MemoryProposalCategory(category)
         normalized_repo_url = (repo_url or "").strip() or None
@@ -57,6 +58,7 @@ class MemoryProposalRepository:
             evidence=evidence,
             task_id=task_id,
             session_id=session_id,
+            source_observation_id=source_observation_id,
         )
         self.session.add(proposal)
         self.session.flush()

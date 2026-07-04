@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, DateTime
+import pytest
+from sqlalchemy import JSON, DateTime, create_engine
 from sqlalchemy import Enum as SQLAlchemyEnum
+from sqlalchemy.exc import IntegrityError
 
 import db.models  # noqa: F401
 from db.base import Base
@@ -32,6 +34,7 @@ EXPECTED_TABLES = {
     "human_interactions",
     "inbound_deliveries",
     "memory_admission_decisions",
+    "memory_observations",
     "memory_personal",
     "memory_proposals",
     "memory_project",
@@ -105,3 +108,97 @@ def test_model_metadata_defines_runtime_manifest_column_type() -> None:
     """Runtime operating contract metadata needs a JSON column on worker runs."""
     column_type = Base.metadata.tables["worker_runs"].c["runtime_manifest"].type
     assert isinstance(column_type, JSON)
+
+
+def test_model_metadata_enforces_memory_observation_constraints() -> None:
+    """Metadata-created DBs should match migration constraints for observations."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+
+    observations = Base.metadata.tables["memory_observations"]
+    proposals = Base.metadata.tables["memory_proposals"]
+    decisions = Base.metadata.tables["memory_admission_decisions"]
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                observations.insert().values(
+                    id="obs-invalid-status",
+                    source="worker",
+                    event_type="worker_completed",
+                    summary="summary",
+                    content="content",
+                    metadata_payload={},
+                    privacy_stripped=False,
+                    admission_status="surprising",
+                )
+            )
+
+    with engine.begin() as connection:
+        connection.execute(
+            proposals.insert(),
+            [
+                _proposal_values("proposal-null-1", "key-null-1", None),
+                _proposal_values("proposal-null-2", "key-null-2", None),
+                _proposal_values("proposal-source-1", "key-source-1", "obs-1"),
+            ],
+        )
+        connection.execute(
+            decisions.insert(),
+            [
+                _decision_values("decision-null-1", "key-null-1", None),
+                _decision_values("decision-null-2", "key-null-2", None),
+                _decision_values("decision-source-1", "key-source-1", "obs-1"),
+            ],
+        )
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                proposals.insert().values(
+                    _proposal_values("proposal-source-2", "key-source-2", "obs-1")
+                )
+            )
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                decisions.insert().values(
+                    _decision_values("decision-source-2", "key-source-2", "obs-1")
+                )
+            )
+
+
+def _proposal_values(
+    proposal_id: str,
+    memory_key: str,
+    source_observation_id: str | None,
+) -> dict[str, object]:
+    return {
+        "id": proposal_id,
+        "category": MemoryProposalCategory.PERSONAL.value,
+        "repo_url": None,
+        "memory_key": memory_key,
+        "value": {},
+        "confidence": 1.0,
+        "requires_verification": True,
+        "status": MemoryProposalStatus.PENDING_REVIEW.value,
+        "source_observation_id": source_observation_id,
+    }
+
+
+def _decision_values(
+    decision_id: str,
+    memory_key: str,
+    source_observation_id: str | None,
+) -> dict[str, object]:
+    return {
+        "id": decision_id,
+        "category": "personal",
+        "memory_key": memory_key,
+        "candidate_payload": {},
+        "decision": "create",
+        "risk_level": "low",
+        "reason": "Looks useful.",
+        "source_observation_id": source_observation_id,
+    }
