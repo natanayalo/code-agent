@@ -226,6 +226,8 @@ def test_bridge_observations_success_and_idempotency(session_factory) -> None:
         obs_repo = ObservationRepository(session)
         obs_repo.create(
             task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
             source="operator",
             event_type="suggestion",
             summary="Suggest memory",
@@ -235,7 +237,6 @@ def test_bridge_observations_success_and_idempotency(session_factory) -> None:
                     "category": "project",
                     "memory_key": "conventions",
                     "value": {"style": "pep8"},
-                    "repo_url": "repo1",
                 }
             },
             admission_status="pending",
@@ -255,11 +256,16 @@ def test_bridge_observations_success_and_idempotency(session_factory) -> None:
         # Verify proposal was created
         proposal = session.scalars(select(MemoryProposal)).one()
         assert proposal.memory_key == "conventions"
+        assert proposal.task_id == task_id
+        assert proposal.session_id == task.session_id
+        assert proposal.repo_url == task.repo_url
         assert proposal.source_observation_id == obs.id
 
         # Verify decision was created
         decision = session.scalars(select(MemoryAdmissionDecision)).one()
         assert decision.memory_key == "conventions"
+        assert decision.task_id == task_id
+        assert decision.session_id == task.session_id
         assert decision.source_observation_id == obs.id
 
         # 2. Idempotency check: run again.

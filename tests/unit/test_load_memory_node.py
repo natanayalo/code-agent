@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from sqlalchemy.pool import StaticPool
 
+import orchestrator.graph as graph_module
 from db.base import Base
 from db.enums import TimelineEventType
 from orchestrator.graph import build_load_memory_node
 from orchestrator.state import OrchestratorState
 from repositories import (
+    ObservationRepository,
     PersonalMemoryRepository,
     ProjectMemoryRepository,
     SessionRepository,
@@ -75,6 +78,15 @@ def _seed_memory_context(session_factory: Any) -> tuple[str, str]:
             decisions_made={"load_strategy": "all"},
             identified_risks={"prompt_size": "small personal-use volumes"},
             files_touched=["orchestrator/graph.py"],
+        )
+        ObservationRepository(session).create(
+            task_id="task-1",
+            session_id=conversation.id,
+            repo_url=repo_url,
+            source="worker",
+            event_type="worker_completed",
+            summary="Previous worker completed.",
+            content="content",
         )
         return user.id, conversation.id
 
@@ -215,15 +227,21 @@ def test_load_memory_node_loads_memory_and_skepticism_metadata(session_factory) 
     assert memory["project"][0]["memory_key"] == "test_command"
     assert memory["session"]["active_goal"] == "wire memory into worker context"
     assert memory["session"]["files_touched"] == ["orchestrator/graph.py"]
+    assert len(memory["observations"]) == 1
+    assert memory["observations"][0]["summary"] == "Previous worker completed."
 
     event = result["timeline_events"][0]
     assert event.event_type == TimelineEventType.MEMORY_LOADED
-    assert event.payload == {
+    assert event.payload["observation_ids"] == [memory["observations"][0]["id"]]
+    payload_without_observation_ids = dict(event.payload)
+    payload_without_observation_ids.pop("observation_ids")
+    assert payload_without_observation_ids == {
         "retrieval_mode": "full_text",
         "search_query": "memory-match",
         "search_limit": 20,
         "personal_count": 1,
         "project_count": 1,
+        "observations_count": 1,
         "session_loaded": True,
         "personal_keys": ["communication_style"],
         "project_keys": ["test_command"],
@@ -246,6 +264,7 @@ def test_load_memory_node_loads_personal_memory_without_session_scope(session_fa
     assert result["memory"]["session"] == {}
     assert result["timeline_events"][0].payload["personal_count"] == 1
     assert result["timeline_events"][0].payload["project_count"] == 0
+    assert result["timeline_events"][0].payload["observations_count"] == 0
 
 
 def test_load_memory_node_prefers_task_spec_goal_for_search_query(
@@ -299,3 +318,48 @@ def test_load_memory_node_db_error_returns_empty_memory() -> None:
 
     assert result["memory"] == {"personal": [], "project": [], "session": {}, "observations": []}
     assert result["timeline_events"][0].event_type == TimelineEventType.MEMORY_LOADED
+    assert result["timeline_events"][0].payload["observations_count"] == 0
+
+
+def test_load_memory_node_records_span_input_output(
+    session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The DB-backed load node should expose memory retrieval details to tracing."""
+    user_id, session_id = _seed_memory_context(session_factory)
+    captured: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    statuses: list[str] = []
+    monkeypatch.setattr(graph_module, "start_optional_span", lambda **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        graph_module,
+        "set_span_input_output",
+        lambda input_data, output_data=None: captured.append((input_data, output_data)),
+    )
+    monkeypatch.setattr(
+        graph_module,
+        "set_span_status_from_outcome",
+        lambda status, *_args, **_kwargs: statuses.append(status),
+    )
+    state = OrchestratorState.model_validate(
+        {
+            "session": {
+                "session_id": session_id,
+                "user_id": user_id,
+                "channel": "http",
+                "external_thread_id": "thread-1",
+            },
+            "task": {
+                "task_text": "memory-match",
+                "repo_url": "https://github.com/natanayalo/code-agent",
+            },
+        }
+    )
+
+    build_load_memory_node(session_factory)(state)
+
+    assert captured[0][0]["source"] == "database"
+    assert captured[0][0]["search_query"] == "memory-match"
+    assert captured[0][1]["personal_count"] == 1
+    assert captured[0][1]["project_count"] == 1
+    assert captured[0][1]["observations_count"] == 1
+    assert statuses == ["success"]

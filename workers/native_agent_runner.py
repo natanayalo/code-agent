@@ -24,12 +24,12 @@ from apps.observability import (
 from sandbox.redact import SecretRedactor, sanitize_command
 from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import ArtifactReference
-from workers.cli_runtime import collect_changed_files_from_repo_path
+from workers.cli_runtime import collect_changed_files_since_ref_from_repo_path
 from workers.failure_taxonomy import find_infra_failure_marker
 from workers.llm_tracing import set_llm_span_output, with_llm_span
 from workers.native_agent_artifacts import (
     DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR,
-    _collect_diff_text,
+    _collect_diff_text_since_ref,
     _collect_standard_artifacts,
     _copy_artifact,
     _write_artifact,
@@ -478,20 +478,26 @@ def _execute_native_agent_subprocess(
 def _collect_optional_diff_and_changed_files(
     request: NativeAgentRunRequest,
     repo_path: Path,  # type: ignore[name-defined]
+    base_git_ref: str | None,
     artifact_root: Path,  # type: ignore[name-defined]
     artifacts: list[ArtifactReference],
 ) -> tuple[list[str], str | None]:
     """Collect git diff and changed files if requested."""
     files_changed = (
-        collect_changed_files_from_repo_path(
+        collect_changed_files_since_ref_from_repo_path(
             repo_path,
+            base_ref=base_git_ref,
             timeout_seconds=request.changed_files_timeout_seconds,
         )
         if request.collect_changed_files
         else []
     )
     diff_text = (
-        _collect_diff_text(repo_path=repo_path, timeout_seconds=request.diff_timeout_seconds)
+        _collect_diff_text_since_ref(
+            repo_path=repo_path,
+            base_ref=base_git_ref,
+            timeout_seconds=request.diff_timeout_seconds,
+        )
         if request.collect_diff
         else None
     )
@@ -511,6 +517,7 @@ def _collect_optional_diff_and_changed_files(
 def _build_native_agent_artifacts(
     request: NativeAgentRunRequest,
     repo_path: Path,  # type: ignore[name-defined]
+    base_git_ref: str | None,
     artifact_root: Path,  # type: ignore[name-defined]
     events_path: Path | None,  # type: ignore[name-defined]
     final_message_path: Path | None,  # type: ignore[name-defined]
@@ -547,7 +554,7 @@ def _build_native_agent_artifacts(
         final_message = _stdout_fallback_final_message(stdout_text)
 
     files_changed, diff_text = _collect_optional_diff_and_changed_files(
-        request, repo_path, artifact_root, artifacts
+        request, repo_path, base_git_ref, artifact_root, artifacts
     )
     return artifacts, final_message, files_changed, diff_text
 
@@ -556,6 +563,7 @@ def _collect_native_agent_results(
     request: NativeAgentRunRequest,
     completed: subprocess.CompletedProcess[str],
     repo_path: Path,  # type: ignore[name-defined]
+    base_git_ref: str | None,
     command_text: str,
     started_at: float,
     artifact_root: Path,  # type: ignore[name-defined]
@@ -572,6 +580,7 @@ def _collect_native_agent_results(
         artifacts, final_message, files_changed, diff_text = _build_native_agent_artifacts(
             request,
             repo_path,
+            base_git_ref,
             artifact_root,
             events_path,
             final_message_path,
@@ -663,6 +672,28 @@ def _setup_native_agent_paths(
     return repo_path, final_message_path, events_path, artifact_root
 
 
+def _capture_git_head(repo_path: Path, *, timeout_seconds: int) -> str | None:
+    """Return the current HEAD ref for baseline diffing when the workspace is a git repo."""
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(repo_path), "rev-parse", "--verify", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        logger.warning("Native agent runner failed to capture starting git HEAD.", exc_info=True)
+        return None
+    if completed.returncode != 0:
+        logger.info(
+            "Native agent runner skipped baseline diff capture because HEAD is unavailable.",
+            extra={"exit_code": completed.returncode},
+        )
+        return None
+    return completed.stdout.strip() or None
+
+
 def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
     """Run one native-agent CLI command and capture stable worker-facing outputs."""
 
@@ -671,6 +702,10 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
 
     repo_path, final_message_path, events_path, artifact_root = _setup_native_agent_paths(request)
 
+    base_git_ref = _capture_git_head(
+        repo_path,
+        timeout_seconds=request.changed_files_timeout_seconds,
+    )
     command_text = _sanitize_run_command(shlex.join(request.command), request)
     started_at = time.perf_counter()
     with start_optional_span(
@@ -726,6 +761,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
             request=request,
             completed=completed,
             repo_path=repo_path,
+            base_git_ref=base_git_ref,
             command_text=command_text,
             started_at=started_at,
             artifact_root=artifact_root,

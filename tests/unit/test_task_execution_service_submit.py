@@ -163,6 +163,33 @@ def test_create_task_clamps_scout_budget_and_forces_read_only() -> None:
         assert budget.get("execution_mode") == "unattended"
 
 
+def test_create_task_redacts_private_tags_before_persistence() -> None:
+    """Private-tagged task text and constraints should not be stored in task rows."""
+    service, session_factory = _make_task_service()
+    submission = execution_module.TaskSubmission(
+        task_text="Implement <private>secret task detail</private>",
+        repo_url="https://github.com/natanayalo/code-agent",
+        constraints={
+            "risk_level": "low",
+            "approval_reason": "Needs <private>secret approval reason</private>",
+        },
+    )
+
+    snapshot, persisted = service.create_task(submission)
+
+    assert "secret task detail" not in snapshot.task_text
+    assert snapshot.task_text == "Implement [redacted-private]"
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(persisted.task_id)
+
+    assert task is not None
+    assert task.task_text == "Implement [redacted-private]"
+    assert task.constraints["approval_reason"] == "Needs [redacted-private]"
+    assert task.task_spec["goal"] == "Implement [redacted-private]"
+    assert "secret task detail" not in str(task.task_spec)
+    assert "secret approval reason" not in str(task.task_spec)
+
+
 def test_create_task_persists_repair_for_task_id() -> None:
     """Repair tasks should keep their source-task link in DB and snapshots."""
     service, session_factory = _make_task_service()

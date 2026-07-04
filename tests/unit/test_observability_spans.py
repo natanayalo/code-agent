@@ -238,6 +238,59 @@ def test_set_span_input_output_uses_text_mime_for_plain_scalars() -> None:
     assert span.attributes["output.mime_type"] == "text/plain"
 
 
+def test_set_span_input_output_redacts_private_tagged_payloads() -> None:
+    """Private-tag blocks should not be emitted into span input/output values."""
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.attributes: dict[str, object] = {}
+
+        def is_recording(self) -> bool:
+            return True
+
+        def set_attribute(self, key: str, value: object) -> None:
+            self.attributes[key] = value
+
+    span = _FakeSpan()
+
+    with patch("opentelemetry.trace.get_current_span", return_value=span):
+        observability_module.set_span_input_output(
+            input_data={"task": "Use <private>secret trace input</private> safely"},
+            output_data="Done <PRIVATE>secret trace output</PRIVATE>",
+        )
+
+    assert "secret trace input" not in str(span.attributes["input.value"])
+    assert "secret trace output" not in str(span.attributes["output.value"])
+    assert "[redacted-private]" in str(span.attributes["input.value"])
+    assert span.attributes["output.value"] == "Done [redacted-private]"
+
+
+def test_add_current_span_event_redacts_private_tagged_attributes() -> None:
+    """Span event attributes should receive the same private-tag redaction."""
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.events: list[tuple[str, dict[str, object]]] = []
+
+        def is_recording(self) -> bool:
+            return True
+
+        def add_event(self, name: str, attributes: dict[str, object]) -> None:
+            self.events.append((name, attributes))
+
+    span = _FakeSpan()
+
+    with patch("opentelemetry.trace.get_current_span", return_value=span):
+        observability_module.add_current_span_event(
+            "task.event",
+            {"message": "Hide <private>secret event detail</private>"},
+        )
+
+    assert span.events == [
+        ("task.event", {"message": "Hide [redacted-private]"}),
+    ]
+
+
 def test_set_span_input_output_handles_tuples_and_mappings() -> None:
     """Tuples and Mappings (non-dict) should also be serialized as JSON."""
 

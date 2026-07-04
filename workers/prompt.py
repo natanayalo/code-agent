@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Final, Literal, cast, get_args
 
 from db.enums import WorkerRuntimeMode
+from privacy.redaction import redact_private_tags
 from tools import McpToolClient, ToolRegistry
 from workers.base import WorkerRequest
 from workers.markdown import markdown_fence_for_content
@@ -474,4 +475,6 @@ def build_system_prompt(
         build_runtime_manifest_section(request),
         build_workflow_instructions_section(request),
     ]
-    return "\n\n".join(section for section in sections if section.strip())
+    prompt = "\n\n".join(section for section in sections if section.strip())
+    redacted_prompt, _ = redact_private_tags(prompt)
+    return redacted_prompt

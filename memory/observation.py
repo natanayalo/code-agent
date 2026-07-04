@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from sqlalchemy import select
@@ -13,6 +12,7 @@ from db.base import utc_now
 from db.models import MemoryAdmissionDecision, MemoryObservation
 from memory.admission import CustomMemoryAdmissionService, MemoryCandidate
 from orchestrator.state import ObservationContextEntry
+from privacy.redaction import redact_private_tags, redact_private_tags_recursive
 from repositories import ObservationRepository
 
 logger = logging.getLogger(__name__)
@@ -20,38 +20,12 @@ logger = logging.getLogger(__name__)
 
 def strip_private_tags(text: str) -> tuple[str, bool]:
     """Strip case-insensitive <private>...</private> blocks and replace with [redacted-private]."""
-    if not text:
-        return text, False
-    pattern = re.compile(r"<private>(.*?)</private>", re.DOTALL | re.IGNORECASE)
-    redacted, count = pattern.subn("[redacted-private]", text)
-    return redacted, count > 0
+    return redact_private_tags(text)
 
 
 def strip_private_tags_recursive(data: Any) -> tuple[Any, bool]:
     """Recursively traverse dictionaries and lists, redacting private tags in strings."""
-    if isinstance(data, str):
-        return strip_private_tags(data)
-    elif isinstance(data, dict):
-        new_dict = {}
-        any_stripped = False
-        for k, v in data.items():
-            new_val, stripped = strip_private_tags_recursive(v)
-            new_dict[k] = new_val
-            if stripped:
-                any_stripped = True
-        return new_dict, any_stripped
-    elif isinstance(data, list | tuple):
-        new_list = []
-        any_stripped = False
-        for item in data:
-            new_item, stripped = strip_private_tags_recursive(item)
-            new_list.append(new_item)
-            if stripped:
-                any_stripped = True
-        if isinstance(data, tuple):
-            return tuple(new_list), any_stripped
-        return new_list, any_stripped
-    return data, False
+    return redact_private_tags_recursive(data)
 
 
 class ObservationCaptureService:
@@ -287,6 +261,17 @@ def _parse_and_validate_candidate(
         return None
 
 
+def _attach_observation_lineage(candidate: MemoryCandidate, obs: MemoryObservation) -> None:
+    """Backfill candidate provenance from the source observation when omitted."""
+    candidate.source_observation_id = obs.id
+    if not candidate.task_id:
+        candidate.task_id = obs.task_id
+    if not candidate.session_id:
+        candidate.session_id = obs.session_id
+    if candidate.category == "project" and not candidate.repo_url:
+        candidate.repo_url = obs.repo_url
+
+
 def _process_single_observation(
     session: Session, obs: MemoryObservation, obs_repo: ObservationRepository
 ) -> None:
@@ -299,8 +284,7 @@ def _process_single_observation(
         if candidate is None:
             return
 
-        # Inject source observation ID
-        candidate.source_observation_id = obs.id
+        _attach_observation_lineage(candidate, obs)
 
         # Submit to Memory Admission Service
         admission_service = CustomMemoryAdmissionService(session)

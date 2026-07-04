@@ -36,6 +36,7 @@ from apps.observability_utils import (
 from apps.observability_utils import (
     serialize_span_payload as _serialize_span_payload,
 )
+from privacy.redaction import redact_private_tags_recursive
 
 logger = logging.getLogger(__name__)
 
@@ -404,12 +405,14 @@ def set_span_input_output(
             return
 
         if input_data is not None:
-            input_str, input_mime_type = _serialize_span_payload(input_data)
+            safe_input_data, _ = redact_private_tags_recursive(input_data)
+            input_str, input_mime_type = _serialize_span_payload(safe_input_data)
             span.set_attribute(INPUT_VALUE_ATTRIBUTE, input_str)
             span.set_attribute(INPUT_MIME_TYPE_ATTRIBUTE, input_mime_type)
 
         if output_data is not None:
-            output_str, output_mime_type = _serialize_span_payload(output_data)
+            safe_output_data, _ = redact_private_tags_recursive(output_data)
+            output_str, output_mime_type = _serialize_span_payload(safe_output_data)
             span.set_attribute(OUTPUT_VALUE_ATTRIBUTE, output_str)
             span.set_attribute(OUTPUT_MIME_TYPE_ATTRIBUTE, output_mime_type)
     except Exception as exc:
@@ -449,7 +452,8 @@ def add_current_span_event(name: str, attributes: Mapping[str, Any] | None = Non
         span = otel_trace.get_current_span()
         if not span.is_recording():
             return
-        span.add_event(name, attributes=dict(attributes or {}))
+        safe_attributes, _ = redact_private_tags_recursive(dict(attributes or {}))
+        span.add_event(name, attributes=dict(safe_attributes or {}))
     except ImportError:
         pass
     except Exception as exc:

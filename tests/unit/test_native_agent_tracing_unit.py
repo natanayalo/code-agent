@@ -222,9 +222,14 @@ def test_run_native_agent_emits_retry_event_for_network_error(tmp_path: Path, mo
         ("ok", ""),
     ]
 
-    def side_effect(*args, **kwargs):
+    def side_effect(command, **kwargs):
         completed = MagicMock()
         completed.returncode = 0
+        if "rev-parse" in command:
+            completed.stdout = "mocked-git-sha"
+            completed.stderr = ""
+            return completed
+
         stdout, stderr = responses.pop(0)
         if kwargs.get("text"):
             completed.stdout = stdout
