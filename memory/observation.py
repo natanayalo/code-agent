@@ -319,6 +319,10 @@ def _is_verification_command(command_str: str) -> bool:
         "npx",
         "npm run",
         "npm",
+        "yarn run",
+        "yarn",
+        "bun run",
+        "bun",
     ]
     cleaned = cmd
     for p in prefixes:
@@ -328,13 +332,18 @@ def _is_verification_command(command_str: str) -> bool:
     if not parts:
         return False
     exe = parts[0].lower()
-    if exe in ("pytest", "tox", "rake"):
+    if exe in ("pytest", "tox", "rake", "vitest", "jest", "mocha"):
         return True
-    if exe == "go" and len(parts) > 1 and parts[1].lower() == "test":
+    if exe in ("go", "cargo") and len(parts) > 1 and parts[1].lower() == "test":
         return True
-    if exe == "cargo" and len(parts) > 1 and parts[1].lower() == "test":
+    if exe in ("python", "python3", "node") and len(parts) > 1:
+        for arg in parts[1:]:
+            arg_l = arg.lower()
+            if "test_" in arg_l or "_test" in arg_l or arg_l.startswith("test"):
+                return True
+    if exe == "test" or (exe == "run" and len(parts) > 1 and parts[1].lower() == "test"):
         return True
-    if "test" in cmd.lower() or "pytest" in cmd.lower():
+    if exe == "make" and len(parts) > 1 and parts[1].lower() in ("test", "ci"):
         return True
     return False
 
@@ -418,6 +427,7 @@ def _extract_verification_candidates(
     normalized_expected = {c.strip() for c in expected_cmds if isinstance(c, str)}
 
     commands = trace_obs.metadata_payload.get("commands_run") or []
+    ver_cmds = []
     for cmd in commands:
         cmd_str = cmd.get("command")
         exit_code = cmd.get("exit_code")
@@ -425,24 +435,28 @@ def _extract_verification_candidates(
             cmd_stripped = cmd_str.strip()
             is_ver = _is_verification_command(cmd_str) or (cmd_stripped in normalized_expected)
             if is_ver:
-                evidence_str = f"Command '{cmd_str}' executed successfully in worker run."
-                candidates.append(
-                    MemoryCandidate(
-                        category="project",
-                        memory_key="verification_commands",
-                        value={"command": cmd_str},
-                        repo_url=trace_obs.repo_url,
-                        source="worker_result",
-                        confidence=0.95,
-                        scope="repo",
-                        evidence=[evidence_str],
-                        task_id=task_id,
-                        session_id=trace_obs.session_id,
-                        producer="system",
-                        last_verified_at=trace_obs.observed_at,
-                        requires_verification=False,
-                    )
-                )
+                ver_cmds.append(cmd_str)
+
+    if ver_cmds:
+        evidence_str = f"Verification commands {ver_cmds} executed successfully."
+        value_dict = {cmd: cmd for cmd in ver_cmds}
+        candidates.append(
+            MemoryCandidate(
+                category="project",
+                memory_key="verification_commands",
+                value=value_dict,
+                repo_url=trace_obs.repo_url,
+                source="worker_result",
+                confidence=0.95,
+                scope="repo",
+                evidence=[evidence_str],
+                task_id=task_id,
+                session_id=trace_obs.session_id,
+                producer="system",
+                last_verified_at=trace_obs.observed_at,
+                requires_verification=False,
+            )
+        )
     return candidates
 
 

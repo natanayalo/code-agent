@@ -401,12 +401,10 @@ def test_trace_extraction_verification_rules(session_factory) -> None:
                 )
             ).all()
         )
-        assert len(children) == 2
-        ver_cmd_strings = {
-            c.metadata_payload["memory_candidate"]["value"]["command"] for c in children
-        }
-        assert "pytest tests/unit" in ver_cmd_strings
-        assert "poetry run python test_script.py" in ver_cmd_strings
+        assert len(children) == 1
+        cand_val = children[0].metadata_payload["memory_candidate"]["value"]
+        assert "pytest tests/unit" in cand_val
+        assert "poetry run python test_script.py" in cand_val
         assert children[0].admission_status == "processed"
 
 
@@ -690,17 +688,16 @@ def test_trace_extraction_custom_expected_verification_commands(session_factory)
                 )
             ).all()
         )
-        # We expect two children (make build and make deploy-check)
-        assert len(children) == 2
-        cand_vals = {c.metadata_payload["memory_candidate"]["value"]["command"] for c in children}
-        assert "make build " in cand_vals
-        assert "make deploy-check" in cand_vals
+        # We expect one aggregated child containing build and deploy-check keys
+        assert len(children) == 1
+        cand_val = children[0].metadata_payload["memory_candidate"]["value"]
+        assert "make build " in cand_val
+        assert "make deploy-check" in cand_val
 
         # Freshly verified commands should set requires_verification=False and last_verified_at
-        for child in children:
-            cand = child.metadata_payload["memory_candidate"]
-            assert cand["requires_verification"] is False
-            assert cand["last_verified_at"] is not None
+        cand = children[0].metadata_payload["memory_candidate"]
+        assert cand["requires_verification"] is False
+        assert cand["last_verified_at"] is not None
 
 
 def test_trace_extraction_remember_instruction_deduplication(session_factory) -> None:
