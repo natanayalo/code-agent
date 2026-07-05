@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: expose memory observation admission visibility ([#299](https://github.com/natanayalo/code-agent/pull/299))
+
 - Feat: add memory admission spike ([#297](https://github.com/natanayalo/code-agent/pull/297))
 
 - Feat: add reviewable memory retrieval corpus ([#296](https://github.com/natanayalo/code-agent/pull/296))
