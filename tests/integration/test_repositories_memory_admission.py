@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sqlalchemy.dialects import sqlite
+
 from db.models import MemoryObservation, Session, Task, User
 from repositories import MemoryAdmissionDecisionRepository, session_scope
 
@@ -118,3 +120,45 @@ def test_memory_admission_decision_repository_filters_by_repo_url_fallbacks(
     assert [row.id for row in explicit_rows] == [explicit.id]
     assert [row.id for row in observation_rows] == [via_observation.id]
     assert [row.id for row in task_rows] == [via_task.id]
+
+
+def test_memory_admission_decision_repository_only_joins_repo_tables_for_repo_filters(
+    session_factory,
+    monkeypatch,
+) -> None:
+    """Repo joins should only be added when repo fallback filtering is requested."""
+    with session_scope(session_factory) as session:
+        repo = MemoryAdmissionDecisionRepository(session)
+        repo.create(
+            category="project",
+            memory_key="test_command",
+            candidate_payload={"memory_key": "test_command"},
+            decision="create",
+            risk_level="low",
+            reason="low-risk evidenced project memory can be created.",
+        )
+        session.flush()
+
+        statements: list[str] = []
+        original_scalars = session.scalars
+
+        def recording_scalars(statement, *args, **kwargs):
+            statements.append(
+                str(
+                    statement.compile(
+                        dialect=sqlite.dialect(),
+                        compile_kwargs={"literal_binds": True},
+                    )
+                )
+            )
+            return original_scalars(statement, *args, **kwargs)
+
+        monkeypatch.setattr(session, "scalars", recording_scalars)
+
+        repo.list()
+        repo.list(repo_url="https://github.com/org/repo")
+
+    assert "JOIN memory_observations" not in statements[0]
+    assert "JOIN tasks" not in statements[0]
+    assert "JOIN memory_observations" in statements[1]
+    assert "JOIN tasks" in statements[1]

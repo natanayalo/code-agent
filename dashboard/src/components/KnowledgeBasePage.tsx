@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { BarChart3, BookOpen, Check, ClipboardList, Plus, Search, Trash2, X } from 'lucide-react';
 import { api } from '../services/api';
 import { DashboardLayout } from './layout/DashboardLayout';
+import { formatLabel } from '../utils/formatters';
 import {
   KnowledgeBaseStatsSnapshot,
   MemoryAdmissionDecisionSnapshot,
@@ -23,6 +24,9 @@ const KNOWLEDGE_SEARCH_LIMIT = 20;
 const DEFAULT_MEMORY_VALUE_JSON = '{\n  \n}';
 const HEADLINE_START = '__CA_MARK_START__';
 const HEADLINE_END = '__CA_MARK_END__';
+const TRACE_SOURCES = ['worker', 'orchestrator', 'operator'] as const;
+const TRACE_ADMISSION_STATUSES = ['not_required', 'pending', 'processed', 'invalid'] as const;
+const TRACE_DECISIONS = ['create', 'reject', 'needs_human_review', 'merge', 'update'] as const;
 const EMPTY_STATS: KnowledgeBaseStatsSnapshot = {
   personal: { total: 0, requires_verification: 0 },
   project: null,
@@ -1160,26 +1164,44 @@ export function KnowledgeBasePage() {
                 />
               </div>
               <label htmlFor="trace-source-filter">Observation Source</label>
-              <input
+              <select
                 id="trace-source-filter"
                 value={traceSourceFilter}
                 onChange={(event) => setTraceSourceFilter(event.target.value)}
-                placeholder="worker, orchestrator, operator"
-              />
+              >
+                <option value="">All sources</option>
+                {TRACE_SOURCES.map((source) => (
+                  <option key={source} value={source}>
+                    {formatLabel(source)}
+                  </option>
+                ))}
+              </select>
               <label htmlFor="trace-admission-status-filter">Observation Status</label>
-              <input
+              <select
                 id="trace-admission-status-filter"
                 value={traceAdmissionStatusFilter}
                 onChange={(event) => setTraceAdmissionStatusFilter(event.target.value)}
-                placeholder="pending, processed, invalid"
-              />
+              >
+                <option value="">All statuses</option>
+                {TRACE_ADMISSION_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {formatLabel(status)}
+                  </option>
+                ))}
+              </select>
               <label htmlFor="trace-decision-filter">Decision Filter</label>
-              <input
+              <select
                 id="trace-decision-filter"
                 value={traceDecisionFilter}
                 onChange={(event) => setTraceDecisionFilter(event.target.value)}
-                placeholder="create, reject, needs_human_review"
-              />
+              >
+                <option value="">All decisions</option>
+                {TRACE_DECISIONS.map((decision) => (
+                  <option key={decision} value={decision}>
+                    {formatLabel(decision)}
+                  </option>
+                ))}
+              </select>
             </div>
           </section>
 

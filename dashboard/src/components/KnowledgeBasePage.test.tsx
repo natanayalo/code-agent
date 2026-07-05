@@ -311,6 +311,29 @@ describe('KnowledgeBasePage', () => {
     ).toBeInTheDocument();
   });
 
+  it('renders trace enum filters as selects with valid options', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Trace/i }));
+
+    const sourceFilter = screen.getByLabelText('Observation Source');
+    const statusFilter = screen.getByLabelText('Observation Status');
+    const decisionFilter = screen.getByLabelText('Decision Filter');
+
+    expect(sourceFilter.tagName).toBe('SELECT');
+    expect(statusFilter.tagName).toBe('SELECT');
+    expect(decisionFilter.tagName).toBe('SELECT');
+    expect(screen.getByRole('option', { name: 'All sources' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Worker' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Processed' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Needs Human Review' })).toBeInTheDocument();
+  });
+
   it('renders trace loading states while observation and decision queries are pending', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockResolvedValue([]);

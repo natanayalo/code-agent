@@ -60,19 +60,7 @@ class MemoryAdmissionDecisionRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> list[MemoryAdmissionDecision]:
-        repo_url_expr = func.coalesce(
-            cast(MemoryAdmissionDecision.candidate_payload["repo_url"].as_string(), String),
-            MemoryObservation.repo_url,
-            Task.repo_url,
-        )
-        statement = (
-            select(MemoryAdmissionDecision)
-            .outerjoin(
-                MemoryObservation,
-                MemoryObservation.id == MemoryAdmissionDecision.source_observation_id,
-            )
-            .outerjoin(Task, Task.id == MemoryAdmissionDecision.task_id)
-        )
+        statement = select(MemoryAdmissionDecision)
         if task_id is not None:
             statement = statement.where(MemoryAdmissionDecision.task_id == task_id)
         if session_id is not None:
@@ -84,6 +72,15 @@ class MemoryAdmissionDecisionRepository:
                 MemoryAdmissionDecision.source_observation_id == source_observation_id
             )
         if repo_url is not None:
+            repo_url_expr = func.coalesce(
+                cast(MemoryAdmissionDecision.candidate_payload["repo_url"].as_string(), String),
+                MemoryObservation.repo_url,
+                Task.repo_url,
+            )
+            statement = statement.outerjoin(
+                MemoryObservation,
+                MemoryObservation.id == MemoryAdmissionDecision.source_observation_id,
+            ).outerjoin(Task, Task.id == MemoryAdmissionDecision.task_id)
             statement = statement.where(repo_url_expr == repo_url)
         statement = (
             statement.order_by(
