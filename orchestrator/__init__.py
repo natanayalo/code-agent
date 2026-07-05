@@ -9,6 +9,10 @@ from orchestrator.execution import (
     TaskSubmission,
     WorkerRunSnapshot,
 )
+from orchestrator.execution_types import (
+    MemoryAdmissionDecisionSnapshot,
+    MemoryObservationSnapshot,
+)
 from orchestrator.graph import ORCHESTRATOR_NODE_SEQUENCE, build_orchestrator_graph
 from orchestrator.state import (
     ApprovalCheckpoint,
@@ -31,6 +35,8 @@ __all__ = [
     "ApprovalCheckpoint",
     "ArtifactReference",
     "ArtifactSnapshot",
+    "MemoryAdmissionDecisionSnapshot",
+    "MemoryObservationSnapshot",
     "MemoryContext",
     "MemoryEntry",
     "ORCHESTRATOR_NODE_SEQUENCE",

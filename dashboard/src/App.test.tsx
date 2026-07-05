@@ -19,6 +19,8 @@ vi.mock('./services/api', () => ({
     listPendingInteractions: vi.fn(),
     getTask: vi.fn(),
     listSessions: vi.fn(),
+    listMemoryAdmissionDecisions: vi.fn(),
+    listMemoryObservations: vi.fn(),
     getKnowledgeBaseStats: vi.fn(),
     listPersonalMemory: vi.fn(),
     listProjectMemory: vi.fn(),
@@ -42,6 +44,8 @@ describe('App', () => {
     vi.clearAllMocks();
     queryClient.clear();
     window.history.pushState({}, '', '/');
+    vi.mocked(api.listMemoryObservations).mockResolvedValue([]);
+    vi.mocked(api.listMemoryAdmissionDecisions).mockResolvedValue([]);
   });
 
   it('renders without crashing and displays tasks when authenticated', async () => {
@@ -133,6 +137,7 @@ describe('App', () => {
           interaction_type: 'clarification',
           status: 'pending',
           summary: 'Task requires clarification before execution can continue.',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: createdAt,

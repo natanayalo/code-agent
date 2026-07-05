@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskSnapshot, TaskStatus } from '../types/task';
 import { api } from '../services/api';
@@ -9,6 +9,8 @@ import { api } from '../services/api';
 vi.mock('../services/api', () => ({
   api: {
     cancelTask: vi.fn(),
+    listMemoryAdmissionDecisions: vi.fn(),
+    listMemoryObservations: vi.fn(),
     recordInteractionResponse: vi.fn(),
   },
 }));
@@ -71,9 +73,54 @@ function buildLatestRun(overrides: Partial<NonNullable<TaskSnapshot['latest_run'
 }
 
 describe('TaskDetailPanel', () => {
+  beforeEach(() => {
+    vi.mocked(api.listMemoryObservations).mockResolvedValue([]);
+    vi.mocked(api.listMemoryAdmissionDecisions).mockResolvedValue([]);
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+  });
+
+  it('renders task-scoped memory trace records', async () => {
+    vi.mocked(api.listMemoryObservations).mockResolvedValue([
+      {
+        observation_id: 'obs-1',
+        task_id: 'task-1',
+        source: 'worker',
+        event_type: 'worker_completed',
+        observed_at: '2026-04-28T00:01:00.000Z',
+        summary: 'Worker completed run',
+        content: 'Worker run details',
+        metadata_payload: {},
+        privacy_stripped: false,
+        admission_status: 'processed',
+        decision_id: 'dec-1',
+        created_at: '2026-04-28T00:01:00.000Z',
+        updated_at: '2026-04-28T00:01:00.000Z',
+      },
+    ]);
+    vi.mocked(api.listMemoryAdmissionDecisions).mockResolvedValue([
+      {
+        decision_id: 'dec-1',
+        category: 'project',
+        memory_key: 'verification_commands',
+        candidate_payload: {},
+        decision: 'create',
+        risk_level: 'low',
+        reason: 'low-risk evidenced project memory can be created.',
+        task_id: 'task-1',
+        source_observation_id: 'obs-1',
+        created_at: '2026-04-28T00:01:02.000Z',
+        updated_at: '2026-04-28T00:01:02.000Z',
+      },
+    ]);
+
+    render(<TaskDetailPanel task={baseTask} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(await screen.findByText(/Worker completed run/i)).toBeInTheDocument();
+    expect(screen.getByText(/verification_commands/i)).toBeInTheDocument();
   });
 
   it('does not emit duplicate-key warnings for repeated list items', () => {
@@ -113,6 +160,7 @@ describe('TaskDetailPanel', () => {
           interaction_type: undefined,
           status: null,
           summary: 'Need operator input',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: '2026-04-28T00:00:00.000Z',
@@ -685,6 +733,7 @@ describe('TaskDetailPanel', () => {
           interaction_type: 'clarification',
           status: 'pending',
           summary: 'Need a quick operator answer',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: '2026-04-28T00:00:00.000Z',
@@ -726,6 +775,7 @@ describe('TaskDetailPanel', () => {
           interaction_type: 'clarification',
           status: 'pending',
           summary: 'Need more details',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: '2026-04-28T00:00:00.000Z',
@@ -762,6 +812,7 @@ describe('TaskDetailPanel', () => {
           interaction_type: 'clarification',
           status: 'pending',
           summary: 'Need input',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: '2026-04-28T00:00:00.000Z',
@@ -833,6 +884,7 @@ describe('TaskDetailPanel', () => {
           interaction_type: 'clarification',
           status: 'pending',
           summary: 'Need input',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: '2026-04-28T00:00:00.000Z',
@@ -856,6 +908,7 @@ describe('TaskDetailPanel', () => {
           interaction_type: 'clarification',
           status: 'pending',
           summary: 'No longer actionable',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: '2026-04-28T00:00:00.000Z',

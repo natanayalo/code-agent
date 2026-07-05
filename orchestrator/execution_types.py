@@ -328,8 +328,54 @@ class MemoryProposalSnapshot(ExecutionModel):
     evidence: dict[str, Any] | None = None
     task_id: str | None = None
     session_id: str | None = None
+    source_observation_id: str | None = None
     accepted_memory_id: str | None = None
     reviewed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoryObservationSnapshot(ExecutionModel):
+    """A persisted episodic observation exposed for operator inspection."""
+
+    observation_id: str
+    task_id: str | None = None
+    session_id: str | None = None
+    repo_url: str | None = None
+    worker_type: str | None = None
+    source: str
+    event_type: str
+    observed_at: datetime
+    summary: str
+    content: str
+    metadata_payload: dict[str, Any] = Field(default_factory=dict)
+    privacy_stripped: bool = False
+    admission_status: str
+    admission_processed_at: datetime | None = None
+    admission_error: str | None = None
+    decision_id: str | None = None
+    proposal_id: str | None = None
+    durable_memory_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoryAdmissionDecisionSnapshot(ExecutionModel):
+    """An inspectable memory-admission outcome with compact lineage."""
+
+    decision_id: str
+    category: str
+    memory_key: str
+    candidate_payload: dict[str, Any] = Field(default_factory=dict)
+    decision: str
+    risk_level: str
+    reason: str
+    task_id: str | None = None
+    session_id: str | None = None
+    repo_url: str | None = None
+    durable_memory_id: str | None = None
+    proposal_id: str | None = None
+    source_observation_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -530,8 +576,6 @@ class ProgressNotifier(Protocol):
 
 @dataclass(frozen=True)
 class ApprovalDecisionResult:
-    """Outcome of applying an approval decision to a paused task."""
-
     status: Literal["applied", "already_applied", "not_waiting", "conflict", "not_found"]
     task_snapshot: TaskSnapshot | None = None
     detail: str | None = None

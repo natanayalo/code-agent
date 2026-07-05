@@ -47,8 +47,8 @@ Active focus:
 
 ## Next Priorities
 
-1. implement M23 Slice 7 observation/admission visibility: operator-facing API and dashboard surfaces for `memory_observations`, `memory_admission_decisions`, and `source_observation_id` lineage
-2. follow with deterministic observation extraction and then a read-side memory gate before broader repo-profile shaping
+1. implement deterministic observation extraction for real task traces so memory candidates are produced from concrete evidence paths, not only pre-structured payloads
+2. follow with a read-side memory gate and then broader repo-profile shaping once the observation/admission corpus is richer
 3. evaluate Phase 4 candidates: routing, DAG decomposition, selective fan-out, review repair, and autonomy policy
 
 ## Current Backlog
@@ -56,7 +56,7 @@ Active focus:
 Granular tasks for the active and upcoming milestones:
 
 - Milestone 21: worker facade [x], runtime executor [x], sandbox adapter [x], and tool extraction.
-- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [x], reviewable corpus/proposals [x], unified memory admission plus library adoption spike in [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md), episodic observation layer [x] in [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md), and next operator visibility slice in [`docs/m23-slice-7-observation-admission-visibility.md`](m23-slice-7-observation-admission-visibility.md).
+- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [x], reviewable corpus/proposals [x], unified memory admission plus library adoption spike in [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md), episodic observation layer [x] in [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md), operator visibility [x] in [`docs/m23-slice-7-observation-admission-visibility.md`](m23-slice-7-observation-admission-visibility.md), and next deterministic observation extraction plus read-side gating follow-ups.
 - Phase 4: evaluate routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy only after Phase 3 proves reliability.
 
 ## Completed Work

@@ -5,7 +5,9 @@ import { api } from '../services/api';
 import { DashboardLayout } from './layout/DashboardLayout';
 import {
   KnowledgeBaseStatsSnapshot,
+  MemoryAdmissionDecisionSnapshot,
   MemoryInventoryCountSnapshot,
+  MemoryObservationSnapshot,
   MemoryProposalCategory,
   MemoryProposalSnapshot,
   PersonalMemorySnapshot,
@@ -27,8 +29,19 @@ const EMPTY_STATS: KnowledgeBaseStatsSnapshot = {
   project_global: { total: 0, requires_verification: 0 },
 };
 
-type KnowledgeBaseTab = 'browse' | 'review' | 'add';
+type KnowledgeBaseTab = 'browse' | 'review' | 'trace' | 'add';
 type MemoryEntry = PersonalMemorySnapshot | ProjectMemorySnapshot;
+
+function renderLineagePill(label: string, value: string | null | undefined): React.ReactNode {
+  if (!value) {
+    return null;
+  }
+  return (
+    <span className="proposal-status-badge" key={`${label}-${value}`}>
+      {label}: {value}
+    </span>
+  );
+}
 
 function parseMemoryValue(raw: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(raw);
@@ -167,6 +180,11 @@ export function KnowledgeBasePage() {
   const [projectError, setProjectError] = React.useState<string | null>(null);
   const [projectSaving, setProjectSaving] = React.useState(false);
   const [projectDeletingEntryId, setProjectDeletingEntryId] = React.useState<string | null>(null);
+  const [traceSearchInput, setTraceSearchInput] = React.useState('');
+  const [traceSearchQuery, setTraceSearchQuery] = React.useState('');
+  const [traceSourceFilter, setTraceSourceFilter] = React.useState('');
+  const [traceAdmissionStatusFilter, setTraceAdmissionStatusFilter] = React.useState('');
+  const [traceDecisionFilter, setTraceDecisionFilter] = React.useState('');
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -174,6 +192,13 @@ export function KnowledgeBasePage() {
     }, SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [searchInput]);
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setTraceSearchQuery(traceSearchInput.trim());
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [traceSearchInput]);
 
   const projectScopeFilter = projectRepoUrl.trim();
   const searchMode = searchQuery.length >= KNOWLEDGE_SEARCH_MIN_LENGTH;
@@ -246,6 +271,52 @@ export function KnowledgeBasePage() {
       [...reviewedMemoryProposalResults].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
     [reviewedMemoryProposalResults]
   );
+  const {
+    data: memoryObservations = [],
+    isLoading: memoryObservationsLoading,
+    error: memoryObservationsError,
+    refetch: refetchMemoryObservations,
+  } = useQuery({
+    queryKey: [
+      'knowledge-base',
+      'observations',
+      projectScopeFilter,
+      traceSourceFilter,
+      traceAdmissionStatusFilter,
+      traceSearchQuery,
+    ],
+    queryFn: () =>
+      api.listMemoryObservations({
+        repoUrl: projectScopeFilter || undefined,
+        source: normalizeOptional(traceSourceFilter),
+        admissionStatus: normalizeOptional(traceAdmissionStatusFilter),
+        query: normalizeOptional(traceSearchQuery),
+        limit: 25,
+      }),
+    retry: false,
+    refetchInterval: KNOWLEDGE_BASE_REFETCH_INTERVAL_MS,
+  });
+  const {
+    data: memoryAdmissionDecisions = [],
+    isLoading: memoryAdmissionDecisionsLoading,
+    error: memoryAdmissionDecisionsError,
+    refetch: refetchMemoryAdmissionDecisions,
+  } = useQuery({
+    queryKey: [
+      'knowledge-base',
+      'admission-decisions',
+      projectScopeFilter,
+      traceDecisionFilter,
+    ],
+    queryFn: () =>
+      api.listMemoryAdmissionDecisions({
+        repoUrl: projectScopeFilter || undefined,
+        decision: normalizeOptional(traceDecisionFilter),
+        limit: 25,
+      }),
+    retry: false,
+    refetchInterval: KNOWLEDGE_BASE_REFETCH_INTERVAL_MS,
+  });
 
   const {
     data: personalData,
@@ -361,6 +432,11 @@ export function KnowledgeBasePage() {
     await refetchReviewedProposals();
   }, [refetchPendingProposals, refetchReviewedProposals]);
 
+  const refreshTrace = React.useCallback(async () => {
+    await refetchMemoryObservations();
+    await refetchMemoryAdmissionDecisions();
+  }, [refetchMemoryAdmissionDecisions, refetchMemoryObservations]);
+
   function renderMemoryProposal(proposal: MemoryProposalSnapshot): React.ReactNode {
     const isPending = proposal.status === 'pending_review';
     return (
@@ -386,6 +462,10 @@ export function KnowledgeBasePage() {
           <span>Confidence: {proposal.confidence.toFixed(2)}</span>
           <span>Needs verification: {proposal.requires_verification ? 'yes' : 'no'}</span>
         </div>
+        <div className="knowledge-entry-meta">
+          {renderLineagePill('Observation', proposal.source_observation_id)}
+          {renderLineagePill('Accepted Memory', proposal.accepted_memory_id)}
+        </div>
         <pre>{JSON.stringify(proposal.value, null, 2)}</pre>
         {isPending ? (
           <div className="knowledge-review-actions">
@@ -409,6 +489,57 @@ export function KnowledgeBasePage() {
             </button>
           </div>
         ) : null}
+      </article>
+    );
+  }
+
+  function renderObservation(observation: MemoryObservationSnapshot): React.ReactNode {
+    return (
+      <article key={observation.observation_id} className="knowledge-entry">
+        <header className="knowledge-entry-header">
+          <div>
+            <h3>{observation.summary}</h3>
+            <p>{observation.repo_url || observation.source}</p>
+          </div>
+          <span className={`proposal-status-badge status-${observation.admission_status}`}>
+            {observation.admission_status.replace('_', ' ')}
+          </span>
+        </header>
+        <p className="knowledge-section-subtitle">
+          {observation.event_type} • {formatTimestamp(observation.observed_at)}
+        </p>
+        <div className="knowledge-entry-meta">
+          <span>Source: {observation.source}</span>
+          <span>Privacy stripped: {observation.privacy_stripped ? 'yes' : 'no'}</span>
+          {renderLineagePill('Decision', observation.decision_id)}
+          {renderLineagePill('Proposal', observation.proposal_id)}
+          {renderLineagePill('Memory', observation.durable_memory_id)}
+        </div>
+        <pre>{observation.content}</pre>
+      </article>
+    );
+  }
+
+  function renderAdmissionDecision(decisionRow: MemoryAdmissionDecisionSnapshot): React.ReactNode {
+    return (
+      <article key={decisionRow.decision_id} className="knowledge-entry">
+        <header className="knowledge-entry-header">
+          <div>
+            <h3>{decisionRow.memory_key}</h3>
+            <p>{decisionRow.repo_url || `${decisionRow.category} memory`}</p>
+          </div>
+          <span className={`proposal-status-badge status-${decisionRow.decision}`}>
+            {decisionRow.decision.replace('_', ' ')}
+          </span>
+        </header>
+        <p className="knowledge-section-subtitle">{decisionRow.reason}</p>
+        <div className="knowledge-entry-meta">
+          <span>Risk: {decisionRow.risk_level}</span>
+          {renderLineagePill('Observation', decisionRow.source_observation_id)}
+          {renderLineagePill('Proposal', decisionRow.proposal_id)}
+          {renderLineagePill('Memory', decisionRow.durable_memory_id)}
+        </div>
+        <pre>{JSON.stringify(decisionRow.candidate_payload, null, 2)}</pre>
       </article>
     );
   }
@@ -677,6 +808,16 @@ export function KnowledgeBasePage() {
         >
           <ClipboardList size={16} />
           Review
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'trace'}
+          className={`knowledge-tab-button ${activeTab === 'trace' ? 'active' : ''}`}
+          onClick={() => setActiveTab('trace')}
+        >
+          <ClipboardList size={16} />
+          Trace
         </button>
         <button
           type="button"
@@ -993,6 +1134,95 @@ export function KnowledgeBasePage() {
             </div>
           </section>
         </div>
+      ) : activeTab === 'trace' ? (
+        <>
+          <section className="card knowledge-search-panel">
+            <div className="knowledge-search-header">
+              <div>
+                <h2>Observation Trace</h2>
+                <p className="knowledge-section-subtitle">
+                  Inspect raw observations and admission outcomes without changing memory policy.
+                </p>
+              </div>
+              <button className="knowledge-load-more" type="button" onClick={() => void refreshTrace()}>
+                Refresh Trace
+              </button>
+            </div>
+            <div className="knowledge-search-controls">
+              <label htmlFor="trace-search-query">Search Observations</label>
+              <div className="knowledge-search-input-wrap">
+                <Search size={15} />
+                <input
+                  id="trace-search-query"
+                  value={traceSearchInput}
+                  onChange={(event) => setTraceSearchInput(event.target.value)}
+                  placeholder="Search summaries and content..."
+                />
+              </div>
+              <label htmlFor="trace-source-filter">Observation Source</label>
+              <input
+                id="trace-source-filter"
+                value={traceSourceFilter}
+                onChange={(event) => setTraceSourceFilter(event.target.value)}
+                placeholder="worker, orchestrator, operator"
+              />
+              <label htmlFor="trace-admission-status-filter">Observation Status</label>
+              <input
+                id="trace-admission-status-filter"
+                value={traceAdmissionStatusFilter}
+                onChange={(event) => setTraceAdmissionStatusFilter(event.target.value)}
+                placeholder="pending, processed, invalid"
+              />
+              <label htmlFor="trace-decision-filter">Decision Filter</label>
+              <input
+                id="trace-decision-filter"
+                value={traceDecisionFilter}
+                onChange={(event) => setTraceDecisionFilter(event.target.value)}
+                placeholder="create, reject, needs_human_review"
+              />
+            </div>
+          </section>
+
+          <div className="knowledge-grid">
+            <section className="card knowledge-section">
+              <h2>Observations</h2>
+              <p className="knowledge-section-subtitle">
+                Recent observation records{projectScopeFilter ? ` for ${projectScopeFilter}` : ''}.
+              </p>
+              {memoryObservationsError ? (
+                <p className="card-error-text">{(memoryObservationsError as Error).message}</p>
+              ) : null}
+              <div className="knowledge-list">
+                {memoryObservationsLoading ? (
+                  <p className="session-context-muted">Loading observations...</p>
+                ) : memoryObservations.length === 0 ? (
+                  <p className="session-context-muted">No observations found.</p>
+                ) : (
+                  memoryObservations.map(renderObservation)
+                )}
+              </div>
+            </section>
+
+            <section className="card knowledge-section">
+              <h2>Admission Decisions</h2>
+              <p className="knowledge-section-subtitle">
+                Inspect direct writes, review routing, merges, and rejects.
+              </p>
+              {memoryAdmissionDecisionsError ? (
+                <p className="card-error-text">{(memoryAdmissionDecisionsError as Error).message}</p>
+              ) : null}
+              <div className="knowledge-list">
+                {memoryAdmissionDecisionsLoading ? (
+                  <p className="session-context-muted">Loading admission decisions...</p>
+                ) : memoryAdmissionDecisions.length === 0 ? (
+                  <p className="session-context-muted">No admission decisions found.</p>
+                ) : (
+                  memoryAdmissionDecisions.map(renderAdmissionDecision)
+                )}
+              </div>
+            </section>
+          </div>
+        </>
       ) : (
         <div className="knowledge-grid">
           <section className="card knowledge-section">

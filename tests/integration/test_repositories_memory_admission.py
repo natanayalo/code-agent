@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from db.models import MemoryObservation, Session, Task, User
 from repositories import MemoryAdmissionDecisionRepository, session_scope
 
 
@@ -37,3 +38,83 @@ def test_memory_admission_decision_repository_creates_and_filters(session_factor
 
     assert by_task == [first]
     assert {row.id for row in by_session} == {first.id, second.id}
+
+
+def test_memory_admission_decision_repository_filters_by_repo_url_fallbacks(
+    session_factory,
+) -> None:
+    """Repo filtering should check candidate payload first, then observation/task fallback."""
+    with session_scope(session_factory) as session:
+        user = User(external_user_id="user-1", display_name="Test User")
+        session.add(user)
+        session.flush()
+        convo = Session(user_id=user.id, channel="http", external_thread_id="thread-1")
+        session.add(convo)
+        session.flush()
+        task = Task(
+            session_id=convo.id,
+            task_text="test task",
+            repo_url="https://github.com/org/task-repo",
+            constraints={},
+            budget={},
+            secrets={},
+            trace_context={},
+        )
+        session.add(task)
+        session.flush()
+        observation = MemoryObservation(
+            task_id=task.id,
+            session_id=convo.id,
+            repo_url="https://github.com/org/observation-repo",
+            source="worker",
+            event_type="worker_completed",
+            observed_at=task.created_at,
+            summary="Worker completed",
+            content="details",
+            metadata_payload={},
+            privacy_stripped=False,
+            admission_status="processed",
+        )
+        session.add(observation)
+        session.flush()
+
+        repo = MemoryAdmissionDecisionRepository(session)
+        explicit = repo.create(
+            category="project",
+            memory_key="explicit_repo",
+            candidate_payload={"repo_url": "https://github.com/org/candidate-repo"},
+            decision="create",
+            risk_level="low",
+            reason="explicit repo url",
+            task_id=task.id,
+            session_id=convo.id,
+        )
+        via_observation = repo.create(
+            category="project",
+            memory_key="observation_repo",
+            candidate_payload={},
+            decision="merge",
+            risk_level="low",
+            reason="observation repo fallback",
+            task_id=task.id,
+            session_id=convo.id,
+            source_observation_id=observation.id,
+        )
+        via_task = repo.create(
+            category="project",
+            memory_key="task_repo",
+            candidate_payload={},
+            decision="update",
+            risk_level="low",
+            reason="task repo fallback",
+            task_id=task.id,
+            session_id=convo.id,
+        )
+
+        explicit_rows = repo.list(repo_url="https://github.com/org/candidate-repo")
+        observation_rows = repo.list(repo_url="https://github.com/org/observation-repo")
+        task_rows = repo.list(repo_url="https://github.com/org/task-repo")
+
+    assert [row.id for row in explicit_rows] == [explicit.id]
+    assert [row.id for row in observation_rows] == [via_observation.id]
+    assert [row.id for row in task_rows] == [via_task.id]

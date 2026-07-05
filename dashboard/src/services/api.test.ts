@@ -465,6 +465,81 @@ describe('api service', () => {
       warnSpy.mockRestore();
     });
 
+    it('listMemoryObservations encodes filters and handles non-array fallback', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({ not: 'array' }),
+      });
+
+      const result = await api.listMemoryObservations({
+        repoUrl: 'https://repo',
+        taskId: 'task-1',
+        source: 'worker',
+        eventType: 'worker_completed',
+        admissionStatus: 'processed',
+        query: 'pytest',
+        limit: 10,
+        offset: 5,
+      });
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/observations?');
+      expect(url).toContain('repo_url=https%3A%2F%2Frepo');
+      expect(url).toContain('task_id=task-1');
+      expect(url).toContain('source=worker');
+      expect(url).toContain('event_type=worker_completed');
+      expect(url).toContain('admission_status=processed');
+      expect(url).toContain('q=pytest');
+      expect(url).toContain('limit=10');
+      expect(url).toContain('offset=5');
+      expect(result).toEqual([]);
+    });
+
+    it('getMemoryObservation fetches one observation detail', async () => {
+      const mockObservation = { observation_id: 'obs-1', summary: 'Worker completed run' };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => mockObservation,
+      });
+
+      const result = await api.getMemoryObservation('obs-1');
+
+      expect(mockFetch.mock.calls[0][0]).toContain('/knowledge-base/observations/obs-1');
+      expect(result).toEqual(mockObservation);
+    });
+
+    it('listMemoryAdmissionDecisions encodes filters and handles non-array fallback', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => ({ not: 'array' }),
+      });
+
+      const result = await api.listMemoryAdmissionDecisions({
+        repoUrl: 'https://repo',
+        taskId: 'task-1',
+        decision: 'create',
+        sourceObservationId: 'obs-1',
+        limit: 10,
+        offset: 5,
+      });
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/admission-decisions?');
+      expect(url).toContain('repo_url=https%3A%2F%2Frepo');
+      expect(url).toContain('task_id=task-1');
+      expect(url).toContain('decision=create');
+      expect(url).toContain('source_observation_id=obs-1');
+      expect(url).toContain('limit=10');
+      expect(url).toContain('offset=5');
+      expect(result).toEqual([]);
+    });
+
     it('searchPersonalMemory encodes the query string and returns array results', async () => {
       const mockEntries = [{ memory_id: 'm-search', memory_key: 'style', value: {} }];
       mockFetch.mockResolvedValueOnce({

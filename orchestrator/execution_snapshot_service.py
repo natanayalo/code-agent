@@ -21,6 +21,8 @@ from db.enums import (
 from db.models import (
     ExecutionPlan,
     HumanInteraction,
+    MemoryAdmissionDecision,
+    MemoryObservation,
     MemoryProposal,
     PersonalMemory,
     ProjectMemory,
@@ -35,7 +37,9 @@ from orchestrator.execution_types import (
     ExecutionPlanNodeSnapshot,
     ExecutionPlanSnapshot,
     KnowledgeBaseStatsSnapshot,
+    MemoryAdmissionDecisionSnapshot,
     MemoryInventoryCountSnapshot,
+    MemoryObservationSnapshot,
     MemoryProposalCreateRequest,
     MemoryProposalSnapshot,
     OperationalMetrics,
@@ -53,7 +57,9 @@ from orchestrator.execution_types import (
 )
 from orchestrator.state import TaskSpec
 from repositories import (
+    MemoryAdmissionDecisionRepository,
     MemoryProposalRepository,
+    ObservationRepository,
     PersonalMemoryRepository,
     ProjectMemoryRepository,
     SessionRepository,
@@ -360,6 +366,127 @@ def list_memory_proposals(
             offset=offset,
         )
         return [self._map_memory_proposal_to_snapshot(proposal) for proposal in proposals]
+
+
+def list_memory_observations(
+    self: Any,
+    *,
+    repo_url: str | None = None,
+    task_id: str | None = None,
+    session_id: str | None = None,
+    source: str | None = None,
+    event_type: str | None = None,
+    admission_status: str | None = None,
+    query: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[MemoryObservationSnapshot]:
+    """List persisted episodic observations with optional filters."""
+    with session_scope(self.session_factory) as session:
+        observations = ObservationRepository(session).list(
+            repo_url=_optional_scope(repo_url),
+            task_id=_optional_scope(task_id),
+            session_id=_optional_scope(session_id),
+            source=_optional_scope(source),
+            event_type=_optional_scope(event_type),
+            admission_status=_optional_scope(admission_status),
+            query=query,
+            limit=limit,
+            offset=offset,
+        )
+        decision_rows = MemoryAdmissionDecisionRepository(session).list(
+            repo_url=_optional_scope(repo_url),
+            task_id=_optional_scope(task_id),
+            session_id=_optional_scope(session_id),
+            limit=max(limit + offset, 200),
+            offset=0,
+        )
+        decisions_by_observation_id = {
+            row.source_observation_id: row
+            for row in decision_rows
+            if row.source_observation_id is not None
+        }
+        return [
+            self._map_memory_observation_to_snapshot(
+                observation,
+                decision=decisions_by_observation_id.get(observation.id),
+            )
+            for observation in observations
+        ]
+
+
+def get_memory_observation(
+    self: Any,
+    observation_id: str,
+) -> MemoryObservationSnapshot | None:
+    """Fetch one persisted episodic observation with lineage details."""
+    with session_scope(self.session_factory) as session:
+        observation = ObservationRepository(session).get(observation_id)
+        if observation is None:
+            return None
+        decision_rows = MemoryAdmissionDecisionRepository(session).list(
+            source_observation_id=observation_id,
+            limit=1,
+            offset=0,
+        )
+        decision = decision_rows[0] if decision_rows else None
+        return self._map_memory_observation_to_snapshot(observation, decision=decision)
+
+
+def list_memory_admission_decisions(
+    self: Any,
+    *,
+    repo_url: str | None = None,
+    task_id: str | None = None,
+    session_id: str | None = None,
+    decision: str | None = None,
+    source_observation_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[MemoryAdmissionDecisionSnapshot]:
+    """List inspectable memory-admission decisions with lineage filters."""
+    with session_scope(self.session_factory) as session:
+        decisions = MemoryAdmissionDecisionRepository(session).list(
+            repo_url=_optional_scope(repo_url),
+            task_id=_optional_scope(task_id),
+            session_id=_optional_scope(session_id),
+            decision=_optional_scope(decision),
+            source_observation_id=_optional_scope(source_observation_id),
+            limit=limit,
+            offset=offset,
+        )
+        observation_repo = ObservationRepository(session)
+        observation_ids = {
+            row.source_observation_id for row in decisions if row.source_observation_id is not None
+        }
+        observations_by_id = {
+            observation_id: observation_repo.get(observation_id)
+            for observation_id in observation_ids
+        }
+        task_ids = {row.task_id for row in decisions if row.task_id is not None}
+        tasks_by_id = (
+            {
+                task.id: task
+                for task in session.scalars(select(Task).where(Task.id.in_(task_ids))).all()
+            }
+            if task_ids
+            else {}
+        )
+        return [
+            self._map_memory_admission_decision_to_snapshot(
+                row,
+                repo_url=_decision_repo_url(
+                    row,
+                    observation=(
+                        observations_by_id.get(row.source_observation_id)
+                        if row.source_observation_id is not None
+                        else None
+                    ),
+                    task=tasks_by_id.get(row.task_id) if row.task_id is not None else None,
+                ),
+            )
+            for row in decisions
+        ]
 
 
 def accept_memory_proposal(
@@ -702,10 +829,90 @@ def _map_memory_proposal_to_snapshot(proposal: MemoryProposal) -> MemoryProposal
         evidence=dict(proposal.evidence) if proposal.evidence else None,
         task_id=proposal.task_id,
         session_id=proposal.session_id,
+        source_observation_id=proposal.source_observation_id,
         accepted_memory_id=proposal.accepted_memory_id,
         reviewed_at=proposal.reviewed_at,
         created_at=proposal.created_at,
         updated_at=proposal.updated_at,
+    )
+
+
+def _map_memory_observation_to_snapshot(
+    observation: MemoryObservation,
+    *,
+    decision: MemoryAdmissionDecision | None = None,
+) -> MemoryObservationSnapshot:
+    return MemoryObservationSnapshot(
+        observation_id=observation.id,
+        task_id=observation.task_id,
+        session_id=observation.session_id,
+        repo_url=observation.repo_url,
+        worker_type=observation.worker_type,
+        source=observation.source,
+        event_type=observation.event_type,
+        observed_at=observation.observed_at,
+        summary=observation.summary,
+        content=observation.content,
+        metadata_payload=dict(observation.metadata_payload or {}),
+        privacy_stripped=observation.privacy_stripped,
+        admission_status=observation.admission_status,
+        admission_processed_at=observation.admission_processed_at,
+        admission_error=observation.admission_error,
+        decision_id=decision.id if decision is not None else None,
+        proposal_id=decision.proposal_id if decision is not None else None,
+        durable_memory_id=decision.durable_memory_id if decision is not None else None,
+        created_at=observation.created_at,
+        updated_at=observation.updated_at,
+    )
+
+
+def _decision_repo_url(
+    decision: MemoryAdmissionDecision,
+    *,
+    observation: MemoryObservation | None = None,
+    task: Task | None = None,
+) -> str | None:
+    candidate_payload = (
+        decision.candidate_payload if isinstance(decision.candidate_payload, dict) else {}
+    )
+    repo_url = candidate_payload.get("repo_url")
+    if isinstance(repo_url, str) and repo_url.strip():
+        return repo_url.strip()
+
+    if (
+        observation is not None
+        and isinstance(observation.repo_url, str)
+        and observation.repo_url.strip()
+    ):
+        return observation.repo_url.strip()
+
+    if task is not None and isinstance(task.repo_url, str) and task.repo_url.strip():
+        return task.repo_url.strip()
+
+    return None
+
+
+def _map_memory_admission_decision_to_snapshot(
+    decision: MemoryAdmissionDecision,
+    *,
+    repo_url: str | None,
+) -> MemoryAdmissionDecisionSnapshot:
+    return MemoryAdmissionDecisionSnapshot(
+        decision_id=decision.id,
+        category=decision.category,
+        memory_key=decision.memory_key,
+        candidate_payload=dict(decision.candidate_payload or {}),
+        decision=decision.decision,
+        risk_level=decision.risk_level,
+        reason=decision.reason,
+        task_id=decision.task_id,
+        session_id=decision.session_id,
+        repo_url=repo_url,
+        durable_memory_id=decision.durable_memory_id,
+        proposal_id=decision.proposal_id,
+        source_observation_id=decision.source_observation_id,
+        created_at=decision.created_at,
+        updated_at=decision.updated_at,
     )
 
 
