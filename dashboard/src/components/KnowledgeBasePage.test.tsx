@@ -258,6 +258,60 @@ describe('KnowledgeBasePage', () => {
     expect(await screen.findByText('Worker completed run')).toBeInTheDocument();
     expect(screen.getByText(/verification_commands/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Observation: obs-1/i).length).toBeGreaterThan(0);
+    const badges = Array.from(document.querySelectorAll('.proposal-status-badge'));
+    expect(badges.some((badge) => badge.classList.contains('status-processed'))).toBe(true);
+    expect(badges.some((badge) => badge.classList.contains('status-create'))).toBe(true);
+  });
+
+  it('normalizes trace badge classes and guards empty values', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.listMemoryObservations).mockResolvedValue([
+      {
+        observation_id: 'obs-2',
+        source: 'worker',
+        event_type: 'worker_completed',
+        observed_at: new Date().toISOString(),
+        summary: 'Observation with empty status',
+        content: 'trace details',
+        metadata_payload: {},
+        privacy_stripped: false,
+        admission_status: '' as unknown as string,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    vi.mocked(api.listMemoryAdmissionDecisions).mockResolvedValue([
+      {
+        decision_id: 'dec-2',
+        category: 'project',
+        memory_key: 'verification_commands',
+        candidate_payload: {},
+        decision: 'needs_human_review',
+        risk_level: 'low',
+        reason: 'needs manual confirmation',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Trace/i }));
+
+    expect(await screen.findByText('Observation with empty status')).toBeInTheDocument();
+    const badges = Array.from(document.querySelectorAll('.proposal-status-badge'));
+    expect(
+      badges.some((badge) => badge.classList.contains('status-needs-human-review'))
+    ).toBe(true);
+    const emptyStatusBadge = screen
+      .getByText('Observation with empty status')
+      .closest('.knowledge-entry')
+      ?.querySelector('.proposal-status-badge');
+    expect(emptyStatusBadge).toHaveClass('status-default');
+    expect(emptyStatusBadge).toHaveTextContent('');
   });
 
   it('passes trace filters through to observation and decision queries', async () => {

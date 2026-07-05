@@ -47,6 +47,15 @@ function renderLineagePill(label: string, value: string | null | undefined): Rea
   );
 }
 
+function statusBadgeClass(value: string | null | undefined): string {
+  const normalized = value?.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return `proposal-status-badge status-${normalized || 'default'}`;
+}
+
+function statusBadgeLabel(value: string | null | undefined): string {
+  return value ? formatLabel(value) : '';
+}
+
 function parseMemoryValue(raw: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(raw);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -454,8 +463,8 @@ export function KnowledgeBasePage() {
                 : 'Personal memory'}
             </p>
           </div>
-          <span className={`proposal-status-badge status-${proposal.status}`}>
-            {proposal.status.replace('_', ' ')}
+          <span className={statusBadgeClass(proposal.status)}>
+            {statusBadgeLabel(proposal.status)}
           </span>
         </header>
         {proposal.summary ? (
@@ -505,8 +514,8 @@ export function KnowledgeBasePage() {
             <h3>{observation.summary}</h3>
             <p>{observation.repo_url || observation.source}</p>
           </div>
-          <span className={`proposal-status-badge status-${observation.admission_status}`}>
-            {observation.admission_status.replace('_', ' ')}
+          <span className={statusBadgeClass(observation.admission_status)}>
+            {statusBadgeLabel(observation.admission_status)}
           </span>
         </header>
         <p className="knowledge-section-subtitle">
@@ -532,8 +541,8 @@ export function KnowledgeBasePage() {
             <h3>{decisionRow.memory_key}</h3>
             <p>{decisionRow.repo_url || `${decisionRow.category} memory`}</p>
           </div>
-          <span className={`proposal-status-badge status-${decisionRow.decision}`}>
-            {decisionRow.decision.replace('_', ' ')}
+          <span className={statusBadgeClass(decisionRow.decision)}>
+            {statusBadgeLabel(decisionRow.decision)}
           </span>
         </header>
         <p className="knowledge-section-subtitle">{decisionRow.reason}</p>
