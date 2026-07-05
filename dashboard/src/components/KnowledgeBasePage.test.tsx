@@ -260,6 +260,73 @@ describe('KnowledgeBasePage', () => {
     expect(screen.getAllByText(/Observation: obs-1/i).length).toBeGreaterThan(0);
   });
 
+  it('passes trace filters through to observation and decision queries', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.change(await screen.findByLabelText('Project Repository URL'), {
+      target: { value: 'https://github.com/natanayalo/code-agent' },
+    });
+    await waitForDebounce();
+
+    fireEvent.click(screen.getByRole('tab', { name: /Trace/i }));
+
+    fireEvent.change(screen.getByLabelText('Search Observations'), {
+      target: { value: 'pytest' },
+    });
+    fireEvent.change(screen.getByLabelText('Observation Source'), {
+      target: { value: 'worker' },
+    });
+    fireEvent.change(screen.getByLabelText('Observation Status'), {
+      target: { value: 'processed' },
+    });
+    fireEvent.change(screen.getByLabelText('Decision Filter'), {
+      target: { value: 'create' },
+    });
+
+    await waitForDebounce();
+
+    await waitFor(() => {
+      expect(api.listMemoryObservations).toHaveBeenLastCalledWith({
+        repoUrl: 'https://github.com/natanayalo/code-agent',
+        source: 'worker',
+        admissionStatus: 'processed',
+        query: 'pytest',
+        limit: 25,
+      });
+    });
+    await waitFor(() => {
+      expect(api.listMemoryAdmissionDecisions).toHaveBeenLastCalledWith({
+        repoUrl: 'https://github.com/natanayalo/code-agent',
+        decision: 'create',
+        limit: 25,
+      });
+    });
+    expect(
+      screen.getByText('Recent observation records for https://github.com/natanayalo/code-agent.')
+    ).toBeInTheDocument();
+  });
+
+  it('renders trace loading states while observation and decision queries are pending', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.listMemoryObservations).mockReturnValue(new Promise(() => []));
+    vi.mocked(api.listMemoryAdmissionDecisions).mockReturnValue(new Promise(() => []));
+
+    renderKnowledgeBasePage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Trace/i }));
+
+    expect(await screen.findByText('Loading observations...')).toBeInTheDocument();
+    expect(screen.getByText('Loading admission decisions...')).toBeInTheDocument();
+  });
+
   it('submits personal memory upsert payload', async () => {
     vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
     vi.mocked(api.listProjectMemory).mockResolvedValue([]);

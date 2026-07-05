@@ -123,6 +123,31 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText(/verification_commands/i)).toBeInTheDocument();
   });
 
+  it('renders partial memory trace empty states when only one side has records', async () => {
+    vi.mocked(api.listMemoryObservations).mockResolvedValue([
+      {
+        observation_id: 'obs-1',
+        task_id: 'task-1',
+        source: 'worker',
+        event_type: 'worker_completed',
+        observed_at: '2026-04-28T00:01:00.000Z',
+        summary: 'Worker completed run',
+        content: 'Worker run details',
+        metadata_payload: {},
+        privacy_stripped: false,
+        admission_status: 'processed',
+        created_at: '2026-04-28T00:01:00.000Z',
+        updated_at: '2026-04-28T00:01:00.000Z',
+      },
+    ]);
+    vi.mocked(api.listMemoryAdmissionDecisions).mockResolvedValue([]);
+
+    render(<TaskDetailPanel task={baseTask} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(await screen.findByText(/Worker completed run/i)).toBeInTheDocument();
+    expect(screen.getByText('No admission decisions captured for this task.')).toBeInTheDocument();
+  });
+
   it('does not emit duplicate-key warnings for repeated list items', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const task = buildTask({

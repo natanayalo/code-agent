@@ -497,6 +497,38 @@ describe('api service', () => {
       expect(result).toEqual([]);
     });
 
+    it('listMemoryObservations omits blank filters and returns array payloads', async () => {
+      const observations = [{ observation_id: 'obs-2' }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => observations,
+      });
+
+      const result = await api.listMemoryObservations();
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/observations');
+      expect(url).not.toContain('?');
+      expect(result).toEqual(observations);
+    });
+
+    it('listMemoryObservations includes the optional session filter when provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => [],
+      });
+
+      await api.listMemoryObservations({ sessionId: 'session-1' });
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('/knowledge-base/observations?');
+      expect(url).toContain('session_id=session-1');
+    });
+
     it('getMemoryObservation fetches one observation detail', async () => {
       const mockObservation = { observation_id: 'obs-1', summary: 'Worker completed run' };
       mockFetch.mockResolvedValueOnce({
@@ -538,6 +570,38 @@ describe('api service', () => {
       expect(url).toContain('limit=10');
       expect(url).toContain('offset=5');
       expect(result).toEqual([]);
+    });
+
+    it('listMemoryAdmissionDecisions omits blank filters and returns array payloads', async () => {
+      const decisions = [{ decision_id: 'dec-2' }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => decisions,
+      });
+
+      const result = await api.listMemoryAdmissionDecisions();
+      const [url] = mockFetch.mock.calls[0];
+
+      expect(url).toContain('/knowledge-base/admission-decisions');
+      expect(url).not.toContain('?');
+      expect(result).toEqual(decisions);
+    });
+
+    it('listMemoryAdmissionDecisions includes the optional session filter when provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => [],
+      });
+
+      await api.listMemoryAdmissionDecisions({ sessionId: 'session-1' });
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('/knowledge-base/admission-decisions?');
+      expect(url).toContain('session_id=session-1');
     });
 
     it('searchPersonalMemory encodes the query string and returns array results', async () => {
