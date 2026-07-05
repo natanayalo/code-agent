@@ -253,3 +253,44 @@ def test_build_system_prompt_ignores_non_string_scout_constraints(tmp_path) -> N
     # Since depth and focus are invalid, they should be omitted
     assert "Depth:" not in prompt
     assert "Focus:" not in prompt
+
+
+def test_build_system_prompt_renders_advisory_metadata(tmp_path) -> None:
+    """Test that build_system_prompt formats memories with advisory strength metadata."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        repo_url="https://example.com/repo.git",
+        memory_context={
+            "personal": [
+                {
+                    "memory_key": "communication_style",
+                    "value": {"style": "concise"},
+                    "confidence": 0.85,
+                    "last_verified_at": "2026-07-04T12:00:00Z",
+                    "requires_verification": False,
+                }
+            ],
+            "project": [
+                {
+                    "memory_key": "verification_commands",
+                    "value": {"command": "pytest"},
+                    "confidence": 0.95,
+                    "last_verified_at": None,
+                    "requires_verification": True,
+                }
+            ],
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    # Verify personal memory formatting has the metadata
+    assert "communication_style" in prompt
+    assert "**communication_style** (confidence: 0.85, verified: 2026-07-04T12:00:00Z):" in prompt
+
+    # Verify project memory formatting has the metadata
+    assert "verification_commands" in prompt
+    assert (
+        "**verification_commands** (confidence: 0.95, unverified, requires verification):" in prompt
+    )

@@ -254,6 +254,21 @@ def build_workflow_instructions_section(request: WorkerRequest) -> str:
     return "\n".join(lines)
 
 
+def _format_advisory_metadata(m: dict[str, Any]) -> str:
+    """Format memory metadata for prompt display."""
+    confidence = m.get("confidence", 1.0)
+    verified_at = m.get("last_verified_at")
+    req_ver = m.get("requires_verification", True)
+    meta_parts = [f"confidence: {confidence:.2f}"]
+    if verified_at:
+        meta_parts.append(f"verified: {verified_at}")
+    else:
+        meta_parts.append("unverified")
+    if req_ver:
+        meta_parts.append("requires verification")
+    return ", ".join(meta_parts)
+
+
 def build_memory_context_section(request: WorkerRequest) -> str:
     """Render memory context into distinct durable and recent observations sections."""
     if not request.memory_context:
@@ -270,14 +285,16 @@ def build_memory_context_section(request: WorkerRequest) -> str:
         for m in personal_mem:
             key = m.get("memory_key")
             val = m.get("value")
-            durable_lines.append(f"- **{key}**: {json.dumps(val)}")
+            meta_str = _format_advisory_metadata(m)
+            durable_lines.append(f"- **{key}** ({meta_str}): {json.dumps(val)}")
 
     if project_mem:
         durable_lines.append("### Project Memories")
         for m in project_mem:
             key = m.get("memory_key")
             val = m.get("value")
-            durable_lines.append(f"- **{key}**: {json.dumps(val)}")
+            meta_str = _format_advisory_metadata(m)
+            durable_lines.append(f"- **{key}** ({meta_str}): {json.dumps(val)}")
 
     durable_text = ""
     if durable_lines:

@@ -363,3 +363,69 @@ def test_load_memory_node_records_span_input_output(
     assert captured[0][1]["project_count"] == 1
     assert captured[0][1]["observations_count"] == 1
     assert statuses == ["success"]
+
+
+def test_load_memory_node_gating_and_deduplication(session_factory) -> None:
+    """Test that the read-side gate filters cross-scope conflicts and resolves duplicates."""
+    from datetime import UTC, datetime
+
+    repo_url = "https://github.com/natanayalo/code-agent"
+
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(external_user_id="gate-user")
+        conv = SessionRepository(session).create(
+            user_id=user.id,
+            channel="http",
+            external_thread_id="thread-gate",
+        )
+
+        # 1. Seed cross-scope conflict:
+        # Personal memory has 'style' key, Project memory also has 'style' key.
+        # Project should override personal.
+        PersonalMemoryRepository(session).upsert(
+            memory_key="style",
+            value={"type": "personal"},
+            source="user",
+            confidence=1.0,
+            scope="global",
+            last_verified_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+        ProjectMemoryRepository(session).upsert(
+            repo_url=repo_url,
+            memory_key="style",
+            value={"type": "project"},
+            source="worker",
+            confidence=1.0,
+            scope="repo",
+            last_verified_at=datetime(2026, 7, 2, tzinfo=UTC),
+        )
+
+        session.flush()
+        user_id = user.id
+        session_id = conv.id
+
+    state = OrchestratorState.model_validate(
+        {
+            "session": {
+                "session_id": session_id,
+                "user_id": user_id,
+                "channel": "http",
+                "external_thread_id": "thread-gate",
+            },
+            "task": {
+                "task_text": "style",
+                "repo_url": repo_url,
+            },
+        }
+    )
+
+    node_result = build_load_memory_node(session_factory)(state)
+    loaded_memory = node_result["memory"]
+
+    # Personal memory for 'style' should be filtered out
+    assert len(loaded_memory["personal"]) == 0
+
+    # Project memory for 'style' should be kept
+    assert len(loaded_memory["project"]) == 1
+    assert loaded_memory["project"][0]["memory_key"] == "style"
+    assert loaded_memory["project"][0]["value"] == {"type": "project"}

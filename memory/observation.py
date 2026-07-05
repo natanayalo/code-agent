@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from db.base import utc_now
-from db.models import MemoryAdmissionDecision, MemoryObservation
+from db.models import MemoryAdmissionDecision, MemoryObservation, Task
 from memory.admission import CustomMemoryAdmissionService, MemoryCandidate
 from orchestrator.state import ObservationContextEntry
 from privacy.redaction import redact_private_tags, redact_private_tags_recursive
@@ -307,12 +308,395 @@ def _process_single_observation(
         )
 
 
+def _is_verification_command(command_str: str) -> bool:
+    cmd = command_str.strip()
+    prefixes = [
+        "poetry run",
+        ".venv/bin/",
+        "python -m",
+        "python3 -m",
+        "bundle exec",
+        "npx",
+        "npm run",
+        "npm",
+    ]
+    cleaned = cmd
+    for p in prefixes:
+        if cleaned.lower().startswith(p):
+            cleaned = cleaned[len(p) :].strip()
+    parts = cleaned.split()
+    if not parts:
+        return False
+    exe = parts[0].lower()
+    if exe in ("pytest", "tox", "rake"):
+        return True
+    if exe == "go" and len(parts) > 1 and parts[1].lower() == "test":
+        return True
+    if exe == "cargo" and len(parts) > 1 and parts[1].lower() == "test":
+        return True
+    if "test" in cmd.lower() or "pytest" in cmd.lower():
+        return True
+    return False
+
+
+def _get_base_executable(cmd_str: str) -> str:
+    cmd = cmd_str.strip()
+    prefixes = [
+        "poetry run",
+        ".venv/bin/",
+        "python -m",
+        "python3 -m",
+        "bundle exec",
+        "npx",
+        "npm run",
+        "npm",
+    ]
+    cleaned = cmd
+    for p in prefixes:
+        if cleaned.lower().startswith(p):
+            cleaned = cleaned[len(p) :].strip()
+    parts = cleaned.split()
+    return parts[0].lower() if parts else ""
+
+
+def _extract_remember_sentences(text: str) -> list[str]:
+    if not text:
+        return []
+    lines = text.split("\n")
+    extracted = []
+    patterns = [
+        re.compile(r"\bremember to\b", re.I),
+        re.compile(r"\bremember that\b", re.I),
+        re.compile(r"\balways use\b", re.I),
+        re.compile(r"\bnever do\b", re.I),
+    ]
+    for line in lines:
+        sentences = re.split(r"(?<=[.!?])\s+", line)
+        for s in sentences:
+            s_clean = s.strip()
+            if any(p.search(s_clean) for p in patterns):
+                extracted.append(s_clean)
+    return extracted
+
+
+def _extract_conventions(text: str) -> list[str]:
+    if not text:
+        return []
+    lines = text.split("\n")
+    extracted = []
+    patterns = [
+        re.compile(r"\bconvention:\s*(.*)", re.I),
+        re.compile(r"\brule:\s*(.*)", re.I),
+    ]
+    for line in lines:
+        for p in patterns:
+            match = p.search(line)
+            if match:
+                val = match.group(1).strip()
+                if val:
+                    extracted.append(val)
+    return extracted
+
+
+def _extract_verification_candidates(
+    trace_obs: MemoryObservation,
+    task_id: str,
+    task: Any = None,
+) -> list[MemoryCandidate]:
+    candidates: list[MemoryCandidate] = []
+    if trace_obs.event_type not in ("worker_completed", "worker_failed"):
+        return candidates
+
+    expected_cmds: list[str] = []
+    if task:
+        if task.task_spec and isinstance(task.task_spec, dict):
+            cmds = task.task_spec.get("verification_commands") or []
+            expected_cmds.extend(cmds)
+        if task.constraints and isinstance(task.constraints, dict):
+            cmds = task.constraints.get("verification_commands") or []
+            expected_cmds.extend(cmds)
+    normalized_expected = {c.strip() for c in expected_cmds if isinstance(c, str)}
+
+    commands = trace_obs.metadata_payload.get("commands_run") or []
+    for cmd in commands:
+        cmd_str = cmd.get("command")
+        exit_code = cmd.get("exit_code")
+        if cmd_str and exit_code == 0:
+            cmd_stripped = cmd_str.strip()
+            is_ver = _is_verification_command(cmd_str) or (cmd_stripped in normalized_expected)
+            if is_ver:
+                evidence_str = f"Command '{cmd_str}' executed successfully in worker run."
+                candidates.append(
+                    MemoryCandidate(
+                        category="project",
+                        memory_key="verification_commands",
+                        value={"command": cmd_str},
+                        repo_url=trace_obs.repo_url,
+                        source="worker_result",
+                        confidence=0.95,
+                        scope="repo",
+                        evidence=[evidence_str],
+                        task_id=task_id,
+                        session_id=trace_obs.session_id,
+                        producer="system",
+                        last_verified_at=trace_obs.observed_at,
+                        requires_verification=False,
+                    )
+                )
+    return candidates
+
+
+def _extract_pitfall_candidates(
+    trace_obs: MemoryObservation, task_id: str
+) -> list[MemoryCandidate]:
+    candidates: list[MemoryCandidate] = []
+    if trace_obs.event_type not in ("worker_completed", "worker_failed"):
+        return candidates
+    commands = trace_obs.metadata_payload.get("commands_run") or []
+    for idx, cmd_fail in enumerate(commands):
+        fail_cmd_str = cmd_fail.get("command")
+        fail_exit_code = cmd_fail.get("exit_code")
+        if fail_cmd_str and fail_exit_code != 0:
+            for cmd_success in commands[idx + 1 :]:
+                success_cmd_str = cmd_success.get("command")
+                success_exit_code = cmd_success.get("exit_code")
+                if success_cmd_str and success_exit_code == 0:
+                    fail_base = _get_base_executable(fail_cmd_str)
+                    succ_base = _get_base_executable(success_cmd_str)
+                    if fail_base == succ_base and fail_base:
+                        evidence_str = (
+                            f"Command '{fail_cmd_str}' failed with exit code "
+                            f"{fail_exit_code}, resolved by '{success_cmd_str}'"
+                        )
+                        candidates.append(
+                            MemoryCandidate(
+                                category="project",
+                                memory_key="known_pitfalls",
+                                value={
+                                    "note": (
+                                        f"Command '{fail_cmd_str}' failed; "
+                                        f"use '{success_cmd_str}' instead."
+                                    ),
+                                    "failed_command": fail_cmd_str,
+                                    "corrected_command": success_cmd_str,
+                                },
+                                repo_url=trace_obs.repo_url,
+                                source="worker_result",
+                                confidence=0.9,
+                                scope="repo",
+                                evidence=[evidence_str],
+                                task_id=task_id,
+                                session_id=trace_obs.session_id,
+                                producer="system",
+                            )
+                        )
+                        break
+    return candidates
+
+
+def _extract_remember_candidates(
+    trace_obs: MemoryObservation, task_id: str
+) -> list[MemoryCandidate]:
+    candidates: list[MemoryCandidate] = []
+    if trace_obs.event_type != "interaction_resolved":
+        return candidates
+    texts_to_scan = []
+    if trace_obs.summary:
+        texts_to_scan.append(trace_obs.summary)
+    if trace_obs.content:
+        texts_to_scan.append(trace_obs.content)
+
+    for text in texts_to_scan:
+        remember_sentences = _extract_remember_sentences(text)
+        for sentence in remember_sentences:
+            candidates.append(
+                MemoryCandidate(
+                    category="project" if trace_obs.repo_url else "personal",
+                    memory_key="remembered_instruction",
+                    value={"instruction": sentence},
+                    repo_url=trace_obs.repo_url,
+                    source="operator" if trace_obs.source == "operator" else "system",
+                    confidence=0.75,
+                    scope="repo" if trace_obs.repo_url else "global",
+                    evidence=[f"Extracted from text: '{sentence}'"],
+                    task_id=task_id,
+                    session_id=trace_obs.session_id,
+                    producer="system",
+                )
+            )
+    return candidates
+
+
+def _extract_convention_candidates(
+    trace_obs: MemoryObservation, task_id: str
+) -> list[MemoryCandidate]:
+    candidates: list[MemoryCandidate] = []
+    if trace_obs.event_type not in ("worker_completed", "worker_failed"):
+        return candidates
+    texts_to_scan = []
+    if trace_obs.summary:
+        texts_to_scan.append(trace_obs.summary)
+    if trace_obs.content:
+        texts_to_scan.append(trace_obs.content)
+
+    for text in texts_to_scan:
+        conventions = _extract_conventions(text)
+        for conv in conventions:
+            candidates.append(
+                MemoryCandidate(
+                    category="project",
+                    memory_key="repo_convention",
+                    value={"convention": conv},
+                    repo_url=trace_obs.repo_url,
+                    source="worker_result",
+                    confidence=0.9,
+                    scope="repo",
+                    evidence=[f"Convention/rule keyword matched in trace: '{conv}'"],
+                    task_id=task_id,
+                    session_id=trace_obs.session_id,
+                    producer="system",
+                )
+            )
+    return candidates
+
+
+def _save_extracted_candidates(
+    session: Session,
+    task_id: str,
+    trace_obs: MemoryObservation,
+    candidates: list[MemoryCandidate],
+    obs_repo: ObservationRepository,
+) -> None:
+    for cand in candidates:
+        cand_dict = cand.model_dump(mode="json")
+        cand_dict, _ = redact_private_tags_recursive(cand_dict)
+
+        obs_repo.create(
+            task_id=task_id,
+            session_id=trace_obs.session_id,
+            repo_url=trace_obs.repo_url,
+            source="system",
+            event_type="extracted_candidate",
+            summary=f"Extracted candidate: {cand.memory_key}",
+            content=(f"Key: {cand.memory_key}\n" f"Source trace observation ID: {trace_obs.id}"),
+            metadata_payload={
+                "memory_candidate": cand_dict,
+                "parent_observation_id": trace_obs.id,
+            },
+            admission_status="pending",
+        )
+
+
+def _extract_candidates_from_task_text(
+    session: Session,
+    task_id: str,
+    task: Any,
+    obs_repo: ObservationRepository,
+) -> None:
+    if not (task and task.task_text):
+        return
+    check_stmt = select(MemoryObservation).where(
+        MemoryObservation.task_id == task_id,
+        MemoryObservation.event_type == "extracted_candidate",
+    )
+    existing_children = list(session.scalars(check_stmt))
+    task_text_already_extracted = any(
+        child.metadata_payload.get("parent_observation_id") == f"task-{task_id}"
+        for child in existing_children
+    )
+    if not task_text_already_extracted:
+        remember_sentences = _extract_remember_sentences(task.task_text)
+        for sentence in remember_sentences:
+            cand = MemoryCandidate(
+                category="project" if task.repo_url else "personal",
+                memory_key="remembered_instruction",
+                value={"instruction": sentence},
+                repo_url=task.repo_url,
+                source="operator",
+                confidence=0.75,
+                scope="repo" if task.repo_url else "global",
+                evidence=[f"Extracted from task instruction: '{sentence}'"],
+                task_id=task_id,
+                session_id=task.session_id,
+                producer="system",
+            )
+            cand_dict = cand.model_dump(mode="json")
+            cand_dict, _ = redact_private_tags_recursive(cand_dict)
+
+            obs_repo.create(
+                task_id=task_id,
+                session_id=task.session_id,
+                repo_url=task.repo_url,
+                source="system",
+                event_type="extracted_candidate",
+                summary=f"Extracted candidate: {cand.memory_key}",
+                content=f"Key: {cand.memory_key}\nSource: task description",
+                metadata_payload={
+                    "memory_candidate": cand_dict,
+                    "parent_observation_id": f"task-{task_id}",
+                },
+                admission_status="pending",
+            )
+
+
+def extract_candidates_from_task_traces(session: Session, task_id: str) -> None:
+    """Scan task observations and finalization text to extract deterministic memory candidates."""
+    obs_repo = ObservationRepository(session)
+    statement = select(MemoryObservation).where(
+        MemoryObservation.task_id == task_id,
+        MemoryObservation.source.in_(["worker", "operator", "orchestrator"]),
+        MemoryObservation.event_type.in_(
+            ["worker_completed", "worker_failed", "interaction_resolved", "task_finalized"]
+        ),
+    )
+    trace_obs_list = list(session.scalars(statement))
+
+    task_statement = select(Task).where(Task.id == task_id)
+    task = session.scalar(task_statement)
+
+    for trace_obs in trace_obs_list:
+        check_stmt = select(MemoryObservation).where(
+            MemoryObservation.task_id == task_id,
+            MemoryObservation.event_type == "extracted_candidate",
+        )
+        existing_children = list(session.scalars(check_stmt))
+        already_extracted = False
+        for child in existing_children:
+            if child.metadata_payload.get("parent_observation_id") == trace_obs.id:
+                already_extracted = True
+                break
+
+        if already_extracted:
+            continue
+
+        candidates: list[MemoryCandidate] = []
+        candidates.extend(_extract_verification_candidates(trace_obs, task_id, task))
+        candidates.extend(_extract_pitfall_candidates(trace_obs, task_id))
+        candidates.extend(_extract_remember_candidates(trace_obs, task_id))
+        candidates.extend(_extract_convention_candidates(trace_obs, task_id))
+
+        _save_extracted_candidates(session, task_id, trace_obs, candidates, obs_repo)
+
+    _extract_candidates_from_task_text(session, task_id, task, obs_repo)
+
+
 class ObservationMemoryBridge:
     """Synchronous, local bridge to promote pending observations to memory candidates."""
 
     @staticmethod
     def bridge_observations(session: Session, task_id: str) -> None:
         """Fetch pending observations for a task, validate candidate payloads, and run admission."""
+        # First perform trace-to-candidate extraction to populate child pending observations
+        try:
+            extract_candidates_from_task_traces(session, task_id)
+            session.flush()
+        except Exception as extract_exc:
+            logger.error(
+                "Failed to run deterministic trace-to-candidate extraction: %s",
+                extract_exc,
+                exc_info=True,
+            )
+
         obs_repo = ObservationRepository(session)
         statement = select(MemoryObservation).where(
             MemoryObservation.task_id == task_id,
