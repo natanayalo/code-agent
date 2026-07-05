@@ -400,7 +400,7 @@ def list_memory_observations(
         )
         decisions_by_observation_id = {
             row.source_observation_id: row
-            for row in decision_rows
+            for row in reversed(decision_rows)
             if row.source_observation_id is not None
         }
         return [

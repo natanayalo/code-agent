@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ from db.base import Base
 from db.models import MemoryObservation, Session, Task, User
 from orchestrator.execution import TaskExecutionService
 from repositories import create_engine_from_url, create_session_factory, session_scope
+from repositories.sqlalchemy_memory_admission import MemoryAdmissionDecisionRepository
 from workers import Worker, WorkerRequest, WorkerResult
 
 
@@ -611,3 +613,45 @@ def test_admission_decision_visibility_bulk_loads_observations(
     assert response.status_code == 200
     payload = response.json()
     assert any(row["decision_id"] == decision_id for row in payload)
+
+
+def test_observation_visibility_prefers_newest_decision_for_same_observation(
+    client: TestClient,
+    session_factory,
+    monkeypatch,
+) -> None:
+    """Observation lineage should keep the newest decision for one observation."""
+    seeded = _seed_observation_visibility_state(session_factory)
+    observation_id = seeded["observation_id"]
+    newer_decision_id = seeded["decision_id"]
+
+    older = SimpleNamespace(
+        id="decision-older",
+        source_observation_id=observation_id,
+        proposal_id=None,
+        durable_memory_id=None,
+    )
+    newer = SimpleNamespace(
+        id=newer_decision_id,
+        source_observation_id=observation_id,
+        proposal_id=None,
+        durable_memory_id=None,
+    )
+
+    monkeypatch.setattr(
+        MemoryAdmissionDecisionRepository,
+        "list_for_source_observation_ids",
+        lambda self, observation_ids: [newer, older],
+    )
+
+    response = client.get(
+        "/knowledge-base/observations"
+        "?repo_url=https://github.com/org/observation-repo"
+        "&source=worker&event_type=worker_completed&admission_status=processed&q=redacted-private"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [row["observation_id"] for row in payload] == [observation_id]
+    assert payload[0]["decision_id"] == newer_decision_id
+    assert payload[0]["decision_id"] != "decision-older"
