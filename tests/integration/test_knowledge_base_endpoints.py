@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,8 +12,10 @@ from sqlalchemy.pool import StaticPool
 from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
 from db.base import Base
+from db.models import MemoryObservation, Session, Task, User
 from orchestrator.execution import TaskExecutionService
-from repositories import create_engine_from_url, create_session_factory
+from repositories import create_engine_from_url, create_session_factory, session_scope
+from repositories.sqlalchemy_memory_admission import MemoryAdmissionDecisionRepository
 from workers import Worker, WorkerRequest, WorkerResult
 
 
@@ -431,3 +434,224 @@ def test_project_memory_search_requires_repo_and_validates_limit(client: TestCli
         f"/knowledge-base/project/search?repo_url={repo_url}&q=pytest&limit=101"
     )
     assert invalid_limit.status_code == 422
+
+
+def _seed_observation_visibility_state(session_factory) -> dict[str, str]:
+    with session_scope(session_factory) as session:
+        user = User(external_user_id="user-1", display_name="Test User")
+        session.add(user)
+        session.flush()
+        convo = Session(user_id=user.id, channel="http", external_thread_id="thread-1")
+        session.add(convo)
+        session.flush()
+        task = Task(
+            session_id=convo.id,
+            repo_url="https://github.com/org/task-repo",
+            task_text="Inspect memory trace",
+            constraints={},
+            budget={},
+            secrets={},
+            trace_context={},
+        )
+        session.add(task)
+        session.flush()
+
+        observation = MemoryObservation(
+            task_id=task.id,
+            session_id=convo.id,
+            repo_url="https://github.com/org/observation-repo",
+            source="worker",
+            event_type="worker_completed",
+            observed_at=task.created_at,
+            summary="Worker completed [redacted-private]",
+            content="Ran [redacted-private] command",
+            metadata_payload={"memory_candidate": {"memory_key": "verification_commands"}},
+            privacy_stripped=True,
+            admission_status="processed",
+        )
+        session.add(observation)
+        session.flush()
+
+        from repositories import MemoryAdmissionDecisionRepository, MemoryProposalRepository
+
+        proposal = MemoryProposalRepository(session).create(
+            category="project",
+            repo_url="https://github.com/org/observation-repo",
+            memory_key="verification_commands",
+            value={"python": ".venv/bin/pytest"},
+            task_id=task.id,
+            session_id=convo.id,
+            source_observation_id=observation.id,
+        )
+        decision = MemoryAdmissionDecisionRepository(session).create(
+            category="project",
+            memory_key="verification_commands",
+            candidate_payload={},
+            decision="needs_human_review",
+            risk_level="medium",
+            reason="direct write requires evidence.",
+            task_id=task.id,
+            session_id=convo.id,
+            proposal_id=proposal.id,
+            source_observation_id=observation.id,
+        )
+        session.flush()
+
+        return {
+            "observation_id": observation.id,
+            "task_id": task.id,
+            "session_id": convo.id,
+            "proposal_id": proposal.id,
+            "decision_id": decision.id,
+        }
+
+
+def test_observation_and_admission_visibility_endpoints(
+    client: TestClient,
+    session_factory,
+) -> None:
+    """Observation and admission APIs should expose lineage and repo fallback data."""
+    seeded = _seed_observation_visibility_state(session_factory)
+    observation_id = seeded["observation_id"]
+    task_id = seeded["task_id"]
+    session_id = seeded["session_id"]
+    proposal_id = seeded["proposal_id"]
+    decision_id = seeded["decision_id"]
+
+    list_response = client.get(
+        f"/knowledge-base/observations?repo_url=https://github.com/org/observation-repo"
+        f"&task_id={task_id}&session_id={session_id}&source=worker&event_type=worker_completed"
+        "&admission_status=processed&q=redacted-private"
+    )
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    assert [row["observation_id"] for row in list_payload] == [observation_id]
+    assert list_payload[0]["privacy_stripped"] is True
+    assert list_payload[0]["decision_id"] == decision_id
+    assert list_payload[0]["proposal_id"] == proposal_id
+    assert "redacted-private" in list_payload[0]["content"]
+
+    detail_response = client.get(f"/knowledge-base/observations/{observation_id}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["observation_id"] == observation_id
+    assert detail_response.json()["privacy_stripped"] is True
+
+    proposal_response = client.get("/knowledge-base/memory-proposals?status=pending_review")
+    assert proposal_response.status_code == 200
+    assert proposal_response.json()[0]["source_observation_id"] == observation_id
+
+    decision_response = client.get(
+        f"/knowledge-base/admission-decisions?repo_url=https://github.com/org/observation-repo"
+        f"&task_id={task_id}&session_id={session_id}&decision=needs_human_review"
+        f"&source_observation_id={observation_id}"
+    )
+    assert decision_response.status_code == 200
+    decision_payload = decision_response.json()
+    assert [row["decision_id"] for row in decision_payload] == [decision_id]
+    assert decision_payload[0]["proposal_id"] == proposal_id
+    assert decision_payload[0]["source_observation_id"] == observation_id
+    assert decision_payload[0]["repo_url"] == "https://github.com/org/observation-repo"
+
+
+def test_observation_visibility_fetches_lineage_beyond_prefetch_caps(
+    client: TestClient,
+    session_factory,
+) -> None:
+    """Observation lineage should still resolve when unrelated newer decisions exceed 200 rows."""
+    seeded = _seed_observation_visibility_state(session_factory)
+    observation_id = seeded["observation_id"]
+    task_id = seeded["task_id"]
+    session_id = seeded["session_id"]
+    decision_id = seeded["decision_id"]
+
+    with session_scope(session_factory) as session:
+        from repositories import MemoryAdmissionDecisionRepository
+
+        for index in range(205):
+            MemoryAdmissionDecisionRepository(session).create(
+                category="project",
+                memory_key=f"other-{index}",
+                candidate_payload={"repo_url": "https://github.com/org/other-repo"},
+                decision="create",
+                risk_level="low",
+                reason="unrelated newer decision",
+                task_id=task_id,
+                session_id=session_id,
+            )
+        session.flush()
+
+    response = client.get(
+        f"/knowledge-base/observations?repo_url=https://github.com/org/observation-repo"
+        f"&task_id={task_id}&session_id={session_id}&source=worker&event_type=worker_completed"
+        "&admission_status=processed&q=redacted-private"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [row["observation_id"] for row in payload] == [observation_id]
+    assert payload[0]["decision_id"] == decision_id
+
+
+def test_admission_decision_visibility_bulk_loads_observations(
+    client: TestClient,
+    session_factory,
+    monkeypatch,
+) -> None:
+    """Admission decision visibility should avoid per-observation get() lookups."""
+    seeded = _seed_observation_visibility_state(session_factory)
+    decision_id = seeded["decision_id"]
+
+    from repositories.sqlalchemy_observation import ObservationRepository
+
+    def _unexpected_get(self, observation_id: str) -> None:  # pragma: no cover - defensive
+        raise AssertionError(f"unexpected point lookup for observation {observation_id}")
+
+    monkeypatch.setattr(ObservationRepository, "get", _unexpected_get)
+
+    response = client.get("/knowledge-base/admission-decisions")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert any(row["decision_id"] == decision_id for row in payload)
+
+
+def test_observation_visibility_prefers_newest_decision_for_same_observation(
+    client: TestClient,
+    session_factory,
+    monkeypatch,
+) -> None:
+    """Observation lineage should keep the newest decision for one observation."""
+    seeded = _seed_observation_visibility_state(session_factory)
+    observation_id = seeded["observation_id"]
+    newer_decision_id = seeded["decision_id"]
+
+    older = SimpleNamespace(
+        id="decision-older",
+        source_observation_id=observation_id,
+        proposal_id=None,
+        durable_memory_id=None,
+    )
+    newer = SimpleNamespace(
+        id=newer_decision_id,
+        source_observation_id=observation_id,
+        proposal_id=None,
+        durable_memory_id=None,
+    )
+
+    monkeypatch.setattr(
+        MemoryAdmissionDecisionRepository,
+        "list_for_source_observation_ids",
+        lambda self, observation_ids: [newer, older],
+    )
+
+    response = client.get(
+        "/knowledge-base/observations"
+        "?repo_url=https://github.com/org/observation-repo"
+        "&source=worker&event_type=worker_completed&admission_status=processed&q=redacted-private"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [row["observation_id"] for row in payload] == [observation_id]
+    assert payload[0]["decision_id"] == newer_decision_id
+    assert payload[0]["decision_id"] != "decision-older"

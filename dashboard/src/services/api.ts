@@ -10,6 +10,8 @@ import { SessionSnapshot } from '../types/session';
 import { OperationalMetrics } from '../types/metrics';
 import {
   KnowledgeBaseStatsSnapshot,
+  MemoryAdmissionDecisionSnapshot,
+  MemoryObservationSnapshot,
   MemoryProposalCreateRequest,
   MemoryProposalSnapshot,
   MemoryProposalStatus,
@@ -276,6 +278,113 @@ export const api = {
       return Array.isArray(data) ? data : [];
     } catch (error) {
       console.warn('Failed to fetch memory proposals from API', error);
+      throw error;
+    }
+  },
+
+  async listMemoryObservations(
+    filters: {
+      repoUrl?: string;
+      taskId?: string;
+      sessionId?: string;
+      source?: string;
+      eventType?: string;
+      admissionStatus?: string;
+      query?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<MemoryObservationSnapshot[]> {
+    try {
+      const query = new URLSearchParams();
+      if (filters.repoUrl) {
+        query.set('repo_url', filters.repoUrl);
+      }
+      if (filters.taskId) {
+        query.set('task_id', filters.taskId);
+      }
+      if (filters.sessionId) {
+        query.set('session_id', filters.sessionId);
+      }
+      if (filters.source) {
+        query.set('source', filters.source);
+      }
+      if (filters.eventType) {
+        query.set('event_type', filters.eventType);
+      }
+      if (filters.admissionStatus) {
+        query.set('admission_status', filters.admissionStatus);
+      }
+      if (filters.query) {
+        query.set('q', filters.query);
+      }
+      if (typeof filters.limit === 'number') {
+        query.set('limit', String(filters.limit));
+      }
+      if (typeof filters.offset === 'number') {
+        query.set('offset', String(filters.offset));
+      }
+      const queryString = query.toString();
+      const data = await fetchWithAuth(
+        `/knowledge-base/observations${queryString ? `?${queryString}` : ''}`
+      );
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to fetch memory observations from API', error);
+      throw error;
+    }
+  },
+
+  async getMemoryObservation(observationId: string): Promise<MemoryObservationSnapshot> {
+    try {
+      return await fetchWithAuth(`/knowledge-base/observations/${observationId}`);
+    } catch (error) {
+      console.warn(`Failed to fetch memory observation ${observationId}`, error);
+      throw error;
+    }
+  },
+
+  async listMemoryAdmissionDecisions(
+    filters: {
+      repoUrl?: string;
+      taskId?: string;
+      sessionId?: string;
+      decision?: string;
+      sourceObservationId?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<MemoryAdmissionDecisionSnapshot[]> {
+    try {
+      const query = new URLSearchParams();
+      if (filters.repoUrl) {
+        query.set('repo_url', filters.repoUrl);
+      }
+      if (filters.taskId) {
+        query.set('task_id', filters.taskId);
+      }
+      if (filters.sessionId) {
+        query.set('session_id', filters.sessionId);
+      }
+      if (filters.decision) {
+        query.set('decision', filters.decision);
+      }
+      if (filters.sourceObservationId) {
+        query.set('source_observation_id', filters.sourceObservationId);
+      }
+      if (typeof filters.limit === 'number') {
+        query.set('limit', String(filters.limit));
+      }
+      if (typeof filters.offset === 'number') {
+        query.set('offset', String(filters.offset));
+      }
+      const queryString = query.toString();
+      const data = await fetchWithAuth(
+        `/knowledge-base/admission-decisions${queryString ? `?${queryString}` : ''}`
+      );
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to fetch memory admission decisions from API', error);
       throw error;
     }
   },

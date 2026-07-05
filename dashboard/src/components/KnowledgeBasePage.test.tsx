@@ -9,6 +9,8 @@ import { api } from '../services/api';
 vi.mock('../services/api', () => ({
   api: {
     getKnowledgeBaseStats: vi.fn(),
+    listMemoryAdmissionDecisions: vi.fn(),
+    listMemoryObservations: vi.fn(),
     listPersonalMemory: vi.fn(),
     searchPersonalMemory: vi.fn(),
     listProjectMemory: vi.fn(),
@@ -62,6 +64,8 @@ describe('KnowledgeBasePage', () => {
       project: null,
       project_global: { total: 0, requires_verification: 0 },
     });
+    vi.mocked(api.listMemoryObservations).mockResolvedValue([]);
+    vi.mocked(api.listMemoryAdmissionDecisions).mockResolvedValue([]);
     vi.mocked(api.listMemoryProposals).mockResolvedValue([]);
     vi.mocked(api.createMemoryProposal).mockResolvedValue({
       proposal_id: 'mp-created',
@@ -203,6 +207,202 @@ describe('KnowledgeBasePage', () => {
     expect(await screen.findByText(personalKey)).toBeInTheDocument();
     expect(await screen.findByText(projectKey)).toBeInTheDocument();
     expect(screen.getByText(projectKey).closest('.knowledge-entry-header')).toBeInTheDocument();
+  });
+
+  it('renders trace tab observation and decision lineage', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.listMemoryObservations).mockResolvedValue([
+      {
+        observation_id: 'obs-1',
+        repo_url: 'https://github.com/natanayalo/code-agent',
+        source: 'worker',
+        event_type: 'worker_completed',
+        observed_at: new Date().toISOString(),
+        summary: 'Worker completed run',
+        content: 'Detailed worker output',
+        metadata_payload: {},
+        privacy_stripped: false,
+        admission_status: 'processed',
+        decision_id: 'dec-1',
+        proposal_id: 'mp-1',
+        durable_memory_id: 'mem-1',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    vi.mocked(api.listMemoryAdmissionDecisions).mockResolvedValue([
+      {
+        decision_id: 'dec-1',
+        category: 'project',
+        memory_key: 'verification_commands',
+        candidate_payload: { repo_url: 'https://github.com/natanayalo/code-agent' },
+        decision: 'create',
+        risk_level: 'low',
+        reason: 'low-risk evidenced project memory can be created.',
+        repo_url: 'https://github.com/natanayalo/code-agent',
+        source_observation_id: 'obs-1',
+        proposal_id: 'mp-1',
+        durable_memory_id: 'mem-1',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Trace/i }));
+
+    expect(await screen.findByText('Worker completed run')).toBeInTheDocument();
+    expect(screen.getByText(/verification_commands/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Observation: obs-1/i).length).toBeGreaterThan(0);
+    const badges = Array.from(document.querySelectorAll('.proposal-status-badge'));
+    expect(badges.some((badge) => badge.classList.contains('status-processed'))).toBe(true);
+    expect(badges.some((badge) => badge.classList.contains('status-create'))).toBe(true);
+  });
+
+  it('normalizes trace badge classes and guards empty values', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.listMemoryObservations).mockResolvedValue([
+      {
+        observation_id: 'obs-2',
+        source: 'worker',
+        event_type: 'worker_completed',
+        observed_at: new Date().toISOString(),
+        summary: 'Observation with empty status',
+        content: 'trace details',
+        metadata_payload: {},
+        privacy_stripped: false,
+        admission_status: '' as unknown as string,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    vi.mocked(api.listMemoryAdmissionDecisions).mockResolvedValue([
+      {
+        decision_id: 'dec-2',
+        category: 'project',
+        memory_key: 'verification_commands',
+        candidate_payload: {},
+        decision: 'needs_human_review',
+        risk_level: 'low',
+        reason: 'needs manual confirmation',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Trace/i }));
+
+    expect(await screen.findByText('Observation with empty status')).toBeInTheDocument();
+    const badges = Array.from(document.querySelectorAll('.proposal-status-badge'));
+    expect(
+      badges.some((badge) => badge.classList.contains('status-needs-human-review'))
+    ).toBe(true);
+    const emptyStatusBadge = screen
+      .getByText('Observation with empty status')
+      .closest('.knowledge-entry')
+      ?.querySelector('.proposal-status-badge');
+    expect(emptyStatusBadge).toHaveClass('status-default');
+    expect(emptyStatusBadge).toHaveTextContent('');
+  });
+
+  it('passes trace filters through to observation and decision queries', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.change(await screen.findByLabelText('Project Repository URL'), {
+      target: { value: 'https://github.com/natanayalo/code-agent' },
+    });
+    await waitForDebounce();
+
+    fireEvent.click(screen.getByRole('tab', { name: /Trace/i }));
+
+    fireEvent.change(screen.getByLabelText('Search Observations'), {
+      target: { value: 'pytest' },
+    });
+    fireEvent.change(screen.getByLabelText('Observation Source'), {
+      target: { value: 'worker' },
+    });
+    fireEvent.change(screen.getByLabelText('Observation Status'), {
+      target: { value: 'processed' },
+    });
+    fireEvent.change(screen.getByLabelText('Decision Filter'), {
+      target: { value: 'create' },
+    });
+
+    await waitForDebounce();
+
+    await waitFor(() => {
+      expect(api.listMemoryObservations).toHaveBeenLastCalledWith({
+        repoUrl: 'https://github.com/natanayalo/code-agent',
+        source: 'worker',
+        admissionStatus: 'processed',
+        query: 'pytest',
+        limit: 25,
+      });
+    });
+    await waitFor(() => {
+      expect(api.listMemoryAdmissionDecisions).toHaveBeenLastCalledWith({
+        repoUrl: 'https://github.com/natanayalo/code-agent',
+        decision: 'create',
+        limit: 25,
+      });
+    });
+    expect(
+      screen.getByText('Recent observation records for https://github.com/natanayalo/code-agent.')
+    ).toBeInTheDocument();
+  });
+
+  it('renders trace enum filters as selects with valid options', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+
+    renderKnowledgeBasePage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Trace/i }));
+
+    const sourceFilter = screen.getByLabelText('Observation Source');
+    const statusFilter = screen.getByLabelText('Observation Status');
+    const decisionFilter = screen.getByLabelText('Decision Filter');
+
+    expect(sourceFilter.tagName).toBe('SELECT');
+    expect(statusFilter.tagName).toBe('SELECT');
+    expect(decisionFilter.tagName).toBe('SELECT');
+    expect(screen.getByRole('option', { name: 'All sources' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Worker' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Processed' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Needs Human Review' })).toBeInTheDocument();
+  });
+
+  it('renders trace loading states while observation and decision queries are pending', async () => {
+    vi.mocked(api.listPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.listProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.searchPersonalMemory).mockResolvedValue([]);
+    vi.mocked(api.searchProjectMemory).mockResolvedValue([]);
+    vi.mocked(api.listMemoryObservations).mockReturnValue(new Promise(() => []));
+    vi.mocked(api.listMemoryAdmissionDecisions).mockReturnValue(new Promise(() => []));
+
+    renderKnowledgeBasePage();
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Trace/i }));
+
+    expect(screen.getByRole('button', { name: 'Refreshing...' })).toBeDisabled();
+    expect(await screen.findByText('Loading observations...')).toBeInTheDocument();
+    expect(screen.getByText('Loading admission decisions...')).toBeInTheDocument();
   });
 
   it('submits personal memory upsert payload', async () => {

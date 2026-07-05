@@ -243,3 +243,61 @@ def test_update_admission_outcome(session_factory) -> None:
         assert retrieved.admission_status == "failed"
         assert retrieved.admission_processed_at.replace(tzinfo=UTC) == now
         assert retrieved.admission_error == "Failed to admit"
+
+
+def test_list_supports_filters_and_pagination(session_factory) -> None:
+    """list should filter observations and paginate in reverse chronological order."""
+    with session_scope(session_factory) as session:
+        repo = ObservationRepository(session)
+        repo.create(
+            source="worker",
+            event_type="worker_completed",
+            summary="matched",
+            content="pytest command",
+            repo_url="repo1",
+            task_id="task-1",
+            session_id="session-1",
+            admission_status="processed",
+            observed_at=datetime(2026, 7, 4, 11, 0, tzinfo=UTC),
+        )
+        repo.create(
+            source="operator",
+            event_type="interaction_resolved",
+            summary="non-matching",
+            content="manual decision",
+            repo_url="repo1",
+            task_id="task-1",
+            session_id="session-1",
+            admission_status="not_required",
+            observed_at=datetime(2026, 7, 4, 10, 0, tzinfo=UTC),
+        )
+        repo.create(
+            source="worker",
+            event_type="worker_completed",
+            summary="other repo",
+            content="pytest command",
+            repo_url="repo2",
+            task_id="task-2",
+            session_id="session-2",
+            admission_status="processed",
+            observed_at=datetime(2026, 7, 4, 12, 0, tzinfo=UTC),
+        )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        repo = ObservationRepository(session)
+        filtered = repo.list(
+            repo_url="repo1",
+            task_id="task-1",
+            session_id="session-1",
+            source="worker",
+            event_type="worker_completed",
+            admission_status="processed",
+            query="pytest",
+            limit=10,
+            offset=0,
+        )
+        paged = repo.list(repo_url="repo1", limit=1, offset=1)
+
+        assert [row.summary for row in filtered] == ["matched"]
+        assert [row.summary for row in paged] == ["non-matching"]

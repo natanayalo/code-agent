@@ -1,6 +1,10 @@
 import React from 'react';
 import { X } from 'lucide-react';
 import {
+  MemoryAdmissionDecisionSnapshot,
+  MemoryObservationSnapshot,
+} from '../types/memory';
+import {
   TaskSnapshot,
   TaskStatus,
   VerifierOutcomeItem,
@@ -442,6 +446,12 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
   const [interactionError, setInteractionError] = React.useState<string | null>(null);
   const [resolvingInteractionId, setResolvingInteractionId] = React.useState<string | null>(null);
   const [interactionResponses, setInteractionResponses] = React.useState<Record<string, string>>({});
+  const [memoryObservations, setMemoryObservations] = React.useState<MemoryObservationSnapshot[]>([]);
+  const [memoryAdmissionDecisions, setMemoryAdmissionDecisions] = React.useState<
+    MemoryAdmissionDecisionSnapshot[]
+  >([]);
+  const [memoryTraceLoading, setMemoryTraceLoading] = React.useState(false);
+  const [memoryTraceError, setMemoryTraceError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     setCancelError(null);
@@ -495,6 +505,48 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
     setCancelError(null);
     setInteractionError(null);
     setResolvingInteractionId(null);
+  }, [task?.task_id]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    if (!task?.task_id) {
+      setMemoryObservations([]);
+      setMemoryAdmissionDecisions([]);
+      setMemoryTraceError(null);
+      setMemoryTraceLoading(false);
+      return;
+    }
+
+    setMemoryTraceLoading(true);
+    setMemoryTraceError(null);
+    setMemoryObservations([]);
+    setMemoryAdmissionDecisions([]);
+    Promise.all([
+      api.listMemoryObservations({ taskId: task.task_id, limit: 10 }),
+      api.listMemoryAdmissionDecisions({ taskId: task.task_id, limit: 10 }),
+    ])
+      .then(([observations, decisions]) => {
+        if (cancelled) return;
+        setMemoryObservations(observations);
+        setMemoryAdmissionDecisions(decisions);
+      })
+      .catch((fetchError: unknown) => {
+        if (cancelled) return;
+        setMemoryObservations([]);
+        setMemoryAdmissionDecisions([]);
+        setMemoryTraceError(
+          fetchError instanceof Error ? fetchError.message : 'Failed to load memory trace.'
+        );
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setMemoryTraceLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [task?.task_id]);
 
   if (!task && !loading && !error) {
@@ -773,6 +825,52 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
               </>
             ) : (
               <p className="task-detail-muted">No delivery metadata available.</p>
+            )}
+          </section>
+
+          <section className="task-detail-section">
+            <h4>Memory Trace</h4>
+            {memoryTraceError ? <p className="task-detail-error">{memoryTraceError}</p> : null}
+            {memoryTraceLoading ? (
+              <p className="task-detail-muted">Loading memory trace...</p>
+            ) : memoryTraceError ? null : memoryObservations.length === 0 &&
+              memoryAdmissionDecisions.length === 0 ? (
+              <p className="task-detail-muted">No memory trace records for this task.</p>
+            ) : (
+              <>
+                <div className="task-detail-group">
+                  <h5>Observations</h5>
+                  {memoryObservations.length === 0 ? (
+                    <p className="task-detail-muted">No observations captured for this task.</p>
+                  ) : (
+                    <ul>
+                      {memoryObservations.map((observation) => (
+                        <li key={observation.observation_id}>
+                          <strong>{formatLabel(observation.event_type)}:</strong> {observation.summary}
+                          {observation.decision_id ? ` (decision ${observation.decision_id})` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <div className="task-detail-group">
+                  <h5>Admission Decisions</h5>
+                  {memoryAdmissionDecisions.length === 0 ? (
+                    <p className="task-detail-muted">No admission decisions captured for this task.</p>
+                  ) : (
+                    <ul>
+                      {memoryAdmissionDecisions.map((decision) => (
+                        <li key={decision.decision_id}>
+                          <strong>{decision.memory_key}:</strong> {formatLabel(decision.decision)}
+                          {decision.source_observation_id
+                            ? ` (observation ${decision.source_observation_id})`
+                            : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </>
             )}
           </section>
 

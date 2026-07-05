@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session
 
-from db.models import MemoryAdmissionDecision
+from db.models import MemoryAdmissionDecision, MemoryObservation, Task
 
 
 class MemoryAdmissionDecisionRepository:
@@ -53,6 +54,9 @@ class MemoryAdmissionDecisionRepository:
         *,
         task_id: str | None = None,
         session_id: str | None = None,
+        decision: str | None = None,
+        source_observation_id: str | None = None,
+        repo_url: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[MemoryAdmissionDecision]:
@@ -61,6 +65,23 @@ class MemoryAdmissionDecisionRepository:
             statement = statement.where(MemoryAdmissionDecision.task_id == task_id)
         if session_id is not None:
             statement = statement.where(MemoryAdmissionDecision.session_id == session_id)
+        if decision is not None:
+            statement = statement.where(MemoryAdmissionDecision.decision == decision)
+        if source_observation_id is not None:
+            statement = statement.where(
+                MemoryAdmissionDecision.source_observation_id == source_observation_id
+            )
+        if repo_url is not None:
+            repo_url_expr = func.coalesce(
+                cast(MemoryAdmissionDecision.candidate_payload["repo_url"].as_string(), String),
+                MemoryObservation.repo_url,
+                Task.repo_url,
+            )
+            statement = statement.outerjoin(
+                MemoryObservation,
+                MemoryObservation.id == MemoryAdmissionDecision.source_observation_id,
+            ).outerjoin(Task, Task.id == MemoryAdmissionDecision.task_id)
+            statement = statement.where(repo_url_expr == repo_url)
         statement = (
             statement.order_by(
                 MemoryAdmissionDecision.created_at.desc(),
@@ -68,5 +89,23 @@ class MemoryAdmissionDecisionRepository:
             )
             .limit(max(0, limit))
             .offset(max(0, offset))
+        )
+        return list(self.session.scalars(statement))
+
+    def list_for_source_observation_ids(
+        self,
+        observation_ids: set[str],
+    ) -> Sequence[MemoryAdmissionDecision]:
+        """Fetch decisions for a specific batch of source observation ids."""
+        if not observation_ids:
+            return []
+
+        statement = (
+            select(MemoryAdmissionDecision)
+            .where(MemoryAdmissionDecision.source_observation_id.in_(sorted(observation_ids)))
+            .order_by(
+                MemoryAdmissionDecision.created_at.desc(),
+                MemoryAdmissionDecision.id.desc(),
+            )
         )
         return list(self.session.scalars(statement))

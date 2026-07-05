@@ -15,6 +15,8 @@ from orchestrator.execution import (
 )
 from orchestrator.execution_types import (
     KnowledgeBaseStatsSnapshot,
+    MemoryAdmissionDecisionSnapshot,
+    MemoryObservationSnapshot,
     MemoryProposalCreateRequest,
     MemoryProposalSnapshot,
 )
@@ -53,6 +55,71 @@ def list_memory_proposals(
         repo_url=repo_url,
         task_id=task_id,
         session_id=session_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/observations", response_model=list[MemoryObservationSnapshot])
+def list_memory_observations(
+    repo_url: str | None = Query(default=None, min_length=1),
+    task_id: str | None = Query(default=None, min_length=1),
+    session_id: str | None = Query(default=None, min_length=1),
+    source: str | None = Query(default=None, min_length=1),
+    event_type: str | None = Query(default=None, min_length=1),
+    admission_status: str | None = Query(default=None, min_length=1),
+    q: str | None = Query(default=None),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> list[MemoryObservationSnapshot]:
+    """List episodic observations with optional operator filters."""
+    return task_service.list_memory_observations(
+        repo_url=repo_url,
+        task_id=task_id,
+        session_id=session_id,
+        source=source,
+        event_type=event_type,
+        admission_status=admission_status,
+        query=q,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/observations/{observation_id}", response_model=MemoryObservationSnapshot)
+def get_memory_observation(
+    observation_id: str,
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> MemoryObservationSnapshot:
+    """Fetch one observation with lineage details."""
+    observation = task_service.get_memory_observation(observation_id)
+    if observation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory observation '{observation_id}' was not found.",
+        )
+    return observation
+
+
+@router.get("/admission-decisions", response_model=list[MemoryAdmissionDecisionSnapshot])
+def list_memory_admission_decisions(
+    repo_url: str | None = Query(default=None, min_length=1),
+    task_id: str | None = Query(default=None, min_length=1),
+    session_id: str | None = Query(default=None, min_length=1),
+    decision: str | None = Query(default=None, min_length=1),
+    source_observation_id: str | None = Query(default=None, min_length=1),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    task_service: TaskExecutionService = Depends(get_task_service),
+) -> list[MemoryAdmissionDecisionSnapshot]:
+    """List inspectable memory-admission decisions with lineage filters."""
+    return task_service.list_memory_admission_decisions(
+        repo_url=repo_url,
+        task_id=task_id,
+        session_id=session_id,
+        decision=decision,
+        source_observation_id=source_observation_id,
         limit=limit,
         offset=offset,
     )

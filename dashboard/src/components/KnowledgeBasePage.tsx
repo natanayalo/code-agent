@@ -3,9 +3,12 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { BarChart3, BookOpen, Check, ClipboardList, Plus, Search, Trash2, X } from 'lucide-react';
 import { api } from '../services/api';
 import { DashboardLayout } from './layout/DashboardLayout';
+import { formatLabel } from '../utils/formatters';
 import {
   KnowledgeBaseStatsSnapshot,
+  MemoryAdmissionDecisionSnapshot,
   MemoryInventoryCountSnapshot,
+  MemoryObservationSnapshot,
   MemoryProposalCategory,
   MemoryProposalSnapshot,
   PersonalMemorySnapshot,
@@ -21,14 +24,37 @@ const KNOWLEDGE_SEARCH_LIMIT = 20;
 const DEFAULT_MEMORY_VALUE_JSON = '{\n  \n}';
 const HEADLINE_START = '__CA_MARK_START__';
 const HEADLINE_END = '__CA_MARK_END__';
+const TRACE_SOURCES = ['worker', 'orchestrator', 'operator'] as const;
+const TRACE_ADMISSION_STATUSES = ['not_required', 'pending', 'processed', 'invalid'] as const;
+const TRACE_DECISIONS = ['create', 'reject', 'needs_human_review', 'merge', 'update'] as const;
 const EMPTY_STATS: KnowledgeBaseStatsSnapshot = {
   personal: { total: 0, requires_verification: 0 },
   project: null,
   project_global: { total: 0, requires_verification: 0 },
 };
 
-type KnowledgeBaseTab = 'browse' | 'review' | 'add';
+type KnowledgeBaseTab = 'browse' | 'review' | 'trace' | 'add';
 type MemoryEntry = PersonalMemorySnapshot | ProjectMemorySnapshot;
+
+function renderLineagePill(label: string, value: string | null | undefined): React.ReactNode {
+  if (!value) {
+    return null;
+  }
+  return (
+    <span className="proposal-status-badge" key={`${label}-${value}`}>
+      {label}: {value}
+    </span>
+  );
+}
+
+function statusBadgeClass(value: string | null | undefined): string {
+  const normalized = value?.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  return `proposal-status-badge status-${normalized || 'default'}`;
+}
+
+function statusBadgeLabel(value: string | null | undefined): string {
+  return value ? formatLabel(value) : '';
+}
 
 function parseMemoryValue(raw: string): Record<string, unknown> {
   const parsed: unknown = JSON.parse(raw);
@@ -167,6 +193,11 @@ export function KnowledgeBasePage() {
   const [projectError, setProjectError] = React.useState<string | null>(null);
   const [projectSaving, setProjectSaving] = React.useState(false);
   const [projectDeletingEntryId, setProjectDeletingEntryId] = React.useState<string | null>(null);
+  const [traceSearchInput, setTraceSearchInput] = React.useState('');
+  const [traceSearchQuery, setTraceSearchQuery] = React.useState('');
+  const [traceSourceFilter, setTraceSourceFilter] = React.useState('');
+  const [traceAdmissionStatusFilter, setTraceAdmissionStatusFilter] = React.useState('');
+  const [traceDecisionFilter, setTraceDecisionFilter] = React.useState('');
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -174,6 +205,13 @@ export function KnowledgeBasePage() {
     }, SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [searchInput]);
+
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setTraceSearchQuery(traceSearchInput.trim());
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [traceSearchInput]);
 
   const projectScopeFilter = projectRepoUrl.trim();
   const searchMode = searchQuery.length >= KNOWLEDGE_SEARCH_MIN_LENGTH;
@@ -246,6 +284,52 @@ export function KnowledgeBasePage() {
       [...reviewedMemoryProposalResults].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
     [reviewedMemoryProposalResults]
   );
+  const {
+    data: memoryObservations = [],
+    isLoading: memoryObservationsLoading,
+    error: memoryObservationsError,
+    refetch: refetchMemoryObservations,
+  } = useQuery({
+    queryKey: [
+      'knowledge-base',
+      'observations',
+      projectScopeFilter,
+      traceSourceFilter,
+      traceAdmissionStatusFilter,
+      traceSearchQuery,
+    ],
+    queryFn: () =>
+      api.listMemoryObservations({
+        repoUrl: projectScopeFilter || undefined,
+        source: normalizeOptional(traceSourceFilter),
+        admissionStatus: normalizeOptional(traceAdmissionStatusFilter),
+        query: normalizeOptional(traceSearchQuery),
+        limit: 25,
+      }),
+    retry: false,
+    refetchInterval: KNOWLEDGE_BASE_REFETCH_INTERVAL_MS,
+  });
+  const {
+    data: memoryAdmissionDecisions = [],
+    isLoading: memoryAdmissionDecisionsLoading,
+    error: memoryAdmissionDecisionsError,
+    refetch: refetchMemoryAdmissionDecisions,
+  } = useQuery({
+    queryKey: [
+      'knowledge-base',
+      'admission-decisions',
+      projectScopeFilter,
+      traceDecisionFilter,
+    ],
+    queryFn: () =>
+      api.listMemoryAdmissionDecisions({
+        repoUrl: projectScopeFilter || undefined,
+        decision: normalizeOptional(traceDecisionFilter),
+        limit: 25,
+      }),
+    retry: false,
+    refetchInterval: KNOWLEDGE_BASE_REFETCH_INTERVAL_MS,
+  });
 
   const {
     data: personalData,
@@ -361,6 +445,12 @@ export function KnowledgeBasePage() {
     await refetchReviewedProposals();
   }, [refetchPendingProposals, refetchReviewedProposals]);
 
+  const refreshTrace = React.useCallback(async () => {
+    await refetchMemoryObservations();
+    await refetchMemoryAdmissionDecisions();
+  }, [refetchMemoryAdmissionDecisions, refetchMemoryObservations]);
+  const traceRefreshing = memoryObservationsLoading || memoryAdmissionDecisionsLoading;
+
   function renderMemoryProposal(proposal: MemoryProposalSnapshot): React.ReactNode {
     const isPending = proposal.status === 'pending_review';
     return (
@@ -374,8 +464,8 @@ export function KnowledgeBasePage() {
                 : 'Personal memory'}
             </p>
           </div>
-          <span className={`proposal-status-badge status-${proposal.status}`}>
-            {proposal.status.replace('_', ' ')}
+          <span className={statusBadgeClass(proposal.status)}>
+            {statusBadgeLabel(proposal.status)}
           </span>
         </header>
         {proposal.summary ? (
@@ -385,6 +475,10 @@ export function KnowledgeBasePage() {
           <span>Key: {proposal.memory_key}</span>
           <span>Confidence: {proposal.confidence.toFixed(2)}</span>
           <span>Needs verification: {proposal.requires_verification ? 'yes' : 'no'}</span>
+        </div>
+        <div className="knowledge-entry-meta">
+          {renderLineagePill('Observation', proposal.source_observation_id)}
+          {renderLineagePill('Accepted Memory', proposal.accepted_memory_id)}
         </div>
         <pre>{JSON.stringify(proposal.value, null, 2)}</pre>
         {isPending ? (
@@ -409,6 +503,57 @@ export function KnowledgeBasePage() {
             </button>
           </div>
         ) : null}
+      </article>
+    );
+  }
+
+  function renderObservation(observation: MemoryObservationSnapshot): React.ReactNode {
+    return (
+      <article key={observation.observation_id} className="knowledge-entry">
+        <header className="knowledge-entry-header">
+          <div>
+            <h3>{observation.summary}</h3>
+            <p>{observation.repo_url || observation.source}</p>
+          </div>
+          <span className={statusBadgeClass(observation.admission_status)}>
+            {statusBadgeLabel(observation.admission_status)}
+          </span>
+        </header>
+        <p className="knowledge-section-subtitle">
+          {observation.event_type} • {formatTimestamp(observation.observed_at)}
+        </p>
+        <div className="knowledge-entry-meta">
+          <span>Source: {observation.source}</span>
+          <span>Privacy stripped: {observation.privacy_stripped ? 'yes' : 'no'}</span>
+          {renderLineagePill('Decision', observation.decision_id)}
+          {renderLineagePill('Proposal', observation.proposal_id)}
+          {renderLineagePill('Memory', observation.durable_memory_id)}
+        </div>
+        <pre>{observation.content}</pre>
+      </article>
+    );
+  }
+
+  function renderAdmissionDecision(decisionRow: MemoryAdmissionDecisionSnapshot): React.ReactNode {
+    return (
+      <article key={decisionRow.decision_id} className="knowledge-entry">
+        <header className="knowledge-entry-header">
+          <div>
+            <h3>{decisionRow.memory_key}</h3>
+            <p>{decisionRow.repo_url || `${decisionRow.category} memory`}</p>
+          </div>
+          <span className={statusBadgeClass(decisionRow.decision)}>
+            {statusBadgeLabel(decisionRow.decision)}
+          </span>
+        </header>
+        <p className="knowledge-section-subtitle">{decisionRow.reason}</p>
+        <div className="knowledge-entry-meta">
+          <span>Risk: {decisionRow.risk_level}</span>
+          {renderLineagePill('Observation', decisionRow.source_observation_id)}
+          {renderLineagePill('Proposal', decisionRow.proposal_id)}
+          {renderLineagePill('Memory', decisionRow.durable_memory_id)}
+        </div>
+        <pre>{JSON.stringify(decisionRow.candidate_payload, null, 2)}</pre>
       </article>
     );
   }
@@ -677,6 +822,16 @@ export function KnowledgeBasePage() {
         >
           <ClipboardList size={16} />
           Review
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'trace'}
+          className={`knowledge-tab-button ${activeTab === 'trace' ? 'active' : ''}`}
+          onClick={() => setActiveTab('trace')}
+        >
+          <ClipboardList size={16} />
+          Trace
         </button>
         <button
           type="button"
@@ -993,6 +1148,118 @@ export function KnowledgeBasePage() {
             </div>
           </section>
         </div>
+      ) : activeTab === 'trace' ? (
+        <>
+          <section className="card knowledge-search-panel">
+            <div className="knowledge-search-header">
+              <div>
+                <h2>Observation Trace</h2>
+                <p className="knowledge-section-subtitle">
+                  Inspect raw observations and admission outcomes without changing memory policy.
+                </p>
+              </div>
+              <button
+                className="knowledge-load-more"
+                type="button"
+                onClick={() => void refreshTrace()}
+                disabled={traceRefreshing}
+              >
+                {traceRefreshing ? 'Refreshing...' : 'Refresh Trace'}
+              </button>
+            </div>
+            <div className="knowledge-search-controls">
+              <label htmlFor="trace-search-query">Search Observations</label>
+              <div className="knowledge-search-input-wrap">
+                <Search size={15} />
+                <input
+                  id="trace-search-query"
+                  value={traceSearchInput}
+                  onChange={(event) => setTraceSearchInput(event.target.value)}
+                  placeholder="Search summaries and content..."
+                />
+              </div>
+              <label htmlFor="trace-source-filter">Observation Source</label>
+              <select
+                id="trace-source-filter"
+                value={traceSourceFilter}
+                onChange={(event) => setTraceSourceFilter(event.target.value)}
+              >
+                <option value="">All sources</option>
+                {TRACE_SOURCES.map((source) => (
+                  <option key={source} value={source}>
+                    {formatLabel(source)}
+                  </option>
+                ))}
+              </select>
+              <label htmlFor="trace-admission-status-filter">Observation Status</label>
+              <select
+                id="trace-admission-status-filter"
+                value={traceAdmissionStatusFilter}
+                onChange={(event) => setTraceAdmissionStatusFilter(event.target.value)}
+              >
+                <option value="">All statuses</option>
+                {TRACE_ADMISSION_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {formatLabel(status)}
+                  </option>
+                ))}
+              </select>
+              <label htmlFor="trace-decision-filter">Decision Filter</label>
+              <select
+                id="trace-decision-filter"
+                value={traceDecisionFilter}
+                onChange={(event) => setTraceDecisionFilter(event.target.value)}
+              >
+                <option value="">All decisions</option>
+                {TRACE_DECISIONS.map((decision) => (
+                  <option key={decision} value={decision}>
+                    {formatLabel(decision)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </section>
+
+          <div className="knowledge-grid">
+            <section className="card knowledge-section">
+              <h2>Observations</h2>
+              <p className="knowledge-section-subtitle">
+                Recent observation records{projectScopeFilter ? ` for ${projectScopeFilter}` : ''}.
+              </p>
+              {memoryObservationsError ? (
+                <p className="card-error-text">{(memoryObservationsError as Error).message}</p>
+              ) : null}
+              <div className="knowledge-list">
+                {memoryObservationsLoading ? (
+                  <p className="session-context-muted">Loading observations...</p>
+                ) : memoryObservations.length === 0 ? (
+                  <p className="session-context-muted">No observations found.</p>
+                ) : (
+                  memoryObservations.map(renderObservation)
+                )}
+              </div>
+            </section>
+
+            <section className="card knowledge-section">
+              <h2>Admission Decisions</h2>
+              <p className="knowledge-section-subtitle">
+                Inspect direct writes, review routing, merges, and rejects.
+              </p>
+              {memoryAdmissionDecisionsError ? (
+                <p className="card-error-text">{(memoryAdmissionDecisionsError as Error).message}</p>
+              ) : null}
+              <div className="knowledge-list">
+                {memoryAdmissionDecisionsLoading ? (
+                  <p className="session-context-muted">Loading admission decisions...</p>
+                ) : memoryAdmissionDecisions.length === 0 ? (
+                  <p className="session-context-muted">No admission decisions found.</p>
+                ) : (
+                  memoryAdmissionDecisions.map(renderAdmissionDecision)
+                )}
+              </div>
+            </section>
+          </div>
+        </>
       ) : (
         <div className="knowledge-grid">
           <section className="card knowledge-section">

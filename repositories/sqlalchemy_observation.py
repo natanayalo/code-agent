@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.orm import Session
 
 from db.base import utc_now
@@ -253,6 +253,54 @@ class ObservationRepository:
             MemoryObservation.observed_at.desc(),
             MemoryObservation.id.desc(),
         ).limit(limit)
+        return list(self.session.scalars(statement))
+
+    def list(
+        self,
+        *,
+        repo_url: str | None = None,
+        session_id: str | None = None,
+        task_id: str | None = None,
+        source: str | None = None,
+        event_type: str | None = None,
+        admission_status: str | None = None,
+        query: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[MemoryObservation]:
+        """List observations with optional filters and text search."""
+        statement = select(MemoryObservation)
+        filters = []
+        if repo_url is not None:
+            filters.append(MemoryObservation.repo_url == repo_url)
+        if session_id is not None:
+            filters.append(MemoryObservation.session_id == session_id)
+        if task_id is not None:
+            filters.append(MemoryObservation.task_id == task_id)
+        if source is not None:
+            filters.append(MemoryObservation.source == source)
+        if event_type is not None:
+            filters.append(MemoryObservation.event_type == event_type)
+        if admission_status is not None:
+            filters.append(MemoryObservation.admission_status == admission_status)
+
+        normalized_query = _normalized_search_query(query or "")
+        if normalized_query:
+            filters.append(
+                or_(
+                    MemoryObservation.summary.ilike(f"%{normalized_query}%"),
+                    MemoryObservation.content.ilike(f"%{normalized_query}%"),
+                )
+            )
+
+        if filters:
+            statement = statement.where(and_(*filters))
+
+        statement = (
+            statement.order_by(MemoryObservation.observed_at.desc(), MemoryObservation.id.desc())
+            .limit(max(0, limit))
+            .offset(max(0, offset))
+        )
         return list(self.session.scalars(statement))
 
     def update_admission_outcome(

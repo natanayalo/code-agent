@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskSnapshot, TaskStatus } from '../types/task';
 import { api } from '../services/api';
@@ -9,6 +9,8 @@ import { api } from '../services/api';
 vi.mock('../services/api', () => ({
   api: {
     cancelTask: vi.fn(),
+    listMemoryAdmissionDecisions: vi.fn(),
+    listMemoryObservations: vi.fn(),
     recordInteractionResponse: vi.fn(),
   },
 }));
@@ -71,9 +73,79 @@ function buildLatestRun(overrides: Partial<NonNullable<TaskSnapshot['latest_run'
 }
 
 describe('TaskDetailPanel', () => {
+  beforeEach(() => {
+    vi.mocked(api.listMemoryObservations).mockResolvedValue([]);
+    vi.mocked(api.listMemoryAdmissionDecisions).mockResolvedValue([]);
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+  });
+
+  it('renders task-scoped memory trace records', async () => {
+    vi.mocked(api.listMemoryObservations).mockResolvedValue([
+      {
+        observation_id: 'obs-1',
+        task_id: 'task-1',
+        source: 'worker',
+        event_type: 'worker_completed',
+        observed_at: '2026-04-28T00:01:00.000Z',
+        summary: 'Worker completed run',
+        content: 'Worker run details',
+        metadata_payload: {},
+        privacy_stripped: false,
+        admission_status: 'processed',
+        decision_id: 'dec-1',
+        created_at: '2026-04-28T00:01:00.000Z',
+        updated_at: '2026-04-28T00:01:00.000Z',
+      },
+    ]);
+    vi.mocked(api.listMemoryAdmissionDecisions).mockResolvedValue([
+      {
+        decision_id: 'dec-1',
+        category: 'project',
+        memory_key: 'verification_commands',
+        candidate_payload: {},
+        decision: 'create',
+        risk_level: 'low',
+        reason: 'low-risk evidenced project memory can be created.',
+        task_id: 'task-1',
+        source_observation_id: 'obs-1',
+        created_at: '2026-04-28T00:01:02.000Z',
+        updated_at: '2026-04-28T00:01:02.000Z',
+      },
+    ]);
+
+    render(<TaskDetailPanel task={baseTask} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(await screen.findByText(/Worker completed run/i)).toBeInTheDocument();
+    expect(screen.getByText(/verification_commands/i)).toBeInTheDocument();
+  });
+
+  it('renders partial memory trace empty states when only one side has records', async () => {
+    vi.mocked(api.listMemoryObservations).mockResolvedValue([
+      {
+        observation_id: 'obs-1',
+        task_id: 'task-1',
+        source: 'worker',
+        event_type: 'worker_completed',
+        observed_at: '2026-04-28T00:01:00.000Z',
+        summary: 'Worker completed run',
+        content: 'Worker run details',
+        metadata_payload: {},
+        privacy_stripped: false,
+        admission_status: 'processed',
+        created_at: '2026-04-28T00:01:00.000Z',
+        updated_at: '2026-04-28T00:01:00.000Z',
+      },
+    ]);
+    vi.mocked(api.listMemoryAdmissionDecisions).mockResolvedValue([]);
+
+    render(<TaskDetailPanel task={baseTask} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(await screen.findByText(/Worker completed run/i)).toBeInTheDocument();
+    expect(screen.getByText('No admission decisions captured for this task.')).toBeInTheDocument();
   });
 
   it('does not emit duplicate-key warnings for repeated list items', () => {
@@ -113,6 +185,7 @@ describe('TaskDetailPanel', () => {
           interaction_type: undefined,
           status: null,
           summary: 'Need operator input',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: '2026-04-28T00:00:00.000Z',
@@ -685,6 +758,7 @@ describe('TaskDetailPanel', () => {
           interaction_type: 'clarification',
           status: 'pending',
           summary: 'Need a quick operator answer',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: '2026-04-28T00:00:00.000Z',
@@ -726,6 +800,7 @@ describe('TaskDetailPanel', () => {
           interaction_type: 'clarification',
           status: 'pending',
           summary: 'Need more details',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: '2026-04-28T00:00:00.000Z',
@@ -762,6 +837,7 @@ describe('TaskDetailPanel', () => {
           interaction_type: 'clarification',
           status: 'pending',
           summary: 'Need input',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: '2026-04-28T00:00:00.000Z',
@@ -833,6 +909,7 @@ describe('TaskDetailPanel', () => {
           interaction_type: 'clarification',
           status: 'pending',
           summary: 'Need input',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: '2026-04-28T00:00:00.000Z',
@@ -856,6 +933,7 @@ describe('TaskDetailPanel', () => {
           interaction_type: 'clarification',
           status: 'pending',
           summary: 'No longer actionable',
+          hitl_mode: 'require_approval',
           data: {},
           response_data: null,
           created_at: '2026-04-28T00:00:00.000Z',
@@ -907,6 +985,54 @@ describe('TaskDetailPanel', () => {
     rerender(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
 
     expect(screen.queryByText('Cancel conflict')).not.toBeInTheDocument();
+  });
+
+  it('clears stale memory trace rows when switching tasks and the new fetch fails', async () => {
+    vi.mocked(api.listMemoryObservations)
+      .mockResolvedValueOnce([
+        {
+          observation_id: 'obs-a',
+          task_id: 'task-a',
+          source: 'worker',
+          event_type: 'worker_completed',
+          observed_at: '2026-04-28T00:01:00.000Z',
+          summary: 'Task A trace',
+          content: 'Task A details',
+          metadata_payload: {},
+          privacy_stripped: false,
+          admission_status: 'processed',
+          created_at: '2026-04-28T00:01:00.000Z',
+          updated_at: '2026-04-28T00:01:00.000Z',
+        },
+      ])
+      .mockRejectedValueOnce(new Error('Trace fetch failed'));
+    vi.mocked(api.listMemoryAdmissionDecisions)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const { rerender } = render(
+      <TaskDetailPanel
+        task={buildTask({ task_id: 'task-a' })}
+        loading={false}
+        error={null}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText(/Task A trace/i)).toBeInTheDocument();
+
+    rerender(
+      <TaskDetailPanel
+        task={buildTask({ task_id: 'task-b' })}
+        loading={false}
+        error={null}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText('Trace fetch failed')).toBeInTheDocument();
+    expect(screen.queryByText(/Task A trace/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('No memory trace records for this task.')).not.toBeInTheDocument();
   });
 
   it('renders delivery metadata if present', () => {
