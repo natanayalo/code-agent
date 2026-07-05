@@ -49,7 +49,8 @@ Active focus:
 
 1. implement deterministic observation extraction for real task traces so memory candidates are produced from concrete evidence paths, not only pre-structured payloads
 2. follow with a read-side memory gate and then broader repo-profile shaping once the observation/admission corpus is richer
-3. evaluate Phase 4 candidates: routing, DAG decomposition, selective fan-out, review repair, and autonomy policy
+3. carry forward the lightweight Slice 7 defer list: richer durable-memory navigation, broader trace-filter ergonomics, and any deeper operator UX polish beyond inspectability
+4. evaluate Phase 4 candidates: routing, DAG decomposition, selective fan-out, review repair, and autonomy policy
 
 ## Current Backlog
 

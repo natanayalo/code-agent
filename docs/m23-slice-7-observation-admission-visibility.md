@@ -1,5 +1,24 @@
 # M23 Slice 7: Observation And Admission Visibility
 
+## Status
+
+Done.
+
+Shipped outcome:
+
+- Knowledge Base observation list/detail and admission-decision API surfaces
+- Trace-tab operator visibility in the dashboard
+- proposal, observation, and decision lineage links via `source_observation_id`
+- compact task-detail memory trace hooks using the same knowledge-base endpoints
+- regression coverage for lineage batching, repo-filter fallback behavior, trace UI states, and redaction-preserving visibility
+
+Deferred to the next slice:
+
+- deterministic trace-to-candidate extraction from real task evidence beyond pre-structured `metadata_payload["memory_candidate"]`
+- read-side memory gating for staleness, conflict, risk, and advisory strength
+- richer durable-memory/operator navigation beyond lightweight ID-based lineage pills
+- any broader Knowledge Base UX polish that goes beyond inspectability-first filters, lists, and compact task trace visibility
+
 > **Prerequisite**: Slice 6 should be merged first. This slice builds on the
 > existing `memory_observations`, `memory_admission_decisions`, and
 > `source_observation_id` lineage fields that are already persisted and tested.
@@ -240,3 +259,16 @@ After this slice:
 1. deterministic trace-to-candidate extraction
 2. read-side memory gate for relevance/staleness/conflict/risk
 3. compact repo profile synthesized from accepted project memory
+
+## Next-Slice Handoff
+
+Start the next slice from the deterministic extraction boundary, not by widening
+Slice 7 UI scope.
+
+Specifically treat these as intentionally deferred:
+
+- promote successful test/verification commands into deterministic candidates
+- promote repeated failure-then-fix command patterns into pitfall candidates
+- promote explicit operator or user “remember this” signals into candidates
+- promote AGENTS.md or repo-doc conventions into evidence-backed repo-memory candidates
+- keep durable-memory navigation lightweight until the extraction corpus is richer enough to justify deeper memory-record UX
