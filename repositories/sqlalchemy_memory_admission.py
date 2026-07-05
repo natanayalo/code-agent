@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import String, cast, func, select
@@ -91,5 +92,23 @@ class MemoryAdmissionDecisionRepository:
             )
             .limit(max(0, limit))
             .offset(max(0, offset))
+        )
+        return list(self.session.scalars(statement))
+
+    def list_for_source_observation_ids(
+        self,
+        observation_ids: set[str],
+    ) -> Sequence[MemoryAdmissionDecision]:
+        """Fetch decisions for a specific batch of source observation ids."""
+        if not observation_ids:
+            return []
+
+        statement = (
+            select(MemoryAdmissionDecision)
+            .where(MemoryAdmissionDecision.source_observation_id.in_(observation_ids))
+            .order_by(
+                MemoryAdmissionDecision.created_at.desc(),
+                MemoryAdmissionDecision.id.desc(),
+            )
         )
         return list(self.session.scalars(statement))

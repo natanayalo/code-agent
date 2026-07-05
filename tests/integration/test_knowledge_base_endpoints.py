@@ -549,3 +549,42 @@ def test_observation_and_admission_visibility_endpoints(
     assert decision_payload[0]["proposal_id"] == proposal_id
     assert decision_payload[0]["source_observation_id"] == observation_id
     assert decision_payload[0]["repo_url"] == "https://github.com/org/observation-repo"
+
+
+def test_observation_visibility_fetches_lineage_beyond_prefetch_caps(
+    client: TestClient,
+    session_factory,
+) -> None:
+    """Observation lineage should still resolve when unrelated newer decisions exceed 200 rows."""
+    seeded = _seed_observation_visibility_state(session_factory)
+    observation_id = seeded["observation_id"]
+    task_id = seeded["task_id"]
+    session_id = seeded["session_id"]
+    decision_id = seeded["decision_id"]
+
+    with session_scope(session_factory) as session:
+        from repositories import MemoryAdmissionDecisionRepository
+
+        for index in range(205):
+            MemoryAdmissionDecisionRepository(session).create(
+                category="project",
+                memory_key=f"other-{index}",
+                candidate_payload={"repo_url": "https://github.com/org/other-repo"},
+                decision="create",
+                risk_level="low",
+                reason="unrelated newer decision",
+                task_id=task_id,
+                session_id=session_id,
+            )
+        session.flush()
+
+    response = client.get(
+        f"/knowledge-base/observations?repo_url=https://github.com/org/observation-repo"
+        f"&task_id={task_id}&session_id={session_id}&source=worker&event_type=worker_completed"
+        "&admission_status=processed&q=redacted-private"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [row["observation_id"] for row in payload] == [observation_id]
+    assert payload[0]["decision_id"] == decision_id

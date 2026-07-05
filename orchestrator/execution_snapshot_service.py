@@ -394,12 +394,9 @@ def list_memory_observations(
             limit=limit,
             offset=offset,
         )
-        decision_rows = MemoryAdmissionDecisionRepository(session).list(
-            repo_url=_optional_scope(repo_url),
-            task_id=_optional_scope(task_id),
-            session_id=_optional_scope(session_id),
-            limit=max(limit + offset, 200),
-            offset=0,
+        observation_ids = {observation.id for observation in observations}
+        decision_rows = MemoryAdmissionDecisionRepository(session).list_for_source_observation_ids(
+            observation_ids
         )
         decisions_by_observation_id = {
             row.source_observation_id: row

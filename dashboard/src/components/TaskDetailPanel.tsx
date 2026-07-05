@@ -519,6 +519,8 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
 
     setMemoryTraceLoading(true);
     setMemoryTraceError(null);
+    setMemoryObservations([]);
+    setMemoryAdmissionDecisions([]);
     Promise.all([
       api.listMemoryObservations({ taskId: task.task_id, limit: 10 }),
       api.listMemoryAdmissionDecisions({ taskId: task.task_id, limit: 10 }),
@@ -530,6 +532,8 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
       })
       .catch((fetchError: unknown) => {
         if (cancelled) return;
+        setMemoryObservations([]);
+        setMemoryAdmissionDecisions([]);
         setMemoryTraceError(
           fetchError instanceof Error ? fetchError.message : 'Failed to load memory trace.'
         );

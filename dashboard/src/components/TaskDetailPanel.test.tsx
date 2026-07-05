@@ -962,6 +962,54 @@ describe('TaskDetailPanel', () => {
     expect(screen.queryByText('Cancel conflict')).not.toBeInTheDocument();
   });
 
+  it('clears stale memory trace rows when switching tasks and the new fetch fails', async () => {
+    vi.mocked(api.listMemoryObservations)
+      .mockResolvedValueOnce([
+        {
+          observation_id: 'obs-a',
+          task_id: 'task-a',
+          source: 'worker',
+          event_type: 'worker_completed',
+          observed_at: '2026-04-28T00:01:00.000Z',
+          summary: 'Task A trace',
+          content: 'Task A details',
+          metadata_payload: {},
+          privacy_stripped: false,
+          admission_status: 'processed',
+          created_at: '2026-04-28T00:01:00.000Z',
+          updated_at: '2026-04-28T00:01:00.000Z',
+        },
+      ])
+      .mockRejectedValueOnce(new Error('Trace fetch failed'));
+    vi.mocked(api.listMemoryAdmissionDecisions)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const { rerender } = render(
+      <TaskDetailPanel
+        task={buildTask({ task_id: 'task-a' })}
+        loading={false}
+        error={null}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText(/Task A trace/i)).toBeInTheDocument();
+
+    rerender(
+      <TaskDetailPanel
+        task={buildTask({ task_id: 'task-b' })}
+        loading={false}
+        error={null}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText('Trace fetch failed')).toBeInTheDocument();
+    expect(screen.queryByText(/Task A trace/i)).not.toBeInTheDocument();
+    expect(screen.getByText('No memory trace records for this task.')).toBeInTheDocument();
+  });
+
   it('renders delivery metadata if present', () => {
     const task = buildTask({
       latest_run: buildLatestRun({
