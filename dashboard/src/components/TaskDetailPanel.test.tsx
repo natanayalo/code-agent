@@ -1032,7 +1032,7 @@ describe('TaskDetailPanel', () => {
 
     expect(await screen.findByText('Trace fetch failed')).toBeInTheDocument();
     expect(screen.queryByText(/Task A trace/i)).not.toBeInTheDocument();
-    expect(screen.getByText('No memory trace records for this task.')).toBeInTheDocument();
+    expect(screen.queryByText('No memory trace records for this task.')).not.toBeInTheDocument();
   });
 
   it('renders delivery metadata if present', () => {

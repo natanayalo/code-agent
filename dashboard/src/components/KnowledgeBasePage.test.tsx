@@ -400,6 +400,7 @@ describe('KnowledgeBasePage', () => {
 
     fireEvent.click(await screen.findByRole('tab', { name: /Trace/i }));
 
+    expect(screen.getByRole('button', { name: 'Refreshing...' })).toBeDisabled();
     expect(await screen.findByText('Loading observations...')).toBeInTheDocument();
     expect(screen.getByText('Loading admission decisions...')).toBeInTheDocument();
   });

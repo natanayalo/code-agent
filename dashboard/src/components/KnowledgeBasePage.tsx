@@ -449,6 +449,7 @@ export function KnowledgeBasePage() {
     await refetchMemoryObservations();
     await refetchMemoryAdmissionDecisions();
   }, [refetchMemoryAdmissionDecisions, refetchMemoryObservations]);
+  const traceRefreshing = memoryObservationsLoading || memoryAdmissionDecisionsLoading;
 
   function renderMemoryProposal(proposal: MemoryProposalSnapshot): React.ReactNode {
     const isPending = proposal.status === 'pending_review';
@@ -1157,8 +1158,13 @@ export function KnowledgeBasePage() {
                   Inspect raw observations and admission outcomes without changing memory policy.
                 </p>
               </div>
-              <button className="knowledge-load-more" type="button" onClick={() => void refreshTrace()}>
-                Refresh Trace
+              <button
+                className="knowledge-load-more"
+                type="button"
+                onClick={() => void refreshTrace()}
+                disabled={traceRefreshing}
+              >
+                {traceRefreshing ? 'Refreshing...' : 'Refresh Trace'}
               </button>
             </div>
             <div className="knowledge-search-controls">

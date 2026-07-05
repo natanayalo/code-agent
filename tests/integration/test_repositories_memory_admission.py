@@ -162,3 +162,33 @@ def test_memory_admission_decision_repository_only_joins_repo_tables_for_repo_fi
     assert "JOIN tasks" not in statements[0]
     assert "JOIN memory_observations" in statements[1]
     assert "JOIN tasks" in statements[1]
+
+
+def test_memory_admission_decision_repository_sorts_observation_ids_for_deterministic_in_clause(
+    session_factory,
+    monkeypatch,
+) -> None:
+    """Observation-id batch queries should sort IDs before compiling the IN clause."""
+    with session_scope(session_factory) as session:
+        repo = MemoryAdmissionDecisionRepository(session)
+        statements: list[str] = []
+        original_scalars = session.scalars
+
+        def recording_scalars(statement, *args, **kwargs):
+            statements.append(
+                str(
+                    statement.compile(
+                        dialect=sqlite.dialect(),
+                        compile_kwargs={"literal_binds": True},
+                    )
+                )
+            )
+            return original_scalars(statement, *args, **kwargs)
+
+        monkeypatch.setattr(session, "scalars", recording_scalars)
+
+        repo.list_for_source_observation_ids({"obs-b", "obs-a"})
+
+    assert "'obs-a'" in statements[0]
+    assert "'obs-b'" in statements[0]
+    assert statements[0].index("'obs-a'") < statements[0].index("'obs-b'")

@@ -102,7 +102,7 @@ class MemoryAdmissionDecisionRepository:
 
         statement = (
             select(MemoryAdmissionDecision)
-            .where(MemoryAdmissionDecision.source_observation_id.in_(observation_ids))
+            .where(MemoryAdmissionDecision.source_observation_id.in_(sorted(observation_ids)))
             .order_by(
                 MemoryAdmissionDecision.created_at.desc(),
                 MemoryAdmissionDecision.id.desc(),

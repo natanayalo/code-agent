@@ -833,7 +833,8 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
             {memoryTraceError ? <p className="task-detail-error">{memoryTraceError}</p> : null}
             {memoryTraceLoading ? (
               <p className="task-detail-muted">Loading memory trace...</p>
-            ) : memoryObservations.length === 0 && memoryAdmissionDecisions.length === 0 ? (
+            ) : memoryTraceError ? null : memoryObservations.length === 0 &&
+              memoryAdmissionDecisions.length === 0 ? (
               <p className="task-detail-muted">No memory trace records for this task.</p>
             ) : (
               <>

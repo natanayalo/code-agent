@@ -459,7 +459,9 @@ def list_memory_admission_decisions(
             {
                 observation.id: observation
                 for observation in session.scalars(
-                    select(MemoryObservation).where(MemoryObservation.id.in_(observation_ids))
+                    select(MemoryObservation).where(
+                        MemoryObservation.id.in_(sorted(observation_ids))
+                    )
                 ).all()
             }
             if observation_ids
@@ -469,7 +471,7 @@ def list_memory_admission_decisions(
         tasks_by_id = (
             {
                 task.id: task
-                for task in session.scalars(select(Task).where(Task.id.in_(task_ids))).all()
+                for task in session.scalars(select(Task).where(Task.id.in_(sorted(task_ids)))).all()
             }
             if task_ids
             else {}
