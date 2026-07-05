@@ -588,3 +588,26 @@ def test_observation_visibility_fetches_lineage_beyond_prefetch_caps(
     payload = response.json()
     assert [row["observation_id"] for row in payload] == [observation_id]
     assert payload[0]["decision_id"] == decision_id
+
+
+def test_admission_decision_visibility_bulk_loads_observations(
+    client: TestClient,
+    session_factory,
+    monkeypatch,
+) -> None:
+    """Admission decision visibility should avoid per-observation get() lookups."""
+    seeded = _seed_observation_visibility_state(session_factory)
+    decision_id = seeded["decision_id"]
+
+    from repositories.sqlalchemy_observation import ObservationRepository
+
+    def _unexpected_get(self, observation_id: str) -> None:  # pragma: no cover - defensive
+        raise AssertionError(f"unexpected point lookup for observation {observation_id}")
+
+    monkeypatch.setattr(ObservationRepository, "get", _unexpected_get)
+
+    response = client.get("/knowledge-base/admission-decisions")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert any(row["decision_id"] == decision_id for row in payload)

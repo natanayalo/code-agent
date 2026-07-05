@@ -452,14 +452,19 @@ def list_memory_admission_decisions(
             limit=limit,
             offset=offset,
         )
-        observation_repo = ObservationRepository(session)
         observation_ids = {
             row.source_observation_id for row in decisions if row.source_observation_id is not None
         }
-        observations_by_id = {
-            observation_id: observation_repo.get(observation_id)
-            for observation_id in observation_ids
-        }
+        observations_by_id = (
+            {
+                observation.id: observation
+                for observation in session.scalars(
+                    select(MemoryObservation).where(MemoryObservation.id.in_(observation_ids))
+                ).all()
+            }
+            if observation_ids
+            else {}
+        )
         task_ids = {row.task_id for row in decisions if row.task_id is not None}
         tasks_by_id = (
             {
