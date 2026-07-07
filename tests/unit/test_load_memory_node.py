@@ -13,7 +13,7 @@ import orchestrator.graph as graph_module
 from db.base import Base
 from db.enums import TimelineEventType
 from orchestrator.graph import build_load_memory_node
-from orchestrator.state import OrchestratorState
+from orchestrator.state import MemoryContext, MemoryEntry, OrchestratorState
 from repositories import (
     ObservationRepository,
     PersonalMemoryRepository,
@@ -429,3 +429,31 @@ def test_load_memory_node_gating_and_deduplication(session_factory) -> None:
     assert len(loaded_memory["project"]) == 1
     assert loaded_memory["project"][0]["memory_key"] == "style"
     assert loaded_memory["project"][0]["value"] == {"type": "project"}
+
+
+def test_apply_read_side_gate_handles_none_confidence() -> None:
+    """Test that read-side gating tolerates None confidence values during dedupe."""
+    memory = MemoryContext.model_construct(
+        personal=[
+            MemoryEntry.model_construct(
+                memory_key="style",
+                value={"type": "personal"},
+                confidence=None,
+                last_verified_at=datetime(2026, 7, 1, tzinfo=UTC),
+            ),
+            MemoryEntry.model_construct(
+                memory_key="style",
+                value={"type": "personal-preferred"},
+                confidence=1.1,
+                last_verified_at=datetime(2026, 7, 1, tzinfo=UTC),
+            ),
+        ],
+        project=[],
+        session={},
+        observations=[],
+    )
+
+    gated = graph_module._apply_read_side_gate(memory)
+
+    assert len(gated.personal) == 1
+    assert gated.personal[0].value == {"type": "personal-preferred"}

@@ -471,9 +471,11 @@ def _extract_verification_candidates(
     commands = metadata.get("commands_run") or []
     ver_cmds = []
     for cmd in commands:
+        if not isinstance(cmd, dict):
+            continue
         cmd_str = cmd.get("command")
         exit_code = cmd.get("exit_code")
-        if cmd_str and exit_code == 0:
+        if isinstance(cmd_str, str) and exit_code == 0:
             cmd_stripped = cmd_str.strip()
             is_ver = _is_verification_command(cmd_str) or (cmd_stripped in normalized_expected)
             if is_ver:
@@ -531,13 +533,17 @@ def _extract_pitfall_candidates(
     metadata = trace_obs.metadata_payload or {}
     commands = metadata.get("commands_run") or []
     for idx, cmd_fail in enumerate(commands):
+        if not isinstance(cmd_fail, dict):
+            continue
         fail_cmd_str = cmd_fail.get("command")
         fail_exit_code = cmd_fail.get("exit_code")
-        if fail_cmd_str and fail_exit_code is not None and fail_exit_code != 0:
+        if isinstance(fail_cmd_str, str) and fail_exit_code is not None and fail_exit_code != 0:
             for cmd_success in commands[idx + 1 :]:
+                if not isinstance(cmd_success, dict):
+                    continue
                 success_cmd_str = cmd_success.get("command")
                 success_exit_code = cmd_success.get("exit_code")
-                if success_cmd_str and success_exit_code == 0:
+                if isinstance(success_cmd_str, str) and success_exit_code == 0:
                     if fail_cmd_str.strip() == success_cmd_str.strip():
                         continue
                     fail_base = _get_base_executable(fail_cmd_str)
@@ -733,10 +739,8 @@ def extract_candidates_from_task_traces(session: Session, task_id: str) -> None:
     extracted_parent_ids: set[str] = {
         parent_id
         for child in existing_children
-        if isinstance(
-            (parent_id := (child.metadata_payload or {}).get("parent_observation_id")),
-            str,
-        )
+        if isinstance(child.metadata_payload, dict)
+        and isinstance((parent_id := child.metadata_payload.get("parent_observation_id")), str)
     }
 
     for trace_obs in trace_obs_list:

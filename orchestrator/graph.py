@@ -1630,6 +1630,9 @@ def _apply_read_side_gate(memory: MemoryContext) -> MemoryContext:
     """Apply read-side memory gate (cross-scope deduplication and conflict resolution)."""
     from datetime import UTC, datetime
 
+    def _confidence_value(value: float | None) -> float:
+        return 1.0 if value is None else value
+
     # 1. Deduplicate personal memory itself
     # (keep highest confidence/newest verification for each key)
     deduped_personal = {}
@@ -1649,7 +1652,10 @@ def _apply_read_side_gate(memory: MemoryContext) -> MemoryContext:
                 if existing.last_verified_at
                 else datetime.min.replace(tzinfo=UTC)
             )
-            if e_time > ex_time or (e_time == ex_time and entry.confidence > existing.confidence):
+            if e_time > ex_time or (
+                e_time == ex_time
+                and _confidence_value(entry.confidence) > _confidence_value(existing.confidence)
+            ):
                 deduped_personal[key] = entry
 
     # 2. Deduplicate project memory itself
@@ -1670,7 +1676,10 @@ def _apply_read_side_gate(memory: MemoryContext) -> MemoryContext:
                 if existing.last_verified_at
                 else datetime.min.replace(tzinfo=UTC)
             )
-            if e_time > ex_time or (e_time == ex_time and entry.confidence > existing.confidence):
+            if e_time > ex_time or (
+                e_time == ex_time
+                and _confidence_value(entry.confidence) > _confidence_value(existing.confidence)
+            ):
                 deduped_project[key] = entry
 
     # 3. Cross-scope deduplication (project overrides personal)

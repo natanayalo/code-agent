@@ -572,6 +572,49 @@ def test_trace_extraction_pitfall_skips_identical_successful_command(
         assert len(pitfalls) == 0
 
 
+def test_trace_extraction_skips_malformed_command_entries(session_factory) -> None:
+    """Verify malformed command payload entries do not crash extraction."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(session)
+        task_id = task.id
+
+        obs_repo = ObservationRepository(session)
+        obs_repo.create(
+            task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            source="worker",
+            event_type="worker_completed",
+            summary="Worker completed.",
+            content="Trace:",
+            metadata_payload={
+                "commands_run": [
+                    "not-a-dict",
+                    {"command": 123, "exit_code": 0},
+                    {"command": "pytest", "exit_code": 0},
+                ]
+            },
+            admission_status="not_required",
+        )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        ObservationMemoryBridge.bridge_observations(session, task_id)
+
+    with session_scope(session_factory) as session:
+        children = list(
+            session.scalars(
+                select(MemoryObservation).where(
+                    MemoryObservation.event_type == "extracted_candidate"
+                )
+            ).all()
+        )
+        assert any(
+            c.metadata_payload["memory_candidate"]["memory_key"] == "verification_commands"
+            for c in children
+        )
+
+
 def test_extract_candidates_from_task_text_does_not_query_existing_children(
     session_factory,
     monkeypatch: pytest.MonkeyPatch,
@@ -593,6 +636,43 @@ def test_extract_candidates_from_task_text_does_not_query_existing_children(
             obs_repo,
             extracted_parent_ids=set(),
         )
+
+
+def test_trace_extraction_ignores_non_dict_existing_child_metadata(
+    session_factory,
+) -> None:
+    """Verify existing child rows with malformed metadata are ignored safely."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(session)
+        task_id = task.id
+
+        obs_repo = ObservationRepository(session)
+        obs_repo.create(
+            task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            source="system",
+            event_type="extracted_candidate",
+            summary="Malformed child",
+            content="Bad child metadata",
+            metadata_payload=["bad"],
+            admission_status="pending",
+        )
+        obs_repo.create(
+            task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            source="worker",
+            event_type="worker_completed",
+            summary="Worker completed.",
+            content="Trace:",
+            metadata_payload={"commands_run": []},
+            admission_status="not_required",
+        )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        ObservationMemoryBridge.bridge_observations(session, task_id)
 
 
 def test_trace_extraction_convention_rules(session_factory) -> None:
