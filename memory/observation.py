@@ -349,7 +349,7 @@ def _bridge_summary(session: Session, task_id: str) -> dict[str, Any]:
     }
 
 
-def _is_verification_command(command_str: str) -> bool:
+def _get_stripped_command(command_str: str) -> str:
     cmd = command_str.strip()
     prefixes = [
         "python3 -m",
@@ -368,13 +368,22 @@ def _is_verification_command(command_str: str) -> bool:
     cleaned = cmd
     while True:
         stripped = False
+        lowered = cleaned.lower()
         for p in prefixes:
-            if cleaned.lower().startswith(p):
+            if lowered.startswith(p):
+                next_char = cleaned[len(p) : len(p) + 1]
+                if not p.endswith("/") and next_char and not next_char.isspace():
+                    continue
                 cleaned = cleaned[len(p) :].strip()
                 stripped = True
                 break
         if not stripped:
             break
+    return cleaned
+
+
+def _is_verification_command(command_str: str) -> bool:
+    cleaned = _get_stripped_command(command_str)
     parts = cleaned.split()
     if not parts:
         return False
@@ -393,32 +402,6 @@ def _is_verification_command(command_str: str) -> bool:
     if exe == "make" and len(parts) > 1 and parts[1].lower() in ("test", "ci"):
         return True
     return False
-
-
-def _get_base_executable(cmd_str: str) -> str:
-    cmd = cmd_str.strip()
-    prefixes = [
-        "poetry run",
-        ".venv/bin/",
-        "python -m",
-        "python3 -m",
-        "bundle exec",
-        "npx",
-        "npm run",
-        "npm",
-    ]
-    cleaned = cmd
-    while True:
-        stripped = False
-        for p in prefixes:
-            if cleaned.lower().startswith(p):
-                cleaned = cleaned[len(p) :].strip()
-                stripped = True
-                break
-        if not stripped:
-            break
-    parts = cleaned.split()
-    return parts[0].lower() if parts else ""
 
 
 def _extract_remember_sentences(text: str) -> list[str]:
@@ -558,9 +541,9 @@ def _extract_pitfall_candidates(
                 if isinstance(success_cmd_str, str) and success_exit_code == 0:
                     if fail_cmd_str.strip() == success_cmd_str.strip():
                         continue
-                    fail_base = _get_base_executable(fail_cmd_str)
-                    succ_base = _get_base_executable(success_cmd_str)
-                    if fail_base == succ_base and fail_base:
+                    fail_clean = _get_stripped_command(fail_cmd_str)
+                    succ_clean = _get_stripped_command(success_cmd_str)
+                    if fail_clean and fail_clean == succ_clean:
                         evidence_str = (
                             f"Command '{fail_cmd_str}' failed with exit code "
                             f"{fail_exit_code}, resolved by '{success_cmd_str}'"

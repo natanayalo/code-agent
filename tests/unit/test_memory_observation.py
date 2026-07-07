@@ -945,6 +945,57 @@ def test_trace_extraction_recognizes_unittest_module_commands(session_factory) -
 def test_is_verification_command_strips_nested_prefixes() -> None:
     """Verify nested wrapper prefixes still resolve to the underlying test command."""
     assert _is_verification_command("poetry run python -m unittest discover") is True
+    assert _is_verification_command("npminstall") is False
+
+
+def test_trace_extraction_pitfall_requires_same_full_command(session_factory) -> None:
+    """Verify different scripts under the same runner do not create a pitfall."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(
+            session,
+            task_id="task-different-scripts",
+            task_text="Run tests.",
+            repo_url="repo-different-scripts",
+            external_thread_id="thread-different-scripts",
+        )
+        task_id = task.id
+
+        ObservationRepository(session).create(
+            task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            source="worker",
+            event_type="worker_completed",
+            summary="Worker finished.",
+            content="Trace",
+            metadata_payload={
+                "commands_run": [
+                    {"command": "python script_a.py", "exit_code": 1},
+                    {"command": "python script_b.py", "exit_code": 0},
+                ]
+            },
+            admission_status="not_required",
+        )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        ObservationMemoryBridge.bridge_observations(session, task_id)
+
+    with session_scope(session_factory) as session:
+        children = list(
+            session.scalars(
+                select(MemoryObservation).where(
+                    MemoryObservation.event_type == "extracted_candidate",
+                    MemoryObservation.task_id == task_id,
+                )
+            ).all()
+        )
+        pitfalls = [
+            c
+            for c in children
+            if c.metadata_payload["memory_candidate"]["memory_key"] == "known_pitfalls"
+        ]
+        assert len(pitfalls) == 0
 
 
 def test_trace_extraction_uses_deterministic_verifier_outcome(session_factory) -> None:
