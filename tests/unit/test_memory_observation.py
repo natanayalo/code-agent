@@ -26,6 +26,7 @@ from memory.observation import (
     ObservationContextService,
     ObservationMemoryBridge,
     _extract_candidates_from_task_text,
+    _is_verification_command,
     strip_private_tags,
     strip_private_tags_recursive,
 )
@@ -939,6 +940,11 @@ def test_trace_extraction_recognizes_unittest_module_commands(session_factory) -
         candidate = children[0].metadata_payload["memory_candidate"]
         assert candidate["memory_key"] == "verification_commands"
         assert candidate["value"] == {"python -m unittest discover": "python -m unittest discover"}
+
+
+def test_is_verification_command_strips_nested_prefixes() -> None:
+    """Verify nested wrapper prefixes still resolve to the underlying test command."""
+    assert _is_verification_command("poetry run python -m unittest discover") is True
 
 
 def test_trace_extraction_uses_deterministic_verifier_outcome(session_factory) -> None:

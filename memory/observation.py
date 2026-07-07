@@ -366,9 +366,15 @@ def _is_verification_command(command_str: str) -> bool:
         "bun",
     ]
     cleaned = cmd
-    for p in prefixes:
-        if cleaned.lower().startswith(p):
-            cleaned = cleaned[len(p) :].strip()
+    while True:
+        stripped = False
+        for p in prefixes:
+            if cleaned.lower().startswith(p):
+                cleaned = cleaned[len(p) :].strip()
+                stripped = True
+                break
+        if not stripped:
+            break
     parts = cleaned.split()
     if not parts:
         return False
@@ -402,9 +408,15 @@ def _get_base_executable(cmd_str: str) -> str:
         "npm",
     ]
     cleaned = cmd
-    for p in prefixes:
-        if cleaned.lower().startswith(p):
-            cleaned = cleaned[len(p) :].strip()
+    while True:
+        stripped = False
+        for p in prefixes:
+            if cleaned.lower().startswith(p):
+                cleaned = cleaned[len(p) :].strip()
+                stripped = True
+                break
+        if not stripped:
+            break
     parts = cleaned.split()
     return parts[0].lower() if parts else ""
 

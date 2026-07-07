@@ -690,6 +690,6 @@ async def test_init_environment_node_detects_makefile_with_spaces_and_double_col
 def test_makefile_has_target_ignores_assignment_lines(tmp_path: Path) -> None:
     """Verify Makefile target detection does not match assignment operators."""
     makefile_path = tmp_path / "Makefile"
-    makefile_path.write_text("setup := true\nsetup ::= also_true\n")
+    makefile_path.write_text("setup := true\nsetup ::= also_true\nsetup: VAR = value\n")
 
     assert _makefile_has_target(makefile_path, "setup") is False

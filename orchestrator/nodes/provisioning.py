@@ -119,7 +119,8 @@ def _makefile_has_target(makefile_path: Any, target: str) -> bool:
             continue
         parts = stripped.split(":", 1)
         if len(parts) > 1:
-            if parts[1].lstrip().lstrip(":").startswith("="):
+            remaining = parts[1].lstrip().lstrip(":")
+            if remaining.startswith("=") or "=" in remaining:
                 continue
             targets = parts[0].strip().split()
             if target in targets:
