@@ -111,15 +111,17 @@ def _makefile_has_target(makefile_path: Any, target: str) -> bool:
     except OSError:
         return False
 
-    target_prefix = f"{target}:"
     for line in lines:
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         if line.startswith((" ", "\t")):
             continue
-        if stripped.startswith(target_prefix):
-            return True
+        parts = stripped.split(":", 1)
+        if len(parts) > 1:
+            targets = parts[0].strip().split()
+            if target in targets:
+                return True
     return False
 
 

@@ -661,3 +661,26 @@ async def test_init_environment_node_fails_on_npm_no_lock_without_override(tmp_p
     assert result["result"].status == "error"
     assert "Missing lockfile" in result["result"].summary
     shell_worker.run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_init_environment_node_detects_makefile_with_spaces_and_double_colon(
+    tmp_path: Path,
+) -> None:
+    """Verify Makefile setup detection matches setup targets with spaces and double colons."""
+    manager = MagicMock()
+    handle = MagicMock()
+    handle.repo_path = tmp_path
+    (tmp_path / "Makefile").write_text("setup ::\n\t@echo setup double colon\n")
+    manager.get_workspace.return_value = handle
+    shell_worker = AsyncMock()
+    shell_worker.run.return_value = WorkerResult(status="success", summary="ok")
+    node = build_init_environment_node(manager, shell_worker)
+    state = OrchestratorState(
+        task={"task_id": "t1", "repo_url": "r1", "task_text": "setup"},
+        dispatch={"workspace_id": "ws-1"},
+    )
+    await node(state)
+    assert shell_worker.run.call_count >= 1
+    init_call_args = shell_worker.run.call_args_list[0][0][0]
+    assert "make setup" in init_call_args.task_text

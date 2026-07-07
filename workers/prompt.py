@@ -259,10 +259,11 @@ def build_workflow_instructions_section(request: WorkerRequest) -> str:
 
 def _format_advisory_metadata(m: dict[str, Any]) -> str:
     """Format memory metadata for prompt display."""
-    confidence = m.get("confidence", 1.0)
+    confidence = m.get("confidence")
+    confidence_val = float(confidence) if confidence is not None else 1.0
     verified_at = m.get("last_verified_at")
     req_ver = m.get("requires_verification", True)
-    meta_parts = [f"confidence: {confidence:.2f}"]
+    meta_parts = [f"confidence: {confidence_val:.2f}"]
     if verified_at:
         meta_parts.append(f"verified: {verified_at}")
     else:

@@ -294,3 +294,27 @@ def test_build_system_prompt_renders_advisory_metadata(tmp_path) -> None:
     assert (
         "**verification_commands** (confidence: 0.95, unverified, requires verification):" in prompt
     )
+
+
+def test_build_system_prompt_advisory_metadata_handles_none_confidence(tmp_path) -> None:
+    """Test that build_system_prompt safely formats memory metadata with a None confidence."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        repo_url="https://example.com/repo.git",
+        memory_context={
+            "personal": [
+                {
+                    "memory_key": "communication_style",
+                    "value": {"style": "concise"},
+                    "confidence": None,
+                    "last_verified_at": "2026-07-04T12:00:00Z",
+                    "requires_verification": False,
+                }
+            ],
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+    assert "communication_style" in prompt
+    assert "**communication_style** (confidence: 1.00, verified: 2026-07-04T12:00:00Z):" in prompt

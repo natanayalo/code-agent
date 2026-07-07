@@ -467,7 +467,8 @@ def _extract_verification_candidates(
             expected_cmds.extend(cmds)
     normalized_expected = {c.strip() for c in expected_cmds if isinstance(c, str)}
 
-    commands = trace_obs.metadata_payload.get("commands_run") or []
+    metadata = trace_obs.metadata_payload or {}
+    commands = metadata.get("commands_run") or []
     ver_cmds = []
     for cmd in commands:
         cmd_str = cmd.get("command")
@@ -478,7 +479,7 @@ def _extract_verification_candidates(
             if is_ver:
                 ver_cmds.append(cmd_str)
 
-    verifier_outcome = trace_obs.metadata_payload.get("verifier_outcome")
+    verifier_outcome = metadata.get("verifier_outcome")
     if isinstance(verifier_outcome, dict):
         deterministic = verifier_outcome.get("deterministic_verification")
         if isinstance(deterministic, dict) and deterministic.get("status") == "passed":
@@ -527,7 +528,8 @@ def _extract_pitfall_candidates(
     candidates: list[MemoryCandidate] = []
     if trace_obs.event_type not in ("worker_completed", "worker_failed"):
         return candidates
-    commands = trace_obs.metadata_payload.get("commands_run") or []
+    metadata = trace_obs.metadata_payload or {}
+    commands = metadata.get("commands_run") or []
     for idx, cmd_fail in enumerate(commands):
         fail_cmd_str = cmd_fail.get("command")
         fail_exit_code = cmd_fail.get("exit_code")
@@ -676,7 +678,7 @@ def _extract_candidates_from_task_text(
     )
     existing_children = list(session.scalars(check_stmt))
     task_text_already_extracted = any(
-        child.metadata_payload.get("parent_observation_id") == f"task-{task_id}"
+        (child.metadata_payload or {}).get("parent_observation_id") == f"task-{task_id}"
         for child in existing_children
     )
     if not task_text_already_extracted:
@@ -729,19 +731,17 @@ def extract_candidates_from_task_traces(session: Session, task_id: str) -> None:
     task_statement = select(Task).where(Task.id == task_id)
     task = session.scalar(task_statement)
 
-    for trace_obs in trace_obs_list:
-        check_stmt = select(MemoryObservation).where(
-            MemoryObservation.task_id == task_id,
-            MemoryObservation.event_type == "extracted_candidate",
-        )
-        existing_children = list(session.scalars(check_stmt))
-        already_extracted = False
-        for child in existing_children:
-            if child.metadata_payload.get("parent_observation_id") == trace_obs.id:
-                already_extracted = True
-                break
+    check_stmt = select(MemoryObservation).where(
+        MemoryObservation.task_id == task_id,
+        MemoryObservation.event_type == "extracted_candidate",
+    )
+    existing_children = list(session.scalars(check_stmt))
+    extracted_parent_ids = {
+        (child.metadata_payload or {}).get("parent_observation_id") for child in existing_children
+    }
 
-        if already_extracted:
+    for trace_obs in trace_obs_list:
+        if trace_obs.id in extracted_parent_ids:
             continue
 
         candidates: list[MemoryCandidate] = []
