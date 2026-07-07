@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -457,3 +457,31 @@ def test_apply_read_side_gate_handles_none_confidence() -> None:
 
     assert len(gated.personal) == 1
     assert gated.personal[0].value == {"type": "personal-preferred"}
+
+
+def test_apply_read_side_gate_normalizes_timezone_aware_verified_at() -> None:
+    """Test that timezone-aware verified timestamps are compared in UTC correctly."""
+    memory = MemoryContext.model_construct(
+        personal=[
+            MemoryEntry.model_construct(
+                memory_key="style",
+                value={"type": "old"},
+                confidence=0.8,
+                last_verified_at=datetime(2026, 7, 1, 12, 0, tzinfo=timezone(timedelta(hours=2))),
+            ),
+            MemoryEntry.model_construct(
+                memory_key="style",
+                value={"type": "new"},
+                confidence=0.8,
+                last_verified_at=datetime(2026, 7, 1, 11, 30, tzinfo=UTC),
+            ),
+        ],
+        project=[],
+        session={},
+        observations=[],
+    )
+
+    gated = graph_module._apply_read_side_gate(memory)
+
+    assert len(gated.personal) == 1
+    assert gated.personal[0].value == {"type": "new"}

@@ -352,10 +352,10 @@ def _bridge_summary(session: Session, task_id: str) -> dict[str, Any]:
 def _is_verification_command(command_str: str) -> bool:
     cmd = command_str.strip()
     prefixes = [
+        "python3 -m",
+        "python -m",
         "poetry run",
         ".venv/bin/",
-        "python -m",
-        "python3 -m",
         "bundle exec",
         "npx",
         "npm run",
@@ -373,7 +373,7 @@ def _is_verification_command(command_str: str) -> bool:
     if not parts:
         return False
     exe = parts[0].lower()
-    if exe in ("pytest", "tox", "rake", "vitest", "jest", "mocha"):
+    if exe in ("pytest", "unittest", "tox", "rake", "vitest", "jest", "mocha"):
         return True
     if exe in ("go", "cargo") and len(parts) > 1 and parts[1].lower() == "test":
         return True
@@ -477,9 +477,9 @@ def _extract_verification_candidates(
         exit_code = cmd.get("exit_code")
         if isinstance(cmd_str, str) and exit_code == 0:
             cmd_stripped = cmd_str.strip()
-            is_ver = _is_verification_command(cmd_str) or (cmd_stripped in normalized_expected)
+            is_ver = _is_verification_command(cmd_stripped) or (cmd_stripped in normalized_expected)
             if is_ver:
-                ver_cmds.append(cmd_str)
+                ver_cmds.append(cmd_stripped)
 
     verifier_outcome = metadata.get("verifier_outcome")
     if isinstance(verifier_outcome, dict):
@@ -736,12 +736,14 @@ def extract_candidates_from_task_traces(session: Session, task_id: str) -> None:
         MemoryObservation.event_type == "extracted_candidate",
     )
     existing_children = list(session.scalars(check_stmt))
-    extracted_parent_ids: set[str] = {
-        parent_id
-        for child in existing_children
-        if isinstance(child.metadata_payload, dict)
-        and isinstance((parent_id := child.metadata_payload.get("parent_observation_id")), str)
-    }
+    extracted_parent_ids: set[str] = set()
+    for child in existing_children:
+        metadata = child.metadata_payload
+        if not isinstance(metadata, dict):
+            continue
+        parent_id = metadata.get("parent_observation_id")
+        if isinstance(parent_id, str):
+            extracted_parent_ids.add(parent_id)
 
     for trace_obs in trace_obs_list:
         if trace_obs.id in extracted_parent_ids:

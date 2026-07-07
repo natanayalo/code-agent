@@ -885,12 +885,60 @@ def test_trace_extraction_custom_expected_verification_commands(session_factory)
         # We expect one aggregated child containing build and deploy-check keys
         assert len(children) == 1
         cand_val = children[0].metadata_payload["memory_candidate"]["value"]
-        assert "make build " in cand_val
+        assert "make build" in cand_val
         assert "make deploy-check" in cand_val
 
         cand = children[0].metadata_payload["memory_candidate"]
         assert cand["requires_verification"] is False
         assert cand["last_verified_at"] is not None
+
+
+def test_trace_extraction_recognizes_unittest_module_commands(session_factory) -> None:
+    """Verify that unittest module invocations are extracted as verification commands."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(
+            session,
+            task_id="task-unittest",
+            task_text="Run the test suite.",
+            repo_url="repo-unittest",
+            external_thread_id="thread-unittest",
+            task_spec={"verification_commands": ["python -m unittest discover"]},
+        )
+        task_id = task.id
+
+        ObservationRepository(session).create(
+            task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            source="worker",
+            event_type="worker_completed",
+            summary="Worker finished.",
+            content="Trace",
+            metadata_payload={
+                "commands_run": [
+                    {"command": "python -m unittest discover", "exit_code": 0},
+                ]
+            },
+            admission_status="not_required",
+        )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        ObservationMemoryBridge.bridge_observations(session, task_id)
+
+    with session_scope(session_factory) as session:
+        children = list(
+            session.scalars(
+                select(MemoryObservation).where(
+                    MemoryObservation.event_type == "extracted_candidate",
+                    MemoryObservation.task_id == task_id,
+                )
+            ).all()
+        )
+        assert len(children) == 1
+        candidate = children[0].metadata_payload["memory_candidate"]
+        assert candidate["memory_key"] == "verification_commands"
+        assert candidate["value"] == {"python -m unittest discover": "python -m unittest discover"}
 
 
 def test_trace_extraction_uses_deterministic_verifier_outcome(session_factory) -> None:

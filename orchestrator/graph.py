@@ -1633,6 +1633,13 @@ def _apply_read_side_gate(memory: MemoryContext) -> MemoryContext:
     def _confidence_value(value: float | None) -> float:
         return 1.0 if value is None else value
 
+    def _as_utc(value: datetime | None) -> datetime:
+        if value is None:
+            return datetime.min.replace(tzinfo=UTC)
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
     # 1. Deduplicate personal memory itself
     # (keep highest confidence/newest verification for each key)
     deduped_personal = {}
@@ -1642,16 +1649,8 @@ def _apply_read_side_gate(memory: MemoryContext) -> MemoryContext:
             deduped_personal[key] = entry
         else:
             existing = deduped_personal[key]
-            e_time = (
-                entry.last_verified_at.replace(tzinfo=UTC)
-                if entry.last_verified_at
-                else datetime.min.replace(tzinfo=UTC)
-            )
-            ex_time = (
-                existing.last_verified_at.replace(tzinfo=UTC)
-                if existing.last_verified_at
-                else datetime.min.replace(tzinfo=UTC)
-            )
+            e_time = _as_utc(entry.last_verified_at)
+            ex_time = _as_utc(existing.last_verified_at)
             if e_time > ex_time or (
                 e_time == ex_time
                 and _confidence_value(entry.confidence) > _confidence_value(existing.confidence)
@@ -1666,16 +1665,8 @@ def _apply_read_side_gate(memory: MemoryContext) -> MemoryContext:
             deduped_project[key] = entry
         else:
             existing = deduped_project[key]
-            e_time = (
-                entry.last_verified_at.replace(tzinfo=UTC)
-                if entry.last_verified_at
-                else datetime.min.replace(tzinfo=UTC)
-            )
-            ex_time = (
-                existing.last_verified_at.replace(tzinfo=UTC)
-                if existing.last_verified_at
-                else datetime.min.replace(tzinfo=UTC)
-            )
+            e_time = _as_utc(entry.last_verified_at)
+            ex_time = _as_utc(existing.last_verified_at)
             if e_time > ex_time or (
                 e_time == ex_time
                 and _confidence_value(entry.confidence) > _confidence_value(existing.confidence)
