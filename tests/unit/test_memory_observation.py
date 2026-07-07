@@ -25,6 +25,7 @@ from memory.observation import (
     ObservationCaptureService,
     ObservationContextService,
     ObservationMemoryBridge,
+    _extract_candidates_from_task_text,
     strip_private_tags,
     strip_private_tags_recursive,
 )
@@ -569,6 +570,29 @@ def test_trace_extraction_pitfall_skips_identical_successful_command(
             if c.metadata_payload["memory_candidate"]["memory_key"] == "known_pitfalls"
         ]
         assert len(pitfalls) == 0
+
+
+def test_extract_candidates_from_task_text_does_not_query_existing_children(
+    session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that task-text extraction reuses the caller's parent-id set."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(session, task_text="Remember to keep tests focused.")
+
+        def fail_scalars(*args, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("unexpected database lookup")
+
+        monkeypatch.setattr(session, "scalars", fail_scalars)
+        obs_repo = SimpleNamespace(create=lambda *args, **kwargs: None)
+
+        _extract_candidates_from_task_text(
+            session,
+            task.id,
+            task,
+            obs_repo,
+            extracted_parent_ids=set(),
+        )
 
 
 def test_trace_extraction_convention_rules(session_factory) -> None:

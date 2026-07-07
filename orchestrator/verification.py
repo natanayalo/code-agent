@@ -601,7 +601,7 @@ async def run_independent_verifier(
 def _build_deterministic_verification_request(
     state: OrchestratorState, commands: list[str], timeout_seconds: int
 ) -> WorkerRequest:
-    script = "\n".join([*_python_module_shadow_guard_script(commands), *commands])
+    script = "\n".join(["set -e", *_python_module_shadow_guard_script(commands), *commands])
     workspace_id = state.dispatch.workspace_id or (
         state.result.workspace_id if state.result else None
     )

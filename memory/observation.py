@@ -671,19 +671,11 @@ def _extract_candidates_from_task_text(
     task_id: str,
     task: Any,
     obs_repo: ObservationRepository,
+    extracted_parent_ids: set[str],
 ) -> None:
     if not (task and task.task_text):
         return
-    check_stmt = select(MemoryObservation).where(
-        MemoryObservation.task_id == task_id,
-        MemoryObservation.event_type == "extracted_candidate",
-    )
-    existing_children = list(session.scalars(check_stmt))
-    task_text_already_extracted = any(
-        (child.metadata_payload or {}).get("parent_observation_id") == f"task-{task_id}"
-        for child in existing_children
-    )
-    if not task_text_already_extracted:
+    if f"task-{task_id}" not in extracted_parent_ids:
         remember_sentences = _extract_remember_sentences(task.task_text)
         for sentence in remember_sentences:
             cand = MemoryCandidate(
@@ -738,8 +730,13 @@ def extract_candidates_from_task_traces(session: Session, task_id: str) -> None:
         MemoryObservation.event_type == "extracted_candidate",
     )
     existing_children = list(session.scalars(check_stmt))
-    extracted_parent_ids = {
-        (child.metadata_payload or {}).get("parent_observation_id") for child in existing_children
+    extracted_parent_ids: set[str] = {
+        parent_id
+        for child in existing_children
+        if isinstance(
+            (parent_id := (child.metadata_payload or {}).get("parent_observation_id")),
+            str,
+        )
     }
 
     for trace_obs in trace_obs_list:
@@ -754,7 +751,7 @@ def extract_candidates_from_task_traces(session: Session, task_id: str) -> None:
 
         _save_extracted_candidates(session, task_id, trace_obs, candidates, obs_repo)
 
-    _extract_candidates_from_task_text(session, task_id, task, obs_repo)
+    _extract_candidates_from_task_text(session, task_id, task, obs_repo, extracted_parent_ids)
 
 
 class ObservationMemoryBridge:
