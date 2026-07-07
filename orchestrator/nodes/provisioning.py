@@ -95,8 +95,32 @@ def _determine_setup_command(
                 "for deterministic Node install."
             )
     elif (repo_path / "Makefile").exists():
-        return "make setup", None
+        if _makefile_has_target(repo_path / "Makefile", "setup"):
+            return (
+                "if command -v make >/dev/null 2>&1; then "
+                "make setup; "
+                "else echo 'make not installed; skipping Makefile setup'; fi"
+            ), None
     return None, None
+
+
+def _makefile_has_target(makefile_path: Any, target: str) -> bool:
+    """Return true when a Makefile declares a concrete top-level target."""
+    try:
+        lines = makefile_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return False
+
+    target_prefix = f"{target}:"
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if line.startswith((" ", "\t")):
+            continue
+        if stripped.startswith(target_prefix):
+            return True
+    return False
 
 
 async def _execute_gitignore_hardening(

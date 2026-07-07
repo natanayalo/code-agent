@@ -62,13 +62,58 @@ async def test_run_deterministic_verification_passes_script_to_shell_worker() ->
 
     assert status == "passed"
     assert "Explicit verification commands passed." in summary
-    assert metadata is None
+    assert metadata is not None
+    assert metadata["status"] == "passed"
+    assert metadata["commands"] == [".venv/bin/pytest tests/unit/test_orchestrator_graph_unit.py"]
+    assert metadata["passed_commands"] == [
+        ".venv/bin/pytest tests/unit/test_orchestrator_graph_unit.py"
+    ]
 
     args, _ = mock_worker.run.call_args
     request = args[0]
     assert request.runtime_mode == WorkerRuntimeMode.SHELL
     assert request.task_text == ".venv/bin/pytest tests/unit/test_orchestrator_graph_unit.py"
     assert request.secrets == {"API_KEY": "secret"}
+    assert metadata.get("python_module_shadow_guard") is None
+
+
+@pytest.mark.anyio
+async def test_run_deterministic_verification_guards_python_m_pytest_shadowing() -> None:
+    state = _state()
+    state.task_spec.verification_commands = ["python3 -m pytest -q"]
+    mock_worker = AsyncMock()
+    mock_worker.run.return_value = WorkerResult(status="success", summary="Commands passed.")
+
+    status, summary, metadata = await verification_module.run_deterministic_verification(
+        state,
+        worker_factory={"shell": mock_worker},
+    )
+
+    assert status == "passed"
+    assert summary == "Explicit verification commands passed."
+    assert metadata is not None
+    assert metadata["commands"] == ["python3 -m pytest -q"]
+    assert metadata["passed_commands"] == ["python3 -m pytest -q"]
+    assert metadata["python_module_shadow_guard"] == {
+        "modules": ["pytest"],
+        "exit_code": 97,
+    }
+
+    args, _ = mock_worker.run.call_args
+    request = args[0]
+    assert "[ -e pytest.py ]" in request.task_text
+    assert "[ -e pytest ]" in request.task_text
+    assert "exit 97" in request.task_text
+    assert request.task_text.endswith("python3 -m pytest -q")
+
+
+def test_python_module_shadow_guard_detects_wrapped_python_m_pytest() -> None:
+    commands = ["poetry run python -m pytest tests/unit -q"]
+
+    guard = verification_module._python_module_shadow_guard_script(commands)
+
+    assert guard
+    assert any("python -m pytest may be shadowed" in line for line in guard)
 
 
 @pytest.mark.anyio
@@ -87,7 +132,11 @@ async def test_run_deterministic_verification_fails_on_worker_failure() -> None:
 
     assert status == "failed"
     assert "Deterministic verification failed: Tests failed." in summary
-    assert metadata is None
+    assert metadata is not None
+    assert metadata["status"] == "failed"
+    assert metadata["failed_commands"] == [
+        ".venv/bin/pytest tests/unit/test_orchestrator_graph_unit.py"
+    ]
 
 
 @pytest.mark.anyio
@@ -146,12 +195,15 @@ async def test_run_deterministic_verification_returns_warning_on_no_result() -> 
 async def test_run_deterministic_verification_returns_warning_on_missing_shell_worker() -> None:
     state = _state()
 
-    status, summary, _ = await verification_module.run_deterministic_verification(
+    status, summary, metadata = await verification_module.run_deterministic_verification(
         state, worker_factory={"codex": AsyncMock()}
     )
 
     assert status == "warning"
     assert "no 'shell' worker available" in summary
+    assert metadata is not None
+    assert metadata["status"] == "warning"
+    assert metadata["commands"] == [".venv/bin/pytest tests/unit/test_orchestrator_graph_unit.py"]
 
 
 @pytest.mark.anyio
@@ -161,13 +213,15 @@ async def test_run_deterministic_verification_handles_timeout_with_passing_tests
     mock_worker = AsyncMock()
     mock_worker.run.side_effect = TimeoutError()
 
-    status, summary, _ = await verification_module.run_deterministic_verification(
+    status, summary, metadata = await verification_module.run_deterministic_verification(
         state,
         worker_factory={"shell": mock_worker},
     )
 
     assert status == "warning"
     assert "timed out after 90s, but internal tests passed" in summary
+    assert metadata is not None
+    assert metadata["status"] == "warning"
 
 
 @pytest.mark.anyio
@@ -177,13 +231,15 @@ async def test_run_deterministic_verification_handles_timeout_with_failing_tests
     mock_worker = AsyncMock()
     mock_worker.run.side_effect = TimeoutError()
 
-    status, summary, _ = await verification_module.run_deterministic_verification(
+    status, summary, metadata = await verification_module.run_deterministic_verification(
         state,
         worker_factory={"shell": mock_worker},
     )
 
     assert status == "failed"
     assert "timed out after 90s" in summary
+    assert metadata is not None
+    assert metadata["status"] == "failed"
 
 
 @pytest.mark.anyio
@@ -192,13 +248,15 @@ async def test_run_deterministic_verification_handles_infra_error() -> None:
     mock_worker = AsyncMock()
     mock_worker.run.side_effect = RuntimeError("Broken")
 
-    status, summary, _ = await verification_module.run_deterministic_verification(
+    status, summary, metadata = await verification_module.run_deterministic_verification(
         state,
         worker_factory={"shell": mock_worker},
     )
 
     assert status == "failed"
     assert "infrastructure error: RuntimeError" in summary
+    assert metadata is not None
+    assert metadata["status"] == "failed"
 
 
 @pytest.mark.anyio
@@ -285,4 +343,6 @@ async def test_run_deterministic_verification_skips_placeholder_only_commands() 
     assert metadata is not None
     assert metadata["skip_reason_code"] == "verification_commands_placeholder_only"
     assert metadata["placeholder_count"] == 1
+    assert metadata["commands"] == []
+    assert metadata["status"] == "warning"
     mock_worker.run.assert_not_called()

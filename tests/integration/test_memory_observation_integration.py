@@ -375,13 +375,14 @@ def test_persist_execution_outcome_bridges_after_outcome_transaction(
     original_capture_worker_run = ObservationCaptureService.capture_worker_run
     original_bridge_observations = ObservationMemoryBridge.bridge_observations
 
-    def mock_capture_worker_run(*, session, task, worker_run, result):
+    def mock_capture_worker_run(*, session, task, worker_run, result, **kwargs):
         capture_session_ids.append(id(session))
         return original_capture_worker_run(
             session=session,
             task=task,
             worker_run=worker_run,
             result=result,
+            **kwargs,
         )
 
     def mock_bridge_observations(*, session, task_id):
@@ -549,6 +550,22 @@ def _build_mock_state_for_extraction(task_id: str) -> OrchestratorState:
     )
 
 
+def _assert_observation_bridge_timeline(db_task: Task) -> None:
+    bridge_events = [
+        event
+        for event in db_task.timeline_events
+        if event.event_type == "memory_persisted"
+        and event.payload
+        and event.payload.get("source") == "observation_bridge"
+    ]
+    assert len(bridge_events) == 1
+    assert bridge_events[0].payload["extracted_candidate_count"] == 3
+    assert bridge_events[0].payload["decision_counts"] == {
+        "create": 1,
+        "needs_human_review": 2,
+    }
+
+
 def test_persist_execution_outcome_performs_deterministic_extraction(session_factory) -> None:
     """_persist_execution_outcome correctly extracts, child-maps, and admits candidates from traces.
 
@@ -625,3 +642,4 @@ def test_persist_execution_outcome_performs_deterministic_extraction(session_fac
             "known_pitfalls",
             "repo_convention",
         }
+        _assert_observation_bridge_timeline(db_task)

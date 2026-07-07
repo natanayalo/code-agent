@@ -349,9 +349,14 @@ def _serialize_verification_report(report: object | None) -> dict[str, Any] | No
         serialized = _drop_none_reason_codes(serialized)
         if serialized.get("failure_kind") is None:
             serialized.pop("failure_kind", None)
+        if serialized.get("deterministic_verification") is None:
+            serialized.pop("deterministic_verification", None)
         return serialized
     if isinstance(report, Mapping):
-        return _drop_none_reason_codes(dict(report))
+        serialized = _drop_none_reason_codes(dict(report))
+        if serialized.get("deterministic_verification") is None:
+            serialized.pop("deterministic_verification", None)
+        return serialized
     raise TypeError(f"Unsupported verification report type: {type(report).__name__}")
 
 

@@ -220,13 +220,17 @@ def _build_verify_response(
     updated_result: dict[str, Any] | None,
     repair_handoff_requested: bool,
 ) -> dict[str, Any]:
-    verification_payload = report.model_dump()
     if deterministic_verifier_metadata is not None:
-        verification_payload["deterministic_verification"] = deterministic_verifier_metadata
+        report = report.model_copy(
+            update={"deterministic_verification": deterministic_verifier_metadata}
+        )
+    verification_payload = report.model_dump(mode="json")
+    if verification_payload.get("deterministic_verification") is None:
+        verification_payload.pop("deterministic_verification", None)
 
     response: dict[str, Any] = {
         "current_step": "verify_result",
-        "verification": report.model_dump(),
+        "verification": verification_payload,
         "progress_updates": _progress_update(state, progress_message),
         **_timeline_events(
             state,

@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 from typing import Final
+from urllib.parse import quote
 
 import httpx
 
@@ -42,6 +43,18 @@ def _required_env_value(name: str) -> str:
 API_URL: Final[str] = os.environ.get("CODE_AGENT_API_URL", "http://127.0.0.1:8000")
 SHARED_SECRET = _required_env_value("CODE_AGENT_API_SHARED_SECRET")
 QA_REPO_KEY: Final[str] = os.environ.get("CODE_AGENT_QA_REPO_KEY", "qa-dummy")
+PHOENIX_URL: Final[str] = os.environ.get("CODE_AGENT_PHOENIX_URL", "http://127.0.0.1:6006")
+TRACING_PROJECT: Final[str] = os.environ.get(
+    "CODE_AGENT_TRACING_PROJECT",
+    _read_env_value("CODE_AGENT_TRACING_PROJECT") or "code-agent-local",
+)
+TRACE_EXPORT_WAIT_SECONDS: Final[int] = int(
+    os.environ.get("CODE_AGENT_QA_TRACE_EXPORT_WAIT_SECONDS", "20")
+)
+ARTIFACT_VERIFY_COMMAND: Final[str] = (
+    'python3 -c "from pathlib import Path; '
+    "assert Path('qa-hello.txt').read_text().strip() == 'Hello QA'\""
+)
 
 
 # Read workspace root from .env to match the docker compose volume mapping
@@ -51,6 +64,10 @@ workspace_root = _read_env_value("CODE_AGENT_WORKSPACE_ROOT") or DEFAULT_WORKSPA
 workspace_root = os.path.expandvars(os.path.expanduser(workspace_root))
 
 DUMMY_REPO_DIR = os.path.join(workspace_root, "dummy_repo")
+
+
+def _is_enabled(raw_value: str | None) -> bool:
+    return (raw_value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def setup_dummy_repo():
@@ -113,6 +130,13 @@ async def main():
         "branch": "master",
         "source": "qa",
         "worker_override": os.environ.get("CODE_AGENT_WORKER_OVERRIDE", "antigravity"),
+        "constraints": {
+            "verification_commands": [ARTIFACT_VERIFY_COMMAND],
+            "acceptance_criteria": [
+                "qa-hello.txt exists.",
+                "qa-hello.txt contains exactly Hello QA.",
+            ],
+        },
     }
 
     async with httpx.AsyncClient() as client:
@@ -163,6 +187,13 @@ async def main():
         else:
             raise RuntimeError("Task timed out.")
 
+        if _is_enabled(_read_env_value("CODE_AGENT_ENABLE_TRACING")):
+            await wait_for_span_export(
+                client,
+                task_id=task_id,
+                span_name="orchestrator.memory.observation_bridge",
+            )
+
     print("\n[*] Verifying dummy repository artifacts")
 
     workspace_dir = None
@@ -192,6 +223,46 @@ async def main():
         raise RuntimeError(f"No workspace directory found at {full_path}")
 
     print("[+] Done.")
+
+
+async def wait_for_span_export(
+    client: httpx.AsyncClient,
+    *,
+    task_id: str,
+    span_name: str,
+) -> None:
+    print(f"[*] Waiting for Phoenix span export: {span_name}")
+    spans_url = f"{PHOENIX_URL.rstrip('/')}/v1/projects/{quote(TRACING_PROJECT)}/spans"
+    attempts = max(1, TRACE_EXPORT_WAIT_SECONDS // 2)
+    last_error = None
+
+    for attempt in range(attempts):
+        try:
+            resp = await client.get(
+                spans_url,
+                params={
+                    "limit": "100",
+                    "name": span_name,
+                    "attribute": f"code_agent.task_id:{task_id}",
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            rows = data.get("data") if isinstance(data, dict) else None
+            if rows:
+                print(f"[+] Phoenix span found: {span_name}")
+                return
+        except (httpx.HTTPError, ValueError) as exc:
+            last_error = exc
+
+        print(f"    - Span attempt {attempt + 1}/{attempts}: not visible yet")
+        await asyncio.sleep(2)
+
+    raise RuntimeError(
+        f"Phoenix span {span_name!r} was not visible for task {task_id} "
+        f"after {TRACE_EXPORT_WAIT_SECONDS}s. Last error: {last_error}"
+    )
 
 
 if __name__ == "__main__":

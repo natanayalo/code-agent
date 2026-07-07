@@ -49,15 +49,32 @@ def session_factory():
     return create_session_factory(engine)
 
 
-def _seed_task(session) -> Task:
-    """Helper to seed user, session, and task to satisfy foreign keys and NOT NULL constraints."""
+def _seed_task(
+    session,
+    *,
+    task_id: str = "task-1",
+    task_text: str = "Implement code",
+    repo_url: str = "repo1",
+    external_thread_id: str = "thread-1",
+    task_spec: dict | None = None,
+    constraints: dict | None = None,
+) -> Task:
     user = User(external_user_id="test-user")
     session.add(user)
     session.flush()
-    conv = ConversationSession(user_id=user.id, channel="test", external_thread_id="thread-1")
+    conv = ConversationSession(
+        user_id=user.id, channel="test", external_thread_id=external_thread_id
+    )
     session.add(conv)
     session.flush()
-    task = Task(id="task-1", session_id=conv.id, task_text="Implement code", repo_url="repo1")
+    task = Task(
+        id=task_id,
+        session_id=conv.id,
+        task_text=task_text,
+        repo_url=repo_url,
+        task_spec=task_spec,
+        constraints=constraints,
+    )
     session.add(task)
     session.flush()
     return task
@@ -153,6 +170,7 @@ def test_capture_worker_run(session_factory) -> None:
         assert retrieved.admission_status == "not_required"
         assert retrieved.privacy_stripped is True
         assert retrieved.metadata_payload["files_changed"] == ["app.py"]
+        assert retrieved.metadata_payload["verifier_outcome"] == {}
 
 
 def test_capture_task_finalization(session_factory) -> None:
@@ -505,26 +523,16 @@ def test_trace_extraction_convention_rules(session_factory) -> None:
 def test_trace_extraction_remember_instruction_rules(session_factory) -> None:
     """Test deterministic extraction of remember instructions from task text."""
     with session_scope(session_factory) as session:
-        # Seed task with task text containing "remember to"
-        user = User(external_user_id="test-user")
-        session.add(user)
-        session.flush()
-        conv = ConversationSession(user_id=user.id, channel="test", external_thread_id="thread-2")
-        session.add(conv)
-        session.flush()
-        task = Task(
-            id="task-2",
-            session_id=conv.id,
+        task = _seed_task(
+            session,
+            task_id="task-2",
             task_text="Remember to use python 3.12 always.",
             repo_url="repo2",
+            external_thread_id="thread-2",
         )
-        session.add(task)
-        session.flush()
         task_id = task.id
 
-        # Seed interaction resolved observation with "always use..."
-        obs_repo = ObservationRepository(session)
-        obs_repo.create(
+        ObservationRepository(session).create(
             task_id=task_id,
             session_id=task.session_id,
             repo_url=task.repo_url,
@@ -536,11 +544,9 @@ def test_trace_extraction_remember_instruction_rules(session_factory) -> None:
         )
         session.flush()
 
-    # Run bridge to trigger extraction
     with session_scope(session_factory) as session:
         ObservationMemoryBridge.bridge_observations(session, task_id)
 
-    # Verify that child observations for remember instructions were created
     with session_scope(session_factory) as session:
         children = list(
             session.scalars(
@@ -638,27 +644,18 @@ def test_extraction_idempotency(session_factory) -> None:
 def test_trace_extraction_custom_expected_verification_commands(session_factory) -> None:
     """Test custom verification commands from task spec/constraints are successfully extracted."""
     with session_scope(session_factory) as session:
-        user = User(external_user_id="test-user")
-        session.add(user)
-        session.flush()
-        conv = ConversationSession(user_id=user.id, channel="test", external_thread_id="thread-e2e")
-        session.add(conv)
-        session.flush()
-        task = Task(
-            id="task-custom-e2e",
-            session_id=conv.id,
+        task = _seed_task(
+            session,
+            task_id="task-custom-e2e",
             task_text="Run normal workflow.",
             repo_url="repo-custom",
+            external_thread_id="thread-e2e",
             task_spec={"verification_commands": ["make build", "make ci"]},
             constraints={"verification_commands": ["make deploy-check"]},
         )
-        session.add(task)
-        session.flush()
         task_id = task.id
 
-        obs_repo = ObservationRepository(session)
-        # Seed worker completed with a matching verification command
-        obs_repo.create(
+        ObservationRepository(session).create(
             task_id=task_id,
             session_id=task.session_id,
             repo_url=task.repo_url,
@@ -694,36 +691,84 @@ def test_trace_extraction_custom_expected_verification_commands(session_factory)
         assert "make build " in cand_val
         assert "make deploy-check" in cand_val
 
-        # Freshly verified commands should set requires_verification=False and last_verified_at
         cand = children[0].metadata_payload["memory_candidate"]
         assert cand["requires_verification"] is False
         assert cand["last_verified_at"] is not None
 
 
+def test_trace_extraction_uses_deterministic_verifier_outcome(session_factory) -> None:
+    """Native runs should extract verifier commands from persisted verifier outcome metadata."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(
+            session,
+            task_id="task-native-verifier",
+            task_text="Run native workflow.",
+            repo_url="repo-native",
+            external_thread_id="thread-e2e",
+            task_spec={"verification_commands": ["python3 --version"]},
+        )
+        task_id = task.id
+
+        ObservationRepository(session).create(
+            task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            source="worker",
+            event_type="worker_completed",
+            summary="Native worker finished.",
+            content="Native wrapper command only.",
+            metadata_payload={
+                "commands_run": [
+                    {"command": "codex exec --model gpt-5 -", "exit_code": 0},
+                ],
+                "verifier_outcome": {
+                    "status": "warning",
+                    "deterministic_verification": {
+                        "status": "passed",
+                        "commands": ["python3 --version"],
+                        "passed_commands": ["python3 --version"],
+                    },
+                },
+            },
+            admission_status="not_required",
+        )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        summary = ObservationMemoryBridge.bridge_observations(session, task_id)
+
+    with session_scope(session_factory) as session:
+        children = list(
+            session.scalars(
+                select(MemoryObservation).where(
+                    MemoryObservation.event_type == "extracted_candidate",
+                    MemoryObservation.task_id == task_id,
+                )
+            ).all()
+        )
+        assert len(children) == 1
+        candidate = children[0].metadata_payload["memory_candidate"]
+        assert candidate["memory_key"] == "verification_commands"
+        assert candidate["value"] == {"python3 --version": "python3 --version"}
+        assert candidate["requires_verification"] is False
+        assert candidate["last_verified_at"] is not None
+        assert summary["decision_counts"] == {"create": 1}
+        assert summary["durable_memory_count"] == 1
+
+
 def test_trace_extraction_remember_instruction_deduplication(session_factory) -> None:
     """Test that remember instructions in task finalized content are not extracted twice."""
     with session_scope(session_factory) as session:
-        user = User(external_user_id="test-user")
-        session.add(user)
-        session.flush()
-        conv = ConversationSession(
-            user_id=user.id, channel="test", external_thread_id="thread-dedup"
-        )
-        session.add(conv)
-        session.flush()
-        task = Task(
-            id="task-dedup",
-            session_id=conv.id,
+        task = _seed_task(
+            session,
+            task_id="task-dedup",
             task_text="Remember to use python 3.12 always.",
             repo_url="repo-dedup",
+            external_thread_id="thread-dedup",
         )
-        session.add(task)
-        session.flush()
         task_id = task.id
 
-        obs_repo = ObservationRepository(session)
-        # Seed task_finalized observation that contains the same remember sentence
-        obs_repo.create(
+        ObservationRepository(session).create(
             task_id=task_id,
             session_id=task.session_id,
             repo_url=task.repo_url,

@@ -193,6 +193,8 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
             tracer_name="workers.codex_cli_worker",
             span_name="CodexCliWorker.run",
             attributes=with_span_kind(SPAN_KIND_AGENT),
+            task_id=request.task_id,
+            session_id=request.session_id,
         ):
 
             def _run_sync(cancel_requested: Callable[[], bool]) -> WorkerResult:

@@ -8,6 +8,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Final, Literal, cast, get_args
 
+from apps.observability import (
+    SPAN_KIND_CHAIN,
+    set_span_input_output,
+    start_optional_span,
+    with_span_kind,
+)
 from db.enums import ArtifactType, ProposalStatus, ProposalType, TaskStatus, WorkerType
 from orchestrator.execution_improvement_proposal_service import (
     _persist_friction_proposals_if_needed,
@@ -60,21 +66,52 @@ class _PersistedExecutionOutcome:
     worker_run_id: str
 
 
-def _bridge_observations_after_outcome_commit(session_factory: Any, task_id: str) -> None:
+def _bridge_observations_after_outcome_commit(
+    session_factory: Any, task_id: str, attempt_count: int
+) -> None:
     """Run memory admission in a short-lived transaction after outcome persistence commits."""
     from memory.observation import ObservationMemoryBridge
 
     try:
-        with session_scope(session_factory) as session:
-            ObservationMemoryBridge.bridge_observations(
-                session=session,
-                task_id=task_id,
-            )
+        with start_optional_span(
+            tracer_name="orchestrator.execution",
+            span_name="orchestrator.memory.observation_bridge",
+            attributes=with_span_kind(SPAN_KIND_CHAIN),
+            task_id=task_id,
+            attempt=attempt_count,
+        ):
+            with session_scope(session_factory) as session:
+                summary = ObservationMemoryBridge.bridge_observations(
+                    session=session,
+                    task_id=task_id,
+                )
+                set_span_input_output(
+                    input_data={"task_id": task_id, "attempt_count": attempt_count},
+                    output_data=summary,
+                )
+                if _observation_bridge_has_activity(summary):
+                    TaskTimelineRepository(session).create_next_for_attempt(
+                        task_id=task_id,
+                        attempt_number=attempt_count,
+                        event_type="memory_persisted",
+                        message="Observation bridge processed deterministic memory candidates.",
+                        payload={"source": "observation_bridge", **summary},
+                    )
     except Exception:
         logger.warning(
             "Failed to bridge episodic observations after outcome persistence; continuing.",
             exc_info=True,
         )
+
+
+def _observation_bridge_has_activity(summary: Mapping[str, Any]) -> bool:
+    """Return true when post-commit observation bridging found memory work to report."""
+    if summary.get("extracted_candidate_count"):
+        return True
+    if summary.get("proposal_count") or summary.get("durable_memory_count"):
+        return True
+    decision_counts = summary.get("decision_counts")
+    return isinstance(decision_counts, Mapping) and any(decision_counts.values())
 
 
 def _apply_approval_constraints(task: Any, state: OrchestratorState, finished_at: datetime) -> None:
@@ -634,12 +671,14 @@ def _persist_execution_outcome(
 
         try:
             with session.begin_nested():
+                verifier_outcome = _serialize_verification_report(state.verification)
                 if state.result is not None:
                     ObservationCaptureService.capture_worker_run(
                         session=session,
                         task=task,
                         worker_run=worker_run,
                         result=state.result,
+                        verifier_outcome=verifier_outcome,
                     )
 
                 if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
@@ -661,7 +700,9 @@ def _persist_execution_outcome(
         )
         worker_run_id_val = worker_run.id
 
-    _bridge_observations_after_outcome_commit(self.session_factory, task_id_val)
+    _bridge_observations_after_outcome_commit(
+        self.session_factory, task_id_val, state.attempt_count
+    )
 
     persisted_outcome = _PersistedExecutionOutcome(
         task_id=task_id_val,

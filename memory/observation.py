@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from db.base import utc_now
-from db.models import MemoryAdmissionDecision, MemoryObservation, Task
+from db.models import MemoryAdmissionDecision, MemoryObservation, MemoryProposal, Task
 from memory.admission import CustomMemoryAdmissionService, MemoryCandidate
 from orchestrator.state import ObservationContextEntry
 from privacy.redaction import redact_private_tags, redact_private_tags_recursive
@@ -43,6 +44,7 @@ class ObservationCaptureService:
         task: Any,
         worker_run: Any,
         result: Any,
+        verifier_outcome: dict[str, Any] | None = None,
     ) -> MemoryObservation:
         """Capture worker execution details upon completion (does not require admission)."""
         summary_text = result.summary or f"Worker finished with status {result.status}."
@@ -75,6 +77,7 @@ class ObservationCaptureService:
             "commands_run": cmds_payload,
             "files_changed": result.files_changed or [],
             "worker_memory_requests": mems_payload,
+            "verifier_outcome": verifier_outcome or {},
         }
 
         # Apply recursive redaction
@@ -308,6 +311,44 @@ def _process_single_observation(
         )
 
 
+def _bridge_summary(session: Session, task_id: str) -> dict[str, Any]:
+    observations = list(
+        session.scalars(select(MemoryObservation).where(MemoryObservation.task_id == task_id))
+    )
+    decisions = list(
+        session.scalars(
+            select(MemoryAdmissionDecision).where(MemoryAdmissionDecision.task_id == task_id)
+        )
+    )
+    proposal_count = (
+        session.scalar(
+            select(func.count())
+            .select_from(MemoryProposal)
+            .where(MemoryProposal.task_id == task_id)
+        )
+        or 0
+    )
+    admission_status_counts = Counter(_string_value(obs.admission_status) for obs in observations)
+    decision_counts = Counter(_string_value(decision.decision) for decision in decisions)
+    risk_counts = Counter(_string_value(decision.risk_level) for decision in decisions)
+    return {
+        "observation_count": len(observations),
+        "extracted_candidate_count": sum(
+            1 for obs in observations if obs.event_type == "extracted_candidate"
+        ),
+        "pending_observation_count": admission_status_counts.get("pending", 0),
+        "processed_observation_count": admission_status_counts.get("processed", 0),
+        "failed_observation_count": admission_status_counts.get("failed", 0),
+        "invalid_observation_count": admission_status_counts.get("invalid", 0),
+        "decision_counts": dict(decision_counts),
+        "risk_counts": dict(risk_counts),
+        "proposal_count": int(proposal_count),
+        "durable_memory_count": sum(
+            1 for decision in decisions if decision.durable_memory_id is not None
+        ),
+    }
+
+
 def _is_verification_command(command_str: str) -> bool:
     cmd = command_str.strip()
     prefixes = [
@@ -436,6 +477,26 @@ def _extract_verification_candidates(
             is_ver = _is_verification_command(cmd_str) or (cmd_stripped in normalized_expected)
             if is_ver:
                 ver_cmds.append(cmd_str)
+
+    verifier_outcome = trace_obs.metadata_payload.get("verifier_outcome")
+    if isinstance(verifier_outcome, dict):
+        deterministic = verifier_outcome.get("deterministic_verification")
+        if isinstance(deterministic, dict) and deterministic.get("status") == "passed":
+            passed_commands = deterministic.get("passed_commands") or deterministic.get("commands")
+            if isinstance(passed_commands, list):
+                for raw_command in passed_commands:
+                    if not isinstance(raw_command, str):
+                        continue
+                    cmd_stripped = raw_command.strip()
+                    if not cmd_stripped:
+                        continue
+                    is_ver = _is_verification_command(cmd_stripped) or (
+                        cmd_stripped in normalized_expected
+                    )
+                    if is_ver:
+                        ver_cmds.append(cmd_stripped)
+
+    ver_cmds = list(dict.fromkeys(ver_cmds))
 
     if ver_cmds:
         evidence_str = f"Verification commands {ver_cmds} executed successfully."
@@ -592,7 +653,7 @@ def _save_extracted_candidates(
             source="system",
             event_type="extracted_candidate",
             summary=f"Extracted candidate: {cand.memory_key}",
-            content=(f"Key: {cand.memory_key}\n" f"Source trace observation ID: {trace_obs.id}"),
+            content=(f"Key: {cand.memory_key}\nSource trace observation ID: {trace_obs.id}"),
             metadata_payload={
                 "memory_candidate": cand_dict,
                 "parent_observation_id": trace_obs.id,
@@ -698,7 +759,7 @@ class ObservationMemoryBridge:
     """Synchronous, local bridge to promote pending observations to memory candidates."""
 
     @staticmethod
-    def bridge_observations(session: Session, task_id: str) -> None:
+    def bridge_observations(session: Session, task_id: str) -> dict[str, Any]:
         """Fetch pending observations for a task, validate candidate payloads, and run admission."""
         # First perform trace-to-candidate extraction to populate child pending observations
         try:
@@ -718,7 +779,7 @@ class ObservationMemoryBridge:
         )
         pending_obs = list(session.scalars(statement))
         if not pending_obs:
-            return
+            return _bridge_summary(session, task_id)
 
         for obs in pending_obs:
             try:
@@ -745,3 +806,4 @@ class ObservationMemoryBridge:
                         obs.id,
                         nested_exc,
                     )
+        return _bridge_summary(session, task_id)

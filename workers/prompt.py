@@ -249,6 +249,9 @@ def build_workflow_instructions_section(request: WorkerRequest) -> str:
             "- Base steps on observed output and exit codes.",
             "- Surface blockers explicitly instead of guessing.",
             "- End with a concise summary.",
+            "- If you encounter a project-specific pitfall, a non-obvious workspace setup rule, "
+            "or a user preference during execution, suggest a candidate memory to save by "
+            "populating the `memory_to_persist` field in your response.",
         ]
     )
     return "\n".join(lines)

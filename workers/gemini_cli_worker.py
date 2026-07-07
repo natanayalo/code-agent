@@ -114,6 +114,8 @@ class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
             tracer_name="workers.gemini_cli_worker",
             span_name="GeminiCliWorker.run",
             attributes=with_span_kind(SPAN_KIND_AGENT),
+            task_id=request.task_id,
+            session_id=request.session_id,
         ):
 
             def _run_sync(cancel_requested: Callable[[], bool]) -> WorkerResult:
