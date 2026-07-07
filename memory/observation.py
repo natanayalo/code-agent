@@ -533,7 +533,7 @@ def _extract_pitfall_candidates(
     for idx, cmd_fail in enumerate(commands):
         fail_cmd_str = cmd_fail.get("command")
         fail_exit_code = cmd_fail.get("exit_code")
-        if fail_cmd_str and fail_exit_code != 0:
+        if fail_cmd_str and fail_exit_code is not None and fail_exit_code != 0:
             for cmd_success in commands[idx + 1 :]:
                 success_cmd_str = cmd_success.get("command")
                 success_exit_code = cmd_success.get("exit_code")

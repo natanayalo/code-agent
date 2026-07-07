@@ -478,6 +478,53 @@ def test_trace_extraction_pitfall_rules(session_factory) -> None:
         assert pitfalls[0].admission_status == "processed"
 
 
+def test_trace_extraction_pitfall_skips_none_exit_code(session_factory) -> None:
+    """Verify that commands with None exit codes are skipped in pitfall extraction."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(session)
+        task_id = task.id
+
+        obs_repo = ObservationRepository(session)
+        obs_repo.create(
+            task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            source="worker",
+            event_type="worker_completed",
+            summary="Worker completed.",
+            content="Trace:",
+            metadata_payload={
+                "commands_run": [
+                    {"command": "python test_script.py", "exit_code": None},
+                    {"command": "poetry run python test_script.py", "exit_code": 0},
+                ]
+            },
+            admission_status="not_required",
+        )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        ObservationMemoryBridge.bridge_observations(session, task_id)
+
+    with session_scope(session_factory) as session:
+        children = list(
+            session.scalars(
+                select(MemoryObservation).where(
+                    MemoryObservation.event_type == "extracted_candidate"
+                )
+            ).all()
+        )
+        # Should not extract a pitfall since fail_exit_code is None.
+        # It only extracts poetry run python test_script.py (exit code 0) as a verification
+        # command candidate.
+        pitfalls = [
+            c
+            for c in children
+            if c.metadata_payload["memory_candidate"]["memory_key"] == "known_pitfalls"
+        ]
+        assert len(pitfalls) == 0
+
+
 def test_trace_extraction_convention_rules(session_factory) -> None:
     """Test deterministic extraction of conventions."""
     with session_scope(session_factory) as session:
