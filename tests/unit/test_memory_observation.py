@@ -525,6 +525,52 @@ def test_trace_extraction_pitfall_skips_none_exit_code(session_factory) -> None:
         assert len(pitfalls) == 0
 
 
+def test_trace_extraction_pitfall_skips_identical_successful_command(
+    session_factory,
+) -> None:
+    """Verify that identical failed and successful commands do not create a pitfall."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(session)
+        task_id = task.id
+
+        obs_repo = ObservationRepository(session)
+        obs_repo.create(
+            task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            source="worker",
+            event_type="worker_completed",
+            summary="Worker completed.",
+            content="Trace:",
+            metadata_payload={
+                "commands_run": [
+                    {"command": "pytest", "exit_code": 1},
+                    {"command": "pytest", "exit_code": 0},
+                ]
+            },
+            admission_status="not_required",
+        )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        ObservationMemoryBridge.bridge_observations(session, task_id)
+
+    with session_scope(session_factory) as session:
+        children = list(
+            session.scalars(
+                select(MemoryObservation).where(
+                    MemoryObservation.event_type == "extracted_candidate"
+                )
+            ).all()
+        )
+        pitfalls = [
+            c
+            for c in children
+            if c.metadata_payload["memory_candidate"]["memory_key"] == "known_pitfalls"
+        ]
+        assert len(pitfalls) == 0
+
+
 def test_trace_extraction_convention_rules(session_factory) -> None:
     """Test deterministic extraction of conventions."""
     with session_scope(session_factory) as session:

@@ -538,6 +538,8 @@ def _extract_pitfall_candidates(
                 success_cmd_str = cmd_success.get("command")
                 success_exit_code = cmd_success.get("exit_code")
                 if success_cmd_str and success_exit_code == 0:
+                    if fail_cmd_str.strip() == success_cmd_str.strip():
+                        continue
                     fail_base = _get_base_executable(fail_cmd_str)
                     succ_base = _get_base_executable(success_cmd_str)
                     if fail_base == succ_base and fail_base:
