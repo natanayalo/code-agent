@@ -17,6 +17,10 @@ from privacy.redaction import redact_private_tags, redact_private_tags_recursive
 from repositories import ObservationRepository
 
 logger = logging.getLogger(__name__)
+_SENTENCE_SPLIT_RE = re.compile(
+    r"(?<!\be\.g\.)(?<!\bi\.e\.)(?<!\bapprox\.)(?<!\bvs\.)(?<=[.!?])\s+",
+    re.I,
+)
 
 
 def strip_private_tags(text: str) -> tuple[str, bool]:
@@ -415,7 +419,7 @@ def _extract_remember_sentences(text: str) -> list[str]:
         re.compile(r"\bnever do\b", re.I),
     ]
     for line in lines:
-        sentences = re.split(r"(?<=[.!?])\s+", line)
+        sentences = _SENTENCE_SPLIT_RE.split(line)
         for s in sentences:
             s_clean = s.strip()
             if any(p.search(s_clean) for p in patterns):

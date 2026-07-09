@@ -26,6 +26,7 @@ from memory.observation import (
     ObservationContextService,
     ObservationMemoryBridge,
     _extract_candidates_from_task_text,
+    _extract_remember_sentences,
     _is_verification_command,
     strip_private_tags,
     strip_private_tags_recursive,
@@ -854,6 +855,18 @@ def test_trace_extraction_remember_instruction_rules(session_factory) -> None:
             "Remember to use python 3.12 always.",
             "Always use ruff for linting.",
         }
+
+
+def test_extract_remember_sentences_preserves_common_abbreviations() -> None:
+    """Remember sentence splitting should not truncate common abbreviations."""
+    sentences = _extract_remember_sentences(
+        "Remember to use e.g. pytest when needed. Always use i.e. exact examples."
+    )
+
+    assert sentences == [
+        "Remember to use e.g. pytest when needed.",
+        "Always use i.e. exact examples.",
+    ]
 
 
 def test_extraction_idempotency(session_factory) -> None:
