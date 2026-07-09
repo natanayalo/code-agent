@@ -115,6 +115,14 @@ class MemoryEntry(OrchestratorModel):
     last_verified_at: datetime | None = None
     requires_verification: bool = True
 
+    # Read-side gating metadata (M23.9)
+    staleness: float = 0.0
+    conflict: str | None = None
+    risk: str = "low"
+    advisory_strength: float = 1.0
+    gate_status: str = "accepted"
+    gate_reason_codes: list[str] = Field(default_factory=list)
+
 
 class ObservationContextEntry(OrchestratorModel):
     """An episodic observation record loaded for a task context."""
@@ -134,6 +142,7 @@ class MemoryContext(OrchestratorModel):
     project: list[MemoryEntry] = Field(default_factory=list)
     session: dict[str, Any] = Field(default_factory=dict)
     observations: list[ObservationContextEntry] = Field(default_factory=list)
+    gate_diagnostics: dict[str, Any] | None = None
 
 
 class RouteDecision(OrchestratorModel):

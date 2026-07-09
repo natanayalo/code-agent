@@ -257,20 +257,63 @@ def build_workflow_instructions_section(request: WorkerRequest) -> str:
     return "\n".join(lines)
 
 
+def _as_str(val: Any) -> str:
+    if val is None:
+        return ""
+    if hasattr(val, "isoformat"):
+        return val.isoformat()
+    return str(val)
+
+
 def _format_advisory_metadata(m: dict[str, Any]) -> str:
     """Format memory metadata for prompt display."""
-    confidence = m.get("confidence")
-    confidence_val = float(confidence) if confidence is not None else 1.0
+    status = m.get("gate_status", "accepted")
+    risk = m.get("risk", "low")
+    strength = m.get("advisory_strength")
+    strength_val = float(strength) if strength is not None else 1.0
     verified_at = m.get("last_verified_at")
     req_ver = m.get("requires_verification", True)
-    meta_parts = [f"confidence: {confidence_val:.2f}"]
+    conflict = m.get("conflict")
+
+    meta_parts = [status, f"risk={risk}", f"strength={strength_val:.2f}"]
     if verified_at:
-        meta_parts.append(f"verified: {verified_at}")
+        date_str = str(verified_at)
+        if "T" in date_str:
+            date_str = date_str.split("T")[0]
+        elif " " in date_str:
+            date_str = date_str.split(" ")[0]
+        meta_parts.append(f"verified={date_str}")
     else:
         meta_parts.append("unverified")
+
     if req_ver:
         meta_parts.append("requires verification")
+    if conflict:
+        meta_parts.append(f"conflict={conflict}")
+
     return ", ".join(meta_parts)
+
+
+def _format_memory_group(group: list[dict[str, Any]]) -> list[str]:
+    lines = []
+    for m in group:
+        key = m.get("memory_key")
+        val = m.get("value")
+        meta_str = _format_advisory_metadata(m)
+        lines.append(f"- **{key}** [{meta_str}]: {json.dumps(val)}")
+    return lines
+
+
+def _memory_sort_key(x: dict[str, Any]) -> tuple[float, str, float]:
+    strength = x.get("advisory_strength")
+    strength_val = float(strength) if strength is not None else 1.0
+    confidence = x.get("confidence")
+    confidence_val = float(confidence) if confidence is not None else 1.0
+    return (
+        strength_val,
+        _as_str(x.get("last_verified_at")),
+        confidence_val,
+    )
 
 
 def build_memory_context_section(request: WorkerRequest) -> str:
@@ -279,29 +322,34 @@ def build_memory_context_section(request: WorkerRequest) -> str:
         return ""
 
     mem_ctx = request.memory_context
+    durable_lines = [
+        "Memory context is advisory. Current user instructions, repository files, "
+        "AGENTS.md, approval policy, and verification results override memory."
+    ]
 
-    durable_lines = []
     personal_mem = mem_ctx.get("personal", [])
     project_mem = mem_ctx.get("project", [])
 
-    if personal_mem:
-        durable_lines.append("### Personal Memories")
-        for m in personal_mem:
-            key = m.get("memory_key")
-            val = m.get("value")
-            meta_str = _format_advisory_metadata(m)
-            durable_lines.append(f"- **{key}** ({meta_str}): {json.dumps(val)}")
+    proj_accepted = [m for m in project_mem if m.get("gate_status", "accepted") == "accepted"]
+    proj_advisory = [m for m in project_mem if m.get("gate_status", "accepted") == "advisory"]
+    pers_accepted = [m for m in personal_mem if m.get("gate_status", "accepted") == "accepted"]
+    pers_advisory = [m for m in personal_mem if m.get("gate_status", "accepted") == "advisory"]
 
-    if project_mem:
+    proj_accepted.sort(key=_memory_sort_key, reverse=True)
+    proj_advisory.sort(key=_memory_sort_key, reverse=True)
+    pers_accepted.sort(key=_memory_sort_key, reverse=True)
+    pers_advisory.sort(key=_memory_sort_key, reverse=True)
+
+    if proj_accepted or proj_advisory:
         durable_lines.append("### Project Memories")
-        for m in project_mem:
-            key = m.get("memory_key")
-            val = m.get("value")
-            meta_str = _format_advisory_metadata(m)
-            durable_lines.append(f"- **{key}** ({meta_str}): {json.dumps(val)}")
+        durable_lines.extend(_format_memory_group(proj_accepted + proj_advisory))
+
+    if pers_accepted or pers_advisory:
+        durable_lines.append("### Personal Memories")
+        durable_lines.extend(_format_memory_group(pers_accepted + pers_advisory))
 
     durable_text = ""
-    if durable_lines:
+    if len(durable_lines) > 1:  # More than just the warning line
         durable_raw = "\n".join(durable_lines)
         if len(durable_raw) > 3500:
             durable_raw = durable_raw[:3500] + "..."

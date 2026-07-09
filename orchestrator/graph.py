@@ -1612,7 +1612,7 @@ def _memory_loaded_payload(
     search_query: str,
     search_limit: int,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "retrieval_mode": "full_text",
         "search_query": search_query[:200],
         "search_limit": search_limit,
@@ -1624,62 +1624,51 @@ def _memory_loaded_payload(
         "project_keys": [entry.memory_key for entry in memory.project],
         "observation_ids": [entry.id for entry in memory.observations],
     }
+    if memory.gate_diagnostics:
+        diag = memory.gate_diagnostics
+        accepted_p = diag.get("accepted_personal", [])
+        accepted_proj = diag.get("accepted_project", [])
+        suppressed_p = diag.get("suppressed_personal", [])
+        suppressed_proj = diag.get("suppressed_project", [])
+
+        accepted_keys = [e.get("memory_key") for e in accepted_p] + [
+            e.get("memory_key") for e in accepted_proj
+        ]
+        suppressed_keys = [e.get("memory_key") for e in suppressed_p] + [
+            e.get("memory_key") for e in suppressed_proj
+        ]
+
+        payload.update(
+            {
+                "loaded_count": len(accepted_keys) + len(suppressed_keys),
+                "accepted_count": len(accepted_keys),
+                "suppressed_count": len(suppressed_keys),
+                "reason_counts": diag.get("reason_counts", {}),
+                "accepted_keys": accepted_keys,
+                "suppressed_keys": suppressed_keys,
+                "suppressed_details": suppressed_p + suppressed_proj,
+            }
+        )
+    return payload
 
 
 def _apply_read_side_gate(memory: MemoryContext) -> MemoryContext:
     """Apply read-side memory gate (cross-scope deduplication and conflict resolution)."""
-    from datetime import UTC, datetime
+    try:
+        from memory.read_side_gate import ReadSideMemoryGateService
 
-    def _confidence_value(value: float | None) -> float:
-        return 1.0 if value is None else value
-
-    def _as_utc(value: datetime | None) -> datetime:
-        if value is None:
-            return datetime.min.replace(tzinfo=UTC)
-        if value.tzinfo is None:
-            return value.replace(tzinfo=UTC)
-        return value.astimezone(UTC)
-
-    # 1. Deduplicate personal memory itself
-    # (keep highest confidence/newest verification for each key)
-    deduped_personal = {}
-    for entry in memory.personal:
-        key = entry.memory_key
-        if key not in deduped_personal:
-            deduped_personal[key] = entry
-        else:
-            existing = deduped_personal[key]
-            e_time = _as_utc(entry.last_verified_at)
-            ex_time = _as_utc(existing.last_verified_at)
-            if e_time > ex_time or (
-                e_time == ex_time
-                and _confidence_value(entry.confidence) > _confidence_value(existing.confidence)
-            ):
-                deduped_personal[key] = entry
-
-    # 2. Deduplicate project memory itself
-    deduped_project = {}
-    for entry in memory.project:
-        key = entry.memory_key
-        if key not in deduped_project:
-            deduped_project[key] = entry
-        else:
-            existing = deduped_project[key]
-            e_time = _as_utc(entry.last_verified_at)
-            ex_time = _as_utc(existing.last_verified_at)
-            if e_time > ex_time or (
-                e_time == ex_time
-                and _confidence_value(entry.confidence) > _confidence_value(existing.confidence)
-            ):
-                deduped_project[key] = entry
-
-    # 3. Cross-scope deduplication (project overrides personal)
-    for key in list(deduped_personal.keys()):
-        if key in deduped_project:
-            del deduped_personal[key]
-
-    memory.personal = list(deduped_personal.values())
-    memory.project = list(deduped_project.values())
+        result = ReadSideMemoryGateService.process(
+            personal=memory.personal,
+            project=memory.project,
+        )
+        memory.personal = result.accepted_personal
+        memory.project = result.accepted_project
+        memory.gate_diagnostics = result.model_dump(mode="json")
+    except Exception:
+        logger.warning(
+            "Failed to run read-side memory gate; using input memories as-is.",
+            exc_info=True,
+        )
     return memory
 
 

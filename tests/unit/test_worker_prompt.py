@@ -269,6 +269,9 @@ def test_build_system_prompt_renders_advisory_metadata(tmp_path) -> None:
                     "confidence": 0.85,
                     "last_verified_at": "2026-07-04T12:00:00Z",
                     "requires_verification": False,
+                    "gate_status": "accepted",
+                    "risk": "low",
+                    "advisory_strength": 0.85,
                 }
             ],
             "project": [
@@ -278,6 +281,9 @@ def test_build_system_prompt_renders_advisory_metadata(tmp_path) -> None:
                     "confidence": 0.95,
                     "last_verified_at": None,
                     "requires_verification": True,
+                    "gate_status": "advisory",
+                    "risk": "low",
+                    "advisory_strength": 0.665,
                 }
             ],
         },
@@ -285,15 +291,22 @@ def test_build_system_prompt_renders_advisory_metadata(tmp_path) -> None:
 
     prompt = build_system_prompt(request, tmp_path)
 
+    # Verify prepended warning warning
+    assert "Memory context is advisory. Current user instructions" in prompt
+
     # Verify personal memory formatting has the metadata
     assert "communication_style" in prompt
-    assert "**communication_style** (confidence: 0.85, verified: 2026-07-04T12:00:00Z):" in prompt
+    assert (
+        "**communication_style** [accepted, risk=low, strength=0.85, verified=2026-07-04]:"
+        in prompt
+    )
 
     # Verify project memory formatting has the metadata
     assert "verification_commands" in prompt
     assert (
-        "**verification_commands** (confidence: 0.95, unverified, requires verification):" in prompt
-    )
+        "**verification_commands** [advisory, risk=low, strength=0.67, "
+        "unverified, requires verification]:"
+    ) in prompt
 
 
 def test_build_system_prompt_advisory_metadata_handles_none_confidence(tmp_path) -> None:
@@ -310,6 +323,9 @@ def test_build_system_prompt_advisory_metadata_handles_none_confidence(tmp_path)
                     "confidence": None,
                     "last_verified_at": "2026-07-04T12:00:00Z",
                     "requires_verification": False,
+                    "gate_status": "accepted",
+                    "risk": "low",
+                    "advisory_strength": 1.0,
                 }
             ],
         },
@@ -317,4 +333,46 @@ def test_build_system_prompt_advisory_metadata_handles_none_confidence(tmp_path)
 
     prompt = build_system_prompt(request, tmp_path)
     assert "communication_style" in prompt
-    assert "**communication_style** (confidence: 1.00, verified: 2026-07-04T12:00:00Z):" in prompt
+    assert (
+        "**communication_style** [accepted, risk=low, strength=1.00, verified=2026-07-04]:"
+        in prompt
+    )
+
+
+def test_build_system_prompt_sorts_memories_correctly(tmp_path) -> None:
+    """Test sorting order of accepted/advisory memories in system prompt."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        repo_url="https://example.com/repo.git",
+        memory_context={
+            "project": [
+                {
+                    "memory_key": "weak_proj",
+                    "value": {"cmd": "weak"},
+                    "confidence": 0.5,
+                    "last_verified_at": "2026-07-01T12:00:00Z",
+                    "requires_verification": True,
+                    "gate_status": "advisory",
+                    "risk": "medium",
+                    "advisory_strength": 0.35,
+                },
+                {
+                    "memory_key": "strong_proj",
+                    "value": {"cmd": "strong"},
+                    "confidence": 0.95,
+                    "last_verified_at": "2026-07-02T12:00:00Z",
+                    "requires_verification": False,
+                    "gate_status": "accepted",
+                    "risk": "low",
+                    "advisory_strength": 0.95,
+                },
+            ],
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+    # The strong project memory should appear before the weak project memory
+    strong_idx = prompt.index("strong_proj")
+    weak_idx = prompt.index("weak_proj")
+    assert strong_idx < weak_idx
