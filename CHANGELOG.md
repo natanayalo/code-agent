@@ -553,6 +553,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: reframe m23 next slices ([#305](https://github.com/natanayalo/code-agent/pull/305))
+
 - Docs: mark M20.4 Worker Supervisor v1 as completed ([#286](https://github.com/natanayalo/code-agent/pull/286))
 
 - Docs: remove completed milestones from roadmap ([#261](https://github.com/natanayalo/code-agent/pull/261))
