@@ -1,7 +1,6 @@
 """Episodic observation service boundaries and logic."""
 
-from __future__ import annotations
-
+import json
 import logging
 import re
 from collections import Counter
@@ -443,6 +442,11 @@ def _extract_conventions(text: str) -> list[str]:
     return extracted
 
 
+def _memory_candidate_fingerprint(cand: MemoryCandidate) -> str:
+    """Build a stable fingerprint for deduplicating extracted candidates."""
+    return json.dumps(cand.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+
+
 def _extract_verification_candidates(
     trace_obs: MemoryObservation,
     task_id: str,
@@ -647,7 +651,16 @@ def _save_extracted_candidates(
     candidates: list[MemoryCandidate],
     obs_repo: ObservationRepository,
 ) -> None:
+    seen_fingerprints: set[str] = set()
+    unique_candidates: list[MemoryCandidate] = []
     for cand in candidates:
+        fingerprint = _memory_candidate_fingerprint(cand)
+        if fingerprint in seen_fingerprints:
+            continue
+        seen_fingerprints.add(fingerprint)
+        unique_candidates.append(cand)
+
+    for cand in unique_candidates:
         cand_dict = cand.model_dump(mode="json")
         cand_dict, _ = redact_private_tags_recursive(cand_dict)
 
@@ -677,7 +690,7 @@ def _extract_candidates_from_task_text(
     if not (task and task.task_text):
         return
     if f"task-{task_id}" not in extracted_parent_ids:
-        remember_sentences = _extract_remember_sentences(task.task_text)
+        remember_sentences = list(dict.fromkeys(_extract_remember_sentences(task.task_text)))
         for sentence in remember_sentences:
             cand = MemoryCandidate(
                 category="project" if task.repo_url else "personal",

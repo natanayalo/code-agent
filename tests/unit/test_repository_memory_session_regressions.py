@@ -299,3 +299,12 @@ def test_relaxed_memory_search_query_uses_significant_or_terms() -> None:
     assert "probe" in relaxed
     assert "python3" in relaxed
     assert "exactly" not in relaxed
+
+
+def test_relaxed_memory_search_query_preserves_underscores_and_unicode() -> None:
+    """Relaxed fallback should keep code identifiers and Unicode tokens intact."""
+    relaxed = _relaxed_tsquery("Inspect test_memory_observation and café results")
+
+    assert relaxed is not None
+    assert "test_memory_observation" in relaxed
+    assert "café" in relaxed

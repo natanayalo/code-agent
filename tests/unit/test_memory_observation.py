@@ -616,6 +616,79 @@ def test_trace_extraction_skips_malformed_command_entries(session_factory) -> No
         )
 
 
+def test_trace_extraction_deduplicates_identical_candidates_before_save(session_factory) -> None:
+    """Verify duplicate extracted candidates are only saved once."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(session)
+        task_id = task.id
+
+        obs_repo = ObservationRepository(session)
+        obs_repo.create(
+            task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            source="worker",
+            event_type="worker_completed",
+            summary="Worker completed.",
+            content="Trace:",
+            metadata_payload={
+                "commands_run": [
+                    {"command": "pytest", "exit_code": 0},
+                    {"command": "pytest", "exit_code": 0},
+                ]
+            },
+            admission_status="not_required",
+        )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        ObservationMemoryBridge.bridge_observations(session, task_id)
+
+    with session_scope(session_factory) as session:
+        children = list(
+            session.scalars(
+                select(MemoryObservation).where(
+                    MemoryObservation.event_type == "extracted_candidate"
+                )
+            ).all()
+        )
+        verification_candidates = [
+            c
+            for c in children
+            if c.metadata_payload["memory_candidate"]["memory_key"] == "verification_commands"
+        ]
+        assert len(verification_candidates) == 1
+
+
+def test_trace_extraction_deduplicates_duplicate_task_text_sentences(session_factory) -> None:
+    """Verify repeated remember sentences in task text are only extracted once."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(
+            session,
+            task_id="task-remember-dupe",
+            task_text=("Remember to keep tests focused. Remember to keep tests focused."),
+        )
+        task_id = task.id
+
+    with session_scope(session_factory) as session:
+        ObservationMemoryBridge.bridge_observations(session, task_id)
+
+    with session_scope(session_factory) as session:
+        children = list(
+            session.scalars(
+                select(MemoryObservation).where(
+                    MemoryObservation.event_type == "extracted_candidate"
+                )
+            ).all()
+        )
+        remembered = [
+            c
+            for c in children
+            if c.metadata_payload["memory_candidate"]["memory_key"] == "remembered_instruction"
+        ]
+        assert len(remembered) == 1
+
+
 def test_extract_candidates_from_task_text_does_not_query_existing_children(
     session_factory,
     monkeypatch: pytest.MonkeyPatch,

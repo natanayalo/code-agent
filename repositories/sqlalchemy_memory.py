@@ -73,7 +73,7 @@ def _normalized_search_query(query: str) -> str:
 def _relaxed_tsquery(query: str) -> str | None:
     """Build a conservative OR tsquery fallback from significant alphanumeric tokens."""
     tokens: list[str] = []
-    for raw_token in re.findall(r"[A-Za-z0-9]+", query.casefold()):
+    for raw_token in re.findall(r"\w+", query.casefold()):
         if len(raw_token) < _RELAXED_TOKEN_MIN_LENGTH:
             continue
         if raw_token in _RELAXED_SEARCH_STOP_WORDS:
