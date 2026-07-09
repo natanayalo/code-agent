@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: implement deterministic memory extraction evaluation harness and harden extraction rules ([#306](https://github.com/natanayalo/code-agent/pull/306))
+
 - Feat: M23 Episodic Memory - Deterministic Verification Gating ([#304](https://github.com/natanayalo/code-agent/pull/304))
 
 - Feat: M23 Episodic Memory - Deterministic Verification Gating ([#303](https://github.com/natanayalo/code-agent/pull/303))
