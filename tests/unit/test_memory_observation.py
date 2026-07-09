@@ -1184,3 +1184,217 @@ def test_trace_extraction_remember_instruction_deduplication(session_factory) ->
         assert len(children) == 1
         cand = children[0].metadata_payload["memory_candidate"]
         assert cand["value"]["instruction"] == "Remember to use python 3.12 always."
+
+
+def test_verification_command_exclusions() -> None:
+    """Test exclusions for help/version flags and build/setup/lint commands."""
+    # Exclude help/version
+    assert _is_verification_command("pytest --help") is False
+    assert _is_verification_command("pytest -h") is False
+    assert _is_verification_command("vitest --version") is False
+    assert _is_verification_command("python test.py --version") is False
+
+    # Exclude build/lint/format/setup
+    assert _is_verification_command("pip install pytest") is False
+    assert _is_verification_command("poetry run ruff check .") is False
+    assert _is_verification_command("npm install") is False
+    assert _is_verification_command("black app.py") is False
+    assert _is_verification_command("python setup.py install") is False
+    assert _is_verification_command("python3 setup.py build") is False
+
+    # Allowed commands
+    assert _is_verification_command("pytest tests/unit") is True
+    assert _is_verification_command("go test ./...") is True
+    assert _is_verification_command("cargo test") is True
+    assert _is_verification_command("python3 -m unittest discover") is True
+
+
+def test_verification_command_exact_override(session_factory) -> None:
+    """Verify that lint/setup commands are extracted if they exactly match verification commands."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(
+            session,
+            task_id="task-override-exact",
+            task_text="Run verification.",
+            repo_url="repo-exact",
+            task_spec={
+                "verification_commands": ["ruff check .", "pip install -r requirements.txt"]
+            },
+        )
+        task_id = task.id
+
+        ObservationRepository(session).create(
+            task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            source="worker",
+            event_type="worker_completed",
+            summary="Completed.",
+            content="Trace",
+            metadata_payload={
+                "commands_run": [
+                    {"command": "ruff check .", "exit_code": 0},
+                    {
+                        "command": "ruff check ./subdir",
+                        "exit_code": 0,
+                    },  # Not exact match, should be excluded
+                    {"command": "pip install -r requirements.txt", "exit_code": 0},
+                ]
+            },
+            admission_status="not_required",
+        )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        ObservationMemoryBridge.bridge_observations(session, task_id)
+
+    with session_scope(session_factory) as session:
+        children = list(
+            session.scalars(
+                select(MemoryObservation).where(
+                    MemoryObservation.event_type == "extracted_candidate",
+                    MemoryObservation.task_id == task_id,
+                )
+            ).all()
+        )
+        assert len(children) == 1
+        cand_val = children[0].metadata_payload["memory_candidate"]["value"]
+        assert "ruff check ." in cand_val
+        assert "pip install -r requirements.txt" in cand_val
+        assert "ruff check ./subdir" not in cand_val
+
+
+def test_pitfall_conservative_matching(session_factory) -> None:
+    """Test conservative pitfall extraction rules."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(session, task_id="task-pitfalls-harness")
+        task_id = task.id
+
+        ObservationRepository(session).create(
+            task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            source="worker",
+            event_type="worker_completed",
+            summary="Worker completed.",
+            content="Trace:",
+            metadata_payload={
+                "commands_run": [
+                    # 1. Matches: same target, different wrapper (pytest vs poetry run pytest)
+                    {"command": "python script_a.py", "exit_code": 1},
+                    {"command": "poetry run python script_a.py", "exit_code": 0},
+                    # 2. Excluded: unrelated classes (non-ver command vs ver command)
+                    {"command": "python app.py", "exit_code": 1},
+                    {"command": "pytest", "exit_code": 0},
+                    # 3. Excluded: different targets, same base executable (python)
+                    {"command": "python script_b.py", "exit_code": 1},
+                    {"command": "python script_c.py", "exit_code": 0},
+                    # 4. Excluded: identical command fail/success
+                    {"command": "pytest", "exit_code": 1},
+                    {"command": "pytest", "exit_code": 0},
+                ]
+            },
+            admission_status="not_required",
+        )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        ObservationMemoryBridge.bridge_observations(session, task_id)
+
+    with session_scope(session_factory) as session:
+        children = list(
+            session.scalars(
+                select(MemoryObservation).where(
+                    MemoryObservation.event_type == "extracted_candidate",
+                    MemoryObservation.task_id == task_id,
+                )
+            ).all()
+        )
+        # We expect:
+        # - 1 verification command: poetry run python script_a.py
+        # - 1 verification command: pytest
+        # - 1 pitfall: python script_a.py -> poetry run python script_a.py
+        pitfalls = [
+            c
+            for c in children
+            if c.metadata_payload["memory_candidate"]["memory_key"] == "known_pitfalls"
+        ]
+        assert len(pitfalls) == 1
+        val = pitfalls[0].metadata_payload["memory_candidate"]["value"]
+        assert val["failed_command"] == "python script_a.py"
+        assert val["corrected_command"] == "poetry run python script_a.py"
+
+
+def test_remember_instruction_expanded_and_guards(session_factory) -> None:
+    """Test remember instruction triggers, length constraints, and source guards."""
+    # 1. Triggers and length constraints
+    assert _extract_remember_sentences(
+        "Remember to keep functions clean.", is_operator_input=True
+    ) == ["Remember to keep functions clean."]
+    assert _extract_remember_sentences("Make sure to check coverage.", is_operator_input=True) == [
+        "Make sure to check coverage."
+    ]
+    assert _extract_remember_sentences("Ensure you document APIs.", is_operator_input=True) == [
+        "Ensure you document APIs."
+    ]
+    assert _extract_remember_sentences("Should always run tests.", is_operator_input=True) == [
+        "Should always run tests."
+    ]
+    assert _extract_remember_sentences("Should never use mock.", is_operator_input=True) == [
+        "Should never use mock."
+    ]
+
+    # "do not" trigger source checks
+    assert _extract_remember_sentences(
+        "Do not modify database directly.", is_operator_input=True
+    ) == ["Do not modify database directly."]
+    assert (
+        _extract_remember_sentences("Do not modify database directly.", is_operator_input=False)
+        == []
+    )
+
+    # Length constraints: short/long
+    assert _extract_remember_sentences("Remember.", is_operator_input=True) == []  # < 10 chars
+    long_txt = "Remember to " + ("a" * 200)
+    assert _extract_remember_sentences(long_txt, is_operator_input=True) == []  # > 200 chars
+
+
+def test_convention_guideline_and_policy(session_factory) -> None:
+    """Test convention extraction with guideline and policy prefixes."""
+    with session_scope(session_factory) as session:
+        task = _seed_task(session, task_id="task-conventions")
+        task_id = task.id
+
+        ObservationRepository(session).create(
+            task_id=task_id,
+            session_id=task.session_id,
+            repo_url=task.repo_url,
+            source="worker",
+            event_type="worker_completed",
+            summary="Finished task.",
+            content="Some details.\nguideline: use spaces.\npolicy: run checks.",
+            admission_status="not_required",
+        )
+        session.flush()
+
+    with session_scope(session_factory) as session:
+        ObservationMemoryBridge.bridge_observations(session, task_id)
+
+    with session_scope(session_factory) as session:
+        children = list(
+            session.scalars(
+                select(MemoryObservation).where(
+                    MemoryObservation.event_type == "extracted_candidate",
+                    MemoryObservation.task_id == task_id,
+                )
+            ).all()
+        )
+        conventions = [
+            c
+            for c in children
+            if c.metadata_payload["memory_candidate"]["memory_key"] == "repo_convention"
+        ]
+        assert len(conventions) == 2
+        vals = {c.metadata_payload["memory_candidate"]["value"]["convention"] for c in conventions}
+        assert "use spaces." in vals
+        assert "run checks." in vals
