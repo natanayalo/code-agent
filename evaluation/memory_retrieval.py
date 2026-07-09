@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ class MemorySeedEntry:
     confidence: float = 1.0
     scope: str | None = None
     requires_verification: bool = True
+    last_verified_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +146,7 @@ class _MemorySeedPayload(BaseModel):
     confidence: float = 1.0
     scope: str | None = None
     requires_verification: bool = True
+    last_verified_at: str | None = None
 
     @field_validator("memory_key")
     @classmethod
@@ -213,6 +216,11 @@ def _case_id(result: MemoryRetrievalCaseResult) -> str:
 
 
 def _seed_entry_from_payload(payload: _MemorySeedPayload) -> MemorySeedEntry:
+    last_verified_at = (
+        datetime.fromisoformat(payload.last_verified_at.replace("Z", "+00:00"))
+        if payload.last_verified_at is not None
+        else None
+    )
     return MemorySeedEntry(
         memory_key=payload.memory_key,
         value=dict(payload.value),
@@ -220,6 +228,7 @@ def _seed_entry_from_payload(payload: _MemorySeedPayload) -> MemorySeedEntry:
         confidence=payload.confidence,
         scope=payload.scope,
         requires_verification=payload.requires_verification,
+        last_verified_at=last_verified_at,
     )
 
 
@@ -279,6 +288,7 @@ def _seed_memory_suite(session_factory: Any, suite: MemoryRetrievalSuite) -> Non
                 confidence=entry.confidence,
                 scope=entry.scope,
                 requires_verification=entry.requires_verification,
+                last_verified_at=entry.last_verified_at,
             )
         for entry in suite.project_memory:
             project_repo.upsert(
@@ -289,6 +299,7 @@ def _seed_memory_suite(session_factory: Any, suite: MemoryRetrievalSuite) -> Non
                 confidence=entry.confidence,
                 scope=entry.scope,
                 requires_verification=entry.requires_verification,
+                last_verified_at=entry.last_verified_at,
             )
 
 
