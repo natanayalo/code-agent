@@ -73,12 +73,19 @@ def _bounded_durable_lines(lines: list[str], *, max_characters: int) -> str:
         return "\n".join(lines)
     kept: list[str] = []
     omitted_items = 0
+    truncating = False
     for line in lines:
+        if truncating:
+            if line.startswith("- **"):
+                omitted_items += 1
+            continue
         candidate = "\n".join([*kept, line])
         if len(candidate) <= max_characters:
             kept.append(line)
-        elif line.startswith("- **"):
-            omitted_items += 1
+        else:
+            truncating = True
+            if line.startswith("- **"):
+                omitted_items += 1
     marker = f"- ... ({omitted_items} advisory memory item(s) omitted by prompt budget)"
     while kept and len("\n".join([*kept, marker])) > max_characters:
         removed = kept.pop()
@@ -107,7 +114,7 @@ def _build_durable_memory_section(memory_context: dict[str, Any]) -> str:
     personal = memory_context.get("personal", [])
     project = memory_context.get("project", [])
     profile = memory_context.get("repository_profile")
-    profile_dict = profile if isinstance(profile, dict) else {}
+    profile_dict = dict(profile) if isinstance(profile, dict) else {}
     accepted_project = [m for m in project if m.get("gate_status", "accepted") == "accepted"]
     advisory_project = [m for m in project if m.get("gate_status", "accepted") == "advisory"]
     accepted_personal = [m for m in personal if m.get("gate_status", "accepted") == "accepted"]

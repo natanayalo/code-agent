@@ -403,6 +403,48 @@ def test_build_system_prompt_keeps_personal_memory_without_empty_profile(tmp_pat
     assert "Repository Profile" not in prompt
 
 
+def test_build_system_prompt_ignores_malformed_repository_profile(tmp_path) -> None:
+    """Legacy malformed profile values should degrade to no profile section."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={"repository_profile": ["legacy", "value"]},
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "Repository Profile" not in prompt
+
+
+def test_build_system_prompt_does_not_orphan_items_after_budget_overflow(tmp_path) -> None:
+    """Prompt truncation must not attach later sections to an earlier heading."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={
+            "repository_profile": {
+                "verification_commands": [
+                    {
+                        "memory_key": "large_command",
+                        "value": {"command": "x" * 4000},
+                    }
+                ],
+                "conventions": [
+                    {
+                        "memory_key": "later_convention",
+                        "value": {"rule": "must not be orphaned"},
+                    }
+                ],
+            }
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "large_command" not in prompt
+    assert "later_convention" not in prompt
+
+
 def test_build_system_prompt_advisory_metadata_handles_none_confidence(tmp_path) -> None:
     """Test that build_system_prompt safely formats memory metadata with a None confidence."""
     (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")

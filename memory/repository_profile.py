@@ -65,12 +65,13 @@ def _profile_item(
 
 
 def _sort_items(items: list[RepositoryMemoryProfileItem]) -> list[RepositoryMemoryProfileItem]:
+    max_datetime = datetime.max.replace(tzinfo=UTC)
     return sorted(
         items,
         key=lambda item: (
             0 if item.gate_status == "accepted" else 1,
             -item.advisory_strength,
-            -_sort_timestamp(item.last_verified_at).timestamp(),
+            max_datetime - _sort_timestamp(item.last_verified_at),
             item.memory_key,
         ),
     )
