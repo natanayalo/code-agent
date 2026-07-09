@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import shlex
 from collections import Counter
 from typing import Any
 
@@ -387,10 +388,54 @@ def _get_stripped_command(command_str: str) -> str:
 
 def _is_verification_command(command_str: str) -> bool:
     cleaned = _get_stripped_command(command_str)
-    parts = cleaned.split()
+    try:
+        parts = shlex.split(cleaned)
+    except Exception:
+        parts = cleaned.split()
     if not parts:
         return False
+
+    # Exclude commands containing help/version flags
+    for part in parts:
+        if part.lower() in ("--help", "-h", "--version", "-version"):
+            return False
+
+    # Exclude build/lint/format/setup commands
     exe = parts[0].lower()
+    excluded_exes = {
+        "pip",
+        "pip3",
+        "poetry",
+        "npm",
+        "yarn",
+        "bun",
+        "gem",
+        "cargo",
+        "go",
+        "black",
+        "ruff",
+        "eslint",
+        "prettier",
+        "flake8",
+        "mypy",
+        "pylint",
+        "isort",
+        "autopep8",
+    }
+    if exe in excluded_exes:
+        if exe == "go" and len(parts) > 1 and parts[1].lower() == "test":
+            pass
+        elif exe == "cargo" and len(parts) > 1 and parts[1].lower() == "test":
+            pass
+        else:
+            return False
+
+    # Check setup scripts or installers via python/python3
+    if exe in ("python", "python3") and len(parts) > 1:
+        second_arg = parts[1].lower()
+        if second_arg in ("setup.py", "setup") or "install" in [p.lower() for p in parts]:
+            return False
+
     if exe in ("pytest", "unittest", "tox", "rake", "vitest", "jest", "mocha"):
         return True
     if exe in ("go", "cargo") and len(parts) > 1 and parts[1].lower() == "test":
@@ -407,7 +452,7 @@ def _is_verification_command(command_str: str) -> bool:
     return False
 
 
-def _extract_remember_sentences(text: str) -> list[str]:
+def _extract_remember_sentences(text: str, is_operator_input: bool = False) -> list[str]:
     if not text:
         return []
     lines = text.split("\n")
@@ -417,13 +462,23 @@ def _extract_remember_sentences(text: str) -> list[str]:
         re.compile(r"\bremember that\b", re.I),
         re.compile(r"\balways use\b", re.I),
         re.compile(r"\bnever do\b", re.I),
+        re.compile(r"\bbe sure to\b", re.I),
+        re.compile(r"\bmake sure to\b", re.I),
+        re.compile(r"\bensure you\b", re.I),
+        re.compile(r"\bshould always\b", re.I),
+        re.compile(r"\bshould never\b", re.I),
     ]
+    if is_operator_input:
+        patterns.append(re.compile(r"\bdo not\b", re.I))
+
     for line in lines:
         sentences = _SENTENCE_SPLIT_RE.split(line)
         for s in sentences:
             s_clean = s.strip()
-            if any(p.search(s_clean) for p in patterns):
-                extracted.append(s_clean)
+            # Enforce length constraints: 10 to 200 characters
+            if 10 <= len(s_clean) <= 200:
+                if any(p.search(s_clean) for p in patterns):
+                    extracted.append(s_clean)
     return extracted
 
 
@@ -435,6 +490,8 @@ def _extract_conventions(text: str) -> list[str]:
     patterns = [
         re.compile(r"\bconvention:\s*(.*)", re.I),
         re.compile(r"\brule:\s*(.*)", re.I),
+        re.compile(r"\bguideline:\s*(.*)", re.I),
+        re.compile(r"\bpolicy:\s*(.*)", re.I),
     ]
     for line in lines:
         for p in patterns:
@@ -480,7 +537,7 @@ def _extract_verification_candidates(
         exit_code = cmd.get("exit_code")
         if isinstance(cmd_str, str) and exit_code == 0:
             cmd_stripped = cmd_str.strip()
-            is_ver = _is_verification_command(cmd_stripped) or (cmd_stripped in normalized_expected)
+            is_ver = (cmd_stripped in normalized_expected) or _is_verification_command(cmd_stripped)
             if is_ver:
                 ver_cmds.append(cmd_stripped)
 
@@ -496,8 +553,8 @@ def _extract_verification_candidates(
                     cmd_stripped = raw_command.strip()
                     if not cmd_stripped:
                         continue
-                    is_ver = _is_verification_command(cmd_stripped) or (
-                        cmd_stripped in normalized_expected
+                    is_ver = (cmd_stripped in normalized_expected) or _is_verification_command(
+                        cmd_stripped
                     )
                     if is_ver:
                         ver_cmds.append(cmd_stripped)
@@ -527,6 +584,49 @@ def _extract_verification_candidates(
     return candidates
 
 
+def _get_base_executable_and_target(command_str: str) -> tuple[str, str | None]:
+    cleaned = _get_stripped_command(command_str)
+    try:
+        parts = shlex.split(cleaned)
+    except Exception:
+        parts = cleaned.split()
+    if not parts:
+        return "", None
+    exe = parts[0]
+
+    # Generic interpreters or shells to strip
+    generic_interpreters = {
+        "python",
+        "python3",
+        "node",
+        "ruby",
+        "perl",
+        "bash",
+        "sh",
+        "zsh",
+        "sudo",
+    }
+    while exe.lower() in generic_interpreters and len(parts) > 1:
+        parts = parts[1:]
+        if parts[0] == "-m" and len(parts) > 1:
+            parts = parts[1:]
+        exe = parts[0]
+
+    # Find the target (e.g. argument that looks like a file/directory path)
+    target = None
+    for part in parts[1:]:
+        if part.startswith("-"):
+            continue
+        # Any non-flag argument can be a potential target
+        target = part
+        break
+
+    if target:
+        target = target.strip("/").strip("\\")
+
+    return exe.lower(), target
+
+
 def _extract_pitfall_candidates(
     trace_obs: MemoryObservation, task_id: str
 ) -> list[MemoryCandidate]:
@@ -549,9 +649,24 @@ def _extract_pitfall_candidates(
                 if isinstance(success_cmd_str, str) and success_exit_code == 0:
                     if fail_cmd_str.strip() == success_cmd_str.strip():
                         continue
-                    fail_clean = _get_stripped_command(fail_cmd_str)
-                    succ_clean = _get_stripped_command(success_cmd_str)
-                    if fail_clean and fail_clean == succ_clean:
+
+                    # Purpose/Class check
+                    is_fail_ver = _is_verification_command(fail_cmd_str)
+                    is_succ_ver = _is_verification_command(success_cmd_str)
+                    if is_fail_ver != is_succ_ver:
+                        continue
+
+                    # Cleaned base executable and target check
+                    fail_exe, fail_target = _get_base_executable_and_target(fail_cmd_str)
+                    succ_exe, succ_target = _get_base_executable_and_target(success_cmd_str)
+
+                    if not fail_exe or not succ_exe:
+                        continue
+
+                    exe_matches = fail_exe == succ_exe
+                    target_matches = fail_target is not None and fail_target == succ_target
+
+                    if exe_matches or target_matches:
                         evidence_str = (
                             f"Command '{fail_cmd_str}' failed with exit code "
                             f"{fail_exit_code}, resolved by '{success_cmd_str}'"
@@ -595,7 +710,7 @@ def _extract_remember_candidates(
         texts_to_scan.append(trace_obs.content)
 
     for text in texts_to_scan:
-        remember_sentences = _extract_remember_sentences(text)
+        remember_sentences = _extract_remember_sentences(text, is_operator_input=True)
         for sentence in remember_sentences:
             candidates.append(
                 MemoryCandidate(
@@ -694,7 +809,9 @@ def _extract_candidates_from_task_text(
     if not (task and task.task_text):
         return
     if f"task-{task_id}" not in extracted_parent_ids:
-        remember_sentences = list(dict.fromkeys(_extract_remember_sentences(task.task_text)))
+        remember_sentences = list(
+            dict.fromkeys(_extract_remember_sentences(task.task_text, is_operator_input=True))
+        )
         for sentence in remember_sentences:
             cand = MemoryCandidate(
                 category="project" if task.repo_url else "personal",

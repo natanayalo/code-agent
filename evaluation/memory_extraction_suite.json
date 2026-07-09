@@ -1,0 +1,417 @@
+{
+  "suite_name": "Deterministic Memory Extraction Suite",
+  "cases": [
+    {
+      "case_id": "case-verification-clean-success",
+      "task_text": "Run pytest tests/unit",
+      "repo_url": "github.com/owner/repo",
+      "observations": [
+        {
+          "source": "worker",
+          "event_type": "worker_completed",
+          "summary": "Completed successfully.",
+          "content": "Passed all unit tests.",
+          "metadata_payload": {
+            "commands_run": [
+              {"command": "pytest tests/unit", "exit_code": 0}
+            ]
+          }
+        }
+      ],
+      "expected_candidates": [
+        {
+          "memory_key": "verification_commands",
+          "category": "project",
+          "value": {
+            "pytest tests/unit": "pytest tests/unit"
+          }
+        }
+      ],
+      "expected_admission_decisions": ["create"],
+      "expected_durable_memory_keys": ["verification_commands"]
+    },
+    {
+      "case_id": "case-verification-override",
+      "task_text": "Verify with ruff check .",
+      "repo_url": "github.com/owner/repo",
+      "task_spec": {
+        "verification_commands": ["ruff check ."]
+      },
+      "observations": [
+        {
+          "source": "worker",
+          "event_type": "worker_completed",
+          "summary": "Completed successfully.",
+          "content": "All lints passed.",
+          "metadata_payload": {
+            "commands_run": [
+              {"command": "ruff check .", "exit_code": 0}
+            ]
+          }
+        }
+      ],
+      "expected_candidates": [
+        {
+          "memory_key": "verification_commands",
+          "category": "project",
+          "value": {
+            "ruff check .": "ruff check ."
+          }
+        }
+      ],
+      "expected_admission_decisions": ["create"],
+      "expected_durable_memory_keys": ["verification_commands"]
+    },
+    {
+      "case_id": "case-verification-help-exclusion",
+      "task_text": "Run tests",
+      "repo_url": "github.com/owner/repo",
+      "observations": [
+        {
+          "source": "worker",
+          "event_type": "worker_completed",
+          "summary": "Completed successfully.",
+          "content": "Help text generated.",
+          "metadata_payload": {
+            "commands_run": [
+              {"command": "pytest --help", "exit_code": 0}
+            ]
+          }
+        }
+      ],
+      "expected_absent": [
+        {
+          "memory_key": "verification_commands"
+        }
+      ],
+      "expected_rejections": 0
+    },
+    {
+      "case_id": "case-verification-setup-lint-exclusion",
+      "task_text": "Run lint and setup",
+      "repo_url": "github.com/owner/repo",
+      "observations": [
+        {
+          "source": "worker",
+          "event_type": "worker_completed",
+          "summary": "Setup finished.",
+          "content": "Installed dependencies.",
+          "metadata_payload": {
+            "commands_run": [
+              {"command": "pip install pytest", "exit_code": 0},
+              {"command": "black app.py", "exit_code": 0},
+              {"command": "ruff check .", "exit_code": 0}
+            ]
+          }
+        }
+      ],
+      "expected_absent": [
+        {
+          "memory_key": "verification_commands"
+        }
+      ]
+    },
+    {
+      "case_id": "case-verification-failed-exclusion",
+      "task_text": "Run failing tests",
+      "repo_url": "github.com/owner/repo",
+      "observations": [
+        {
+          "source": "worker",
+          "event_type": "worker_failed",
+          "summary": "Tests failed.",
+          "content": "1 test failed.",
+          "metadata_payload": {
+            "commands_run": [
+              {"command": "pytest tests/unit", "exit_code": 1}
+            ]
+          }
+        }
+      ],
+      "expected_absent": [
+        {
+          "memory_key": "verification_commands"
+        }
+      ]
+    },
+    {
+      "case_id": "case-pitfall-wrapper-correction",
+      "task_text": "Fix command run",
+      "repo_url": "github.com/owner/repo",
+      "observations": [
+        {
+          "source": "worker",
+          "event_type": "worker_completed",
+          "summary": "Completed successfully.",
+          "content": "Resolved.",
+          "metadata_payload": {
+            "commands_run": [
+              {"command": "python script.py", "exit_code": 1},
+              {"command": "poetry run python script.py", "exit_code": 0}
+            ]
+          }
+        }
+      ],
+      "expected_candidates": [
+        {
+          "memory_key": "known_pitfalls",
+          "category": "project",
+          "value": {
+            "note": "Command 'python script.py' failed; use 'poetry run python script.py' instead.",
+            "failed_command": "python script.py",
+            "corrected_command": "poetry run python script.py"
+          }
+        }
+      ],
+      "expected_admission_decisions": ["needs_human_review"],
+      "expected_proposals": ["known_pitfalls"]
+    },
+    {
+      "case_id": "case-pitfall-target-match",
+      "task_text": "Fix target path command",
+      "repo_url": "github.com/owner/repo",
+      "observations": [
+        {
+          "source": "worker",
+          "event_type": "worker_completed",
+          "summary": "Completed.",
+          "content": "Resolved path.",
+          "metadata_payload": {
+            "commands_run": [
+              {"command": "pytest tests/foo", "exit_code": 1},
+              {"command": ".venv/bin/pytest tests/foo", "exit_code": 0}
+            ]
+          }
+        }
+      ],
+      "expected_candidates": [
+        {
+          "memory_key": "known_pitfalls",
+          "category": "project",
+          "value": {
+            "note": "Command 'pytest tests/foo' failed; use '.venv/bin/pytest tests/foo' instead.",
+            "failed_command": "pytest tests/foo",
+            "corrected_command": ".venv/bin/pytest tests/foo"
+          }
+        },
+        {
+          "memory_key": "verification_commands",
+          "category": "project",
+          "value": {
+            ".venv/bin/pytest tests/foo": ".venv/bin/pytest tests/foo"
+          }
+        }
+      ],
+      "expected_admission_decisions": ["create", "needs_human_review"],
+      "expected_proposals": ["known_pitfalls"],
+      "expected_durable_memory_keys": ["verification_commands"]
+    },
+    {
+      "case_id": "case-pitfall-unrelated-exclusion",
+      "task_text": "Run build and test",
+      "repo_url": "github.com/owner/repo",
+      "observations": [
+        {
+          "source": "worker",
+          "event_type": "worker_completed",
+          "summary": "Completed.",
+          "content": "Passed.",
+          "metadata_payload": {
+            "commands_run": [
+              {"command": "python app.py", "exit_code": 1},
+              {"command": "pytest", "exit_code": 0}
+            ]
+          }
+        }
+      ],
+      "expected_candidates": [
+        {
+          "memory_key": "verification_commands",
+          "category": "project",
+          "value": {
+            "pytest": "pytest"
+          }
+        }
+      ],
+      "expected_absent": [
+        {
+          "memory_key": "known_pitfalls"
+        }
+      ],
+      "expected_admission_decisions": ["create"],
+      "expected_durable_memory_keys": ["verification_commands"]
+    },
+    {
+      "case_id": "case-pitfall-identical-exclusion",
+      "task_text": "Retry test command",
+      "repo_url": "github.com/owner/repo",
+      "observations": [
+        {
+          "source": "worker",
+          "event_type": "worker_completed",
+          "summary": "Completed.",
+          "content": "Retried.",
+          "metadata_payload": {
+            "commands_run": [
+              {"command": "pytest", "exit_code": 1},
+              {"command": "pytest", "exit_code": 0}
+            ]
+          }
+        }
+      ],
+      "expected_candidates": [
+        {
+          "memory_key": "verification_commands",
+          "category": "project",
+          "value": {
+            "pytest": "pytest"
+          }
+        }
+      ],
+      "expected_absent": [
+        {
+          "memory_key": "known_pitfalls"
+        }
+      ],
+      "expected_admission_decisions": ["create"],
+      "expected_durable_memory_keys": ["verification_commands"]
+    },
+    {
+      "case_id": "case-remember-instruction-project",
+      "task_text": "Please make sure to always use python 3.12.",
+      "repo_url": "github.com/owner/repo",
+      "observations": [],
+      "expected_candidates": [
+        {
+          "memory_key": "remembered_instruction",
+          "category": "project",
+          "value": {
+            "instruction": "Please make sure to always use python 3.12."
+          }
+        }
+      ],
+      "expected_admission_decisions": ["needs_human_review"],
+      "expected_proposals": ["remembered_instruction"]
+    },
+    {
+      "case_id": "case-remember-instruction-personal-do-not",
+      "task_text": "Do not modify the API routes directly.",
+      "observations": [],
+      "expected_candidates": [
+        {
+          "memory_key": "remembered_instruction",
+          "category": "personal",
+          "value": {
+            "instruction": "Do not modify the API routes directly."
+          }
+        }
+      ],
+      "expected_admission_decisions": ["needs_human_review"],
+      "expected_proposals": ["remembered_instruction"]
+    },
+    {
+      "case_id": "case-remember-instruction-exclusions",
+      "task_text": "Do not.",
+      "observations": [
+        {
+          "source": "operator",
+          "event_type": "interaction_resolved",
+          "summary": "Remember.",
+          "content": "Remember to use spaces.",
+          "metadata_payload": {
+            "response_data": {}
+          }
+        }
+      ],
+      "expected_candidates": [
+        {
+          "memory_key": "remembered_instruction",
+          "value": {
+            "instruction": "Remember to use spaces."
+          }
+        }
+      ],
+      "expected_absent": [
+        {
+          "value": {
+            "instruction": "Do not."
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "case-repo-convention-prefixes",
+      "task_text": "Run conventions",
+      "repo_url": "github.com/owner/repo",
+      "observations": [
+        {
+          "source": "worker",
+          "event_type": "worker_completed",
+          "summary": "Completed with guidelines.",
+          "content": "guideline: always format files.\npolicy: run tests before push.",
+          "metadata_payload": {
+            "commands_run": []
+          }
+        }
+      ],
+      "expected_candidates": [
+        {
+          "memory_key": "repo_convention",
+          "category": "project",
+          "value": {
+            "convention": "always format files."
+          }
+        },
+        {
+          "memory_key": "repo_convention",
+          "category": "project",
+          "value": {
+            "convention": "run tests before push."
+          }
+        }
+      ],
+      "expected_admission_decisions": ["needs_human_review", "needs_human_review"],
+      "expected_proposals": ["repo_convention", "repo_convention"]
+    },
+    {
+      "case_id": "case-realistic-trace-e2e-verification",
+      "task_text": "Execute vertical slice.",
+      "repo_url": "github.com/owner/repo-e2e",
+      "task_spec": {
+        "verification_commands": ["python3 -m unittest tests/integration/test_vertical_slice_e2e.py"]
+      },
+      "observations": [
+        {
+          "source": "worker",
+          "event_type": "worker_completed",
+          "summary": "Native worker completed.",
+          "content": "Execution logs here.",
+          "metadata_payload": {
+            "commands_run": [
+              {"command": "codex exec --model gemini-2.5-pro -", "exit_code": 0}
+            ],
+            "verifier_outcome": {
+              "status": "passed",
+              "deterministic_verification": {
+                "status": "passed",
+                "commands": ["python3 -m unittest tests/integration/test_vertical_slice_e2e.py"],
+                "passed_commands": ["python3 -m unittest tests/integration/test_vertical_slice_e2e.py"]
+              }
+            }
+          }
+        }
+      ],
+      "expected_candidates": [
+        {
+          "memory_key": "verification_commands",
+          "category": "project",
+          "value": {
+            "python3 -m unittest tests/integration/test_vertical_slice_e2e.py": "python3 -m unittest tests/integration/test_vertical_slice_e2e.py"
+          }
+        }
+      ],
+      "expected_admission_decisions": ["create"],
+      "expected_durable_memory_keys": ["verification_commands"]
+    }
+  ]
+}
