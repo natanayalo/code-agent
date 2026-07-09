@@ -86,7 +86,7 @@ def _calculate_staleness(
 ) -> float:
     """Calculate staleness score between 0.0 and 1.0."""
     if last_verified_at is None:
-        return 1.0 if requires_verification else 0.0
+        return 1.0
     if window_days <= 0:
         return 1.0
     now = datetime.now(UTC)

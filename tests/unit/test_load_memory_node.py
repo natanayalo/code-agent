@@ -583,8 +583,16 @@ def test_read_side_gate_staleness_and_advisory_strength() -> None:
         requires_verification=False,
     )
 
+    entry_unverified_deploy = MemoryEntry(
+        memory_key="deploy_policy_without_timestamp",
+        value={"cmd": "old deploy flow"},
+        confidence=0.8,
+        last_verified_at=None,
+        requires_verification=False,
+    )
+
     result = ReadSideMemoryGateService.process(
-        personal=[entry_pitfall, entry_deploy],
+        personal=[entry_pitfall, entry_deploy, entry_unverified_deploy],
         project=[],
     )
 
@@ -603,6 +611,15 @@ def test_read_side_gate_staleness_and_advisory_strength() -> None:
     assert pytest.approx(deploy_ann.advisory_strength, abs=0.01) == 0.657
     assert deploy_ann.gate_status == "accepted"
 
+    assert not any(
+        e.memory_key == "deploy_policy_without_timestamp" for e in result.accepted_personal
+    )
+    suppressed_deploy = next(
+        e for e in result.suppressed_personal if e.memory_key == "deploy_policy_without_timestamp"
+    )
+    assert suppressed_deploy.reason_codes == ["high_risk_unverified_or_stale"]
+
+    assert _calculate_staleness(None, requires_verification=False, window_days=30) == 1.0
     assert _calculate_staleness(now, requires_verification=False, window_days=0) == 1.0
     assert _calculate_staleness(now, requires_verification=False, window_days=-1) == 1.0
 
