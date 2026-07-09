@@ -709,3 +709,23 @@ def test_read_side_gate_diagnostics_timeline_payload(session_factory) -> None:
     assert "project_overrides_personal" in payload["reason_counts"]
     assert "editor" in payload["accepted_keys"]
     assert "editor" in payload["suppressed_keys"]
+
+
+def test_tokenize_key_camel_and_snake_case() -> None:
+    """Verify that _tokenize_key splits camelCase and preserves snake_case underscores."""
+    from memory.read_side_gate import _tokenize_key
+
+    # camelCase tokenization
+    assert _tokenize_key("apiToken") == {"apitoken", "api", "token"}
+    assert _tokenize_key("myAwesomeSecret") == {"myawesomesecret", "my", "awesome", "secret"}
+
+    # snake_case tokenization (preserving underscores)
+    assert _tokenize_key("api_key") == {"api_key", "api", "key"}
+    assert _tokenize_key("private_key") == {"private_key", "private", "key"}
+    assert _tokenize_key("some_other_auth_credential") == {
+        "some_other_auth_credential",
+        "some",
+        "other",
+        "auth",
+        "credential",
+    }

@@ -93,17 +93,16 @@ def _calculate_staleness(
 
 def _tokenize_key(memory_key: str) -> set[str]:
     """Tokenize key splitting by non-alphanumeric and camelcase boundaries."""
-    raw_tokens = re.split(r"[^a-zA-Z0-9]", memory_key.casefold())
+    raw_tokens = re.split(r"[^a-zA-Z0-9_]", memory_key)
     tokens = set()
     for t in raw_tokens:
         if not t:
             continue
+        tokens.add(t.lower())
         parts = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\b)|[0-9]+", t)
         if parts:
             for p in parts:
                 tokens.add(p.lower())
-        else:
-            tokens.add(t)
     return tokens
 
 
