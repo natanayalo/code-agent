@@ -460,7 +460,7 @@ Progress:
 - [x] Slice 6: add an episodic observation layer for raw task/session observations, compact search, timeline/full-observation fetch, recent-session context, private-tag stripping, and an observation-to-admission bridge; see [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md)
 - [x] Slice 7: expose observation/admission visibility and lineage through the Knowledge Base UI; see [`docs/m23-slice-7-observation-admission-visibility.md`](m23-slice-7-observation-admission-visibility.md)
 - [x] M23.8: deterministic extraction hardening + evaluation for verification commands, pitfalls, remembered instructions, and conventions
-- [ ] M23.9: read-side memory gate for staleness, conflict, risk, advisory strength, and project-over-personal precedence
+- [x] M23.9: read-side memory gate for staleness, conflict, risk, advisory strength, and project-over-personal precedence
 - [ ] M23.10: repo-profile shaping once the observation/admission corpus is richer and gating is stable
 
 Scope:
@@ -572,7 +572,7 @@ Phase 3:
 Phase 4:
 
 1. Milestone 22 [x]
-2. Milestone 23 [in progress: slices 5-7, M23.8 complete; M23.9-M23.10 remain]
+2. Milestone 23 [in progress: slices 5-7 and M23.8-M23.9 complete; M23.10 remains]
 3. Milestone 24
 4. Milestone 25
 5. Milestone 26
