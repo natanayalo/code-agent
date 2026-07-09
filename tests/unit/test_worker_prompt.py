@@ -350,6 +350,59 @@ def test_build_system_prompt_renders_repository_profile_without_project_duplicat
     assert "### Project Memories" not in prompt
 
 
+def test_build_system_prompt_omits_empty_repository_profile(tmp_path) -> None:
+    """An empty shaped profile must not add a misleading repository section."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={
+            "personal": [],
+            "project": [],
+            "repository_profile": {
+                "verification_commands": [],
+                "conventions": [],
+                "pitfalls": [],
+                "remembered_instructions": [],
+                "general_facts": [],
+            },
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "Repository Profile" not in prompt
+    assert "## Durable Memories" not in prompt
+
+
+def test_build_system_prompt_keeps_personal_memory_without_empty_profile(tmp_path) -> None:
+    """Personal memory remains visible when the repository profile has no items."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={
+            "personal": [
+                {
+                    "memory_key": "communication_style",
+                    "value": {"style": "concise"},
+                }
+            ],
+            "project": [],
+            "repository_profile": {
+                "verification_commands": [],
+                "conventions": [],
+                "pitfalls": [],
+                "remembered_instructions": [],
+                "general_facts": [],
+            },
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "### Personal Memories" in prompt
+    assert "Repository Profile" not in prompt
+
+
 def test_build_system_prompt_advisory_metadata_handles_none_confidence(tmp_path) -> None:
     """Test that build_system_prompt safely formats memory metadata with a None confidence."""
     (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
