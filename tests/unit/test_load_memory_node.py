@@ -245,6 +245,13 @@ def test_load_memory_node_loads_memory_and_skepticism_metadata(session_factory) 
         "session_loaded": True,
         "personal_keys": ["communication_style"],
         "project_keys": ["test_command"],
+        "loaded_count": 2,
+        "accepted_count": 2,
+        "suppressed_count": 0,
+        "reason_counts": {},
+        "accepted_keys": ["communication_style", "test_command"],
+        "suppressed_keys": [],
+        "suppressed_details": [],
     }
 
 
@@ -316,7 +323,13 @@ def test_load_memory_node_db_error_returns_empty_memory() -> None:
 
     result = build_load_memory_node(broken_factory)(state)
 
-    assert result["memory"] == {"personal": [], "project": [], "session": {}, "observations": []}
+    assert result["memory"] == {
+        "personal": [],
+        "project": [],
+        "session": {},
+        "observations": [],
+        "gate_diagnostics": None,
+    }
     assert result["timeline_events"][0].event_type == TimelineEventType.MEMORY_LOADED
     assert result["timeline_events"][0].payload["observations_count"] == 0
 
@@ -485,3 +498,247 @@ def test_apply_read_side_gate_normalizes_timezone_aware_verified_at() -> None:
 
     assert len(gated.personal) == 1
     assert gated.personal[0].value == {"type": "new"}
+
+
+def test_read_side_gate_does_not_mutate_db(session_factory) -> None:
+    """Verify that read-side gating does not mutate memory tables in the DB."""
+    from db.models import PersonalMemory
+
+    repo_url = "https://github.com/natanayalo/code-agent"
+
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(external_user_id="gate-user")
+        conv = SessionRepository(session).create(
+            user_id=user.id,
+            channel="http",
+            external_thread_id="thread-gate-mute",
+        )
+        # Seed a key that would trigger conflict/override
+        PersonalMemoryRepository(session).upsert(
+            memory_key="api_token",
+            value={"token": "secret"},
+            requires_verification=True,
+        )
+        ProjectMemoryRepository(session).upsert(
+            repo_url=repo_url,
+            memory_key="api_token",
+            value={"token": "different"},
+            requires_verification=True,
+        )
+        session.flush()
+        user_id = user.id
+        session_id = conv.id
+
+    state = OrchestratorState.model_validate(
+        {
+            "session": {
+                "session_id": session_id,
+                "user_id": user_id,
+                "channel": "http",
+                "external_thread_id": "thread-gate-mute",
+            },
+            "task": {
+                "task_text": "api_token",
+                "repo_url": repo_url,
+            },
+        }
+    )
+
+    # Execute memory load which triggers gating
+    node_result = build_load_memory_node(session_factory)(state)
+
+    # Verify memory is annotated in state
+    loaded_memory = node_result["memory"]
+    assert len(loaded_memory["personal"]) == 0  # suppressed due to conflict + high risk
+    assert len(loaded_memory["project"]) == 0  # suppressed due to high risk + unverified
+
+    # Check that personal memory in DB remains exactly as it was
+    with session_scope(session_factory) as session:
+        db_personal = session.query(PersonalMemory).filter_by(memory_key="api_token").one()
+        # Ensure requires_verification is still True, value is unchanged, etc.
+        assert db_personal.requires_verification is True
+        assert db_personal.value == {"token": "secret"}
+
+
+def test_read_side_gate_staleness_and_advisory_strength() -> None:
+    """Test staleness windows and strength calculations based on key risk/type."""
+    from memory.read_side_gate import ReadSideMemoryGateService, _calculate_staleness
+
+    now = datetime.now(UTC)
+    # Stale known_pitfalls (> 60 days)
+    entry_pitfall = MemoryEntry(
+        memory_key="known_pitfalls",
+        value={"tip": "do not crash"},
+        confidence=0.9,
+        last_verified_at=now - timedelta(days=70),
+        requires_verification=False,
+    )
+
+    # Fresh deploy instructions (< 14 days)
+    entry_deploy = MemoryEntry(
+        memory_key="deploy_policy",
+        value={"cmd": "deploy"},
+        confidence=0.8,
+        last_verified_at=now - timedelta(days=5),
+        requires_verification=False,
+    )
+
+    entry_unverified_deploy = MemoryEntry(
+        memory_key="deploy_policy_without_timestamp",
+        value={"cmd": "old deploy flow"},
+        confidence=0.8,
+        last_verified_at=None,
+        requires_verification=False,
+    )
+
+    result = ReadSideMemoryGateService.process(
+        personal=[entry_pitfall, entry_deploy, entry_unverified_deploy],
+        project=[],
+    )
+
+    # Pitfall is stale (staleness = 1.0 because 70 > 60)
+    # deploy is fresh (staleness = 5 / 14 = ~0.357)
+    pitfall_ann = next(e for e in result.accepted_personal if e.memory_key == "known_pitfalls")
+    deploy_ann = next(e for e in result.accepted_personal if e.memory_key == "deploy_policy")
+
+    assert pitfall_ann.staleness == 1.0
+    # strength = 0.9 * (1.0 - 1.0 * 0.5) = 0.45
+    assert pytest.approx(pitfall_ann.advisory_strength) == 0.45
+    assert pitfall_ann.gate_status == "advisory"  # because staleness >= 0.5
+
+    assert pytest.approx(deploy_ann.staleness, abs=0.01) == 0.357
+    # strength = 0.8 * (1.0 - 0.357 * 0.5) = 0.657
+    assert pytest.approx(deploy_ann.advisory_strength, abs=0.01) == 0.657
+    assert deploy_ann.gate_status == "accepted"
+
+    assert not any(
+        e.memory_key == "deploy_policy_without_timestamp" for e in result.accepted_personal
+    )
+    suppressed_deploy = next(
+        e for e in result.suppressed_personal if e.memory_key == "deploy_policy_without_timestamp"
+    )
+    assert suppressed_deploy.reason_codes == ["high_risk_unverified_or_stale"]
+
+    assert _calculate_staleness(None, requires_verification=False, window_days=30) == 1.0
+    assert _calculate_staleness(now, requires_verification=False, window_days=0) == 1.0
+    assert _calculate_staleness(now, requires_verification=False, window_days=-1) == 1.0
+
+
+def test_read_side_gate_conflict_coexistence_for_collections() -> None:
+    """Test same-key conflict logic for scalar keys vs collection keys."""
+    from memory.read_side_gate import ReadSideMemoryGateService
+
+    now = datetime.now(UTC)
+
+    # Collection key: 'verification_commands'
+    entry_coll_personal = MemoryEntry(
+        memory_key="verification_commands",
+        value={"unit": "pytest"},
+        confidence=0.9,
+        requires_verification=False,
+        last_verified_at=now,
+    )
+    entry_coll_project = MemoryEntry(
+        memory_key="verification_commands",
+        value={"integration": "pytest-integration"},
+        confidence=0.9,
+        requires_verification=False,
+        last_verified_at=now,
+    )
+
+    # Scalar key: 'editor' (different values)
+    entry_scal_personal = MemoryEntry(
+        memory_key="editor",
+        value={"theme": "light"},
+        confidence=0.9,
+        requires_verification=False,
+        last_verified_at=now,
+    )
+    entry_scal_project = MemoryEntry(
+        memory_key="editor",
+        value={"theme": "dark"},
+        confidence=0.9,
+        requires_verification=False,
+        last_verified_at=now,
+    )
+
+    result = ReadSideMemoryGateService.process(
+        personal=[entry_coll_personal, entry_scal_personal],
+        project=[entry_coll_project, entry_scal_project],
+    )
+
+    # Collections coexist without contradiction -> both accepted
+    assert any(e.memory_key == "verification_commands" for e in result.accepted_personal)
+    assert any(e.memory_key == "verification_commands" for e in result.accepted_project)
+
+    # Scalar is overridden -> personal suppressed, project kept
+    assert not any(e.memory_key == "editor" for e in result.accepted_personal)
+    editor_proj = next(e for e in result.accepted_project if e.memory_key == "editor")
+    assert editor_proj.conflict == "personal_conflict_resolved"
+    # Project gets 0.8 conflict penalty: strength = 0.9 * 0.8 = 0.72
+    assert pytest.approx(editor_proj.advisory_strength) == 0.72
+
+
+def test_read_side_gate_diagnostics_timeline_payload(session_factory) -> None:
+    """Verify that MEMORY_LOADED event includes correct gating diagnostics."""
+    repo_url = "https://github.com/natanayalo/code-agent"
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(external_user_id="gate-user-diag")
+        conv = SessionRepository(session).create(
+            user_id=user.id,
+            channel="http",
+            external_thread_id="thread-gate-diag",
+        )
+        # Seed 1 accepted project memory, 1 suppressed personal (due to conflict)
+        PersonalMemoryRepository(session).upsert(
+            memory_key="editor",
+            value={"theme": "light"},
+        )
+        ProjectMemoryRepository(session).upsert(
+            repo_url=repo_url,
+            memory_key="editor",
+            value={"theme": "dark"},
+        )
+        session.flush()
+        user_id = user.id
+        session_id = conv.id
+
+    state = OrchestratorState.model_validate(
+        {
+            "session": {
+                "session_id": session_id,
+                "user_id": user_id,
+                "channel": "http",
+                "external_thread_id": "thread-gate-diag",
+            },
+            "task": {
+                "task_text": "editor",
+                "repo_url": repo_url,
+            },
+        }
+    )
+
+    node_result = build_load_memory_node(session_factory)(state)
+    timeline_events = node_result.get("timeline_events", [])
+    memory_event = next(e for e in timeline_events if e.event_type == "memory_loaded")
+    payload = memory_event.payload
+
+    assert payload["loaded_count"] == 2
+    assert payload["accepted_count"] == 1
+    assert payload["suppressed_count"] == 1
+    assert "project_overrides_personal" in payload["reason_counts"]
+    assert "editor" in payload["accepted_keys"]
+    assert "editor" in payload["suppressed_keys"]
+
+
+def test_determine_risk_high_risk_substrings() -> None:
+    """Verify that _determine_risk identifies high risk keys within larger names."""
+    from memory.read_side_gate import _determine_risk
+
+    assert _determine_risk("my_api_key", False) == "high"
+    assert _determine_risk("aws_access_key", False) == "high"
+    assert _determine_risk("custom_private_key", False) == "high"
+    assert _determine_risk("some_deploy_action", False) == "high"
+    assert _determine_risk("auth_token", False) == "high"
+    assert _determine_risk("non_risk_key", False) == "low"
+    assert _determine_risk("non_risk_key", True) == "medium"
