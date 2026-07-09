@@ -87,6 +87,8 @@ def _calculate_staleness(
     """Calculate staleness score between 0.0 and 1.0."""
     if last_verified_at is None:
         return 1.0 if requires_verification else 0.0
+    if window_days <= 0:
+        return 1.0
     now = datetime.now(UTC)
     if last_verified_at.tzinfo is None:
         verified_utc = last_verified_at.replace(tzinfo=UTC)
@@ -94,22 +96,6 @@ def _calculate_staleness(
         verified_utc = last_verified_at.astimezone(UTC)
     delta_days = (now - verified_utc).total_seconds() / (3600.0 * 24.0)
     return min(1.0, max(0.0, delta_days / window_days))
-
-
-def _tokenize_key(memory_key: str) -> set[str]:
-    """Tokenize key splitting by non-alphanumeric and camelcase boundaries."""
-    raw_tokens = re.split(r"[^a-zA-Z0-9_]", memory_key)
-    tokens = set()
-    for t in raw_tokens:
-        if not t:
-            continue
-        tokens.add(t.lower())
-        t_norm = t.replace("_", " ")
-        parts = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\b)|[0-9]+", t_norm)
-        if parts:
-            for p in parts:
-                tokens.add(p.lower())
-    return tokens
 
 
 def _determine_risk(
