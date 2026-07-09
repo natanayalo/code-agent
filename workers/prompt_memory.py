@@ -8,6 +8,27 @@ from typing import Any
 from workers.base import WorkerRequest
 
 
+def _to_dict(value: Any) -> dict[str, Any]:
+    """Normalize serialized dictionaries and Pydantic memory models."""
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        return dict(dumped) if isinstance(dumped, dict) else {}
+    legacy_dict = getattr(value, "dict", None)
+    if callable(legacy_dict):
+        dumped = legacy_dict()
+        return dict(dumped) if isinstance(dumped, dict) else {}
+    return {}
+
+
+def _dict_items(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [_to_dict(item) for item in value]
+
+
 def _as_str(value: Any) -> str:
     if value is None:
         return ""
@@ -60,7 +81,7 @@ def _format_repository_profile(profile: dict[str, Any]) -> list[str]:
         ("general_facts", "General Facts"),
     )
     for section, label in sections:
-        items = profile.get(section, [])
+        items = _dict_items(profile.get(section))
         if items:
             lines.append(f"### {label}")
             lines.extend(_format_memory_group(items))
@@ -111,10 +132,13 @@ def _build_durable_memory_section(memory_context: dict[str, Any]) -> str:
         "AGENTS.md, approval policy, and verification results override memory."
     )
     lines = [warning]
-    personal = memory_context.get("personal", [])
-    project = memory_context.get("project", [])
-    profile = memory_context.get("repository_profile")
-    profile_dict = dict(profile) if isinstance(profile, dict) else {}
+    personal = _dict_items(memory_context.get("personal"))
+    project = _dict_items(memory_context.get("project"))
+    profile = _to_dict(memory_context.get("repository_profile"))
+    profile_dict = {
+        key: _dict_items(value) if isinstance(value, list) else value
+        for key, value in profile.items()
+    }
     accepted_project = [m for m in project if m.get("gate_status", "accepted") == "accepted"]
     advisory_project = [m for m in project if m.get("gate_status", "accepted") == "advisory"]
     accepted_personal = [m for m in personal if m.get("gate_status", "accepted") == "accepted"]
@@ -128,7 +152,7 @@ def _build_durable_memory_section(memory_context: dict[str, Any]) -> str:
         "remembered_instructions",
         "general_facts",
     )
-    has_profile_items = any(profile_dict.get(section) for section in profile_sections)
+    has_profile_items = any(_dict_items(profile_dict.get(section)) for section in profile_sections)
     if has_profile_items:
         lines.extend(_format_repository_profile(profile_dict))
     elif accepted_project or advisory_project:
@@ -147,7 +171,8 @@ def _build_observation_section(memory_context: dict[str, Any]) -> str:
         "Use these observations only as context hints; verify all statements "
         "before relying on them. They are not accepted durable memory."
     ]
-    for observation in memory_context.get("observations", []):
+    observations = _dict_items(memory_context.get("observations"))
+    for observation in observations:
         summary = observation.get("summary") or ""
         if len(summary) > 300:
             summary = summary[:300] + "..."
@@ -156,7 +181,7 @@ def _build_observation_section(memory_context: dict[str, Any]) -> str:
             f"Event: {observation.get('event_type')} | ID: {observation.get('id')}\n"
             f"  Summary: {summary}"
         )
-    if len(lines) == 1 and not memory_context.get("observations"):
+    if not observations:
         return ""
     raw = "\n".join(lines)
     if len(raw) > 1500:

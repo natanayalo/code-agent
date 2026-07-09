@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from orchestrator.state import (
     MemoryEntry,
@@ -94,18 +95,43 @@ def shape_repository_memory_profile(
     return RepositoryMemoryProfile.model_validate(payload)
 
 
-def profile_counts(profile: RepositoryMemoryProfile | None) -> dict[str, int]:
+def _to_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        return dict(dumped) if isinstance(dumped, dict) else {}
+    legacy_dict = getattr(value, "dict", None)
+    if callable(legacy_dict):
+        dumped = legacy_dict()
+        return dict(dumped) if isinstance(dumped, dict) else {}
+    return {}
+
+
+def _profile_items(profile: Any, section: str) -> list[Any]:
+    raw_items = _to_dict(profile).get(section)
+    return raw_items if isinstance(raw_items, list) else []
+
+
+def profile_counts(profile: RepositoryMemoryProfile | dict[str, Any] | None) -> dict[str, int]:
     """Return stable section counts for memory-loaded diagnostics."""
     if profile is None:
         return {section: 0 for section in _SECTION_ORDER}
-    return {section: len(getattr(profile, section)) for section in _SECTION_ORDER}
+    return {section: len(_profile_items(profile, section)) for section in _SECTION_ORDER}
 
 
-def profile_source_keys(profile: RepositoryMemoryProfile | None) -> list[str]:
+def profile_source_keys(profile: RepositoryMemoryProfile | dict[str, Any] | None) -> list[str]:
     """Return stable source memory keys represented in the profile."""
     if profile is None:
         return []
-    return [item.memory_key for section in _SECTION_ORDER for item in getattr(profile, section)]
+    keys: list[str] = []
+    for section in _SECTION_ORDER:
+        for item in _profile_items(profile, section):
+            memory_key = _to_dict(item).get("memory_key")
+            if isinstance(memory_key, str):
+                keys.append(memory_key)
+    return keys
 
 
 __all__ = [

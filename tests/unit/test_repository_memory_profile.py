@@ -76,6 +76,18 @@ def test_profile_diagnostics_are_stable_for_empty_input() -> None:
     assert profile_source_keys(profile) == []
 
 
+def test_profile_diagnostics_accept_serialized_profile_dicts() -> None:
+    profile = {
+        "verification_commands": [
+            {"memory_key": "test_command"},
+        ],
+        "conventions": None,
+    }
+
+    assert profile_counts(profile)["verification_commands"] == 1
+    assert profile_source_keys(profile) == ["test_command"]
+
+
 def test_read_side_gate_excludes_suppressed_project_entries_from_profile() -> None:
     memory = _apply_read_side_gate(
         MemoryContext(

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
+from orchestrator.state import MemoryEntry, ObservationContextEntry, RepositoryMemoryProfile
 from workers.base import WorkerRequest
 from workers.prompt import build_system_prompt
 
@@ -443,6 +446,33 @@ def test_build_system_prompt_does_not_orphan_items_after_budget_overflow(tmp_pat
 
     assert "large_command" not in prompt
     assert "later_convention" not in prompt
+
+
+def test_build_system_prompt_normalizes_memory_models_and_nullable_lists(tmp_path) -> None:
+    """Live Pydantic context models and null collections render safely."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={
+            "personal": [MemoryEntry(memory_key="personal_hint", value={"hint": "concise"})],
+            "project": None,
+            "repository_profile": RepositoryMemoryProfile(),
+            "observations": [
+                ObservationContextEntry(
+                    id="obs-1",
+                    observed_at=datetime.now(UTC),
+                    source="worker",
+                    event_type="completed",
+                    summary="Observed completion.",
+                )
+            ],
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "personal_hint" in prompt
+    assert "Observed completion." in prompt
 
 
 def test_build_system_prompt_advisory_metadata_handles_none_confidence(tmp_path) -> None:
