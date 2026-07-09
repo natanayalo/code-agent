@@ -31,6 +31,11 @@ HIGH_RISK_KEYWORDS = {
     "approval",
 }
 
+_HIGH_RISK_PATTERN = re.compile(
+    r"\b(?:" + "|".join(re.escape(k.replace("_", " ")) for k in HIGH_RISK_KEYWORDS) + r")\b",
+    re.IGNORECASE,
+)
+
 COLLECTION_KEYS = {
     "verification_commands",
     "known_pitfalls",
@@ -99,7 +104,8 @@ def _tokenize_key(memory_key: str) -> set[str]:
         if not t:
             continue
         tokens.add(t.lower())
-        parts = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\b)|[0-9]+", t)
+        t_norm = t.replace("_", " ")
+        parts = re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|\b)|[0-9]+", t_norm)
         if parts:
             for p in parts:
                 tokens.add(p.lower())
@@ -111,9 +117,14 @@ def _determine_risk(
     requires_verification: bool,
 ) -> Literal["low", "medium", "high"]:
     """Determine risk level of memory entry."""
-    tokens = _tokenize_key(memory_key)
-    if any(token in HIGH_RISK_KEYWORDS for token in tokens):
+    normalized = re.sub(r"[^a-zA-Z0-9]", " ", memory_key)
+    normalized = re.sub(r"([a-z])([A-Z])", r"\1 \2", normalized)
+    normalized = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", normalized)
+    normalized = normalized.lower()
+
+    if _HIGH_RISK_PATTERN.search(normalized):
         return "high"
+
     if requires_verification:
         return "medium"
     return "low"

@@ -729,3 +729,19 @@ def test_tokenize_key_camel_and_snake_case() -> None:
         "auth",
         "credential",
     }
+
+    # Uppercase acronym split matching
+    assert _tokenize_key("API_KEY") == {"api_key", "api", "key"}
+
+
+def test_determine_risk_high_risk_substrings() -> None:
+    """Verify that _determine_risk identifies high risk keys within larger names."""
+    from memory.read_side_gate import _determine_risk
+
+    assert _determine_risk("my_api_key", False) == "high"
+    assert _determine_risk("aws_access_key", False) == "high"
+    assert _determine_risk("custom_private_key", False) == "high"
+    assert _determine_risk("some_deploy_action", False) == "high"
+    assert _determine_risk("auth_token", False) == "high"
+    assert _determine_risk("non_risk_key", False) == "low"
+    assert _determine_risk("non_risk_key", True) == "medium"
