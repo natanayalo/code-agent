@@ -47,16 +47,16 @@ Active focus:
 
 ## Next Slices Only
 
-1. deterministic trace-to-candidate extraction from real task evidence
-2. read-side memory gate for staleness, conflict, risk, and advisory strength
-3. broader repo-profile shaping once the observation/admission corpus is richer and gating is stable
+1. M23.8 deterministic extraction hardening + evaluation
+2. M23.9 read-side memory gate for staleness, conflict, risk, and advisory strength
+3. M23.10 repo-profile shaping once the observation/admission corpus is richer and gating is stable
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
 - Milestone 21: worker facade [x], runtime executor [x], sandbox adapter [x], and tool extraction.
-- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [x], reviewable corpus/proposals [x], unified memory admission plus library adoption spike in [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md), episodic observation layer [x] in [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md), operator visibility [x] in [`docs/m23-slice-7-observation-admission-visibility.md`](m23-slice-7-observation-admission-visibility.md), and the next slices listed above.
+- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [x], reviewable corpus/proposals [x], unified memory admission plus library adoption spike in [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md), episodic observation layer [x] in [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md), operator visibility [x] in [`docs/m23-slice-7-observation-admission-visibility.md`](m23-slice-7-observation-admission-visibility.md), and the M23.8-M23.10 follow-ups listed above.
 - Phase 4: evaluate routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy only after Phase 3 proves reliability.
 
 ## Completed Work
