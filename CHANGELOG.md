@@ -337,6 +337,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps): bump fastapi from 0.138.2 to 0.139.0 ([#302](https://github.com/natanayalo/code-agent/pull/302))
+
 - Build(deps): bump langgraph from 1.2.6 to 1.2.8 ([#301](https://github.com/natanayalo/code-agent/pull/301))
 
 - Build(deps): bump uvicorn from 0.49.0 to 0.51.0 ([#300](https://github.com/natanayalo/code-agent/pull/300))
