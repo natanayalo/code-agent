@@ -252,6 +252,14 @@ def test_load_memory_node_loads_memory_and_skepticism_metadata(session_factory) 
         "accepted_keys": ["communication_style", "test_command"],
         "suppressed_keys": [],
         "suppressed_details": [],
+        "repository_profile_counts": {
+            "verification_commands": 1,
+            "conventions": 0,
+            "pitfalls": 0,
+            "remembered_instructions": 0,
+            "general_facts": 0,
+        },
+        "repository_profile_source_keys": ["test_command"],
     }
 
 
@@ -328,6 +336,7 @@ def test_load_memory_node_db_error_returns_empty_memory() -> None:
         "project": [],
         "session": {},
         "observations": [],
+        "repository_profile": None,
         "gate_diagnostics": None,
     }
     assert result["timeline_events"][0].event_type == TimelineEventType.MEMORY_LOADED

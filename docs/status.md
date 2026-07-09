@@ -28,6 +28,7 @@ Active focus:
 - operational controls: task replay, approval decision endpoint, progress callbacks, and metrics
 - generated TaskSpec contract for task goal/risk/type/delivery policy before worker routing
 - repo registry and validation profiles gate public repo selection, protected paths, and validation defaults
+- deterministic advisory repository memory profiles are injected into worker context without changing repository policy
 - PR-native delivery fields with GitHub branch/draft-PR delivery integration
 - full-text personal/project memory search with dashboard search results and memory-retrieval timeline visibility
 - deterministic memory retrieval evaluation to separate full-text regressions from known semantic gaps
@@ -47,14 +48,14 @@ Active focus:
 
 ## Next Slices Only
 
-1. M23.10 repo-profile shaping once the observation/admission corpus is richer and gating is stable
+1. continue M23 follow-up evaluation and reliability work without expanding advisory memory into executable policy
 
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
 
 - Milestone 21: worker facade [x], runtime executor [x], sandbox adapter [x], and tool extraction.
-- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [x], reviewable corpus/proposals [x], unified memory admission plus library adoption spike in [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md), episodic observation layer [x] in [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md), operator visibility [x] in [`docs/m23-slice-7-observation-admission-visibility.md`](m23-slice-7-observation-admission-visibility.md), M23.8 deterministic extraction hardening and evaluation [x], M23.9 read-side memory gate [x], and the M23.10 follow-up listed above.
+- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [x], reviewable corpus/proposals [x], unified memory admission plus library adoption spike in [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md), episodic observation layer [x] in [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md), operator visibility [x] in [`docs/m23-slice-7-observation-admission-visibility.md`](m23-slice-7-observation-admission-visibility.md), M23.8 deterministic extraction hardening and evaluation [x], M23.9 read-side memory gate [x], and M23.10 advisory repository memory profile [x].
 - Phase 4: evaluate routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy only after Phase 3 proves reliability.
 
 ## Completed Work

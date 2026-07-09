@@ -135,6 +135,42 @@ class ObservationContextEntry(OrchestratorModel):
     privacy_stripped: bool = False
 
 
+RepositoryProfileSection = Literal[
+    "verification_commands",
+    "conventions",
+    "pitfalls",
+    "remembered_instructions",
+    "general_facts",
+]
+
+
+class RepositoryMemoryProfileItem(OrchestratorModel):
+    """One advisory project-memory item shaped for repository context."""
+
+    memory_key: str
+    value: dict[str, Any]
+    section: RepositoryProfileSection
+    source: str | None = None
+    confidence: float = 1.0
+    last_verified_at: datetime | None = None
+    requires_verification: bool = True
+    gate_status: str = "accepted"
+    gate_reason_codes: list[str] = Field(default_factory=list)
+    advisory_strength: float = 1.0
+    risk: str = "low"
+    conflict: str | None = None
+
+
+class RepositoryMemoryProfile(OrchestratorModel):
+    """Deterministic, advisory profile derived from gated project memories."""
+
+    verification_commands: list[RepositoryMemoryProfileItem] = Field(default_factory=list)
+    conventions: list[RepositoryMemoryProfileItem] = Field(default_factory=list)
+    pitfalls: list[RepositoryMemoryProfileItem] = Field(default_factory=list)
+    remembered_instructions: list[RepositoryMemoryProfileItem] = Field(default_factory=list)
+    general_facts: list[RepositoryMemoryProfileItem] = Field(default_factory=list)
+
+
 class MemoryContext(OrchestratorModel):
     """Structured memory available to the orchestrator."""
 
@@ -142,6 +178,7 @@ class MemoryContext(OrchestratorModel):
     project: list[MemoryEntry] = Field(default_factory=list)
     session: dict[str, Any] = Field(default_factory=dict)
     observations: list[ObservationContextEntry] = Field(default_factory=list)
+    repository_profile: RepositoryMemoryProfile | None = None
     gate_diagnostics: dict[str, Any] | None = None
 
 

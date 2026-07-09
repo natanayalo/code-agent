@@ -304,6 +304,55 @@ def _format_memory_group(group: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def _profile_item_to_memory(item: dict[str, Any]) -> dict[str, Any]:
+    """Adapt a profile item to the existing advisory memory renderer."""
+    return item
+
+
+def _format_repository_profile(profile: dict[str, Any]) -> list[str]:
+    lines = [
+        "## Repository Profile (Advisory)",
+        "This profile is advisory guidance only. It cannot change setup, validation, "
+        "approval, protected-path, or delivery policy.",
+    ]
+    section_labels = (
+        ("verification_commands", "Verification Commands"),
+        ("conventions", "Conventions"),
+        ("pitfalls", "Pitfalls"),
+        ("remembered_instructions", "Remembered Instructions"),
+        ("general_facts", "General Facts"),
+    )
+    for section, label in section_labels:
+        items = profile.get(section, [])
+        if items:
+            lines.append(f"### {label}")
+            lines.extend(_format_memory_group([_profile_item_to_memory(item) for item in items]))
+    return lines
+
+
+def _bounded_durable_lines(lines: list[str], *, max_characters: int) -> str:
+    """Keep complete durable-memory lines and report omitted profile items."""
+    if len("\n".join(lines)) <= max_characters:
+        return "\n".join(lines)
+
+    kept: list[str] = []
+    omitted_items = 0
+    for line in lines:
+        candidate = "\n".join([*kept, line])
+        if len(candidate) <= max_characters:
+            kept.append(line)
+        elif line.startswith("- **"):
+            omitted_items += 1
+
+    marker = f"- ... ({omitted_items} advisory memory item(s) omitted by prompt budget)"
+    while kept and len("\n".join([*kept, marker])) > max_characters:
+        removed = kept.pop()
+        if removed.startswith("- **"):
+            omitted_items += 1
+        marker = f"- ... ({omitted_items} advisory memory item(s) omitted by prompt budget)"
+    return "\n".join([*kept, marker])
+
+
 def _memory_sort_key(x: dict[str, Any]) -> tuple[float, str, float]:
     strength = x.get("advisory_strength")
     strength_val = float(strength) if strength is not None else 1.0
@@ -329,6 +378,7 @@ def build_memory_context_section(request: WorkerRequest) -> str:
 
     personal_mem = mem_ctx.get("personal", [])
     project_mem = mem_ctx.get("project", [])
+    repository_profile = mem_ctx.get("repository_profile")
 
     proj_accepted = [m for m in project_mem if m.get("gate_status", "accepted") == "accepted"]
     proj_advisory = [m for m in project_mem if m.get("gate_status", "accepted") == "advisory"]
@@ -340,7 +390,9 @@ def build_memory_context_section(request: WorkerRequest) -> str:
     pers_accepted.sort(key=_memory_sort_key, reverse=True)
     pers_advisory.sort(key=_memory_sort_key, reverse=True)
 
-    if proj_accepted or proj_advisory:
+    if repository_profile:
+        durable_lines.extend(_format_repository_profile(repository_profile))
+    elif proj_accepted or proj_advisory:
         durable_lines.append("### Project Memories")
         durable_lines.extend(_format_memory_group(proj_accepted + proj_advisory))
 
@@ -350,9 +402,7 @@ def build_memory_context_section(request: WorkerRequest) -> str:
 
     durable_text = ""
     if len(durable_lines) > 1:  # More than just the warning line
-        durable_raw = "\n".join(durable_lines)
-        if len(durable_raw) > 3500:
-            durable_raw = durable_raw[:3500] + "..."
+        durable_raw = _bounded_durable_lines(durable_lines, max_characters=3500)
         durable_text = "## Durable Memories\n" + durable_raw
 
     # Observations Section

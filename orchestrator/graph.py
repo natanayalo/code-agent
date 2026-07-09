@@ -1624,6 +1624,17 @@ def _memory_loaded_payload(
         "project_keys": [entry.memory_key for entry in memory.project],
         "observation_ids": [entry.id for entry in memory.observations],
     }
+    try:
+        from memory.repository_profile import profile_counts, profile_source_keys
+
+        payload.update(
+            {
+                "repository_profile_counts": profile_counts(memory.repository_profile),
+                "repository_profile_source_keys": profile_source_keys(memory.repository_profile),
+            }
+        )
+    except Exception:
+        logger.warning("Failed to serialize repository memory profile diagnostics.", exc_info=True)
     if memory.gate_diagnostics:
         diag = memory.gate_diagnostics
         accepted_p = diag.get("accepted_personal", [])
@@ -1664,6 +1675,17 @@ def _apply_read_side_gate(memory: MemoryContext) -> MemoryContext:
         memory.personal = result.accepted_personal
         memory.project = result.accepted_project
         memory.gate_diagnostics = result.model_dump(mode="json")
+        try:
+            from memory.repository_profile import shape_repository_memory_profile
+
+            memory.repository_profile = shape_repository_memory_profile(memory.project)
+        except Exception:
+            logger.warning(
+                "Failed to shape repository memory profile; retaining raw project memories.",
+                exc_info=True,
+                extra={"project_memory_keys": [entry.memory_key for entry in memory.project]},
+            )
+            memory.repository_profile = None
     except Exception:
         logger.warning(
             "Failed to run read-side memory gate; using input memories as-is.",

@@ -309,6 +309,47 @@ def test_build_system_prompt_renders_advisory_metadata(tmp_path) -> None:
     ) in prompt
 
 
+def test_build_system_prompt_renders_repository_profile_without_project_duplicates(
+    tmp_path,
+) -> None:
+    """Repository profiles are advisory and replace raw project-memory rendering."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={
+            "repository_profile": {
+                "verification_commands": [
+                    {
+                        "memory_key": "verification_commands",
+                        "value": {"command": "pytest"},
+                        "gate_status": "accepted",
+                        "advisory_strength": 0.9,
+                    }
+                ],
+                "conventions": [],
+                "pitfalls": [],
+                "remembered_instructions": [],
+                "general_facts": [],
+            },
+            "project": [
+                {
+                    "memory_key": "verification_commands",
+                    "value": {"command": "pytest"},
+                    "gate_status": "accepted",
+                }
+            ],
+            "personal": [],
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "## Repository Profile (Advisory)" in prompt
+    assert "cannot change setup, validation, approval" in prompt
+    assert prompt.count("**verification_commands**") == 1
+    assert "### Project Memories" not in prompt
+
+
 def test_build_system_prompt_advisory_metadata_handles_none_confidence(tmp_path) -> None:
     """Test that build_system_prompt safely formats memory metadata with a None confidence."""
     (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
