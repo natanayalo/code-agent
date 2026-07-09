@@ -331,15 +331,17 @@ def _evaluate_candidate_matching(
             key = expected.memory_key or "unknown"
             fn_by_key[key] = fn_by_key.get(key, 0) + 1
 
+    matched_absent_indices = set()
     for expected_abs in expected_absent:
-        for actual in actual_candidates:
+        for act_idx, actual in enumerate(actual_candidates):
             if _match_candidate(actual, expected_abs):
+                matched_absent_indices.add(act_idx)
                 failures.append(f"Extracted forbidden candidate: key={expected_abs.memory_key}")
                 key = expected_abs.memory_key or "unknown"
                 fp_by_key[key] = fp_by_key.get(key, 0) + 1
 
     for act_idx, actual in enumerate(actual_candidates):
-        if act_idx not in matched_actual_indices:
+        if act_idx not in matched_actual_indices and act_idx not in matched_absent_indices:
             failures.append(f"Unexpected extra candidate extracted: {actual.get('memory_key')}")
             key = actual.get("memory_key") or "unknown"
             fp_by_key[key] = fp_by_key.get(key, 0) + 1

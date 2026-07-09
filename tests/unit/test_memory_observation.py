@@ -27,6 +27,7 @@ from memory.observation import (
     ObservationMemoryBridge,
     _extract_candidates_from_task_text,
     _extract_remember_sentences,
+    _get_base_executable_and_target,
     _is_verification_command,
     strip_private_tags,
     strip_private_tags_recursive,
@@ -1398,3 +1399,18 @@ def test_convention_guideline_and_policy(session_factory) -> None:
         vals = {c.metadata_payload["memory_candidate"]["value"]["convention"] for c in conventions}
         assert "use spaces." in vals
         assert "run checks." in vals
+
+
+def test_get_base_executable_and_target_generic_interpreters() -> None:
+    """Test that _get_base_executable_and_target recursively strips nested generic interpreters."""
+    assert _get_base_executable_and_target("pytest tests/unit") == ("pytest", "tests/unit")
+    assert _get_base_executable_and_target("python script.py") == ("script.py", None)
+    assert _get_base_executable_and_target("python3 -m unittest discover") == (
+        "unittest",
+        "discover",
+    )
+    assert _get_base_executable_and_target("sudo python script.py") == ("script.py", None)
+    assert _get_base_executable_and_target("sudo python3 -m pytest tests/unit") == (
+        "pytest",
+        "tests/unit",
+    )

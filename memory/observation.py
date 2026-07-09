@@ -606,7 +606,7 @@ def _get_base_executable_and_target(command_str: str) -> tuple[str, str | None]:
         "zsh",
         "sudo",
     }
-    if exe.lower() in generic_interpreters and len(parts) > 1:
+    while exe.lower() in generic_interpreters and len(parts) > 1:
         parts = parts[1:]
         if parts[0] == "-m" and len(parts) > 1:
             parts = parts[1:]
