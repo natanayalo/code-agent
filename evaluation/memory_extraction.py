@@ -538,7 +538,7 @@ def evaluate_memory_extraction(
     quality_metrics = {
         "extraction_precision": overall_precision,
         "extraction_recall": overall_recall,
-        "admission_precision": (
+        "admission_non_rejected_rate": (
             (direct_write_total + proposal_total)
             / (direct_write_total + proposal_total + rejected_total)
             if (direct_write_total + proposal_total + rejected_total) > 0
