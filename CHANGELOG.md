@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: M23 Episodic Memory - Deterministic Verification Gating ([#303](https://github.com/natanayalo/code-agent/pull/303))
+
 - Feat: expose memory observation admission visibility ([#299](https://github.com/natanayalo/code-agent/pull/299))
 
 - Feat: add memory admission spike ([#297](https://github.com/natanayalo/code-agent/pull/297))
