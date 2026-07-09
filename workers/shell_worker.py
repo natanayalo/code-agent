@@ -58,6 +58,8 @@ def _apply_diff_if_provided(
             repo_path=workspace.repo_path,
             workspace_path=workspace.workspace_path,
             timeout_seconds=DEFAULT_GIT_APPLY_TIMEOUT_SECONDS,
+            task_id=request.task_id,
+            session_id=request.session_id,
             redactor=SecretRedactor(list((request.secrets or {}).values())),
             span_kind=SPAN_KIND_TOOL,
         )
@@ -105,6 +107,8 @@ def _run_shell_script(
             workspace_path=workspace.workspace_path,
             timeout_seconds=request.budget.get("worker_timeout_seconds", 300),
             env=request.secrets,
+            task_id=request.task_id,
+            session_id=request.session_id,
             redactor=SecretRedactor(list((request.secrets or {}).values())),
             span_kind=SPAN_KIND_TOOL,
         )

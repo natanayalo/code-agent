@@ -1626,6 +1626,63 @@ def _memory_loaded_payload(
     }
 
 
+def _apply_read_side_gate(memory: MemoryContext) -> MemoryContext:
+    """Apply read-side memory gate (cross-scope deduplication and conflict resolution)."""
+    from datetime import UTC, datetime
+
+    def _confidence_value(value: float | None) -> float:
+        return 1.0 if value is None else value
+
+    def _as_utc(value: datetime | None) -> datetime:
+        if value is None:
+            return datetime.min.replace(tzinfo=UTC)
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    # 1. Deduplicate personal memory itself
+    # (keep highest confidence/newest verification for each key)
+    deduped_personal = {}
+    for entry in memory.personal:
+        key = entry.memory_key
+        if key not in deduped_personal:
+            deduped_personal[key] = entry
+        else:
+            existing = deduped_personal[key]
+            e_time = _as_utc(entry.last_verified_at)
+            ex_time = _as_utc(existing.last_verified_at)
+            if e_time > ex_time or (
+                e_time == ex_time
+                and _confidence_value(entry.confidence) > _confidence_value(existing.confidence)
+            ):
+                deduped_personal[key] = entry
+
+    # 2. Deduplicate project memory itself
+    deduped_project = {}
+    for entry in memory.project:
+        key = entry.memory_key
+        if key not in deduped_project:
+            deduped_project[key] = entry
+        else:
+            existing = deduped_project[key]
+            e_time = _as_utc(entry.last_verified_at)
+            ex_time = _as_utc(existing.last_verified_at)
+            if e_time > ex_time or (
+                e_time == ex_time
+                and _confidence_value(entry.confidence) > _confidence_value(existing.confidence)
+            ):
+                deduped_project[key] = entry
+
+    # 3. Cross-scope deduplication (project overrides personal)
+    for key in list(deduped_personal.keys()):
+        if key in deduped_project:
+            del deduped_personal[key]
+
+    memory.personal = list(deduped_personal.values())
+    memory.project = list(deduped_project.values())
+    return memory
+
+
 def _fetch_memory_context(
     session_factory: Callable[[], Session],
     user_id: str | None,
@@ -1676,7 +1733,8 @@ def _fetch_memory_context(
                     "repo_url": repo_url,
                 },
             )
-        return memory
+
+        return _apply_read_side_gate(memory)
     except Exception:
         logger.warning(
             "Failed to load memory context; continuing with empty memory.",

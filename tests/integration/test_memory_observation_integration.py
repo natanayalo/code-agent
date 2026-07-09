@@ -174,7 +174,9 @@ def test_outcome_persistence_captures_and_bridges_e2e(session_factory) -> None:
                 select(MemoryObservation).order_by(MemoryObservation.observed_at.asc())
             ).all()
         )
-        assert len(obs_list) == 3
+        # We expect: suggestion, worker_completed, task_finalized,
+        # and extracted_candidate (from command pytest)
+        assert len(obs_list) == 4
 
         suggestion_obs = [o for o in obs_list if o.event_type == "suggestion"][0]
         assert suggestion_obs.admission_status == "processed"
@@ -186,10 +188,16 @@ def test_outcome_persistence_captures_and_bridges_e2e(session_factory) -> None:
 
         assert [o for o in obs_list if o.event_type == "task_finalized"]
 
-        proposal = session.scalars(select(MemoryProposal)).one()
+        proposal_select = select(MemoryProposal).where(
+            MemoryProposal.source_observation_id == suggestion_obs.id
+        )
+        proposal = session.scalars(proposal_select).one()
         assert proposal.source_observation_id == suggestion_obs.id
 
-        decision = session.scalars(select(MemoryAdmissionDecision)).one()
+        decision_select = select(MemoryAdmissionDecision).where(
+            MemoryAdmissionDecision.source_observation_id == suggestion_obs.id
+        )
+        decision = session.scalars(decision_select).one()
         assert decision.source_observation_id == suggestion_obs.id
 
 
@@ -329,16 +337,24 @@ def test_persist_execution_outcome_integration_happy_path(
                 select(MemoryObservation).order_by(MemoryObservation.observed_at.asc())
             ).all()
         )
-        assert len(obs_list) == 3
+        # We expect: suggestion, worker_completed, task_finalized,
+        # and extracted_candidate (from command pytest)
+        assert len(obs_list) == 4
 
         suggestion_obs = [o for o in obs_list if o.event_type == "suggestion"][0]
         assert suggestion_obs.admission_status == "processed"
         assert suggestion_obs.id == suggestion_id
 
-        proposal = session.scalars(select(MemoryProposal)).one()
+        proposal_select = select(MemoryProposal).where(
+            MemoryProposal.source_observation_id == suggestion_obs.id
+        )
+        proposal = session.scalars(proposal_select).one()
         assert proposal.source_observation_id == suggestion_obs.id
 
-        decision = session.scalars(select(MemoryAdmissionDecision)).one()
+        decision_select = select(MemoryAdmissionDecision).where(
+            MemoryAdmissionDecision.source_observation_id == suggestion_obs.id
+        )
+        decision = session.scalars(decision_select).one()
         assert decision.source_observation_id == suggestion_obs.id
 
 
@@ -359,13 +375,14 @@ def test_persist_execution_outcome_bridges_after_outcome_transaction(
     original_capture_worker_run = ObservationCaptureService.capture_worker_run
     original_bridge_observations = ObservationMemoryBridge.bridge_observations
 
-    def mock_capture_worker_run(*, session, task, worker_run, result):
+    def mock_capture_worker_run(*, session, task, worker_run, result, **kwargs):
         capture_session_ids.append(id(session))
         return original_capture_worker_run(
             session=session,
             task=task,
             worker_run=worker_run,
             result=result,
+            **kwargs,
         )
 
     def mock_bridge_observations(*, session, task_id):
@@ -504,3 +521,125 @@ def test_persist_execution_outcome_isolates_capture_failures(session_factory, mo
     with session_scope(session_factory) as session:
         db_task = session.get(Task, task_id)
         assert db_task.status == TaskStatus.COMPLETED
+
+
+def _build_mock_state_for_extraction(task_id: str) -> OrchestratorState:
+    result = WorkerResult(
+        status="success",
+        summary="Task succeeded. convention: write unit tests.",
+        commands_run=[
+            WorkerCommand(command="pytest tests/unit", exit_code=0),
+            WorkerCommand(command="python run_app.py", exit_code=1),
+            WorkerCommand(command="poetry run python run_app.py", exit_code=0),
+        ],
+        files_changed=["main.py"],
+    )
+    return OrchestratorState(
+        task=TaskRequest(task_text="Run task", task_id=task_id),
+        session=None,
+        route=RouteDecision(chosen_worker="antigravity", route_reason="scout"),
+        dispatch=WorkerDispatch(),
+        approval=ApprovalCheckpoint(required=False, status="not_required"),
+        task_spec=TaskSpec(
+            goal="Run task",
+            task_type="scout",
+            delivery_mode="workspace",
+        ),
+        result=result,
+        attempt_count=1,
+    )
+
+
+def _assert_observation_bridge_timeline(db_task: Task) -> None:
+    bridge_events = [
+        event
+        for event in db_task.timeline_events
+        if event.event_type == "memory_persisted"
+        and event.payload
+        and event.payload.get("source") == "observation_bridge"
+    ]
+    assert len(bridge_events) == 1
+    assert bridge_events[0].payload["extracted_candidate_count"] == 3
+    assert bridge_events[0].payload["decision_counts"] == {
+        "create": 1,
+        "needs_human_review": 2,
+    }
+
+
+def test_persist_execution_outcome_performs_deterministic_extraction(session_factory) -> None:
+    """_persist_execution_outcome correctly extracts, child-maps, and admits candidates from traces.
+
+    Verifies that multiple candidates can be extracted from a single trace observation
+    without database index uniqueness constraint errors.
+    """
+    with session_scope(session_factory) as session:
+        task = _seed_user_session_task(session)
+        task_id = task.id
+
+        run = WorkerRun(
+            id="run-2",
+            task_id=task_id,
+            session_id=task.session_id,
+            worker_type="antigravity",
+            started_at=utc_now(),
+            finished_at=utc_now(),
+            status="success",
+        )
+        session.add(run)
+        session.flush()
+
+    service = MockExecutionService(session_factory)
+    state = _build_mock_state_for_extraction(task_id)
+
+    now = utc_now()
+    _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+        force_task_status=TaskStatus.COMPLETED,
+    )
+
+    with session_scope(session_factory) as session:
+        db_task = session.get(Task, task_id)
+        assert db_task.status == TaskStatus.COMPLETED
+
+        # Check observations
+        obs_list = list(
+            session.scalars(
+                select(MemoryObservation).where(MemoryObservation.task_id == task_id)
+            ).all()
+        )
+
+        # We expect:
+        # - 1 worker completed observation
+        # - 1 task finalized observation
+        # - 3 child extracted candidate observations
+        #   (1 verification command, 1 pitfall, 1 convention)
+        assert len(obs_list) == 5
+
+        children = [o for o in obs_list if o.event_type == "extracted_candidate"]
+        assert len(children) == 3
+        assert all(c.admission_status == "processed" for c in children)
+
+        # Check unique constraint safety
+        # Make sure that proposals and decisions are created and linked to the child observations
+        proposal_stmt = select(MemoryProposal).where(MemoryProposal.task_id == task_id)
+        proposals = list(session.scalars(proposal_stmt).all())
+        # Both known_pitfalls and repo_convention force human review, so 2 proposals
+        assert len(proposals) == 2
+        assert {p.memory_key for p in proposals} == {"known_pitfalls", "repo_convention"}
+
+        decision_stmt = select(MemoryAdmissionDecision).where(
+            MemoryAdmissionDecision.task_id == task_id
+        )
+        decisions = list(session.scalars(decision_stmt).all())
+        # Verification command, pitfall, and convention are all logged in decisions
+        assert len(decisions) == 3
+        assert {d.memory_key for d in decisions} == {
+            "verification_commands",
+            "known_pitfalls",
+            "repo_convention",
+        }
+        _assert_observation_bridge_timeline(db_task)

@@ -283,6 +283,7 @@ class VerificationReport(OrchestratorModel):
     summary: str | None = None
     failure_kind: VerificationFailureKind | None = None
     items: list[VerificationReportItem] = Field(default_factory=list)
+    deterministic_verification: dict[str, Any] | None = None
 
 
 class TaskTimelineEventState(OrchestratorModel):

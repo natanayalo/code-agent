@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -13,7 +13,7 @@ import orchestrator.graph as graph_module
 from db.base import Base
 from db.enums import TimelineEventType
 from orchestrator.graph import build_load_memory_node
-from orchestrator.state import OrchestratorState
+from orchestrator.state import MemoryContext, MemoryEntry, OrchestratorState
 from repositories import (
     ObservationRepository,
     PersonalMemoryRepository,
@@ -363,3 +363,125 @@ def test_load_memory_node_records_span_input_output(
     assert captured[0][1]["project_count"] == 1
     assert captured[0][1]["observations_count"] == 1
     assert statuses == ["success"]
+
+
+def test_load_memory_node_gating_and_deduplication(session_factory) -> None:
+    """Test that the read-side gate filters cross-scope conflicts and resolves duplicates."""
+    from datetime import UTC, datetime
+
+    repo_url = "https://github.com/natanayalo/code-agent"
+
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(external_user_id="gate-user")
+        conv = SessionRepository(session).create(
+            user_id=user.id,
+            channel="http",
+            external_thread_id="thread-gate",
+        )
+
+        # 1. Seed cross-scope conflict:
+        # Personal memory has 'style' key, Project memory also has 'style' key.
+        # Project should override personal.
+        PersonalMemoryRepository(session).upsert(
+            memory_key="style",
+            value={"type": "personal"},
+            source="user",
+            confidence=1.0,
+            scope="global",
+            last_verified_at=datetime(2026, 7, 1, tzinfo=UTC),
+        )
+        ProjectMemoryRepository(session).upsert(
+            repo_url=repo_url,
+            memory_key="style",
+            value={"type": "project"},
+            source="worker",
+            confidence=1.0,
+            scope="repo",
+            last_verified_at=datetime(2026, 7, 2, tzinfo=UTC),
+        )
+
+        session.flush()
+        user_id = user.id
+        session_id = conv.id
+
+    state = OrchestratorState.model_validate(
+        {
+            "session": {
+                "session_id": session_id,
+                "user_id": user_id,
+                "channel": "http",
+                "external_thread_id": "thread-gate",
+            },
+            "task": {
+                "task_text": "style",
+                "repo_url": repo_url,
+            },
+        }
+    )
+
+    node_result = build_load_memory_node(session_factory)(state)
+    loaded_memory = node_result["memory"]
+
+    # Personal memory for 'style' should be filtered out
+    assert len(loaded_memory["personal"]) == 0
+
+    # Project memory for 'style' should be kept
+    assert len(loaded_memory["project"]) == 1
+    assert loaded_memory["project"][0]["memory_key"] == "style"
+    assert loaded_memory["project"][0]["value"] == {"type": "project"}
+
+
+def test_apply_read_side_gate_handles_none_confidence() -> None:
+    """Test that read-side gating tolerates None confidence values during dedupe."""
+    memory = MemoryContext.model_construct(
+        personal=[
+            MemoryEntry.model_construct(
+                memory_key="style",
+                value={"type": "personal"},
+                confidence=None,
+                last_verified_at=datetime(2026, 7, 1, tzinfo=UTC),
+            ),
+            MemoryEntry.model_construct(
+                memory_key="style",
+                value={"type": "personal-preferred"},
+                confidence=1.1,
+                last_verified_at=datetime(2026, 7, 1, tzinfo=UTC),
+            ),
+        ],
+        project=[],
+        session={},
+        observations=[],
+    )
+
+    gated = graph_module._apply_read_side_gate(memory)
+
+    assert len(gated.personal) == 1
+    assert gated.personal[0].value == {"type": "personal-preferred"}
+
+
+def test_apply_read_side_gate_normalizes_timezone_aware_verified_at() -> None:
+    """Test that timezone-aware verified timestamps are compared in UTC correctly."""
+    memory = MemoryContext.model_construct(
+        personal=[
+            MemoryEntry.model_construct(
+                memory_key="style",
+                value={"type": "old"},
+                confidence=0.8,
+                last_verified_at=datetime(2026, 7, 1, 12, 0, tzinfo=timezone(timedelta(hours=2))),
+            ),
+            MemoryEntry.model_construct(
+                memory_key="style",
+                value={"type": "new"},
+                confidence=0.8,
+                last_verified_at=datetime(2026, 7, 1, 11, 30, tzinfo=UTC),
+            ),
+        ],
+        project=[],
+        session={},
+        observations=[],
+    )
+
+    gated = graph_module._apply_read_side_gate(memory)
+
+    assert len(gated.personal) == 1
+    assert gated.personal[0].value == {"type": "new"}

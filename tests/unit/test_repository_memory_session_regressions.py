@@ -21,6 +21,7 @@ from repositories import (
     session_scope,
 )
 from repositories.sqlalchemy import SessionStateRepository
+from repositories.sqlalchemy_memory import _relaxed_tsquery
 
 
 @pytest.fixture
@@ -282,3 +283,28 @@ def test_memory_repositories_recover_from_integrity_error_race(monkeypatch) -> N
     assert recovered_project is project_state
     assert recovered_project.value == {"pitfall": "new"}
     assert recovered_project.requires_verification is False
+
+
+def test_relaxed_memory_search_query_uses_significant_or_terms() -> None:
+    """Relaxed Postgres fallback should avoid requiring every task-goal term."""
+    query = (
+        "Probe memory_e2e_full_123. Create qa-memory-e2e.txt exactly. "
+        "Run python3 --version for future tasks."
+    )
+
+    relaxed = _relaxed_tsquery(query)
+
+    assert relaxed is not None
+    assert "|" in relaxed
+    assert "probe" in relaxed
+    assert "python3" in relaxed
+    assert "exactly" not in relaxed
+
+
+def test_relaxed_memory_search_query_preserves_underscores_and_unicode() -> None:
+    """Relaxed fallback should keep code identifiers and Unicode tokens intact."""
+    relaxed = _relaxed_tsquery("Inspect test_memory_observation and café results")
+
+    assert relaxed is not None
+    assert "test_memory_observation" in relaxed
+    assert "café" in relaxed

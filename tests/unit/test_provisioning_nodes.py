@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from orchestrator.nodes.provisioning import (
+    _makefile_has_target,
     build_init_environment_node,
     build_provision_workspace_node,
 )
@@ -520,11 +521,11 @@ async def test_init_environment_node_detects_go(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_init_environment_node_detects_makefile(tmp_path: Path) -> None:
-    """Verify detection of Makefile."""
+    """Verify Makefile setup detection requires a setup target."""
     manager = MagicMock()
     handle = MagicMock()
     handle.repo_path = tmp_path
-    (tmp_path / "Makefile").write_text("all:")
+    (tmp_path / "Makefile").write_text("setup:\n\t@echo setup\n")
     manager.get_workspace.return_value = handle
     shell_worker = AsyncMock()
     shell_worker.run.return_value = WorkerResult(status="success", summary="ok")
@@ -537,6 +538,28 @@ async def test_init_environment_node_detects_makefile(tmp_path: Path) -> None:
     assert shell_worker.run.call_count >= 1
     init_call_args = shell_worker.run.call_args_list[0][0][0]
     assert "make setup" in init_call_args.task_text
+    assert "command -v make" in init_call_args.task_text
+
+
+@pytest.mark.asyncio
+async def test_init_environment_node_skips_makefile_without_setup_target(tmp_path: Path) -> None:
+    """A Makefile without setup target should not trigger heuristic make setup."""
+    manager = MagicMock()
+    handle = MagicMock()
+    handle.repo_path = tmp_path
+    (tmp_path / "Makefile").write_text("all:\n\t@echo all\n")
+    manager.get_workspace.return_value = handle
+    shell_worker = AsyncMock()
+    shell_worker.run.return_value = WorkerResult(status="success", summary="ok")
+    node = build_init_environment_node(manager, shell_worker)
+    state = OrchestratorState(
+        task={"task_id": "t1", "repo_url": "r1", "task_text": "setup"},
+        dispatch={"workspace_id": "ws-1"},
+    )
+    await node(state)
+    assert shell_worker.run.call_count >= 1
+    first_call_args = shell_worker.run.call_args_list[0][0][0]
+    assert "make setup" not in first_call_args.task_text
 
 
 @pytest.mark.asyncio
@@ -639,3 +662,34 @@ async def test_init_environment_node_fails_on_npm_no_lock_without_override(tmp_p
     assert result["result"].status == "error"
     assert "Missing lockfile" in result["result"].summary
     shell_worker.run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_init_environment_node_detects_makefile_with_spaces_and_double_colon(
+    tmp_path: Path,
+) -> None:
+    """Verify Makefile setup detection matches setup targets with spaces and double colons."""
+    manager = MagicMock()
+    handle = MagicMock()
+    handle.repo_path = tmp_path
+    (tmp_path / "Makefile").write_text("setup ::\n\t@echo setup double colon\n")
+    manager.get_workspace.return_value = handle
+    shell_worker = AsyncMock()
+    shell_worker.run.return_value = WorkerResult(status="success", summary="ok")
+    node = build_init_environment_node(manager, shell_worker)
+    state = OrchestratorState(
+        task={"task_id": "t1", "repo_url": "r1", "task_text": "setup"},
+        dispatch={"workspace_id": "ws-1"},
+    )
+    await node(state)
+    assert shell_worker.run.call_count >= 1
+    init_call_args = shell_worker.run.call_args_list[0][0][0]
+    assert "make setup" in init_call_args.task_text
+
+
+def test_makefile_has_target_ignores_assignment_lines(tmp_path: Path) -> None:
+    """Verify Makefile target detection does not match assignment operators."""
+    makefile_path = tmp_path / "Makefile"
+    makefile_path.write_text("setup := true\nsetup ::= also_true\nsetup: VAR = value\n")
+
+    assert _makefile_has_target(makefile_path, "setup") is False

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import shlex
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -33,6 +34,11 @@ DEFAULT_INDEPENDENT_VERIFIER_TIMEOUT_SECONDS = DEFAULT_VERIFIER_TIMEOUT_SECONDS
 _INDEPENDENT_VERIFIER_TIMEOUT_GRACE_SECONDS = 15
 _INDEPENDENT_VERIFIER_SUMMARY_MAX_CHARS = 300
 _VERIFICATION_PLACEHOLDER_PREVIEW_MAX = 3
+_DETERMINISTIC_OUTPUT_PREVIEW_MAX_CHARS = 500
+_DETERMINISTIC_SHADOW_GUARD_EXIT_CODE = 97
+_PYTHON_MODULE_SHADOW_GUARDS: Mapping[str, tuple[str, ...]] = {
+    "pytest": ("pytest.py", "pytest"),
+}
 
 _INDEPENDENT_VERIFIER_SYSTEM_PROMPT = """
 You are an autonomous CI/QA Verification Agent. Your goal is to rigorously validate the
@@ -166,6 +172,87 @@ def split_verification_commands(
         else:
             executable.append(command)
     return executable, placeholders
+
+
+def _looks_like_python_executable(token: str) -> bool:
+    executable = token.rsplit("/", 1)[-1]
+    return executable in {"python", "python3"} or executable.startswith("python3.")
+
+
+def _python_module_invocations(command: str) -> list[str]:
+    """Return modules invoked by simple `python -m ...` segments in a shell command."""
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return []
+
+    modules: list[str] = []
+    for index, token in enumerate(tokens):
+        if not _looks_like_python_executable(token):
+            continue
+        cursor = index + 1
+        while cursor < len(tokens):
+            current = tokens[cursor]
+            if current == "-m":
+                if cursor + 1 < len(tokens):
+                    modules.append(tokens[cursor + 1].split(":", 1)[0])
+                break
+            if current == "-c" or not current.startswith("-"):
+                break
+            cursor += 1
+    return modules
+
+
+def _shadow_guard_modules_for_commands(commands: list[str]) -> list[str]:
+    guarded_modules: set[str] = set()
+    for command in commands:
+        for module_name in _python_module_invocations(command):
+            root_module = module_name.split(".", 1)[0]
+            if root_module in _PYTHON_MODULE_SHADOW_GUARDS:
+                guarded_modules.add(root_module)
+    return sorted(guarded_modules)
+
+
+def _python_module_shadow_guard_script(commands: list[str]) -> list[str]:
+    guarded_modules = _shadow_guard_modules_for_commands(commands)
+    if not guarded_modules:
+        return []
+
+    lines = [
+        "# code-agent deterministic verifier preflight: block repo-local python module shadowing.",
+    ]
+    for module_name in guarded_modules:
+        shadow_paths = _PYTHON_MODULE_SHADOW_GUARDS[module_name]
+        test_expr = " || ".join(f"[ -e {shlex.quote(path)} ]" for path in shadow_paths)
+        display_paths = " or ".join(shadow_paths)
+        message = (
+            f"Deterministic verification blocked: python -m {module_name} may be shadowed "
+            f"by repo-local {display_paths}. Remove or rename the shadowing path, or use "
+            "a dependency-safe verifier command."
+        )
+        lines.extend(
+            [
+                f"if {test_expr}; then",
+                f"  echo {shlex.quote(message)} >&2",
+                f"  exit {_DETERMINISTIC_SHADOW_GUARD_EXIT_CODE}",
+                "fi",
+            ]
+        )
+    return lines
+
+
+def _with_python_module_shadow_guard_metadata(
+    metadata: dict[str, Any] | None, commands: list[str]
+) -> dict[str, Any] | None:
+    guarded_modules = _shadow_guard_modules_for_commands(commands)
+    if not guarded_modules:
+        return metadata
+    output = dict(metadata or {})
+    output["python_module_shadow_guard"] = {
+        "modules": guarded_modules,
+        "exit_code": _DETERMINISTIC_SHADOW_GUARD_EXIT_CODE,
+    }
+    return output
 
 
 def _resolve_independent_verifier_timeout_seconds(state: OrchestratorState) -> int:
@@ -514,7 +601,7 @@ async def run_independent_verifier(
 def _build_deterministic_verification_request(
     state: OrchestratorState, commands: list[str], timeout_seconds: int
 ) -> WorkerRequest:
-    script = "\n".join(commands)
+    script = "\n".join(["set -e", *_python_module_shadow_guard_script(commands), *commands])
     workspace_id = state.dispatch.workspace_id or (
         state.result.workspace_id if state.result else None
     )
@@ -561,65 +648,163 @@ def _extract_verification_placeholder_metadata(
     return metadata
 
 
-async def _execute_deterministic_verification_worker(
+def _with_deterministic_command_metadata(
+    metadata: dict[str, Any] | None,
+    *,
+    commands: list[str],
+    status: Literal["passed", "failed", "warning"],
+    summary: str,
+    stdout: str | None = None,
+    stderr: str | None = None,
+    exit_code: int | None = None,
+) -> dict[str, Any]:
+    """Attach deterministic verifier command facts to reusable metadata."""
+    output = dict(metadata or {})
+    output.update(
+        {
+            "commands": list(commands),
+            "status": status,
+            "summary": summary,
+        }
+    )
+    if status == "passed":
+        output["passed_commands"] = list(commands)
+    elif status == "failed":
+        output["failed_commands"] = list(commands)
+    if exit_code is not None:
+        output["exit_code"] = exit_code
+    if stdout:
+        output["stdout_preview"] = stdout[:_DETERMINISTIC_OUTPUT_PREVIEW_MAX_CHARS]
+    if stderr:
+        output["stderr_preview"] = stderr[:_DETERMINISTIC_OUTPUT_PREVIEW_MAX_CHARS]
+    return output
+
+
+async def _run_deterministic_verification_request(
     worker: Worker,
     request: WorkerRequest,
     state: OrchestratorState,
     timeout_seconds: int,
+) -> WorkerResult:
+    """Execute the shell verifier request under a traced span."""
+    with start_optional_span(
+        tracer_name="orchestrator.verification",
+        span_name="deterministic_verification",
+        task_id=state.task.task_id,
+        session_id=state.session.session_id if state.session else None,
+        attempt=state.attempt_count,
+        task_kind=state.task_kind,
+        route_reason=state.route.route_reason if state.route else None,
+        verification_summary=state.verification.summary if state.verification else None,
+        attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
+    ):
+        set_span_input_output(input_data=request.task_text)
+        verifier_result = await asyncio.wait_for(
+            worker.run(request),
+            timeout=timeout_seconds + _INDEPENDENT_VERIFIER_TIMEOUT_GRACE_SECONDS,
+        )
+
+        if verifier_result.stdout:
+            set_current_span_attribute(NATIVE_AGENT_STDOUT_ATTRIBUTE, verifier_result.stdout)
+        if verifier_result.stderr:
+            set_current_span_attribute(NATIVE_AGENT_STDERR_ATTRIBUTE, verifier_result.stderr)
+        set_span_input_output(input_data=None, output_data=verifier_result.summary)
+        return verifier_result
+
+
+def _deterministic_timeout_result(
+    state: OrchestratorState,
+    *,
+    timeout_seconds: int,
     metadata: dict[str, Any] | None,
+    commands: list[str],
 ) -> tuple[Literal["passed", "failed", "warning"], str, dict[str, Any] | None]:
-    try:
-        with start_optional_span(
-            tracer_name="orchestrator.verification",
-            span_name="deterministic_verification",
-            task_id=state.task.task_id,
-            session_id=state.session.session_id if state.session else None,
-            attempt=state.attempt_count,
-            task_kind=state.task_kind,
-            route_reason=state.route.route_reason if state.route else None,
-            verification_summary=state.verification.summary if state.verification else None,
-            attributes={OPENINFERENCE_SPAN_KIND_ATTRIBUTE: SPAN_KIND_TOOL},
-        ):
-            set_span_input_output(input_data=request.task_text)
-            verifier_result = await asyncio.wait_for(
-                worker.run(request),
-                timeout=timeout_seconds + _INDEPENDENT_VERIFIER_TIMEOUT_GRACE_SECONDS,
-            )
-
-            if verifier_result.stdout:
-                set_current_span_attribute(NATIVE_AGENT_STDOUT_ATTRIBUTE, verifier_result.stdout)
-            if verifier_result.stderr:
-                set_current_span_attribute(NATIVE_AGENT_STDERR_ATTRIBUTE, verifier_result.stderr)
-            set_span_input_output(input_data=None, output_data=verifier_result.summary)
-    except TimeoutError:
-        if _internal_tests_passed(state):
-            return (
-                "warning",
-                f"Deterministic verification timed out after {timeout_seconds}s, but internal tests passed.",  # noqa: E501
-                metadata,
-            )
-        return "failed", f"Deterministic verification timed out after {timeout_seconds}s.", metadata
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        logger.warning("Deterministic verification execution failed unexpectedly", exc_info=True)
-        return (
-            "failed",
-            f"Deterministic verification infrastructure error: {type(exc).__name__}.",
+    if _internal_tests_passed(state):
+        summary = (
+            f"Deterministic verification timed out after {timeout_seconds}s, "
+            "but internal tests passed."
+        )
+        status: Literal["passed", "failed", "warning"] = "warning"
+    else:
+        summary = f"Deterministic verification timed out after {timeout_seconds}s."
+        status = "failed"
+    return (
+        status,
+        summary,
+        _with_deterministic_command_metadata(
             metadata,
-        )
+            commands=commands,
+            status=status,
+            summary=summary,
+        ),
+    )
 
-    if verifier_result.status != "success":
-        message = verifier_result.summary or "no summary returned"
-        logger.warning(
-            "Deterministic verification commands failed",
-            extra={
-                "session_id": state.session.session_id if state.session else None,
-                "task_id": state.task.task_id,
-            },
-        )
-        return "failed", f"Deterministic verification failed: {message}", metadata
 
+def _deterministic_exception_result(
+    exc: Exception,
+    *,
+    metadata: dict[str, Any] | None,
+    commands: list[str],
+) -> tuple[Literal["passed", "failed", "warning"], str, dict[str, Any] | None]:
+    summary = f"Deterministic verification infrastructure error: {type(exc).__name__}."
+    return (
+        "failed",
+        summary,
+        _with_deterministic_command_metadata(
+            metadata,
+            commands=commands,
+            status="failed",
+            summary=summary,
+        ),
+    )
+
+
+def _last_command_exit_code(result: WorkerResult) -> int | None:
+    return result.commands_run[-1].exit_code if result.commands_run else None
+
+
+def _worker_stream(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _deterministic_worker_failure_result(
+    verifier_result: WorkerResult,
+    state: OrchestratorState,
+    *,
+    metadata: dict[str, Any] | None,
+    commands: list[str],
+) -> tuple[Literal["passed", "failed", "warning"], str, dict[str, Any] | None]:
+    message = verifier_result.summary or "no summary returned"
+    summary = f"Deterministic verification failed: {message}"
+    logger.warning(
+        "Deterministic verification commands failed",
+        extra={
+            "session_id": state.session.session_id if state.session else None,
+            "task_id": state.task.task_id,
+        },
+    )
+    return (
+        "failed",
+        summary,
+        _with_deterministic_command_metadata(
+            metadata,
+            commands=commands,
+            status="failed",
+            summary=summary,
+            stdout=_worker_stream(verifier_result.stdout),
+            stderr=_worker_stream(verifier_result.stderr),
+            exit_code=_last_command_exit_code(verifier_result),
+        ),
+    )
+
+
+def _deterministic_worker_success_result(
+    verifier_result: WorkerResult,
+    state: OrchestratorState,
+    *,
+    metadata: dict[str, Any] | None,
+    commands: list[str],
+) -> tuple[Literal["passed", "failed", "warning"], str, dict[str, Any] | None]:
     logger.info(
         "Deterministic verification commands passed",
         extra={
@@ -627,7 +812,55 @@ async def _execute_deterministic_verification_worker(
             "task_id": state.task.task_id,
         },
     )
-    return "passed", "Explicit verification commands passed.", metadata
+    summary = "Explicit verification commands passed."
+    return (
+        "passed",
+        summary,
+        _with_deterministic_command_metadata(
+            metadata,
+            commands=commands,
+            status="passed",
+            summary=summary,
+            stdout=_worker_stream(verifier_result.stdout),
+            stderr=_worker_stream(verifier_result.stderr),
+            exit_code=_last_command_exit_code(verifier_result),
+        ),
+    )
+
+
+async def _execute_deterministic_verification_worker(
+    worker: Worker,
+    request: WorkerRequest,
+    state: OrchestratorState,
+    timeout_seconds: int,
+    metadata: dict[str, Any] | None,
+    commands: list[str],
+) -> tuple[Literal["passed", "failed", "warning"], str, dict[str, Any] | None]:
+    try:
+        verifier_result = await _run_deterministic_verification_request(
+            worker, request, state, timeout_seconds
+        )
+    except TimeoutError:
+        return _deterministic_timeout_result(
+            state,
+            timeout_seconds=timeout_seconds,
+            metadata=metadata,
+            commands=commands,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("Deterministic verification execution failed unexpectedly", exc_info=True)
+        return _deterministic_exception_result(exc, metadata=metadata, commands=commands)
+
+    if verifier_result.status != "success":
+        return _deterministic_worker_failure_result(
+            verifier_result, state, metadata=metadata, commands=commands
+        )
+
+    return _deterministic_worker_success_result(
+        verifier_result, state, metadata=metadata, commands=commands
+    )
 
 
 async def run_deterministic_verification(
@@ -650,6 +883,8 @@ async def run_deterministic_verification(
     if not commands:
         combined_metadata = dict(metadata or {})
         combined_metadata["skip_reason_code"] = "verification_commands_placeholder_only"
+        combined_metadata["commands"] = []
+        combined_metadata["status"] = "warning"
         return (
             "warning",
             (
@@ -658,13 +893,20 @@ async def run_deterministic_verification(
             ),
             combined_metadata,
         )
+    metadata = _with_python_module_shadow_guard_metadata(metadata, commands)
 
     workers = worker_factory or {}
     if "shell" not in workers:
+        summary = "Deterministic verification skipped: no 'shell' worker available."
         return (
             "warning",
-            "Deterministic verification skipped: no 'shell' worker available.",
-            metadata,
+            summary,
+            _with_deterministic_command_metadata(
+                metadata,
+                commands=commands,
+                status="warning",
+                summary=summary,
+            ),
         )
 
     worker = workers["shell"]
@@ -681,5 +923,5 @@ async def run_deterministic_verification(
 
     request = _build_deterministic_verification_request(state, commands, timeout_seconds)
     return await _execute_deterministic_verification_worker(
-        worker, request, state, timeout_seconds, metadata
+        worker, request, state, timeout_seconds, metadata, commands
     )

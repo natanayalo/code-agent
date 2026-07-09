@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -16,6 +17,31 @@ from repositories.sqlalchemy_common import UNSET, apply_memory_metadata
 
 _SEARCH_LIMIT_CAP = 100
 _SEARCH_QUERY_MAX_CHARS = 200
+_RELAXED_TOKEN_LIMIT = 8
+_RELAXED_TOKEN_MIN_LENGTH = 3
+_RELAXED_SEARCH_STOP_WORDS = frozenset(
+    {
+        "and",
+        "are",
+        "but",
+        "for",
+        "from",
+        "into",
+        "not",
+        "the",
+        "this",
+        "that",
+        "then",
+        "with",
+        "after",
+        "before",
+        "change",
+        "create",
+        "exactly",
+        "future",
+        "tasks",
+    }
+)
 _HEADLINE_START = "__CA_MARK_START__"
 _HEADLINE_END = "__CA_MARK_END__"
 _HEADLINE_OPTIONS = (
@@ -42,6 +68,24 @@ def _normalized_search_limit(limit: int) -> int:
 
 def _normalized_search_query(query: str) -> str:
     return query[:_SEARCH_QUERY_MAX_CHARS].strip()
+
+
+def _relaxed_tsquery(query: str) -> str | None:
+    """Build a conservative OR tsquery fallback from significant alphanumeric tokens."""
+    tokens: list[str] = []
+    for raw_token in re.findall(r"\w+", query.casefold()):
+        if len(raw_token) < _RELAXED_TOKEN_MIN_LENGTH:
+            continue
+        if raw_token in _RELAXED_SEARCH_STOP_WORDS:
+            continue
+        if raw_token in tokens:
+            continue
+        tokens.append(raw_token)
+        if len(tokens) >= _RELAXED_TOKEN_LIMIT:
+            break
+    if not tokens:
+        return None
+    return " | ".join(tokens)
 
 
 def _dialect_name(session: Session) -> str:
@@ -103,6 +147,42 @@ def _ordered_search_results(
     return ordered_results
 
 
+def _postgres_search_with_relaxed_fallback(
+    session: Session,
+    *,
+    strict_statement: str,
+    relaxed_statement: str,
+    base_params: dict[str, Any],
+    query: str,
+    limit: int,
+    model: type[PersonalMemory] | type[ProjectMemory],
+) -> list[MemorySearchResult]:
+    params = {
+        **base_params,
+        "query": query,
+        "limit": _normalized_search_limit(limit),
+        "headline_options": _HEADLINE_OPTIONS,
+    }
+    strict_results = _ordered_search_results(
+        session,
+        statement=strict_statement,
+        params=params,
+        model=model,
+    )
+    if strict_results:
+        return strict_results
+
+    relaxed_query = _relaxed_tsquery(query)
+    if relaxed_query is None:
+        return []
+    return _ordered_search_results(
+        session,
+        statement=relaxed_statement,
+        params={**params, "query": relaxed_query},
+        model=model,
+    )
+
+
 class PersonalMemoryRepository:
     """Persist and query personal memory entries."""
 
@@ -155,9 +235,9 @@ class PersonalMemoryRepository:
                 limit=_normalized_search_limit(limit),
             )
 
-        return _ordered_search_results(
+        return _postgres_search_with_relaxed_fallback(
             self.session,
-            statement="""
+            strict_statement="""
                 SELECT
                     id,
                     ts_headline(
@@ -174,11 +254,26 @@ class PersonalMemoryRepository:
                   id DESC
                 LIMIT :limit
             """,
-            params={
-                "query": normalized_query,
-                "limit": _normalized_search_limit(limit),
-                "headline_options": _HEADLINE_OPTIONS,
-            },
+            relaxed_statement="""
+                SELECT
+                    id,
+                    ts_headline(
+                        'english',
+                        coalesce(memory_key, '') || ' ' || coalesce(value::text, ''),
+                        to_tsquery('english', :query),
+                        :headline_options
+                    ) AS headline
+                FROM memory_personal
+                WHERE search_vector @@ to_tsquery('english', :query)
+                ORDER BY
+                  ts_rank(search_vector, to_tsquery('english', :query)) DESC,
+                  created_at DESC,
+                  id DESC
+                LIMIT :limit
+            """,
+            base_params={},
+            query=normalized_query,
+            limit=limit,
             model=PersonalMemory,
         )
 
@@ -280,9 +375,9 @@ class ProjectMemoryRepository:
                 limit=_normalized_search_limit(limit),
             )
 
-        return _ordered_search_results(
+        return _postgres_search_with_relaxed_fallback(
             self.session,
-            statement="""
+            strict_statement="""
                 SELECT
                     id,
                     ts_headline(
@@ -300,12 +395,27 @@ class ProjectMemoryRepository:
                   id DESC
                 LIMIT :limit
             """,
-            params={
-                "repo_url": repo_url,
-                "query": normalized_query,
-                "limit": _normalized_search_limit(limit),
-                "headline_options": _HEADLINE_OPTIONS,
-            },
+            relaxed_statement="""
+                SELECT
+                    id,
+                    ts_headline(
+                        'english',
+                        coalesce(memory_key, '') || ' ' || coalesce(value::text, ''),
+                        to_tsquery('english', :query),
+                        :headline_options
+                    ) AS headline
+                FROM memory_project
+                WHERE repo_url = :repo_url
+                  AND search_vector @@ to_tsquery('english', :query)
+                ORDER BY
+                  ts_rank(search_vector, to_tsquery('english', :query)) DESC,
+                  created_at DESC,
+                  id DESC
+                LIMIT :limit
+            """,
+            base_params={"repo_url": repo_url},
+            query=normalized_query,
+            limit=limit,
             model=ProjectMemory,
         )
 

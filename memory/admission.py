@@ -50,6 +50,8 @@ _HUMAN_REVIEW_KEYWORDS = (
     "preference",
     "style",
     "workflow",
+    "instruction",
+    "remembered_instruction",
 )
 
 
