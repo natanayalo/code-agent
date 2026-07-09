@@ -456,8 +456,12 @@ Progress:
 - [x] Slice 1: load skeptical personal/project/session memory from the DB before worker dispatch and persist typed worker-produced memory after runs
 - [x] Slice 2: add full-text memory search and retrieval visibility before evaluating semantic/vector retrieval
 - [x] Slice 3/4: add deterministic retrieval evaluation, curated reviewable memory corpus, memory proposals, dashboard review flow, and SQLite-vs-Postgres FTS evidence
-- [ ] Slice 5: unify worker memory candidates and reviewable proposals behind a `MemoryAdmissionService`, including a required LangMem and Mem0/OpenMemory adoption spike; see [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md)
-- [ ] Slice 6: add an episodic observation layer for raw task/session observations, compact search, timeline/full-observation fetch, recent-session context, private-tag stripping, and an observation-to-admission bridge; see [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md)
+- [x] Slice 5: unify worker memory candidates and reviewable proposals behind a `MemoryAdmissionService`, including a required LangMem and Mem0/OpenMemory adoption spike; see [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md)
+- [x] Slice 6: add an episodic observation layer for raw task/session observations, compact search, timeline/full-observation fetch, recent-session context, private-tag stripping, and an observation-to-admission bridge; see [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md)
+- [x] Slice 7: expose observation/admission visibility and lineage through the Knowledge Base UI; see [`docs/m23-slice-7-observation-admission-visibility.md`](m23-slice-7-observation-admission-visibility.md)
+- [ ] Next slice: deterministic trace-to-candidate extraction from real task evidence
+- [ ] Next slice: read-side memory gate for staleness, conflict, risk, and advisory strength
+- [ ] Next slice: broader repo-profile shaping once the observation/admission corpus is richer and gating is stable
 
 Scope:
 
@@ -568,7 +572,7 @@ Phase 3:
 Phase 4:
 
 1. Milestone 22 [x]
-2. Milestone 23 [in progress: Slice 5 memory admission in review; Slice 6 episodic observations planned]
+2. Milestone 23 [in progress: slices 5-7 complete; deterministic extraction and read-side gating remain]
 3. Milestone 24
 4. Milestone 25
 5. Milestone 26
