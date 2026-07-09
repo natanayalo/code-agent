@@ -52,6 +52,16 @@ Active focus:
 3. carry forward the lightweight Slice 7 defer list: richer durable-memory navigation, broader trace-filter ergonomics, and any deeper operator UX polish beyond inspectability
 4. evaluate Phase 4 candidates: routing, DAG decomposition, selective fan-out, review repair, and autonomy policy
 
+## Leftover Checklist
+
+Remaining follow-up slices after this task:
+
+- deterministic trace-to-candidate extraction from real task evidence
+- read-side memory gate for staleness, conflict, risk, and advisory strength
+- richer durable-memory/operator navigation beyond compact lineage pills
+- trace-filter ergonomics and other small operator UX polish only where it improves inspectability
+- Phase 4 evaluation only after the reliability baseline and memory gates prove stable
+
 ## Current Backlog
 
 Granular tasks for the active and upcoming milestones:
