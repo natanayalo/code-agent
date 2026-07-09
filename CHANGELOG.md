@@ -337,6 +337,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps): bump uvicorn from 0.49.0 to 0.51.0 ([#300](https://github.com/natanayalo/code-agent/pull/300))
+
 - [codex] Add memory observations ([#298](https://github.com/natanayalo/code-agent/pull/298))
 
 - Refactor: extract RuntimeExecutor and SandboxSessionAdapter to clean up CLI workers ([#291](https://github.com/natanayalo/code-agent/pull/291))
