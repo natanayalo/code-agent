@@ -72,14 +72,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def resolve_live_repo_url(repo_key: str = "qa-dummy") -> str | None:
-    """Resolve the live evaluation repository from the local allowlist config."""
-    configured = os.environ.get("CODE_AGENT_ALLOWED_REPOS", "")
+def parse_env_map(env_var_name: str) -> dict[str, str]:
+    """Parse a comma-separated environment map while preserving first values."""
+    configured = os.environ.get(env_var_name, "")
+    result: dict[str, str] = {}
     for pair in configured.split(","):
         key, separator, url = pair.partition(":")
-        if separator and key.strip() == repo_key:
-            return url.strip() or None
-    return None
+        if separator:
+            result.setdefault(key.strip(), url.strip())
+    return result
+
+
+def resolve_live_repo_url(repo_key: str = "qa-dummy") -> str | None:
+    """Resolve the live evaluation repository from the local allowlist config."""
+    return parse_env_map("CODE_AGENT_ALLOWED_REPOS").get(repo_key) or None
 
 
 def repo_path_from_url(repo_url: str) -> str:
@@ -471,7 +477,9 @@ def _write_report(
         ],
         "cleanup_errors": cleanup_errors,
     }
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    output_dir = os.path.dirname(args.output)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
 

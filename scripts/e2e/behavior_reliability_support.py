@@ -82,10 +82,10 @@ def load_dotenv(env_path: str = ".env") -> None:
             if sep:
                 key = key.strip()
                 val = val.strip()
+                if not (len(val) >= 2 and val[0] == val[-1] and val[0] in {"'", '"'}):
+                    val = val.split("#", 1)[0].strip()
                 if len(val) >= 2 and val[0] == val[-1] and val[0] in {"'", '"'}:
                     val = val[1:-1]
-                else:
-                    val = val.split("#", 1)[0].strip()
                 if key and key not in os.environ:
                     os.environ[key] = val
 

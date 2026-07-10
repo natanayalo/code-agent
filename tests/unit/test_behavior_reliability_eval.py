@@ -7,14 +7,18 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from scripts.e2e.behavior_reliability_support import setup_dummy_repo
+from scripts.e2e.behavior_reliability_support import load_dotenv, setup_dummy_repo
 from scripts.e2e.run_behavior_reliability_eval import (
+    CaseResult,
+    _write_report,
     execute_eval_cleanup,
     parse_args,
+    parse_env_map,
 )
 
 
@@ -95,6 +99,34 @@ def test_setup_dummy_repo_refuses_unmarked_existing_directory(tmp_path: Path) ->
         setup_dummy_repo(str(repo_dir))
 
     assert (repo_dir / "important.txt").read_text(encoding="utf-8") == "keep me"
+
+
+def test_load_dotenv_strips_inline_comments_before_quotes(tmp_path: Path, monkeypatch) -> None:
+    """Quoted dotenv values with comments should load without the comment."""
+    env_path = tmp_path / ".env"
+    env_path.write_text('EVAL_QUOTED="value" # comment\n', encoding="utf-8")
+    monkeypatch.delenv("EVAL_QUOTED", raising=False)
+
+    load_dotenv(str(env_path))
+
+    assert os.environ["EVAL_QUOTED"] == "value"
+
+
+def test_parse_env_map_preserves_first_repo_mapping(monkeypatch) -> None:
+    """Repository map parsing should preserve the first configured value."""
+    monkeypatch.setenv("EVAL_REPOS", "qa-dummy:first,qa-dummy:second,other:value")
+
+    assert parse_env_map("EVAL_REPOS") == {"qa-dummy": "first", "other": "value"}
+
+
+def test_write_report_supports_filename_without_directory(tmp_path: Path, monkeypatch) -> None:
+    """A report filename without a directory should be written successfully."""
+    monkeypatch.chdir(tmp_path)
+    args = SimpleNamespace(output="report.json", base_url="http://localhost:8000", mode="contract")
+
+    _write_report(args, "run-1", "2026-07-10T00:00:00Z", [CaseResult("case")], [], False)
+
+    assert (tmp_path / "report.json").exists()
 
 
 def test_contract_execution_runs_successfully(tmp_path: Path) -> None:
