@@ -109,28 +109,30 @@ def _to_dict(value: Any) -> dict[str, Any]:
     return {}
 
 
-def _profile_items(profile: Any, section: str) -> list[Any]:
-    raw_items = _to_dict(profile).get(section)
-    return raw_items if isinstance(raw_items, list) else []
-
-
 def profile_counts(profile: RepositoryMemoryProfile | dict[str, Any] | None) -> dict[str, int]:
     """Return stable section counts for memory-loaded diagnostics."""
     if profile is None:
         return {section: 0 for section in _SECTION_ORDER}
-    return {section: len(_profile_items(profile, section)) for section in _SECTION_ORDER}
+    profile_dict = _to_dict(profile)
+    return {
+        section: len(items) if isinstance(items := profile_dict.get(section), list) else 0
+        for section in _SECTION_ORDER
+    }
 
 
 def profile_source_keys(profile: RepositoryMemoryProfile | dict[str, Any] | None) -> list[str]:
     """Return stable source memory keys represented in the profile."""
     if profile is None:
         return []
+    profile_dict = _to_dict(profile)
     keys: list[str] = []
     for section in _SECTION_ORDER:
-        for item in _profile_items(profile, section):
-            memory_key = _to_dict(item).get("memory_key")
-            if isinstance(memory_key, str):
-                keys.append(memory_key)
+        items = profile_dict.get(section)
+        if isinstance(items, list):
+            for item in items:
+                memory_key = _to_dict(item).get("memory_key")
+                if isinstance(memory_key, str):
+                    keys.append(memory_key)
     return keys
 
 
