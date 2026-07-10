@@ -529,6 +529,10 @@ def _map_execution_plan_to_snapshot(execution_plan: Any) -> ExecutionPlanSnapsho
             ExecutionPlanNodeSnapshot(
                 node_id=node.node_id,
                 depends_on=node.depends_on,
+                task_spec=(
+                    TaskSpec.model_validate(node.task_spec) if node.task_spec is not None else None
+                ),
+                node_kind=node.node_kind,
                 status=cast(Any, _enum_value(node.status) or "pending"),
                 goal=node.goal,
                 acceptance_criteria=node.acceptance_criteria,
@@ -540,6 +544,13 @@ def _map_execution_plan_to_snapshot(execution_plan: Any) -> ExecutionPlanSnapsho
                 retry_count=node.retry_count,
                 started_at=node.started_at,
                 finished_at=node.finished_at,
+                worker_run_id=node.worker_run_id,
+                result_summary=node.result_summary,
+                failure_kind=node.failure_kind,
+                verification_outcome=node.verification_outcome,
+                changed_files=node.changed_files,
+                output_artifacts=node.output_artifacts,
+                last_attempt_at=node.last_attempt_at,
                 created_at=node.created_at,
                 updated_at=node.updated_at,
             )

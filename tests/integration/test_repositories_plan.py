@@ -60,6 +60,8 @@ def test_add_and_update_node(session_factory):
             goal="Test goal",
             depends_on=["node-0"],
             assigned_worker_profile="coder",
+            task_spec={"goal": "Test goal", "task_type": "feature"},
+            node_kind="implement",
         )
         assert node.plan_id == plan.id
         assert node.node_id == "node-1"
@@ -67,6 +69,8 @@ def test_add_and_update_node(session_factory):
         assert node.status == ExecutionPlanNodeStatus.PENDING
         assert node.depends_on == ["node-0"]
         assert node.assigned_worker_profile == "coder"
+        assert node.task_spec == {"goal": "Test goal", "task_type": "feature"}
+        assert node.node_kind == "implement"
 
         now = utc_now()
         updated_node = repo.update_node(
@@ -75,11 +79,18 @@ def test_add_and_update_node(session_factory):
             status=ExecutionPlanNodeStatus.ACTIVE,
             started_at=now,
             retry_count=1,
+            result_summary="Completed",
+            changed_files=["src/example.py"],
+            output_artifacts=[{"name": "report"}],
+            failure_kind=None,
+            worker_run_id=None,
         )
         assert updated_node is not None
         assert updated_node.status == ExecutionPlanNodeStatus.ACTIVE
         assert updated_node.started_at == now
         assert updated_node.retry_count == 1
+        assert updated_node.result_summary == "Completed"
+        assert updated_node.changed_files == ["src/example.py"]
 
         fetched_node = repo.get_node(plan.id, "node-1")
         assert fetched_node is not None

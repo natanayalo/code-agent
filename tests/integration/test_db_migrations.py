@@ -238,6 +238,17 @@ def _assert_upgrade_columns(inspector) -> None:
         "consecutive_failures",
         "quarantine_reason",
     } <= _column_names(inspector, "worker_nodes")
+    assert {
+        "task_spec",
+        "node_kind",
+        "worker_run_id",
+        "result_summary",
+        "failure_kind",
+        "verification_outcome",
+        "changed_files",
+        "output_artifacts",
+        "last_attempt_at",
+    } <= _column_names(inspector, "execution_plan_nodes")
 
 
 def _assert_session_and_admission_columns(inspector) -> None:

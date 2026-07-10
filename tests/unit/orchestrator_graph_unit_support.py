@@ -16,6 +16,8 @@ from orchestrator.brain import (
 )
 from orchestrator.checkpoints import create_in_memory_checkpointer
 from orchestrator.graph import (
+    _aggregate_decomposed_results,
+    _await_decomposed_nodes,
     _await_worker_with_timeout,
     _build_worker_request,
     _coerce_approval_decision,
@@ -43,7 +45,7 @@ from orchestrator.nodes.utils import (
     _has_meaningful_deliverable,
     _requires_deliverable_evidence,
 )
-from orchestrator.state import OrchestratorState
+from orchestrator.state import DecomposedTaskPlan, NodeOutcome, OrchestratorState
 from orchestrator.task_spec import is_destructive_task
 from workers import Worker, WorkerProfile, WorkerRequest, WorkerResult
 

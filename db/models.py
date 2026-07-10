@@ -941,6 +941,8 @@ class ExecutionPlanNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     node_id: Mapped[str] = mapped_column(String(255), nullable=False)
     sequence_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     depends_on: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    task_spec: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    node_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
     status: Mapped[ExecutionPlanNodeStatus] = mapped_column(
         EXECUTION_PLAN_NODE_STATUS_ENUM, nullable=False, default=ExecutionPlanNodeStatus.PENDING
     )
@@ -958,6 +960,15 @@ class ExecutionPlanNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    worker_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("worker_runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failure_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    verification_outcome: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    changed_files: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    output_artifacts: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     execution_plan: Mapped[ExecutionPlan] = relationship(back_populates="nodes")
     blocker_interaction: Mapped[HumanInteraction | None] = relationship()

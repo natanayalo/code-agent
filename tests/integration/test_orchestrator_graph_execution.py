@@ -369,7 +369,12 @@ def test_orchestrator_graph_clarification_resume_token_resolution_allows_progres
     state = OrchestratorState.model_validate(raw_output)
     assert state.result is not None
     assert state.result.status == "success"
-    assert len(worker.requests) == 1
+    assert len(worker.requests) == 3
+    assert [request.task_text for request in worker.requests] == [
+        "Investigate Root Cause and Scope",
+        "Implement the Smallest Safe Slice",
+        "Verify and Summarize",
+    ]
 
 
 def test_orchestrator_graph_review_task_without_deliverable_fails() -> None:

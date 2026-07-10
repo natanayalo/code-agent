@@ -459,6 +459,8 @@ class ExecutionPlanNodeSnapshot(ExecutionModel):
 
     node_id: str
     depends_on: list[str] | None = None
+    task_spec: TaskSpec | None = None
+    node_kind: str | None = None
     status: Literal["pending", "active", "blocked", "completed", "failed", "skipped"]
     goal: str
     acceptance_criteria: str | None = None
@@ -470,6 +472,13 @@ class ExecutionPlanNodeSnapshot(ExecutionModel):
     retry_count: int = 0
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    worker_run_id: str | None = None
+    result_summary: str | None = None
+    failure_kind: str | None = None
+    verification_outcome: dict[str, Any] | None = None
+    changed_files: list[str] | None = None
+    output_artifacts: list[dict[str, Any]] | None = None
+    last_attempt_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

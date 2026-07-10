@@ -8,16 +8,18 @@
 
 ## Current Phase
 
-Phase 3: personal reliability before broader autonomy.
+Phase 4: selective autonomy after reliability.
 
 Priority sequence:
 
-1. Milestone 20: Personal Reliability Program
-2. Milestone 21: Worker Runtime Hotspot Refactor
+1. Milestone 24: Decomposed Task DAG
+2. Milestone 25: Parallel Worker Fan-Out
+3. Milestone 26: Review Comment Repair
+4. Milestone 27: Reliability-Based Autonomy Policy
 
-Planned follow-up phase:
+Completed foundation:
 
-1. Phase 4: Selective Autonomy After Reliability
+1. Phase 3: Personal reliability before broader autonomy
 
 Past phases:
 
@@ -462,7 +464,7 @@ Progress:
 - [x] M23.8: deterministic extraction hardening + evaluation for verification commands, pitfalls, remembered instructions, and conventions
 - [x] M23.9: read-side memory gate for staleness, conflict, risk, advisory strength, and project-over-personal precedence
 - [x] M23.10: shape a deterministic advisory repository memory profile from read-gated project memory without changing executable repository policy (done in pr 308)
-- [ ] M23.11: evaluation/reliability of actual agent behavior: does the worker use the profile correctly, does it avoid stale policy, and does it improve task success without increasing unsafe actions.
+- [x] M23.11: evaluation/reliability of actual agent behavior: does the worker use the profile correctly, does it avoid stale policy, and does it improve task success without increasing unsafe actions.
 
 Scope:
 
@@ -499,6 +501,15 @@ Scope:
 Boundary:
 
 - DAG scheduling is introduced after the plan spine, decision model, supervisor, and validation gates are stable
+
+Progress:
+
+- [x] M24.1: typed node contracts, deterministic dependency validation, six-node limit, and safe monolithic fallback
+- [x] M24.2: persisted node TaskSpecs, worker evidence, outcome fields, API snapshots, and dashboard visibility
+- [x] M24.3: sequential topological node execution in one parent task/workspace through the existing worker runtime
+- [x] M24.4: deterministic node outcome aggregation into the parent result and validation story
+- [x] M24.5: node-specific approval/blocking integration, bounded retry, and resume from completed nodes
+- [ ] M24.6: reliability evaluation gate before M25 fan-out
 
 ### M25 Parallel Worker Fan-Out
 
@@ -566,14 +577,14 @@ Phase 2:
 
 Phase 3:
 
-1. M20.0
-2. Milestone 20
-3. Milestone 21
+1. M20.0 [x]
+2. Milestone 20 [x]
+3. Milestone 21 [x]
 
 Phase 4:
 
 1. Milestone 22 [x]
-2. Milestone 23 [in progress: M23.11 TODO ]
+2. Milestone 23 [x]
 3. Milestone 24
 4. Milestone 25
 5. Milestone 26
