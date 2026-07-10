@@ -299,6 +299,10 @@ class LiveRunner:
         self.poll_interval_seconds = poll_interval_seconds
         self.client = httpx.Client(headers={API_SHARED_SECRET_HEADER: secret})
 
+    def close(self) -> None:
+        """Close the live runner's HTTP client and its connection pool."""
+        self.client.close()
+
     def seed_personal(self, key: str, value: dict, **kwargs) -> None:
         payload = {"memory_key": key, "value": value}
         payload.update(kwargs)

@@ -542,6 +542,8 @@ async def main_async() -> int:
 
     passed_all = all(r.passed for r in results)
     _write_report(args, run_id, started_at, results, cleanup_errors, passed_all)
+    if hasattr(runner, "close"):
+        runner.close()
 
     print(f"\n[+] Behavior evaluation report written to {args.output}")
     print(f"[+] Overall result: {'PASSED' if passed_all else 'FAILED'}")
