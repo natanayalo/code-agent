@@ -43,6 +43,7 @@ packages = [
     {include = "repositories"},
     {include = "sandbox"},
     {include = "tools"},
+    {include = "utils"},
     {include = "workers"},
 ]
 

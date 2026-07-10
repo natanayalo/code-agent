@@ -552,9 +552,9 @@ def test_worker_prompt_to_dict_defensive_handling() -> None:
         def dict(self) -> None:
             raise ValueError("dict failed")
 
-    from workers.prompt_memory import _to_dict
+    from utils.serialization import to_dict
 
-    assert _to_dict(FailingDump()) == {}
+    assert to_dict(FailingDump()) == {}
 
 
 def test_worker_prompt_safe_float_defensive_handling() -> None:

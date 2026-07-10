@@ -5,34 +5,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from utils.serialization import to_dict
 from workers.base import WorkerRequest
-
-
-def _to_dict(value: Any) -> dict[str, Any]:
-    """Normalize serialized dictionaries and Pydantic memory models."""
-    if isinstance(value, dict):
-        return dict(value)
-    model_dump = getattr(value, "model_dump", None)
-    if callable(model_dump):
-        try:
-            dumped = model_dump()
-            return dict(dumped) if isinstance(dumped, dict) else {}
-        except Exception:
-            pass
-    legacy_dict = getattr(value, "dict", None)
-    if callable(legacy_dict):
-        try:
-            dumped = legacy_dict()
-            return dict(dumped) if isinstance(dumped, dict) else {}
-        except Exception:
-            pass
-    return {}
 
 
 def _dict_items(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
-    return [_to_dict(item) for item in value]
+    return [to_dict(item) for item in value]
 
 
 def _as_str(value: Any) -> str:
@@ -147,7 +127,7 @@ def _build_durable_memory_section(memory_context: dict[str, Any]) -> str:
     lines = [warning]
     personal = _dict_items(memory_context.get("personal"))
     project = _dict_items(memory_context.get("project"))
-    profile = _to_dict(memory_context.get("repository_profile"))
+    profile = to_dict(memory_context.get("repository_profile"))
     profile_dict = {
         key: _dict_items(value) if isinstance(value, list) else value
         for key, value in profile.items()

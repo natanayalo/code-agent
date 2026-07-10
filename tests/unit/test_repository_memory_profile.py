@@ -125,6 +125,6 @@ def test_to_dict_defensive_handling() -> None:
         def dict(self) -> None:
             raise ValueError("dict failed")
 
-    from memory.repository_profile import _to_dict
+    from utils.serialization import to_dict
 
-    assert _to_dict(FailingDump()) == {}
+    assert to_dict(FailingDump()) == {}

@@ -11,6 +11,7 @@ from orchestrator.state import (
     RepositoryMemoryProfileItem,
     RepositoryProfileSection,
 )
+from utils.serialization import to_dict
 
 _SECTION_ORDER: tuple[RepositoryProfileSection, ...] = (
     "verification_commands",
@@ -101,31 +102,11 @@ def shape_repository_memory_profile(
     return RepositoryMemoryProfile.model_validate(payload)
 
 
-def _to_dict(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return dict(value)
-    model_dump = getattr(value, "model_dump", None)
-    if callable(model_dump):
-        try:
-            dumped = model_dump()
-            return dict(dumped) if isinstance(dumped, dict) else {}
-        except Exception:
-            pass
-    legacy_dict = getattr(value, "dict", None)
-    if callable(legacy_dict):
-        try:
-            dumped = legacy_dict()
-            return dict(dumped) if isinstance(dumped, dict) else {}
-        except Exception:
-            pass
-    return {}
-
-
 def profile_counts(profile: RepositoryMemoryProfile | dict[str, Any] | None) -> dict[str, int]:
     """Return stable section counts for memory-loaded diagnostics."""
     if profile is None:
         return {section: 0 for section in _SECTION_ORDER}
-    profile_dict = _to_dict(profile)
+    profile_dict = to_dict(profile)
     return {
         section: len(items) if isinstance(items := profile_dict.get(section), list) else 0
         for section in _SECTION_ORDER
@@ -136,13 +117,13 @@ def profile_source_keys(profile: RepositoryMemoryProfile | dict[str, Any] | None
     """Return stable source memory keys represented in the profile."""
     if profile is None:
         return []
-    profile_dict = _to_dict(profile)
+    profile_dict = to_dict(profile)
     keys: list[str] = []
     for section in _SECTION_ORDER:
         items = profile_dict.get(section)
         if isinstance(items, list):
             for item in items:
-                memory_key = _to_dict(item).get("memory_key")
+                memory_key = to_dict(item).get("memory_key")
                 if isinstance(memory_key, str):
                     keys.append(memory_key)
     return keys
