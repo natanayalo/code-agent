@@ -9,7 +9,12 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from db.base import utc_now
-from db.enums import HumanInteractionHitlMode, HumanInteractionStatus, HumanInteractionType
+from db.enums import (
+    HumanInteractionHitlMode,
+    HumanInteractionStatus,
+    HumanInteractionType,
+    TaskStatus,
+)
 from db.models import HumanInteraction, InboundDelivery, Task
 from db.utils import compute_interaction_content_hash
 
@@ -49,6 +54,9 @@ class HumanInteractionRepository:
             select(HumanInteraction, Task)
             .join(Task, Task.id == HumanInteraction.task_id)
             .where(HumanInteraction.status == HumanInteractionStatus.PENDING)
+            .where(
+                Task.status.notin_((TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED))
+            )
             .order_by(HumanInteraction.created_at.desc())
         )
         return [(row[0], row[1]) for row in self.session.execute(statement)]

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from db.enums import HumanInteractionHitlMode, HumanInteractionStatus, HumanInteractionType
+from db.enums import (
+    HumanInteractionHitlMode,
+    HumanInteractionStatus,
+    HumanInteractionType,
+    TaskStatus,
+)
 from repositories import session_scope
 
 
@@ -68,3 +73,44 @@ def test_list_pending_interactions_endpoint(
     # Ensure our new fields decision_key and hitl_mode mapped successfully
     assert interaction_data["decision_key"] == "decision_123"
     assert interaction_data["hitl_mode"] == "notify_only"
+
+
+def test_list_pending_interactions_excludes_terminal_task_rows(
+    client: TestClient,
+    session_factory,
+) -> None:
+    """Historical pending rows on finished tasks must not remain in the inbox."""
+    response = client.post(
+        "/tasks",
+        json={
+            "task_text": "Task with a stale approval row",
+            "session": {
+                "channel": "http",
+                "external_user_id": "http:stale-inbox",
+                "external_thread_id": "thread-stale-inbox",
+            },
+        },
+    )
+    assert response.status_code == 202
+    task_id = response.json()["task_id"]
+
+    with session_scope(session_factory) as session:
+        from db.models import HumanInteraction, Task
+
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.status = TaskStatus.FAILED
+        session.add(
+            HumanInteraction(
+                task_id=task_id,
+                interaction_type=HumanInteractionType.PERMISSION,
+                status=HumanInteractionStatus.PENDING,
+                summary="Stale approval",
+                hitl_mode=HumanInteractionHitlMode.REQUIRE_APPROVAL,
+                data={},
+            )
+        )
+
+    inbox_response = client.get("/tasks/interactions/pending")
+    assert inbox_response.status_code == 200
+    assert all(card["task_id"] != task_id for card in inbox_response.json())

@@ -232,6 +232,15 @@ def test_run_queued_task_requeues_failed_result_when_retries_remain(monkeypatch)
             repo_url="https://github.com/natanayalo/code-agent",
         )
     )
+    with session_scope(session_factory) as session:
+        HumanInteractionRepository(session).sync_task_spec_flags(
+            task_id=snapshot.task_id,
+            task_spec={
+                "requires_permission": True,
+                "permission_reason": "Manual approval required.",
+                "risk_level": "high",
+            },
+        )
     claim = service.claim_next_task(worker_id="worker-a", lease_seconds=45)
     assert claim is not None
 
@@ -695,3 +704,11 @@ def test_apply_task_approval_decision_reject_is_terminal_and_conflict_is_reporte
         assert isinstance(approval, dict)
         assert approval.get("status") == "rejected"
         assert approval.get("approved") is False
+        interactions = HumanInteractionRepository(session).list_by_task(task_id=task.id)
+        assert len(interactions) == 1
+        assert interactions[0].status == HumanInteractionStatus.REJECTED
+        assert interactions[0].response_data == {
+            "approved": False,
+            "source": "api",
+            "reason": interactions[0].summary,
+        }

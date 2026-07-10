@@ -233,6 +233,7 @@ def apply_task_approval_decision(
     decided_at = utc_now()
     with session_scope(self.session_factory) as session:
         task_repo = TaskRepository(session)
+        interaction_repo = HumanInteractionRepository(session)
         worker_run_repo = WorkerRunRepository(session)
 
         task = task_repo.get(task_id)
@@ -274,6 +275,18 @@ def apply_task_approval_decision(
             task.last_error = None
         else:
             _handle_approval_rejection(task, worker_run_repo, decided_at)
+            for interaction in interaction_repo.list_by_task(
+                task_id=task_id,
+                interaction_types=(HumanInteractionType.PERMISSION,),
+                statuses=(HumanInteractionStatus.PENDING,),
+            ):
+                interaction.status = HumanInteractionStatus.REJECTED
+                interaction.response_data = {
+                    "approved": False,
+                    "source": "api",
+                    "reason": reason or interaction.summary,
+                }
+                interaction.updated_at = decided_at
 
         task.constraints = constraints
         task.lease_owner = None
