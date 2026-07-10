@@ -48,14 +48,10 @@ Active focus:
 
 ## Next Slices Only
 
-1. continue M23 follow-up evaluation and reliability work without expanding advisory memory into executable policy
+1. M23.11: evaluation/reliability of actual agent behavior (does the worker use the profile correctly, does it avoid stale policy, and does it improve task success without increasing unsafe actions)
 
 ## Current Backlog
 
-Granular tasks for the active and upcoming milestones:
-
-- Milestone 21: worker facade [x], runtime executor [x], sandbox adapter [x], and tool extraction.
-- Milestone 23: memory load/persist [x], full-text memory search/retrieval visibility [x], semantic retrieval evaluation [x], reviewable corpus/proposals [x], unified memory admission plus library adoption spike in [`docs/m23-slice-5-memory-admission.md`](m23-slice-5-memory-admission.md), episodic observation layer [x] in [`docs/m23-slice-6-episodic-observation-layer.md`](m23-slice-6-episodic-observation-layer.md), operator visibility [x] in [`docs/m23-slice-7-observation-admission-visibility.md`](m23-slice-7-observation-admission-visibility.md), M23.8 deterministic extraction hardening and evaluation [x], M23.9 read-side memory gate [x], and M23.10 advisory repository memory profile [x].
 - Phase 4: evaluate routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy only after Phase 3 proves reliability.
 
 ## Completed Work
