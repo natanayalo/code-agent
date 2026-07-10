@@ -212,7 +212,12 @@ class ContractRunner:
         db_url = os.path.expandvars(db_url)
         parsed_db_url = urlparse(db_url)
         if parsed_db_url.scheme.startswith("sqlite"):
-            db_url = urlunparse(parsed_db_url._replace(path=os.path.expanduser(parsed_db_url.path)))
+            db_path = parsed_db_url.path
+            if db_path.startswith("/~"):
+                db_path = "/" + os.path.expanduser(db_path[1:])
+            else:
+                db_path = os.path.expanduser(db_path)
+            db_url = urlunparse(parsed_db_url._replace(path=db_path))
             engine_kwargs: dict[str, Any] = {"connect_args": {"check_same_thread": False}}
             if db_url.endswith(":memory:"):
                 engine_kwargs["poolclass"] = StaticPool
