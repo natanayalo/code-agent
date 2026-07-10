@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from orchestrator.state import (
     AggregationRole,
     DecomposedTaskNode,
@@ -42,7 +44,9 @@ def decompose_task_plan(
         errors.append("invalid_verification_command")
 
     if not errors:
-        errors.extend(_cycle_errors(task_plan))
+        errors.extend(
+            _cycle_errors({step.step_id: set(step.depends_on or []) for step in task_plan.steps})
+        )
     if errors:
         return _fallback("invalid_task_plan", errors)
 
@@ -70,6 +74,9 @@ def decompose_task_plan(
                 aggregation_role=role,
             )
         )
+    final_cycle_errors = _cycle_errors({node.node_id: set(node.depends_on) for node in nodes})
+    if final_cycle_errors:
+        return _fallback("invalid_task_plan", final_cycle_errors)
     return DecomposedTaskPlan(
         triggered=True,
         status="decomposed",
@@ -87,8 +94,7 @@ def _fallback(reason: str, errors: list[str] | None = None) -> DecomposedTaskPla
     )
 
 
-def _cycle_errors(task_plan: TaskPlan) -> list[str]:
-    dependencies = {step.step_id: set(step.depends_on or []) for step in task_plan.steps}
+def _cycle_errors(dependencies: Mapping[str, set[str]]) -> list[str]:
     visiting: set[str] = set()
     visited: set[str] = set()
 

@@ -66,6 +66,37 @@ def test_aggregate_decomposed_results_blocks_success_when_node_is_skipped():
     assert result.next_action_hint == "inspect_failed_node"
 
 
+def test_aggregate_decomposed_results_handles_nullable_result_lists():
+    outcome = NodeOutcome.model_construct(
+        node_id="inspect",
+        status="completed",
+        result=WorkerResult.model_construct(
+            status="success",
+            summary="Inspected",
+            commands_run=None,
+            files_changed=None,
+            test_results=None,
+            artifacts=None,
+            friction_reports=None,
+            maintenance_requests=None,
+            memory_to_persist=None,
+        ),
+        dependencies=[],
+        attempts=1,
+    )
+
+    result = _aggregate_decomposed_results([outcome])
+
+    assert result.status == "success"
+    assert result.commands_run == []
+    assert result.files_changed == []
+    assert result.test_results == []
+    assert result.artifacts == []
+    assert result.friction_reports == []
+    assert result.maintenance_requests == []
+    assert result.memory_to_persist == []
+
+
 def test_decomposed_permission_block_resumes_from_blocked_node():
     class PermissionThenSuccessWorker(Worker):
         def __init__(self):
@@ -195,5 +226,72 @@ def test_decomposed_resume_retries_skipped_downstream_nodes():
     assert worker.task_texts == ["Implement", "Verify"]
     assert [(outcome.node_id, outcome.status) for outcome in outcomes] == [
         ("implement", "completed"),
+        ("verify", "completed"),
+    ]
+
+
+def test_decomposed_prior_context_handles_nullable_dependency_artifacts():
+    class ContextAssertingWorker(Worker):
+        async def run(self, request: WorkerRequest, **kwargs) -> WorkerResult:
+            del kwargs
+            prior_context = request.memory_context["decomposed_task"]
+            assert prior_context["inspect"]["files_changed"] == []
+            assert prior_context["inspect"]["artifacts"] == []
+            return WorkerResult(status="success", summary="Verified")
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Verify after inspection"},
+            "task_spec": {"goal": "Verify after inspection"},
+            "route": {"chosen_worker": "codex"},
+            "dispatch": {"worker_type": "codex"},
+            "decomposed_plan": {
+                "triggered": True,
+                "status": "decomposed",
+                "nodes": [
+                    {
+                        "node_id": "inspect",
+                        "title": "Inspect",
+                        "task_spec": {"goal": "Inspect"},
+                        "node_kind": "inspect",
+                    },
+                    {
+                        "node_id": "verify",
+                        "title": "Verify",
+                        "depends_on": ["inspect"],
+                        "task_spec": {"goal": "Verify"},
+                        "node_kind": "verify",
+                    },
+                ],
+            },
+        }
+    )
+    inspect_result = WorkerResult.model_construct(
+        status="success",
+        summary="Inspected",
+        files_changed=None,
+        artifacts=None,
+    )
+    resumed_state = state.model_copy(
+        update={
+            "node_outcomes": [
+                NodeOutcome.model_construct(
+                    node_id="inspect",
+                    status="completed",
+                    result=inspect_result,
+                    dependencies=[],
+                    attempts=1,
+                )
+            ]
+        }
+    )
+
+    result, outcomes, _ = asyncio.run(
+        _await_decomposed_nodes(resumed_state, ContextAssertingWorker())
+    )
+
+    assert result.status == "success"
+    assert [(outcome.node_id, outcome.status) for outcome in outcomes] == [
+        ("inspect", "completed"),
         ("verify", "completed"),
     ]

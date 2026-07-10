@@ -73,6 +73,16 @@ def test_decompose_task_plan_falls_back_for_cycle() -> None:
     assert result.validation_errors == ["dependency_cycle"]
 
 
+def test_decompose_task_plan_falls_back_for_final_sequential_cycle() -> None:
+    result = decompose_task_plan(
+        _plan(_step("a", depends_on=["b"]), _step("b")),
+        _spec(),
+    )
+
+    assert result.status == "fallback"
+    assert result.validation_errors == ["dependency_cycle"]
+
+
 def test_decompose_task_plan_falls_back_when_too_large() -> None:
     result = decompose_task_plan(
         _plan(*[_step(str(index)) for index in range(7)]),

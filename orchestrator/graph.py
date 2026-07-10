@@ -699,12 +699,16 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
         None,
     )
     skipped = [outcome for outcome in outcomes if outcome.status == "skipped"]
-    all_commands = [command for outcome in outcomes for command in outcome.result.commands_run]
-    all_tests = [test for outcome in outcomes for test in outcome.result.test_results]
-    all_artifacts = [artifact for outcome in outcomes for artifact in outcome.result.artifacts]
+    all_commands = [
+        command for outcome in outcomes for command in (outcome.result.commands_run or [])
+    ]
+    all_tests = [test for outcome in outcomes for test in (outcome.result.test_results or [])]
+    all_artifacts = [
+        artifact for outcome in outcomes for artifact in (outcome.result.artifacts or [])
+    ]
     changed_files = list(
         dict.fromkeys(
-            file_path for outcome in outcomes for file_path in outcome.result.files_changed
+            file_path for outcome in outcomes for file_path in (outcome.result.files_changed or [])
         )
     )
     summaries = [
@@ -750,13 +754,13 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
             None,
         ),
         friction_reports=[
-            report for result in outcomes for report in result.result.friction_reports
+            report for result in outcomes for report in (result.result.friction_reports or [])
         ],
         maintenance_requests=[
-            request for result in outcomes for request in result.result.maintenance_requests
+            request for result in outcomes for request in (result.result.maintenance_requests or [])
         ],
         memory_to_persist=[
-            entry for result in outcomes for entry in result.result.memory_to_persist
+            entry for result in outcomes for entry in (result.result.memory_to_persist or [])
         ],
         delivery_metadata=next(
             (
@@ -832,9 +836,10 @@ async def _await_decomposed_nodes(
         prior_context = {
             dependency.node_id: {
                 "summary": dependency.result.summary,
-                "files_changed": dependency.result.files_changed,
+                "files_changed": dependency.result.files_changed or [],
                 "artifacts": [
-                    artifact.model_dump(mode="json") for artifact in dependency.result.artifacts
+                    artifact.model_dump(mode="json")
+                    for artifact in (dependency.result.artifacts or [])
                 ],
             }
             for dependency in dependencies
