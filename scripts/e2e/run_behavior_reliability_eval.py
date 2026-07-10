@@ -24,6 +24,7 @@ from scripts.e2e.behavior_reliability_support import (
     LiveRunner,
     is_evaluator_owned_repo,
     load_dotenv,
+    remove_readonly,
     setup_dummy_repo,
 )
 from workers import WorkerCommand, WorkerResult
@@ -534,7 +535,7 @@ async def main_async() -> int:
         if not args.keep_temp_repo:
             if is_evaluator_owned_repo(dummy_repo_dir):
                 print("[*] Cleaning up temporary dummy repo...")
-                shutil.rmtree(dummy_repo_dir, ignore_errors=True)
+                shutil.rmtree(dummy_repo_dir, onerror=remove_readonly)
             else:
                 print(f"[*] Skipping cleanup of unmarked repo: {dummy_repo_dir}")
 

@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import stat
 import subprocess
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Final
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from sqlalchemy.pool import StaticPool
@@ -99,6 +101,12 @@ def parse_env_value(value: str) -> str:
     return stripped.split("#", 1)[0].strip()
 
 
+def remove_readonly(func: Any, path: str, _exc_info: Any) -> None:
+    """Retry removal after clearing read-only attributes, including on Windows."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
 def setup_dummy_repo(repo_dir: str) -> None:
     """Initialize a local dummy git repository with config and protected files."""
     resolved_repo_dir = os.path.abspath(os.path.expanduser(repo_dir))
@@ -109,7 +117,7 @@ def setup_dummy_repo(repo_dir: str) -> None:
                 f"Refusing to delete unmarked existing directory: {resolved_repo_dir}. "
                 f"Only evaluator-owned repositories with {DUMMY_REPO_MARKER} may be replaced."
             )
-        shutil.rmtree(resolved_repo_dir)
+        shutil.rmtree(resolved_repo_dir, onerror=remove_readonly)
 
     os.makedirs(resolved_repo_dir, exist_ok=True)
     subprocess.run(["git", "init"], cwd=resolved_repo_dir, check=True, capture_output=True)
@@ -201,14 +209,16 @@ class ContractRunner:
         # accidentally write to the developer's live database. Explicit
         # DATABASE_URL values supplied by callers remain supported.
         db_url = os.environ.get("DATABASE_URL") or "sqlite:///:memory:"
-        db_url = os.path.expandvars(os.path.expanduser(db_url))
-        if db_url.startswith("sqlite"):
+        db_url = os.path.expandvars(db_url)
+        parsed_db_url = urlparse(db_url)
+        if parsed_db_url.scheme.startswith("sqlite"):
+            db_url = urlunparse(parsed_db_url._replace(path=os.path.expanduser(parsed_db_url.path)))
             engine_kwargs: dict[str, Any] = {"connect_args": {"check_same_thread": False}}
             if db_url.endswith(":memory:"):
                 engine_kwargs["poolclass"] = StaticPool
             engine = create_engine_from_url(db_url, **engine_kwargs)
         else:
-            engine = create_engine_from_url(db_url)
+            engine = create_engine_from_url(os.path.expanduser(db_url))
         self.session_factory = create_session_factory(engine)
         Base.metadata.create_all(bind=engine)
         self.worker = FakeBehaviorWorker()
