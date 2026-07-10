@@ -81,13 +81,22 @@ def load_dotenv(env_path: str = ".env") -> None:
             key, sep, val = line.partition("=")
             if sep:
                 key = key.strip()
-                val = val.strip()
-                if not (len(val) >= 2 and val[0] == val[-1] and val[0] in {"'", '"'}):
-                    val = val.split("#", 1)[0].strip()
-                if len(val) >= 2 and val[0] == val[-1] and val[0] in {"'", '"'}:
-                    val = val[1:-1]
+                val = parse_env_value(val)
                 if key and key not in os.environ:
                     os.environ[key] = val
+
+
+def parse_env_value(value: str) -> str:
+    """Parse an env value while preserving hashes inside quoted values."""
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped[0] in {"'", '"'}:
+        quote = stripped[0]
+        closing_index = stripped.rfind(quote)
+        if closing_index > 0:
+            suffix = stripped[closing_index + 1 :].strip()
+            if not suffix or suffix.startswith("#"):
+                return stripped[1:closing_index]
+    return stripped.split("#", 1)[0].strip()
 
 
 def setup_dummy_repo(repo_dir: str) -> None:

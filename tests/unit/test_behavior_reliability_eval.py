@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from scripts.e2e.behavior_reliability_support import load_dotenv, setup_dummy_repo
+from scripts.e2e.behavior_reliability_support import load_dotenv, parse_env_value, setup_dummy_repo
 from scripts.e2e.run_behavior_reliability_eval import (
     CaseResult,
     _write_report,
@@ -110,6 +110,11 @@ def test_load_dotenv_strips_inline_comments_before_quotes(tmp_path: Path, monkey
     load_dotenv(str(env_path))
 
     assert os.environ["EVAL_QUOTED"] == "value"
+
+
+def test_parse_env_value_preserves_hashes_inside_quotes() -> None:
+    """Quoted hashes remain part of the value before an inline comment."""
+    assert parse_env_value('"value#with#hash" # comment') == "value#with#hash"
 
 
 def test_parse_env_map_preserves_first_repo_mapping(monkeypatch) -> None:

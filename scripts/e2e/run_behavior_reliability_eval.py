@@ -12,7 +12,8 @@ import shutil
 import sys
 import uuid
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from db.base import utc_now
 from orchestrator import OrchestratorState
@@ -91,7 +92,7 @@ def resolve_live_repo_url(repo_key: str = "qa-dummy") -> str | None:
 def repo_path_from_url(repo_url: str) -> str:
     """Convert a local file URL or path into a filesystem path."""
     parsed = urlparse(repo_url)
-    return unquote(parsed.path) if parsed.scheme == "file" else repo_url
+    return url2pathname(parsed.path) if parsed.scheme == "file" else repo_url
 
 
 def run_case_1_assertions(
