@@ -186,7 +186,7 @@ def build_memory_context_section(request: WorkerRequest) -> str:
     """Render durable memory and untrusted observations into separate sections."""
     if not request.memory_context:
         return ""
-    memory_context = request.memory_context
+    memory_context = to_dict(request.memory_context)
     sections = [
         _build_durable_memory_section(memory_context),
         _build_observation_section(memory_context),

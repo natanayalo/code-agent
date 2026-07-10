@@ -565,3 +565,24 @@ def test_worker_prompt_safe_float_defensive_handling() -> None:
     assert _safe_float(None, 2.0) == 2.0
     assert _safe_float("invalid", 1.5) == 1.5
     assert _safe_float([], 1.2) == 1.2
+
+
+def test_build_memory_context_section_with_pydantic_model() -> None:
+    from orchestrator.state import MemoryContext
+    from workers.prompt_memory import build_memory_context_section
+
+    request = WorkerRequest.model_construct(
+        task_text="Run task",
+        memory_context=MemoryContext(
+            personal=[],
+            project=[],
+            repository_profile={
+                "verification_commands": [],
+                "conventions": [],
+                "pitfalls": [],
+                "remembered_instructions": [],
+                "general_facts": [],
+            },
+        ),
+    )
+    assert build_memory_context_section(request) == ""

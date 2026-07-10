@@ -78,7 +78,7 @@ def _sort_items(items: list[RepositoryMemoryProfileItem]) -> list[RepositoryMemo
         items,
         key=lambda item: (
             0 if item.gate_status == "accepted" else 1,
-            -item.advisory_strength,
+            -(item.advisory_strength if item.advisory_strength is not None else 1.0),
             max_datetime - _sort_timestamp(item.last_verified_at),
             item.memory_key,
         ),

@@ -128,3 +128,17 @@ def test_to_dict_defensive_handling() -> None:
     from utils.serialization import to_dict
 
     assert to_dict(FailingDump()) == {}
+
+
+def test_profile_sort_items_handles_none_advisory_strength() -> None:
+    from memory.repository_profile import _sort_items
+    from orchestrator.state import RepositoryMemoryProfileItem
+
+    item = RepositoryMemoryProfileItem.model_construct(
+        memory_key="custom_fact",
+        gate_status="accepted",
+        advisory_strength=None,
+        last_verified_at=None,
+    )
+    sorted_items = _sort_items([item])
+    assert sorted_items[0].memory_key == "custom_fact"
