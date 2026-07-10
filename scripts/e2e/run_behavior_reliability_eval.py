@@ -21,6 +21,7 @@ from scripts.e2e.behavior_reliability_support import (
     CaseResult,
     ContractRunner,
     LiveRunner,
+    is_evaluator_owned_repo,
     load_dotenv,
     setup_dummy_repo,
 )
@@ -38,7 +39,7 @@ def _live_memory_loaded(task_data: dict[str, Any]) -> dict[str, Any]:
         return memory_loaded
 
     for event in reversed(task_data.get("timeline") or []):
-        if event.get("event_type") == "memory_loaded":
+        if isinstance(event, dict) and event.get("event_type") == "memory_loaded":
             payload = event.get("payload") or {}
             if isinstance(payload, dict):
                 return payload
@@ -522,8 +523,11 @@ async def main_async() -> int:
         print("[*] Cleaning up database memories...")
         cleanup_errors = execute_eval_cleanup(runner, list(set(seeded_keys)))
         if not args.keep_temp_repo:
-            print("[*] Cleaning up temporary dummy repo...")
-            shutil.rmtree(dummy_repo_dir, ignore_errors=True)
+            if is_evaluator_owned_repo(dummy_repo_dir):
+                print("[*] Cleaning up temporary dummy repo...")
+                shutil.rmtree(dummy_repo_dir, ignore_errors=True)
+            else:
+                print(f"[*] Skipping cleanup of unmarked repo: {dummy_repo_dir}")
 
     passed_all = all(r.passed for r in results)
     _write_report(args, run_id, started_at, results, cleanup_errors, passed_all)

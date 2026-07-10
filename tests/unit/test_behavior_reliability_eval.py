@@ -9,6 +9,9 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from scripts.e2e.behavior_reliability_support import setup_dummy_repo
 from scripts.e2e.run_behavior_reliability_eval import (
     execute_eval_cleanup,
     parse_args,
@@ -80,6 +83,18 @@ def test_execute_eval_cleanup_handles_errors() -> None:
     assert any("Failed deleting personal memory key2" in err for err in errors)
     assert mock_runner.delete_project.call_count == 2
     assert mock_runner.delete_personal.call_count == 2
+
+
+def test_setup_dummy_repo_refuses_unmarked_existing_directory(tmp_path: Path) -> None:
+    """The evaluator must not delete a repository it did not create."""
+    repo_dir = tmp_path / "existing-repo"
+    repo_dir.mkdir()
+    (repo_dir / "important.txt").write_text("keep me", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unmarked existing directory"):
+        setup_dummy_repo(str(repo_dir))
+
+    assert (repo_dir / "important.txt").read_text(encoding="utf-8") == "keep me"
 
 
 def test_contract_execution_runs_successfully(tmp_path: Path) -> None:

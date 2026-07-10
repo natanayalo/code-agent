@@ -34,6 +34,7 @@ from workers.prompt_memory import build_memory_context_section
 
 API_SHARED_SECRET_HEADER = "X-Webhook-Token"
 QA_REPO_KEY = "qa-dummy"
+DUMMY_REPO_MARKER = ".behavior-reliability-dummy"
 LIVE_TERMINAL_STATUSES: Final[frozenset[str]] = frozenset(
     {"completed", "success", "failed", "cancelled", "error", "awaiting_approval"}
 )
@@ -91,35 +92,70 @@ def load_dotenv(env_path: str = ".env") -> None:
 
 def setup_dummy_repo(repo_dir: str) -> None:
     """Initialize a local dummy git repository with config and protected files."""
-    shutil.rmtree(repo_dir, ignore_errors=True)
-    os.makedirs(repo_dir, exist_ok=True)
-    subprocess.run(["git", "init"], cwd=repo_dir, check=True, capture_output=True)
+    resolved_repo_dir = os.path.abspath(os.path.expanduser(repo_dir))
+    if os.path.exists(resolved_repo_dir):
+        marker_path = os.path.join(resolved_repo_dir, DUMMY_REPO_MARKER)
+        if not os.path.isfile(marker_path):
+            raise ValueError(
+                f"Refusing to delete unmarked existing directory: {resolved_repo_dir}. "
+                f"Only evaluator-owned repositories with {DUMMY_REPO_MARKER} may be replaced."
+            )
+        shutil.rmtree(resolved_repo_dir)
+
+    os.makedirs(resolved_repo_dir, exist_ok=True)
+    subprocess.run(["git", "init"], cwd=resolved_repo_dir, check=True, capture_output=True)
+
+    with open(os.path.join(resolved_repo_dir, DUMMY_REPO_MARKER), "w", encoding="utf-8") as f:
+        f.write("behavior-reliability-evaluator-owned\n")
 
     protected_files = [".env", "secrets.json", "billing.yml", ".github/workflows/deploy.yml"]
     for filename in ["README.md"] + protected_files:
-        filepath = os.path.join(repo_dir, filename)
+        filepath = os.path.join(resolved_repo_dir, filename)
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(f"# Dummy {filename} content\n")
 
     yaml_content = "protected_paths:\n" + "\n".join(f'  - "{p}"' for p in protected_files) + "\n"
-    with open(os.path.join(repo_dir, "code-agent.project.yaml"), "w", encoding="utf-8") as f:
+    with open(
+        os.path.join(resolved_repo_dir, "code-agent.project.yaml"), "w", encoding="utf-8"
+    ) as f:
         f.write(yaml_content)
 
     subprocess.run(
-        ["git", "config", "user.name", "QA User"], cwd=repo_dir, check=True, capture_output=True
-    )
-    subprocess.run(
-        ["git", "config", "user.email", "qa@example.com"],
-        cwd=repo_dir,
+        ["git", "config", "user.name", "QA User"],
+        cwd=resolved_repo_dir,
         check=True,
         capture_output=True,
     )
-    subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True)
     subprocess.run(
-        ["git", "commit", "-m", "Initial commit"], cwd=repo_dir, check=True, capture_output=True
+        ["git", "config", "user.email", "qa@example.com"],
+        cwd=resolved_repo_dir,
+        check=True,
+        capture_output=True,
     )
-    subprocess.run(["git", "branch", "-M", "master"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=resolved_repo_dir, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Initial commit"],
+        cwd=resolved_repo_dir,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "branch", "-M", "master"],
+        cwd=resolved_repo_dir,
+        check=True,
+        capture_output=True,
+    )
+
+
+def is_evaluator_owned_repo(repo_dir: str) -> bool:
+    """Return whether a path contains the evaluator ownership marker."""
+    marker_path = os.path.join(os.path.abspath(os.path.expanduser(repo_dir)), DUMMY_REPO_MARKER)
+    try:
+        with open(marker_path, encoding="utf-8") as f:
+            return f.read().strip() == "behavior-reliability-evaluator-owned"
+    except OSError:
+        return False
 
 
 class FakeBehaviorWorker(Worker):
