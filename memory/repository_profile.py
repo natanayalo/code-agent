@@ -25,11 +25,17 @@ _KEY_TO_SECTION: dict[str, RepositoryProfileSection] = {
     "test_commands": "verification_commands",
     "test_command": "verification_commands",
     "repo_convention": "conventions",
+    "repo_conventions": "conventions",
     "convention": "conventions",
+    "conventions": "conventions",
     "known_pitfalls": "pitfalls",
     "known_pitfall": "pitfalls",
+    "pitfalls": "pitfalls",
+    "pitfall": "pitfalls",
     "remembered_instruction": "remembered_instructions",
     "remembered_instructions": "remembered_instructions",
+    "instruction": "remembered_instructions",
+    "instructions": "remembered_instructions",
 }
 
 
@@ -100,12 +106,18 @@ def _to_dict(value: Any) -> dict[str, Any]:
         return dict(value)
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
-        dumped = model_dump()
-        return dict(dumped) if isinstance(dumped, dict) else {}
+        try:
+            dumped = model_dump()
+            return dict(dumped) if isinstance(dumped, dict) else {}
+        except Exception:
+            pass
     legacy_dict = getattr(value, "dict", None)
     if callable(legacy_dict):
-        dumped = legacy_dict()
-        return dict(dumped) if isinstance(dumped, dict) else {}
+        try:
+            dumped = legacy_dict()
+            return dict(dumped) if isinstance(dumped, dict) else {}
+        except Exception:
+            pass
     return {}
 
 

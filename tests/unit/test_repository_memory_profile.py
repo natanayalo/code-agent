@@ -102,3 +102,29 @@ def test_read_side_gate_excludes_suppressed_project_entries_from_profile() -> No
     keys = profile_source_keys(memory.repository_profile)
     assert "safe_convention" in keys
     assert "deploy_approval" not in keys
+
+
+def test_profile_groups_new_key_variations() -> None:
+    profile = shape_repository_memory_profile(
+        [
+            _entry("conventions"),
+            _entry("pitfalls"),
+            _entry("instructions"),
+        ]
+    )
+    assert [item.memory_key for item in profile.conventions] == ["conventions"]
+    assert [item.memory_key for item in profile.pitfalls] == ["pitfalls"]
+    assert [item.memory_key for item in profile.remembered_instructions] == ["instructions"]
+
+
+def test_to_dict_defensive_handling() -> None:
+    class FailingDump:
+        def model_dump(self) -> None:
+            raise ValueError("model_dump failed")
+
+        def dict(self) -> None:
+            raise ValueError("dict failed")
+
+    from memory.repository_profile import _to_dict
+
+    assert _to_dict(FailingDump()) == {}

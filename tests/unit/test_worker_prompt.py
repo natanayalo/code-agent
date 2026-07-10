@@ -542,3 +542,16 @@ def test_build_system_prompt_sorts_memories_correctly(tmp_path) -> None:
     strong_idx = prompt.index("strong_proj")
     weak_idx = prompt.index("weak_proj")
     assert strong_idx < weak_idx
+
+
+def test_worker_prompt_to_dict_defensive_handling() -> None:
+    class FailingDump:
+        def model_dump(self) -> None:
+            raise ValueError("model_dump failed")
+
+        def dict(self) -> None:
+            raise ValueError("dict failed")
+
+    from workers.prompt_memory import _to_dict
+
+    assert _to_dict(FailingDump()) == {}

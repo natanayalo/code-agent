@@ -14,12 +14,18 @@ def _to_dict(value: Any) -> dict[str, Any]:
         return dict(value)
     model_dump = getattr(value, "model_dump", None)
     if callable(model_dump):
-        dumped = model_dump()
-        return dict(dumped) if isinstance(dumped, dict) else {}
+        try:
+            dumped = model_dump()
+            return dict(dumped) if isinstance(dumped, dict) else {}
+        except Exception:
+            pass
     legacy_dict = getattr(value, "dict", None)
     if callable(legacy_dict):
-        dumped = legacy_dict()
-        return dict(dumped) if isinstance(dumped, dict) else {}
+        try:
+            dumped = legacy_dict()
+            return dict(dumped) if isinstance(dumped, dict) else {}
+        except Exception:
+            pass
     return {}
 
 
