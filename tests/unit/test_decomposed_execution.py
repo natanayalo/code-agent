@@ -127,3 +127,73 @@ def test_decomposed_permission_block_resumes_from_blocked_node():
     assert [outcome.node_id for outcome in resumed_outcomes] == ["implement", "verify"]
     assert all(outcome.status == "completed" for outcome in resumed_outcomes)
     assert worker.calls == 3
+
+
+def test_decomposed_resume_retries_skipped_downstream_nodes():
+    class SuccessWorker(Worker):
+        def __init__(self):
+            self.task_texts: list[str] = []
+
+        async def run(self, request: WorkerRequest, **kwargs) -> WorkerResult:
+            del kwargs
+            self.task_texts.append(request.task_text)
+            return WorkerResult(status="success", summary=f"Completed {request.task_text}")
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Implement and verify"},
+            "task_spec": {"goal": "Implement and verify"},
+            "route": {"chosen_worker": "codex"},
+            "dispatch": {"worker_type": "codex"},
+            "decomposed_plan": {
+                "triggered": True,
+                "status": "decomposed",
+                "nodes": [
+                    {
+                        "node_id": "implement",
+                        "title": "Implement",
+                        "task_spec": {"goal": "Implement"},
+                        "node_kind": "implement",
+                    },
+                    {
+                        "node_id": "verify",
+                        "title": "Verify",
+                        "depends_on": ["implement"],
+                        "task_spec": {"goal": "Verify"},
+                        "node_kind": "verify",
+                    },
+                ],
+            },
+            "node_outcomes": [
+                {
+                    "node_id": "implement",
+                    "status": "failed",
+                    "result": {
+                        "status": "failure",
+                        "summary": "Previous failure",
+                        "failure_kind": "worker_failure",
+                    },
+                },
+                {
+                    "node_id": "verify",
+                    "status": "skipped",
+                    "result": {
+                        "status": "failure",
+                        "summary": "Previous skip",
+                        "failure_kind": "incomplete_delivery",
+                    },
+                    "dependencies": ["implement"],
+                },
+            ],
+        }
+    )
+    worker = SuccessWorker()
+
+    result, outcomes, _ = asyncio.run(_await_decomposed_nodes(state, worker))
+
+    assert result.status == "success"
+    assert worker.task_texts == ["Implement", "Verify"]
+    assert [(outcome.node_id, outcome.status) for outcome in outcomes] == [
+        ("implement", "completed"),
+        ("verify", "completed"),
+    ]

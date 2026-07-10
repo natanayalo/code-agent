@@ -794,9 +794,7 @@ async def _await_decomposed_nodes(
         raise ValueError("decomposed node execution requires a validated decomposition")
 
     outcomes: list[NodeOutcome] = list(state.node_outcomes)
-    completed_node_ids = {
-        outcome.node_id for outcome in outcomes if outcome.status in ("completed", "skipped")
-    }
+    completed_node_ids = {outcome.node_id for outcome in outcomes if outcome.status == "completed"}
     pending = {node.node_id: node for node in plan.nodes if node.node_id not in completed_node_ids}
     last_manifest: dict[str, Any] | None = None
     while pending:
@@ -4100,13 +4098,7 @@ def _add_orchestrator_edges(builder: Any) -> None:
     builder.add_edge("classify_task", "plan_task")
     builder.add_edge("plan_task", "load_repo_profile")
     builder.add_edge("load_repo_profile", "generate_task_spec_and_route")
-    builder.add_conditional_edges(
-        "generate_task_spec_and_route",
-        lambda state: "decompose_task",
-        {
-            "decompose_task": "decompose_task",
-        },
-    )
+    builder.add_edge("generate_task_spec_and_route", "decompose_task")
     builder.add_conditional_edges(
         "decompose_task",
         _route_after_generate_task_spec,

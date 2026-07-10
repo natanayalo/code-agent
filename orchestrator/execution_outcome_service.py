@@ -630,10 +630,14 @@ def _persist_decomposed_node_outcomes(
             failure_kind=result.failure_kind,
             verification_outcome={
                 "status": "passed" if result.status == "success" else "failed",
-                "test_results": [test.model_dump(mode="json") for test in result.test_results],
+                "test_results": [
+                    test.model_dump(mode="json") for test in (result.test_results or [])
+                ],
             },
             changed_files=result.files_changed,
-            output_artifacts=[artifact.model_dump(mode="json") for artifact in result.artifacts],
+            output_artifacts=[
+                artifact.model_dump(mode="json") for artifact in (result.artifacts or [])
+            ],
             retry_count=max(outcome.attempts - 1, 0),
             last_attempt_at=finished_at,
             finished_at=finished_at,
