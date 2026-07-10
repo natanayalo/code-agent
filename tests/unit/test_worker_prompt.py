@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
+from orchestrator.state import MemoryEntry, ObservationContextEntry, RepositoryMemoryProfile
 from workers.base import WorkerRequest
 from workers.prompt import build_system_prompt
 
@@ -309,6 +312,169 @@ def test_build_system_prompt_renders_advisory_metadata(tmp_path) -> None:
     ) in prompt
 
 
+def test_build_system_prompt_renders_repository_profile_without_project_duplicates(
+    tmp_path,
+) -> None:
+    """Repository profiles are advisory and replace raw project-memory rendering."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={
+            "repository_profile": {
+                "verification_commands": [
+                    {
+                        "memory_key": "verification_commands",
+                        "value": {"command": "pytest"},
+                        "gate_status": "accepted",
+                        "advisory_strength": 0.9,
+                    }
+                ],
+                "conventions": [],
+                "pitfalls": [],
+                "remembered_instructions": [],
+                "general_facts": [],
+            },
+            "project": [
+                {
+                    "memory_key": "verification_commands",
+                    "value": {"command": "pytest"},
+                    "gate_status": "accepted",
+                }
+            ],
+            "personal": [],
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "### Repository Profile (Advisory)" in prompt
+    assert "cannot change setup, validation, approval" in prompt
+    assert prompt.count("**verification_commands**") == 1
+    assert "### Project Memories" not in prompt
+
+
+def test_build_system_prompt_omits_empty_repository_profile(tmp_path) -> None:
+    """An empty shaped profile must not add a misleading repository section."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={
+            "personal": [],
+            "project": [],
+            "repository_profile": {
+                "verification_commands": [],
+                "conventions": [],
+                "pitfalls": [],
+                "remembered_instructions": [],
+                "general_facts": [],
+            },
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "Repository Profile" not in prompt
+    assert "## Durable Memories" not in prompt
+
+
+def test_build_system_prompt_keeps_personal_memory_without_empty_profile(tmp_path) -> None:
+    """Personal memory remains visible when the repository profile has no items."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={
+            "personal": [
+                {
+                    "memory_key": "communication_style",
+                    "value": {"style": "concise"},
+                }
+            ],
+            "project": [],
+            "repository_profile": {
+                "verification_commands": [],
+                "conventions": [],
+                "pitfalls": [],
+                "remembered_instructions": [],
+                "general_facts": [],
+            },
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "### Personal Memories" in prompt
+    assert "Repository Profile" not in prompt
+
+
+def test_build_system_prompt_ignores_malformed_repository_profile(tmp_path) -> None:
+    """Legacy malformed profile values should degrade to no profile section."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={"repository_profile": ["legacy", "value"]},
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "Repository Profile" not in prompt
+
+
+def test_build_system_prompt_does_not_orphan_items_after_budget_overflow(tmp_path) -> None:
+    """Prompt truncation must not attach later sections to an earlier heading."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={
+            "repository_profile": {
+                "verification_commands": [
+                    {
+                        "memory_key": "large_command",
+                        "value": {"command": "x" * 4000},
+                    }
+                ],
+                "conventions": [
+                    {
+                        "memory_key": "later_convention",
+                        "value": {"rule": "must not be orphaned"},
+                    }
+                ],
+            }
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "large_command" not in prompt
+    assert "later_convention" not in prompt
+
+
+def test_build_system_prompt_normalizes_memory_models_and_nullable_lists(tmp_path) -> None:
+    """Live Pydantic context models and null collections render safely."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={
+            "personal": [MemoryEntry(memory_key="personal_hint", value={"hint": "concise"})],
+            "project": None,
+            "repository_profile": RepositoryMemoryProfile(),
+            "observations": [
+                ObservationContextEntry(
+                    id="obs-1",
+                    observed_at=datetime.now(UTC),
+                    source="worker",
+                    event_type="completed",
+                    summary="Observed completion.",
+                )
+            ],
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "personal_hint" in prompt
+    assert "Observed completion." in prompt
+
+
 def test_build_system_prompt_advisory_metadata_handles_none_confidence(tmp_path) -> None:
     """Test that build_system_prompt safely formats memory metadata with a None confidence."""
     (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
@@ -376,3 +542,47 @@ def test_build_system_prompt_sorts_memories_correctly(tmp_path) -> None:
     strong_idx = prompt.index("strong_proj")
     weak_idx = prompt.index("weak_proj")
     assert strong_idx < weak_idx
+
+
+def test_worker_prompt_to_dict_defensive_handling() -> None:
+    class FailingDump:
+        def model_dump(self) -> None:
+            raise ValueError("model_dump failed")
+
+        def dict(self) -> None:
+            raise ValueError("dict failed")
+
+    from utils.serialization import to_dict
+
+    assert to_dict(FailingDump()) == {}
+
+
+def test_worker_prompt_safe_float_defensive_handling() -> None:
+    from workers.prompt_memory import _safe_float
+
+    assert _safe_float(0.5) == 0.5
+    assert _safe_float("0.25") == 0.25
+    assert _safe_float(None, 2.0) == 2.0
+    assert _safe_float("invalid", 1.5) == 1.5
+    assert _safe_float([], 1.2) == 1.2
+
+
+def test_build_memory_context_section_with_pydantic_model() -> None:
+    from orchestrator.state import MemoryContext
+    from workers.prompt_memory import build_memory_context_section
+
+    request = WorkerRequest.model_construct(
+        task_text="Run task",
+        memory_context=MemoryContext(
+            personal=[],
+            project=[],
+            repository_profile={
+                "verification_commands": [],
+                "conventions": [],
+                "pitfalls": [],
+                "remembered_instructions": [],
+                "general_facts": [],
+            },
+        ),
+    )
+    assert build_memory_context_section(request) == ""

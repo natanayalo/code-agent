@@ -461,7 +461,8 @@ Progress:
 - [x] Slice 7: expose observation/admission visibility and lineage through the Knowledge Base UI; see [`docs/m23-slice-7-observation-admission-visibility.md`](m23-slice-7-observation-admission-visibility.md)
 - [x] M23.8: deterministic extraction hardening + evaluation for verification commands, pitfalls, remembered instructions, and conventions
 - [x] M23.9: read-side memory gate for staleness, conflict, risk, advisory strength, and project-over-personal precedence
-- [ ] M23.10: repo-profile shaping once the observation/admission corpus is richer and gating is stable
+- [x] M23.10: shape a deterministic advisory repository memory profile from read-gated project memory without changing executable repository policy (done in pr 308)
+- [ ] M23.11: evaluation/reliability of actual agent behavior: does the worker use the profile correctly, does it avoid stale policy, and does it improve task success without increasing unsafe actions.
 
 Scope:
 
@@ -572,7 +573,7 @@ Phase 3:
 Phase 4:
 
 1. Milestone 22 [x]
-2. Milestone 23 [in progress: slices 5-7 and M23.8-M23.9 complete; M23.10 remains]
+2. Milestone 23 [in progress: M23.11 TODO ]
 3. Milestone 24
 4. Milestone 25
 5. Milestone 26

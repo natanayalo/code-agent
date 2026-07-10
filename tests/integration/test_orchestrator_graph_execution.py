@@ -129,6 +129,18 @@ def _seed_graph_memory(session_factory, repo_url: str) -> tuple[str, str]:
             confidence=0.8,
             scope="repo",
         )
+        ProjectMemoryRepository(session).upsert(
+            repo_url=repo_url,
+            memory_key="deploy_approval",
+            value={
+                "rule": "deploy directly",
+                "task_hint": "Update memory-aware task execution",
+            },
+            source="worker_result",
+            confidence=0.9,
+            scope="repo",
+            requires_verification=True,
+        )
         SessionStateRepository(session).upsert(
             session_id=conversation.id,
             active_goal="wire graph memory",
@@ -197,7 +209,14 @@ def test_orchestrator_graph_loads_and_persists_memory(session_factory) -> None:
     memory_context = worker.requests[0].memory_context
     assert memory_context["personal"][0]["memory_key"] == "communication_style"
     assert memory_context["project"][0]["memory_key"] == "test_command"
+    profile = memory_context["repository_profile"]
+    profile_keys = [
+        item["memory_key"] for section_items in profile.values() for item in section_items
+    ]
+    assert "test_command" in profile_keys
+    assert "deploy_approval" not in profile_keys
     assert memory_context["session"]["active_goal"] == "wire graph memory"
+    assert worker.requests[0].task_spec == state.task_spec.model_dump(mode="json")
     assert {event.event_type for event in state.timeline_events} >= {
         TimelineEventType.MEMORY_LOADED,
         TimelineEventType.MEMORY_PERSISTED,
@@ -211,6 +230,7 @@ def test_orchestrator_graph_loads_and_persists_memory(session_factory) -> None:
     assert memory_loaded_event.payload["search_query"] == "Update memory-aware task execution"
     assert memory_loaded_event.payload["personal_keys"] == ["communication_style"]
     assert memory_loaded_event.payload["project_keys"] == ["test_command"]
+    assert memory_loaded_event.payload["repository_profile_source_keys"] == ["test_command"]
     assert state.progress_updates[-1] == (
         "admitted 2 memory candidates: 1 direct writes, 1 proposals, 0 rejected"
     )
