@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add advisory repository memory profile ([#308](https://github.com/natanayalo/code-agent/pull/308))
+
 - Feat: implement read-side memory gate to score and filter loaded memory entries ([#307](https://github.com/natanayalo/code-agent/pull/307))
 
 - Feat: implement deterministic memory extraction evaluation harness and harden extraction rules ([#306](https://github.com/natanayalo/code-agent/pull/306))
