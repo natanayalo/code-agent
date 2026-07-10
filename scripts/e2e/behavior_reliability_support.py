@@ -217,9 +217,14 @@ class ContractRunner:
                 db_path = "/" + os.path.expanduser(db_path[1:])
             else:
                 db_path = os.path.expanduser(db_path)
-            db_url = urlunparse(parsed_db_url._replace(path=db_path))
+            if parsed_db_url.netloc:
+                db_url = urlunparse(parsed_db_url._replace(path=db_path))
+            else:
+                db_url = f"{parsed_db_url.scheme}://{db_path}"
+                if parsed_db_url.query:
+                    db_url += f"?{parsed_db_url.query}"
             engine_kwargs: dict[str, Any] = {"connect_args": {"check_same_thread": False}}
-            if db_url.endswith(":memory:"):
+            if parsed_db_url.path in {":memory:", "/:memory:"}:
                 engine_kwargs["poolclass"] = StaticPool
             engine = create_engine_from_url(db_url, **engine_kwargs)
         else:

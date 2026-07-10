@@ -15,6 +15,7 @@ import pytest
 from scripts.e2e.behavior_reliability_support import load_dotenv, parse_env_value, setup_dummy_repo
 from scripts.e2e.run_behavior_reliability_eval import (
     CaseResult,
+    ContractRunner,
     _write_report,
     execute_eval_cleanup,
     parse_args,
@@ -132,6 +133,14 @@ def test_write_report_supports_filename_without_directory(tmp_path: Path, monkey
     _write_report(args, "run-1", "2026-07-10T00:00:00Z", [CaseResult("case")], [], False)
 
     assert (tmp_path / "report.json").exists()
+
+
+def test_contract_runner_supports_memory_database_query_parameters(monkeypatch) -> None:
+    """In-memory SQLite remains shared when the URL includes query parameters."""
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:?cache=shared")
+
+    runner = ContractRunner(run_id="run-1", repo_url="file:///tmp/dummy_repo")
+    runner.seed_project(key="test", value={"ok": True}, requires_verification=False)
 
 
 def test_contract_execution_runs_successfully(tmp_path: Path) -> None:
