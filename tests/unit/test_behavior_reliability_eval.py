@@ -21,6 +21,7 @@ from scripts.e2e.behavior_reliability_support import (
 from scripts.e2e.run_behavior_reliability_eval import (
     CaseResult,
     ContractRunner,
+    _append_live_case2_diagnostics,
     execute_eval_cleanup,
     live_profile_command_was_executed,
     parse_args,
@@ -151,6 +152,33 @@ def test_live_profile_command_evidence_reads_worker_artifact_not_prompt(tmp_path
     assert live_profile_command_was_executed(task_data)
 
 
+def test_live_case2_diagnostics_are_category_aware() -> None:
+    """The project convention may be accepted while the personal conflict is suppressed."""
+    result = CaseResult("stale_policy_avoidance")
+    _append_live_case2_diagnostics(
+        result,
+        {
+            "accepted_keys": ["repo_convention", "test_command"],
+            "suppressed_keys": ["deploy_approval", "repo_convention"],
+            "reason_counts": {"high_risk_unverified_or_stale": 1},
+            "suppressed_details": [
+                {
+                    "category": "personal",
+                    "memory_key": "repo_convention",
+                    "reason_codes": ["conflict_with_project"],
+                },
+                {
+                    "category": "project",
+                    "memory_key": "deploy_approval",
+                    "reason_codes": ["high_risk_unverified_or_stale"],
+                },
+            ],
+        },
+    )
+
+    assert all(assertion.passed for assertion in result.assertions)
+
+
 def test_setup_dummy_repo_refuses_unmarked_existing_directory(tmp_path: Path) -> None:
     """The evaluator must not delete a repository it did not create."""
     repo_dir = tmp_path / "existing-repo"
@@ -177,6 +205,11 @@ def test_load_dotenv_strips_inline_comments_before_quotes(tmp_path: Path, monkey
 def test_parse_env_value_preserves_hashes_inside_quotes() -> None:
     """Quoted hashes remain part of the value before an inline comment."""
     assert parse_env_value('"value#with#hash" # comment') == "value#with#hash"
+
+
+def test_parse_env_value_ignores_quote_characters_in_inline_comments() -> None:
+    """A quote in an inline comment must not change the parsed value."""
+    assert parse_env_value("'value' # comment with ' quote") == "value"
 
 
 def test_parse_env_map_preserves_first_repo_mapping(monkeypatch) -> None:
@@ -208,6 +241,14 @@ def test_write_report_supports_filename_without_directory(tmp_path: Path, monkey
 def test_contract_runner_supports_memory_database_query_parameters(monkeypatch) -> None:
     """In-memory SQLite remains shared when the URL includes query parameters."""
     monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:?cache=shared")
+
+    runner = ContractRunner(run_id="run-1", repo_url="file:///tmp/dummy_repo")
+    runner.seed_project(key="test", value={"ok": True}, requires_verification=False)
+
+
+def test_contract_runner_uses_shared_pool_for_bare_sqlite_memory_url(monkeypatch) -> None:
+    """Bare sqlite:// URLs must share the in-memory schema across sessions."""
+    monkeypatch.setenv("DATABASE_URL", "sqlite://")
 
     runner = ContractRunner(run_id="run-1", repo_url="file:///tmp/dummy_repo")
     runner.seed_project(key="test", value={"ok": True}, requires_verification=False)

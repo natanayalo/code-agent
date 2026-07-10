@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
 import os
 import shutil
 import sys
@@ -23,6 +22,7 @@ from scripts.e2e.behavior_reliability_support import (
     ContractRunner,
     LiveRunner,
     is_evaluator_owned_repo,
+    live_memory_loaded,
     live_profile_command_was_executed,
     live_workspace_path,
     load_dotenv,
@@ -31,24 +31,6 @@ from scripts.e2e.behavior_reliability_support import (
     write_report,
 )
 from workers import WorkerCommand, WorkerResult
-
-logger = logging.getLogger(__name__)
-
-
-def _live_memory_loaded(task_data: dict[str, Any]) -> dict[str, Any]:
-    """Read memory-load diagnostics from the live task response timeline."""
-    latest_run = task_data.get("latest_run") or {}
-    evidence = latest_run.get("evidence") or {}
-    memory_loaded = evidence.get("memory_loaded")
-    if isinstance(memory_loaded, dict):
-        return memory_loaded
-
-    for event in reversed(task_data.get("timeline") or []):
-        if isinstance(event, dict) and event.get("event_type") == "memory_loaded":
-            payload = event.get("payload") or {}
-            if isinstance(payload, dict):
-                return payload
-    return {}
 
 
 def _append_live_case2_diagnostics(result: CaseResult, memory_loaded: dict[str, Any]) -> None:
@@ -64,7 +46,13 @@ def _append_live_case2_diagnostics(result: CaseResult, memory_loaded: dict[str, 
     ) or any(
         isinstance(item, dict)
         and item.get("memory_key") == deploy_key
-        and item.get("reason_code") == "high_risk_unverified_or_stale"
+        and "high_risk_unverified_or_stale" in (item.get("reason_codes") or [])
+        for item in suppressed_details
+    )
+    personal_convention_suppressed = any(
+        isinstance(item, dict)
+        and item.get("category") == "personal"
+        and item.get("memory_key") == convention_key
         for item in suppressed_details
     )
     result.assertions.extend(
@@ -78,8 +66,12 @@ def _append_live_case2_diagnostics(result: CaseResult, memory_loaded: dict[str, 
                 passed=has_stale_reason,
             ),
             AssertionResult(
-                name="conflicting_personal_memory_suppressed",
-                passed=convention_key not in memory_loaded.get("accepted_keys", []),
+                name="personal_repo_convention_suppressed",
+                passed=personal_convention_suppressed,
+            ),
+            AssertionResult(
+                name="project_repo_convention_remains_available",
+                passed=convention_key in memory_loaded.get("accepted_keys", []),
             ),
         ]
     )
@@ -171,7 +163,7 @@ def run_case_1_assertions(
     else:
         task_data = run_output["task_data"]
         latest_run = task_data.get("latest_run") or {}
-        memory_loaded = _live_memory_loaded(task_data)
+        memory_loaded = live_memory_loaded(task_data)
 
         source_keys = memory_loaded.get("repository_profile_source_keys", [])
         injected = "test_command" in source_keys
@@ -278,7 +270,7 @@ def run_case_2_assertions(
             )
     else:
         task_data = run_output["task_data"]
-        memory_loaded = _live_memory_loaded(task_data)
+        memory_loaded = live_memory_loaded(task_data)
 
         source_keys = memory_loaded.get("repository_profile_source_keys", [])
         da_key = "deploy_approval"

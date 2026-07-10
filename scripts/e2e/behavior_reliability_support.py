@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -139,13 +140,9 @@ def load_dotenv(env_path: str = ".env") -> None:
 def parse_env_value(value: str) -> str:
     """Parse an env value while preserving hashes inside quoted values."""
     stripped = value.strip()
-    if len(stripped) >= 2 and stripped[0] in {"'", '"'}:
-        quote = stripped[0]
-        closing_index = stripped.rfind(quote)
-        if closing_index > 0:
-            suffix = stripped[closing_index + 1 :].strip()
-            if not suffix or suffix.startswith("#"):
-                return stripped[1:closing_index]
+    match = re.match(r"^(['\"])(.*?)\1\s*(?:#.*)?$", stripped)
+    if match:
+        return match.group(2)
     return stripped.split("#", 1)[0].strip()
 
 
@@ -283,6 +280,21 @@ def live_workspace_path(task_data: dict[str, Any]) -> Path | None:
     return None
 
 
+def live_memory_loaded(task_data: dict[str, Any]) -> dict[str, Any]:
+    """Read memory-load diagnostics from a live task response."""
+    latest_run = task_data.get("latest_run") or {}
+    evidence = latest_run.get("evidence") or {}
+    memory_loaded = evidence.get("memory_loaded")
+    if isinstance(memory_loaded, dict):
+        return memory_loaded
+    for event in reversed(task_data.get("timeline") or []):
+        if isinstance(event, dict) and event.get("event_type") == "memory_loaded":
+            payload = event.get("payload") or {}
+            if isinstance(payload, dict):
+                return payload
+    return {}
+
+
 class FakeBehaviorWorker(Worker):
     """Fake worker to capture graph requests and simulate specific task outcomes."""
 
@@ -332,7 +344,7 @@ class ContractRunner:
                 if parsed_db_url.query:
                     db_url += f"?{parsed_db_url.query}"
             engine_kwargs: dict[str, Any] = {"connect_args": {"check_same_thread": False}}
-            if parsed_db_url.path in {":memory:", "/:memory:"}:
+            if parsed_db_url.path in {"", ":memory:", "/:memory:"}:
                 engine_kwargs["poolclass"] = StaticPool
             engine = create_engine_from_url(db_url, **engine_kwargs)
         else:
@@ -421,7 +433,7 @@ class LiveRunner:
     def _list_memory(self, category: str) -> list[dict[str, Any]]:
         """List one memory category through the live API."""
         path = f"{self.base_url}/knowledge-base/{category}"
-        params = {"limit": 200, "offset": 0}
+        params: dict[str, int | str] = {"limit": 200, "offset": 0}
         if category == "project":
             params["repo_url"] = self.repo_url
         resp = self.client.get(path, params=params)
