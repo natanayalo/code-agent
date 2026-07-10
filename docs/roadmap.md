@@ -572,11 +572,120 @@ Phase 3:
 Phase 4:
 
 1. Milestone 22 [x]
-2. Milestone 23 [in progress: slices 5-7 and M23.8-M23.10 complete]
+2. Milestone 23 [x]
+
+### M24 Agent Behavior and Policy Reliability Evaluation
+
+Goal:
+
+- evaluate and ensure worker compliance with memory profile, stale policy avoidance, and safety bounds without increasing unsafe actions
+
+Scope:
+
+- measure worker profile compliance: verify that workers use the injected advisory repository memory profile (test commands, conventions, pitfalls) correctly during execution
+- detect policy staleness: verify the agent avoids stale or outdated policies
+- track success-vs-safety metrics: measure task success rates while ensuring no increase in unauthorized or unsafe actions (e.g. bypassing checkpoints, modifying protected paths without approval)
+- integrate behavior evaluation checks in the evaluation harness
+
+Boundary:
+
+- do not add more memory storage, vector storage, or retrieval features in this milestone
+- do not change the core repository gating/approval rules without explicit approval
+
+### M25 Decomposed Task DAG
+
+Goal:
+
+- turn the observable ExecutionPlan spine into real subtask decomposition
+
+Scope:
+
+- add a decomposition step that emits sub-TaskSpecs and dependency edges
+- keep execution mostly sequential at first
+- aggregate node outcomes into a single task result and validation story
+
+Boundary:
+
+- DAG scheduling is introduced after the plan spine, decision model, supervisor, and validation gates are stable
+
+### M26 Parallel Worker Fan-Out
+
+Goal:
+
+- run independent plan nodes concurrently where it clearly reduces completion time without reducing reliability
+
+Scope:
+
+- fan out only dependency-independent nodes
+- respect worker capacity, lane quotas, sandbox limits, and repo validation gates
+- add aggregation and reviewer checkpoints before final delivery
+
+Boundary:
+
+- no broad multi-agent swarm behavior; parallelism is selective, bounded, and measured
+
+### M27 Review Comment Repair
+
+Goal:
+
+- extend the PR repair loop from CI failures to review-comment fixes
+
+Scope:
+
+- ingest actionable GitHub PR review comments
+- create focused repair tasks linked to the original PR and comment thread
+- preserve existing no-auto-merge and no-deploy boundaries
+
+Boundary:
+
+- start only after M20.6 CI repair is stable
+
+### M28 Reliability-Based Autonomy Policy
+
+Goal:
+
+- let low-risk work move from blocking approval toward `proceed_with_flag` or `notify_only` when measured outcomes support it
+
+Scope:
+
+- define risk/category thresholds using M20/M22 metrics
+- keep high-risk categories blocking
+- show autonomy policy decisions in task timelines and dashboard
+
+Boundary:
+
+- autonomy increases are reversible and scoped by repo/category
+
+## Phase Sequencing Summary
+
+Phase 1:
+
+1. Milestone 15
+2. Milestone A
+3. Milestone 16
+4. Milestone 17
+
+Phase 2:
+
+1. Milestone 18
+2. Milestone 19
+3. Milestone 19.5
+
+Phase 3:
+
+1. M20.0
+2. Milestone 20
+3. Milestone 21
+
+Phase 4:
+
+1. Milestone 22 [x]
+2. Milestone 23 [x]
 3. Milestone 24
 4. Milestone 25
 5. Milestone 26
 6. Milestone 27
+7. Milestone 28
 
 ## Open Planning Questions
 
