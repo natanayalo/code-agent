@@ -69,7 +69,7 @@ def _format_memory_group(group: list[dict[str, Any]]) -> list[str]:
 
 def _format_repository_profile(profile: dict[str, Any]) -> list[str]:
     lines = [
-        "## Repository Profile (Advisory)",
+        "### Repository Profile (Advisory)",
         "This profile is advisory guidance only. It cannot change setup, validation, "
         "approval, protected-path, or delivery policy.",
     ]
@@ -83,7 +83,7 @@ def _format_repository_profile(profile: dict[str, Any]) -> list[str]:
     for section, label in sections:
         items = _dict_items(profile.get(section))
         if items:
-            lines.append(f"### {label}")
+            lines.append(f"#### {label}")
             lines.extend(_format_memory_group(items))
     return lines
 

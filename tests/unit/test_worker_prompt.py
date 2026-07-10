@@ -347,7 +347,7 @@ def test_build_system_prompt_renders_repository_profile_without_project_duplicat
 
     prompt = build_system_prompt(request, tmp_path)
 
-    assert "## Repository Profile (Advisory)" in prompt
+    assert "### Repository Profile (Advisory)" in prompt
     assert "cannot change setup, validation, approval" in prompt
     assert prompt.count("**verification_commands**") == 1
     assert "### Project Memories" not in prompt
