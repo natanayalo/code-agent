@@ -55,7 +55,7 @@ class HumanInteractionRepository:
             .join(Task, Task.id == HumanInteraction.task_id)
             .where(HumanInteraction.status == HumanInteractionStatus.PENDING)
             .where(
-                Task.status.not_in((TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED))
+                Task.status.notin_((TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED))
             )
             .order_by(HumanInteraction.created_at.desc())
         )

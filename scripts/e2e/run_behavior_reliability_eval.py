@@ -11,6 +11,7 @@ import os
 import shutil
 import sys
 import uuid
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
@@ -513,7 +514,7 @@ async def main_async() -> int:
             dummy_repo_dir = repo_path_from_url(configured_live_repo)
     setup_dummy_repo(dummy_repo_dir)
     if not repo_url:
-        repo_url = f"file://{os.path.abspath(dummy_repo_dir)}"
+        repo_url = Path(dummy_repo_dir).resolve().as_uri()
 
     runner = _build_runner(args, run_id, repo_url)
 
