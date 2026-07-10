@@ -706,7 +706,7 @@ def test_apply_task_approval_decision_reject_is_terminal_and_conflict_is_reporte
         assert approval.get("approved") is False
         interactions = HumanInteractionRepository(session).list_by_task(task_id=task.id)
         assert len(interactions) == 1
-        assert interactions[0].status is HumanInteractionStatus.REJECTED
+        assert interactions[0].status == HumanInteractionStatus.REJECTED
         assert interactions[0].response_data == {
             "approved": False,
             "source": "api",

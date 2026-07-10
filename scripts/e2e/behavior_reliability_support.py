@@ -9,7 +9,7 @@ import subprocess
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Final
 
 import httpx
 from sqlalchemy.pool import StaticPool
@@ -34,6 +34,9 @@ from workers.prompt_memory import build_memory_context_section
 
 API_SHARED_SECRET_HEADER = "X-Webhook-Token"
 QA_REPO_KEY = "qa-dummy"
+LIVE_TERMINAL_STATUSES: Final[frozenset[str]] = frozenset(
+    {"completed", "success", "failed", "cancelled", "error", "awaiting_approval"}
+)
 
 
 def _json_safe(value: Any) -> Any:
@@ -282,18 +285,14 @@ class LiveRunner:
             deadline = asyncio.get_running_loop().time() + self.timeout_seconds
             while asyncio.get_running_loop().time() < deadline:
                 await asyncio.sleep(self.poll_interval_seconds)
-                t_resp = await client.get(f"{self.base_url}/tasks/{task_id}")
-                t_resp.raise_for_status()
-                task_data = t_resp.json()
-                if task_data.get("status") in [
-                    "completed",
-                    "success",
-                    "failed",
-                    "cancelled",
-                    "error",
-                    "awaiting_approval",
-                ]:
-                    break
+                try:
+                    t_resp = await client.get(f"{self.base_url}/tasks/{task_id}")
+                    t_resp.raise_for_status()
+                    task_data = t_resp.json()
+                    if task_data.get("status") in LIVE_TERMINAL_STATUSES:
+                        break
+                except httpx.HTTPError:
+                    continue
             else:
                 raise RuntimeError(f"Task {task_id} timed out.")
             return {"task_data": task_data, "task_id": task_id}

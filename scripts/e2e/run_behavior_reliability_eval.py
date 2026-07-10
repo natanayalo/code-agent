@@ -199,7 +199,10 @@ def run_case_2_assertions(
 
             da_key = "deploy_approval"
             in_profile = any(
-                item.get("memory_key") == da_key for sec in profile.values() for item in sec
+                isinstance(item, dict) and item.get("memory_key") == da_key
+                for sec in profile.values()
+                if isinstance(sec, list)
+                for item in sec
             )
             result.assertions.append(
                 AssertionResult(
@@ -494,7 +497,9 @@ async def main_async() -> int:
 
     dummy_repo_dir = args.repo_root or os.path.join(workspace_root, f"dummy_repo_{run_id}")
     if configured_live_repo and not args.repo_root:
-        dummy_repo_dir = repo_path_from_url(configured_live_repo)
+        parsed_repo_url = urlparse(configured_live_repo)
+        if parsed_repo_url.scheme in {"", "file"}:
+            dummy_repo_dir = repo_path_from_url(configured_live_repo)
     setup_dummy_repo(dummy_repo_dir)
     if not repo_url:
         repo_url = f"file://{os.path.abspath(dummy_repo_dir)}"
