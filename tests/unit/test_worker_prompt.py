@@ -555,3 +555,13 @@ def test_worker_prompt_to_dict_defensive_handling() -> None:
     from workers.prompt_memory import _to_dict
 
     assert _to_dict(FailingDump()) == {}
+
+
+def test_worker_prompt_safe_float_defensive_handling() -> None:
+    from workers.prompt_memory import _safe_float
+
+    assert _safe_float(0.5) == 0.5
+    assert _safe_float("0.25") == 0.25
+    assert _safe_float(None, 2.0) == 2.0
+    assert _safe_float("invalid", 1.5) == 1.5
+    assert _safe_float([], 1.2) == 1.2

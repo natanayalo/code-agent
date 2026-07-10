@@ -43,12 +43,19 @@ def _as_str(value: Any) -> str:
     return str(value)
 
 
+def _safe_float(value: Any, default: float = 1.0) -> float:
+    try:
+        return float(value) if value is not None else default
+    except (ValueError, TypeError):
+        return default
+
+
 def _format_advisory_metadata(memory: dict[str, Any]) -> str:
     """Format read-side gate metadata for prompt display."""
     status = memory.get("gate_status", "accepted")
     risk = memory.get("risk", "low")
     strength = memory.get("advisory_strength")
-    strength_value = float(strength) if strength is not None else 1.0
+    strength_value = _safe_float(strength, 1.0)
     verified_at = memory.get("last_verified_at")
     requires_verification = memory.get("requires_verification", True)
     conflict = memory.get("conflict")
@@ -126,9 +133,9 @@ def _memory_sort_key(memory: dict[str, Any]) -> tuple[float, str, float]:
     strength = memory.get("advisory_strength")
     confidence = memory.get("confidence")
     return (
-        float(strength) if strength is not None else 1.0,
+        _safe_float(strength, 1.0),
         _as_str(memory.get("last_verified_at")),
-        float(confidence) if confidence is not None else 1.0,
+        _safe_float(confidence, 1.0),
     )
 
 
