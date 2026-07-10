@@ -12,14 +12,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from scripts.e2e.behavior_reliability_support import load_dotenv, parse_env_value, setup_dummy_repo
+from scripts.e2e.behavior_reliability_support import (
+    LiveRunner,
+    load_dotenv,
+    parse_env_value,
+    setup_dummy_repo,
+)
 from scripts.e2e.run_behavior_reliability_eval import (
     CaseResult,
     ContractRunner,
-    _write_report,
     execute_eval_cleanup,
+    live_profile_command_was_executed,
     parse_args,
     parse_env_map,
+    write_report,
 )
 
 
@@ -90,6 +96,61 @@ def test_execute_eval_cleanup_handles_errors() -> None:
     assert mock_runner.delete_personal.call_count == 2
 
 
+def test_live_restore_memories_preserves_original_and_removes_owned_new_entries() -> None:
+    """Live cleanup restores overwritten data and removes only evaluator-owned additions."""
+    runner = LiveRunner.__new__(LiveRunner)
+    runner.run_id = "eval-1"
+    runner.repo_url = "file:///repo"
+    runner._memory_snapshots = {
+        ("project", "existing"): {
+            "memory_key": "existing",
+            "repo_url": runner.repo_url,
+            "value": {"rule": "original"},
+            "confidence": 0.4,
+            "requires_verification": True,
+        },
+        ("personal", "new"): None,
+    }
+    runner._seeded_values = {
+        ("project", "existing"): {"eval_run_id": "eval-1"},
+        ("personal", "new"): {"eval_run_id": "eval-1"},
+    }
+    runner._current_memory = MagicMock(
+        side_effect=[
+            {"memory_key": "existing", "value": {"eval_run_id": "eval-1"}},
+            {"memory_key": "new", "value": {"eval_run_id": "eval-1"}},
+        ]
+    )
+    runner._upsert = MagicMock()
+    runner.delete_personal = MagicMock()
+
+    errors = runner.restore_memories(["existing", "new"])
+
+    assert errors == []
+    runner._upsert.assert_called_once()
+    assert runner._upsert.call_args.args[0] == "project"
+    runner.delete_personal.assert_called_once_with("new")
+
+
+def test_live_profile_command_evidence_reads_worker_artifact_not_prompt(tmp_path: Path) -> None:
+    """Prompt text alone must not satisfy the live command-utilization assertion."""
+    task_data = {
+        "latest_run": {
+            "commands_run": [
+                {"command": "agy -p profile_verification_utilization"},
+            ]
+        }
+    }
+    assert not live_profile_command_was_executed(task_data)
+
+    stdout = tmp_path / "stdout.log"
+    stdout.write_text("ran profile_verification_utilization\n", encoding="utf-8")
+    task_data["latest_run"]["artifact_index"] = [
+        {"name": "native-agent-stdout", "uri": stdout.as_uri()}
+    ]
+    assert live_profile_command_was_executed(task_data)
+
+
 def test_setup_dummy_repo_refuses_unmarked_existing_directory(tmp_path: Path) -> None:
     """The evaluator must not delete a repository it did not create."""
     repo_dir = tmp_path / "existing-repo"
@@ -130,7 +191,16 @@ def test_write_report_supports_filename_without_directory(tmp_path: Path, monkey
     monkeypatch.chdir(tmp_path)
     args = SimpleNamespace(output="report.json", base_url="http://localhost:8000", mode="contract")
 
-    _write_report(args, "run-1", "2026-07-10T00:00:00Z", [CaseResult("case")], [], False)
+    write_report(
+        args.output,
+        args.base_url,
+        args.mode,
+        "run-1",
+        "2026-07-10T00:00:00Z",
+        [CaseResult("case")],
+        [],
+        False,
+    )
 
     assert (tmp_path / "report.json").exists()
 

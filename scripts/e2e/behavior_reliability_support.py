@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import stat
@@ -10,8 +11,10 @@ import subprocess
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Final
 from urllib.parse import urlparse, urlunparse
+from urllib.request import url2pathname
 
 import httpx
 from sqlalchemy.pool import StaticPool
@@ -69,6 +72,51 @@ class CaseResult:
     assertions: list[AssertionResult] = field(default_factory=list)
     timeline_summary: dict[str, Any] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+
+
+def write_report(
+    output: str,
+    base_url: str,
+    mode: str,
+    run_id: str,
+    started_at: str,
+    results: list[CaseResult],
+    cleanup_errors: list[str],
+    passed_all: bool,
+) -> None:
+    """Write the evaluator report to a caller-selected path."""
+    report = {
+        "run_id": run_id,
+        "started_at": started_at,
+        "base_url": base_url,
+        "mode": mode,
+        "passed": passed_all,
+        "cases": [
+            {
+                "case_id": result.case_id,
+                "passed": result.passed,
+                "task_id": result.task_id,
+                "seeded_memory_ids": result.seeded_memory_keys,
+                "assertions": [
+                    {
+                        "name": assertion.name,
+                        "passed": assertion.passed,
+                        "message": assertion.message,
+                    }
+                    for assertion in result.assertions
+                ],
+                "timeline_summary": result.timeline_summary,
+                "errors": result.errors,
+            }
+            for result in results
+        ],
+        "cleanup_errors": cleanup_errors,
+    }
+    output_dir = os.path.dirname(output)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    with open(output, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
 
 
 def load_dotenv(env_path: str = ".env") -> None:
@@ -173,6 +221,66 @@ def is_evaluator_owned_repo(repo_dir: str) -> bool:
             return f.read().strip() == "behavior-reliability-evaluator-owned"
     except OSError:
         return False
+
+
+def local_file_from_uri(uri: Any) -> Path | None:
+    """Resolve a local file URI emitted by the worker artifact index."""
+    if not isinstance(uri, str):
+        return None
+    parsed = urlparse(uri)
+    if parsed.scheme == "file":
+        return Path(url2pathname(parsed.path))
+    if parsed.scheme == "" and uri:
+        return Path(uri)
+    return None
+
+
+def live_artifact_text(task_data: dict[str, Any], *names: str) -> str:
+    """Read available local worker artifacts for execution evidence."""
+    latest_run = task_data.get("latest_run") or {}
+    artifacts = list(latest_run.get("artifact_index") or []) + list(
+        latest_run.get("artifacts") or []
+    )
+    wanted = set(names)
+    chunks: list[str] = []
+    for artifact in artifacts:
+        if not isinstance(artifact, dict) or artifact.get("name") not in wanted:
+            continue
+        path = local_file_from_uri(artifact.get("uri"))
+        if path is None:
+            continue
+        try:
+            chunks.append(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return "\n".join(chunks)
+
+
+def live_profile_command_was_executed(task_data: dict[str, Any]) -> bool:
+    """Require command evidence independent of the prompt that requested it."""
+    marker = "profile_verification_utilization"
+    latest_run = task_data.get("latest_run") or {}
+    for command in latest_run.get("commands_run") or []:
+        if not isinstance(command, dict):
+            continue
+        text = command.get("command") or command.get("cmd") or ""
+        if marker in text and " -p " not in text and "--prompt" not in text:
+            return True
+    return marker in live_artifact_text(task_data, "native-agent-stdout", "worker-stdout", "stdout")
+
+
+def live_workspace_path(task_data: dict[str, Any]) -> Path | None:
+    """Find the worker workspace artifact used by a live run."""
+    latest_run = task_data.get("latest_run") or {}
+    artifacts = list(latest_run.get("artifact_index") or []) + list(
+        latest_run.get("artifacts") or []
+    )
+    for artifact in artifacts:
+        if isinstance(artifact, dict) and artifact.get("name") == "workspace":
+            path = local_file_from_uri(artifact.get("uri"))
+            if path is not None:
+                return path
+    return None
 
 
 class FakeBehaviorWorker(Worker):
@@ -303,22 +411,76 @@ class LiveRunner:
         self.timeout_seconds = timeout_seconds
         self.poll_interval_seconds = poll_interval_seconds
         self.client = httpx.Client(headers={API_SHARED_SECRET_HEADER: secret})
+        self._memory_snapshots: dict[tuple[str, str], dict[str, Any] | None] = {}
+        self._seeded_values: dict[tuple[str, str], dict[str, Any]] = {}
 
     def close(self) -> None:
         """Close the live runner's HTTP client and its connection pool."""
         self.client.close()
 
+    def _list_memory(self, category: str) -> list[dict[str, Any]]:
+        """List one memory category through the live API."""
+        path = f"{self.base_url}/knowledge-base/{category}"
+        params = {"limit": 200, "offset": 0}
+        if category == "project":
+            params["repo_url"] = self.repo_url
+        resp = self.client.get(path, params=params)
+        resp.raise_for_status()
+        payload = resp.json()
+        if not isinstance(payload, list):
+            raise TypeError(f"Unexpected {category} memory response: {type(payload).__name__}")
+        return [item for item in payload if isinstance(item, dict)]
+
+    def _snapshot_memory(self, category: str, key: str) -> None:
+        """Save a canonical memory before the evaluator overwrites it."""
+        identity = (category, key)
+        if identity in self._memory_snapshots:
+            return
+        repo_url = self.repo_url if category == "project" else None
+        match = next(
+            (
+                item
+                for item in self._list_memory(category)
+                if item.get("memory_key") == key
+                and (category != "project" or item.get("repo_url") == repo_url)
+            ),
+            None,
+        )
+        self._memory_snapshots[identity] = match
+
+    def _current_memory(self, category: str, key: str) -> dict[str, Any] | None:
+        """Read the current exact memory entry for ownership-safe cleanup."""
+        repo_url = self.repo_url if category == "project" else None
+        return next(
+            (
+                item
+                for item in self._list_memory(category)
+                if item.get("memory_key") == key
+                and (category != "project" or item.get("repo_url") == repo_url)
+            ),
+            None,
+        )
+
+    def _upsert(self, category: str, payload: dict[str, Any]) -> None:
+        resp = self.client.put(
+            f"{self.base_url}/knowledge-base/{category}", json=_json_safe(payload)
+        )
+        resp.raise_for_status()
+
+    def _seed(self, category: str, key: str, payload: dict[str, Any]) -> None:
+        self._snapshot_memory(category, key)
+        self._seeded_values[(category, key)] = dict(payload["value"])
+        self._upsert(category, payload)
+
     def seed_personal(self, key: str, value: dict, **kwargs) -> None:
         payload = {"memory_key": key, "value": value}
         payload.update(kwargs)
-        resp = self.client.put(f"{self.base_url}/knowledge-base/personal", json=_json_safe(payload))
-        resp.raise_for_status()
+        self._seed("personal", key, payload)
 
     def seed_project(self, key: str, value: dict, **kwargs) -> None:
         payload = {"repo_url": self.repo_url, "memory_key": key, "value": value}
         payload.update(kwargs)
-        resp = self.client.put(f"{self.base_url}/knowledge-base/project", json=_json_safe(payload))
-        resp.raise_for_status()
+        self._seed("project", key, payload)
 
     def delete_personal(self, key: str) -> None:
         resp = self.client.delete(
@@ -334,6 +496,56 @@ class LiveRunner:
         )
         if resp.status_code != 404:
             resp.raise_for_status()
+
+    def restore_memories(self, keys: list[str]) -> list[str]:
+        """Restore overwritten memories without deleting concurrent user data."""
+        cleanup_errors: list[str] = []
+        identities = [identity for identity in self._memory_snapshots if identity[1] in keys]
+        for category, key in identities:
+            original = self._memory_snapshots[(category, key)]
+            try:
+                current = self._current_memory(category, key)
+                current_value = current.get("value") if current else None
+                seeded_value = self._seeded_values.get((category, key))
+                evaluator_owned = isinstance(current_value, dict) and (
+                    current_value.get("eval_run_id") == self.run_id or current_value == seeded_value
+                )
+                if original is None:
+                    if current is None:
+                        continue
+                    if not evaluator_owned:
+                        cleanup_errors.append(f"Skipped deleting modified {category} memory {key}.")
+                        continue
+                    if category == "project":
+                        self.delete_project(key)
+                    else:
+                        self.delete_personal(key)
+                    continue
+                if current is None:
+                    cleanup_errors.append(f"Skipped restoring deleted {category} memory {key}.")
+                    continue
+                if not evaluator_owned:
+                    cleanup_errors.append(f"Skipped restoring modified {category} memory {key}.")
+                    continue
+                restore_payload = {
+                    field: original[field]
+                    for field in (
+                        "memory_key",
+                        "value",
+                        "source",
+                        "confidence",
+                        "scope",
+                        "last_verified_at",
+                        "requires_verification",
+                    )
+                    if field in original
+                }
+                if category == "project":
+                    restore_payload["repo_url"] = self.repo_url
+                self._upsert(category, restore_payload)
+            except Exception as exc:
+                cleanup_errors.append(f"Failed restoring {category} memory {key}: {exc}")
+        return cleanup_errors
 
     async def execute_task(
         self, task_text: str, constraints: dict, simulated_result: WorkerResult | None
