@@ -863,9 +863,25 @@ async def _await_decomposed_nodes(
                 session_id=request.session_id,
                 timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
             )
-            if result.status == "success":
+            if result is None:
+                logger.warning("Node execution result is None, falling back to failure default.")
+                result = WorkerResult(
+                    status="failure",
+                    summary="Node execution returned no result.",
+                    failure_kind="worker_failure",
+                )
                 break
-        assert result is not None
+            if result.status == "success" or result.next_action_hint == "request_higher_permission":
+                break
+        if result is None:
+            logger.warning(
+                "Node execution completed without a result, falling back to failure default."
+            )
+            result = WorkerResult(
+                status="failure",
+                summary="Node execution returned no result.",
+                failure_kind="worker_failure",
+            )
         if result.workspace_id is None and state.dispatch.workspace_id:
             result = result.model_copy(update={"workspace_id": state.dispatch.workspace_id})
         outcomes = [outcome for outcome in outcomes if outcome.node_id != ready_node.node_id]

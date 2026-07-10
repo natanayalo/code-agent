@@ -129,6 +129,7 @@ def test_decomposed_permission_block_resumes_from_blocked_node():
                         "title": "Implement",
                         "task_spec": {"goal": "Implement"},
                         "node_kind": "implement",
+                        "max_attempts": 3,
                     },
                     {
                         "node_id": "verify",
@@ -148,6 +149,7 @@ def test_decomposed_permission_block_resumes_from_blocked_node():
     assert first_result.next_action_hint == "request_higher_permission"
     assert first_outcomes[0].status == "blocked"
     assert len(first_outcomes) == 1
+    assert worker.calls == 1
 
     resumed_state = state.model_copy(update={"node_outcomes": first_outcomes})
     resumed_result, resumed_outcomes, _ = asyncio.run(
@@ -158,6 +160,40 @@ def test_decomposed_permission_block_resumes_from_blocked_node():
     assert [outcome.node_id for outcome in resumed_outcomes] == ["implement", "verify"]
     assert all(outcome.status == "completed" for outcome in resumed_outcomes)
     assert worker.calls == 3
+
+
+def test_decomposed_node_none_result_falls_back_to_failure():
+    class NoneWorker(Worker):
+        async def run(self, request: WorkerRequest, **kwargs) -> WorkerResult:
+            del request, kwargs
+            return None  # type: ignore[return-value]
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Implement"},
+            "task_spec": {"goal": "Implement"},
+            "route": {"chosen_worker": "codex"},
+            "dispatch": {"worker_type": "codex"},
+            "decomposed_plan": {
+                "triggered": True,
+                "status": "decomposed",
+                "nodes": [
+                    {
+                        "node_id": "implement",
+                        "title": "Implement",
+                        "task_spec": {"goal": "Implement"},
+                        "node_kind": "implement",
+                    },
+                ],
+            },
+        }
+    )
+
+    result, outcomes, _ = asyncio.run(_await_decomposed_nodes(state, NoneWorker()))
+
+    assert result.status == "failure"
+    assert outcomes[0].status == "failed"
+    assert outcomes[0].result.failure_kind == "worker_failure"
 
 
 def test_decomposed_resume_retries_skipped_downstream_nodes():

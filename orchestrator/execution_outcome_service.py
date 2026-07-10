@@ -603,6 +603,9 @@ def _update_task_route_and_spec(
                         mode="json"
                     )
                     existing_node.node_kind = decomposed_nodes[step.step_id].node_kind
+                else:
+                    existing_node.task_spec = None
+                    existing_node.node_kind = None
 
         # Remove orphaned nodes that are no longer in the plan
         for node_id, node in list(existing_nodes.items()):
