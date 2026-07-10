@@ -849,10 +849,16 @@ async def _await_decomposed_nodes(
         result: WorkerResult | None = None
         while attempts < ready_node.max_attempts:
             attempts += 1
+            parent_task_text = state.normalized_task_text or state.task.task_text
+            node_task_text = (
+                f"Parent task:\n{parent_task_text}\n\n"
+                f"Current DAG node ({ready_node.node_kind}): {ready_node.task_spec.goal}\n"
+                f"Node acceptance criteria: {'; '.join(ready_node.task_spec.acceptance_criteria)}"
+            )
             request = _build_worker_request(
                 node_state,
                 task_spec_override=ready_node.task_spec,
-                task_text_override=ready_node.task_spec.goal,
+                task_text_override=node_task_text,
                 prior_node_context=prior_context,
             )
             last_manifest = request.runtime_manifest

@@ -571,6 +571,10 @@ def _update_task_route_and_spec(
                 )
                 continue
             active_node_ids.add(step.step_id)
+            decomposed_node = decomposed_nodes.get(step.step_id)
+            dependencies = (
+                decomposed_node.depends_on if decomposed_node is not None else step.depends_on or []
+            )
             if step.step_id not in existing_nodes:
                 new_node = plan_repo.add_node(
                     plan_id=plan.id,
@@ -578,7 +582,7 @@ def _update_task_route_and_spec(
                     goal=step.title or f"Step {step.step_id}",
                     sequence_number=i,
                     acceptance_criteria=step.expected_outcome,
-                    depends_on=step.depends_on or [],
+                    depends_on=dependencies,
                     task_spec=(
                         decomposed_nodes[step.step_id].task_spec.model_dump(mode="json")
                         if step.step_id in decomposed_nodes
@@ -597,7 +601,7 @@ def _update_task_route_and_spec(
                 existing_node.goal = step.title or f"Step {step.step_id}"
                 existing_node.sequence_number = i
                 existing_node.acceptance_criteria = step.expected_outcome
-                existing_node.depends_on = step.depends_on or []
+                existing_node.depends_on = dependencies
                 if step.step_id in decomposed_nodes:
                     existing_node.task_spec = decomposed_nodes[step.step_id].task_spec.model_dump(
                         mode="json"

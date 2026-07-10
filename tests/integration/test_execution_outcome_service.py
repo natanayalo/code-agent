@@ -344,6 +344,87 @@ def test_persist_execution_outcome_clears_stale_node_contract_fields(session_fac
         assert node.node_kind is None
 
 
+def test_persist_execution_outcome_uses_validated_decomposed_dependencies(session_factory) -> None:
+    service = MockExecutionService(session_factory)
+
+    with session_scope(session_factory) as session:
+        task_id = _setup_task(session)
+
+    task_plan = TaskPlan(
+        triggered=True,
+        complexity_reason="multi-step",
+        steps=[
+            TaskPlanStep(
+                step_id="inspect", title="Inspect", expected_outcome="Inspection complete"
+            ),
+            TaskPlanStep(
+                step_id="implement", title="Implement", expected_outcome="Change complete"
+            ),
+            TaskPlanStep(
+                step_id="verify", title="Verify", expected_outcome="Verification complete"
+            ),
+        ],
+    )
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Inspect, implement, and verify", "task_id": task_id},
+            "task_plan": task_plan.model_dump(mode="json"),
+            "task_spec": {"goal": "Inspect, implement, and verify"},
+            "route": {"chosen_worker": "codex", "route_reason": "test"},
+            "dispatch": {},
+            "approval": {"required": False, "status": "not_required"},
+            "decomposed_plan": {
+                "triggered": True,
+                "status": "decomposed",
+                "nodes": [
+                    {
+                        "node_id": "inspect",
+                        "title": "Inspect",
+                        "task_spec": {"goal": "Inspect"},
+                        "node_kind": "inspect",
+                    },
+                    {
+                        "node_id": "implement",
+                        "title": "Implement",
+                        "depends_on": ["inspect"],
+                        "task_spec": {"goal": "Implement"},
+                        "node_kind": "implement",
+                    },
+                    {
+                        "node_id": "verify",
+                        "title": "Verify",
+                        "depends_on": ["implement"],
+                        "task_spec": {"goal": "Verify"},
+                        "node_kind": "verify",
+                    },
+                ],
+            },
+            "result": {"status": "success", "summary": "Done"},
+        }
+    )
+    now = datetime.now(UTC)
+
+    _persist_execution_outcome(
+        service,
+        task_id=task_id,
+        state=state,
+        started_at=now,
+        finished_at=now,
+        persist_friction_proposals=False,
+    )
+
+    with session_scope(session_factory) as session:
+        plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
+        assert plan is not None
+        assert ExecutionPlanRepository(session).get_node(plan.id, "inspect").depends_on == []
+        assert ExecutionPlanRepository(session).get_node(plan.id, "implement").depends_on == [
+            "inspect"
+        ]
+        assert ExecutionPlanRepository(session).get_node(plan.id, "verify").depends_on == [
+            "implement"
+        ]
+
+
 def test_persist_execution_outcome_creates_proposal_for_scout(session_factory) -> None:
     """Successful scout tasks should produce one idempotent Proposal per structured item."""
     service = MockExecutionService(session_factory)

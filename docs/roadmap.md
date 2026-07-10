@@ -510,6 +510,12 @@ Progress:
 - [x] M24.4: deterministic node outcome aggregation into the parent result and validation story
 - [x] M24.5: node-specific approval/blocking integration, bounded retry, and resume from completed nodes
 - [ ] M24.6: reliability evaluation gate before M25 fan-out
+  - [ ] run a scenario matrix covering successful execution, node failure, verification failure,
+    permission pause/resume, retries, and multiple dependencies
+  - [ ] persist per-node execution timing, runtime/trace identity, and sanitized effective input
+    for operator inspection
+  - [ ] define generated-node retry and idempotency semantics explicitly
+  - [ ] add a deterministic branching-and-join DAG test without enabling concurrent execution
 
 ### M25 Parallel Worker Fan-Out
 

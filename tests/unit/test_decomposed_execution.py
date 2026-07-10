@@ -259,7 +259,9 @@ def test_decomposed_resume_retries_skipped_downstream_nodes():
     result, outcomes, _ = asyncio.run(_await_decomposed_nodes(state, worker))
 
     assert result.status == "success"
-    assert worker.task_texts == ["Implement", "Verify"]
+    assert all("Parent task:\nImplement and verify" in task_text for task_text in worker.task_texts)
+    assert "Current DAG node (implement): Implement" in worker.task_texts[0]
+    assert "Current DAG node (verify): Verify" in worker.task_texts[1]
     assert [(outcome.node_id, outcome.status) for outcome in outcomes] == [
         ("implement", "completed"),
         ("verify", "completed"),

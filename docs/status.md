@@ -51,6 +51,10 @@ Active focus:
 ## Next Slices Only
 
 1. M24.6: M24 reliability evaluation gate
+   - execute a failure/recovery and multi-dependency scenario matrix
+   - add per-node timing, runtime/trace, and effective-input observability
+   - define generated-node retry/idempotency behavior
+   - validate a deterministic branching-and-join DAG before M25 fan-out
 
 ## Current Backlog
 
