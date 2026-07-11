@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 3: personal reliability before broader autonomy.
+Phase 4: selective autonomy after reliability.
 
 Active focus:
 
-- Evaluate Phase 4 candidates using the Phase 3 reliability baseline
+- M24: implement decomposed task DAG execution
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
@@ -29,6 +29,8 @@ Active focus:
 - generated TaskSpec contract for task goal/risk/type/delivery policy before worker routing
 - repo registry and validation profiles gate public repo selection, protected paths, and validation defaults
 - deterministic advisory repository memory profiles are injected into worker context without changing repository policy
+- M23.11 evaluation confirms the worker uses advisory profiles correctly, avoids stale policy, and improves task success without increasing unsafe actions
+- M24.1–M24.5 provide validated sequential task decomposition, durable node contracts/evidence, sequential execution, parent-result aggregation, bounded retry, and blocked-node resume
 - PR-native delivery fields with GitHub branch/draft-PR delivery integration
 - full-text personal/project memory search with dashboard search results and memory-retrieval timeline visibility
 - deterministic memory retrieval evaluation to separate full-text regressions from known semantic gaps
@@ -48,11 +50,15 @@ Active focus:
 
 ## Next Slices Only
 
-1. M23.11: evaluation/reliability of actual agent behavior (does the worker use the profile correctly, does it avoid stale policy, and does it improve task success without increasing unsafe actions)
+1. M24.6: M24 reliability evaluation gate
+   - execute a failure/recovery and multi-dependency scenario matrix
+   - add per-node timing, runtime/trace, and effective-input observability
+   - define generated-node retry/idempotency behavior
+   - validate a deterministic branching-and-join DAG before M25 fan-out
 
 ## Current Backlog
 
-- Phase 4: evaluate routing, semantic memory, DAG decomposition, selective fan-out, review repair, and autonomy policy only after Phase 3 proves reliability.
+- Phase 4: decomposed task DAG, selective fan-out, review repair, and reliability-based autonomy policy.
 
 ## Completed Work
 

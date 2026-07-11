@@ -7,6 +7,7 @@ file_exceptions:
   orchestrator/nodes/verification_result.py: Maps complex verification states and validation rules into structured report items.
   orchestrator/verification.py: Coordinates the entire verification loop including code building, execution, parsing, and state updates. (Tightly coupled logic boundary)
   orchestrator/execution_outcome_service.py: Master orchestration flow persisting numerous task aspects including plans, heavily integrated.
+  orchestrator/execution_types.py: Boundary models for task execution and snapshots; the execution-plan snapshot contract is kept cohesive.
   orchestrator/execution_snapshot_service.py: Snapshot/listing service centralizes task, session, and memory projection logic behind one persistence boundary; splitting the cohesive mapping helpers would add churn without reducing complexity meaningfully.
   tests/integration/test_execution_outcome_service.py: Contains comprehensive integration tests for orchestrator state persistence; tightly coupled test cases.
   tests/integration/test_db_migrations.py: Contains comprehensive database migration integration tests including schema assertions and partial unique index validation.
@@ -38,6 +39,7 @@ function_exceptions:
     _persist_execution_outcome: Master orchestrator logic that persists artifacts, task state, and reflection proposals, highly cohesive.
     _persist_friction_proposals_if_needed: Gathers evidence from state and delegates to proposal persistence, cohesive logic block.
     _persist_scout_proposal_if_needed: Gathers scout findings and chain metadata; tightly coupled mapping logic.
+    _update_task_route_and_spec: Persists task routing, TaskSpec, and execution-plan node contracts in one transaction boundary.
   orchestrator/execution_proposal_service.py:
     accept_proposal: Cohesive execution orchestration flow spanning DB retrieval, task building, and conditional SQL atomic updates; splitting degrades readability.
   orchestrator/execution_submission_service.py:
@@ -46,6 +48,10 @@ function_exceptions:
     replay_task: Clones task state, flags, and specs for replay; requires dense DB model interactions.
   orchestrator/graph.py:
     _apply_brain_route_suggestion: Applies routing suggestions by merging them securely into state; tightly coupled mapping block.
+    _aggregate_decomposed_results: Aggregates all node-level worker outputs into the existing parent WorkerResult contract; keeping the field mapping together prevents delivery and memory fields from being dropped.
+    _await_decomposed_nodes: Sequential DAG execution loop coordinates dependency readiness, retries, shared worker context, and permission-blocked resume state.
+    _add_orchestrator_edges: LangGraph edge declarations are a single cohesive workflow topology and splitting them would obscure routing behavior.
+    await_result: Existing worker-result boundary now includes the sequential decomposed execution branch while preserving legacy worker behavior.
     build_await_result_node: Graph node builder for awaiting worker results, handling parsing, progress, and fallback logic cleanly without artificial splitting.
     _add_orchestrator_complex_nodes: Graph node builder block; splitting degrades readability.
   orchestrator/task_spec.py:

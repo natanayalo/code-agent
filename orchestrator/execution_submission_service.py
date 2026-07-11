@@ -20,6 +20,7 @@ from orchestrator.execution_policy import (
     _sanitize_submission_constraints,
     normalize_scout_submission,
 )
+from orchestrator.execution_resume_service import restore_decomposed_execution_state
 from orchestrator.execution_types import (
     REPLAYABLE_STATUSES as _REPLAYABLE_STATUSES,
 )
@@ -38,6 +39,7 @@ from orchestrator.execution_types import (
 from orchestrator.task_spec import build_task_spec
 from privacy.redaction import redact_private_tags, redact_private_tags_recursive
 from repositories import (
+    ExecutionPlanRepository,
     HumanInteractionRepository,
     InboundDeliveryRepository,
     SessionRepository,
@@ -372,6 +374,8 @@ def _load_submission_for_task(
             ),
         )
         runs = WorkerRunRepository(session).list_by_task(task_id)
+        execution_plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
+        decomposed_plan, node_outcomes = restore_decomposed_execution_state(execution_plan)
         last_run_dispatch = None
         last_run_result = None
         if runs:
@@ -441,6 +445,8 @@ def _load_submission_for_task(
             last_run_dispatch=last_run_dispatch,
             last_run_result=last_run_result,
             timeline_events=serialized_events,
+            decomposed_plan=decomposed_plan,
+            node_outcomes=node_outcomes,
         )
         return submission, persisted
 

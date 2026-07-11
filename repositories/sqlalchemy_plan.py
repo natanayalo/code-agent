@@ -47,6 +47,8 @@ class ExecutionPlanRepository:
         sequence_number: int = 0,
         status: ExecutionPlanNodeStatus = ExecutionPlanNodeStatus.PENDING,
         depends_on: list[str] | None = None,
+        task_spec: dict[str, Any] | None = None,
+        node_kind: str | None = None,
         acceptance_criteria: str | None = None,
         assigned_worker_profile: str | None = None,
         budget: dict[str, Any] | None = None,
@@ -60,6 +62,8 @@ class ExecutionPlanRepository:
             node_id=node_id,
             sequence_number=sequence_number,
             depends_on=depends_on,
+            task_spec=task_spec,
+            node_kind=node_kind,
             status=status,
             goal=goal,
             acceptance_criteria=acceptance_criteria,
@@ -92,6 +96,15 @@ class ExecutionPlanRepository:
         retry_count: int | Any = ...,
         started_at: datetime | None | Any = ...,
         finished_at: datetime | None | Any = ...,
+        task_spec: dict[str, Any] | None | Any = ...,
+        node_kind: str | None | Any = ...,
+        worker_run_id: str | None | Any = ...,
+        result_summary: str | None | Any = ...,
+        failure_kind: str | None | Any = ...,
+        verification_outcome: dict[str, Any] | None | Any = ...,
+        changed_files: list[str] | None | Any = ...,
+        output_artifacts: list[dict[str, Any]] | None | Any = ...,
+        last_attempt_at: datetime | None | Any = ...,
     ) -> ExecutionPlanNode | None:
         """Update fields of an execution plan node."""
         node = self.get_node(plan_id, node_id)
@@ -116,5 +129,23 @@ class ExecutionPlanRepository:
             node.started_at = started_at
         if finished_at is not ...:
             node.finished_at = finished_at
+        if task_spec is not ...:
+            node.task_spec = task_spec
+        if node_kind is not ...:
+            node.node_kind = node_kind
+        if worker_run_id is not ...:
+            node.worker_run_id = worker_run_id
+        if result_summary is not ...:
+            node.result_summary = result_summary
+        if failure_kind is not ...:
+            node.failure_kind = failure_kind
+        if verification_outcome is not ...:
+            node.verification_outcome = verification_outcome
+        if changed_files is not ...:
+            node.changed_files = changed_files
+        if output_artifacts is not ...:
+            node.output_artifacts = output_artifacts
+        if last_attempt_at is not ...:
+            node.last_attempt_at = last_attempt_at
 
         return node

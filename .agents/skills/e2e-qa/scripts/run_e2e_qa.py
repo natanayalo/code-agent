@@ -55,6 +55,13 @@ ARTIFACT_VERIFY_COMMAND: Final[str] = (
     'python3 -c "from pathlib import Path; '
     "assert Path('qa-hello.txt').read_text().strip() == 'Hello QA'\""
 )
+TASK_TEXT: Final[str] = os.environ.get(
+    "CODE_AGENT_QA_TASK_TEXT",
+    "Create a file named qa-hello.txt containing the text 'Hello QA' and commit it.",
+)
+EXPECT_DECOMPOSED_DAG: Final[bool] = os.environ.get(
+    "CODE_AGENT_QA_EXPECT_DECOMPOSED_DAG", ""
+).strip().lower() in {"1", "true", "yes", "on"}
 
 
 # Read workspace root from .env to match the docker compose volume mapping
@@ -122,14 +129,12 @@ async def main():
     print("[+] API is healthy!")
 
     print("[*] Submitting task via webhook")
+    worker_override = os.environ.get("CODE_AGENT_WORKER_OVERRIDE", "antigravity").strip()
     payload = {
-        "task_text": (
-            "Create a file named qa-hello.txt containing the text 'Hello QA' and commit it."
-        ),
+        "task_text": TASK_TEXT,
         "repo_key": QA_REPO_KEY,
         "branch": "master",
         "source": "qa",
-        "worker_override": os.environ.get("CODE_AGENT_WORKER_OVERRIDE", "antigravity"),
         "constraints": {
             "verification_commands": [ARTIFACT_VERIFY_COMMAND],
             "acceptance_criteria": [
@@ -138,6 +143,8 @@ async def main():
             ],
         },
     }
+    if worker_override:
+        payload["worker_override"] = worker_override
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
@@ -180,12 +187,17 @@ async def main():
                 print(f"\n[+] Task finished with status: {status}")
                 print(f"    - Details: {task_data}")
                 if status not in ["completed", "success"]:
+                    if EXPECT_DECOMPOSED_DAG:
+                        verify_decomposed_dag(task_data)
                     raise RuntimeError(f"Task failed with status: {status}")
                 break
 
             await asyncio.sleep(2)
         else:
             raise RuntimeError("Task timed out.")
+
+        if EXPECT_DECOMPOSED_DAG:
+            verify_decomposed_dag(task_data)
 
         if _is_enabled(_read_env_value("CODE_AGENT_ENABLE_TRACING")):
             await wait_for_span_export(
@@ -223,6 +235,41 @@ async def main():
         raise RuntimeError(f"No workspace directory found at {full_path}")
 
     print("[+] Done.")
+
+
+def verify_decomposed_dag(task_data: dict) -> None:
+    """Assert that the public task snapshot exposes completed sequential DAG nodes."""
+    execution_plan = task_data.get("execution_plan")
+    if not isinstance(execution_plan, dict):
+        raise RuntimeError("Task did not persist an execution plan for the expected DAG.")
+    nodes = execution_plan.get("nodes")
+    if not isinstance(nodes, list):
+        raise RuntimeError("Persisted execution plan did not contain node records.")
+
+    node_by_id = {node.get("node_id"): node for node in nodes if isinstance(node, dict)}
+    expected_nodes = {
+        "1": ("inspect", []),
+        "2": ("implement", ["1"]),
+        "3": ("verify", ["2"]),
+    }
+    if set(node_by_id) != set(expected_nodes):
+        raise RuntimeError(f"Unexpected DAG node ids: {sorted(node_by_id)}")
+
+    worker_run_id = task_data.get("latest_run", {}).get("run_id")
+    for node_id, (node_kind, dependencies) in expected_nodes.items():
+        node = node_by_id[node_id]
+        if node.get("node_kind") != node_kind:
+            raise RuntimeError(f"DAG node {node_id} has kind {node.get('node_kind')!r}.")
+        if node.get("depends_on") != dependencies:
+            raise RuntimeError(f"DAG node {node_id} has dependencies {node.get('depends_on')!r}.")
+        if node.get("status") != "completed":
+            raise RuntimeError(f"DAG node {node_id} did not complete: {node.get('status')!r}.")
+        if node.get("worker_run_id") != worker_run_id:
+            raise RuntimeError(f"DAG node {node_id} was not linked to the parent worker run.")
+        if not node.get("result_summary"):
+            raise RuntimeError(f"DAG node {node_id} did not persist result evidence.")
+
+    print("[+] Verified completed sequential DAG nodes and persisted evidence.")
 
 
 async def wait_for_span_export(

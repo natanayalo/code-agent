@@ -123,6 +123,39 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText(/verification_commands/i)).toBeInTheDocument();
   });
 
+  it('renders decomposed execution plan nodes and evidence', () => {
+    const task = buildTask({
+      execution_plan: {
+        plan_id: 'plan-1',
+        task_id: 'task-1',
+        created_at: '2026-04-28T00:00:00.000Z',
+        updated_at: '2026-04-28T00:01:00.000Z',
+        nodes: [
+          {
+            node_id: 'implement',
+            goal: 'Implement the change',
+            status: 'completed',
+            node_kind: 'implement',
+            depends_on: ['inspect'],
+            retry_count: 1,
+            worker_run_id: 'run-node-1',
+            result_summary: 'Implementation completed',
+            changed_files: ['src/example.ts'],
+            created_at: '2026-04-28T00:00:00.000Z',
+            updated_at: '2026-04-28T00:01:00.000Z',
+          },
+        ],
+      },
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Execution Plan')).toBeInTheDocument();
+    expect(screen.getByText('Implementation completed')).toBeInTheDocument();
+    expect(screen.getByText('src/example.ts')).toBeInTheDocument();
+    expect(screen.getByText('run-node-1')).toBeInTheDocument();
+  });
+
   it('renders partial memory trace empty states when only one side has records', async () => {
     vi.mocked(api.listMemoryObservations).mockResolvedValue([
       {

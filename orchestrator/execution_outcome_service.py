@@ -14,7 +14,14 @@ from apps.observability import (
     start_optional_span,
     with_span_kind,
 )
-from db.enums import ArtifactType, ProposalStatus, ProposalType, TaskStatus, WorkerType
+from db.enums import (
+    ArtifactType,
+    ExecutionPlanNodeStatus,
+    ProposalStatus,
+    ProposalType,
+    TaskStatus,
+    WorkerType,
+)
 from orchestrator.execution_improvement_proposal_service import (
     _persist_friction_proposals_if_needed,
 )
@@ -548,6 +555,10 @@ def _update_task_route_and_spec(
 
         # Sync nodes
         existing_nodes = {n.node_id: n for n in plan.nodes}
+        decomposed_nodes = {
+            node.node_id: node
+            for node in (state.decomposed_plan.nodes if state.decomposed_plan else [])
+        }
         active_node_ids = set()
         for i, step in enumerate(state.task_plan.steps):
             if not step or not step.step_id:
@@ -560,6 +571,10 @@ def _update_task_route_and_spec(
                 )
                 continue
             active_node_ids.add(step.step_id)
+            decomposed_node = decomposed_nodes.get(step.step_id)
+            dependencies = (
+                decomposed_node.depends_on if decomposed_node is not None else step.depends_on or []
+            )
             if step.step_id not in existing_nodes:
                 new_node = plan_repo.add_node(
                     plan_id=plan.id,
@@ -567,7 +582,17 @@ def _update_task_route_and_spec(
                     goal=step.title or f"Step {step.step_id}",
                     sequence_number=i,
                     acceptance_criteria=step.expected_outcome,
-                    depends_on=step.depends_on or [],
+                    depends_on=dependencies,
+                    task_spec=(
+                        decomposed_nodes[step.step_id].task_spec.model_dump(mode="json")
+                        if step.step_id in decomposed_nodes
+                        else None
+                    ),
+                    node_kind=(
+                        decomposed_nodes[step.step_id].node_kind
+                        if step.step_id in decomposed_nodes
+                        else None
+                    ),
                 )
                 existing_nodes[step.step_id] = new_node
                 plan.nodes.append(new_node)
@@ -576,12 +601,54 @@ def _update_task_route_and_spec(
                 existing_node.goal = step.title or f"Step {step.step_id}"
                 existing_node.sequence_number = i
                 existing_node.acceptance_criteria = step.expected_outcome
-                existing_node.depends_on = step.depends_on or []
+                existing_node.depends_on = dependencies
+                if step.step_id in decomposed_nodes:
+                    existing_node.task_spec = decomposed_nodes[step.step_id].task_spec.model_dump(
+                        mode="json"
+                    )
+                    existing_node.node_kind = decomposed_nodes[step.step_id].node_kind
+                else:
+                    existing_node.task_spec = None
+                    existing_node.node_kind = None
 
         # Remove orphaned nodes that are no longer in the plan
         for node_id, node in list(existing_nodes.items()):
             if node_id not in active_node_ids:
                 plan.nodes.remove(node)
+
+
+def _persist_decomposed_node_outcomes(
+    *,
+    plan_repo: ExecutionPlanRepository,
+    plan_id: str,
+    state: OrchestratorState,
+    worker_run_id: str,
+    finished_at: datetime,
+) -> None:
+    """Persist node status and evidence under the parent worker run."""
+    for outcome in state.node_outcomes:
+        result = outcome.result
+        plan_repo.update_node(
+            plan_id=plan_id,
+            node_id=outcome.node_id,
+            status=ExecutionPlanNodeStatus(outcome.status),
+            worker_run_id=worker_run_id,
+            result_summary=result.summary,
+            failure_kind=result.failure_kind,
+            verification_outcome={
+                "status": "passed" if result.status == "success" else "failed",
+                "test_results": [
+                    test.model_dump(mode="json") for test in (result.test_results or [])
+                ],
+            },
+            changed_files=result.files_changed,
+            output_artifacts=[
+                artifact.model_dump(mode="json") for artifact in (result.artifacts or [])
+            ],
+            retry_count=max(outcome.attempts - 1, 0),
+            last_attempt_at=finished_at,
+            finished_at=finished_at,
+        )
 
 
 def _persist_execution_outcome(
@@ -641,6 +708,14 @@ def _persist_execution_outcome(
             finished_at=finished_at,
             retention_expires_at=retention_expires_at,
         )
+        if task.execution_plan is not None and state.node_outcomes:
+            _persist_decomposed_node_outcomes(
+                plan_repo=plan_repo,
+                plan_id=task.execution_plan.id,
+                state=state,
+                worker_run_id=worker_run.id,
+                finished_at=finished_at,
+            )
 
         _persist_timeline_events(session, task_id, state)
 

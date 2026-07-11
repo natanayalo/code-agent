@@ -272,6 +272,7 @@ def _terminal_follow_up_status(
     is_clarification_gate = state.current_step in {
         "generate_task_spec",
         "generate_task_spec_and_route",
+        "decompose_task",
         "await_clarification",
     }
     if (

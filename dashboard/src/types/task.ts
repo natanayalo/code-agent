@@ -190,6 +190,8 @@ export interface ExecutionPlanNodeSnapshot {
   status: ExecutionPlanNodeStatus;
   acceptance_criteria?: string | null;
   depends_on?: string[] | null;
+  task_spec?: TaskSpec | null;
+  node_kind?: string | null;
   assigned_worker_profile?: string | null;
   budget?: Record<string, unknown> | null;
   validation_commands?: string[] | null;
@@ -197,6 +199,13 @@ export interface ExecutionPlanNodeSnapshot {
   blocker_interaction_id?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  worker_run_id?: string | null;
+  result_summary?: string | null;
+  failure_kind?: string | null;
+  verification_outcome?: Record<string, unknown> | null;
+  changed_files?: string[] | null;
+  output_artifacts?: Record<string, unknown>[] | null;
+  last_attempt_at?: string | null;
   retry_count: number;
   created_at: string;
   updated_at: string;

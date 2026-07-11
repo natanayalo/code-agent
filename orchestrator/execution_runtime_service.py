@@ -22,6 +22,7 @@ from apps.observability import (
 from apps.observability_utils import ATTR_WORKER_ID
 from db.base import utc_now
 from db.enums import TaskStatus
+from orchestrator.execution_graph_input import build_orchestrator_graph_input
 from orchestrator.execution_policy import (
     _apply_execution_budget_policy,
 )
@@ -44,7 +45,7 @@ from orchestrator.execution_worker_service import (
     worker_node_failure_kind_from_exception,
     worker_node_failure_kind_from_state,
 )
-from orchestrator.state import OrchestratorState, SessionRef
+from orchestrator.state import OrchestratorState
 from repositories import TaskTimelineRepository, session_scope
 
 logger = logging.getLogger("orchestrator.execution")
@@ -549,39 +550,12 @@ async def _run_orchestrator(
         channel=persisted.channel,
     )
     with span_cm:
-        graph_input = {
-            "session": SessionRef(
-                session_id=persisted.session_id,
-                user_id=persisted.user_id,
-                channel=persisted.channel,
-                external_thread_id=persisted.external_thread_id,
-                active_task_id=persisted.task_id,
-                status="active",
-            ).model_dump(),
-            "task": {
-                "task_id": persisted.task_id,
-                "task_text": submission.task_text,
-                "repo_url": submission.repo_url,
-                "branch": submission.branch,
-                "priority": submission.priority,
-                "worker_override": (
-                    submission.worker_override.value
-                    if submission.worker_override is not None
-                    else None
-                ),
-                "worker_profile_override": submission.worker_profile_override,
-                "constraints": dict(submission.constraints),
-                "budget": effective_budget,
-                "secrets": dict(submission.secrets),
-                "tools": submission.tools,
-            },
-            "task_spec": persisted.task_spec,
-            "attempt_count": persisted.attempt_count,
-            "dispatch": persisted.last_run_dispatch or {},
-            "result": persisted.last_run_result,
-            "timeline_events": persisted.timeline_events,
-            "timeline_persisted_count": initial_persisted_count,
-        }
+        graph_input = build_orchestrator_graph_input(
+            submission,
+            persisted,
+            effective_budget,
+            initial_persisted_count,
+        )
 
         set_span_input_output(input_data=_summarize_graph_span_input(graph_input))
         raw_output = await self.graph.ainvoke(graph_input, config=config)

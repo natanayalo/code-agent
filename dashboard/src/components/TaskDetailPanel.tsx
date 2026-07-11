@@ -668,6 +668,39 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
           )}
 
           <section className="task-detail-section">
+            <h4>Execution Plan</h4>
+            {task.execution_plan && task.execution_plan.nodes.length > 0 ? (
+              <ol className="task-timeline-list">
+                {task.execution_plan.nodes.map((node) => (
+                  <li key={node.node_id}>
+                    <p>
+                      <strong>{node.node_id}</strong>{' '}
+                      <span className="task-detail-muted">({formatLabel(node.status)})</span>
+                    </p>
+                    <p>{node.goal}</p>
+                    <div className="task-detail-grid">
+                      <p><strong>Kind:</strong> {formatLabel(node.node_kind || 'unknown')}</p>
+                      <p><strong>Worker run:</strong> {node.worker_run_id || 'not started'}</p>
+                      <p><strong>Dependencies:</strong> {node.depends_on?.join(', ') || 'none'}</p>
+                      <p><strong>Retries:</strong> {node.retry_count}</p>
+                    </div>
+                    {node.result_summary ? <p><strong>Result:</strong> {node.result_summary}</p> : null}
+                    {node.failure_kind ? <p><strong>Failure:</strong> {formatLabel(node.failure_kind)}</p> : null}
+                    {node.changed_files && node.changed_files.length > 0
+                      ? renderStringList('Node Changed Files', node.changed_files)
+                      : null}
+                    {node.output_artifacts && node.output_artifacts.length > 0
+                      ? renderJsonBlock(node.output_artifacts)
+                      : null}
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="task-detail-muted">No decomposed execution plan captured.</p>
+            )}
+          </section>
+
+          <section className="task-detail-section">
             <h4>Pending Interactions</h4>
             {task.pending_interactions && task.pending_interactions.length > 0 ? (
               <ul className="task-interactions-list">

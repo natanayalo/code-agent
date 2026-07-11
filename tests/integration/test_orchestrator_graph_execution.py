@@ -369,7 +369,15 @@ def test_orchestrator_graph_clarification_resume_token_resolution_allows_progres
     state = OrchestratorState.model_validate(raw_output)
     assert state.result is not None
     assert state.result.status == "success"
-    assert len(worker.requests) == 1
+    assert len(worker.requests) == 3
+    assert all(
+        "Parent task:\nReview orchestrator and summarize findings" in request.task_text
+        for request in worker.requests
+    )
+    node_task_texts = [request.task_text for request in worker.requests]
+    assert "Current DAG node (inspect): Investigate Root Cause and Scope" in node_task_texts[0]
+    assert "Current DAG node (implement): Implement the Smallest Safe Slice" in node_task_texts[1]
+    assert "Current DAG node (verify): Verify and Summarize" in node_task_texts[2]
 
 
 def test_orchestrator_graph_review_task_without_deliverable_fails() -> None:

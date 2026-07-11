@@ -43,6 +43,7 @@ from orchestrator.constants import (
     HIGH_QUALITY_REQUEST_MARKERS,
     LOW_COST_REQUEST_MARKERS,
 )
+from orchestrator.decomposition import decompose_task_plan
 from orchestrator.nodes.delivery import build_deliver_result_node
 from orchestrator.nodes.ingestion import (
     classify_task,
@@ -82,8 +83,10 @@ from orchestrator.scout_proposals import (
 from orchestrator.state import (
     SUPPORTED_WORKER_TYPES,
     ApprovalCheckpoint,
+    DecomposedTaskNode,
     MemoryContext,
     MemoryEntry,
+    NodeOutcome,
     OrchestratorState,
     PersistMemoryEntry,
     RouteDecision,
@@ -125,6 +128,7 @@ ORCHESTRATOR_NODE_SEQUENCE = (
     "load_repo_profile",
     "generate_task_spec",
     "generate_task_spec_and_route",
+    "decompose_task",
     "await_clarification",
     "load_memory",
     "await_permission",
@@ -543,6 +547,7 @@ def _build_worker_request_runtime_manifest(
     worker_profile: str | None,
     runtime_mode: Any,
     read_only: bool,
+    task_spec: TaskSpec | None = None,
 ) -> dict[str, Any]:
     """Build the frozen runtime manifest payload for a worker request."""
     route = state.route
@@ -553,7 +558,7 @@ def _build_worker_request_runtime_manifest(
         worker_profile=worker_profile,
         runtime_mode=runtime_mode,
         workspace_id=dispatch.workspace_id if dispatch else None,
-        task_spec=state.task_spec,
+        task_spec=task_spec or state.task_spec,
         read_only=read_only,
         network_enabled=False,
         budget=state.task.budget,
@@ -598,9 +603,15 @@ def _build_worker_request_task_text(state: OrchestratorState) -> str:
     return task_text
 
 
-def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
+def _build_worker_request(
+    state: OrchestratorState,
+    *,
+    task_spec_override: TaskSpec | None = None,
+    task_text_override: str | None = None,
+    prior_node_context: dict[str, Any] | None = None,
+) -> WorkerRequest:
     """Build the typed worker request from orchestrator state."""
-    task_text = _build_worker_request_task_text(state)
+    task_text = task_text_override or _build_worker_request_task_text(state)
     route = state.route
     dispatch = state.dispatch
     worker_profile = (dispatch.worker_profile if dispatch else None) or (
@@ -613,6 +624,8 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         constraints["scout_mode"] = state.scout_phase or "repo"
 
     memory_context = state.memory.model_dump()
+    if prior_node_context:
+        memory_context["decomposed_task"] = prior_node_context
     if state.scout_phase == "research" and state.scout_phase_results:
         repo_result = next((r.result for r in state.scout_phase_results if r.phase == "repo"), None)
         if repo_result is None:
@@ -631,11 +644,13 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         route.runtime_mode if route else None
     )
     read_only = constraints.get("read_only", False)
+    effective_task_spec = task_spec_override or state.task_spec
     runtime_manifest = _build_worker_request_runtime_manifest(
         state,
         worker_profile=worker_profile,
         runtime_mode=runtime_mode,
         read_only=bool(read_only),
+        task_spec=effective_task_spec,
     )
 
     return WorkerRequest(
@@ -647,7 +662,9 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         task_text=task_text,
         memory_context=memory_context,
         task_plan=state.task_plan.model_dump(mode="json") if state.task_plan is not None else None,
-        task_spec=state.task_spec.model_dump(mode="json") if state.task_spec is not None else None,
+        task_spec=effective_task_spec.model_dump(mode="json")
+        if effective_task_spec is not None
+        else None,
         constraints=constraints,
         budget=dict(state.task.budget),
         secrets=dict((state.task.secrets or {}) | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
@@ -660,6 +677,240 @@ def _build_worker_request(state: OrchestratorState) -> WorkerRequest:
         response_format="json" if is_scout else "text",
         response_schema=scout_response_schema_for_constraints(constraints) if is_scout else None,
     )
+
+
+def _skipped_node_result(node: DecomposedTaskNode, reason: str) -> WorkerResult:
+    """Build an explicit result for a node blocked by an upstream failure."""
+    return WorkerResult(
+        status="failure",
+        summary=f"Node skipped because a dependency did not complete: {reason}",
+        failure_kind="incomplete_delivery",
+        commands_run=[],
+        files_changed=[],
+        test_results=[],
+        artifacts=[],
+    )
+
+
+def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
+    """Merge sequential node results into the existing parent worker contract."""
+    failed = next(
+        (outcome for outcome in outcomes if outcome.status in ("failed", "blocked")),
+        None,
+    )
+    skipped = [outcome for outcome in outcomes if outcome.status == "skipped"]
+    all_commands = [
+        command for outcome in outcomes for command in (outcome.result.commands_run or [])
+    ]
+    all_tests = [test for outcome in outcomes for test in (outcome.result.test_results or [])]
+    all_artifacts = [
+        artifact for outcome in outcomes for artifact in (outcome.result.artifacts or [])
+    ]
+    changed_files = list(
+        dict.fromkeys(
+            file_path for outcome in outcomes for file_path in (outcome.result.files_changed or [])
+        )
+    )
+    summaries = [
+        f"{outcome.node_id}: {outcome.result.summary or outcome.status}" for outcome in outcomes
+    ]
+    successful_results = [
+        outcome.result for outcome in outcomes if outcome.result.status == "success"
+    ]
+    failed_results = [outcome.result for outcome in outcomes if outcome.result.status != "success"]
+    status: Literal["success", "failure"] = (
+        "failure" if failed is not None or skipped else "success"
+    )
+    return WorkerResult(
+        status=status,
+        summary="Sequential DAG results:\n" + "\n".join(f"- {summary}" for summary in summaries),
+        failure_kind=failed.result.failure_kind if failed is not None else None,
+        workspace_id=next(
+            (outcome.result.workspace_id for outcome in outcomes if outcome.result.workspace_id),
+            None,
+        ),
+        budget_usage={
+            "node_count": len(outcomes),
+            "nodes": {outcome.node_id: outcome.result.budget_usage or {} for outcome in outcomes},
+        },
+        commands_run=all_commands,
+        files_changed=changed_files,
+        test_results=all_tests,
+        artifacts=all_artifacts,
+        review_result=next(
+            (
+                result.review_result
+                for result in reversed(successful_results)
+                if result.review_result
+            ),
+            None,
+        ),
+        diff_text=next(
+            (result.diff_text for result in reversed(successful_results) if result.diff_text),
+            None,
+        ),
+        json_payload=next(
+            (result.json_payload for result in reversed(successful_results) if result.json_payload),
+            None,
+        ),
+        friction_reports=[
+            report for result in outcomes for report in (result.result.friction_reports or [])
+        ],
+        maintenance_requests=[
+            request for result in outcomes for request in (result.result.maintenance_requests or [])
+        ],
+        memory_to_persist=[
+            entry for result in outcomes for entry in (result.result.memory_to_persist or [])
+        ],
+        delivery_metadata=next(
+            (
+                result.delivery_metadata
+                for result in reversed(successful_results)
+                if result.delivery_metadata
+            ),
+            None,
+        ),
+        requested_permission=next(
+            (
+                result.requested_permission
+                for result in reversed(failed_results)
+                if result.requested_permission
+            ),
+            None,
+        ),
+        next_action_hint=(
+            failed.result.next_action_hint
+            if failed is not None and failed.result.next_action_hint == "request_higher_permission"
+            else "inspect_failed_node"
+            if status == "failure"
+            else "persist_memory"
+        ),
+    )
+
+
+async def _await_decomposed_nodes(
+    state: OrchestratorState,
+    worker: Worker,
+) -> tuple[WorkerResult, list[NodeOutcome], dict[str, Any] | None]:
+    """Run ready decomposed nodes one at a time in the shared workspace."""
+    plan = state.decomposed_plan
+    if plan is None or plan.status != "decomposed":
+        raise ValueError("decomposed node execution requires a validated decomposition")
+
+    outcomes: list[NodeOutcome] = list(state.node_outcomes)
+    completed_node_ids = {outcome.node_id for outcome in outcomes if outcome.status == "completed"}
+    pending = {node.node_id: node for node in plan.nodes if node.node_id not in completed_node_ids}
+    last_manifest: dict[str, Any] | None = None
+    while pending:
+        outcome_by_id = {outcome.node_id: outcome for outcome in outcomes}
+        ready_node = next(
+            (
+                node
+                for node in pending.values()
+                if all(dependency in outcome_by_id for dependency in node.depends_on)
+            ),
+            None,
+        )
+        if ready_node is None:
+            raise ValueError("validated decomposition contains an unresolvable dependency")
+
+        dependencies = [outcome_by_id[dependency] for dependency in ready_node.depends_on]
+        failed_dependency = next(
+            (dependency for dependency in dependencies if dependency.status != "completed"),
+            None,
+        )
+        if failed_dependency is not None:
+            skipped_result = _skipped_node_result(ready_node, failed_dependency.node_id)
+            outcomes = [outcome for outcome in outcomes if outcome.node_id != ready_node.node_id]
+            outcomes.append(
+                NodeOutcome(
+                    node_id=ready_node.node_id,
+                    status="skipped",
+                    result=skipped_result,
+                    dependencies=ready_node.depends_on,
+                )
+            )
+            pending.pop(ready_node.node_id)
+            continue
+
+        prior_context = {
+            dependency.node_id: {
+                "summary": dependency.result.summary,
+                "files_changed": dependency.result.files_changed or [],
+                "artifacts": [
+                    artifact.model_dump(mode="json")
+                    for artifact in (dependency.result.artifacts or [])
+                ],
+            }
+            for dependency in dependencies
+        }
+        node_state = state.model_copy(update={"task_plan": None, "task_spec": ready_node.task_spec})
+        attempts = 0
+        result: WorkerResult | None = None
+        while attempts < ready_node.max_attempts:
+            attempts += 1
+            parent_task_text = state.normalized_task_text or state.task.task_text
+            node_task_text = (
+                f"Parent task:\n{parent_task_text}\n\n"
+                f"Current DAG node ({ready_node.node_kind}): {ready_node.task_spec.goal}\n"
+                f"Node acceptance criteria: {'; '.join(ready_node.task_spec.acceptance_criteria)}"
+            )
+            request = _build_worker_request(
+                node_state,
+                task_spec_override=ready_node.task_spec,
+                task_text_override=node_task_text,
+                prior_node_context=prior_context,
+            )
+            last_manifest = request.runtime_manifest
+            result, _progress = await _await_worker_with_timeout(
+                worker,
+                request,
+                worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
+                session_id=request.session_id,
+                timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+            )
+            if result is None:
+                logger.warning("Node execution result is None, falling back to failure default.")
+                result = WorkerResult(
+                    status="failure",
+                    summary="Node execution returned no result.",
+                    failure_kind="worker_failure",
+                )
+                break
+            if result.status == "success" or result.next_action_hint == "request_higher_permission":
+                break
+        if result is None:
+            logger.warning(
+                "Node execution completed without a result, falling back to failure default."
+            )
+            result = WorkerResult(
+                status="failure",
+                summary="Node execution returned no result.",
+                failure_kind="worker_failure",
+            )
+        if result.workspace_id is None and state.dispatch.workspace_id:
+            result = result.model_copy(update={"workspace_id": state.dispatch.workspace_id})
+        outcomes = [outcome for outcome in outcomes if outcome.node_id != ready_node.node_id]
+        outcomes.append(
+            NodeOutcome(
+                node_id=ready_node.node_id,
+                status=(
+                    "completed"
+                    if result.status == "success"
+                    else "blocked"
+                    if result.next_action_hint == "request_higher_permission"
+                    else "failed"
+                ),
+                result=result,
+                dependencies=ready_node.depends_on,
+                attempts=attempts,
+            )
+        )
+        pending.pop(ready_node.node_id)
+        if result.next_action_hint == "request_higher_permission":
+            break
+
+    return _aggregate_decomposed_results(outcomes), outcomes, last_manifest
 
 
 def _default_worker_result_provider(request: WorkerRequest) -> WorkerResult:
@@ -1469,6 +1720,37 @@ def _route_after_generate_task_spec(state_input: OrchestratorState) -> str:
         set_current_span_attribute("code_agent.clarification_resolved", False)
         return "await_clarification"
     return "load_memory"
+
+
+def decompose_task(state_input: OrchestratorState) -> dict[str, Any]:
+    """Build a validated node DAG while preserving monolithic fallback behavior."""
+    state = _ensure_state(state_input)
+    decomposition = decompose_task_plan(state.task_plan, state.task_spec)
+    if decomposition.status == "decomposed":
+        message = f"task decomposed into {len(decomposition.nodes)} sequential nodes"
+    elif decomposition.status == "fallback":
+        message = f"task decomposition fell back to monolithic execution: {decomposition.reason}"
+        logger.warning(
+            "Task decomposition fell back",
+            extra={"task_id": state.task.task_id, "reason": decomposition.reason},
+        )
+    else:
+        message = "task decomposition not required"
+    response: dict[str, Any] = {
+        "current_step": "decompose_task",
+        "decomposed_plan": decomposition.model_dump(),
+    }
+    if decomposition.status != "not_required":
+        response["progress_updates"] = _progress_update(state, message)
+        response.update(
+            _timeline_event(
+                state,
+                TimelineEventType.TASK_PLANNED,
+                message=message,
+                payload={"decomposition": decomposition.model_dump(mode="json")},
+            )
+        )
+    return response
 
 
 def await_clarification(state_input: OrchestratorState) -> dict[str, Any]:
@@ -2908,6 +3190,7 @@ def build_await_result_node(
     async def await_result(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
         request = None
+        node_outcomes: list[NodeOutcome] = []
 
         with start_optional_span(
             tracer_name="orchestrator.graph",
@@ -2940,14 +3223,23 @@ def build_await_result_node(
                     progress_message = f"worker unavailable: {worker_type or 'unknown'}"
                     progress_updates = _progress_update(state, progress_message)
                 else:
-                    request = _build_worker_request(state)
-                    result, progress_message = await _await_worker_with_timeout(
-                        bound_worker,
-                        request,
-                        worker_type=worker_type or "unknown",
-                        session_id=request.session_id,
-                        timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
-                    )
+                    if state.decomposed_plan and state.decomposed_plan.status == "decomposed":
+                        result, node_outcomes, runtime_manifest = await _await_decomposed_nodes(
+                            state,
+                            bound_worker,
+                        )
+                        progress_message = "sequential task nodes completed"
+                        request = _build_worker_request(state)
+                        request = request.model_copy(update={"runtime_manifest": runtime_manifest})
+                    else:
+                        request = _build_worker_request(state)
+                        result, progress_message = await _await_worker_with_timeout(
+                            bound_worker,
+                            request,
+                            worker_type=worker_type or "unknown",
+                            session_id=request.session_id,
+                            timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                        )
                     if result.workspace_id is None and state.dispatch.workspace_id:
                         result = result.model_copy(
                             update={"workspace_id": state.dispatch.workspace_id}
@@ -2966,6 +3258,8 @@ def build_await_result_node(
                     **state.dispatch.model_dump(),
                     "runtime_manifest": request.runtime_manifest if request is not None else None,
                 },
+                "node_outcomes": [outcome.model_dump() for outcome in node_outcomes],
+                "current_node_id": (node_outcomes[-1].node_id if node_outcomes else None),
                 **_timeline_event(
                     state,
                     (
@@ -3717,6 +4011,7 @@ def _add_orchestrator_nodes(
         ("classify_task", classify_task),
         ("plan_task", plan_task),
         ("load_repo_profile", load_repo_profile_node),
+        ("decompose_task", decompose_task),
         ("await_clarification", await_clarification),
         ("await_permission", await_permission),
         ("check_approval", check_approval),
@@ -3830,8 +4125,9 @@ def _add_orchestrator_edges(builder: Any) -> None:
     builder.add_edge("classify_task", "plan_task")
     builder.add_edge("plan_task", "load_repo_profile")
     builder.add_edge("load_repo_profile", "generate_task_spec_and_route")
+    builder.add_edge("generate_task_spec_and_route", "decompose_task")
     builder.add_conditional_edges(
-        "generate_task_spec_and_route",
+        "decompose_task",
         _route_after_generate_task_spec,
         {
             "await_clarification": "await_clarification",

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, Protocol
 
@@ -17,6 +17,7 @@ from db.enums import (
     WorkerType,
     coerce_worker_type,
 )
+from orchestrator.execution_context import _PersistedTaskContext
 from orchestrator.execution_policy import validate_callback_url
 from orchestrator.state import TaskSpec
 from workers.base import normalize_worker_profile_name
@@ -459,6 +460,8 @@ class ExecutionPlanNodeSnapshot(ExecutionModel):
 
     node_id: str
     depends_on: list[str] | None = None
+    task_spec: TaskSpec | None = None
+    node_kind: str | None = None
     status: Literal["pending", "active", "blocked", "completed", "failed", "skipped"]
     goal: str
     acceptance_criteria: str | None = None
@@ -470,6 +473,13 @@ class ExecutionPlanNodeSnapshot(ExecutionModel):
     retry_count: int = 0
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    worker_run_id: str | None = None
+    result_summary: str | None = None
+    failure_kind: str | None = None
+    verification_outcome: dict[str, Any] | None = None
+    changed_files: list[str] | None = None
+    output_artifacts: list[dict[str, Any]] | None = None
+    last_attempt_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -514,23 +524,6 @@ class DeliveryKey:
 
     channel: str
     delivery_id: str
-
-
-@dataclass(frozen=True)
-class _PersistedTaskContext:
-    """The DB-backed task/session identifiers needed during execution."""
-
-    user_id: str
-    session_id: str
-    channel: str
-    external_thread_id: str
-    task_id: str
-    attempt_count: int
-    task_spec: dict[str, Any] | None = None
-    trace_context: dict[str, str] = field(default_factory=dict)
-    last_run_dispatch: dict[str, Any] | None = None
-    last_run_result: dict[str, Any] | None = None
-    timeline_events: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
