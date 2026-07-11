@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 
+import orchestrator.graph as graph_module
 from db.enums import ExecutionPlanNodeStatus
+from orchestrator import OrchestratorState
 from orchestrator.execution import TaskExecutionService
 from orchestrator.execution_types import TaskSubmission
+from orchestrator.graph import build_decompose_task_node
 from repositories import ExecutionPlanRepository, session_scope
 from workers import Worker, WorkerRequest, WorkerResult
 
@@ -25,6 +28,34 @@ class RecordingWorker(Worker):
             summary=f"Completed {request.task_text}",
             files_changed=["qa-resume.txt"],
         )
+
+
+def test_persisted_decomposition_skips_malformed_nodes(session_factory, monkeypatch) -> None:
+    service = TaskExecutionService(session_factory=session_factory, worker=RecordingWorker())
+    snapshot, _ = service.create_task(TaskSubmission(task_text="Persist a safe DAG"))
+    node = build_decompose_task_node(session_factory)
+    response = {
+        "decomposed_plan": {
+            "status": "decomposed",
+            "nodes": [
+                None,
+                {"title": "Missing ID"},
+                {"node_id": "valid", "title": "Valid", "task_spec": {"goal": "Valid"}},
+            ],
+        }
+    }
+    monkeypatch.setattr(graph_module, "decompose_task", lambda state: response)
+
+    node(
+        OrchestratorState.model_validate(
+            {"task": {"task_id": snapshot.task_id, "task_text": "Persist a safe DAG"}}
+        )
+    )
+
+    with session_scope(session_factory) as session:
+        plan = ExecutionPlanRepository(session).get_by_task_id(snapshot.task_id)
+        assert plan is not None
+        assert [plan_node.node_id for plan_node in plan.nodes] == ["valid"]
 
 
 def _assert_persisted_attempts(service: TaskExecutionService, task_id: str) -> None:

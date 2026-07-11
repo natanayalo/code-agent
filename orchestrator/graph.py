@@ -705,7 +705,8 @@ def _redact_effective_input(value: Any, secret_values: set[str]) -> Any:
         return {
             key: (
                 "[REDACTED]"
-                if isinstance(key, str) and key.lower() in _SENSITIVE_INPUT_KEYS
+                if isinstance(key, str)
+                and any(sensitive_key in key.lower() for sensitive_key in _SENSITIVE_INPUT_KEYS)
                 else _redact_effective_input(item, secret_values)
             )
             for key, item in value.items()
@@ -1890,7 +1891,9 @@ def build_decompose_task_node(
                 if plan is None:
                     plan = plan_repo.create(task_id=state.task.task_id)
                 existing = {plan_node.node_id for plan_node in plan.nodes}
-                for sequence_number, item in enumerate(decomposition.get("nodes", [])):
+                for sequence_number, item in enumerate(decomposition.get("nodes") or []):
+                    if not isinstance(item, dict) or not item.get("node_id"):
+                        continue
                     node_id = item["node_id"]
                     if node_id in existing:
                         continue
