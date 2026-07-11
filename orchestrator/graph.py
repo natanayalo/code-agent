@@ -774,6 +774,7 @@ def _start_node_attempt(
             )
             or (str(route.runtime_mode) if route and route.runtime_mode else None),
             workspace_id=dispatch.workspace_id if dispatch else None,
+            worker_run_id=dispatch.run_id if dispatch else None,
             task_trace_id=trace_id,
         )
         return attempt.id
@@ -961,7 +962,7 @@ async def _await_decomposed_nodes(
             parent_task_text = state.normalized_task_text or state.task.task_text
             node_task_text = (
                 f"Parent task:\n{parent_task_text}\n\n"
-                f"Current DAG node ({ready_node.node_kind}): {ready_node.task_spec.goal}\n"
+                f"Current DAG node ({ready_node.node_id}): {ready_node.task_spec.goal}\n"
                 f"Node acceptance criteria: {'; '.join(ready_node.task_spec.acceptance_criteria)}"
             )
             request = _build_worker_request(

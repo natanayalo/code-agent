@@ -163,6 +163,7 @@ class ExecutionPlanRepository:
         runtime_mode: str | None,
         workspace_id: str | None,
         task_trace_id: str | None,
+        worker_run_id: str | None = None,
         max_retries: int = 5,
     ) -> ExecutionPlanNodeAttempt:
         """Persist an attempt before a worker is dispatched."""
@@ -192,6 +193,7 @@ class ExecutionPlanRepository:
                         worker_profile=worker_profile,
                         runtime_mode=runtime_mode,
                         workspace_id=workspace_id,
+                        worker_run_id=worker_run_id,
                         task_trace_id=task_trace_id,
                     )
                     self.session.add(attempt)

@@ -143,8 +143,8 @@ def test_queue_reload_resumes_only_non_completed_decomposed_nodes(session_factor
         request for request in worker.requests if "Current DAG node" in request.task_text
     ]
     assert len(dag_requests) == 2
-    assert "Current DAG node (implement)" in dag_requests[0].task_text
-    assert "Current DAG node (verify)" in dag_requests[1].task_text
-    assert all("Current DAG node (inspect)" not in request.task_text for request in dag_requests)
+    assert "Current DAG node (2)" in dag_requests[0].task_text
+    assert "Current DAG node (3)" in dag_requests[1].task_text
+    assert all("Current DAG node (1)" not in request.task_text for request in dag_requests)
 
     _assert_persisted_attempts(service, snapshot.task_id)

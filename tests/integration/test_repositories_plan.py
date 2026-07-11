@@ -126,6 +126,7 @@ def test_start_attempt_allocates_monotonic_numbers(session_factory):
             runtime_mode=None,
             workspace_id=None,
             task_trace_id=None,
+            worker_run_id="worker-run-1",
         )
         second = repo.start_attempt(
             plan_id=plan.id,
@@ -140,6 +141,7 @@ def test_start_attempt_allocates_monotonic_numbers(session_factory):
         )
 
         assert [first.attempt_number, second.attempt_number] == [1, 2]
+        assert first.worker_run_id == "worker-run-1"
 
 
 def test_finish_attempt_normalizes_finished_at_before_persistence(session_factory, monkeypatch):

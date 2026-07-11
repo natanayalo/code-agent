@@ -40,7 +40,7 @@ def _state(nodes: list[dict]) -> OrchestratorState:
     )
 
 
-def _nodes(branching: bool = False) -> list[dict]:
+def _nodes(*, include_verify: bool = False, branching: bool = False) -> list[dict]:
     nodes = [
         {
             "node_id": "inspect",
@@ -57,21 +57,24 @@ def _nodes(branching: bool = False) -> list[dict]:
             "max_attempts": 3,
         },
     ]
-    if branching:
+    if include_verify or branching:
         nodes += [
             {
                 "node_id": "verify",
                 "title": "Verify",
-                "depends_on": ["inspect"],
+                "depends_on": ["inspect"] if branching else ["implement"],
                 "task_spec": {"goal": "Verify"},
                 "node_kind": "verify",
             },
+        ]
+    if branching:
+        nodes += [
             {
                 "node_id": "join",
                 "title": "Join",
                 "depends_on": ["implement", "verify"],
                 "task_spec": {"goal": "Join"},
-                "node_kind": "verify",
+                "node_kind": "aggregate",
             },
         ]
     return nodes
@@ -82,64 +85,142 @@ def _run(name: str, state: OrchestratorState, results: list[WorkerResult]) -> di
     result, outcomes, _ = asyncio.run(_await_decomposed_nodes(state, worker))
     return {
         "scenario": name,
-        "passed": result.status == "success",
+        "result_status": result.status,
+        "next_action_hint": result.next_action_hint,
         "outcomes": [{"node_id": item.node_id, "status": item.status} for item in outcomes],
-        "dispatch_order": [
+        "dispatch_node_ids": [
+            request.task_text.split("Current DAG node (")[1].split(")")[0]
+            for request in worker.requests
+        ],
+        "join_dependency_context": next(
+            (
+                request.memory_context.get("decomposed_task", {})
+                for request in worker.requests
+                if "Current DAG node (join)" in request.task_text
+            ),
+            {},
+        ),
+    }
+
+
+def _permission_pause_resume() -> dict[str, object]:
+    state = _state(_nodes(include_verify=True))
+    worker = ScenarioWorker(
+        [
+            WorkerResult(status="success", summary="inspected"),
+            WorkerResult(
+                status="failure",
+                failure_kind="permission_denied",
+                next_action_hint="request_higher_permission",
+            ),
+            WorkerResult(status="success", summary="implemented"),
+            WorkerResult(status="success", summary="verified"),
+        ]
+    )
+    paused_result, paused_outcomes, _ = asyncio.run(_await_decomposed_nodes(state, worker))
+    resumed_state = state.model_copy(update={"node_outcomes": paused_outcomes})
+    resumed_result, resumed_outcomes, _ = asyncio.run(
+        _await_decomposed_nodes(resumed_state, worker)
+    )
+    outcomes = [{"node_id": item.node_id, "status": item.status} for item in resumed_outcomes]
+    return {
+        "scenario": "permission_pause_resume",
+        "passed": (
+            paused_result.next_action_hint == "request_higher_permission"
+            and [(item.node_id, item.status) for item in paused_outcomes]
+            == [("inspect", "completed"), ("implement", "blocked")]
+            and resumed_result.status == "success"
+            and outcomes
+            == [
+                {"node_id": "inspect", "status": "completed"},
+                {"node_id": "implement", "status": "completed"},
+                {"node_id": "verify", "status": "completed"},
+            ]
+        ),
+        "outcomes": outcomes,
+        "dispatch_node_ids": [
             request.task_text.split("Current DAG node (")[1].split(")")[0]
             for request in worker.requests
         ],
     }
 
 
-def main() -> int:
-    def success() -> WorkerResult:
-        return WorkerResult(status="success", summary="ok")
+def _success() -> WorkerResult:
+    return WorkerResult(status="success", summary="ok")
 
-    cases = [
-        _run("linear_success", _state(_nodes()), [success(), success()]),
-        _run(
-            "node_failure_downstream_skip",
-            _state(_nodes()),
-            [
-                success(),
-                WorkerResult(status="failure", failure_kind="worker_failure"),
-                WorkerResult(status="failure", failure_kind="worker_failure"),
-                WorkerResult(status="failure", failure_kind="worker_failure"),
-            ],
-        ),
-        _run(
-            "verify_node_failure",
-            _state(_nodes()),
-            [
-                success(),
-                WorkerResult(status="failure", failure_kind="test"),
-                WorkerResult(status="failure", failure_kind="test"),
-                WorkerResult(status="failure", failure_kind="test"),
-            ],
-        ),
-        _run(
-            "retry_success",
-            _state(_nodes()),
-            [success(), WorkerResult(status="failure"), success()],
-        ),
-        _run(
-            "retry_exhaustion",
-            _state(_nodes()),
-            [
-                success(),
-                WorkerResult(status="failure"),
-                WorkerResult(status="failure"),
-                WorkerResult(status="failure"),
-            ],
-        ),
-        _run(
-            "serial_branch_join", _state(_nodes(True)), [success(), success(), success(), success()]
-        ),
+
+def _reliability_cases() -> list[dict[str, object]]:
+    linear_success = _run("linear_success", _state(_nodes()), [_success(), _success()])
+    failure_skip = _run(
+        "node_failure_downstream_skip",
+        _state(_nodes(include_verify=True)),
+        [
+            _success(),
+            WorkerResult(status="failure", failure_kind="worker_failure"),
+            WorkerResult(status="failure", failure_kind="worker_failure"),
+            WorkerResult(status="failure", failure_kind="worker_failure"),
+        ],
+    )
+    verify_failure = _run(
+        "verify_node_failure",
+        _state(_nodes(include_verify=True)),
+        [
+            _success(),
+            _success(),
+            WorkerResult(status="failure", failure_kind="test"),
+        ],
+    )
+    retry_success = _run(
+        "retry_success",
+        _state(_nodes()),
+        [_success(), WorkerResult(status="failure"), _success()],
+    )
+    retry_exhaustion = _run(
+        "retry_exhaustion",
+        _state(_nodes()),
+        [
+            _success(),
+            WorkerResult(status="failure"),
+            WorkerResult(status="failure"),
+            WorkerResult(status="failure"),
+        ],
+    )
+    branch_join = _run(
+        "serial_branch_join",
+        _state(_nodes(branching=True)),
+        [_success(), _success(), _success(), _success()],
+    )
+    linear_success["passed"] = linear_success["result_status"] == "success"
+    failure_skip["passed"] = failure_skip["outcomes"] == [
+        {"node_id": "inspect", "status": "completed"},
+        {"node_id": "implement", "status": "failed"},
+        {"node_id": "verify", "status": "skipped"},
     ]
-    cases[1]["passed"] = cases[1]["outcomes"][-1]["status"] == "failed"
-    cases[2]["passed"] = cases[2]["outcomes"][-1]["status"] == "failed"
-    cases[4]["passed"] = cases[4]["outcomes"][-1]["status"] == "failed"
-    cases[5]["passed"] = cases[5]["dispatch_order"] == ["inspect", "implement", "verify", "verify"]
+    verify_failure["passed"] = verify_failure["outcomes"][-1] == {
+        "node_id": "verify",
+        "status": "failed",
+    }
+    retry_success["passed"] = retry_success["result_status"] == "success"
+    retry_exhaustion["passed"] = retry_exhaustion["outcomes"][-1]["status"] == "failed"
+    branch_join["passed"] = branch_join["dispatch_node_ids"] == [
+        "inspect",
+        "implement",
+        "verify",
+        "join",
+    ] and set(branch_join["join_dependency_context"]) == {"implement", "verify"}
+    return [
+        linear_success,
+        failure_skip,
+        verify_failure,
+        retry_success,
+        retry_exhaustion,
+        _permission_pause_resume(),
+        branch_join,
+    ]
+
+
+def main() -> int:
+    cases = _reliability_cases()
     output = Path("artifacts/evaluations/dag-reliability-report.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
