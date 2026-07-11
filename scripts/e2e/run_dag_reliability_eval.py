@@ -145,7 +145,13 @@ def main() -> int:
     output.write_text(
         json.dumps({"suite": "m24.6-dag-reliability", "cases": cases}, indent=2) + "\n"
     )
-    return 0 if all(case["passed"] for case in cases) else 1
+    passed_count = sum(bool(case["passed"]) for case in cases)
+    print(
+        "dag-reliability:",
+        f"passed={passed_count}/{len(cases)}",
+        f"output={output}",
+    )
+    return 0 if passed_count == len(cases) else 1
 
 
 if __name__ == "__main__":
