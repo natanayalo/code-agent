@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add sequential decomposed task DAG execution ([#311](https://github.com/natanayalo/code-agent/pull/311))
+
 - Feat: add behavior reliability evaluation and approval cleanup ([#310](https://github.com/natanayalo/code-agent/pull/310))
 
 - Feat: add advisory repository memory profile ([#308](https://github.com/natanayalo/code-agent/pull/308))
