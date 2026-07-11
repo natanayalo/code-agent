@@ -210,7 +210,7 @@ describe('TaskDetailPanel', () => {
     render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
 
     expect(screen.queryByText(/Attempt evidence \(0\)/)).not.toBeInTheDocument();
-    expect(screen.getByText('Duration:').parentElement).toHaveTextContent('running ms');
+    expect(screen.getByText('Duration:').parentElement).toHaveTextContent('running');
     expect(screen.getByText('Runtime:').parentElement).toHaveTextContent('unknown / unknown');
     expect(screen.getByText('Trace:').parentElement).toHaveTextContent('not captured');
   });

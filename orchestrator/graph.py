@@ -746,12 +746,14 @@ def _start_node_attempt(
     summary: dict[str, Any],
     digest: str,
 ) -> str | None:
-    if session_factory is None or state.task.task_id is None:
+    if session_factory is None or not state.task.task_id:
         return None
     with session_scope(cast(sessionmaker[Session], session_factory)) as session:
         plan = ExecutionPlanRepository(session).get_by_task_id(state.task.task_id)
         if plan is None:
             return None
+        dispatch = state.dispatch
+        route = state.route
         task = session.get(Task, state.task.task_id)
         trace_context = task.trace_context if task is not None else None
         traceparent = trace_context.get("traceparent") if isinstance(trace_context, dict) else None
@@ -763,10 +765,20 @@ def _start_node_attempt(
             attempt_number=attempt_number,
             effective_input_summary=summary,
             effective_input_digest=digest,
-            worker_type=str(state.dispatch.worker_type or state.route.chosen_worker or ""),
-            worker_profile=state.dispatch.worker_profile or state.route.chosen_profile,
-            runtime_mode=str(state.dispatch.runtime_mode or state.route.runtime_mode or "") or None,
-            workspace_id=state.dispatch.workspace_id,
+            worker_type=str(
+                (dispatch.worker_type if dispatch else None)
+                or (route.chosen_worker if route else None)
+                or ""
+            ),
+            worker_profile=(dispatch.worker_profile if dispatch else None)
+            or (route.chosen_profile if route else None),
+            runtime_mode=str(
+                (dispatch.runtime_mode if dispatch else None)
+                or (route.runtime_mode if route else None)
+                or ""
+            )
+            or None,
+            workspace_id=dispatch.workspace_id if dispatch else None,
             task_trace_id=trace_id,
         )
         return attempt.id
@@ -1877,14 +1889,15 @@ def build_decompose_task_node(
         decomposition = response.get("decomposed_plan")
         if (
             session_factory
+            and state.task.task_id
             and isinstance(decomposition, dict)
             and decomposition.get("status") == "decomposed"
         ):
             with session_scope(cast(sessionmaker[Session], session_factory)) as session:
                 plan_repo = ExecutionPlanRepository(session)
-                plan = plan_repo.get_by_task_id(state.task.task_id or "")
+                plan = plan_repo.get_by_task_id(state.task.task_id)
                 if plan is None:
-                    plan = plan_repo.create(task_id=state.task.task_id or "")
+                    plan = plan_repo.create(task_id=state.task.task_id)
                 existing = {plan_node.node_id for plan_node in plan.nodes}
                 for sequence_number, item in enumerate(decomposition.get("nodes", [])):
                     if item["node_id"] in existing:
@@ -1895,10 +1908,10 @@ def build_decompose_task_node(
                         goal=item["title"],
                         sequence_number=sequence_number,
                         depends_on=item.get("depends_on") or [],
-                        task_spec=item["task_spec"],
-                        node_kind=item["node_kind"],
+                        task_spec=item.get("task_spec"),
+                        node_kind=item.get("node_kind"),
                         acceptance_criteria="; ".join(
-                            item["task_spec"].get("acceptance_criteria", [])
+                            (item.get("task_spec") or {}).get("acceptance_criteria", [])
                         ),
                     )
         return response

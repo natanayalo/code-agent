@@ -698,7 +698,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                         {node.attempts.map((attempt) => (
                           <div key={attempt.attempt_number} className="task-detail-grid">
                             <p><strong>Attempt:</strong> {attempt.attempt_number} ({formatLabel(attempt.status)})</p>
-                            <p><strong>Duration:</strong> {attempt.duration_ms ?? 'running'} ms</p>
+                            <p><strong>Duration:</strong> {attempt.duration_ms != null ? `${attempt.duration_ms} ms` : 'running'}</p>
                             <p><strong>Runtime:</strong> {attempt.worker_type || 'unknown'} / {attempt.runtime_mode || 'unknown'}</p>
                             <p><strong>Trace:</strong> {attempt.task_trace_id || 'not captured'}</p>
                             <p><strong>Input digest:</strong> <code>{attempt.effective_input_digest}</code></p>
