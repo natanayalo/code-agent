@@ -8,6 +8,30 @@ import asyncio
 from tests.unit.orchestrator_graph_unit_support import *  # noqa: F403, F405
 
 
+def test_redact_effective_input_redacts_sensitive_key_substrings() -> None:
+    result = _redact_effective_input(
+        {"github_token": "secret", "db_password": "secret", "safe_value": "visible"}, set()
+    )
+
+    assert result == {
+        "github_token": "[REDACTED]",
+        "db_password": "[REDACTED]",
+        "safe_value": "visible",
+    }
+
+
+def test_effective_input_evidence_tolerates_missing_node_task_spec() -> None:
+    state = OrchestratorState.model_validate({"task": {"task_text": "Run a task"}})
+    node = DecomposedTaskNode.model_construct(
+        node_id="inspect", title="Inspect", node_kind="inspect", task_spec=None
+    )
+
+    summary, _ = _effective_input_evidence(state, node, {})
+
+    assert summary["goal"] == ""
+    assert summary["acceptance_criteria"] == []
+
+
 def test_aggregate_decomposed_results_deduplicates_changed_files():
     outcomes = [
         NodeOutcome(

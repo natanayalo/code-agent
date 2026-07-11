@@ -726,11 +726,12 @@ def _effective_input_evidence(
     state: OrchestratorState, node: DecomposedTaskNode, prior_context: dict[str, Any]
 ) -> tuple[dict[str, Any], str]:
     """Create the bounded operator-facing input evidence for a node attempt."""
+    task_spec = node.task_spec
     payload = {
         "node_id": node.node_id,
         "node_kind": node.node_kind,
-        "goal": node.task_spec.goal,
-        "acceptance_criteria": node.task_spec.acceptance_criteria,
+        "goal": getattr(task_spec, "goal", ""),
+        "acceptance_criteria": getattr(task_spec, "acceptance_criteria", []),
         "parent_task_text": state.normalized_task_text or state.task.task_text,
         "dependencies": prior_context,
     }
@@ -1904,7 +1905,7 @@ def build_decompose_task_node(
                     plan_repo.add_node(
                         plan_id=plan.id,
                         node_id=item["node_id"],
-                        goal=item.get("title", item["node_id"]),
+                        goal=item.get("title") or item["node_id"],
                         sequence_number=sequence_number,
                         depends_on=item.get("depends_on") or [],
                         task_spec=task_spec,

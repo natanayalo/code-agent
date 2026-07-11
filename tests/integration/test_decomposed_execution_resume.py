@@ -41,6 +41,7 @@ def test_persisted_decomposition_skips_malformed_nodes(session_factory, monkeypa
                 None,
                 {"title": "Missing ID"},
                 {"node_id": "valid", "title": "Valid", "task_spec": {"goal": "Valid"}},
+                {"node_id": "blank-title", "title": "", "task_spec": {"goal": "Blank"}},
             ],
         }
     }
@@ -55,7 +56,9 @@ def test_persisted_decomposition_skips_malformed_nodes(session_factory, monkeypa
     with session_scope(session_factory) as session:
         plan = ExecutionPlanRepository(session).get_by_task_id(snapshot.task_id)
         assert plan is not None
-        assert [plan_node.node_id for plan_node in plan.nodes] == ["valid"]
+        assert [plan_node.node_id for plan_node in plan.nodes] == ["valid", "blank-title"]
+        node_goals = {plan_node.node_id: plan_node.goal for plan_node in plan.nodes}
+        assert node_goals["blank-title"] == "blank-title"
 
 
 def _assert_persisted_attempts(service: TaskExecutionService, task_id: str) -> None:

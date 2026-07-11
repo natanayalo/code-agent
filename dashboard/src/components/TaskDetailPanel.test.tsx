@@ -199,6 +199,13 @@ describe('TaskDetailPanel', () => {
                 effective_input_summary: {},
                 effective_input_digest: 'b'.repeat(64),
               },
+              {
+                attempt_number: 2,
+                started_at: '2026-04-28T00:01:00.000Z',
+                status: 'failed',
+                effective_input_summary: {},
+                effective_input_digest: 'd'.repeat(64),
+              },
             ],
             created_at: '2026-04-28T00:00:00.000Z',
             updated_at: '2026-04-28T00:01:00.000Z',
@@ -210,9 +217,10 @@ describe('TaskDetailPanel', () => {
     render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
 
     expect(screen.queryByText(/Attempt evidence \(0\)/)).not.toBeInTheDocument();
-    expect(screen.getByText('Duration:').parentElement).toHaveTextContent('running');
-    expect(screen.getByText('Runtime:').parentElement).toHaveTextContent('unknown / unknown');
-    expect(screen.getByText('Trace:').parentElement).toHaveTextContent('not captured');
+    expect(screen.getAllByText('Duration:')[0].parentElement).toHaveTextContent('running');
+    expect(screen.getAllByText('Duration:')[1].parentElement).toHaveTextContent('n/a');
+    expect(screen.getAllByText('Runtime:')[0].parentElement).toHaveTextContent('unknown / unknown');
+    expect(screen.getAllByText('Trace:')[0].parentElement).toHaveTextContent('not captured');
   });
 
   it('does not render malformed or empty attempt input summaries', () => {

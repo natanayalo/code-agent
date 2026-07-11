@@ -32,18 +32,6 @@ def test_redact_effective_input_ignores_non_string_and_blank_secrets() -> None:
     assert result == {"token": "[REDACTED]", "message": "keep this value"}
 
 
-def test_redact_effective_input_redacts_sensitive_key_substrings() -> None:
-    result = _redact_effective_input(
-        {"github_token": "secret", "db_password": "secret", "safe_value": "visible"}, set()
-    )
-
-    assert result == {
-        "github_token": "[REDACTED]",
-        "db_password": "[REDACTED]",
-        "safe_value": "visible",
-    }
-
-
 def test_task_requires_approval_ignores_untrusted_approved_status() -> None:
     state = OrchestratorState.model_validate(
         {
