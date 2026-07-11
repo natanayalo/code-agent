@@ -96,3 +96,44 @@ def test_add_and_update_node(session_factory):
         assert fetched_node is not None
         assert fetched_node.status == ExecutionPlanNodeStatus.ACTIVE
         assert fetched_node.started_at == now
+
+
+def test_start_attempt_allocates_monotonic_numbers(session_factory):
+    """Retry/resume attempt evidence must not reuse a node attempt number."""
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(
+            external_user_id="test-attempt-user", display_name="Test"
+        )
+        conversation = SessionRepository(session).create(
+            user_id=user.id, channel="web", external_thread_id="test-attempt-thread"
+        )
+        task = TaskRepository(session).create(session_id=conversation.id, task_text="Test task")
+        repo = ExecutionPlanRepository(session)
+        plan = repo.create(task_id=task.id)
+        repo.add_node(plan_id=plan.id, node_id="node", goal="Test node")
+
+        evidence = {"node_id": "node"}
+        first = repo.start_attempt(
+            plan_id=plan.id,
+            node_id="node",
+            effective_input_summary=evidence,
+            effective_input_digest="a" * 64,
+            worker_type=None,
+            worker_profile=None,
+            runtime_mode=None,
+            workspace_id=None,
+            task_trace_id=None,
+        )
+        second = repo.start_attempt(
+            plan_id=plan.id,
+            node_id="node",
+            effective_input_summary=evidence,
+            effective_input_digest="b" * 64,
+            worker_type=None,
+            worker_profile=None,
+            runtime_mode=None,
+            workspace_id=None,
+            task_trace_id=None,
+        )
+
+        assert [first.attempt_number, second.attempt_number] == [1, 2]

@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from db.base import generate_uuid, utc_now
@@ -155,7 +156,6 @@ class ExecutionPlanRepository:
         *,
         plan_id: str,
         node_id: str,
-        attempt_number: int,
         effective_input_summary: dict[str, Any],
         effective_input_digest: str,
         worker_type: str | None,
@@ -163,26 +163,44 @@ class ExecutionPlanRepository:
         runtime_mode: str | None,
         workspace_id: str | None,
         task_trace_id: str | None,
+        max_retries: int = 5,
     ) -> ExecutionPlanNodeAttempt:
         """Persist an attempt before a worker is dispatched."""
         node = self.get_node(plan_id, node_id)
         if node is None:
             raise ValueError(f"Unknown execution plan node: {node_id}")
-        attempt = ExecutionPlanNodeAttempt(
-            id=generate_uuid(),
-            plan_node_id=node.id,
-            attempt_number=attempt_number,
-            started_at=utc_now(),
-            effective_input_summary=effective_input_summary,
-            effective_input_digest=effective_input_digest,
-            worker_type=worker_type,
-            worker_profile=worker_profile,
-            runtime_mode=runtime_mode,
-            workspace_id=workspace_id,
-            task_trace_id=task_trace_id,
-        )
-        self.session.add(attempt)
-        return attempt
+        for attempt_index in range(max_retries):
+            try:
+                with self.session.begin_nested():
+                    existing_attempt_count = (
+                        self.session.scalar(
+                            select(
+                                func.coalesce(func.max(ExecutionPlanNodeAttempt.attempt_number), 0)
+                            ).where(ExecutionPlanNodeAttempt.plan_node_id == node.id)
+                        )
+                        or 0
+                    )
+                    attempt_number = existing_attempt_count + 1
+                    attempt = ExecutionPlanNodeAttempt(
+                        id=generate_uuid(),
+                        plan_node_id=node.id,
+                        attempt_number=attempt_number,
+                        started_at=utc_now(),
+                        effective_input_summary=effective_input_summary,
+                        effective_input_digest=effective_input_digest,
+                        worker_type=worker_type,
+                        worker_profile=worker_profile,
+                        runtime_mode=runtime_mode,
+                        workspace_id=workspace_id,
+                        task_trace_id=task_trace_id,
+                    )
+                    self.session.add(attempt)
+                    self.session.flush()
+                    return attempt
+            except IntegrityError:
+                if attempt_index == max_retries - 1:
+                    raise
+        raise RuntimeError("Unable to allocate execution-plan attempt number.")
 
     def finish_attempt(
         self,

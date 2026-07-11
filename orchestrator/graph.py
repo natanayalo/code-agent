@@ -742,7 +742,6 @@ def _start_node_attempt(
     session_factory: Callable[[], Session] | None,
     state: OrchestratorState,
     node: DecomposedTaskNode,
-    attempt_number: int,
     summary: dict[str, Any],
     digest: str,
 ) -> str | None:
@@ -762,22 +761,16 @@ def _start_node_attempt(
         attempt = ExecutionPlanRepository(session).start_attempt(
             plan_id=plan.id,
             node_id=node.node_id,
-            attempt_number=attempt_number,
             effective_input_summary=summary,
             effective_input_digest=digest,
-            worker_type=str(
-                (dispatch.worker_type if dispatch else None)
-                or (route.chosen_worker if route else None)
-                or ""
-            ),
+            worker_type=(str(dispatch.worker_type) if dispatch and dispatch.worker_type else None)
+            or (str(route.chosen_worker) if route and route.chosen_worker else None),
             worker_profile=(dispatch.worker_profile if dispatch else None)
             or (route.chosen_profile if route else None),
-            runtime_mode=str(
-                (dispatch.runtime_mode if dispatch else None)
-                or (route.runtime_mode if route else None)
-                or ""
+            runtime_mode=(
+                str(dispatch.runtime_mode) if dispatch and dispatch.runtime_mode else None
             )
-            or None,
+            or (str(route.runtime_mode) if route and route.runtime_mode else None),
             workspace_id=dispatch.workspace_id if dispatch else None,
             task_trace_id=trace_id,
         )
@@ -976,9 +969,7 @@ async def _await_decomposed_nodes(
                 prior_node_context=prior_context,
             )
             evidence, digest = _effective_input_evidence(state, ready_node, prior_context)
-            attempt_id = _start_node_attempt(
-                session_factory, state, ready_node, attempts, evidence, digest
-            )
+            attempt_id = _start_node_attempt(session_factory, state, ready_node, evidence, digest)
             last_manifest = request.runtime_manifest
             result, _progress = await _await_worker_with_timeout(
                 worker,
