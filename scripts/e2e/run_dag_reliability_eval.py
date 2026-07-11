@@ -143,7 +143,8 @@ def main() -> int:
     output = Path("artifacts/evaluations/dag-reliability-report.json")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
-        json.dumps({"suite": "m24.6-dag-reliability", "cases": cases}, indent=2) + "\n"
+        json.dumps({"suite": "m24.6-dag-reliability", "cases": cases}, indent=2) + "\n",
+        encoding="utf-8",
     )
     passed_count = sum(bool(case["passed"]) for case in cases)
     print(

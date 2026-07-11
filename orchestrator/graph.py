@@ -733,7 +733,7 @@ def _effective_input_evidence(
         "parent_task_text": state.normalized_task_text or state.task.task_text,
         "dependencies": prior_context,
     }
-    summary = _redact_effective_input(payload, set(state.task.secrets.values()))
+    summary = _redact_effective_input(payload, set((state.task.secrets or {}).values()))
     canonical = json.dumps(summary, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return summary, hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
