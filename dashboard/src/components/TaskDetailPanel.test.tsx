@@ -169,6 +169,52 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText(/Attempt evidence \(1\)/)).toBeInTheDocument();
   });
 
+  it('renders empty attempt evidence without exposing optional runtime fields', () => {
+    const task = buildTask({
+      execution_plan: {
+        plan_id: 'plan-1',
+        task_id: 'task-1',
+        created_at: '2026-04-28T00:00:00.000Z',
+        updated_at: '2026-04-28T00:01:00.000Z',
+        nodes: [
+          {
+            node_id: 'inspect',
+            goal: 'Inspect the change',
+            status: 'completed',
+            retry_count: 0,
+            attempts: [],
+            created_at: '2026-04-28T00:00:00.000Z',
+            updated_at: '2026-04-28T00:01:00.000Z',
+          },
+          {
+            node_id: 'verify',
+            goal: 'Verify the change',
+            status: 'active',
+            retry_count: 0,
+            attempts: [
+              {
+                attempt_number: 1,
+                started_at: '2026-04-28T00:00:00.000Z',
+                status: 'started',
+                effective_input_summary: {},
+                effective_input_digest: 'b'.repeat(64),
+              },
+            ],
+            created_at: '2026-04-28T00:00:00.000Z',
+            updated_at: '2026-04-28T00:01:00.000Z',
+          },
+        ],
+      },
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.queryByText(/Attempt evidence \(0\)/)).not.toBeInTheDocument();
+    expect(screen.getByText('Duration:').parentElement).toHaveTextContent('running ms');
+    expect(screen.getByText('Runtime:').parentElement).toHaveTextContent('unknown / unknown');
+    expect(screen.getByText('Trace:').parentElement).toHaveTextContent('not captured');
+  });
+
   it('renders partial memory trace empty states when only one side has records', async () => {
     vi.mocked(api.listMemoryObservations).mockResolvedValue([
       {
