@@ -715,7 +715,7 @@ def _redact_effective_input(value: Any, secret_values: set[str]) -> Any:
     if isinstance(value, str):
         redacted = value
         for secret in secret_values:
-            if secret:
+            if isinstance(secret, str) and secret.strip():
                 redacted = redacted.replace(secret, "[REDACTED]")
         return redacted
     return value
@@ -1895,16 +1895,22 @@ def build_decompose_task_node(
                     if node_id in existing:
                         continue
                     existing.add(node_id)
+                    task_spec = item.get("task_spec")
+                    task_spec = task_spec if isinstance(task_spec, dict) else {}
+                    acceptance_criteria = task_spec.get("acceptance_criteria")
                     plan_repo.add_node(
                         plan_id=plan.id,
                         node_id=item["node_id"],
                         goal=item.get("title", item["node_id"]),
                         sequence_number=sequence_number,
                         depends_on=item.get("depends_on") or [],
-                        task_spec=item.get("task_spec"),
+                        task_spec=task_spec,
                         node_kind=item.get("node_kind"),
                         acceptance_criteria="; ".join(
-                            (item.get("task_spec") or {}).get("acceptance_criteria") or []
+                            str(criterion)
+                            for criterion in (
+                                acceptance_criteria if isinstance(acceptance_criteria, list) else []
+                            )
                         ),
                     )
         return response

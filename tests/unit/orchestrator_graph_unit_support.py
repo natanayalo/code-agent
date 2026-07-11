@@ -24,6 +24,7 @@ from orchestrator.graph import (
     _compute_route_decision,
     _default_worker_result_provider,
     _is_interaction_requirement_resolved,
+    _redact_effective_input,
     _resolve_orchestrator_timeout_seconds,
     _route_after_review_result,
     _task_requires_approval,

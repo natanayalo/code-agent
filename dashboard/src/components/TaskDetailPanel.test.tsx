@@ -215,6 +215,36 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('Trace:').parentElement).toHaveTextContent('not captured');
   });
 
+  it('does not render malformed or empty attempt input summaries', () => {
+    const task = buildTask({
+      execution_plan: {
+        plan_id: 'plan-1',
+        task_id: 'task-1',
+        created_at: '2026-04-28T00:00:00.000Z',
+        updated_at: '2026-04-28T00:01:00.000Z',
+        nodes: [{
+          node_id: 'verify',
+          goal: 'Verify the change',
+          status: 'active',
+          retry_count: 0,
+          attempts: [{
+            attempt_number: 1,
+            started_at: '2026-04-28T00:00:00.000Z',
+            status: 'started',
+            effective_input_summary: null as unknown as Record<string, unknown>,
+            effective_input_digest: 'c'.repeat(64),
+          }],
+          created_at: '2026-04-28T00:00:00.000Z',
+          updated_at: '2026-04-28T00:01:00.000Z',
+        }],
+      },
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.queryByText('Unserializable object value')).not.toBeInTheDocument();
+  });
+
   it('renders partial memory trace empty states when only one side has records', async () => {
     vi.mocked(api.listMemoryObservations).mockResolvedValue([
       {

@@ -88,6 +88,10 @@ function renderJsonBlock(value: unknown) {
   }
 }
 
+function hasRecordValues(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0;
+}
+
 function artifactRows(run: TaskSnapshot['latest_run']) {
   if (!run) return [];
   if (Array.isArray(run.artifact_index) && run.artifact_index.length > 0) {
@@ -696,7 +700,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                       <details>
                         <summary>Attempt evidence ({node.attempts.length})</summary>
                         {node.attempts.map((attempt) => (
-                          <div key={attempt.attempt_number}>
+                          <div key={attempt.attempt_number} className="task-detail-attempt">
                             <div className="task-detail-grid">
                             <p><strong>Attempt:</strong> {attempt.attempt_number} ({formatLabel(attempt.status)})</p>
                             <p><strong>Duration:</strong> {attempt.duration_ms != null ? `${attempt.duration_ms} ms` : 'running'}</p>
@@ -704,7 +708,7 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                             <p><strong>Trace:</strong> {attempt.task_trace_id || 'not captured'}</p>
                             <p><strong>Input digest:</strong> <code>{attempt.effective_input_digest}</code></p>
                             </div>
-                            {Object.keys(attempt.effective_input_summary).length > 0
+                            {hasRecordValues(attempt.effective_input_summary)
                               ? renderJsonBlock(attempt.effective_input_summary)
                               : null}
                           </div>
