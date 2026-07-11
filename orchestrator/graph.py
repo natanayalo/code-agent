@@ -1896,7 +1896,7 @@ def build_decompose_task_node(
                     plan_repo.add_node(
                         plan_id=plan.id,
                         node_id=item["node_id"],
-                        goal=item["title"],
+                        goal=item.get("title", item["node_id"]),
                         sequence_number=sequence_number,
                         depends_on=item.get("depends_on") or [],
                         task_spec=item.get("task_spec"),

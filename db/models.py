@@ -975,7 +975,7 @@ class ExecutionPlanNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="plan_node",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        order_by="ExecutionPlanNodeAttempt.attempt_number.asc()",
+        order_by=lambda: ExecutionPlanNodeAttempt.attempt_number.asc(),
     )
     blocker_interaction: Mapped[HumanInteraction | None] = relationship()
 

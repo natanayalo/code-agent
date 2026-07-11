@@ -219,6 +219,8 @@ class ExecutionPlanRepository:
         started_at = attempt.started_at
         if started_at.tzinfo is None:
             started_at = started_at.replace(tzinfo=UTC)
+        if finished_at.tzinfo is None:
+            finished_at = finished_at.replace(tzinfo=UTC)
         attempt.duration_ms = max(0, int((finished_at - started_at).total_seconds() * 1000))
         attempt.status = status
         attempt.failure_kind = failure_kind
