@@ -13,6 +13,7 @@ EXPECTED_TABLES = {
     "artifacts",
     "execution_plans",
     "execution_plan_nodes",
+    "execution_plan_node_attempts",
     "human_interactions",
     "inbound_deliveries",
     "memory_admission_decisions",

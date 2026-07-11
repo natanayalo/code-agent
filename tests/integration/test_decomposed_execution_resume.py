@@ -27,6 +27,17 @@ class RecordingWorker(Worker):
         )
 
 
+def _assert_persisted_attempts(service: TaskExecutionService, task_id: str) -> None:
+    """Assert resumed nodes retain one durable attempt record each."""
+    persisted_snapshot = service.get_task(task_id)
+    assert persisted_snapshot is not None
+    nodes = {node.node_id: node for node in persisted_snapshot.execution_plan.nodes}
+    assert [attempt.attempt_number for attempt in nodes["2"].attempts] == [1]
+    assert nodes["2"].attempts[0].status == "completed"
+    assert nodes["2"].attempts[0].effective_input_digest
+    assert [attempt.attempt_number for attempt in nodes["3"].attempts] == [1]
+
+
 def test_queue_reload_resumes_only_non_completed_decomposed_nodes(session_factory) -> None:
     worker = RecordingWorker()
     service = TaskExecutionService(session_factory=session_factory, worker=worker)
@@ -101,3 +112,5 @@ def test_queue_reload_resumes_only_non_completed_decomposed_nodes(session_factor
     assert "Current DAG node (implement)" in dag_requests[0].task_text
     assert "Current DAG node (verify)" in dag_requests[1].task_text
     assert all("Current DAG node (inspect)" not in request.task_text for request in dag_requests)
+
+    _assert_persisted_attempts(service, snapshot.task_id)

@@ -206,9 +206,27 @@ export interface ExecutionPlanNodeSnapshot {
   changed_files?: string[] | null;
   output_artifacts?: Record<string, unknown>[] | null;
   last_attempt_at?: string | null;
+  attempts?: ExecutionPlanNodeAttemptSnapshot[];
   retry_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ExecutionPlanNodeAttemptSnapshot {
+  attempt_number: number;
+  started_at: string;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  worker_run_id?: string | null;
+  task_trace_id?: string | null;
+  worker_type?: string | null;
+  worker_profile?: string | null;
+  runtime_mode?: string | null;
+  workspace_id?: string | null;
+  status: string;
+  failure_kind?: string | null;
+  effective_input_summary: Record<string, unknown>;
+  effective_input_digest: string;
 }
 
 export interface ExecutionPlanSnapshot {

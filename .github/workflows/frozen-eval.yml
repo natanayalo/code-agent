@@ -37,3 +37,11 @@ jobs:
           name: frozen-suite-report
           path: artifacts/evaluations/frozen-suite-report.json
           if-no-files-found: error
+      - name: Run DAG reliability evaluation
+        run: python scripts/e2e/run_dag_reliability_eval.py
+      - name: Upload DAG reliability report
+        uses: actions/upload-artifact@v7
+        with:
+          name: dag-reliability-report
+          path: artifacts/evaluations/dag-reliability-report.json
+          if-no-files-found: error

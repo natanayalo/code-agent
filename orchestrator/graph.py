@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import json
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
@@ -13,7 +15,7 @@ from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from apps.observability import (
     SPAN_KIND_CHAIN,
@@ -25,6 +27,7 @@ from apps.observability import (
     start_optional_span,
 )
 from db.enums import TimelineEventType
+from db.models import Task
 from db.utils import compute_interaction_content_hash
 from memory.admission import (
     CustomMemoryAdmissionService,
@@ -103,11 +106,13 @@ from orchestrator.task_spec import (
     is_destructive_task,
     validate_task_spec_policy,
 )
+from repositories.session import session_scope
 from repositories.sqlalchemy import (
     PersonalMemoryRepository,
     ProjectMemoryRepository,
     SessionStateRepository,
 )
+from repositories.sqlalchemy_plan import ExecutionPlanRepository
 from sandbox import WorkspaceManager
 from tools import coerce_permission_level
 from tools.numeric import coerce_positive_int_like
@@ -692,6 +697,102 @@ def _skipped_node_result(node: DecomposedTaskNode, reason: str) -> WorkerResult:
     )
 
 
+_SENSITIVE_INPUT_KEYS = frozenset({"secret", "token", "password", "authorization", "callback_url"})
+
+
+def _redact_effective_input(value: Any, secret_values: set[str]) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: (
+                "[REDACTED]"
+                if key.lower() in _SENSITIVE_INPUT_KEYS
+                else _redact_effective_input(item, secret_values)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_effective_input(item, secret_values) for item in value]
+    if isinstance(value, str):
+        redacted = value
+        for secret in secret_values:
+            if secret:
+                redacted = redacted.replace(secret, "[REDACTED]")
+        return redacted
+    return value
+
+
+def _effective_input_evidence(
+    state: OrchestratorState, node: DecomposedTaskNode, prior_context: dict[str, Any]
+) -> tuple[dict[str, Any], str]:
+    """Create the bounded operator-facing input evidence for a node attempt."""
+    payload = {
+        "node_id": node.node_id,
+        "node_kind": node.node_kind,
+        "goal": node.task_spec.goal,
+        "acceptance_criteria": node.task_spec.acceptance_criteria,
+        "parent_task_text": state.normalized_task_text or state.task.task_text,
+        "dependencies": prior_context,
+    }
+    summary = _redact_effective_input(payload, set(state.task.secrets.values()))
+    canonical = json.dumps(summary, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return summary, hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _start_node_attempt(
+    session_factory: Callable[[], Session] | None,
+    state: OrchestratorState,
+    node: DecomposedTaskNode,
+    attempt_number: int,
+    summary: dict[str, Any],
+    digest: str,
+) -> str | None:
+    if session_factory is None or state.task.task_id is None:
+        return None
+    with session_scope(cast(sessionmaker[Session], session_factory)) as session:
+        plan = ExecutionPlanRepository(session).get_by_task_id(state.task.task_id)
+        if plan is None:
+            return None
+        task = session.get(Task, state.task.task_id)
+        trace_context = task.trace_context if task is not None else None
+        traceparent = trace_context.get("traceparent") if isinstance(trace_context, dict) else None
+        trace_parts = traceparent.split("-") if isinstance(traceparent, str) else []
+        trace_id = trace_parts[1] if len(trace_parts) > 1 else None
+        attempt = ExecutionPlanRepository(session).start_attempt(
+            plan_id=plan.id,
+            node_id=node.node_id,
+            attempt_number=attempt_number,
+            effective_input_summary=summary,
+            effective_input_digest=digest,
+            worker_type=str(state.dispatch.worker_type or state.route.chosen_worker or ""),
+            worker_profile=state.dispatch.worker_profile or state.route.chosen_profile,
+            runtime_mode=str(state.dispatch.runtime_mode or state.route.runtime_mode or "") or None,
+            workspace_id=state.dispatch.workspace_id,
+            task_trace_id=trace_id,
+        )
+        return attempt.id
+
+
+def _finish_node_attempt(
+    session_factory: Callable[[], Session] | None, attempt_id: str | None, result: WorkerResult
+) -> None:
+    if session_factory is None or attempt_id is None:
+        return
+    with session_scope(cast(sessionmaker[Session], session_factory)) as session:
+        status = (
+            "completed"
+            if result.status == "success"
+            else "blocked"
+            if result.next_action_hint == "request_higher_permission"
+            else "failed"
+        )
+        ExecutionPlanRepository(session).finish_attempt(
+            attempt_id=attempt_id,
+            status=status,
+            failure_kind=result.failure_kind,
+            workspace_id=result.workspace_id,
+        )
+
+
 def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
     """Merge sequential node results into the existing parent worker contract."""
     failed = next(
@@ -791,6 +892,7 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
 async def _await_decomposed_nodes(
     state: OrchestratorState,
     worker: Worker,
+    session_factory: Callable[[], Session] | None = None,
 ) -> tuple[WorkerResult, list[NodeOutcome], dict[str, Any] | None]:
     """Run ready decomposed nodes one at a time in the shared workspace."""
     plan = state.decomposed_plan
@@ -861,6 +963,10 @@ async def _await_decomposed_nodes(
                 task_text_override=node_task_text,
                 prior_node_context=prior_context,
             )
+            evidence, digest = _effective_input_evidence(state, ready_node, prior_context)
+            attempt_id = _start_node_attempt(
+                session_factory, state, ready_node, attempts, evidence, digest
+            )
             last_manifest = request.runtime_manifest
             result, _progress = await _await_worker_with_timeout(
                 worker,
@@ -876,7 +982,9 @@ async def _await_decomposed_nodes(
                     summary="Node execution returned no result.",
                     failure_kind="worker_failure",
                 )
+                _finish_node_attempt(session_factory, attempt_id, result)
                 break
+            _finish_node_attempt(session_factory, attempt_id, result)
             if result.status == "success" or result.next_action_hint == "request_higher_permission":
                 break
         if result is None:
@@ -1725,6 +1833,11 @@ def _route_after_generate_task_spec(state_input: OrchestratorState) -> str:
 def decompose_task(state_input: OrchestratorState) -> dict[str, Any]:
     """Build a validated node DAG while preserving monolithic fallback behavior."""
     state = _ensure_state(state_input)
+    if state.decomposed_plan is not None and state.decomposed_plan.status == "decomposed":
+        return {
+            "current_step": "decompose_task",
+            "decomposed_plan": state.decomposed_plan.model_dump(mode="json"),
+        }
     decomposition = decompose_task_plan(state.task_plan, state.task_spec)
     if decomposition.status == "decomposed":
         message = f"task decomposed into {len(decomposition.nodes)} sequential nodes"
@@ -1751,6 +1864,46 @@ def decompose_task(state_input: OrchestratorState) -> dict[str, Any]:
             )
         )
     return response
+
+
+def build_decompose_task_node(
+    session_factory: Callable[[], Session] | None,
+) -> Callable[[OrchestratorState], dict[str, Any]]:
+    """Persist a newly-generated DAG before its first node can execute."""
+
+    def node(state_input: OrchestratorState) -> dict[str, Any]:
+        response = decompose_task(state_input)
+        state = _ensure_state(state_input)
+        decomposition = response.get("decomposed_plan")
+        if (
+            session_factory
+            and isinstance(decomposition, dict)
+            and decomposition.get("status") == "decomposed"
+        ):
+            with session_scope(cast(sessionmaker[Session], session_factory)) as session:
+                plan_repo = ExecutionPlanRepository(session)
+                plan = plan_repo.get_by_task_id(state.task.task_id or "")
+                if plan is None:
+                    plan = plan_repo.create(task_id=state.task.task_id or "")
+                existing = {plan_node.node_id for plan_node in plan.nodes}
+                for sequence_number, item in enumerate(decomposition.get("nodes", [])):
+                    if item["node_id"] in existing:
+                        continue
+                    plan_repo.add_node(
+                        plan_id=plan.id,
+                        node_id=item["node_id"],
+                        goal=item["title"],
+                        sequence_number=sequence_number,
+                        depends_on=item.get("depends_on") or [],
+                        task_spec=item["task_spec"],
+                        node_kind=item["node_kind"],
+                        acceptance_criteria="; ".join(
+                            item["task_spec"].get("acceptance_criteria", [])
+                        ),
+                    )
+        return response
+
+    return node
 
 
 def await_clarification(state_input: OrchestratorState) -> dict[str, Any]:
@@ -3183,6 +3336,7 @@ def build_await_result_node(
     worker: Worker | None = None,
     *,
     available_profile_names: frozenset[str] = frozenset(),
+    session_factory: Callable[[], Session] | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around the workers wired into the graph."""
     available_workers = _available_workers(worker)
@@ -3227,6 +3381,7 @@ def build_await_result_node(
                         result, node_outcomes, runtime_manifest = await _await_decomposed_nodes(
                             state,
                             bound_worker,
+                            session_factory=session_factory,
                         )
                         progress_message = "sequential task nodes completed"
                         request = _build_worker_request(state)
@@ -4011,7 +4166,7 @@ def _add_orchestrator_nodes(
         ("classify_task", classify_task),
         ("plan_task", plan_task),
         ("load_repo_profile", load_repo_profile_node),
-        ("decompose_task", decompose_task),
+        ("decompose_task", build_decompose_task_node(session_factory)),
         ("await_clarification", await_clarification),
         ("await_permission", await_permission),
         ("check_approval", check_approval),
@@ -4045,6 +4200,7 @@ def _add_orchestrator_nodes(
         profile_names,
         enable_independent_verifier,
         worker,
+        session_factory,
     )
 
 
@@ -4058,6 +4214,7 @@ def _add_orchestrator_complex_nodes(
     profile_names: frozenset[str],
     enable_independent_verifier: bool,
     worker: Worker | None,
+    session_factory: Callable[[], Session] | None,
 ) -> None:
     builder.add_node(
         "generate_task_spec_and_route",
@@ -4092,6 +4249,7 @@ def _add_orchestrator_complex_nodes(
             build_await_result_node(
                 worker,
                 available_profile_names=profile_names,
+                session_factory=session_factory,
             )
         ),
     )

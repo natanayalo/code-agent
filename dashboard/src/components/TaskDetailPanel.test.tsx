@@ -141,6 +141,18 @@ describe('TaskDetailPanel', () => {
             worker_run_id: 'run-node-1',
             result_summary: 'Implementation completed',
             changed_files: ['src/example.ts'],
+            attempts: [
+              {
+                attempt_number: 1,
+                started_at: '2026-04-28T00:00:00.000Z',
+                duration_ms: 42,
+                status: 'completed',
+                worker_type: 'codex',
+                runtime_mode: 'native_agent',
+                effective_input_summary: { node_id: 'implement' },
+                effective_input_digest: 'a'.repeat(64),
+              },
+            ],
             created_at: '2026-04-28T00:00:00.000Z',
             updated_at: '2026-04-28T00:01:00.000Z',
           },
@@ -154,6 +166,7 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('Implementation completed')).toBeInTheDocument();
     expect(screen.getByText('src/example.ts')).toBeInTheDocument();
     expect(screen.getByText('run-node-1')).toBeInTheDocument();
+    expect(screen.getByText(/Attempt evidence \(1\)/)).toBeInTheDocument();
   });
 
   it('renders partial memory trace empty states when only one side has records', async () => {

@@ -6,7 +6,7 @@ Phase 4: selective autonomy after reliability.
 
 Active focus:
 
-- M24: implement decomposed task DAG execution
+- M25: evaluate selective parallel worker fan-out after the M24 reliability gate
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
@@ -30,7 +30,7 @@ Active focus:
 - repo registry and validation profiles gate public repo selection, protected paths, and validation defaults
 - deterministic advisory repository memory profiles are injected into worker context without changing repository policy
 - M23.11 evaluation confirms the worker uses advisory profiles correctly, avoids stale policy, and improves task success without increasing unsafe actions
-- M24.1–M24.5 provide validated sequential task decomposition, durable node contracts/evidence, sequential execution, parent-result aggregation, bounded retry, and blocked-node resume
+- M24.1–M24.6 provide validated sequential task decomposition, durable node contracts/evidence, crash-resilient per-node attempt history, sequential execution, parent-result aggregation, bounded retry, blocked-node resume, and a deterministic reliability gate
 - PR-native delivery fields with GitHub branch/draft-PR delivery integration
 - full-text personal/project memory search with dashboard search results and memory-retrieval timeline visibility
 - deterministic memory retrieval evaluation to separate full-text regressions from known semantic gaps
@@ -50,11 +50,8 @@ Active focus:
 
 ## Next Slices Only
 
-1. M24.6: M24 reliability evaluation gate
-   - execute a failure/recovery and multi-dependency scenario matrix
-   - add per-node timing, runtime/trace, and effective-input observability
-   - define generated-node retry/idempotency behavior
-   - validate a deterministic branching-and-join DAG before M25 fan-out
+1. M25: selective parallel worker fan-out
+   - begin only from the validated M24 sequential DAG and reliability evidence
 
 ## Current Backlog
 

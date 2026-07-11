@@ -20,6 +20,7 @@ from db.enums import (
 )
 from db.models import (
     ExecutionPlan,
+    ExecutionPlanNode,
     HumanInteraction,
     MemoryAdmissionDecision,
     MemoryObservation,
@@ -34,6 +35,7 @@ from orchestrator.execution_serialization import _enum_value, _get_trace_id_from
 from orchestrator.execution_tracing import _get_phoenix_url
 from orchestrator.execution_types import (
     ArtifactSnapshot,
+    ExecutionPlanNodeAttemptSnapshot,
     ExecutionPlanNodeSnapshot,
     ExecutionPlanSnapshot,
     KnowledgeBaseStatsSnapshot,
@@ -107,7 +109,9 @@ def get_task(self: Any, task_id: str) -> TaskSnapshot | None:
                 selectinload(Task.timeline_events),
                 selectinload(Task.human_interactions),
                 selectinload(Task.worker_runs).selectinload(WorkerRun.artifacts),
-                selectinload(Task.execution_plan).selectinload(ExecutionPlan.nodes),
+                selectinload(Task.execution_plan)
+                .selectinload(ExecutionPlan.nodes)
+                .selectinload(ExecutionPlanNode.attempts),
             )
         )
         task = session.scalar(statement)
@@ -551,6 +555,25 @@ def _map_execution_plan_to_snapshot(execution_plan: Any) -> ExecutionPlanSnapsho
                 changed_files=node.changed_files,
                 output_artifacts=node.output_artifacts,
                 last_attempt_at=node.last_attempt_at,
+                attempts=[
+                    ExecutionPlanNodeAttemptSnapshot(
+                        attempt_number=attempt.attempt_number,
+                        started_at=attempt.started_at,
+                        finished_at=attempt.finished_at,
+                        duration_ms=attempt.duration_ms,
+                        worker_run_id=attempt.worker_run_id,
+                        task_trace_id=attempt.task_trace_id,
+                        worker_type=attempt.worker_type,
+                        worker_profile=attempt.worker_profile,
+                        runtime_mode=attempt.runtime_mode,
+                        workspace_id=attempt.workspace_id,
+                        status=attempt.status,
+                        failure_kind=attempt.failure_kind,
+                        effective_input_summary=attempt.effective_input_summary,
+                        effective_input_digest=attempt.effective_input_digest,
+                    )
+                    for attempt in getattr(node, "attempts", [])
+                ],
                 created_at=node.created_at,
                 updated_at=node.updated_at,
             )
