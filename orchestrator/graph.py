@@ -705,7 +705,7 @@ def _redact_effective_input(value: Any, secret_values: set[str]) -> Any:
         return {
             key: (
                 "[REDACTED]"
-                if key.lower() in _SENSITIVE_INPUT_KEYS
+                if isinstance(key, str) and key.lower() in _SENSITIVE_INPUT_KEYS
                 else _redact_effective_input(item, secret_values)
             )
             for key, item in value.items()
@@ -1891,8 +1891,10 @@ def build_decompose_task_node(
                     plan = plan_repo.create(task_id=state.task.task_id)
                 existing = {plan_node.node_id for plan_node in plan.nodes}
                 for sequence_number, item in enumerate(decomposition.get("nodes", [])):
-                    if item["node_id"] in existing:
+                    node_id = item["node_id"]
+                    if node_id in existing:
                         continue
+                    existing.add(node_id)
                     plan_repo.add_node(
                         plan_id=plan.id,
                         node_id=item["node_id"],
@@ -1902,7 +1904,7 @@ def build_decompose_task_node(
                         task_spec=item.get("task_spec"),
                         node_kind=item.get("node_kind"),
                         acceptance_criteria="; ".join(
-                            (item.get("task_spec") or {}).get("acceptance_criteria", [])
+                            (item.get("task_spec") or {}).get("acceptance_criteria") or []
                         ),
                     )
         return response

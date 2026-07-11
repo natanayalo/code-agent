@@ -696,13 +696,17 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                       <details>
                         <summary>Attempt evidence ({node.attempts.length})</summary>
                         {node.attempts.map((attempt) => (
-                          <div key={attempt.attempt_number} className="task-detail-grid">
+                          <div key={attempt.attempt_number}>
+                            <div className="task-detail-grid">
                             <p><strong>Attempt:</strong> {attempt.attempt_number} ({formatLabel(attempt.status)})</p>
                             <p><strong>Duration:</strong> {attempt.duration_ms != null ? `${attempt.duration_ms} ms` : 'running'}</p>
                             <p><strong>Runtime:</strong> {attempt.worker_type || 'unknown'} / {attempt.runtime_mode || 'unknown'}</p>
                             <p><strong>Trace:</strong> {attempt.task_trace_id || 'not captured'}</p>
                             <p><strong>Input digest:</strong> <code>{attempt.effective_input_digest}</code></p>
-                            {renderJsonBlock(attempt.effective_input_summary)}
+                            </div>
+                            {Object.keys(attempt.effective_input_summary).length > 0
+                              ? renderJsonBlock(attempt.effective_input_summary)
+                              : null}
                           </div>
                         ))}
                       </details>
