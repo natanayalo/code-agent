@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add durable DAG reliability gate ([#312](https://github.com/natanayalo/code-agent/pull/312))
+
 - Feat: add sequential decomposed task DAG execution ([#311](https://github.com/natanayalo/code-agent/pull/311))
 
 - Feat: add behavior reliability evaluation and approval cleanup ([#310](https://github.com/natanayalo/code-agent/pull/310))
