@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from orchestrator.graph import _await_decomposed_nodes
 from orchestrator.state import OrchestratorState
