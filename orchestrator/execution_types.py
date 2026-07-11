@@ -480,8 +480,28 @@ class ExecutionPlanNodeSnapshot(ExecutionModel):
     changed_files: list[str] | None = None
     output_artifacts: list[dict[str, Any]] | None = None
     last_attempt_at: datetime | None = None
+    attempts: list[ExecutionPlanNodeAttemptSnapshot] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class ExecutionPlanNodeAttemptSnapshot(ExecutionModel):
+    """One durable worker-dispatch attempt for an execution-plan node."""
+
+    attempt_number: int
+    started_at: datetime
+    finished_at: datetime | None = None
+    duration_ms: int | None = None
+    worker_run_id: str | None = None
+    task_trace_id: str | None = None
+    worker_type: str | None = None
+    worker_profile: str | None = None
+    runtime_mode: str | None = None
+    workspace_id: str | None = None
+    status: str
+    failure_kind: str | None = None
+    effective_input_summary: dict[str, Any]
+    effective_input_digest: str
 
 
 class ExecutionPlanSnapshot(ExecutionModel):

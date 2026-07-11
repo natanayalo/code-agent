@@ -375,9 +375,9 @@ def test_orchestrator_graph_clarification_resume_token_resolution_allows_progres
         for request in worker.requests
     )
     node_task_texts = [request.task_text for request in worker.requests]
-    assert "Current DAG node (inspect): Investigate Root Cause and Scope" in node_task_texts[0]
-    assert "Current DAG node (implement): Implement the Smallest Safe Slice" in node_task_texts[1]
-    assert "Current DAG node (verify): Verify and Summarize" in node_task_texts[2]
+    assert "Current DAG node (1): Investigate Root Cause and Scope" in node_task_texts[0]
+    assert "Current DAG node (2): Implement the Smallest Safe Slice" in node_task_texts[1]
+    assert "Current DAG node (3): Verify and Summarize" in node_task_texts[2]
 
 
 def test_orchestrator_graph_review_task_without_deliverable_fails() -> None:

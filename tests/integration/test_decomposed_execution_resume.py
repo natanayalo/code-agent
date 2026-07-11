@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 
+import orchestrator.graph as graph_module
 from db.enums import ExecutionPlanNodeStatus
+from orchestrator import OrchestratorState
 from orchestrator.execution import TaskExecutionService
 from orchestrator.execution_types import TaskSubmission
+from orchestrator.graph import build_decompose_task_node
 from repositories import ExecutionPlanRepository, session_scope
 from workers import Worker, WorkerRequest, WorkerResult
 
@@ -25,6 +28,48 @@ class RecordingWorker(Worker):
             summary=f"Completed {request.task_text}",
             files_changed=["qa-resume.txt"],
         )
+
+
+def test_persisted_decomposition_skips_malformed_nodes(session_factory, monkeypatch) -> None:
+    service = TaskExecutionService(session_factory=session_factory, worker=RecordingWorker())
+    snapshot, _ = service.create_task(TaskSubmission(task_text="Persist a safe DAG"))
+    node = build_decompose_task_node(session_factory)
+    response = {
+        "decomposed_plan": {
+            "status": "decomposed",
+            "nodes": [
+                None,
+                {"title": "Missing ID"},
+                {"node_id": "valid", "title": "Valid", "task_spec": {"goal": "Valid"}},
+                {"node_id": "blank-title", "title": "", "task_spec": {"goal": "Blank"}},
+            ],
+        }
+    }
+    monkeypatch.setattr(graph_module, "decompose_task", lambda state: response)
+
+    node(
+        OrchestratorState.model_validate(
+            {"task": {"task_id": snapshot.task_id, "task_text": "Persist a safe DAG"}}
+        )
+    )
+
+    with session_scope(session_factory) as session:
+        plan = ExecutionPlanRepository(session).get_by_task_id(snapshot.task_id)
+        assert plan is not None
+        assert [plan_node.node_id for plan_node in plan.nodes] == ["valid", "blank-title"]
+        node_goals = {plan_node.node_id: plan_node.goal for plan_node in plan.nodes}
+        assert node_goals["blank-title"] == "blank-title"
+
+
+def _assert_persisted_attempts(service: TaskExecutionService, task_id: str) -> None:
+    """Assert resumed nodes retain one durable attempt record each."""
+    persisted_snapshot = service.get_task(task_id)
+    assert persisted_snapshot is not None
+    nodes = {node.node_id: node for node in persisted_snapshot.execution_plan.nodes}
+    assert [attempt.attempt_number for attempt in nodes["2"].attempts] == [1]
+    assert nodes["2"].attempts[0].status == "completed"
+    assert nodes["2"].attempts[0].effective_input_digest
+    assert [attempt.attempt_number for attempt in nodes["3"].attempts] == [1]
 
 
 def test_queue_reload_resumes_only_non_completed_decomposed_nodes(session_factory) -> None:
@@ -98,6 +143,8 @@ def test_queue_reload_resumes_only_non_completed_decomposed_nodes(session_factor
         request for request in worker.requests if "Current DAG node" in request.task_text
     ]
     assert len(dag_requests) == 2
-    assert "Current DAG node (implement)" in dag_requests[0].task_text
-    assert "Current DAG node (verify)" in dag_requests[1].task_text
-    assert all("Current DAG node (inspect)" not in request.task_text for request in dag_requests)
+    assert "Current DAG node (2)" in dag_requests[0].task_text
+    assert "Current DAG node (3)" in dag_requests[1].task_text
+    assert all("Current DAG node (1)" not in request.task_text for request in dag_requests)
+
+    _assert_persisted_attempts(service, snapshot.task_id)

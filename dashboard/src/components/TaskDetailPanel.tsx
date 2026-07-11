@@ -88,6 +88,10 @@ function renderJsonBlock(value: unknown) {
   }
 }
 
+function hasRecordValues(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0;
+}
+
 function artifactRows(run: TaskSnapshot['latest_run']) {
   if (!run) return [];
   if (Array.isArray(run.artifact_index) && run.artifact_index.length > 0) {
@@ -692,6 +696,25 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                     {node.output_artifacts && node.output_artifacts.length > 0
                       ? renderJsonBlock(node.output_artifacts)
                       : null}
+                    {node.attempts && node.attempts.length > 0 ? (
+                      <details>
+                        <summary>Attempt evidence ({node.attempts.length})</summary>
+                        {node.attempts.map((attempt) => (
+                          <div key={attempt.attempt_number} className="task-detail-attempt">
+                            <div className="task-detail-grid">
+                              <p><strong>Attempt:</strong> {attempt.attempt_number} ({formatLabel(attempt.status)})</p>
+                              <p><strong>Duration:</strong> {attempt.duration_ms != null ? `${attempt.duration_ms} ms` : attempt.status === 'started' ? 'running' : 'n/a'}</p>
+                              <p><strong>Runtime:</strong> {attempt.worker_type || 'unknown'} / {attempt.runtime_mode || 'unknown'}</p>
+                              <p><strong>Trace:</strong> {attempt.task_trace_id || 'not captured'}</p>
+                              <p><strong>Input digest:</strong> <code>{attempt.effective_input_digest}</code></p>
+                            </div>
+                            {hasRecordValues(attempt.effective_input_summary)
+                              ? renderJsonBlock(attempt.effective_input_summary)
+                              : null}
+                          </div>
+                        ))}
+                      </details>
+                    ) : null}
                   </li>
                 ))}
               </ol>

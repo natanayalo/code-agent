@@ -23,7 +23,9 @@ from orchestrator.graph import (
     _coerce_approval_decision,
     _compute_route_decision,
     _default_worker_result_provider,
+    _effective_input_evidence,
     _is_interaction_requirement_resolved,
+    _redact_effective_input,
     _resolve_orchestrator_timeout_seconds,
     _route_after_review_result,
     _task_requires_approval,
@@ -45,7 +47,12 @@ from orchestrator.nodes.utils import (
     _has_meaningful_deliverable,
     _requires_deliverable_evidence,
 )
-from orchestrator.state import DecomposedTaskPlan, NodeOutcome, OrchestratorState
+from orchestrator.state import (
+    DecomposedTaskNode,
+    DecomposedTaskPlan,
+    NodeOutcome,
+    OrchestratorState,
+)
 from orchestrator.task_spec import is_destructive_task
 from workers import Worker, WorkerProfile, WorkerRequest, WorkerResult
 

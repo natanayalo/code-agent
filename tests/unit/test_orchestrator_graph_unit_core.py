@@ -23,6 +23,15 @@ def test_is_destructive_task():
     assert is_destructive_task("test", {"destructive_action": True}) is True
 
 
+def test_redact_effective_input_ignores_non_string_and_blank_secrets() -> None:
+    result = _redact_effective_input(
+        {"token": "visible", "message": "keep this value"},
+        {"", "   ", 7},  # type: ignore[arg-type]
+    )
+
+    assert result == {"token": "[REDACTED]", "message": "keep this value"}
+
+
 def test_task_requires_approval_ignores_untrusted_approved_status() -> None:
     state = OrchestratorState.model_validate(
         {

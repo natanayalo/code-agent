@@ -141,6 +141,18 @@ describe('TaskDetailPanel', () => {
             worker_run_id: 'run-node-1',
             result_summary: 'Implementation completed',
             changed_files: ['src/example.ts'],
+            attempts: [
+              {
+                attempt_number: 1,
+                started_at: '2026-04-28T00:00:00.000Z',
+                duration_ms: 42,
+                status: 'completed',
+                worker_type: 'codex',
+                runtime_mode: 'native_agent',
+                effective_input_summary: { node_id: 'implement' },
+                effective_input_digest: 'a'.repeat(64),
+              },
+            ],
             created_at: '2026-04-28T00:00:00.000Z',
             updated_at: '2026-04-28T00:01:00.000Z',
           },
@@ -154,6 +166,91 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('Implementation completed')).toBeInTheDocument();
     expect(screen.getByText('src/example.ts')).toBeInTheDocument();
     expect(screen.getByText('run-node-1')).toBeInTheDocument();
+    expect(screen.getByText(/Attempt evidence \(1\)/)).toBeInTheDocument();
+  });
+
+  it('renders empty attempt evidence without exposing optional runtime fields', () => {
+    const task = buildTask({
+      execution_plan: {
+        plan_id: 'plan-1',
+        task_id: 'task-1',
+        created_at: '2026-04-28T00:00:00.000Z',
+        updated_at: '2026-04-28T00:01:00.000Z',
+        nodes: [
+          {
+            node_id: 'inspect',
+            goal: 'Inspect the change',
+            status: 'completed',
+            retry_count: 0,
+            attempts: [],
+            created_at: '2026-04-28T00:00:00.000Z',
+            updated_at: '2026-04-28T00:01:00.000Z',
+          },
+          {
+            node_id: 'verify',
+            goal: 'Verify the change',
+            status: 'active',
+            retry_count: 0,
+            attempts: [
+              {
+                attempt_number: 1,
+                started_at: '2026-04-28T00:00:00.000Z',
+                status: 'started',
+                effective_input_summary: {},
+                effective_input_digest: 'b'.repeat(64),
+              },
+              {
+                attempt_number: 2,
+                started_at: '2026-04-28T00:01:00.000Z',
+                status: 'failed',
+                effective_input_summary: {},
+                effective_input_digest: 'd'.repeat(64),
+              },
+            ],
+            created_at: '2026-04-28T00:00:00.000Z',
+            updated_at: '2026-04-28T00:01:00.000Z',
+          },
+        ],
+      },
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.queryByText(/Attempt evidence \(0\)/)).not.toBeInTheDocument();
+    expect(screen.getAllByText('Duration:')[0].parentElement).toHaveTextContent('running');
+    expect(screen.getAllByText('Duration:')[1].parentElement).toHaveTextContent('n/a');
+    expect(screen.getAllByText('Runtime:')[0].parentElement).toHaveTextContent('unknown / unknown');
+    expect(screen.getAllByText('Trace:')[0].parentElement).toHaveTextContent('not captured');
+  });
+
+  it('does not render malformed or empty attempt input summaries', () => {
+    const task = buildTask({
+      execution_plan: {
+        plan_id: 'plan-1',
+        task_id: 'task-1',
+        created_at: '2026-04-28T00:00:00.000Z',
+        updated_at: '2026-04-28T00:01:00.000Z',
+        nodes: [{
+          node_id: 'verify',
+          goal: 'Verify the change',
+          status: 'active',
+          retry_count: 0,
+          attempts: [{
+            attempt_number: 1,
+            started_at: '2026-04-28T00:00:00.000Z',
+            status: 'started',
+            effective_input_summary: null as unknown as Record<string, unknown>,
+            effective_input_digest: 'c'.repeat(64),
+          }],
+          created_at: '2026-04-28T00:00:00.000Z',
+          updated_at: '2026-04-28T00:01:00.000Z',
+        }],
+      },
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.queryByText('Unserializable object value')).not.toBeInTheDocument();
   });
 
   it('renders partial memory trace empty states when only one side has records', async () => {

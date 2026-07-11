@@ -802,6 +802,10 @@ button {
   gap: var(--spacing-sm) var(--spacing-md);
 }
 
+.task-detail-attempt {
+  margin-top: var(--spacing-sm);
+}
+
 .task-detail-group {
   margin-top: var(--spacing-md);
 }

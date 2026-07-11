@@ -971,6 +971,12 @@ class ExecutionPlanNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     execution_plan: Mapped[ExecutionPlan] = relationship(back_populates="nodes")
+    attempts: Mapped[list[ExecutionPlanNodeAttempt]] = relationship(
+        back_populates="plan_node",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by=lambda: ExecutionPlanNodeAttempt.attempt_number.asc(),
+    )
     blocker_interaction: Mapped[HumanInteraction | None] = relationship()
 
     @validates("status")
@@ -980,3 +986,32 @@ class ExecutionPlanNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         """Normalize assigned plan node statuses to the canonical enum."""
 
         return ExecutionPlanNodeStatus(value)
+
+
+class ExecutionPlanNodeAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Durable, append-only execution evidence for one DAG node attempt."""
+
+    __tablename__ = "execution_plan_node_attempts"
+    __table_args__ = (
+        UniqueConstraint("plan_node_id", "attempt_number", name="uq_plan_node_attempt_number"),
+    )
+
+    plan_node_id: Mapped[str] = mapped_column(
+        ForeignKey("execution_plan_nodes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    worker_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    task_trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    worker_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    worker_profile: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    runtime_mode: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="started")
+    failure_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    effective_input_summary: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    effective_input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    plan_node: Mapped[ExecutionPlanNode] = relationship(back_populates="attempts")

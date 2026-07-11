@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from db.base import generate_uuid
+from db.base import generate_uuid, utc_now
 from db.enums import ExecutionPlanNodeStatus
-from db.models import ExecutionPlan, ExecutionPlanNode
+from db.models import ExecutionPlan, ExecutionPlanNode, ExecutionPlanNodeAttempt
 
 
 class ExecutionPlanRepository:
@@ -149,3 +150,82 @@ class ExecutionPlanRepository:
             node.last_attempt_at = last_attempt_at
 
         return node
+
+    def start_attempt(
+        self,
+        *,
+        plan_id: str,
+        node_id: str,
+        effective_input_summary: dict[str, Any],
+        effective_input_digest: str,
+        worker_type: str | None,
+        worker_profile: str | None,
+        runtime_mode: str | None,
+        workspace_id: str | None,
+        task_trace_id: str | None,
+        worker_run_id: str | None = None,
+        max_retries: int = 5,
+    ) -> ExecutionPlanNodeAttempt:
+        """Persist an attempt before a worker is dispatched."""
+        node = self.get_node(plan_id, node_id)
+        if node is None:
+            raise ValueError(f"Unknown execution plan node: {node_id}")
+        for attempt_index in range(max_retries):
+            try:
+                with self.session.begin_nested():
+                    existing_attempt_count = (
+                        self.session.scalar(
+                            select(
+                                func.coalesce(func.max(ExecutionPlanNodeAttempt.attempt_number), 0)
+                            ).where(ExecutionPlanNodeAttempt.plan_node_id == node.id)
+                        )
+                        or 0
+                    )
+                    attempt_number = existing_attempt_count + 1
+                    attempt = ExecutionPlanNodeAttempt(
+                        id=generate_uuid(),
+                        plan_node_id=node.id,
+                        attempt_number=attempt_number,
+                        started_at=utc_now(),
+                        effective_input_summary=effective_input_summary,
+                        effective_input_digest=effective_input_digest,
+                        worker_type=worker_type,
+                        worker_profile=worker_profile,
+                        runtime_mode=runtime_mode,
+                        workspace_id=workspace_id,
+                        worker_run_id=worker_run_id,
+                        task_trace_id=task_trace_id,
+                    )
+                    self.session.add(attempt)
+                    self.session.flush()
+                    return attempt
+            except IntegrityError:
+                if attempt_index == max_retries - 1:
+                    raise
+        raise RuntimeError("Unable to allocate execution-plan attempt number.")
+
+    def finish_attempt(
+        self,
+        *,
+        attempt_id: str,
+        status: str,
+        failure_kind: str | None,
+        workspace_id: str | None = None,
+    ) -> ExecutionPlanNodeAttempt | None:
+        """Finalize a started attempt without modifying historical attempts."""
+        attempt = self.session.get(ExecutionPlanNodeAttempt, attempt_id)
+        if attempt is None:
+            return None
+        finished_at = utc_now()
+        if finished_at.tzinfo is None:
+            finished_at = finished_at.replace(tzinfo=UTC)
+        attempt.finished_at = finished_at
+        started_at = attempt.started_at
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=UTC)
+        attempt.duration_ms = max(0, int((finished_at - started_at).total_seconds() * 1000))
+        attempt.status = status
+        attempt.failure_kind = failure_kind
+        if workspace_id is not None:
+            attempt.workspace_id = workspace_id
+        return attempt
