@@ -79,7 +79,6 @@ function_exceptions:
     _determine_exit_status: Parses and classifies error markers from native execution logs; cohesive matching block.
   orchestrator/execution_interaction_service.py:
     record_interaction_response: Persists operator interaction state and coordinates Temporal resumption as one transaction boundary.
-  orchestrator/temporal/workflows.py:
   tests/integration/test_temporal_runtime.py:
     test_temporal_runtime_happy_path: End-to-end Temporal fixture setup and lifecycle assertions are one operator-flow smoke test.
     test_temporal_runtime_hitl_approval: Approval signal setup and projection assertions cover one durable interaction flow.

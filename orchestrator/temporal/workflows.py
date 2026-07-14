@@ -4,6 +4,8 @@ from temporalio import workflow
 
 from orchestrator.temporal.policy import activity_options
 
+MAX_PERMISSION_ESCALATIONS = 5
+
 
 @workflow.defn
 class TaskExecutionWorkflow:
@@ -68,18 +70,11 @@ class TaskExecutionWorkflow:
         )
 
         # Step 7: Run worker
-        while True:
-            worker_result = await self._run_worker(task_id, execution_task_queue)
-            if not worker_result.get("requires_permission_escalation", False):
-                break
-            permission_granted = await self._handle_permission_escalation(task_id)
-            if not permission_granted:
-                return {"status": "rejected", "summary": "Permission escalation rejected."}
-            await workflow.execute_activity(
-                "provision_workspace",
-                task_id,
-                **activity_options("provision_workspace"),
-            )
+        escalation_failure = await self._run_worker_with_permission_escalations(
+            task_id, execution_task_queue
+        )
+        if escalation_failure is not None:
+            return escalation_failure
 
         # Step 8: Verify result
         await workflow.execute_activity(
@@ -104,6 +99,36 @@ class TaskExecutionWorkflow:
         )
 
         return {"status": "completed", "summary": "Task completed successfully via Temporal."}
+
+    async def _run_worker_with_permission_escalations(
+        self, task_id: str, task_queue: str | None
+    ) -> dict | None:
+        """Run the worker while bounding repeated permission requests."""
+        escalation_count = 0
+        while True:
+            worker_result = await self._run_worker(task_id, task_queue)
+            if not worker_result.get("requires_permission_escalation", False):
+                return None
+            escalation_count += 1
+            if escalation_count > MAX_PERMISSION_ESCALATIONS:
+                failure = (
+                    "Maximum sequential permission escalation limit reached "
+                    f"({MAX_PERMISSION_ESCALATIONS})."
+                )
+                await workflow.execute_activity(
+                    "record_workflow_failure",
+                    args=[task_id, failure],
+                    **activity_options("record_workflow_failure"),
+                )
+                return {"status": "failed", "summary": failure}
+            permission_granted = await self._handle_permission_escalation(task_id)
+            if not permission_granted:
+                return {"status": "rejected", "summary": "Permission escalation rejected."}
+            await workflow.execute_activity(
+                "provision_workspace",
+                task_id,
+                **activity_options("provision_workspace"),
+            )
 
     async def _run_worker(self, task_id: str, task_queue: str | None) -> dict:
         return await workflow.execute_activity(

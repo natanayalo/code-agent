@@ -56,3 +56,13 @@ async def test_temporal_activity_awaits_plain_async_nodes_directly() -> None:
         return {"seen": state["value"]}
 
     assert await activity._run_node(node, {"value": 42}) == {"seen": 42}
+
+
+def test_temporal_activity_ignores_empty_node_updates() -> None:
+    """Side-effect-only nodes may return no state update."""
+    activity = object.__new__(TaskExecutionActivities)
+    state: dict[str, object] = {"value": 42}
+
+    activity._merge_updates(state, None)
+
+    assert state == {"value": 42}

@@ -4,7 +4,7 @@ import pytest
 from temporalio import workflow
 
 from orchestrator.temporal.policy import activity_options
-from orchestrator.temporal.workflows import TaskExecutionWorkflow
+from orchestrator.temporal.workflows import MAX_PERMISSION_ESCALATIONS, TaskExecutionWorkflow
 
 
 def test_worker_activity_policy_has_bounded_retry_and_heartbeat() -> None:
@@ -89,3 +89,36 @@ async def test_workflow_repeats_sequential_permission_escalations(monkeypatch) -
     assert activity_names.count("request_permission_escalation") == 2
     assert activity_names.count("resolve_permission_escalation") == 2
     assert activity_names.count("provision_workspace") == 3
+
+
+@pytest.mark.anyio
+async def test_workflow_bounds_repeated_permission_escalations(monkeypatch) -> None:
+    """A misconfigured worker must not loop on permission requests forever."""
+    workflow_instance = TaskExecutionWorkflow()
+    activity_names: list[str] = []
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "classify_and_plan":
+            return {}
+        if name == "run_worker":
+            return {"requires_permission_escalation": True}
+        return None
+
+    async def wait_condition(predicate) -> None:
+        workflow_instance.permission_escalation_decision = True
+
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+
+    result = await workflow_instance._run_lifecycle("task-id")
+
+    assert result == {
+        "status": "failed",
+        "summary": (
+            "Maximum sequential permission escalation limit reached "
+            f"({MAX_PERMISSION_ESCALATIONS})."
+        ),
+    }
+    assert activity_names.count("run_worker") == MAX_PERMISSION_ESCALATIONS + 1
+    assert activity_names[-1] == "record_workflow_failure"

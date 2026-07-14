@@ -264,7 +264,9 @@ class TaskExecutionActivities:
                     task_id=task_id, state=state.model_dump(mode="json")
                 )
 
-    def _merge_updates(self, state_dict: dict[str, Any], updates: dict[str, Any]) -> None:
+    def _merge_updates(self, state_dict: dict[str, Any], updates: dict[str, Any] | None) -> None:
+        if not isinstance(updates, dict):
+            return
         for key, val in updates.items():
             if val is None:
                 continue
@@ -501,7 +503,8 @@ class TaskExecutionActivities:
             self._merge_updates(state_dict, updates)
 
             state = OrchestratorState.model_validate(state_dict)
-            constraints = dict(state.task.constraints)
+            constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+            constraints = dict(constraints)
             constraints.pop("permission_escalation_retry", None)
             state.task = state.task.model_copy(update={"constraints": constraints})
             finished_at = utc_now()
