@@ -15,6 +15,7 @@ from db.enums import (
     HumanInteractionStatus,
     HumanInteractionType,
     TaskStatus,
+    TimelineEventType,
 )
 from db.models import HumanInteraction
 from orchestrator import execution as execution_module
@@ -140,6 +141,60 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
             "symptom": "failing retry path",
         }
         assert timeline[-1].event_type.value == "task_spec_and_route_generated"
+
+
+def test_record_interaction_response_rejects_normal_permission(monkeypatch) -> None:
+    """Generic permission rejection must project failure before signaling Temporal."""
+    service, session_factory = _make_task_service()
+    task_snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="Reject elevated permission",
+            constraints={"requires_approval": True},
+        )
+    )
+
+    with session_scope(session_factory) as session:
+        HumanInteractionRepository(session).sync_task_spec_flags(
+            task_id=task_snapshot.task_id,
+            task_spec={
+                "requires_permission": True,
+                "permission_reason": "Need workspace write access.",
+                "risk_level": "high",
+            },
+        )
+        permission_interaction = next(
+            row
+            for row in HumanInteractionRepository(session).list_by_task(
+                task_id=task_snapshot.task_id
+            )
+            if row.interaction_type is HumanInteractionType.PERMISSION
+        )
+
+    temporal_signals: list[tuple[str, str, object]] = []
+
+    async def signal_temporal_workflow(task_id: str, signal_name: str, arg: object) -> None:
+        temporal_signals.append((task_id, signal_name, arg))
+
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    monkeypatch.setattr(service, "signal_temporal_workflow", signal_temporal_workflow)
+    refreshed = service.record_interaction_response(
+        task_snapshot.task_id,
+        permission_interaction.id,
+        execution_module.InteractionResponse(response_data={"approved": False}),
+    )
+
+    assert refreshed is not None
+    assert refreshed.status == TaskStatus.FAILED.value
+    assert temporal_signals == [(task_snapshot.task_id, "handle_approval", False)]
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(task_snapshot.task_id)
+        assert task is not None
+        assert task.status is TaskStatus.FAILED
+        assert task.next_attempt_at is None
+        assert task.constraints["approval"]["status"] == "rejected"
+        assert task.last_error == "Manual approval rejected via interaction response."
+        timeline = TaskTimelineRepository(session).list_by_task(task_snapshot.task_id)
+        assert timeline[-1].event_type is TimelineEventType.APPROVAL_REJECTED
 
 
 def test_record_interaction_response_ignores_missing_observation_dependency(

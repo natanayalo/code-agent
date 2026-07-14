@@ -102,24 +102,37 @@ def _persist_resolved_interaction(
     }
     constraints["interactions"] = interactions
 
-    if (
+    response_data = response.response_data or {}
+    approved = response_data.get("approved", True)
+    is_normal_permission = (
         interaction.interaction_type == HumanInteractionType.PERMISSION
         and not is_permission_escalation
-    ):
+    )
+    if is_normal_permission:
         constraints["requires_approval"] = False
         constraints["approval"] = {
-            "status": "approved",
+            "status": "approved" if approved else "rejected",
             "source": "orchestrator",
-            "reason": f"Permission granted via interaction {interaction.id}",
-            "granted_at": utc_now().isoformat(),
+            "reason": (
+                f"Permission granted via interaction {interaction.id}"
+                if approved
+                else f"Permission rejected via interaction {interaction.id}"
+            ),
+            "updated_at": utc_now().isoformat(),
         }
 
     task.constraints = constraints
     task.next_attempt_at = utc_now()
     task.status = TaskStatus.PENDING
+    if is_normal_permission and not approved:
+        task.next_attempt_at = None
+        task.status = TaskStatus.FAILED
+        task.last_error = "Manual approval rejected via interaction response."
     event_type = (
         TimelineEventType.APPROVAL_GRANTED
-        if interaction.interaction_type == HumanInteractionType.PERMISSION
+        if is_normal_permission and approved
+        else TimelineEventType.APPROVAL_REJECTED
+        if is_normal_permission
         else TimelineEventType.TASK_SPEC_AND_ROUTE_GENERATED
     )
     timeline_repo.create_next_for_attempt(
