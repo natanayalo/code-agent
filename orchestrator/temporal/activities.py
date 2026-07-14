@@ -696,6 +696,5 @@ class TaskExecutionActivities:
             state=state,
             started_at=started_at,
             finished_at=finished_at,
-            clear_snapshot=True,
         )
         state.timeline_persisted_count = len(state.timeline_events)

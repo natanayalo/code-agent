@@ -93,6 +93,7 @@ def record_interaction_response(
     response: InteractionResponse,
 ) -> TaskSnapshot | None:
     """Apply an operator response to a pending interaction and trigger task resumption."""
+    temporal_signal: tuple[str, object] | None = None
     with session_scope(self.session_factory) as session:
         task_repo = TaskRepository(session)
         interaction_repo = HumanInteractionRepository(session)
@@ -182,41 +183,23 @@ def record_interaction_response(
             if is_permission_escalation:
                 resp_data = response.response_data
                 approved = resp_data.get("approved", True) if resp_data else True
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(
-                        self.signal_temporal_workflow(
-                            task_id, "handle_permission_escalation", approved
-                        )
-                    )
-                except RuntimeError:
-                    asyncio.run(
-                        self.signal_temporal_workflow(
-                            task_id, "handle_permission_escalation", approved
-                        )
-                    )
+                temporal_signal = ("handle_permission_escalation", approved)
             elif interaction.interaction_type == HumanInteractionType.PERMISSION:
                 resp_data = response.response_data
                 approved = resp_data.get("approved", True) if resp_data else True
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(
-                        self.signal_temporal_workflow(task_id, "handle_approval", approved)
-                    )
-                except RuntimeError:
-                    asyncio.run(self.signal_temporal_workflow(task_id, "handle_approval", approved))
+                temporal_signal = ("handle_approval", approved)
             elif interaction.interaction_type == HumanInteractionType.CLARIFICATION:
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(
-                        self.signal_temporal_workflow(task_id, "handle_clarification", None)
-                    )
-                except RuntimeError:
-                    asyncio.run(
-                        self.signal_temporal_workflow(task_id, "handle_clarification", None)
-                    )
+                temporal_signal = ("handle_clarification", None)
 
-        return self.get_task(task_id)
+    if temporal_signal is not None:
+        signal_name, signal_arg = temporal_signal
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.signal_temporal_workflow(task_id, signal_name, signal_arg))
+        except RuntimeError:
+            asyncio.run(self.signal_temporal_workflow(task_id, signal_name, signal_arg))
+
+    return self.get_task(task_id)
 
 
 def _validate_approval_state(

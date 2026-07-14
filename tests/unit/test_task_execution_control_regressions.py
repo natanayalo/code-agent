@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import logging
+from contextlib import contextmanager
 
 from sqlalchemy.pool import StaticPool
 
@@ -16,6 +17,7 @@ from db.enums import (
 )
 from db.models import HumanInteraction
 from orchestrator import execution as execution_module
+from orchestrator import execution_interaction_service as interaction_module
 from repositories import (
     HumanInteractionRepository,
     TaskRepository,
@@ -62,11 +64,25 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
         if interaction.interaction_type == "clarification"
     )
     temporal_signals: list[tuple[str, str, object]] = []
+    active_transactions = 0
+    original_session_scope = interaction_module.session_scope
+
+    @contextmanager
+    def tracking_session_scope(factory):
+        nonlocal active_transactions
+        active_transactions += 1
+        try:
+            with original_session_scope(factory) as session:
+                yield session
+        finally:
+            active_transactions -= 1
 
     async def signal_temporal_workflow(task_id: str, signal_name: str, arg: object) -> None:
+        assert active_transactions == 0
         temporal_signals.append((task_id, signal_name, arg))
 
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    monkeypatch.setattr(interaction_module, "session_scope", tracking_session_scope)
     monkeypatch.setattr(service, "signal_temporal_workflow", signal_temporal_workflow)
 
     refreshed = service.record_interaction_response(

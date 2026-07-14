@@ -1,6 +1,10 @@
 from datetime import timedelta
 
+import pytest
+from temporalio import workflow
+
 from orchestrator.temporal.policy import activity_options
+from orchestrator.temporal.workflows import TaskExecutionWorkflow
 
 
 def test_worker_activity_policy_has_bounded_retry_and_heartbeat() -> None:
@@ -34,3 +38,23 @@ def test_unknown_activity_policy_is_rejected() -> None:
         assert str(exc) == "Unknown Temporal activity policy: unknown"
     else:  # pragma: no cover - assertion guard
         raise AssertionError("Unknown activity policy unexpectedly resolved.")
+
+
+@pytest.mark.anyio
+async def test_workflow_persists_memory_before_terminal_delivery(monkeypatch) -> None:
+    """The final worker state must still exist when memory persistence runs."""
+    activity_names: list[str] = []
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "classify_and_plan":
+            return {}
+        if name == "run_worker":
+            return {}
+        return None
+
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+
+    await TaskExecutionWorkflow()._run_lifecycle("task-id")
+
+    assert activity_names[-2:] == ["persist_memory", "deliver_result"]

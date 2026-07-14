@@ -105,18 +105,19 @@ class TaskExecutionWorkflow:
             **activity_options("verify_result"),
         )
 
-        # Step 9: Deliver result
-        await workflow.execute_activity(
-            "deliver_result",
-            task_id,
-            **activity_options("deliver_result"),
-        )
-
-        # Step 10: Persist memory
+        # Step 9: Persist memory before terminal delivery so the final worker
+        # result remains available in the Temporal snapshot.
         await workflow.execute_activity(
             "persist_memory",
             task_id,
             **activity_options("persist_memory"),
+        )
+
+        # Step 10: Deliver result and remove the completed snapshot.
+        await workflow.execute_activity(
+            "deliver_result",
+            task_id,
+            **activity_options("deliver_result"),
         )
 
         return {"status": "completed", "summary": "Task completed successfully via Temporal."}
