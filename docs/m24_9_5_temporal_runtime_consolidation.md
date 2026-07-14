@@ -7,8 +7,7 @@ M25 adds concurrent DAG execution. This is a simplification milestone, not a
 second orchestration implementation and not a broad rewrite.
 
 The PoC decision is carried forward here as the implementation boundary for
-M25. Supporting ownership and retirement details are in the
-[LangGraph boundary audit](m24_9_5_langgraph_boundary_audit.md) and
+M25. The legacy retirement gates remain in the
 [legacy drain plan](m24_9_5_legacy_drain_plan.md).
 
 ## Target boundary
@@ -19,6 +18,42 @@ M25. Supporting ownership and retirement details are in the
 | Postgres product projection | Tasks, interactions, timeline, artifacts, dashboard queries, and user-visible delivery state. |
 | code-agent domain logic | Task classification, planning/decomposition, worker/provider behavior, workspace policy, validation, review, and memory governance. |
 | Legacy runtime | Explicit fallback only while existing tasks and operational parity are drained and verified. |
+
+## LangGraph boundary audit
+
+Temporal is the durable execution owner for the enabled runtime. LangGraph is
+legacy orchestration only; it is not a dependency of the Temporal workflow
+path. Domain nodes and optional agent reasoning remain reusable code-agent
+logic, not Temporal-owned behavior.
+
+Keep the existing seams rather than introducing parallel `BrainPort` or
+`NodeRunnerPort` abstractions:
+
+| Seam | Existing implementation | Boundary |
+| --- | --- | --- |
+| Brain | `orchestrator.brain.OrchestratorBrain` | Supplies advisory TaskSpec and route suggestions; it does not own durable sequencing. |
+| Worker execution | `workers.Worker` plus `build_await_result_node` | Remains the execution seam; extract a named node runner only for a concrete Temporal requirement. |
+| Durable lifecycle | `TaskExecutionWorkflow` | Owns sequencing, waits, retries, cancellation, and terminal failure projection. |
+| Product projection | Temporal activities plus repositories | Postgres owns tasks, interactions, timeline, artifacts, and dashboard reads. |
+
+The legacy graph in `orchestrator/graph.py` retains only fallback lifecycle
+responsibilities. Its task understanding, worker execution, workspace,
+validation, review, delivery, and memory logic remain reusable domain code
+called by activities. Temporal invokes the domain-node equivalents directly
+and does not compile or restore a LangGraph graph or checkpoint.
+
+The supported legacy interrupt families have Temporal equivalents:
+
+| Legacy interrupt | Temporal replacement |
+| --- | --- |
+| Main task approval | Persisted DB interaction plus `handle_approval` signal. |
+| Clarification | Persisted DB interaction plus `handle_clarification` signal. |
+| Permission escalation | Distinct worker-escalation interaction plus `handle_permission_escalation` signal, with grant, rejection, duplicate-response, and cancellation coverage. |
+
+Keep LangGraph checkpoint and interrupt support until the drain conditions are
+met. No new Temporal control flow may depend on a LangGraph checkpoint, and no
+domain decision logic should move into the Temporal workflow; the workflow
+chooses activities and waits for durable interaction state.
 
 ## Current ownership audit
 
