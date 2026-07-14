@@ -24,7 +24,6 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("task_id", name="uq_temporal_task_states_task_id"),
     )
-    op.create_index("ix_temporal_task_states_task_id", "temporal_task_states", ["task_id"])
 
 
 def downgrade() -> None:

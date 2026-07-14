@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import builtins
 import logging
 from contextlib import contextmanager
@@ -49,6 +50,28 @@ def _make_task_service() -> tuple[execution_module.TaskExecutionService, object]
         worker=_StaticWorker(),
     )
     return service, session_factory
+
+
+def test_temporal_client_cache_is_scoped_to_event_loop(monkeypatch) -> None:
+    """Sync fallbacks must not reuse a client bound to a closed event loop."""
+    service, _ = _make_task_service()
+    clients: list[object] = []
+
+    async def connect(_address: str) -> object:
+        client = object()
+        clients.append(client)
+        return client
+
+    from temporalio.client import Client
+
+    monkeypatch.setattr(Client, "connect", connect)
+
+    first_client = asyncio.run(service._get_temporal_client())
+    second_client = asyncio.run(service._get_temporal_client())
+
+    assert first_client is clients[0]
+    assert second_client is clients[1]
+    assert first_client is not second_client
 
 
 def test_record_interaction_response_clarification_requeues_without_approval_side_effects(

@@ -58,3 +58,34 @@ async def test_workflow_persists_memory_before_terminal_delivery(monkeypatch) ->
     await TaskExecutionWorkflow()._run_lifecycle("task-id")
 
     assert activity_names[-2:] == ["persist_memory", "deliver_result"]
+
+
+@pytest.mark.anyio
+async def test_workflow_repeats_sequential_permission_escalations(monkeypatch) -> None:
+    """Each worker retry must be able to request a fresh permission decision."""
+    workflow_instance = TaskExecutionWorkflow()
+    worker_results = iter(
+        [
+            {"requires_permission_escalation": True},
+            {"requires_permission_escalation": True},
+            {"requires_permission_escalation": False},
+        ]
+    )
+    activity_names: list[str] = []
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        return next(worker_results) if name == "run_worker" else {}
+
+    async def wait_condition(predicate) -> None:
+        workflow_instance.permission_escalation_decision = True
+
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+
+    result = await workflow_instance._run_lifecycle("task-id")
+
+    assert result["status"] == "completed"
+    assert activity_names.count("request_permission_escalation") == 2
+    assert activity_names.count("resolve_permission_escalation") == 2
+    assert activity_names.count("provision_workspace") == 3

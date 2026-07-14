@@ -149,7 +149,11 @@ class TaskExecutionActivities:
                 approval_status = (
                     approval_data.get("status") if isinstance(approval_data, dict) else None
                 )
-                if approval_status in {"approved", "rejected"} and state.approval.required:
+                if (
+                    approval_status in {"approved", "rejected"}
+                    and state.approval is not None
+                    and state.approval.required
+                ):
                     state.approval = state.approval.model_copy(update={"status": approval_status})
                 persisted_count = TaskTimelineRepository(session).count_by_attempt(
                     task_id=task_id,
@@ -410,9 +414,10 @@ class TaskExecutionActivities:
     @_restore_task_trace_context
     async def provision_workspace(self, task_id: str) -> None:
         state = await self.service._run_blocking(self._get_current_state, task_id)
-        retrying_permission_escalation = bool(
-            state.task.constraints.get("permission_escalation_retry")
+        task_constraints = (
+            state.task.constraints if isinstance(state.task.constraints, dict) else {}
         )
+        retrying_permission_escalation = bool(task_constraints.get("permission_escalation_retry"))
         if (
             self._has_event(state, TimelineEventType.WORKSPACE_PROVISIONED)
             and not retrying_permission_escalation
@@ -442,9 +447,10 @@ class TaskExecutionActivities:
     @_restore_task_trace_context
     async def run_worker(self, task_id: str) -> dict[str, bool]:
         state = await self.service._run_blocking(self._get_current_state, task_id)
-        retrying_permission_escalation = bool(
-            state.task.constraints.get("permission_escalation_retry")
+        task_constraints = (
+            state.task.constraints if isinstance(state.task.constraints, dict) else {}
         )
+        retrying_permission_escalation = bool(task_constraints.get("permission_escalation_retry"))
         if (
             self._has_event(
                 state,
@@ -458,17 +464,37 @@ class TaskExecutionActivities:
             return {"requires_permission_escalation": False}
 
         async def send_heartbeats() -> None:
-            while True:
-                activity.heartbeat()
-                await asyncio.sleep(5)
+            try:
+                while True:
+                    activity.heartbeat()
+                    await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                raise
+            except RuntimeError as exc:
+                logger.debug("Temporal heartbeat failed for task %s: %s", task_id, exc)
+                raise
 
         heartbeat_task = asyncio.create_task(
             send_heartbeats(), name=f"temporal-worker-heartbeat-{task_id}"
         )
+        worker_task: asyncio.Task[dict[str, Any]] | None = None
         try:
             started_at = utc_now()
             state_dict = state.model_dump()
-            updates = await self._run_node(self.await_result_node, state_dict)
+            worker_task = asyncio.create_task(
+                self._run_node(self.await_result_node, state_dict),
+                name=f"temporal-worker-execution-{task_id}",
+            )
+            done, _ = await asyncio.wait(
+                {worker_task, heartbeat_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if heartbeat_task in done:
+                heartbeat_error = heartbeat_task.exception()
+                worker_task.cancel()
+                await asyncio.gather(worker_task, return_exceptions=True)
+                raise heartbeat_error or RuntimeError("Temporal heartbeat stopped unexpectedly.")
+            updates = await worker_task
             self._merge_updates(state_dict, updates)
 
             state = OrchestratorState.model_validate(state_dict)
@@ -491,6 +517,9 @@ class TaskExecutionActivities:
                 )
             }
         finally:
+            if worker_task is not None and not worker_task.done():
+                worker_task.cancel()
+                await asyncio.gather(worker_task, return_exceptions=True)
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
 
