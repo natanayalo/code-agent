@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from datetime import datetime
 from functools import wraps
@@ -284,6 +285,8 @@ class TaskExecutionActivities:
             return {}
         if hasattr(node, "ainvoke"):
             res = await node.ainvoke(state_dict)
+        elif inspect.iscoroutinefunction(node):
+            res = await node(state_dict)
         else:
 
             def _sync_run() -> Any:
@@ -292,8 +295,6 @@ class TaskExecutionActivities:
                 return node(state_dict)
 
             res = await self.service._run_blocking(_sync_run)
-
-        import inspect
 
         if inspect.isawaitable(res):
             res = await res

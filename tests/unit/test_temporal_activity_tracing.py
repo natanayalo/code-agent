@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from orchestrator.temporal.activities import _restore_task_trace_context
+from orchestrator.temporal.activities import TaskExecutionActivities, _restore_task_trace_context
 
 
 @pytest.mark.anyio
@@ -39,3 +39,20 @@ async def test_temporal_activity_restores_task_trace_context(monkeypatch) -> Non
 
     assert await FakeActivity().execute("task-123") == "done"
     assert seen_contexts == [{"traceparent": "00-abc-def-01"}]
+
+
+@pytest.mark.anyio
+async def test_temporal_activity_awaits_plain_async_nodes_directly() -> None:
+    """Coroutine nodes must not be created inside the blocking worker thread."""
+
+    class FakeService:
+        async def _run_blocking(self, func, *args):
+            raise AssertionError("plain async nodes must bypass _run_blocking")
+
+    activity = object.__new__(TaskExecutionActivities)
+    activity.service = FakeService()
+
+    async def node(state: dict[str, object]) -> dict[str, object]:
+        return {"seen": state["value"]}
+
+    assert await activity._run_node(node, {"value": 42}) == {"seen": 42}
