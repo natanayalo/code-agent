@@ -86,13 +86,23 @@ mkdir -p "$CODE_AGENT_WORKSPACE_ROOT"
 echo "[run-production-like] Using shared workspace root: $CODE_AGENT_WORKSPACE_ROOT"
 echo "[run-production-like] Codex sandbox mode: $CODE_AGENT_CODEX_SANDBOX"
 
+services="postgres migrate api worker dashboard"
 if is_enabled "${CODE_AGENT_ENABLE_TRACING:-0}"; then
   echo "[run-production-like] Tracing enabled (CODE_AGENT_ENABLE_TRACING=1); starting phoenix too"
-  echo "[run-production-like] Starting postgres + migration + api + worker + phoenix + dashboard"
-  docker compose --profile observability --env-file "$ENV_FILE" up -d --build postgres migrate api worker phoenix dashboard
+  services="$services phoenix"
+fi
+if is_enabled "${CODE_AGENT_USE_TEMPORAL:-0}"; then
+  echo "[run-production-like] Temporal enabled (CODE_AGENT_USE_TEMPORAL=true); starting temporal and temporal-ui too"
+  services="$services temporal temporal-ui"
+fi
+
+echo "[run-production-like] Starting $services"
+if is_enabled "${CODE_AGENT_ENABLE_TRACING:-0}"; then
+  # shellcheck disable=SC2086
+  docker compose --profile observability --env-file "$ENV_FILE" up -d --build $services
 else
-  echo "[run-production-like] Starting postgres + migration + api + worker + dashboard"
-  docker compose --env-file "$ENV_FILE" up -d --build postgres migrate api worker dashboard
+  # shellcheck disable=SC2086
+  docker compose --env-file "$ENV_FILE" up -d --build $services
 fi
 
 api_container_id="$(docker compose --env-file "$ENV_FILE" ps -q api)"

@@ -15,6 +15,27 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER?Please set POSTGRES_USER in .env}
+      - POSTGRES_PWD=${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}
+      - POSTGRES_SEEDS=postgres
+    ports:
+      - "7233:7233"
+    depends_on:
+      postgres:
+        condition: service_healthy
+  temporal-ui:
+    image: temporalio/ui:2.24.0
+    ports:
+      - "8080:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - temporal
   migrate:
     build:
       context: .
@@ -62,6 +83,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER?Please set POSTGRES_USER in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DATABASE_HOST:-postgres}:${DATABASE_PORT:-5432}/${POSTGRES_DB}
+      CODE_AGENT_EXECUTION_RUNTIME: ${CODE_AGENT_EXECUTION_RUNTIME:-temporal}
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS_DOCKER:-temporal:7233}
     ports:
       - "8000:8000"
     depends_on:
@@ -115,6 +138,8 @@ services:
       OTEL_RESOURCE_ATTRIBUTES: "openinference.project.name=${CODE_AGENT_TRACING_PROJECT:-code-agent-local},service.name=code-agent-worker"
       CODE_AGENT_CODEX_RUNTIME_MODE: ${CODE_AGENT_CODEX_RUNTIME_MODE:-native_agent}
       CODE_AGENT_CODEX_TRUSTED_REPO_PATTERNS: ${CODE_AGENT_CODEX_TRUSTED_REPO_PATTERNS:-}
+      CODE_AGENT_EXECUTION_RUNTIME: ${CODE_AGENT_EXECUTION_RUNTIME:-temporal}
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS_DOCKER:-temporal:7233}
     depends_on:
       postgres:
         condition: service_healthy

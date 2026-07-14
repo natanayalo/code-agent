@@ -6,7 +6,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from apps.runtime import _is_enabled, coerce_non_negative_int_env
+from apps.runtime import coerce_non_negative_int_env, is_enabled
 from sandbox.container import DEFAULT_SANDBOX_IMAGE
 from sandbox.workspace import default_workspace_root
 
@@ -74,7 +74,7 @@ class SystemConfig:
         return cls(
             default_image=image,
             workspace_root=workspace_root,
-            scout_scheduler_enabled=_is_enabled(
+            scout_scheduler_enabled=is_enabled(
                 environ.get("CODE_AGENT_SCOUT_SCHEDULER_ENABLED"), default=False
             ),
             scout_idle_trigger_minutes=coerce_non_negative_int_env(
@@ -83,7 +83,7 @@ class SystemConfig:
             scout_schedule_interval_minutes=coerce_non_negative_int_env(
                 environ.get("CODE_AGENT_SCOUT_SCHEDULE_INTERVAL_MINUTES"), default=1440
             ),
-            ci_polling_enabled=_is_enabled(
+            ci_polling_enabled=is_enabled(
                 environ.get("CODE_AGENT_CI_POLLING_ENABLED"), default=False
             ),
             ci_polling_interval_minutes=coerce_non_negative_int_env(

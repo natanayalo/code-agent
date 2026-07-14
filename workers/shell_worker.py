@@ -62,6 +62,7 @@ def _apply_diff_if_provided(
             session_id=request.session_id,
             redactor=SecretRedactor(list((request.secrets or {}).values())),
             span_kind=SPAN_KIND_TOOL,
+            require_observable_result=False,
         )
     )
     setup_commands = [
@@ -111,6 +112,7 @@ def _run_shell_script(
             session_id=request.session_id,
             redactor=SecretRedactor(list((request.secrets or {}).values())),
             span_kind=SPAN_KIND_TOOL,
+            require_observable_result=False,
         )
     )
 

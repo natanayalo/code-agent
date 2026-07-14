@@ -298,6 +298,9 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     execution_plan: Mapped[ExecutionPlan | None] = relationship(
         back_populates="task", passive_deletes=True
     )
+    temporal_state: Mapped[TemporalTaskState | None] = relationship(
+        back_populates="task", cascade="all, delete-orphan", passive_deletes=True
+    )
     repair_for_task: Mapped[Task | None] = relationship(
         remote_side="Task.id", back_populates="repairing_tasks"
     )
@@ -342,6 +345,19 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         if value is None:
             return None
         return WorkerRuntimeMode(value)
+
+
+class TemporalTaskState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Encrypted durable activity handoff state for a Temporal task workflow."""
+
+    __tablename__ = "temporal_task_states"
+
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    )
+    state: Mapped[dict[str, Any]] = mapped_column(EncryptedJSON, nullable=False)
+
+    task: Mapped[Task] = relationship(back_populates="temporal_state")
 
 
 class WorkerRun(UUIDPrimaryKeyMixin, Base):
@@ -633,6 +649,7 @@ class TaskTimelineEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "sequence_number",
             name="uq_task_timeline_events_task_attempt_seq",
         ),
+        UniqueConstraint("task_id", "event_key", name="uq_task_timeline_events_task_event_key"),
     )
 
     task_id: Mapped[str] = mapped_column(
@@ -650,6 +667,7 @@ class TaskTimelineEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         default=0,
     )
+    event_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     event_type: Mapped[TimelineEventType] = mapped_column(
         TIMELINE_EVENT_TYPE_ENUM,
         nullable=False,

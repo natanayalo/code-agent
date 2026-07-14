@@ -14,6 +14,9 @@ file_exceptions:
   workers/native_agent_runner.py: Runner handles complex interactions with native agents including network retries, output capture, and workspace integration. (Cannot easily split further without breaking CLI contract)
   evaluation/harness.py: File exceeds length due to comprehensive evaluation orchestration and formatting requirements.
   tests/unit/test_evaluation_harness.py: File exceeds length due to extensive test coverage for all reporting permutations.
+  tests/unit/test_native_agent_runner.py: Native-agent result-integrity regressions extend the cohesive runner contract coverage.
+  tests/integration/test_temporal_runtime.py: Comprehensive Temporal integration coverage shares one Compose/test-fixture boundary for lifecycle, HITL, cancellation, retry, and projection behavior.
+  orchestrator/temporal/activities.py: Temporal activity adapters keep the product projection and worker handoff contract together.
   tests/unit/test_memory_observation.py: Contains comprehensive unit tests for all memory observation, candidate extraction, and trace-bridging rules.
 function_exceptions:
   orchestrator/nodes/verification_result.py:
@@ -75,6 +78,20 @@ function_exceptions:
   workers/native_agent_runner.py:
     _collect_native_agent_results: Coordinates async result collection from the agent and tool runner; tightly coupled logic.
     _determine_exit_status: Parses and classifies error markers from native execution logs; cohesive matching block.
+  workers/shell_worker.py:
+    _run_shell_script: Shell execution setup, invocation, and result projection remain one cohesive worker boundary.
+  orchestrator/execution_interaction_service.py:
+    record_interaction_response: Persists operator interaction state and coordinates Temporal resumption as one transaction boundary.
+    apply_task_approval_decision: Applies approval state, pending interaction cleanup, and Temporal resumption atomically.
+  orchestrator/temporal/workflows.py:
+    _run_lifecycle: Sequential Temporal lifecycle ordering is intentionally kept visible as one durable workflow boundary.
+  tests/integration/test_temporal_runtime.py:
+    test_temporal_runtime_happy_path: End-to-end Temporal fixture setup and lifecycle assertions are one operator-flow smoke test.
+    test_temporal_runtime_hitl_approval: Approval signal setup and projection assertions cover one durable interaction flow.
+    test_temporal_runtime_clarification_interaction_resumes_workflow: Clarification pause/resume setup and assertions cover one durable interaction flow.
+    _exercise_permission_escalation_workflow_with_docker: Docker-backed permission escalation setup and assertions cover one integration flow.
+    test_temporal_runtime_cancellation_projects_terminal_state: Cancellation setup and terminal projection assertions cover one durable workflow flow.
+    test_temporal_runtime_idempotency_and_retry: Retry/idempotency setup and projection assertions cover one durable workflow flow.
   workers/self_review.py:
     run_shared_self_review_fix_loop: Bounded retry loop mutating execution in place; heavy local state coupling.
   orchestrator/execution_queue.py:

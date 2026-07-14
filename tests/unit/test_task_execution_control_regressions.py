@@ -8,7 +8,13 @@ import logging
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
-from db.enums import HumanInteractionStatus, HumanInteractionType, TaskStatus
+from db.enums import (
+    HumanInteractionHitlMode,
+    HumanInteractionStatus,
+    HumanInteractionType,
+    TaskStatus,
+)
+from db.models import HumanInteraction
 from orchestrator import execution as execution_module
 from repositories import (
     HumanInteractionRepository,
@@ -43,7 +49,9 @@ def _make_task_service() -> tuple[execution_module.TaskExecutionService, object]
     return service, session_factory
 
 
-def test_record_interaction_response_clarification_requeues_without_approval_side_effects() -> None:
+def test_record_interaction_response_clarification_requeues_without_approval_side_effects(
+    monkeypatch,
+) -> None:
     """Clarification answers should resume the task without mutating approval state."""
     service, session_factory = _make_task_service()
     snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="debug this"))
@@ -53,6 +61,13 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
         for interaction in snapshot.pending_interactions
         if interaction.interaction_type == "clarification"
     )
+    temporal_signals: list[tuple[str, str, object]] = []
+
+    async def signal_temporal_workflow(task_id: str, signal_name: str, arg: object) -> None:
+        temporal_signals.append((task_id, signal_name, arg))
+
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    monkeypatch.setattr(service, "signal_temporal_workflow", signal_temporal_workflow)
 
     refreshed = service.record_interaction_response(
         snapshot.task_id,
@@ -67,6 +82,7 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
     assert refreshed.pending_interaction_count == 0
     assert refreshed.pending_interactions == []
     assert any(event.event_type == "task_spec_and_route_generated" for event in refreshed.timeline)
+    assert temporal_signals == [(snapshot.task_id, "handle_clarification", None)]
 
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(snapshot.task_id)
@@ -116,6 +132,47 @@ def test_record_interaction_response_ignores_missing_observation_dependency(
 
     assert refreshed is not None
     assert refreshed.status == TaskStatus.PENDING.value
+
+
+def test_permission_escalation_response_signals_dedicated_temporal_handler(monkeypatch) -> None:
+    """Worker escalation responses must not be confused with task approval."""
+    service, session_factory = _make_task_service()
+    snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="debug this"))
+    temporal_signals: list[tuple[str, str, object]] = []
+
+    async def signal_temporal_workflow(task_id: str, signal_name: str, arg: object) -> None:
+        temporal_signals.append((task_id, signal_name, arg))
+
+    with session_scope(session_factory) as session:
+        interaction = HumanInteraction(
+            task_id=snapshot.task_id,
+            interaction_type=HumanInteractionType.PERMISSION,
+            status=HumanInteractionStatus.PENDING,
+            hitl_mode=HumanInteractionHitlMode.REQUIRE_APPROVAL,
+            summary="Worker needs workspace_write.",
+            data={"source": "worker_permission_escalation"},
+        )
+        session.add(interaction)
+        session.flush()
+        interaction_id = interaction.id
+
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    monkeypatch.setattr(service, "signal_temporal_workflow", signal_temporal_workflow)
+    refreshed = service.record_interaction_response(
+        snapshot.task_id,
+        interaction_id,
+        execution_module.InteractionResponse(response_data={"approved": False}),
+    )
+
+    assert refreshed is not None
+    assert temporal_signals == [(snapshot.task_id, "handle_permission_escalation", False)]
+
+    service.record_interaction_response(
+        snapshot.task_id,
+        interaction_id,
+        execution_module.InteractionResponse(response_data={"approved": False}),
+    )
+    assert temporal_signals == [(snapshot.task_id, "handle_permission_escalation", False)]
 
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(snapshot.task_id)

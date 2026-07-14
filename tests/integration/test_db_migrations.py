@@ -25,6 +25,7 @@ EXPECTED_TABLES = {
     "sessions",
     "session_states",
     "tasks",
+    "temporal_task_states",
     "task_timeline_events",
     "users",
     "worker_nodes",
@@ -763,9 +764,7 @@ def test_memory_persisted_timeline_event_can_be_written_after_upgrade(tmp_path: 
             },
         )
         count = connection.execute(
-            text(
-                "SELECT COUNT(*) FROM task_timeline_events " "WHERE event_type = 'memory_persisted'"
-            )
+            text("SELECT COUNT(*) FROM task_timeline_events WHERE event_type = 'memory_persisted'")
         ).scalar_one()
 
     assert count == 1

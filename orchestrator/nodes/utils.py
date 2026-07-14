@@ -48,7 +48,7 @@ def _timeline_events(
         None,
     )
     if last_event:
-        base_seq = last_event.sequence_number + 1
+        base_seq = max(last_event.sequence_number + 1, state.timeline_persisted_count)
     else:
         base_seq = state.timeline_persisted_count
 
