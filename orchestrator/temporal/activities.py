@@ -323,7 +323,7 @@ class TaskExecutionActivities:
                 ),
                 "requires_approval": state.approval.required if state.approval else False,
                 "execution_task_queue": execution_task_queue_for_profile(
-                    state.route.chosen_profile
+                    state.route.chosen_profile if state.route else None
                 ),
             }
 
@@ -357,7 +357,9 @@ class TaskExecutionActivities:
                 state.task_spec and state.task_spec.requires_clarification
             ),
             "requires_approval": state.approval.required if state.approval else False,
-            "execution_task_queue": execution_task_queue_for_profile(state.route.chosen_profile),
+            "execution_task_queue": execution_task_queue_for_profile(
+                state.route.chosen_profile if state.route else None
+            ),
         }
 
     @activity.defn(name="decompose_task")

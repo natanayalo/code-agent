@@ -170,6 +170,7 @@ class TaskExecutionService:
         self._checkpointer_cm: AbstractAsyncContextManager[BaseCheckpointSaver] | None = None
         self._graph: Any | None = None
         self._temporal_client: Any | None = None
+        self._temporal_client_lock: asyncio.Lock | None = None
         self._temporal_client_loop: asyncio.AbstractEventLoop | None = None
 
     @property
@@ -394,7 +395,7 @@ class TaskExecutionService:
     async def _get_temporal_client(self) -> Any:
         """Get or initialize the shared, pooled Temporal client."""
         current_loop = asyncio.get_running_loop()
-        if self._temporal_client_loop is not current_loop:
+        if self._temporal_client_loop is not current_loop or self._temporal_client_lock is None:
             self._temporal_client = None
             self._temporal_client_lock = asyncio.Lock()
             self._temporal_client_loop = current_loop
