@@ -74,29 +74,10 @@ class TaskExecutionWorkflow:
             **activity_options("run_worker", task_queue=execution_task_queue),
         )
         if worker_result.get("requires_permission_escalation", False):
-            await workflow.execute_activity(
-                "request_permission_escalation",
-                task_id,
-                **activity_options("request_permission_escalation"),
-            )
-            await workflow.wait_condition(lambda: self.permission_escalation_decision is not None)
-            await workflow.execute_activity(
-                "resolve_permission_escalation",
-                args=[task_id, self.permission_escalation_decision],
-                **activity_options("resolve_permission_escalation"),
-            )
-            if not self.permission_escalation_decision:
+            permission_granted = await self._handle_permission_escalation(task_id)
+            if not permission_granted:
                 return {"status": "rejected", "summary": "Permission escalation rejected."}
-            await workflow.execute_activity(
-                "provision_workspace",
-                task_id,
-                **activity_options("provision_workspace"),
-            )
-            await workflow.execute_activity(
-                "run_worker",
-                task_id,
-                **activity_options("run_worker", task_queue=execution_task_queue),
-            )
+            await self._rerun_worker(task_id, execution_task_queue)
 
         # Step 8: Verify result
         await workflow.execute_activity(
@@ -121,6 +102,33 @@ class TaskExecutionWorkflow:
         )
 
         return {"status": "completed", "summary": "Task completed successfully via Temporal."}
+
+    async def _handle_permission_escalation(self, task_id: str) -> bool:
+        await workflow.execute_activity(
+            "request_permission_escalation",
+            task_id,
+            **activity_options("request_permission_escalation"),
+        )
+        await workflow.wait_condition(lambda: self.permission_escalation_decision is not None)
+        approved = self.permission_escalation_decision
+        await workflow.execute_activity(
+            "resolve_permission_escalation",
+            args=[task_id, approved],
+            **activity_options("resolve_permission_escalation"),
+        )
+        return bool(approved)
+
+    async def _rerun_worker(self, task_id: str, task_queue: str | None) -> None:
+        await workflow.execute_activity(
+            "provision_workspace",
+            task_id,
+            **activity_options("provision_workspace"),
+        )
+        await workflow.execute_activity(
+            "run_worker",
+            task_id,
+            **activity_options("run_worker", task_queue=task_queue),
+        )
 
     @workflow.signal
     async def handle_approval(self, approved: bool) -> None:

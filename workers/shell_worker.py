@@ -21,6 +21,7 @@ from sandbox.workspace import default_workspace_root
 from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import FailureKind, Worker, WorkerCommand, WorkerRequest, WorkerResult
 from workers.constants import DEFAULT_GIT_APPLY_TIMEOUT_SECONDS
+from workers.native_agent_models import NativeAgentRunResult
 from workers.native_agent_runner import (
     NativeAgentRunRequest,
     run_native_agent,
@@ -83,39 +84,11 @@ def _apply_diff_if_provided(
     return None, setup_commands
 
 
-def _run_shell_script(
-    request: WorkerRequest,
-    container: DockerSandboxContainer,
-    workspace: WorkspaceHandle,
+def _build_shell_worker_result(
+    native_result: NativeAgentRunResult,
     setup_commands: list[WorkerCommand],
     cancel_requested: Callable[[], bool],
 ) -> WorkerResult:
-    # In SHELL mode, we treat task_text as the script content.
-    native_result = run_native_agent(
-        NativeAgentRunRequest(
-            command=[
-                "docker",
-                "exec",
-                "-i",
-                "-w",
-                container.working_dir,
-                container.container_name,
-                "/bin/sh",
-                "-e",
-            ],
-            prompt=request.task_text,
-            repo_path=workspace.repo_path,
-            workspace_path=workspace.workspace_path,
-            timeout_seconds=request.budget.get("worker_timeout_seconds", 300),
-            env=request.secrets,
-            task_id=request.task_id,
-            session_id=request.session_id,
-            redactor=SecretRedactor(list((request.secrets or {}).values())),
-            span_kind=SPAN_KIND_TOOL,
-            require_observable_result=False,
-        )
-    )
-
     if cancel_requested():
         return WorkerResult(
             status="error",
@@ -164,6 +137,40 @@ def _run_shell_script(
         stdout=native_result.stdout,
         stderr=native_result.stderr,
     )
+
+
+def _run_shell_script(
+    request: WorkerRequest,
+    container: DockerSandboxContainer,
+    workspace: WorkspaceHandle,
+    setup_commands: list[WorkerCommand],
+    cancel_requested: Callable[[], bool],
+) -> WorkerResult:
+    native_result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[
+                "docker",
+                "exec",
+                "-i",
+                "-w",
+                container.working_dir,
+                container.container_name,
+                "/bin/sh",
+                "-e",
+            ],
+            prompt=request.task_text,
+            repo_path=workspace.repo_path,
+            workspace_path=workspace.workspace_path,
+            timeout_seconds=request.budget.get("worker_timeout_seconds", 300),
+            env=request.secrets,
+            task_id=request.task_id,
+            session_id=request.session_id,
+            redactor=SecretRedactor(list((request.secrets or {}).values())),
+            span_kind=SPAN_KIND_TOOL,
+            require_observable_result=False,
+        )
+    )
+    return _build_shell_worker_result(native_result, setup_commands, cancel_requested)
 
 
 class ShellWorker(Worker):
