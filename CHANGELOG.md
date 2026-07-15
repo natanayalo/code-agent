@@ -353,6 +353,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps): bump openai from 2.44.0 to 2.45.0 ([#315](https://github.com/natanayalo/code-agent/pull/315))
+
 - Build(deps): bump langgraph from 1.2.8 to 1.2.9 ([#313](https://github.com/natanayalo/code-agent/pull/313))
 
 - Build(deps): bump fastapi from 0.138.2 to 0.139.0 ([#302](https://github.com/natanayalo/code-agent/pull/302))
