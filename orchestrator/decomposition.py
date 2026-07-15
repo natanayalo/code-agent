@@ -4,14 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from orchestrator.state import (
-    AggregationRole,
-    DecomposedTaskNode,
-    DecomposedTaskPlan,
-    NodeKind,
-    TaskPlan,
-    TaskSpec,
-)
+from orchestrator.state import DecomposedTaskNode, DecomposedTaskPlan, TaskPlan, TaskSpec
 
 MAX_DECOMPOSED_NODES = 6
 
@@ -53,9 +46,8 @@ def decompose_task_plan(
     nodes: list[DecomposedTaskNode] = []
     for index, step in enumerate(task_plan.steps):
         dependencies = list(step.depends_on or [])
-        if not dependencies and index > 0:
+        if step.depends_on is None and index > 0:
             dependencies = [task_plan.steps[index - 1].step_id]
-        node_kind, role = _node_kind(index, len(task_plan.steps))
         node_spec = parent_spec.model_copy(
             update={
                 "goal": step.title,
@@ -68,10 +60,12 @@ def decompose_task_plan(
                 title=step.title,
                 depends_on=dependencies,
                 task_spec=node_spec,
-                node_kind=node_kind,
+                node_kind=step.node_kind,
                 expected_inputs=["parent_task_context", *dependencies],
                 expected_outputs=["summary", "validation_evidence"],
-                aggregation_role=role,
+                aggregation_role=step.aggregation_role,
+                execution_mode=step.execution_mode,
+                parallel_safe=step.parallel_safe,
             )
         )
     final_cycle_errors = _cycle_errors({node.node_id: set(node.depends_on) for node in nodes})
@@ -113,9 +107,22 @@ def _cycle_errors(dependencies: Mapping[str, set[str]]) -> list[str]:
     return ["dependency_cycle"] if any(visit(node_id) for node_id in dependencies) else []
 
 
-def _node_kind(index: int, total: int) -> tuple[NodeKind, AggregationRole]:
-    if index == 0:
-        return "inspect", "context"
-    if index == total - 1:
-        return "verify", "validation"
-    return "implement", "mutation"
+def is_read_only_fanout_eligible(
+    *,
+    parent_read_only: bool,
+    selected_profile_mutation_policy: str | None,
+    node: DecomposedTaskNode,
+    completed_node_ids: set[str],
+    has_unresolved_blocker: bool,
+    fanout_disabled: bool,
+) -> bool:
+    """Return whether one ready node satisfies the future M25 fan-out contract."""
+    return (
+        parent_read_only
+        and selected_profile_mutation_policy == "read_only"
+        and node.execution_mode == "read_only"
+        and node.parallel_safe
+        and all(dependency in completed_node_ids for dependency in node.depends_on)
+        and not has_unresolved_blocker
+        and not fanout_disabled
+    )

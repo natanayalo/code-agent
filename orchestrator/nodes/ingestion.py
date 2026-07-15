@@ -120,11 +120,15 @@ def _build_task_plan(state: OrchestratorState, complexity_reason: str) -> TaskPl
                 step_id="1",
                 title=step_one_title,
                 expected_outcome=step_one_outcome,
+                node_kind="inspect",
+                aggregation_role="context",
             ),
             TaskPlanStep(
                 step_id="2",
                 title=step_two_title,
                 expected_outcome=step_two_outcome,
+                node_kind="implement",
+                aggregation_role="mutation",
             ),
             TaskPlanStep(
                 step_id="3",
@@ -133,6 +137,8 @@ def _build_task_plan(state: OrchestratorState, complexity_reason: str) -> TaskPl
                     "Run focused checks proving "
                     f"'{task_text_preview}' is satisfied and summarize outcomes."
                 ),
+                node_kind="verify",
+                aggregation_role="validation",
             ),
         ],
     )

@@ -187,11 +187,21 @@ export enum ExecutionPlanNodeStatus {
 export interface ExecutionPlanNodeSnapshot {
   node_id: string;
   goal: string;
-  status: ExecutionPlanNodeStatus;
+  status:
+    | ExecutionPlanNodeStatus
+    | 'pending'
+    | 'active'
+    | 'blocked'
+    | 'completed'
+    | 'failed'
+    | 'skipped';
   acceptance_criteria?: string | null;
   depends_on?: string[] | null;
   task_spec?: TaskSpec | null;
   node_kind?: string | null;
+  aggregation_role?: string;
+  execution_mode?: string;
+  parallel_safe?: boolean;
   assigned_worker_profile?: string | null;
   budget?: Record<string, unknown> | null;
   validation_commands?: string[] | null;
@@ -231,6 +241,7 @@ export interface ExecutionPlanNodeAttemptSnapshot {
 
 export interface ExecutionPlanSnapshot {
   plan_id: string;
+  task_id: string;
   created_at: string;
   updated_at: string;
   nodes: ExecutionPlanNodeSnapshot[];

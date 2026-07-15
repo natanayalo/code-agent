@@ -462,6 +462,9 @@ class ExecutionPlanNodeSnapshot(ExecutionModel):
     depends_on: list[str] | None = None
     task_spec: TaskSpec | None = None
     node_kind: str | None = None
+    aggregation_role: str = "mutation"
+    execution_mode: str = "mutable"
+    parallel_safe: bool = False
     status: Literal["pending", "active", "blocked", "completed", "failed", "skipped"]
     goal: str
     acceptance_criteria: str | None = None

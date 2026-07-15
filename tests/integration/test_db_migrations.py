@@ -243,6 +243,9 @@ def _assert_upgrade_columns(inspector) -> None:
     assert {
         "task_spec",
         "node_kind",
+        "aggregation_role",
+        "execution_mode",
+        "parallel_safe",
         "worker_run_id",
         "result_summary",
         "failure_kind",

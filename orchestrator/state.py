@@ -199,6 +199,11 @@ class RouteDecision(OrchestratorModel):
         return normalize_worker_type(value)
 
 
+NodeKind = Literal["inspect", "implement", "verify", "review", "aggregate"]
+AggregationRole = Literal["context", "mutation", "validation", "final"]
+NodeExecutionMode = Literal["read_only", "mutable"]
+
+
 class TaskPlanStep(OrchestratorModel):
     """A single ordered planning step for complex tasks."""
 
@@ -206,6 +211,10 @@ class TaskPlanStep(OrchestratorModel):
     title: str = Field(min_length=1)
     expected_outcome: str = Field(min_length=1)
     depends_on: list[str] | None = None
+    node_kind: NodeKind = "implement"
+    aggregation_role: AggregationRole = "mutation"
+    execution_mode: NodeExecutionMode = "mutable"
+    parallel_safe: bool = False
 
 
 class TaskPlan(OrchestratorModel):
@@ -265,10 +274,6 @@ class TaskSpec(OrchestratorModel):
         return v
 
 
-NodeKind = Literal["inspect", "implement", "verify", "review", "aggregate"]
-AggregationRole = Literal["context", "mutation", "validation", "final"]
-
-
 class DecomposedTaskNode(OrchestratorModel):
     """A narrowed task contract and dependency edge for one plan node."""
 
@@ -280,6 +285,8 @@ class DecomposedTaskNode(OrchestratorModel):
     expected_inputs: list[str] = Field(default_factory=list)
     expected_outputs: list[str] = Field(default_factory=list)
     aggregation_role: AggregationRole = "mutation"
+    execution_mode: NodeExecutionMode = "mutable"
+    parallel_safe: bool = False
     max_attempts: int = Field(default=1, ge=1, le=3)
 
 

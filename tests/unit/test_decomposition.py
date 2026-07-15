@@ -1,7 +1,7 @@
 """Tests for sequential M24 task decomposition."""
 
-from orchestrator.decomposition import decompose_task_plan
-from orchestrator.state import TaskPlan, TaskPlanStep, TaskSpec
+from orchestrator.decomposition import decompose_task_plan, is_read_only_fanout_eligible
+from orchestrator.state import DecomposedTaskNode, TaskPlan, TaskPlanStep, TaskSpec
 
 
 def _plan(*steps: TaskPlanStep) -> TaskPlan:
@@ -34,7 +34,9 @@ def test_decompose_task_plan_builds_sequential_dependencies() -> None:
     assert [node.node_id for node in result.nodes] == ["inspect", "implement", "verify"]
     assert [node.depends_on for node in result.nodes] == [[], ["inspect"], ["implement"]]
     assert result.nodes[0].task_spec.goal == "Step inspect"
-    assert result.nodes[-1].node_kind == "verify"
+    assert [node.node_kind for node in result.nodes] == ["implement", "implement", "implement"]
+    assert all(node.execution_mode == "mutable" for node in result.nodes)
+    assert not any(node.parallel_safe for node in result.nodes)
 
 
 def test_decompose_task_plan_preserves_explicit_branching() -> None:
@@ -50,6 +52,72 @@ def test_decompose_task_plan_preserves_explicit_branching() -> None:
     assert result.status == "decomposed"
     assert result.nodes[1].depends_on == ["root"]
     assert result.nodes[2].depends_on == ["root"]
+
+
+def test_decompose_task_plan_preserves_explicit_independent_root() -> None:
+    result = decompose_task_plan(
+        _plan(_step("root"), _step("independent", depends_on=[]), _step("joined", depends_on=[])),
+        _spec(),
+    )
+
+    assert [node.depends_on for node in result.nodes] == [[], [], []]
+
+
+def test_decompose_task_plan_preserves_explicit_node_classification() -> None:
+    plan = _plan(
+        TaskPlanStep(
+            step_id="inspect",
+            title="Inspect",
+            expected_outcome="Find relevant code.",
+            node_kind="inspect",
+            aggregation_role="context",
+            execution_mode="read_only",
+            parallel_safe=True,
+        )
+    )
+
+    result = decompose_task_plan(plan, _spec())
+
+    assert result.nodes[0].node_kind == "inspect"
+    assert result.nodes[0].aggregation_role == "context"
+    assert result.nodes[0].execution_mode == "read_only"
+    assert result.nodes[0].parallel_safe is True
+
+
+def test_read_only_fanout_eligibility_requires_every_safety_predicate() -> None:
+    node = DecomposedTaskNode(
+        node_id="inspect",
+        title="Inspect",
+        depends_on=["root"],
+        task_spec=_spec(),
+        node_kind="inspect",
+        aggregation_role="context",
+        execution_mode="read_only",
+        parallel_safe=True,
+    )
+    eligible = {
+        "parent_read_only": True,
+        "selected_profile_mutation_policy": "read_only",
+        "node": node,
+        "completed_node_ids": {"root"},
+        "has_unresolved_blocker": False,
+        "fanout_disabled": False,
+    }
+
+    assert is_read_only_fanout_eligible(**eligible)
+    assert not is_read_only_fanout_eligible(**(eligible | {"parent_read_only": False}))
+    assert not is_read_only_fanout_eligible(
+        **(eligible | {"selected_profile_mutation_policy": "patch_allowed"})
+    )
+    assert not is_read_only_fanout_eligible(**(eligible | {"completed_node_ids": set()}))
+    assert not is_read_only_fanout_eligible(**(eligible | {"has_unresolved_blocker": True}))
+    assert not is_read_only_fanout_eligible(**(eligible | {"fanout_disabled": True}))
+    assert not is_read_only_fanout_eligible(
+        **(eligible | {"node": node.model_copy(update={"parallel_safe": False})})
+    )
+    assert not is_read_only_fanout_eligible(
+        **(eligible | {"node": node.model_copy(update={"execution_mode": "mutable"})})
+    )
 
 
 def test_decompose_task_plan_falls_back_for_invalid_graph() -> None:

@@ -961,6 +961,9 @@ class ExecutionPlanNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     depends_on: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     task_spec: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     node_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    aggregation_role: Mapped[str] = mapped_column(String(50), nullable=False, default="mutation")
+    execution_mode: Mapped[str] = mapped_column(String(50), nullable=False, default="mutable")
+    parallel_safe: Mapped[bool] = mapped_column(nullable=False, default=False)
     status: Mapped[ExecutionPlanNodeStatus] = mapped_column(
         EXECUTION_PLAN_NODE_STATUS_ENUM, nullable=False, default=ExecutionPlanNodeStatus.PENDING
     )

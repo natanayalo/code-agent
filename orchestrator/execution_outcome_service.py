@@ -593,6 +593,21 @@ def _update_task_route_and_spec(
                         if step.step_id in decomposed_nodes
                         else None
                     ),
+                    aggregation_role=(
+                        decomposed_nodes[step.step_id].aggregation_role
+                        if step.step_id in decomposed_nodes
+                        else step.aggregation_role
+                    ),
+                    execution_mode=(
+                        decomposed_nodes[step.step_id].execution_mode
+                        if step.step_id in decomposed_nodes
+                        else step.execution_mode
+                    ),
+                    parallel_safe=(
+                        decomposed_nodes[step.step_id].parallel_safe
+                        if step.step_id in decomposed_nodes
+                        else step.parallel_safe
+                    ),
                 )
                 existing_nodes[step.step_id] = new_node
                 plan.nodes.append(new_node)
@@ -607,9 +622,15 @@ def _update_task_route_and_spec(
                         mode="json"
                     )
                     existing_node.node_kind = decomposed_nodes[step.step_id].node_kind
+                    existing_node.aggregation_role = decomposed_nodes[step.step_id].aggregation_role
+                    existing_node.execution_mode = decomposed_nodes[step.step_id].execution_mode
+                    existing_node.parallel_safe = decomposed_nodes[step.step_id].parallel_safe
                 else:
                     existing_node.task_spec = None
                     existing_node.node_kind = None
+                    existing_node.aggregation_role = step.aggregation_role
+                    existing_node.execution_mode = step.execution_mode
+                    existing_node.parallel_safe = step.parallel_safe
 
         # Remove orphaned nodes that are no longer in the plan
         for node_id, node in list(existing_nodes.items()):

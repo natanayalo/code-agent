@@ -50,6 +50,9 @@ class ExecutionPlanRepository:
         depends_on: list[str] | None = None,
         task_spec: dict[str, Any] | None = None,
         node_kind: str | None = None,
+        aggregation_role: str = "mutation",
+        execution_mode: str = "mutable",
+        parallel_safe: bool = False,
         acceptance_criteria: str | None = None,
         assigned_worker_profile: str | None = None,
         budget: dict[str, Any] | None = None,
@@ -65,6 +68,9 @@ class ExecutionPlanRepository:
             depends_on=depends_on,
             task_spec=task_spec,
             node_kind=node_kind,
+            aggregation_role=aggregation_role,
+            execution_mode=execution_mode,
+            parallel_safe=parallel_safe,
             status=status,
             goal=goal,
             acceptance_criteria=acceptance_criteria,
@@ -99,6 +105,9 @@ class ExecutionPlanRepository:
         finished_at: datetime | None | Any = ...,
         task_spec: dict[str, Any] | None | Any = ...,
         node_kind: str | None | Any = ...,
+        aggregation_role: str | Any = ...,
+        execution_mode: str | Any = ...,
+        parallel_safe: bool | Any = ...,
         worker_run_id: str | None | Any = ...,
         result_summary: str | None | Any = ...,
         failure_kind: str | None | Any = ...,
@@ -134,6 +143,12 @@ class ExecutionPlanRepository:
             node.task_spec = task_spec
         if node_kind is not ...:
             node.node_kind = node_kind
+        if aggregation_role is not ...:
+            node.aggregation_role = aggregation_role
+        if execution_mode is not ...:
+            node.execution_mode = execution_mode
+        if parallel_safe is not ...:
+            node.parallel_safe = parallel_safe
         if worker_run_id is not ...:
             node.worker_run_id = worker_run_id
         if result_summary is not ...:
