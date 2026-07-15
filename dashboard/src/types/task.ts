@@ -199,8 +199,8 @@ export interface ExecutionPlanNodeSnapshot {
   depends_on?: string[] | null;
   task_spec?: TaskSpec | null;
   node_kind?: string | null;
-  aggregation_role?: string;
-  execution_mode?: string;
+  aggregation_role?: 'context' | 'mutation' | 'validation' | 'final';
+  execution_mode?: 'read_only' | 'mutable';
   parallel_safe?: boolean;
   assigned_worker_profile?: string | null;
   budget?: Record<string, unknown> | null;
