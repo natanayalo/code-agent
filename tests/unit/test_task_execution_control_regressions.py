@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import builtins
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
 from sqlalchemy.pool import StaticPool
@@ -73,6 +74,33 @@ def test_temporal_client_cache_is_scoped_to_event_loop(monkeypatch) -> None:
     assert first_client is clients[0]
     assert second_client is clients[1]
     assert first_client is not second_client
+
+
+def test_temporal_client_cache_supports_concurrent_event_loops(monkeypatch) -> None:
+    """Concurrent sync fallbacks must keep each loop's client isolated."""
+    service, _ = _make_task_service()
+    clients: list[object] = []
+
+    async def connect(_address: str) -> object:
+        client = object()
+        clients.append(client)
+        await asyncio.sleep(0)
+        return client
+
+    from temporalio.client import Client
+
+    monkeypatch.setattr(Client, "connect", connect)
+
+    def get_client(_index: int) -> object:
+        return asyncio.run(service._get_temporal_client())
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(get_client, range(2)))
+
+    assert len(set(results)) == 2
+    assert len(clients) == 2
+    assert len(service._temporal_clients) == 2
+    assert len(service._temporal_locks) == 2
 
 
 def test_record_interaction_response_clarification_requeues_without_approval_side_effects(

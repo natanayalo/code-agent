@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
@@ -169,9 +170,9 @@ class TaskExecutionService:
         self._checkpointer: BaseCheckpointSaver | None = None
         self._checkpointer_cm: AbstractAsyncContextManager[BaseCheckpointSaver] | None = None
         self._graph: Any | None = None
-        self._temporal_client: Any | None = None
-        self._temporal_client_lock: asyncio.Lock | None = None
-        self._temporal_client_loop: asyncio.AbstractEventLoop | None = None
+        self._temporal_clients: dict[asyncio.AbstractEventLoop, Any] = {}
+        self._temporal_locks: dict[asyncio.AbstractEventLoop, asyncio.Lock] = {}
+        self._temporal_cache_lock = threading.Lock()
 
     @property
     def graph(self) -> Any:
@@ -395,18 +396,25 @@ class TaskExecutionService:
     async def _get_temporal_client(self) -> Any:
         """Get or initialize the shared, pooled Temporal client."""
         current_loop = asyncio.get_running_loop()
-        if self._temporal_client_loop is not current_loop or self._temporal_client_lock is None:
-            self._temporal_client = None
-            self._temporal_client_lock = asyncio.Lock()
-            self._temporal_client_loop = current_loop
-        if self._temporal_client is None:
-            async with self._temporal_client_lock:
-                if self._temporal_client is None:
+        with self._temporal_cache_lock:
+            client = self._temporal_clients.get(current_loop)
+            loop_lock = self._temporal_locks.get(current_loop)
+            if loop_lock is None:
+                loop_lock = asyncio.Lock()
+                self._temporal_locks[current_loop] = loop_lock
+
+        if client is None:
+            async with loop_lock:
+                with self._temporal_cache_lock:
+                    client = self._temporal_clients.get(current_loop)
+                if client is None:
                     from temporalio.client import Client
 
                     temporal_address = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
-                    self._temporal_client = await Client.connect(temporal_address)
-        return self._temporal_client
+                    client = await Client.connect(temporal_address)
+                    with self._temporal_cache_lock:
+                        self._temporal_clients[current_loop] = client
+        return client
 
     def _mark_task_as_failed_on_startup(self, task_id: str, exc: Exception) -> None:
         try:
