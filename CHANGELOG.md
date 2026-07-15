@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: consolidate temporal task execution runtime ([#316](https://github.com/natanayalo/code-agent/pull/316))
+
 - Feat: add durable DAG reliability gate ([#312](https://github.com/natanayalo/code-agent/pull/312))
 
 - Feat: add sequential decomposed task DAG execution ([#311](https://github.com/natanayalo/code-agent/pull/311))
