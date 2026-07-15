@@ -397,6 +397,11 @@ class TaskExecutionService:
         """Get or initialize the shared, pooled Temporal client."""
         current_loop = asyncio.get_running_loop()
         with self._temporal_cache_lock:
+            closed_loops = set(self._temporal_clients) | set(self._temporal_locks)
+            closed_loops = {loop for loop in closed_loops if loop.is_closed()}
+            for closed_loop in closed_loops:
+                self._temporal_clients.pop(closed_loop, None)
+                self._temporal_locks.pop(closed_loop, None)
             client = self._temporal_clients.get(current_loop)
             loop_lock = self._temporal_locks.get(current_loop)
             if loop_lock is None:

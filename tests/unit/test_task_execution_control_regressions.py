@@ -70,10 +70,14 @@ def test_temporal_client_cache_is_scoped_to_event_loop(monkeypatch) -> None:
 
     first_client = asyncio.run(service._get_temporal_client())
     second_client = asyncio.run(service._get_temporal_client())
+    third_client = asyncio.run(service._get_temporal_client())
 
     assert first_client is clients[0]
     assert second_client is clients[1]
     assert first_client is not second_client
+    assert third_client is clients[2]
+    assert len(service._temporal_clients) == 1
+    assert len(service._temporal_locks) == 1
 
 
 def test_temporal_client_cache_supports_concurrent_event_loops(monkeypatch) -> None:
