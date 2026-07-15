@@ -92,6 +92,31 @@ async def test_workflow_repeats_sequential_permission_escalations(monkeypatch) -
 
 
 @pytest.mark.anyio
+async def test_permission_signal_during_request_activity_is_preserved(monkeypatch) -> None:
+    """An early operator signal must survive request activity completion."""
+    workflow_instance = TaskExecutionWorkflow()
+    activity_names: list[str] = []
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "request_permission_escalation":
+            workflow_instance.permission_escalation_decision = True
+        return None
+
+    async def wait_condition(predicate) -> None:
+        assert predicate()
+
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+
+    assert await workflow_instance._handle_permission_escalation("task-id") is True
+    assert activity_names == [
+        "request_permission_escalation",
+        "resolve_permission_escalation",
+    ]
+
+
+@pytest.mark.anyio
 async def test_workflow_bounds_repeated_permission_escalations(monkeypatch) -> None:
     """A misconfigured worker must not loop on permission requests forever."""
     workflow_instance = TaskExecutionWorkflow()

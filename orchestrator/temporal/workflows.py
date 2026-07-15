@@ -138,12 +138,12 @@ class TaskExecutionWorkflow:
         )
 
     async def _handle_permission_escalation(self, task_id: str) -> bool:
+        self.permission_escalation_decision = None
         await workflow.execute_activity(
             "request_permission_escalation",
             task_id,
             **activity_options("request_permission_escalation"),
         )
-        self.permission_escalation_decision = None
         await workflow.wait_condition(lambda: self.permission_escalation_decision is not None)
         approved = self.permission_escalation_decision
         await workflow.execute_activity(

@@ -107,6 +107,27 @@ def test_temporal_client_cache_supports_concurrent_event_loops(monkeypatch) -> N
     assert len(service._temporal_locks) == 2
 
 
+def test_start_temporal_workflow_sync_dispatches_background_thread(monkeypatch) -> None:
+    """Sync submission must not block while Temporal retries connection failures."""
+    service, _ = _make_task_service()
+    started: list[tuple[object, bool]] = []
+
+    class FakeThread:
+        def __init__(self, *, target, daemon: bool) -> None:
+            self.target = target
+            self.daemon = daemon
+
+        def start(self) -> None:
+            started.append((self.target, self.daemon))
+
+    monkeypatch.setattr(execution_module.threading, "Thread", FakeThread)
+
+    service.start_temporal_workflow_sync("task-id")
+
+    assert len(started) == 1
+    assert started[0][1] is True
+
+
 def test_record_interaction_response_clarification_requeues_without_approval_side_effects(
     monkeypatch,
 ) -> None:

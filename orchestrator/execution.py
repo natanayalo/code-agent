@@ -120,7 +120,6 @@ from workers import Worker, WorkerProfile
 
 logger = logging.getLogger(__name__)
 
-# Compatibility aliases preserved while internals move under focused helper modules.
 with_restored_trace_context = _with_restored_trace_context
 socket = _execution_policy_module.socket
 _task_status_from_result = _execution_policy_module._task_status_from_result
@@ -390,8 +389,9 @@ class TaskExecutionService:
             loop = asyncio.get_running_loop()
             loop.create_task(self.start_temporal_workflow(task_id))
         except RuntimeError:
-            # Fall back to running synchronously (e.g. in sync test runner context)
-            asyncio.run(self.start_temporal_workflow(task_id))
+            threading.Thread(
+                target=lambda: asyncio.run(self.start_temporal_workflow(task_id)), daemon=True
+            ).start()
 
     async def _get_temporal_client(self) -> Any:
         """Get or initialize the shared, pooled Temporal client."""

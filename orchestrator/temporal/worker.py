@@ -57,4 +57,6 @@ async def start_temporal_worker(
     )
 
     logger.info("Temporal workers successfully started. Running worker loops...")
-    await asyncio.gather(worker.run(), codex_execution_worker.run())
+    async with asyncio.TaskGroup() as task_group:
+        task_group.create_task(worker.run())
+        task_group.create_task(codex_execution_worker.run())
