@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import threading
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
@@ -18,6 +21,7 @@ from apps.observability import (
 from apps.observability import (
     with_restored_trace_context as _with_restored_trace_context,
 )
+from apps.runtime import uses_temporal_execution
 from db.enums import (
     TaskStatus,
 )
@@ -116,7 +120,6 @@ from workers import Worker, WorkerProfile
 
 logger = logging.getLogger(__name__)
 
-# Compatibility aliases preserved while internals move under focused helper modules.
 with_restored_trace_context = _with_restored_trace_context
 socket = _execution_policy_module.socket
 _task_status_from_result = _execution_policy_module._task_status_from_result
@@ -166,6 +169,9 @@ class TaskExecutionService:
         self._checkpointer: BaseCheckpointSaver | None = None
         self._checkpointer_cm: AbstractAsyncContextManager[BaseCheckpointSaver] | None = None
         self._graph: Any | None = None
+        self._temporal_clients: dict[asyncio.AbstractEventLoop, Any] = {}
+        self._temporal_locks: dict[asyncio.AbstractEventLoop, asyncio.Lock] = {}
+        self._temporal_cache_lock = threading.Lock()
 
     @property
     def graph(self) -> Any:
@@ -256,6 +262,9 @@ class TaskExecutionService:
                     "channel": delivery_key.channel if delivery_key else None,
                 },
             )
+        else:
+            if uses_temporal_execution():
+                self.start_temporal_workflow_sync(task_id)
         return outcome
 
     _normalize_and_validate_submission = (
@@ -373,6 +382,155 @@ class TaskExecutionService:
         execution_improvement_proposal_service._persist_scored_friction_proposals
     )
     _log_task_outcome = execution_snapshot_service._log_task_outcome
+
+    def start_temporal_workflow_sync(self, task_id: str) -> None:
+        """Start Temporal workflow from a sync context, spawning background task."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.start_temporal_workflow(task_id))
+        except RuntimeError:
+            threading.Thread(
+                target=lambda: asyncio.run(self.start_temporal_workflow(task_id)), daemon=True
+            ).start()
+
+    async def _get_temporal_client(self) -> Any:
+        """Get or initialize the shared, pooled Temporal client."""
+        current_loop = asyncio.get_running_loop()
+        with self._temporal_cache_lock:
+            closed_loops = set(self._temporal_clients) | set(self._temporal_locks)
+            closed_loops = {loop for loop in closed_loops if loop.is_closed()}
+            for closed_loop in closed_loops:
+                self._temporal_clients.pop(closed_loop, None)
+                self._temporal_locks.pop(closed_loop, None)
+            client = self._temporal_clients.get(current_loop)
+            loop_lock = self._temporal_locks.get(current_loop)
+            if loop_lock is None:
+                loop_lock = asyncio.Lock()
+                self._temporal_locks[current_loop] = loop_lock
+
+        if client is None:
+            async with loop_lock:
+                with self._temporal_cache_lock:
+                    client = self._temporal_clients.get(current_loop)
+                if client is None:
+                    from temporalio.client import Client
+
+                    temporal_address = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
+                    client = await Client.connect(temporal_address)
+                    with self._temporal_cache_lock:
+                        self._temporal_clients[current_loop] = client
+        return client
+
+    def _mark_task_as_failed_on_startup(self, task_id: str, exc: Exception) -> None:
+        try:
+            from repositories import TaskRepository, TaskTimelineRepository, session_scope
+
+            with session_scope(self.session_factory) as session:
+                from db.enums import TimelineEventType
+
+                task_repo = TaskRepository(session)
+                timeline_repo = TaskTimelineRepository(session)
+                task = task_repo.get(task_id)
+                if task and task.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+                    task.status = TaskStatus.FAILED
+                    task.last_error = f"Temporal workflow startup failed: {exc}"
+                    timeline_repo.create_next_for_attempt(
+                        task_id=task_id,
+                        attempt_number=task.attempt_count,
+                        event_type=TimelineEventType.WORKER_ERROR,
+                        message=f"Temporal workflow startup failed: {exc}",
+                    )
+        except Exception as db_exc:
+            logger.error(
+                "Failed to transition task %s to FAILED state on startup: %s",
+                task_id,
+                db_exc,
+            )
+
+    async def start_temporal_workflow(self, task_id: str) -> None:
+        """Connect to Temporal and start workflow with retries for transient errors."""
+        import socket
+
+        import temporalio.exceptions
+
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                client = await self._get_temporal_client()
+                await client.start_workflow(
+                    "TaskExecutionWorkflow",
+                    task_id,
+                    id=f"task-{task_id}",
+                    task_queue="task-execution-queue",
+                )
+                return
+            except temporalio.exceptions.WorkflowAlreadyStartedError:
+                logger.info("Temporal workflow for task %s is already running.", task_id)
+                return
+            except (temporalio.service.RPCError, ConnectionError, socket.gaierror) as exc:
+                if attempt == max_attempts - 1:
+                    logger.exception(
+                        "Failed to start Temporal workflow for task %s after %s attempts",
+                        task_id,
+                        max_attempts,
+                    )
+                    self._mark_task_as_failed_on_startup(task_id, exc)
+                    return
+                backoff = 2**attempt
+                logger.warning(
+                    "Transient error starting workflow for task %s. "
+                    "Retrying in %s seconds... Error: %s",
+                    task_id,
+                    backoff,
+                    exc,
+                )
+                await asyncio.sleep(backoff)
+            except Exception as exc:
+                logger.exception(
+                    "Non-retryable exception starting Temporal workflow for task %s",
+                    task_id,
+                )
+                self._mark_task_as_failed_on_startup(task_id, exc)
+                return
+
+    async def cancel_temporal_workflow(self, task_id: str) -> None:
+        """Connect to Temporal and cancel the workflow."""
+        try:
+            client = await self._get_temporal_client()
+            handle = client.get_workflow_handle(f"task-{task_id}")
+            await handle.cancel()
+            logger.info(
+                "Successfully requested cancellation for Temporal workflow task-%s",
+                task_id,
+            )
+        except Exception as exc:
+            logger.exception("Failed to cancel Temporal workflow task-%s: %s", task_id, exc)
+
+    async def signal_temporal_workflow(self, task_id: str, signal_name: str, arg: Any) -> None:
+        """Connect to Temporal and send a signal to the workflow, retrying on transient errors."""
+        import asyncio
+
+        for attempt in range(3):
+            try:
+                client = await self._get_temporal_client()
+                handle = client.get_workflow_handle(f"task-{task_id}")
+                await handle.signal(signal_name, arg)
+                return
+            except Exception as exc:
+                if attempt == 2:
+                    logger.exception(
+                        "Failed to signal Temporal workflow %s after 3 attempts: %s",
+                        task_id,
+                        exc,
+                    )
+                    raise
+                logger.warning(
+                    "Signal attempt %d failed for task %s, retrying in 1s: %s",
+                    attempt + 1,
+                    task_id,
+                    exc,
+                )
+                await asyncio.sleep(1)
 
 
 __all__ = [

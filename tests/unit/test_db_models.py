@@ -43,6 +43,7 @@ EXPECTED_TABLES = {
     "sessions",
     "session_states",
     "tasks",
+    "temporal_task_states",
     "task_timeline_events",
     "users",
     "worker_nodes",

@@ -96,6 +96,28 @@ def test_cancel_pending_task_prevents_claim(client: TestClient, session_factory)
     assert claim is None
 
 
+def test_cancel_temporal_task_requests_workflow_cancellation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    """Temporal-backed cancellation should cancel the durable workflow too."""
+    response = client.post("/tasks", json={"task_text": "Temporal cancellation"})
+    task_id = response.json()["task_id"]
+    requested_cancellations: list[str] = []
+
+    async def cancel_temporal_workflow(cancelled_task_id: str) -> None:
+        requested_cancellations.append(cancelled_task_id)
+
+    service = client.app.state.task_service
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    monkeypatch.setattr(service, "cancel_temporal_workflow", cancel_temporal_workflow)
+
+    cancel_response = client.post(f"/tasks/{task_id}/cancel")
+
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] == "failed"
+    assert requested_cancellations == [task_id]
+
+
 def test_cancel_in_progress_task_aborts_execution(client: TestClient, session_factory, slow_worker):
     """Cancelling an in-progress task should stop the heartbeat and abort the orchestrator."""
     response = client.post("/tasks", json={"task_text": "Long task"})

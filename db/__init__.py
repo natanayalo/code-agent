@@ -9,6 +9,7 @@ from db.models import (
     ProjectMemory,
     Session,
     Task,
+    TemporalTaskState,
     User,
     WorkerRun,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "ProjectMemory",
     "Session",
     "Task",
+    "TemporalTaskState",
     "User",
     "WorkerRun",
 ]

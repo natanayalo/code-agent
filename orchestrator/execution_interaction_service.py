@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from typing import Any
 
+from apps.runtime import uses_temporal_execution
 from db.base import utc_now
 from db.enums import (
     HumanInteractionStatus,
@@ -27,6 +29,7 @@ from repositories import (
     HumanInteractionRepository,
     TaskRepository,
     TaskTimelineRepository,
+    TemporalTaskStateRepository,
     WorkerRunRepository,
     session_scope,
 )
@@ -56,6 +59,98 @@ def _capture_interaction_resolution_observation(
             "Failed to capture interaction resolution observation; continuing.",
             exc_info=True,
         )
+
+
+def _dispatch_temporal_signal(
+    service: Any,
+    task_id: str,
+    signal_name: str,
+    signal_arg: object,
+) -> None:
+    """Dispatch a Temporal signal from outside the committing DB transaction."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(service.signal_temporal_workflow(task_id, signal_name, signal_arg))
+    except RuntimeError:
+        asyncio.run(service.signal_temporal_workflow(task_id, signal_name, signal_arg))
+
+
+def _persist_resolved_interaction(
+    *,
+    session: Any,
+    task: Any,
+    interaction: Any,
+    response: InteractionResponse,
+    timeline_repo: Any,
+) -> None:
+    interaction_data = interaction.data if isinstance(interaction.data, Mapping) else {}
+    is_permission_escalation = interaction_data.get("source") == "worker_permission_escalation"
+    content_hash = compute_interaction_content_hash(
+        interaction.interaction_type,
+        interaction.summary,
+        interaction.data,
+    )
+    constraints = dict(task.constraints or {})
+    interactions = dict(constraints.get("interactions") or {})
+    interactions[content_hash] = {
+        "status": "resolved",
+        "response_data": response.response_data,
+        "interaction_id": interaction.id,
+        "interaction_type": interaction.interaction_type,
+        "summary": interaction.summary,
+        "data": dict(interaction.data or {}) if interaction.data is not None else {},
+    }
+    constraints["interactions"] = interactions
+
+    response_data = response.response_data or {}
+    approved = response_data.get("approved", True)
+    is_normal_permission = (
+        interaction.interaction_type == HumanInteractionType.PERMISSION
+        and not is_permission_escalation
+    )
+    if is_normal_permission:
+        constraints["requires_approval"] = False
+        constraints["approval"] = {
+            "status": "approved" if approved else "rejected",
+            "source": "orchestrator",
+            "reason": (
+                f"Permission granted via interaction {interaction.id}"
+                if approved
+                else f"Permission rejected via interaction {interaction.id}"
+            ),
+            "updated_at": utc_now().isoformat(),
+        }
+
+    task.constraints = constraints
+    task.next_attempt_at = utc_now()
+    task.status = TaskStatus.PENDING
+    if is_normal_permission and not approved:
+        task.next_attempt_at = None
+        task.status = TaskStatus.FAILED
+        task.last_error = "Manual approval rejected via interaction response."
+    event_type = (
+        TimelineEventType.APPROVAL_GRANTED
+        if is_normal_permission and approved
+        else TimelineEventType.APPROVAL_REJECTED
+        if is_normal_permission
+        else TimelineEventType.TASK_SPEC_AND_ROUTE_GENERATED
+    )
+    timeline_repo.create_next_for_attempt(
+        task_id=task.id,
+        attempt_number=task.attempt_count,
+        event_type=event_type,
+        event_key=f"interaction:{interaction.id}:resolved",
+        message=f"Interaction '{interaction.interaction_type}' resolved by operator.",
+        payload={
+            "interaction_id": interaction.id,
+            "response_data": response.response_data,
+        },
+    )
+    _capture_interaction_resolution_observation(
+        session=session,
+        task=task,
+        interaction=interaction,
+    )
 
 
 def list_pending_interactions(self: Any) -> list[InteractionInboxCard]:
@@ -90,6 +185,7 @@ def record_interaction_response(
     response: InteractionResponse,
 ) -> TaskSnapshot | None:
     """Apply an operator response to a pending interaction and trigger task resumption."""
+    temporal_signal: tuple[str, object] | None = None
     with session_scope(self.session_factory) as session:
         task_repo = TaskRepository(session)
         interaction_repo = HumanInteractionRepository(session)
@@ -109,58 +205,39 @@ def record_interaction_response(
             return None
 
         if applied and interaction.status == HumanInteractionStatus.RESOLVED:
-            content_hash = compute_interaction_content_hash(
-                interaction.interaction_type,
-                interaction.summary,
-                interaction.data,
-            )
-            constraints = dict(task.constraints or {})
-            interactions = dict(constraints.get("interactions") or {})
-            interactions[content_hash] = {
-                "status": "resolved",
-                "response_data": response.response_data,
-                "interaction_id": interaction.id,
-                "interaction_type": interaction.interaction_type,
-                "summary": interaction.summary,
-                "data": dict(interaction.data or {}) if interaction.data is not None else {},
-            }
-            constraints["interactions"] = interactions
-
-            if interaction.interaction_type == HumanInteractionType.PERMISSION:
-                constraints["requires_approval"] = False
-                constraints["approval"] = {
-                    "status": "approved",
-                    "source": "orchestrator",
-                    "reason": f"Permission granted via interaction {interaction.id}",
-                    "granted_at": utc_now().isoformat(),
-                }
-
-            task.constraints = constraints
-            task.next_attempt_at = utc_now()
-            task.status = TaskStatus.PENDING
-            event_type = (
-                TimelineEventType.APPROVAL_GRANTED
-                if interaction.interaction_type == HumanInteractionType.PERMISSION
-                else TimelineEventType.TASK_SPEC_AND_ROUTE_GENERATED
-            )
-            timeline_repo.create_next_for_attempt(
-                task_id=task_id,
-                attempt_number=task.attempt_count,
-                event_type=event_type,
-                message=f"Interaction '{interaction.interaction_type}' resolved by operator.",
-                payload={
-                    "interaction_id": interaction.id,
-                    "response_data": response.response_data,
-                },
-            )
-            _capture_interaction_resolution_observation(
+            _persist_resolved_interaction(
                 session=session,
                 task=task,
                 interaction=interaction,
+                response=response,
+                timeline_repo=timeline_repo,
             )
 
         session.flush()
-        return self.get_task(task_id)
+
+        is_temporal = uses_temporal_execution()
+        is_resolved = applied and interaction.status == HumanInteractionStatus.RESOLVED
+        if is_temporal and is_resolved:
+            interaction_data = interaction.data if isinstance(interaction.data, Mapping) else {}
+            is_permission_escalation = (
+                interaction_data.get("source") == "worker_permission_escalation"
+            )
+            if is_permission_escalation:
+                resp_data = response.response_data
+                approved = resp_data.get("approved", True) if resp_data else True
+                temporal_signal = ("handle_permission_escalation", approved)
+            elif interaction.interaction_type == HumanInteractionType.PERMISSION:
+                resp_data = response.response_data
+                approved = resp_data.get("approved", True) if resp_data else True
+                temporal_signal = ("handle_approval", approved)
+            elif interaction.interaction_type == HumanInteractionType.CLARIFICATION:
+                temporal_signal = ("handle_clarification", None)
+
+    if temporal_signal is not None:
+        signal_name, signal_arg = temporal_signal
+        _dispatch_temporal_signal(self, task_id, signal_name, signal_arg)
+
+    return self.get_task(task_id)
 
 
 def _validate_approval_state(
@@ -293,6 +370,9 @@ def apply_task_approval_decision(
         task.lease_expires_at = None
         session.flush()
 
+    if uses_temporal_execution():
+        _dispatch_temporal_signal(self, task_id, "handle_approval", approved)
+
     snapshot = self.get_task(task_id)
     if snapshot is None:
         return ApprovalDecisionResult(
@@ -312,10 +392,18 @@ def cancel_task(self: Any, *, task_id: str) -> TaskSnapshot | None:
         if task is None:
             return None
         if was_cancelled:
+            TemporalTaskStateRepository(session).delete(task_id=task_id)
             timeline_repo.create_next_for_attempt(
                 task_id=task_id,
                 attempt_number=task.attempt_count,
                 event_type=TimelineEventType.TASK_CANCELLED,
+                event_key=f"task:{task_id}:cancelled",
                 message="Task was cancelled by operator.",
             )
+    if was_cancelled and uses_temporal_execution():
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.cancel_temporal_workflow(task_id))
+        except RuntimeError:
+            asyncio.run(self.cancel_temporal_workflow(task_id))
     return self.get_task(task_id)

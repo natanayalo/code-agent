@@ -58,6 +58,18 @@ Codex and Antigravity native execution workers are now native-only.
 
 ## 3) Queue + Lease Behavior
 
+### Legacy runtime status
+
+The Postgres queue/lease worker and LangGraph lifecycle are **fallback-only**.
+New production-like local tasks use Temporal by default. Set
+`CODE_AGENT_EXECUTION_RUNTIME=legacy` only for an explicit incident fallback or
+local recovery investigation; do not add features to that path.
+
+Do not remove the fallback until the drain gates in
+[M24.9.5 legacy runtime drain plan](m24_9_5_legacy_drain_plan.md) are met:
+no unfinished legacy tasks, a 30-day Temporal-default observation window, and
+an operator-approved rollback alternative.
+
 Queue lifecycle:
 
 1. API persists a pending task.

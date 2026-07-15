@@ -190,10 +190,56 @@ def _sanitize_run_command(command_text: str, request: NativeAgentRunRequest) -> 
 
 
 def _determine_exit_status(
-    completed_returncode: int, final_message: str | None, stderr_text: str, stdout_text: str = ""
+    completed_returncode: int,
+    final_message: str | None,
+    stderr_text: str,
+    stdout_text: str = "",
+    require_observable_result: bool = True,
 ) -> tuple[Literal["success", "failure", "error"], str, list[dict[str, Any]]]:
     friction_reports: list[dict[str, Any]] = []
     if completed_returncode == 0:
+        if require_observable_result:
+            provider_failure_markers = (
+                "resource_exhausted",
+                "individual quota reached",
+                "quota exceeded",
+                "not logged into antigravity",
+            )
+            combined_text = f"{stdout_text}\n{stderr_text}\n{final_message or ''}".lower()
+            if any(marker in combined_text for marker in provider_failure_markers):
+                friction_reports.append(
+                    _build_friction_report_dict(
+                        source="tooling",
+                        description=(
+                            "Native agent reported a provider quota or authentication failure."
+                        ),
+                        impact="blocked",
+                        context={"exit_code": completed_returncode},
+                    )
+                )
+                return (
+                    "error",
+                    "NATIVE_AGENT_PROVIDER_FAILURE: provider request was not completed.",
+                    friction_reports,
+                )
+            if (
+                not (final_message or "").strip()
+                and not stdout_text.strip()
+                and not stderr_text.strip()
+            ):
+                friction_reports.append(
+                    _build_friction_report_dict(
+                        source="tooling",
+                        description="Native agent exited successfully without producing a result.",
+                        impact="blocked",
+                        context={"exit_code": completed_returncode},
+                    )
+                )
+                return (
+                    "error",
+                    "NATIVE_AGENT_EMPTY_RESULT: native agent produced no result.",
+                    friction_reports,
+                )
         return (
             "success",
             final_message or "Native agent run completed successfully.",
@@ -589,7 +635,11 @@ def _collect_native_agent_results(
         )
 
         status, summary, friction_reports = _determine_exit_status(
-            completed.returncode, final_message, stderr_text, stdout_text
+            completed.returncode,
+            final_message,
+            stderr_text,
+            stdout_text,
+            request.require_observable_result,
         )
 
         json_payload, json_payload_source, json_payload_rejected_reason = (

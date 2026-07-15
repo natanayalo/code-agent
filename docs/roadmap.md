@@ -516,6 +516,31 @@ Progress:
   - [x] preserve persisted generated-node contracts across retry and resume
   - [x] add deterministic branching-and-join coverage without concurrent execution
 
+### M24.9.5 Temporal Runtime Consolidation — Complete
+
+Goal:
+
+- consolidate the Temporal runtime boundary proven by the M24.9 PoC before
+  introducing concurrent DAG execution
+
+Scope:
+
+- make Temporal the guarded default for new sequential tasks while retaining an
+  explicit legacy fallback during drain
+- standardize retry, timeout, heartbeat, cancellation, and terminal-failure
+  projection semantics for Temporal activities
+- make task, interaction, and timeline projections idempotent and safe for
+  operator/workflow multi-writer updates
+- inventory LangGraph durable-control-flow responsibilities and define the
+  brain/node-runner extraction boundary
+- classify legacy queue, lease, heartbeat, and worker-registry code as custom
+  policy, fallback-only, or a future deletion candidate
+
+Boundary:
+
+- no parallel fan-out, worktree mutation, queue deletion, or broad LangGraph
+  rewrite in this milestone
+
 ### M25 Parallel Worker Fan-Out
 
 Goal:

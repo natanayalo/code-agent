@@ -126,6 +126,30 @@ def test_create_next_for_attempt_assigns_monotonic_sequence_numbers(session_fact
         assert second.sequence_number == 1
 
 
+def test_create_next_for_attempt_reuses_stable_event_key(session_factory) -> None:
+    """A retried projection should return its original timeline event."""
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).create(
+            session_id="session-event-key", task_text="Idempotent timeline event"
+        )
+        timeline_repo = TaskTimelineRepository(session)
+        first = timeline_repo.create_next_for_attempt(
+            task_id=task.id,
+            attempt_number=0,
+            event_type=TimelineEventType.APPROVAL_GRANTED,
+            event_key="interaction:approval-1:resolved",
+        )
+        duplicate = timeline_repo.create_next_for_attempt(
+            task_id=task.id,
+            attempt_number=0,
+            event_type=TimelineEventType.APPROVAL_GRANTED,
+            event_key="interaction:approval-1:resolved",
+        )
+
+        assert duplicate.id == first.id
+        assert len(timeline_repo.list_by_task(task.id)) == 1
+
+
 def test_create_next_for_attempt_retries_after_integrity_error(session_factory) -> None:
     """Sequence creation should retry bounded conflicts before succeeding."""
     with session_scope(session_factory) as session:

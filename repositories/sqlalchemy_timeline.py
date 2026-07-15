@@ -28,14 +28,25 @@ class TaskTimelineRepository:
         event_type: str | TimelineEventType,
         attempt_number: int = 0,
         sequence_number: int = 0,
+        event_key: str | None = None,
         message: str | None = None,
         payload: dict[str, Any] | None = None,
         created_at: datetime | None = None,
     ) -> TaskTimelineEvent:
+        if event_key:
+            existing = self.session.scalar(
+                select(TaskTimelineEvent).where(
+                    TaskTimelineEvent.task_id == task_id,
+                    TaskTimelineEvent.event_key == event_key,
+                )
+            )
+            if existing is not None:
+                return existing
         event = TaskTimelineEvent(
             task_id=task_id,
             attempt_number=attempt_number,
             sequence_number=sequence_number,
+            event_key=event_key,
             event_type=event_type,
             message=message,
             payload=payload,
@@ -80,6 +91,7 @@ class TaskTimelineRepository:
         payload: dict[str, Any] | None = None,
         created_at: datetime | None = None,
         max_retries: int = 3,
+        event_key: str | None = None,
     ) -> TaskTimelineEvent:
         tries = 0
         while True:
@@ -90,6 +102,7 @@ class TaskTimelineRepository:
                         task_id=task_id,
                         attempt_number=attempt_number,
                         sequence_number=sequence_number,
+                        event_key=event_key,
                         event_type=event_type,
                         message=message,
                         payload=payload,

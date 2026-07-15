@@ -60,6 +60,7 @@ class NativeAgentRunRequest:
     session_id: str | None = None
     redactor: SecretRedactor | None = None
     stdin_prompt: bool = True
+    require_observable_result: bool = True
     command_redactions: list[str] = field(default_factory=list)
     response_format: Literal["text", "json"] = "text"
     response_schema: dict[str, Any] | None = None

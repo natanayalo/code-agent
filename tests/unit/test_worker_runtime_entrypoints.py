@@ -38,6 +38,32 @@ def test_runtime_mode_defaults_and_overrides() -> None:
     assert runtime_module.should_run_worker({runtime_module.RUN_WORKER_ENV_VAR: "on"}) is True
 
 
+def test_execution_runtime_prefers_explicit_selector_with_legacy_flag_compatibility() -> None:
+    """The explicit runtime selector should make fallback intent unambiguous."""
+    assert runtime_module.execution_runtime({}) == runtime_module.LEGACY_EXECUTION_RUNTIME
+    assert (
+        runtime_module.execution_runtime({"CODE_AGENT_USE_TEMPORAL": "true"})
+        == runtime_module.TEMPORAL_EXECUTION_RUNTIME
+    )
+    assert (
+        runtime_module.execution_runtime({"CODE_AGENT_EXECUTION_RUNTIME": "temporal"})
+        == runtime_module.TEMPORAL_EXECUTION_RUNTIME
+    )
+    assert (
+        runtime_module.execution_runtime(
+            {
+                "CODE_AGENT_EXECUTION_RUNTIME": "legacy",
+                "CODE_AGENT_USE_TEMPORAL": "true",
+            }
+        )
+        == runtime_module.LEGACY_EXECUTION_RUNTIME
+    )
+    assert runtime_module.uses_temporal_execution({"CODE_AGENT_EXECUTION_RUNTIME": "temporal"})
+    assert not runtime_module.uses_temporal_execution(
+        {"CODE_AGENT_EXECUTION_RUNTIME": "unexpected"}
+    )
+
+
 def test_runtime_coerce_positive_int_env_defaults_and_overrides() -> None:
     """Shared env int parser should return defaults on invalid values."""
     assert runtime_module.coerce_positive_int_env(None, default=5) == 5

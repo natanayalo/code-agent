@@ -20,6 +20,7 @@ from apps.observability import (
     with_span_kind,
 )
 from apps.observability_utils import ATTR_WORKER_ID
+from apps.runtime import uses_temporal_execution
 from db.base import utc_now
 from db.enums import TaskStatus
 from orchestrator.execution_graph_input import build_orchestrator_graph_input
@@ -97,6 +98,22 @@ async def submit_task(
     persisted: _PersistedTaskContext,
 ) -> None:
     """Legacy direct execution entrypoint kept for compatibility/tests."""
+    if uses_temporal_execution():
+        import temporalio.exceptions
+
+        client = await self._get_temporal_client()
+        try:
+            handle = await client.start_workflow(
+                "TaskExecutionWorkflow",
+                persisted.task_id,
+                id=f"task-{persisted.task_id}",
+                task_queue="task-execution-queue",
+            )
+        except temporalio.exceptions.WorkflowAlreadyStartedError:
+            handle = client.get_workflow_handle(f"task-{persisted.task_id}")
+        await handle.result()
+        return None
+
     loaded = await self._run_blocking(self._load_submission_for_task, task_id=persisted.task_id)
     if loaded is not None:
         submission = loaded[0]

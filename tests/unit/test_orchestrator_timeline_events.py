@@ -191,3 +191,25 @@ def test_timeline_sequence_increments_across_calls():
     )
     res = _timeline_events(state, (TimelineEventType.TASK_CLASSIFIED, None, None))
     assert res["timeline_events"][0].sequence_number == 5
+
+
+def test_timeline_sequence_uses_reconciled_persisted_count_after_operator_event():
+    """A resumed workflow must not reuse a sequence inserted by an operator action."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "hello"},
+            "attempt_count": 0,
+            "timeline_persisted_count": 8,
+            "timeline_events": [
+                TaskTimelineEventState(
+                    event_type=TimelineEventType.WORKSPACE_PROVISIONED,
+                    attempt_number=0,
+                    sequence_number=6,
+                )
+            ],
+        }
+    )
+
+    res = _timeline_events(state, (TimelineEventType.WORKER_COMPLETED, None, None))
+
+    assert res["timeline_events"][0].sequence_number == 8

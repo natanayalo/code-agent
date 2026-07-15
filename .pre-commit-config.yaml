@@ -82,6 +82,7 @@ repos:
           - uvicorn>=0.35,<1.0
           - cryptography>=46.0.0,<47.0
           - pyjwt>=2.12.1
+          - temporalio>=1.5.0
         files: ^(apps|db|memory|orchestrator|sandbox|tools|workers)/.*\.py$
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v3.13.0

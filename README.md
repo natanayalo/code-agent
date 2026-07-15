@@ -86,6 +86,11 @@ cp .env.example .env
 scripts/up.sh
 ```
 
+The Compose stack uses the Temporal execution runtime by default. To run the
+legacy queue intentionally (for fallback or API-only development), set
+`CODE_AGENT_EXECUTION_RUNTIME=legacy`; the older `CODE_AGENT_USE_TEMPORAL`
+boolean remains a compatibility fallback only.
+
 Verify service health:
 
 ```bash

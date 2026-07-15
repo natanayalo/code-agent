@@ -20,6 +20,7 @@ from repositories.sqlalchemy_session import (
     UserRepository,
 )
 from repositories.sqlalchemy_task import TaskRepository
+from repositories.sqlalchemy_temporal_state import TemporalTaskStateRepository
 from repositories.sqlalchemy_timeline import TaskTimelineRepository
 from repositories.sqlalchemy_worker import WorkerNodeRepository
 
@@ -37,6 +38,7 @@ __all__ = [
     "SessionRepository",
     "SessionStateRepository",
     "TaskRepository",
+    "TemporalTaskStateRepository",
     "TaskTimelineRepository",
     "UserRepository",
     "WorkerNodeRepository",

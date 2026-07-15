@@ -93,6 +93,33 @@ Before acting on each comment:
 
 If already fixed, reply with concise evidence and resolve only when appropriate.
 
+## False-Positive and Deferral Guard
+
+Treat automated review findings as hypotheses, especially comments about
+framework APIs, imports, type behavior, or runtime compatibility. Before
+changing code for a suspected blocker:
+
+1. Reproduce the claimed failure on the current PR head when practical.
+2. Check the installed dependency/version and the repository's actual lint,
+   type-check, and test configuration.
+3. Inspect the runtime or library source/signature when the comment assumes an
+   API contract.
+4. Decide whether the finding is a real defect, a false positive, already
+   fixed, or valid but outside the current scope.
+
+Do not add defensive code solely to satisfy an unverified review suggestion.
+For a false positive, leave the implementation unchanged and reply with the
+specific evidence: the command or test run, dependency/version or source
+inspection, and the observed result. Classify it as `Not applicable` rather
+than `Fixed`. Resolve it only when the evidence fully answers the comment and
+team norms allow author resolution; otherwise leave it open for reviewer
+confirmation.
+
+For a valid but non-blocking concern, defer it explicitly. Record why it is
+outside the current scope, the risk it carries, and the follow-up condition or
+owner. Do not present deferred work as completed, and do not let a medium or
+low-priority hardening suggestion expand a focused PR without user approval.
+
 ## Triage Workflow
 
 For each comment, classify as:
@@ -102,7 +129,8 @@ For each comment, classify as:
 - Maintainability cleanup.
 - Scope-expanding design suggestion.
 - Stale or already fixed.
-- Not applicable.
+- False positive / not applicable.
+- Valid but deferred outside current scope.
 
 For fixes in scope:
 

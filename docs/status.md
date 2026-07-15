@@ -6,7 +6,9 @@ Phase 4: selective autonomy after reliability.
 
 Active focus:
 
-- M25: evaluate selective parallel worker fan-out after the M24 reliability gate
+- Pre-M25 Temporal runtime consolidation is complete.
+  - M24.9.5 now has lifecycle, interaction, projection, and legacy-drain
+    evidence. M25 has not started.
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
@@ -31,6 +33,7 @@ Active focus:
 - deterministic advisory repository memory profiles are injected into worker context without changing repository policy
 - M23.11 evaluation confirms the worker uses advisory profiles correctly, avoids stale policy, and improves task success without increasing unsafe actions
 - M24.1–M24.6 provide validated sequential task decomposition, durable node contracts/evidence, crash-resilient per-node attempt history, sequential execution, parent-result aggregation, bounded retry, blocked-node resume, and a deterministic reliability gate
+- M24.9 Temporal PoC is complete: feature-flagged Temporal lifecycle, profile queues, durable activity handoff, dashboard HITL signals, trace continuity, worker recovery, and legacy fallback have closing evidence
 - PR-native delivery fields with GitHub branch/draft-PR delivery integration
 - full-text personal/project memory search with dashboard search results and memory-retrieval timeline visibility
 - deterministic memory retrieval evaluation to separate full-text regressions from known semantic gaps
@@ -51,7 +54,7 @@ Active focus:
 ## Next Slices Only
 
 1. M25: selective parallel worker fan-out
-   - begin only from the validated M24 sequential DAG and reliability evidence
+   - implement Temporal-native ready-set scheduling with bounded read-only fan-out first
 
 ## Current Backlog
 
