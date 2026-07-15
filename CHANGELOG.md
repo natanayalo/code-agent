@@ -353,6 +353,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps): bump langchain-core from 1.4.8 to 1.4.9 ([#314](https://github.com/natanayalo/code-agent/pull/314))
+
 - Build(deps): bump openai from 2.44.0 to 2.45.0 ([#315](https://github.com/natanayalo/code-agent/pull/315))
 
 - Build(deps): bump langgraph from 1.2.8 to 1.2.9 ([#313](https://github.com/natanayalo/code-agent/pull/313))
