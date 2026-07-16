@@ -537,9 +537,9 @@ def _map_execution_plan_to_snapshot(execution_plan: Any) -> ExecutionPlanSnapsho
                     TaskSpec.model_validate(node.task_spec) if node.task_spec is not None else None
                 ),
                 node_kind=node.node_kind,
-                aggregation_role=node.aggregation_role,
-                execution_mode=node.execution_mode,
-                parallel_safe=node.parallel_safe,
+                aggregation_role=node.aggregation_role or "mutation",
+                execution_mode=node.execution_mode or "mutable",
+                parallel_safe=bool(node.parallel_safe),
                 status=cast(Any, _enum_value(node.status) or "pending"),
                 goal=node.goal,
                 acceptance_criteria=node.acceptance_criteria,
