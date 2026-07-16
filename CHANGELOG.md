@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add M25 DAG fan-out metadata contracts ([#317](https://github.com/natanayalo/code-agent/pull/317))
+
 - Feat: consolidate temporal task execution runtime ([#316](https://github.com/natanayalo/code-agent/pull/316))
 
 - Feat: add durable DAG reliability gate ([#312](https://github.com/natanayalo/code-agent/pull/312))
