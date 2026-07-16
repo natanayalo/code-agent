@@ -93,7 +93,7 @@ def test_decompose_task_plan_preserves_explicit_node_classification() -> None:
 
 @pytest.mark.parametrize(
     ("execution_mode", "aggregation_role"),
-    [("mutable", "context"), ("read_only", "mutation"), ("read_only", None)],
+    [("mutable", "context"), ("read_only", "mutation")],
 )
 def test_task_plan_step_rejects_unsafe_parallel_metadata(
     execution_mode: str, aggregation_role: str | None
@@ -107,6 +107,23 @@ def test_task_plan_step_rejects_unsafe_parallel_metadata(
             execution_mode=execution_mode,
             aggregation_role=aggregation_role,
             parallel_safe=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("node_kind", "aggregation_role"),
+    [("verify", None), (None, "validation")],
+)
+def test_task_plan_step_requires_complete_node_classification(
+    node_kind: str | None, aggregation_role: str | None
+) -> None:
+    with pytest.raises(ValueError, match="supplied or omitted together"):
+        TaskPlanStep(
+            step_id="step",
+            title="Step",
+            expected_outcome="Complete",
+            node_kind=node_kind,
+            aggregation_role=aggregation_role,
         )
 
 

@@ -171,7 +171,6 @@ class TaskExecutionService:
         self._graph: Any | None = None
         self._temporal_clients: dict[asyncio.AbstractEventLoop, Any] = {}
         self._temporal_locks: dict[asyncio.AbstractEventLoop, asyncio.Lock] = {}
-        self._temporal_loop_threads: dict[asyncio.AbstractEventLoop, int] = {}
         self._temporal_cache_lock = threading.Lock()
 
     @property
@@ -397,24 +396,17 @@ class TaskExecutionService:
     async def _get_temporal_client(self) -> Any:
         """Get or initialize the shared, pooled Temporal client."""
         current_loop = asyncio.get_running_loop()
-        current_thread = threading.get_ident()
         with self._temporal_cache_lock:
             closed_loops = set(self._temporal_clients) | set(self._temporal_locks)
-            closed_loops = {
-                loop
-                for loop in closed_loops
-                if loop.is_closed() and self._temporal_loop_threads.get(loop) == current_thread
-            }
+            closed_loops = {loop for loop in closed_loops if loop.is_closed()}
             for closed_loop in closed_loops:
                 self._temporal_clients.pop(closed_loop, None)
                 self._temporal_locks.pop(closed_loop, None)
-                self._temporal_loop_threads.pop(closed_loop, None)
             client = self._temporal_clients.get(current_loop)
             loop_lock = self._temporal_locks.get(current_loop)
             if loop_lock is None:
                 loop_lock = asyncio.Lock()
                 self._temporal_locks[current_loop] = loop_lock
-                self._temporal_loop_threads[current_loop] = current_thread
 
         if client is None:
             async with loop_lock:

@@ -219,6 +219,8 @@ class TaskPlanStep(OrchestratorModel):
     @model_validator(mode="after")
     def validate_parallel_safety(self) -> TaskPlanStep:
         """Reject metadata that could make a mutable node eligible for fan-out."""
+        if (self.node_kind is None) != (self.aggregation_role is None):
+            raise ValueError("node_kind and aggregation_role must be supplied or omitted together")
         if self.parallel_safe and (
             self.execution_mode != "read_only" or self.aggregation_role in {None, "mutation"}
         ):

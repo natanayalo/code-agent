@@ -7,6 +7,7 @@ import builtins
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from threading import Barrier
 
 from sqlalchemy.pool import StaticPool
 
@@ -84,11 +85,12 @@ def test_temporal_client_cache_supports_concurrent_event_loops(monkeypatch) -> N
     """Concurrent sync fallbacks must keep each loop's client isolated."""
     service, _ = _make_task_service()
     clients: list[object] = []
+    both_connecting = Barrier(2)
 
     async def connect(_address: str) -> object:
         client = object()
         clients.append(client)
-        await asyncio.sleep(0)
+        both_connecting.wait()
         return client
 
     from temporalio.client import Client
