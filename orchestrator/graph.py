@@ -806,6 +806,46 @@ def _finish_node_attempt(
         )
 
 
+async def _execute_decomposed_node(
+    *,
+    session_factory: Callable[[], Session] | None,
+    state: OrchestratorState,
+    worker: Worker,
+    request: WorkerRequest,
+    node: DecomposedTaskNode,
+    logical_attempt: int,
+    plan_id: str | None,
+    effective_input_summary: dict[str, Any],
+    effective_input_digest: str,
+    task_trace_id: str | None,
+) -> tuple[WorkerResult | None, NodeOutcome | None]:
+    """Dispatch one node through durable persistence or the legacy fallback."""
+    if session_factory is not None and state.task.task_id and plan_id is not None:
+        activity_request = NodeActivityRequest(
+            task_id=state.task.task_id,
+            plan_id=plan_id,
+            node_id=node.node_id,
+            logical_attempt=logical_attempt,
+            logical_activity_key=logical_activity_key(plan_id, node.node_id, logical_attempt),
+            effective_input_digest=effective_input_digest,
+            task_trace_id=task_trace_id,
+        )
+        _result_ref, outcome = await NodeExecutionService(session_factory, worker).execute(
+            activity=activity_request,
+            request=request,
+            effective_input_summary=effective_input_summary,
+        )
+        return outcome.result if outcome is not None else None, outcome
+    result, _progress = await _await_worker_with_timeout(
+        worker,
+        request,
+        worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
+        session_id=request.session_id,
+        timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+    )
+    return result, None
+
+
 def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
     """Merge sequential node results into the existing parent worker contract."""
     failed = next(
@@ -991,48 +1031,18 @@ async def _await_decomposed_nodes(
             )
             evidence, digest = _effective_input_evidence(state, ready_node, prior_context)
             last_manifest = request.runtime_manifest
-            persisted_outcome: NodeOutcome | None = None
-            if session_factory is not None and state.task.task_id:
-                if plan_id is not None:
-                    activity_request = NodeActivityRequest(
-                        task_id=state.task.task_id,
-                        plan_id=plan_id,
-                        node_id=ready_node.node_id,
-                        logical_attempt=attempts,
-                        logical_activity_key=logical_activity_key(
-                            plan_id, ready_node.node_id, attempts
-                        ),
-                        effective_input_digest=digest,
-                        task_trace_id=task_trace_id,
-                    )
-                    _result_ref, persisted_outcome = await NodeExecutionService(
-                        session_factory, worker
-                    ).execute(
-                        activity=activity_request,
-                        request=request,
-                        effective_input_summary=evidence,
-                    )
-                    result = persisted_outcome.result if persisted_outcome is not None else None
-                else:
-                    result, _progress = await _await_worker_with_timeout(
-                        worker,
-                        request,
-                        worker_type=(
-                            state.dispatch.worker_type or state.route.chosen_worker or "unknown"
-                        ),
-                        session_id=request.session_id,
-                        timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
-                    )
-            else:
-                result, _progress = await _await_worker_with_timeout(
-                    worker,
-                    request,
-                    worker_type=(
-                        state.dispatch.worker_type or state.route.chosen_worker or "unknown"
-                    ),
-                    session_id=request.session_id,
-                    timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
-                )
+            result, persisted_outcome = await _execute_decomposed_node(
+                session_factory=session_factory,
+                state=state,
+                worker=worker,
+                request=request,
+                node=ready_node,
+                logical_attempt=attempts,
+                plan_id=plan_id,
+                effective_input_summary=evidence,
+                effective_input_digest=digest,
+                task_trace_id=task_trace_id,
+            )
             if result is None:
                 logger.warning("Node execution result is None, falling back to failure default.")
                 result = WorkerResult(
