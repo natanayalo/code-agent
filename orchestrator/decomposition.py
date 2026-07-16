@@ -53,9 +53,11 @@ def decompose_task_plan(
     nodes: list[DecomposedTaskNode] = []
     for index, step in enumerate(task_plan.steps):
         dependencies = list(step.depends_on or [])
-        if not dependencies and index > 0:
+        if step.depends_on is None and index > 0:
             dependencies = [task_plan.steps[index - 1].step_id]
-        node_kind, role = _node_kind(index, len(task_plan.steps))
+        node_kind, aggregation_role = _node_metadata(
+            step.node_kind, step.aggregation_role, index, len(task_plan.steps)
+        )
         node_spec = parent_spec.model_copy(
             update={
                 "goal": step.title,
@@ -71,7 +73,9 @@ def decompose_task_plan(
                 node_kind=node_kind,
                 expected_inputs=["parent_task_context", *dependencies],
                 expected_outputs=["summary", "validation_evidence"],
-                aggregation_role=role,
+                aggregation_role=aggregation_role,
+                execution_mode=step.execution_mode,
+                parallel_safe=step.parallel_safe,
             )
         )
     final_cycle_errors = _cycle_errors({node.node_id: set(node.depends_on) for node in nodes})
@@ -94,6 +98,25 @@ def _fallback(reason: str, errors: list[str] | None = None) -> DecomposedTaskPla
     )
 
 
+def _node_metadata(
+    node_kind: NodeKind | None,
+    aggregation_role: AggregationRole | None,
+    index: int,
+    total: int,
+) -> tuple[NodeKind, AggregationRole]:
+    """Preserve legacy positional roles only for fields omitted by old plans."""
+    legacy_kind, legacy_role = _legacy_node_metadata(index, total)
+    return node_kind or legacy_kind, aggregation_role or legacy_role
+
+
+def _legacy_node_metadata(index: int, total: int) -> tuple[NodeKind, AggregationRole]:
+    if index == 0:
+        return "inspect", "context"
+    if index == total - 1:
+        return "verify", "validation"
+    return "implement", "mutation"
+
+
 def _cycle_errors(dependencies: Mapping[str, set[str]]) -> list[str]:
     visiting: set[str] = set()
     visited: set[str] = set()
@@ -113,9 +136,23 @@ def _cycle_errors(dependencies: Mapping[str, set[str]]) -> list[str]:
     return ["dependency_cycle"] if any(visit(node_id) for node_id in dependencies) else []
 
 
-def _node_kind(index: int, total: int) -> tuple[NodeKind, AggregationRole]:
-    if index == 0:
-        return "inspect", "context"
-    if index == total - 1:
-        return "verify", "validation"
-    return "implement", "mutation"
+def is_read_only_fanout_eligible(
+    *,
+    parent_read_only: bool,
+    selected_profile_mutation_policy: str | None,
+    node: DecomposedTaskNode,
+    completed_node_ids: set[str],
+    has_unresolved_blocker: bool,
+    fanout_disabled: bool,
+) -> bool:
+    """Return whether one ready node satisfies the future M25 fan-out contract."""
+    return (
+        parent_read_only
+        and selected_profile_mutation_policy == "read_only"
+        and node.execution_mode == "read_only"
+        and node.parallel_safe
+        and node.aggregation_role != "mutation"
+        and all(dependency in completed_node_ids for dependency in node.depends_on)
+        and not has_unresolved_blocker
+        and not fanout_disabled
+    )

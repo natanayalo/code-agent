@@ -584,14 +584,25 @@ def _update_task_route_and_spec(
                     acceptance_criteria=step.expected_outcome,
                     depends_on=dependencies,
                     task_spec=(
-                        decomposed_nodes[step.step_id].task_spec.model_dump(mode="json")
-                        if step.step_id in decomposed_nodes
+                        decomposed_node.task_spec.model_dump(mode="json")
+                        if decomposed_node is not None
                         else None
                     ),
-                    node_kind=(
-                        decomposed_nodes[step.step_id].node_kind
-                        if step.step_id in decomposed_nodes
-                        else None
+                    node_kind=(decomposed_node.node_kind if decomposed_node is not None else None),
+                    aggregation_role=(
+                        decomposed_node.aggregation_role
+                        if decomposed_node is not None
+                        else step.aggregation_role or "mutation"
+                    ),
+                    execution_mode=(
+                        decomposed_node.execution_mode
+                        if decomposed_node is not None
+                        else step.execution_mode
+                    ),
+                    parallel_safe=(
+                        decomposed_node.parallel_safe
+                        if decomposed_node is not None
+                        else step.parallel_safe
                     ),
                 )
                 existing_nodes[step.step_id] = new_node
@@ -602,14 +613,18 @@ def _update_task_route_and_spec(
                 existing_node.sequence_number = i
                 existing_node.acceptance_criteria = step.expected_outcome
                 existing_node.depends_on = dependencies
-                if step.step_id in decomposed_nodes:
-                    existing_node.task_spec = decomposed_nodes[step.step_id].task_spec.model_dump(
-                        mode="json"
-                    )
-                    existing_node.node_kind = decomposed_nodes[step.step_id].node_kind
+                if decomposed_node is not None:
+                    existing_node.task_spec = decomposed_node.task_spec.model_dump(mode="json")
+                    existing_node.node_kind = decomposed_node.node_kind
+                    existing_node.aggregation_role = decomposed_node.aggregation_role
+                    existing_node.execution_mode = decomposed_node.execution_mode
+                    existing_node.parallel_safe = decomposed_node.parallel_safe
                 else:
                     existing_node.task_spec = None
                     existing_node.node_kind = None
+                    existing_node.aggregation_role = step.aggregation_role or "mutation"
+                    existing_node.execution_mode = step.execution_mode
+                    existing_node.parallel_safe = step.parallel_safe
 
         # Remove orphaned nodes that are no longer in the plan
         for node_id, node in list(existing_nodes.items()):

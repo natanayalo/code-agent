@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -277,6 +277,7 @@ def load_memory_retrieval_suite(path: Path | None = None) -> MemoryRetrievalSuit
 
 
 def _seed_memory_suite(session_factory: Any, suite: MemoryRetrievalSuite) -> None:
+    evaluated_at = datetime.now(UTC)
     with session_scope(session_factory) as session:
         personal_repo = PersonalMemoryRepository(session)
         project_repo = ProjectMemoryRepository(session)
@@ -288,7 +289,10 @@ def _seed_memory_suite(session_factory: Any, suite: MemoryRetrievalSuite) -> Non
                 confidence=entry.confidence,
                 scope=entry.scope,
                 requires_verification=entry.requires_verification,
-                last_verified_at=entry.last_verified_at,
+                # This evaluation measures retrieval, not time-sensitive gate policy.
+                # Keep curated fixtures fresh so their static verification timestamps
+                # cannot turn a direct search match into a gate suppression.
+                last_verified_at=evaluated_at if entry.last_verified_at is not None else None,
             )
         for entry in suite.project_memory:
             project_repo.upsert(
@@ -299,7 +303,7 @@ def _seed_memory_suite(session_factory: Any, suite: MemoryRetrievalSuite) -> Non
                 confidence=entry.confidence,
                 scope=entry.scope,
                 requires_verification=entry.requires_verification,
-                last_verified_at=entry.last_verified_at,
+                last_verified_at=evaluated_at if entry.last_verified_at is not None else None,
             )
 
 

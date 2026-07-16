@@ -19,7 +19,7 @@ from db.enums import (
 )
 from orchestrator.execution_context import _PersistedTaskContext
 from orchestrator.execution_policy import validate_callback_url
-from orchestrator.state import TaskSpec
+from orchestrator.state import AggregationRole, NodeExecutionMode, TaskSpec
 from workers.base import normalize_worker_profile_name
 
 
@@ -462,6 +462,9 @@ class ExecutionPlanNodeSnapshot(ExecutionModel):
     depends_on: list[str] | None = None
     task_spec: TaskSpec | None = None
     node_kind: str | None = None
+    aggregation_role: AggregationRole = "mutation"
+    execution_mode: NodeExecutionMode = "mutable"
+    parallel_safe: bool = False
     status: Literal["pending", "active", "blocked", "completed", "failed", "skipped"]
     goal: str
     acceptance_criteria: str | None = None

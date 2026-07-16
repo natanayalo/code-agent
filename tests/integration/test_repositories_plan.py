@@ -65,6 +65,9 @@ def test_add_and_update_node(session_factory):
             assigned_worker_profile="coder",
             task_spec={"goal": "Test goal", "task_type": "feature"},
             node_kind="implement",
+            aggregation_role="mutation",
+            execution_mode="read_only",
+            parallel_safe=True,
         )
         assert node.plan_id == plan.id
         assert node.node_id == "node-1"
@@ -74,6 +77,9 @@ def test_add_and_update_node(session_factory):
         assert node.assigned_worker_profile == "coder"
         assert node.task_spec == {"goal": "Test goal", "task_type": "feature"}
         assert node.node_kind == "implement"
+        assert node.aggregation_role == "mutation"
+        assert node.execution_mode == "read_only"
+        assert node.parallel_safe is True
 
         now = utc_now()
         updated_node = repo.update_node(
@@ -87,6 +93,8 @@ def test_add_and_update_node(session_factory):
             output_artifacts=[{"name": "report"}],
             failure_kind=None,
             worker_run_id=None,
+            execution_mode="mutable",
+            parallel_safe=False,
         )
         assert updated_node is not None
         assert updated_node.status == ExecutionPlanNodeStatus.ACTIVE
@@ -94,6 +102,8 @@ def test_add_and_update_node(session_factory):
         assert updated_node.retry_count == 1
         assert updated_node.result_summary == "Completed"
         assert updated_node.changed_files == ["src/example.py"]
+        assert updated_node.execution_mode == "mutable"
+        assert updated_node.parallel_safe is False
 
         fetched_node = repo.get_node(plan.id, "node-1")
         assert fetched_node is not None

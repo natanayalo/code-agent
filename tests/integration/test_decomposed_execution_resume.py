@@ -40,7 +40,15 @@ def test_persisted_decomposition_skips_malformed_nodes(session_factory, monkeypa
             "nodes": [
                 None,
                 {"title": "Missing ID"},
-                {"node_id": "valid", "title": "Valid", "task_spec": {"goal": "Valid"}},
+                {
+                    "node_id": "valid",
+                    "title": "Valid",
+                    "task_spec": {"goal": "Valid"},
+                    "node_kind": "inspect",
+                    "aggregation_role": "context",
+                    "execution_mode": "read_only",
+                    "parallel_safe": True,
+                },
                 {"node_id": "blank-title", "title": "", "task_spec": {"goal": "Blank"}},
             ],
         }
@@ -59,6 +67,11 @@ def test_persisted_decomposition_skips_malformed_nodes(session_factory, monkeypa
         assert [plan_node.node_id for plan_node in plan.nodes] == ["valid", "blank-title"]
         node_goals = {plan_node.node_id: plan_node.goal for plan_node in plan.nodes}
         assert node_goals["blank-title"] == "blank-title"
+        valid_node = next(plan_node for plan_node in plan.nodes if plan_node.node_id == "valid")
+        assert valid_node.node_kind == "inspect"
+        assert valid_node.aggregation_role == "context"
+        assert valid_node.execution_mode == "read_only"
+        assert valid_node.parallel_safe is True
 
 
 def _assert_persisted_attempts(service: TaskExecutionService, task_id: str) -> None:

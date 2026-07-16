@@ -145,6 +145,32 @@ def _setup_task(session) -> str:
     return task.id
 
 
+def _read_only_inspection_step() -> TaskPlanStep:
+    return TaskPlanStep(
+        step_id="inspect",
+        title="Inspect",
+        expected_outcome="Inspection complete",
+        node_kind="inspect",
+        aggregation_role="context",
+        execution_mode="read_only",
+        parallel_safe=True,
+    )
+
+
+def _assert_read_only_inspection_node(plan_id: str, repository: ExecutionPlanRepository) -> None:
+    node = repository.get_node(plan_id, "inspect")
+    assert node is not None
+    assert node.aggregation_role == "context"
+    assert node.execution_mode == "read_only"
+    assert node.parallel_safe is True
+
+
+def _require_execution_plan(session, task_id: str):
+    plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
+    assert plan is not None
+    return plan
+
+
 def _scout_proposal_payload(
     *,
     title: str = "Inspect queue drift",
@@ -336,8 +362,7 @@ def test_persist_execution_outcome_clears_stale_node_contract_fields(session_fac
     )
 
     with session_scope(session_factory) as session:
-        plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
-        assert plan is not None
+        plan = _require_execution_plan(session, task_id)
         node = ExecutionPlanRepository(session).get_node(plan.id, "inspect")
         assert node is not None
         assert node.task_spec is None
@@ -354,9 +379,7 @@ def test_persist_execution_outcome_uses_validated_decomposed_dependencies(sessio
         triggered=True,
         complexity_reason="multi-step",
         steps=[
-            TaskPlanStep(
-                step_id="inspect", title="Inspect", expected_outcome="Inspection complete"
-            ),
+            _read_only_inspection_step(),
             TaskPlanStep(
                 step_id="implement", title="Implement", expected_outcome="Change complete"
             ),
@@ -382,6 +405,9 @@ def test_persist_execution_outcome_uses_validated_decomposed_dependencies(sessio
                         "title": "Inspect",
                         "task_spec": {"goal": "Inspect"},
                         "node_kind": "inspect",
+                        "aggregation_role": "context",
+                        "execution_mode": "read_only",
+                        "parallel_safe": True,
                     },
                     {
                         "node_id": "implement",
@@ -414,9 +440,9 @@ def test_persist_execution_outcome_uses_validated_decomposed_dependencies(sessio
     )
 
     with session_scope(session_factory) as session:
-        plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
-        assert plan is not None
+        plan = _require_execution_plan(session, task_id)
         assert ExecutionPlanRepository(session).get_node(plan.id, "inspect").depends_on == []
+        _assert_read_only_inspection_node(plan.id, ExecutionPlanRepository(session))
         assert ExecutionPlanRepository(session).get_node(plan.id, "implement").depends_on == [
             "inspect"
         ]

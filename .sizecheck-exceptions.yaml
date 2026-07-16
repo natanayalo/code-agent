@@ -9,6 +9,7 @@ file_exceptions:
   orchestrator/execution_outcome_service.py: Master orchestration flow persisting numerous task aspects including plans, heavily integrated.
   orchestrator/execution_types.py: Boundary models for task execution and snapshots; the execution-plan snapshot contract is kept cohesive.
   orchestrator/execution_snapshot_service.py: Snapshot/listing service centralizes task, session, and memory projection logic behind one persistence boundary; splitting the cohesive mapping helpers would add churn without reducing complexity meaningfully.
+  orchestrator/execution.py: Task execution service keeps the Temporal client lifecycle alongside synchronous submission and interaction entry points; extracting its small cache boundary would add indirection without reducing coupling.
   tests/integration/test_execution_outcome_service.py: Contains comprehensive integration tests for orchestrator state persistence; tightly coupled test cases.
   tests/integration/test_db_migrations.py: Contains comprehensive database migration integration tests including schema assertions and partial unique index validation.
   workers/native_agent_runner.py: Runner handles complex interactions with native agents including network retries, output capture, and workspace integration. (Cannot easily split further without breaking CLI contract)
